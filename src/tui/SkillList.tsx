@@ -58,7 +58,11 @@ const sortKeyLabel = (k: SortKey): string =>
                 : "name";
 
 const fmtScore = (n: number): string =>
-    Number.isInteger(n) ? String(n) : n.toFixed(1);
+    Number.isInteger(n) ? n.toLocaleString("en-US") : n.toFixed(1);
+
+// Thousand-separator format for invocation counts. Values can reach 600K+ on
+// codex tools; raw String(n) blew past 6-char column. See #52.
+const fmtCount = (n: number): string => n.toLocaleString("en-US");
 
 /**
  * Sortable, navigable skill list. Renders the in-memory filtered + sorted
@@ -140,11 +144,11 @@ export function SkillList({
                     " " +
                     padR(fmtScore(Number(row.taste_score ?? 0)), COL_WIDTHS.score) +
                     " " +
-                    padR(String(row.inv_7d), COL_WIDTHS.n7) +
+                    padR(fmtCount(Number(row.inv_7d ?? 0)), COL_WIDTHS.n7) +
                     " " +
-                    padR(String(row.inv_30d), COL_WIDTHS.n30) +
+                    padR(fmtCount(Number(row.inv_30d ?? 0)), COL_WIDTHS.n30) +
                     " " +
-                    padR(String(row.total_inv), COL_WIDTHS.total) +
+                    padR(fmtCount(Number(row.total_inv ?? 0)), COL_WIDTHS.total) +
                     " " +
                     padR(fmtLastUsed(row.last_used), COL_WIDTHS.last);
                 return isSelected ? (
