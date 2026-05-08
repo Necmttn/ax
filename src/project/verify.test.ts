@@ -94,4 +94,112 @@ describe("deriveVerificationChecks", () => {
 
         expect(checks.map((check) => check.id)).toContain("effect-guidance");
     });
+
+    test("requires test run for test-file changes", () => {
+        const checks = deriveVerificationChecks({
+            git: {
+                ...baseGit,
+                changes: [
+                    {
+                        path: "src/project/verify.test.ts",
+                        status: "M",
+                        staged: false,
+                        unstaged: true,
+                        untracked: false,
+                        lang: "typescript",
+                    },
+                ],
+            },
+            stack: baseStack,
+        });
+
+        expect(checks).toContainEqual(
+            expect.objectContaining({
+                id: "tests-run",
+                severity: "required",
+                command: "bun run test",
+            }),
+        );
+    });
+
+    test("recommends lint for lintable source changes", () => {
+        const checks = deriveVerificationChecks({
+            git: {
+                ...baseGit,
+                changes: [
+                    {
+                        path: "src/cli/index.js",
+                        status: "M",
+                        staged: false,
+                        unstaged: true,
+                        untracked: false,
+                        lang: "javascript",
+                    },
+                ],
+            },
+            stack: baseStack,
+        });
+
+        expect(checks).toContainEqual(
+            expect.objectContaining({
+                id: "lint",
+                severity: "recommended",
+                command: "bun run lint",
+            }),
+        );
+    });
+
+    test("recommends schema smoke check for schema changes", () => {
+        const checks = deriveVerificationChecks({
+            git: {
+                ...baseGit,
+                changes: [
+                    {
+                        path: "schema/main.surql",
+                        status: "M",
+                        staged: false,
+                        unstaged: true,
+                        untracked: false,
+                        lang: "surql",
+                    },
+                ],
+            },
+            stack: baseStack,
+        });
+
+        expect(checks).toContainEqual(
+            expect.objectContaining({
+                id: "schema-smoke",
+                severity: "recommended",
+                command: null,
+            }),
+        );
+    });
+
+    test("suggests diff review for dirty changes with no matched heuristic", () => {
+        const checks = deriveVerificationChecks({
+            git: {
+                ...baseGit,
+                changes: [
+                    {
+                        path: "README.md",
+                        status: "M",
+                        staged: false,
+                        unstaged: true,
+                        untracked: false,
+                        lang: "markdown",
+                    },
+                ],
+            },
+            stack: baseStack,
+        });
+
+        expect(checks).toEqual([
+            expect.objectContaining({
+                id: "review-diff",
+                severity: "info",
+                command: "git diff --stat",
+            }),
+        ]);
+    });
 });
