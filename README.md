@@ -70,7 +70,7 @@ agentctl project verify --json    # diff-aware verification + live diagnostics
 These commands are read-only and designed for Claude Code, Codex, and
 self-improve jobs that need grounded repo context before acting.
 
-Optional diagnostics config:
+Optional diagnostics config in `.agentctl/config.json`:
 
 ```json
 { "diagnostics": { "healthUrl": "http://localhost:4319/internal/health", "timeoutMs": 1000 } }
