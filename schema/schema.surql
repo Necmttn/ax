@@ -27,6 +27,18 @@ DEFINE FIELD model          ON session TYPE option<string>;
 DEFINE FIELD source         ON session TYPE string DEFAULT 'claude';  -- 'claude' | 'codex'
 DEFINE FIELD started_at     ON session TYPE option<datetime>;
 DEFINE FIELD ended_at       ON session TYPE option<datetime>;
+DEFINE FIELD raw_file       ON session TYPE option<string>;  -- f"transcripts:/<id>.jsonl" pointer; full original jsonl
+
+-- ==== File buckets (SurrealDB 3.0 experimental) ====
+-- Requires: surreal start --allow-experimental files
+--           SURREAL_BUCKET_FOLDER_ALLOWLIST=$AGENTCTL_DATA_DIR/buckets
+-- Bucket paths are hardcoded because SurrealQL does not interpolate env vars.
+-- apply-schema.sh warns if $AGENTCTL_DATA_DIR differs from the default.
+
+DEFINE BUCKET IF NOT EXISTS transcripts
+    BACKEND "file:/Users/necmttn/.local/share/agentctl/buckets/transcripts";
+DEFINE BUCKET IF NOT EXISTS codex_artifacts
+    BACKEND "file:/Users/necmttn/.local/share/agentctl/buckets/codex_artifacts";
 
 DEFINE TABLE turn SCHEMAFULL;
 DEFINE FIELD session        ON turn TYPE record<session>;

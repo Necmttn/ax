@@ -1,7 +1,7 @@
 import { readdir, stat, open } from "node:fs/promises";
 import { join, basename } from "node:path";
 import { Effect } from "effect";
-import { RecordId, SurrealClient } from "../lib/db.ts";
+import { RecordId, SurrealClient, filePointer } from "../lib/db.ts";
 import { TRANSCRIPTS_DIR } from "../lib/paths.ts";
 import { skillRecordKey } from "../lib/skill-id.ts";
 import { AppLayer } from "../lib/layers.ts";
@@ -13,6 +13,7 @@ interface Session {
     cwd: string | null;
     started_at: string | null;
     ended_at: string | null;
+    raw_file: string | null;
 }
 
 interface Turn {
@@ -110,6 +111,7 @@ async function extractFile(filePath: string, projectDir: string): Promise<FileEx
                 cwd,
                 started_at: ts,
                 ended_at: ts,
+                raw_file: null,
             };
         }
         session.ended_at = ts;
@@ -199,11 +201,44 @@ const upsertSessions = (sessions: Session[]) =>
                 db.upsert(new RecordId("session", s.id), {
                     project: s.project,
                     cwd: s.cwd,
+                    source: "claude",
                     started_at: s.started_at ? new Date(s.started_at) : null,
                     ended_at: s.ended_at ? new Date(s.ended_at) : null,
+                    raw_file: s.raw_file,
                 }),
             { concurrency: 4, discard: true },
         );
+    });
+
+/**
+ * Snapshot the original transcript jsonl into the `transcripts` bucket and
+ * return the file pointer string to persist on `session.raw_file`. Failures
+ * are logged but do not abort ingest - the bucket is best-effort cold storage.
+ */
+const snapshotTranscript = (sessionId: string, filePath: string) =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const content = yield* Effect.promise(async () => {
+            try {
+                return await Bun.file(filePath).text();
+            } catch {
+                return null;
+            }
+        });
+        if (content === null) return null;
+        const bucketPath = `${sessionId}.jsonl`;
+        const result = yield* db
+            .putFile("transcripts", bucketPath, content)
+            .pipe(
+                Effect.map(() => filePointer("transcripts", bucketPath)),
+                Effect.catch((err) => {
+                    console.error(
+                        `[transcripts] putFile failed ${sessionId}: ${err.message}`,
+                    );
+                    return Effect.succeed(null as string | null);
+                }),
+            );
+        return result;
     });
 
 const upsertTurns = (turns: Turn[]) =>
@@ -313,6 +348,11 @@ export const ingestTranscripts = (
                 );
                 if (!extracted) continue;
                 files += 1;
+                const pointer = yield* snapshotTranscript(
+                    extracted.session.id,
+                    filePath,
+                );
+                extracted.session.raw_file = pointer;
                 yield* upsertSessions([extracted.session]);
                 sessions += 1;
                 yield* upsertTurns(extracted.turns);
