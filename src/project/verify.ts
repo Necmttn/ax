@@ -9,8 +9,15 @@ function changed(git: GitState, predicate: (path: string) => boolean): ReadonlyA
     return git.changes.map((change) => change.path).filter(predicate);
 }
 
+function packageManagerRunCommand(packageManager: string | null, scriptName: string): string {
+    if (packageManager?.startsWith("npm")) return `npm run ${scriptName}`;
+    if (packageManager?.startsWith("pnpm")) return `pnpm run ${scriptName}`;
+    if (packageManager?.startsWith("yarn")) return `yarn ${scriptName}`;
+    return `bun run ${scriptName}`;
+}
+
 function scriptCommand(stack: ProjectStack, scriptName: string, fallback: string): string {
-    return stack.package.scripts[scriptName] ? `bun run ${scriptName}` : fallback;
+    return stack.package.scripts[scriptName] ? packageManagerRunCommand(stack.package.packageManager, scriptName) : fallback;
 }
 
 function hasAnyDependency(stack: ProjectStack, names: ReadonlyArray<string>): boolean {
@@ -56,7 +63,7 @@ export function deriveVerificationChecks(input: DeriveInput): ReadonlyArray<Veri
             severity: "recommended",
             title: "Run tests that cover the edited TypeScript",
             reason: "Source files changed and this package declares a test script.",
-            command: "bun run test",
+            command: scriptCommand(stack, "test", "bun test"),
             relatedFiles: tsFiles,
         });
     }
@@ -68,7 +75,7 @@ export function deriveVerificationChecks(input: DeriveInput): ReadonlyArray<Veri
             severity: "recommended",
             title: "Run lint",
             reason: "Lintable source files changed and a lint script exists.",
-            command: "bun run lint",
+            command: scriptCommand(stack, "lint", "bun run lint"),
             relatedFiles: lintable,
         });
     }
@@ -93,7 +100,7 @@ export function deriveVerificationChecks(input: DeriveInput): ReadonlyArray<Veri
             severity: "recommended",
             title: "Run a schema or database smoke check",
             reason: "Schema or migration files changed.",
-            command: stack.package.scripts["db:schema"] ? "bun run db:schema" : null,
+            command: stack.package.scripts["db:schema"] ? scriptCommand(stack, "db:schema", "bun run db:schema") : null,
             relatedFiles: schemaFiles,
         });
     }

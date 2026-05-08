@@ -202,4 +202,48 @@ describe("deriveVerificationChecks", () => {
             }),
         ]);
     });
+
+    test("uses pnpm commands when package manager is pnpm", () => {
+        const checks = deriveVerificationChecks({
+            git: {
+                ...baseGit,
+                changes: [
+                    {
+                        path: "src/project/verify.test.ts",
+                        status: "M",
+                        staged: false,
+                        unstaged: true,
+                        untracked: false,
+                        lang: "typescript",
+                    },
+                    {
+                        path: "schema/main.surql",
+                        status: "M",
+                        staged: false,
+                        unstaged: true,
+                        untracked: false,
+                        lang: "surql",
+                    },
+                ],
+            },
+            stack: {
+                ...baseStack,
+                package: {
+                    ...baseStack.package,
+                    packageManager: "pnpm@10.0.0",
+                    scripts: {
+                        ...baseStack.package.scripts,
+                        "db:schema": "surreal import schema/main.surql",
+                    },
+                },
+            },
+        });
+
+        const commandsById = new Map(checks.map((check) => [check.id, check.command]));
+
+        expect(commandsById.get("typescript-typecheck")).toBe("pnpm run typecheck");
+        expect(commandsById.get("tests-run")).toBe("pnpm run test");
+        expect(commandsById.get("lint")).toBe("pnpm run lint");
+        expect(commandsById.get("schema-smoke")).toBe("pnpm run db:schema");
+    });
 });
