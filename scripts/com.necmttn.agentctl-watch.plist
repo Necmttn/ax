@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.necmttn.agentctl-watch</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>cd __AGENTCTL_DIR__ &amp;&amp; bun src/cli/index.ts ingest --since=1 &gt;&gt;__LOG_DIR__/watcher.log 2&gt;&amp;1</string>
+  </array>
+  <key>WatchPaths</key>
+  <array>
+    <string>__HOME__/.claude/projects</string>
+    <string>__HOME__/.codex/sessions</string>
+  </array>
+  <key>ThrottleInterval</key>
+  <integer>60</integer>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>StandardOutPath</key>
+  <string>__LOG_DIR__/watcher.out</string>
+  <key>StandardErrorPath</key>
+  <string>__LOG_DIR__/watcher.err</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+</dict>
+</plist>

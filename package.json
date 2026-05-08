@@ -14,7 +14,9 @@
     "db:start": "scripts/db-start.sh",
     "db:stop": "scripts/db-stop.sh",
     "db:schema": "scripts/apply-schema.sh",
-    "refs:setup": "scripts/setup-references.sh"
+    "refs:setup": "scripts/setup-references.sh",
+    "watcher:install": "bash scripts/install-watcher.sh",
+    "watcher:uninstall": "bash scripts/uninstall-watcher.sh"
   },
   "dependencies": {
     "effect": "^4.0.0-beta.64",
