@@ -69,13 +69,17 @@ export function detectLang(path: string): string | null {
     }
 }
 
-function parseStatusLine(line: string): ProjectFileChange | null {
-    if (line.length < 4) return null;
-    const stagedStatus = line[0] ?? " ";
-    const unstagedStatus = line[1] ?? " ";
-    const rawPath = line.slice(3);
-    const isRenameOrCopy = stagedStatus === "R" || stagedStatus === "C";
-    const path = isRenameOrCopy && rawPath.includes(" -> ") ? rawPath.split(" -> ").at(-1)! : rawPath;
+const isRenameOrCopyStatus = (status: string): boolean => status === "R" || status === "C";
+
+function isRenameOrCopyRecord(record: string): boolean {
+    return isRenameOrCopyStatus(record[0] ?? " ") || isRenameOrCopyStatus(record[1] ?? " ");
+}
+
+function parseStatusRecord(record: string): ProjectFileChange | null {
+    if (record.length < 4) return null;
+    const stagedStatus = record[0] ?? " ";
+    const unstagedStatus = record[1] ?? " ";
+    const path = record.slice(3);
     const untracked = stagedStatus === "?" && unstagedStatus === "?";
     return {
         path,
@@ -108,7 +112,7 @@ export const getGitState = (cwd = process.cwd()): Effect.Effect<GitState> =>
         }
 
         const [status, head] = yield* Effect.all([
-            runGit(root, ["status", "--porcelain=v1", "-b"]),
+            runGit(root, ["status", "--porcelain=v1", "-z", "-b"]),
             runGit(root, ["rev-parse", "--short", "HEAD"]),
         ]);
 
@@ -120,9 +124,18 @@ export const getGitState = (cwd = process.cwd()): Effect.Effect<GitState> =>
             );
         }
 
-        const lines = status.stdout.split("\n").filter((line) => line.length > 0);
-        const branch = lines.length > 0 ? parseBranch(lines[0]!) : null;
-        const changes = lines.slice(1).map(parseStatusLine).filter((row): row is ProjectFileChange => row !== null);
+        const records = status.stdout.split("\0");
+        const branch = records[0]?.startsWith("## ") === true ? parseBranch(records[0]!) : null;
+        const changes: Array<ProjectFileChange> = [];
+
+        for (let i = branch === null ? 0 : 1; i < records.length; i += 1) {
+            const record = records[i];
+            if (!record) continue;
+
+            const change = parseStatusRecord(record);
+            if (change) changes.push(change);
+            if (isRenameOrCopyRecord(record)) i += 1;
+        }
 
         return {
             root,
