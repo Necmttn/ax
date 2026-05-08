@@ -49,10 +49,41 @@ agentctl ingest [--since=DAYS]      # refresh (skills + transcripts + codex)
 Three layers, no daemon:
 
 1. **Stop hook** (`~/.claude/settings.json`) fires `agentctl ingest --since=1` after every Claude Code session ends.
-2. **launchd WatchPaths** (planned) - fallback for non-Claude tools writing into `~/.claude/projects/` or `~/.codex/sessions/`.
+2. **launchd WatchPaths** (macOS) - fallback for non-Claude tools writing into `~/.claude/projects/` or `~/.codex/sessions/`.
 3. **Weekly cron** via your existing self-improve runs full ingest as deep-scan backfill.
 
 Stop hook is enough for ~99% of cases. The other two are insurance.
+
+### launchd watcher (macOS)
+
+Belt-and-suspenders fallback to the Stop hook. A `LaunchAgent` watches
+`~/.claude/projects/` and `~/.codex/sessions/`; whenever those paths change
+it runs `agentctl ingest --since=1`. `ThrottleInterval=60` coalesces bursts
+so a flurry of writes triggers a single ingest at most once per minute.
+
+```bash
+bun run watcher:install      # renders + loads ~/Library/LaunchAgents/com.necmttn.agentctl-watch.plist
+bun run watcher:uninstall    # unloads + removes it
+```
+
+What `watcher:install` does:
+
+- renders `scripts/com.necmttn.agentctl-watch.plist` (a template) into
+  `~/Library/LaunchAgents/com.necmttn.agentctl-watch.plist`, substituting
+  absolute paths for `$HOME`, the repo, and the log dir
+- `launchctl unload`s any previous version (idempotent)
+- `launchctl load -w`s the fresh plist
+
+Logs land in `~/.local/share/agentctl/logs/`:
+
+- `watcher.log` - stdout/stderr of each `bun ... ingest --since=1` invocation
+- `watcher.out` / `watcher.err` - launchd's own pipes
+
+Verify it's loaded:
+
+```bash
+launchctl list | grep com.necmttn.agentctl-watch
+```
 
 ## Schema
 
