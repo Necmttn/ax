@@ -5,11 +5,13 @@ import { AppLayer } from "../lib/layers.ts";
 import { ingestSkills } from "../ingest/skills.ts";
 import { ingestTranscripts } from "../ingest/transcripts.ts";
 import { ingestCodex } from "../ingest/codex.ts";
+import { deriveSignals } from "../ingest/derive-signals.ts";
 
 const HELP = `agentctl - agent telemetry & taste graph
 
 Usage:
   agentctl ingest [--skills-only|--transcripts-only] [--since=DAYS]
+  agentctl derive-signals [--since=DAYS]
   agentctl search <query> [--limit=N]
   agentctl stats <skill>
   agentctl recent [--limit=N]
@@ -34,6 +36,16 @@ const cmdIngest = (args: string[]) =>
         if (!transcriptsOnly && !codexOnly) yield* ingestSkills();
         if (!skillsOnly && !codexOnly) yield* ingestTranscripts({ sinceDays });
         if (!skillsOnly && !claudeOnly) yield* ingestCodex({ sinceDays });
+        // Auto-derive signals so taste queries always see fresh
+        // corrected_by / proposed edges. Cheap: O(turns) in-memory walk.
+        if (!skillsOnly) yield* deriveSignals({ sinceDays });
+    });
+
+const cmdDeriveSignals = (args: string[]) =>
+    Effect.gen(function* () {
+        const sinceArg = flag("since", args);
+        const sinceDays = sinceArg ? parseInt(sinceArg, 10) : undefined;
+        yield* deriveSignals({ sinceDays });
     });
 
 const cmdSearch = (args: string[]) =>
@@ -168,8 +180,14 @@ const cmdTaste = (args: string[]) =>
     Effect.gen(function* () {
         const limit = parseInt(flag("limit", args) ?? "30", 10);
         const db = yield* SurrealClient;
-        // Composite signal: invocations (positive), errors near invocation (negative),
-        // edits-following-invocation in same session (positive - work happened).
+        // Composite signal: invocations (positive), errors near invocation
+        // (negative), corrections within 3 turns of invocation in the same
+        // session (negative - user pushed back), and proposed-but-not-invoked
+        // (signal of mismatch between assistant suggestions and tool firing).
+        //
+        // `corrections` counts invocations where the next user turn within 3
+        // seq steps in the same session triggered a corrected_by edge.
+        // `proposals` counts proposed edges into this skill.
         const sql = `
 SELECT
     name,
@@ -180,19 +198,29 @@ SELECT
     array::len((
         SELECT * FROM <-invoked
         WHERE in.has_error = false
-    )) AS clean_inv
+    )) AS clean_inv,
+    array::len((
+        SELECT * FROM <-invoked
+        WHERE array::len((
+            SELECT * FROM corrected_by
+            WHERE in.session = $parent.in.session
+              AND in.seq >= $parent.in.seq
+              AND in.seq <= $parent.in.seq + 3
+        )) > 0
+    )) AS corrections,
+    array::len(<-proposed) AS proposals
 FROM skill
-WHERE array::len(<-invoked) > 0
+WHERE array::len(<-invoked) > 0 OR array::len(<-proposed) > 0
 ORDER BY inv_30d DESC, clean_inv DESC, inv_total DESC
 LIMIT ${limit};`;
         const result = yield* db.query<[Array<Record<string, unknown>>]>(sql);
         const rows = result?.[0];
         console.log(
-            `${"skill".padEnd(50)}  ${"scope".padEnd(16)}  7d  30d  total  clean`,
+            `${"skill".padEnd(50)}  ${"scope".padEnd(16)}  7d  30d  total  clean  corr  prop`,
         );
         for (const r of rows ?? []) {
             console.log(
-                `${String(r.name).padEnd(50)}  ${String(r.scope).padEnd(16)}  ${String(r.inv_7d).padStart(2)}  ${String(r.inv_30d).padStart(3)}  ${String(r.inv_total).padStart(5)}  ${String(r.clean_inv).padStart(5)}`,
+                `${String(r.name).padEnd(50)}  ${String(r.scope).padEnd(16)}  ${String(r.inv_7d).padStart(2)}  ${String(r.inv_30d).padStart(3)}  ${String(r.inv_total).padStart(5)}  ${String(r.clean_inv).padStart(5)}  ${String(r.corrections ?? 0).padStart(4)}  ${String(r.proposals ?? 0).padStart(4)}`,
             );
         }
     });
@@ -204,6 +232,8 @@ const dispatch = (
     switch (cmd) {
         case "ingest":
             return cmdIngest(rest);
+        case "derive-signals":
+            return cmdDeriveSignals(rest);
         case "search":
             return cmdSearch(rest);
         case "stats":
