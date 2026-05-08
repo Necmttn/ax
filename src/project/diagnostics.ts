@@ -12,10 +12,25 @@ function numberOrDefault(value: unknown, fallback: number): number {
     return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
+function emptyDiagnosticConfig(): DiagnosticConfig {
+    return {
+        healthUrl: null,
+        statusUrl: null,
+        errorsUrl: null,
+        timeoutMs: 1000,
+    };
+}
+
+function recordOrNull(value: unknown): Record<string, unknown> | null {
+    return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
 export function parseDiagnosticConfig(raw: string): DiagnosticConfig {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const diagnostics =
-        parsed.diagnostics && typeof parsed.diagnostics === "object" ? (parsed.diagnostics as Record<string, unknown>) : {};
+    const parsed = JSON.parse(raw) as unknown;
+    const root = recordOrNull(parsed);
+    if (!root) return emptyDiagnosticConfig();
+
+    const diagnostics = recordOrNull(root.diagnostics) ?? {};
     return {
         healthUrl: stringOrNull(diagnostics.healthUrl),
         statusUrl: stringOrNull(diagnostics.statusUrl),
@@ -24,13 +39,19 @@ export function parseDiagnosticConfig(raw: string): DiagnosticConfig {
     };
 }
 
-export const loadDiagnosticConfig = (root: string | null): Effect.Effect<DiagnosticConfig | null> =>
+export const loadDiagnosticConfig = (root: string | null): Effect.Effect<DiagnosticConfig | null, string> =>
     Effect.gen(function* () {
         if (!root) return null;
         const path = join(root, ".agentctl", "config.json");
         if (!existsSync(path)) return null;
-        const raw = yield* Effect.promise(() => readFile(path, "utf8"));
-        return parseDiagnosticConfig(raw);
+        const raw = yield* Effect.tryPromise({
+            try: () => readFile(path, "utf8"),
+            catch: (error) => String(error),
+        });
+        return yield* Effect.try({
+            try: () => parseDiagnosticConfig(raw),
+            catch: (error) => String(error),
+        });
     });
 
 function severity(value: unknown): DiagnosticIssue["severity"] {
@@ -84,7 +105,15 @@ const emptyDiagnostics = (configured: boolean, error: string | null): LiveDiagno
 
 export const queryLiveDiagnostics = (root: string | null): Effect.Effect<LiveDiagnostics> =>
     Effect.gen(function* () {
-        const config = yield* loadDiagnosticConfig(root);
+        const configResult = yield* loadDiagnosticConfig(root).pipe(
+            Effect.match({
+                onFailure: (error) => ({ _tag: "Error" as const, error }),
+                onSuccess: (config) => ({ _tag: "Success" as const, config }),
+            }),
+        );
+        if (configResult._tag === "Error") return emptyDiagnostics(true, configResult.error);
+
+        const config = configResult.config;
         if (!config || !config.healthUrl) return emptyDiagnostics(false, null);
 
         const result = yield* Effect.tryPromise({
