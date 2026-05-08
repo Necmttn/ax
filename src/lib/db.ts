@@ -5,7 +5,7 @@ import {
     type AnyRecordId,
     type Table,
 } from "surrealdb";
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Schedule } from "effect";
 import { DbError } from "./errors.ts";
 
 export interface DbConfig {
@@ -33,6 +33,42 @@ const sqlExcerpt = (sql: unknown): string | undefined => {
 
 const errorMessage = (err: unknown): string =>
     err instanceof Error ? err.message : String(err);
+
+/** Connect timeout for the initial SurrealDB handshake. Bun's WebSocket has
+ *  no built-in timeout on hung daemons, so we cap acquisition at 5s. */
+const CONNECT_TIMEOUT_MS = 5000;
+
+/**
+ * Detects "Transaction conflict" errors from SurrealDB's optimistic-locking
+ * layer. Concurrent writers (e.g. two `agentctl ingest` runs hitting the same
+ * rocksdb keys) hit this and SurrealDB explicitly tells us we can retry.
+ *
+ * Examples of matching messages:
+ *   - "Transaction conflict: this transaction can be retried"
+ *   - "transaction failed, can be retried"
+ */
+const isTransactionConflict = (err: DbError): boolean =>
+    /transaction conflict|can be retried/i.test(err.message);
+
+/**
+ * Retry policy for transient transaction conflicts: exponential backoff
+ * (100ms, 200ms, 400ms) capped at 3 retries. Only retries while the error
+ * looks like a transaction conflict - any other DbError fails fast.
+ */
+const transactionConflictRetry = {
+    schedule: Schedule.exponential("100 millis", 2),
+    times: 3,
+    while: (err: DbError) => {
+        if (isTransactionConflict(err)) {
+            // Best-effort observability so concurrent-ingest dogfooding shows
+            // retries actually happened. Stays on stderr to keep stdout clean
+            // for piped output (`agentctl recent | jq`).
+            console.error(`[db] retry on conflict: ${err.message}`);
+            return true;
+        }
+        return false;
+    },
+} as const;
 
 /**
  * Effect-friendly wrapper around the SurrealDB client. Acquired as a Layer so
@@ -97,6 +133,12 @@ export class SurrealClient extends Context.Service<
     SurrealClientShape
 >()("agentctl/SurrealClient") {}
 
+const connectError = (url: string, reason: string): DbError =>
+    new DbError({
+        operation: "connect",
+        message: `daemon not reachable at ${url} (${reason}); run 'agentctl install' to start it`,
+    });
+
 const acquire = (cfg: DbConfig): Effect.Effect<Surreal, DbError> =>
     Effect.tryPromise({
         try: async () => {
@@ -106,12 +148,22 @@ const acquire = (cfg: DbConfig): Effect.Effect<Surreal, DbError> =>
             await db.use({ namespace: cfg.ns, database: cfg.db });
             return db;
         },
-        catch: (err) =>
-            new DbError({
-                operation: "connect",
-                message: errorMessage(err),
-            }),
-    });
+        catch: (err) => connectError(cfg.url, errorMessage(err)),
+    }).pipe(
+        // Bun's WebSocket has no implicit timeout - if the daemon is down,
+        // `db.connect()` hangs forever. Cap acquisition at 5s and surface a
+        // typed DbError with a clear hint so the CLI doesn't appear frozen.
+        Effect.timeoutOrElse({
+            duration: `${CONNECT_TIMEOUT_MS} millis`,
+            orElse: () =>
+                Effect.fail(
+                    connectError(
+                        cfg.url,
+                        `connect timed out after ${CONNECT_TIMEOUT_MS}ms`,
+                    ),
+                ),
+        }),
+    );
 
 const release = (db: Surreal): Effect.Effect<void> =>
     Effect.promise(async () => {
@@ -135,7 +187,7 @@ const wrap = (db: Surreal): SurrealClientShape => ({
                     message: errorMessage(err),
                     sql: sqlExcerpt(sql),
                 }),
-        }),
+        }).pipe(Effect.retry(transactionConflictRetry)),
 
     upsert: (id: RecordId, content: Record<string, unknown>) =>
         Effect.tryPromise({
@@ -146,7 +198,7 @@ const wrap = (db: Surreal): SurrealClientShape => ({
                     message: errorMessage(err),
                     sql: id.toString(),
                 }),
-        }),
+        }).pipe(Effect.retry(transactionConflictRetry)),
 
     relate: (
         from: AnyRecordId,
@@ -164,7 +216,7 @@ const wrap = (db: Surreal): SurrealClientShape => ({
                     operation: "relate",
                     message: errorMessage(err),
                 }),
-        }),
+        }).pipe(Effect.retry(transactionConflictRetry)),
 
     putFile: (bucket: string, path: string, content: string | Uint8Array) =>
         Effect.tryPromise({
@@ -181,7 +233,7 @@ const wrap = (db: Surreal): SurrealClientShape => ({
                     message: errorMessage(err),
                     sql: `${bucket}:/${path}`,
                 }),
-        }),
+        }).pipe(Effect.retry(transactionConflictRetry)),
 
     getFile: (bucket: string, path: string) =>
         Effect.tryPromise({
