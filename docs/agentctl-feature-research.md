@@ -479,6 +479,9 @@ Should include:
 
 Diff-aware verification guidance.
 
+First implementation target: static diff-aware checks plus an optional HTTP
+diagnostics adapter; OTEL persistence remains a later phase.
+
 Examples:
 
 - TypeScript changed -> run typecheck.

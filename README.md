@@ -60,6 +60,22 @@ agentctl taste [--limit=N]          # composite signal score
 agentctl ingest [--since=DAYS]      # refresh (skills + transcripts + codex)
 ```
 
+### Project Grounding
+
+```bash
+agentctl project context --json   # repo stack, instructions, git state, checks
+agentctl project verify --json    # diff-aware verification + live diagnostics
+```
+
+These commands are read-only and designed for Claude Code, Codex, and
+self-improve jobs that need grounded repo context before acting.
+
+Optional diagnostics config:
+
+```json
+{ "diagnostics": { "healthUrl": "http://localhost:4319/internal/health", "timeoutMs": 1000 } }
+```
+
 `--since=N` limits ingest to files modified in the last N days - useful for the Stop-hook fast path.
 
 ## Reactivity
