@@ -38,7 +38,7 @@ The next layer should make this graph useful before and during agent work:
 - `agentctl project context`.
 - `agentctl project memory`.
 - `agentctl recall <question>`.
-- `agentctl verify`.
+- `agentctl project verify`.
 - JSON contracts for self-improve and other agents.
 
 ## Feature Categories
@@ -73,7 +73,7 @@ How `agentctl` differs:
 Feature discussion:
 
 - Should `agentctl` integrate with RTK/context-mode as upstream signal sources?
-- Should `agentctl verify` recommend RTK/context-mode when repeated truncation
+- Should `agentctl project verify` recommend RTK/context-mode when repeated truncation
   or noisy command patterns appear?
 
 ### 2. Codebase Structure And Retrieval
