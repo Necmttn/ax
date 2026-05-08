@@ -98,6 +98,13 @@ function which(cmd: string): string | null {
     return r.stdout.trim() || null;
 }
 
+// Strip ANSI color/control sequences. The surreal CLI emits SGR codes when it
+// thinks it's attached to a TTY; we capture stdout/stderr and clean before re-logging.
+const ANSI_REGEX = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
+function stripAnsi(s: string): string {
+    return s.replace(ANSI_REGEX, "");
+}
+
 function platformArtifact(): string | null {
     const p = process.platform;
     const a = process.arch;
@@ -166,17 +173,19 @@ async function ensureSurreal(): Promise<string> {
 
     const tag = `v${SURREAL_VERSION}`;
     const url = `https://github.com/surrealdb/surrealdb/releases/download/${tag}/surreal-${tag}.${platform}.tgz`;
-    console.log(`  surreal: downloading ${tag} for ${platform}`);
+    console.log(`  surreal: downloading ${tag} for ${platform}...`);
 
     await mkdir(VENDOR_BIN_DIR, { recursive: true });
     const tmpTar = join(VENDOR_BIN_DIR, "surreal.tgz");
 
+    const startedAt = Date.now();
     try {
         const res = await fetch(url);
         if (!res.ok) {
             throw new Error(`download failed: HTTP ${res.status} ${res.statusText}`);
         }
         const buf = await res.arrayBuffer();
+        const sizeMB = (buf.byteLength / (1024 * 1024)).toFixed(1);
         await writeFile(tmpTar, new Uint8Array(buf));
 
         const ex = spawnSync("tar", ["-xzf", tmpTar, "-C", VENDOR_BIN_DIR], {
@@ -188,7 +197,8 @@ async function ensureSurreal(): Promise<string> {
 
         const v = surrealVersionString(localBin);
         if (!v) throw new Error(`downloaded surreal at ${localBin} did not run`);
-        console.log(`  surreal: installed ${localBin} (${v})`);
+        const elapsedSec = ((Date.now() - startedAt) / 1000).toFixed(1);
+        console.log(`  surreal: installed ${localBin} (${v}) [${sizeMB} MB in ${elapsedSec}s]`);
         return localBin;
     } catch (err) {
         // Offline / GitHub down - fall back to system surreal if present at all.
@@ -220,16 +230,19 @@ async function loadAgent(plistPath: string) {
     execSync(`launchctl load -w "${plistPath}"`, { stdio: "inherit" });
 }
 
-async function unloadAgent(plistPath: string) {
+/** Unload + delete a LaunchAgent plist. Returns true when the file existed and was removed. */
+async function unloadAgent(plistPath: string): Promise<boolean> {
     try {
         execSync(`launchctl unload "${plistPath}" 2>/dev/null`, { stdio: "ignore" });
     } catch {
         // ok
     }
+    if (!existsSync(plistPath)) return false;
     try {
         await unlink(plistPath);
+        return true;
     } catch {
-        // ok
+        return false;
     }
 }
 
@@ -305,12 +318,20 @@ export async function cmdInstall() {
             "main",
             schemaPath,
         ],
-        { stdio: "inherit" },
+        { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" },
     );
     if (r.status === 0) {
         console.log("  schema: applied");
     } else {
+        // Capture stdio so the surreal CLI doesn't paint raw ANSI escapes to the
+        // user's terminal; surface only the relevant lines on failure.
+        const out = stripAnsi(`${r.stdout ?? ""}${r.stderr ?? ""}`).trim();
         console.warn("  schema: apply failed (daemon may not be ready); re-run 'agentctl install'");
+        if (out) {
+            for (const line of out.split("\n")) {
+                if (line.trim()) console.warn(`    ${line}`);
+            }
+        }
     }
     await unlink(schemaPath).catch(() => undefined);
 
@@ -323,20 +344,30 @@ export async function cmdInstall() {
 
 export async function cmdUninstall() {
     console.log("[agentctl] uninstall");
-    await unloadAgent(WATCH_PLIST);
-    console.log(`  removed: ${WATCH_PLIST}`);
-    await unloadAgent(DB_PLIST);
-    console.log(`  removed: ${DB_PLIST}`);
+    for (const plist of [WATCH_PLIST, DB_PLIST]) {
+        const removed = await unloadAgent(plist);
+        console.log(`  ${removed ? "removed" : "absent "}: ${plist}`);
+    }
 
     const binLink = join(BIN_DIR, "agentctl");
+    let symlinkStatus: "removed" | "absent" | "skipped" = "absent";
     try {
         const st = await lstat(binLink);
         if (st.isSymbolicLink()) {
             await unlink(binLink);
-            console.log(`  removed symlink: ${binLink}`);
+            symlinkStatus = "removed";
+        } else {
+            symlinkStatus = "skipped";
         }
-    } catch {
-        // ok
+    } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    }
+    if (symlinkStatus === "removed") {
+        console.log(`  removed symlink: ${binLink}`);
+    } else if (symlinkStatus === "absent") {
+        console.log(`  absent  symlink: ${binLink}`);
+    } else {
+        console.log(`  skipped symlink: ${binLink} (not a symlink)`);
     }
 
     console.log();
