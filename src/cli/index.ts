@@ -68,26 +68,50 @@ const cmdSearch = (args: string[]) =>
     Effect.gen(function* () {
         const query = args
             .filter((a) => !a.startsWith("--"))
-            .join(" ")
-            .toLowerCase();
+            .join(" ");
         const limit = parseInt(flag("limit", args) ?? "10", 10);
         if (!query) {
             console.error("agentctl search: missing query");
             process.exit(1);
         }
         const db = yield* SurrealClient;
-        // Lexical contains + recent-use boost
-        // NOTE: Time-window counts use explicit `invoked WHERE out = $parent.id`
-        // form rather than `<-invoked WHERE ts > ...`. The graph-traversal form
-        // materialises the edges first and the WHERE filter then drops every
-        // row (returns 0 even when matches exist). See issue #15.
-        const sql = `
+        // Primary path: SurrealDB v3 BM25 FTS via the skill_search_name +
+        // skill_search_desc indexes (defined in schema/schema.surql with
+        // ngram(2, 8) tokenisation, so "test" hits "test-driven"). The
+        // `@N@` matches operator references an index by *position in the
+        // WHERE clause* (not field), and `search::score(N)` returns the
+        // BM25 score for predicate N. Combined score = sum of name +
+        // description BM25 scores; either side is NONE when only one
+        // matched, so we coerce via `math::max([score, 0])`.
+        //
+        // Time-window counts use explicit `invoked WHERE out = $parent.id`
+        // form rather than `<-invoked WHERE ts > ...`. The graph-traversal
+        // form materialises edges first then the WHERE drops every row
+        // (returns 0 even when matches exist). See issue #15.
+        const ftsSql = `
 SELECT
     name,
     scope,
     description,
-    (string::lowercase(name) CONTAINS $q) AS name_match,
-    (description IS NONE OR string::lowercase(description ?? '') CONTAINS $q) AS desc_match,
+    (math::max([search::score(0), 0.0]) + math::max([search::score(1), 0.0])) AS score,
+    array::len(<-invoked) AS total_inv,
+    (SELECT count() FROM invoked WHERE out = $parent.id AND ts > time::now() - 30d GROUP ALL)[0].count ?? 0 AS inv_30d,
+    (SELECT ts FROM invoked WHERE out = $parent.id ORDER BY ts DESC LIMIT 1)[0].ts AS last_used
+FROM skill
+WHERE name @0@ $q OR description @1@ $q
+ORDER BY score DESC, inv_30d DESC, total_inv DESC
+LIMIT ${limit};`;
+        // Fallback: legacy CONTAINS query for DBs that haven't had
+        // schema/schema.surql re-applied since this change landed (FTS
+        // index missing). Mirrors the pre-FTS behaviour with a synthetic
+        // score column so the downstream rendering loop is uniform.
+        const legacySql = `
+SELECT
+    name,
+    scope,
+    description,
+    (IF string::lowercase(name) CONTAINS $q THEN 2.0 ELSE 0.0 END
+     + IF string::lowercase(description ?? '') CONTAINS $q THEN 1.0 ELSE 0.0 END) AS score,
     array::len(<-invoked) AS total_inv,
     (SELECT count() FROM invoked WHERE out = $parent.id AND ts > time::now() - 30d GROUP ALL)[0].count ?? 0 AS inv_30d,
     (SELECT ts FROM invoked WHERE out = $parent.id ORDER BY ts DESC LIMIT 1)[0].ts AS last_used
@@ -95,19 +119,29 @@ FROM skill
 WHERE
     string::lowercase(name) CONTAINS $q
     OR string::lowercase(description ?? '') CONTAINS $q
-ORDER BY name_match DESC, inv_30d DESC, total_inv DESC
+ORDER BY score DESC, inv_30d DESC, total_inv DESC
 LIMIT ${limit};`;
-        const result = yield* db.query<[Array<Record<string, unknown>>]>(sql, { q: query });
+        const result = yield* db
+            .query<[Array<Record<string, unknown>>]>(ftsSql, { q: query })
+            .pipe(
+                Effect.catch(() =>
+                    db.query<[Array<Record<string, unknown>>]>(legacySql, {
+                        q: query.toLowerCase(),
+                    }),
+                ),
+            );
         const rows = result?.[0];
         if (!rows || rows.length === 0) {
             console.log("(no matches)");
             return;
         }
         for (const r of rows) {
+            const score = Number(r.score ?? 0);
+            const scoreStr = score.toFixed(2);
             const usage = `${r.inv_30d ?? 0}×30d / ${r.total_inv ?? 0}×total`;
             const desc = (r.description as string | null) ?? "";
             const truncDesc = desc.length > 100 ? desc.slice(0, 97) + "…" : desc;
-            console.log(`${r.name}  [${r.scope}]  ${usage}`);
+            console.log(`${r.name}  [${r.scope}]  score=${scoreStr}  ${usage}`);
             if (truncDesc) console.log(`  ${truncDesc}`);
         }
     });
