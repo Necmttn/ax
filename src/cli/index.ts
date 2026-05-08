@@ -124,19 +124,32 @@ RETURN {
     )
 };`;
         const result = yield* db.query<unknown[]>(sql, { name });
-        // SurrealDB returns one entry per statement; the LET yields null,
-        // the RETURN yields the payload. Pick the last non-null result.
         const payload = (Array.isArray(result)
             ? [...result].reverse().find((r) => r != null)
             : result) as
-            | { skill?: { body?: string | null } | null }
+            | { skill?: { dir_path?: string | null } | null }
             | undefined;
-        const body = payload?.skill?.body;
-        if (typeof body === "string" && body.length > 0) {
-            const excerpt = body.length > 500 ? body.slice(0, 500) + "…" : body;
-            console.log("--- body excerpt ---");
-            console.log(excerpt);
-            console.log("--- end body ---\n");
+        // Read body lazily from disk via dir_path (DB no longer stores body -
+        // multi-file skills + cache-staleness make on-disk the canonical source).
+        const dirPath = payload?.skill?.dir_path;
+        if (typeof dirPath === "string" && dirPath.length > 0) {
+            try {
+                const { readFile } = yield* Effect.promise(() => import("node:fs/promises"));
+                const { join } = yield* Effect.promise(() => import("node:path"));
+                const content = yield* Effect.promise(() =>
+                    readFile(join(dirPath, "SKILL.md"), "utf8"),
+                );
+                const m = content.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/);
+                const body = (m?.[1] ?? content).trim();
+                if (body.length > 0) {
+                    const excerpt = body.length > 500 ? body.slice(0, 500) + "…" : body;
+                    console.log("--- body excerpt ---");
+                    console.log(excerpt);
+                    console.log("--- end body ---\n");
+                }
+            } catch {
+                // Skill file unreadable - fall through to JSON dump only.
+            }
         }
         console.log(JSON.stringify(payload, null, 2));
     });
