@@ -13,6 +13,7 @@ export interface SkillRow {
     readonly inv_7d: number;
     readonly inv_30d: number;
     readonly last_used: string | null;
+    readonly taste_score: number;
 }
 
 export interface SkillsState {
