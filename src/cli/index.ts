@@ -107,8 +107,22 @@ RETURN {
         LIMIT 5
     )
 };`;
-        const result = yield* db.query<[unknown]>(sql, { name });
-        console.log(JSON.stringify(result?.[0], null, 2));
+        const result = yield* db.query<unknown[]>(sql, { name });
+        // SurrealDB returns one entry per statement; the LET yields null,
+        // the RETURN yields the payload. Pick the last non-null result.
+        const payload = (Array.isArray(result)
+            ? [...result].reverse().find((r) => r != null)
+            : result) as
+            | { skill?: { body?: string | null } | null }
+            | undefined;
+        const body = payload?.skill?.body;
+        if (typeof body === "string" && body.length > 0) {
+            const excerpt = body.length > 500 ? body.slice(0, 500) + "…" : body;
+            console.log("--- body excerpt ---");
+            console.log(excerpt);
+            console.log("--- end body ---\n");
+        }
+        console.log(JSON.stringify(payload, null, 2));
     });
 
 const cmdRecent = (args: string[]) =>
