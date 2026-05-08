@@ -157,7 +157,7 @@ export function App({ client, onQuit }: AppProps) {
     const dbError = skills.error;
     const errorMessage = dbError
         ? dbError.includes("ECONNREFUSED") || dbError.includes("connect")
-            ? "DB not running - start with `bun run db:start`"
+            ? "DB not running - run `agentctl install` to start it"
             : `DB error: ${dbError}`
         : null;
 
