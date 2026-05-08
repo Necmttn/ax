@@ -18,6 +18,22 @@ DEFINE FIELD ingested_at    ON skill TYPE datetime VALUE time::now();
 DEFINE INDEX skill_name_uq  ON skill FIELDS name UNIQUE;
 DEFINE INDEX skill_scope    ON skill FIELDS scope;
 
+-- Full-text search (BM25 + ngram tokenization) for `agentctl search`.
+-- ngram(2, 8) generates 2-8 char substrings so partial-word queries hit
+-- ("test" matches "test-driven") and multi-word queries rank by combined
+-- term presence. SurrealDB v3 FTS indexes are single-field; we score
+-- name + description separately and combine in the query
+-- (see src/cli/index.ts `cmdSearch`).
+DEFINE ANALYZER IF NOT EXISTS skill_text
+    TOKENIZERS class
+    FILTERS lowercase, ngram(2, 8);
+DEFINE INDEX IF NOT EXISTS skill_search_name
+    ON skill FIELDS name
+    FULLTEXT ANALYZER skill_text BM25 HIGHLIGHTS;
+DEFINE INDEX IF NOT EXISTS skill_search_desc
+    ON skill FIELDS description
+    FULLTEXT ANALYZER skill_text BM25 HIGHLIGHTS;
+
 DEFINE TABLE session SCHEMAFULL;
 DEFINE FIELD project        ON session TYPE option<string>;
 DEFINE FIELD cwd            ON session TYPE option<string>;
