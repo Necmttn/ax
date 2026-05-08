@@ -212,14 +212,17 @@ export const ingestCodex = (
                     );
             }
 
+            // SurrealDB v3 rejects JS `null` for `option<T>` fields (CBOR
+            // encodes null as SurrealQL NULL, not NONE). Coalesce to
+            // `undefined` so the JS client maps it to NONE. See issue #37.
             yield* db.upsert(new RecordId("session", extracted.session.id), {
-                project: extracted.session.cwd,
-                cwd: extracted.session.cwd,
-                model: extracted.session.model_provider,
+                project: extracted.session.cwd ?? undefined,
+                cwd: extracted.session.cwd ?? undefined,
+                model: extracted.session.model_provider ?? undefined,
                 source: "codex",
                 started_at: new Date(extracted.session.started_at),
                 ended_at: new Date(extracted.session.ended_at),
-                raw_file: rawPointer,
+                raw_file: rawPointer ?? undefined,
             });
             sessionCount += 1;
 

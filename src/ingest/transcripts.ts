@@ -222,13 +222,15 @@ const upsertSessions = (sessions: Session[]) =>
         yield* Effect.forEach(
             sessions,
             (s) =>
+                // SurrealDB v3 rejects JS `null` for `option<T>` fields - the
+                // JS client must see `undefined` to encode NONE. See issue #37.
                 db.upsert(new RecordId("session", s.id), {
-                    project: s.project,
-                    cwd: s.cwd,
+                    project: s.project ?? undefined,
+                    cwd: s.cwd ?? undefined,
                     source: "claude",
-                    started_at: s.started_at ? new Date(s.started_at) : null,
-                    ended_at: s.ended_at ? new Date(s.ended_at) : null,
-                    raw_file: s.raw_file,
+                    started_at: s.started_at ? new Date(s.started_at) : undefined,
+                    ended_at: s.ended_at ? new Date(s.ended_at) : undefined,
+                    raw_file: s.raw_file ?? undefined,
                 }),
             { concurrency: 4, discard: true },
         );
@@ -284,6 +286,48 @@ const relateInvocations = (invocations: Invocation[]) =>
     Effect.gen(function* () {
         if (invocations.length === 0) return;
         const db = yield* SurrealClient;
+
+        // Backstop for issues #41 / #42: any Skill-tool invocation whose
+        // target isn't on disk (e.g. a slash command vendored by a plugin we
+        // didn't enumerate, or one already removed) would otherwise create
+        // an orphan `invoked` edge - the RELATE auto-creates a schemafull
+        // skill row with no `name`, which then gets filtered out everywhere.
+        // We pre-upsert a minimal `scope='unknown'` placeholder for every
+        // unique invoked target. ingestSkills + ingestCommands run before
+        // this, so a real record (if one exists) already won the row, and
+        // our `MERGE` only touches the field set we own here.
+        const uniqueSkills = new Set(invocations.map((i) => i.skill));
+        if (uniqueSkills.size > 0) {
+            // Look up which skill rows already exist so we don't overwrite
+            // the proper scope/dir_path/description on known skills with
+            // our 'unknown' placeholder. Idempotent re-runs of ingest stay
+            // a no-op for everything that has a real on-disk source.
+            const ids = [...uniqueSkills].map(
+                (n) => `skill:\`${skillRecordKey(n)}\``,
+            );
+            // Use `WHERE id IN [...]` rather than `FROM [...]` because the
+            // latter form is broken in SurrealDB 3.0 (returns DatabaseEmpty)
+            // - so we filter the full skill table by id list instead.
+            const existing = (yield* db.query<[Array<{ name?: string }>]>(
+                `SELECT name FROM skill WHERE id IN [${ids.join(",")}];`,
+            )) as [Array<{ name?: string }>];
+            const knownNames = new Set(
+                (existing[0] ?? [])
+                    .map((r) => r.name)
+                    .filter((n): n is string => typeof n === "string" && n.length > 0),
+            );
+            const missing = [...uniqueSkills].filter((n) => !knownNames.has(n));
+            if (missing.length > 0) {
+                const placeholders = missing.map(
+                    (n) =>
+                        `UPSERT skill:\`${skillRecordKey(n)}\` MERGE { name: ${JSON.stringify(n)}, scope: "unknown", dir_path: "(unknown)", content_hash: "unknown" };`,
+                );
+                for (let i = 0; i < placeholders.length; i += 500) {
+                    yield* db.query(placeholders.slice(i, i + 500).join(""));
+                }
+            }
+        }
+
         const stmts = invocations.map(
             (inv) =>
                 `RELATE turn:\`${turnRecordKey(inv.session, inv.seq)}\`->invoked->skill:\`${skillRecordKey(inv.skill)}\` SET ts = d"${inv.ts}", args = ${JSON.stringify(JSON.stringify(inv.args))}, turn_has_error = ${inv.turn_has_error};`,
