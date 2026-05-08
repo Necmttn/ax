@@ -60,9 +60,37 @@ export interface SurrealClientShape {
         data?: Record<string, unknown>,
     ) => Effect.Effect<unknown, DbError>;
 
+    /**
+     * Write content to a SurrealDB v3 file bucket. Path is relative within the
+     * bucket (e.g. `<session-id>.jsonl`). Uses SurrealQL `f"bucket:/path".put($c)`
+     * syntax under the hood. Requires `--allow-experimental files`.
+     */
+    readonly putFile: (
+        bucket: string,
+        path: string,
+        content: string | Uint8Array,
+    ) => Effect.Effect<void, DbError>;
+
+    /**
+     * Read content from a SurrealDB v3 file bucket as a UTF-8 string. Uses
+     * SurrealQL `<string>f"bucket:/path".get()`.
+     */
+    readonly getFile: (
+        bucket: string,
+        path: string,
+    ) => Effect.Effect<string, DbError>;
+
     /** Escape hatch for the raw client when callers need methods we don't wrap. */
     readonly raw: Surreal;
 }
+
+/**
+ * Format a stored file-pointer string for record fields. We persist the bare
+ * `bucket:/path` form (without the SurrealQL `f"..."` literal wrapper) so
+ * downstream code can split on `:/` without parsing.
+ */
+export const filePointer = (bucket: string, path: string): string =>
+    `${bucket}:/${path}`;
 
 export class SurrealClient extends Context.Service<
     SurrealClient,
@@ -135,6 +163,40 @@ const wrap = (db: Surreal): SurrealClientShape => ({
                 new DbError({
                     operation: "relate",
                     message: errorMessage(err),
+                }),
+        }),
+
+    putFile: (bucket: string, path: string, content: string | Uint8Array) =>
+        Effect.tryPromise({
+            try: async () => {
+                // SurrealQL: f"<bucket>:/<path>".put($content)
+                // Bucket + path are interpolated (validated by caller); content
+                // is parameterized to handle binary + arbitrary text safely.
+                const sql = `f"${bucket}:/${path}".put($content); RETURN true;`;
+                await db.query(sql, { content });
+            },
+            catch: (err) =>
+                new DbError({
+                    operation: "putFile",
+                    message: errorMessage(err),
+                    sql: `${bucket}:/${path}`,
+                }),
+        }),
+
+    getFile: (bucket: string, path: string) =>
+        Effect.tryPromise({
+            try: async () => {
+                // <string> cast forces bytes -> UTF-8 string per SurrealDB 3.0 docs.
+                const sql = `RETURN <string>f"${bucket}:/${path}".get();`;
+                const result = (await db.query(sql)) as unknown[];
+                const first = result?.[0];
+                return typeof first === "string" ? first : String(first ?? "");
+            },
+            catch: (err) =>
+                new DbError({
+                    operation: "getFile",
+                    message: errorMessage(err),
+                    sql: `${bucket}:/${path}`,
                 }),
         }),
 

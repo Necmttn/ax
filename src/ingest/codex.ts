@@ -2,7 +2,7 @@ import { readdir, stat, open } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { Effect } from "effect";
-import { RecordId, SurrealClient } from "../lib/db.ts";
+import { RecordId, SurrealClient, filePointer } from "../lib/db.ts";
 import { skillRecordKey } from "../lib/skill-id.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
@@ -187,6 +187,31 @@ export const ingestCodex = (
             if (!extracted) continue;
             fileCount += 1;
 
+            // Snapshot the raw codex jsonl into the `codex_artifacts` bucket as
+            // best-effort cold storage. Failure does not abort ingest.
+            const bucketPath = `${extracted.session.id}.jsonl`;
+            const rawContent = yield* Effect.promise(async () => {
+                try {
+                    return await Bun.file(filePath).text();
+                } catch {
+                    return null;
+                }
+            });
+            let rawPointer: string | null = null;
+            if (rawContent !== null) {
+                rawPointer = yield* db
+                    .putFile("codex_artifacts", bucketPath, rawContent)
+                    .pipe(
+                        Effect.map(() => filePointer("codex_artifacts", bucketPath)),
+                        Effect.catch((err) => {
+                            console.error(
+                                `[codex] putFile failed ${extracted.session.id}: ${err.message}`,
+                            );
+                            return Effect.succeed(null as string | null);
+                        }),
+                    );
+            }
+
             yield* db.upsert(new RecordId("session", extracted.session.id), {
                 project: extracted.session.cwd,
                 cwd: extracted.session.cwd,
@@ -194,6 +219,7 @@ export const ingestCodex = (
                 source: "codex",
                 started_at: new Date(extracted.session.started_at),
                 ended_at: new Date(extracted.session.ended_at),
+                raw_file: rawPointer,
             });
             sessionCount += 1;
 
