@@ -84,18 +84,29 @@ DEFINE INDEX commit_sha_uq  ON commit FIELDS repo, sha UNIQUE;
 DEFINE TABLE invoked      TYPE RELATION FROM turn TO skill;     -- explicit Skill tool call
 DEFINE FIELD args         ON invoked TYPE option<string>;       -- JSON-encoded
 DEFINE FIELD ts           ON invoked TYPE datetime;
+-- Most cmdTaste/cmdSearch/cmdUnused subqueries filter
+-- `WHERE out = $skill_id AND ts > time::now() - Nd`. Composite index
+-- covers both predicates from one seek.
+DEFINE INDEX IF NOT EXISTS invoked_out_ts ON invoked FIELDS out, ts;
 
 DEFINE TABLE proposed     TYPE RELATION FROM turn TO skill;     -- assistant text mentioned skill, never invoked
 DEFINE FIELD ts           ON proposed TYPE datetime;
 DEFINE FIELD context_excerpt ON proposed TYPE option<string>;
+-- `<-proposed` traversal counts (proposed-but-never-invoked) hit `out`.
+DEFINE INDEX IF NOT EXISTS proposed_out ON proposed FIELDS out;
 
 DEFINE TABLE edited       TYPE RELATION FROM turn TO file;      -- Edit/Write tool fired
 DEFINE FIELD tool         ON edited TYPE string;                -- 'Edit'|'Write'|'NotebookEdit'
 DEFINE FIELD ts           ON edited TYPE datetime;
+-- `edited` lookups by source turn (e.g., 'which files did this session edit').
+DEFINE INDEX IF NOT EXISTS edited_in ON edited FIELDS in;
 
 DEFINE TABLE corrected_by TYPE RELATION FROM turn TO turn;      -- assistant turn → next user turn that pushed back
 DEFINE FIELD pattern      ON corrected_by TYPE option<string>;  -- which negation pattern matched
 DEFINE FIELD ts           ON corrected_by TYPE datetime;
+-- `corrected_by` lookups in cmdTaste's correction-rate subquery walk via `in`
+-- (the assistant turn that was corrected).
+DEFINE INDEX IF NOT EXISTS corrected_by_in ON corrected_by FIELDS in;
 
 DEFINE TABLE produced     TYPE RELATION FROM session TO commit;
 DEFINE TABLE touched      TYPE RELATION FROM commit TO file;
