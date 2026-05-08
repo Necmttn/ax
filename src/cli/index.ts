@@ -6,6 +6,7 @@ import { ingestSkills } from "../ingest/skills.ts";
 import { ingestTranscripts } from "../ingest/transcripts.ts";
 import { ingestCodex } from "../ingest/codex.ts";
 import { deriveSignals } from "../ingest/derive-signals.ts";
+import { cmdInstall, cmdUninstall } from "./install.ts";
 
 const HELP = `agentctl - agent telemetry & taste graph
 
@@ -18,6 +19,8 @@ Usage:
   agentctl unused [--days=N]
   agentctl taste [--limit=N]
   agentctl tui
+  agentctl install            # one-shot setup: daemon + watcher + symlink
+  agentctl uninstall
   agentctl help
 `;
 
@@ -262,6 +265,14 @@ async function main() {
         // of the load path for non-TUI commands.
         const { runTui } = await import("../tui/index.tsx");
         await runTui();
+        return;
+    }
+    if (cmd === "install") {
+        await cmdInstall();
+        return;
+    }
+    if (cmd === "uninstall") {
+        await cmdUninstall();
         return;
     }
     const program = dispatch(cmd, rest);

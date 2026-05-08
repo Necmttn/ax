@@ -19,17 +19,35 @@ Claude Code and Codex both leave detailed transcripts on disk. They contain ever
 
 ## Install
 
+### Single-binary (recommended)
+
 ```bash
 git clone https://github.com/Necmttn/agentctl ~/Projects/agentctl
 cd ~/Projects/agentctl
 bun install
-bun scripts/db-start.sh        # starts SurrealDB on :8521
-bun scripts/apply-schema.sh    # applies graph schema
-bin/agentctl ingest            # ingests skills + transcripts + codex
-ln -s "$PWD/bin/agentctl" ~/.local/bin/agentctl   # optional: put on PATH
+bun run build               # compiles to dist/agentctl (~70MB, includes runtime)
+./dist/agentctl install     # symlinks binary, installs daemon + watcher LaunchAgents, applies schema
+agentctl ingest             # initial fill
 ```
 
-Requirements: bun ≥ 1.3, SurrealDB ≥ 3.0.
+`agentctl install` is idempotent: it stops any old plists, writes fresh ones into `~/Library/LaunchAgents/`, loads them via `launchctl`, waits for the daemon to bind on `127.0.0.1:8521`, and applies the embedded schema. `agentctl uninstall` reverses everything except your data dir.
+
+After install, two LaunchAgents run on boot:
+- `com.necmttn.agentctl-db` - SurrealDB daemon with `--allow-experimental=files` and bucket allowlist
+- `com.necmttn.agentctl-watch` - fires `agentctl ingest --since=1` on changes to `~/.claude/projects` or `~/.codex/sessions` (60s throttle)
+
+### Dev mode (run from source)
+
+```bash
+git clone https://github.com/Necmttn/agentctl ~/Projects/agentctl
+cd ~/Projects/agentctl
+bun install
+bun scripts/db-start.sh
+bun scripts/apply-schema.sh
+bun src/cli/index.ts ingest
+```
+
+Requirements: bun ≥ 1.3, SurrealDB ≥ 3.0 CLI on PATH (`brew install surrealdb/tap/surreal`).
 
 ## Use
 
