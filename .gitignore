@@ -1,0 +1,6 @@
+node_modules/
+data/
+*.log
+.env
+.env.local
+bun.lockb

@@ -1,0 +1,25 @@
+{
+  "name": "agentctl",
+  "version": "0.0.1",
+  "description": "Agent telemetry & taste graph for Claude Code. Ingests transcripts, skills, and git history into SurrealDB; surfaces 'what skills are worth keeping' and 'what does this user actually do' on demand.",
+  "type": "module",
+  "bin": {
+    "agentctl": "./bin/agentctl"
+  },
+  "scripts": {
+    "ingest": "bun src/cli/index.ts ingest",
+    "search": "bun src/cli/index.ts search",
+    "db:start": "scripts/db-start.sh",
+    "db:stop": "scripts/db-stop.sh",
+    "db:schema": "scripts/apply-schema.sh"
+  },
+  "dependencies": {
+    "effect": "^4.0.0-beta.64",
+    "surrealdb": "^2.0.0",
+    "yaml": "^2.8.4"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.5.0"
+  }
+}
