@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Effect } from "effect";
 import { flushSync } from "@opentui/react";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { SurrealClientShape } from "../../lib/db.ts";
 import { SKILL_DETAIL_SQL } from "../queries.ts";
 
@@ -9,6 +11,8 @@ export interface SkillDetailRecord {
         readonly name: string;
         readonly scope: string;
         readonly description?: string | null;
+        readonly dir_path?: string | null;
+        /** Body excerpt read from disk (dir_path/SKILL.md) at fetch time, not stored in DB. */
         readonly body?: string | null;
         readonly bytes?: number | null;
     } | null;
@@ -67,21 +71,36 @@ export function useSkillDetail(
         Effect.runPromise(
             client.query<unknown[]>(SKILL_DETAIL_SQL, { name }),
         )
-            .then((result) => {
+            .then(async (result) => {
                 if (cancelled) return;
                 debug(`raw result type=${typeof result} isArr=${Array.isArray(result)} len=${Array.isArray(result) ? result.length : "n/a"} sample=${JSON.stringify(result).slice(0,200)}`);
-                // SurrealDB returns one entry per statement; LET yields null,
-                // RETURN yields the payload. Pick last non-null.
                 const payload = Array.isArray(result)
                     ? ([...result].reverse().find((r) => r != null) as
                           | SkillDetailRecord
                           | undefined)
                     : (result as SkillDetailRecord | undefined);
-                // OpenTUI's reconciler waits for an event-loop flush; an
-                // async setState from a Promise.then callback is otherwise
-                // not committed to the renderer until the next keypress.
+
+                // Read body lazily from disk via dir_path. DB no longer stores
+                // body - multi-file skills + cache-staleness make on-disk
+                // canonical.
+                let withBody = payload ?? null;
+                const dirPath = withBody?.skill?.dir_path;
+                if (typeof dirPath === "string" && dirPath.length > 0) {
+                    try {
+                        const raw = await readFile(join(dirPath, "SKILL.md"), "utf8");
+                        const m = raw.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/);
+                        const body = (m?.[1] ?? raw).trim();
+                        withBody = {
+                            ...withBody!,
+                            skill: { ...withBody!.skill!, body },
+                        };
+                    } catch {
+                        // Skill file unreadable - leave body undefined.
+                    }
+                }
+
                 flushSync(() => {
-                    setData(payload ?? null);
+                    setData(withBody);
                     setError(null);
                     setLoading(false);
                 });

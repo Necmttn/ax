@@ -13,6 +13,7 @@ SELECT
     name,
     scope,
     description,
+    dir_path,
     bytes,
     array::len(<-invoked) AS total_inv,
     array::len((SELECT * FROM <-invoked WHERE ts > time::now() - 7d))  AS inv_7d,
@@ -23,8 +24,9 @@ ORDER BY inv_30d DESC, total_inv DESC
 LIMIT 500;`;
 
 /**
- * Detail payload for a single skill: full record (including body) +
- * per-day invocation buckets for the last 30 days + recent invocation list.
+ * Detail payload for a single skill: skill metadata (no body - read from
+ * dir_path on the JS side) + per-day invocation buckets for the last 30 days
+ * + recent invocation list.
  *
  * Bindings: $name (skill name).
  */

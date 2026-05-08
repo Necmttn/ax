@@ -169,8 +169,6 @@ export const ingestSkills = (): Effect.Effect<{ count: number }, DbError, Surrea
                     scope: item.scope,
                     dir_path: item.dir_path,
                     description: item.skill.description ?? null,
-                    frontmatter: JSON.stringify(item.skill.frontmatter),
-                    body: item.skill.body,
                     content_hash: hash,
                     bytes: item.bytes,
                 });
