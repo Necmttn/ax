@@ -16,7 +16,10 @@
     "db:schema": "scripts/apply-schema.sh",
     "refs:setup": "scripts/setup-references.sh",
     "watcher:install": "bash scripts/install-watcher.sh",
-    "watcher:uninstall": "bash scripts/uninstall-watcher.sh"
+    "watcher:uninstall": "bash scripts/uninstall-watcher.sh",
+    "daemon:install": "bash scripts/install-daemon.sh",
+    "daemon:uninstall": "bash scripts/uninstall-daemon.sh",
+    "build": "bun build --compile --outfile=dist/agentctl src/cli/index.ts"
   },
   "dependencies": {
     "@opentui/core": "^0.2.5",

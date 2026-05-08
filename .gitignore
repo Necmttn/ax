@@ -6,3 +6,4 @@ data/
 bun.lockb
 .references/
 *.tsbuildinfo
+dist/
