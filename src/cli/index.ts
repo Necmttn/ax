@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import { SurrealClient } from "../lib/db.ts";
 import { AppLayer } from "../lib/layers.ts";
 import { ingestSkills } from "../ingest/skills.ts";
+import { ingestCommands } from "../ingest/commands.ts";
 import { ingestTranscripts } from "../ingest/transcripts.ts";
 import { ingestCodex } from "../ingest/codex.ts";
 import { ingestGit } from "../ingest/git.ts";
@@ -152,7 +153,14 @@ const cmdIngest = (args: string[]) =>
         // (and, for `--claude-only`, the matching pair: skills + transcripts).
         // The mutual-exclusion check above guarantees at most one is set, so
         // these conditions just enumerate "is some other --only filter on".
-        if (!transcriptsOnly && !codexOnly && !gitOnly) yield* ingestSkills();
+        if (!transcriptsOnly && !codexOnly && !gitOnly) {
+            yield* ingestSkills();
+            // Slash commands live in `~/.claude/commands/` (and plugin
+            // command dirs) and aren't indexed by ingestSkills. Without
+            // this, every Skill-tool call against a slash command becomes
+            // an orphan `invoked` edge. See issues #41 / #42.
+            yield* ingestCommands();
+        }
         if (!skillsOnly && !codexOnly && !gitOnly)
             yield* ingestTranscripts({ sinceDays });
         if (!skillsOnly && !transcriptsOnly && !claudeOnly && !gitOnly)
