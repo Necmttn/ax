@@ -65,6 +65,10 @@ const cmdSearch = (args: string[]) =>
         }
         const db = yield* SurrealClient;
         // Lexical contains + recent-use boost
+        // NOTE: Time-window counts use explicit `invoked WHERE out = $parent.id`
+        // form rather than `<-invoked WHERE ts > ...`. The graph-traversal form
+        // materialises the edges first and the WHERE filter then drops every
+        // row (returns 0 even when matches exist). See issue #15.
         const sql = `
 SELECT
     name,
@@ -73,8 +77,8 @@ SELECT
     (string::lowercase(name) CONTAINS $q) AS name_match,
     (description IS NONE OR string::lowercase(description ?? '') CONTAINS $q) AS desc_match,
     array::len(<-invoked) AS total_inv,
-    array::len((SELECT * FROM <-invoked WHERE ts > time::now() - 30d)) AS inv_30d,
-    (SELECT ts FROM <-invoked ORDER BY ts DESC LIMIT 1)[0].ts AS last_used
+    (SELECT count() FROM invoked WHERE out = $parent.id AND ts > time::now() - 30d GROUP ALL)[0].count ?? 0 AS inv_30d,
+    (SELECT ts FROM invoked WHERE out = $parent.id ORDER BY ts DESC LIMIT 1)[0].ts AS last_used
 FROM skill
 WHERE
     string::lowercase(name) CONTAINS $q
@@ -174,14 +178,17 @@ const cmdUnused = (args: string[]) =>
     Effect.gen(function* () {
         const days = parseInt(flag("days", args) ?? "7", 10);
         const db = yield* SurrealClient;
+        // See issue #15: `<-invoked WHERE ts > ...` materialises edges first
+        // then the WHERE drops everything, so the count is always 0. Use the
+        // explicit `invoked WHERE out = $parent.id` form instead.
         const sql = `
 SELECT
     name,
     scope,
     array::len(<-invoked) AS total_inv,
-    (SELECT ts FROM <-invoked ORDER BY ts DESC LIMIT 1)[0].ts AS last_used
+    (SELECT ts FROM invoked WHERE out = $parent.id ORDER BY ts DESC LIMIT 1)[0].ts AS last_used
 FROM skill
-WHERE array::len((SELECT * FROM <-invoked WHERE ts > time::now() - ${days}d)) = 0
+WHERE ((SELECT count() FROM invoked WHERE out = $parent.id AND ts > time::now() - ${days}d GROUP ALL)[0].count ?? 0) = 0
 ORDER BY total_inv ASC, name ASC;`;
         const result = yield* db.query<[Array<Record<string, unknown>>]>(sql);
         const rows = result?.[0];
@@ -205,20 +212,22 @@ const cmdTaste = (args: string[]) =>
         // `corrections` counts invocations where the next user turn within 3
         // seq steps in the same session triggered a corrected_by edge.
         // `proposals` counts proposed edges into this skill.
+        // NOTE: Filtered counts use explicit `invoked WHERE out = $parent.id`
+        // form rather than `<-invoked WHERE ...`. The graph-traversal form
+        // materialises the edges first and the WHERE filter then drops every
+        // row (returns 0 even when matches exist). See issue #15.
         const sql = `
 SELECT
     name,
     scope,
     array::len(<-invoked) AS inv_total,
-    array::len((SELECT * FROM <-invoked WHERE ts > time::now() - 7d))  AS inv_7d,
-    array::len((SELECT * FROM <-invoked WHERE ts > time::now() - 30d)) AS inv_30d,
+    (SELECT count() FROM invoked WHERE out = $parent.id AND ts > time::now() - 7d  GROUP ALL)[0].count ?? 0 AS inv_7d,
+    (SELECT count() FROM invoked WHERE out = $parent.id AND ts > time::now() - 30d GROUP ALL)[0].count ?? 0 AS inv_30d,
+    (SELECT count() FROM invoked WHERE out = $parent.id AND in.has_error = false GROUP ALL)[0].count ?? 0 AS clean_inv,
     array::len((
-        SELECT * FROM <-invoked
-        WHERE in.has_error = false
-    )) AS clean_inv,
-    array::len((
-        SELECT * FROM <-invoked
-        WHERE array::len((
+        SELECT * FROM invoked
+        WHERE out = $parent.id
+          AND array::len((
             SELECT * FROM corrected_by
             WHERE in.session = $parent.in.session
               AND in.seq >= $parent.in.seq
