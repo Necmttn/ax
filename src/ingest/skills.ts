@@ -2,15 +2,25 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
-import { connect, RecordId } from "../lib/db.ts";
+import { Effect } from "effect";
+import { RecordId, SurrealClient } from "../lib/db.ts";
 import { defaultSkillDirs } from "../lib/paths.ts";
 import { skillRecordKey } from "../lib/skill-id.ts";
+import { AppLayer } from "../lib/layers.ts";
+import type { DbError } from "../lib/errors.ts";
 
 interface ParsedSkill {
     name: string;
     description: string | undefined;
     frontmatter: Record<string, unknown>;
     body: string;
+}
+
+interface SkillItem {
+    skill: ParsedSkill;
+    dir_path: string;
+    bytes: number;
+    scope: string;
 }
 
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/;
@@ -48,16 +58,8 @@ function parseSkillFile(content: string, fallbackName: string): ParsedSkill {
     };
 }
 
-async function readSkillDir(
-    dir: string,
-    scope: string,
-): Promise<Array<{ skill: ParsedSkill; dir_path: string; bytes: number; scope: string }>> {
-    const out: Array<{
-        skill: ParsedSkill;
-        dir_path: string;
-        bytes: number;
-        scope: string;
-    }> = [];
+async function readSkillDir(dir: string, scope: string): Promise<SkillItem[]> {
+    const out: SkillItem[] = [];
     let entries: string[];
     try {
         entries = await readdir(dir);
@@ -91,16 +93,9 @@ async function readSkillDir(
     return out;
 }
 
-async function readPluginSkills(): Promise<
-    Array<{ skill: ParsedSkill; dir_path: string; bytes: number; scope: string }>
-> {
+async function readPluginSkills(): Promise<SkillItem[]> {
     const root = join(process.env.HOME!, ".claude", "plugins", "cache");
-    const out: Array<{
-        skill: ParsedSkill;
-        dir_path: string;
-        bytes: number;
-        scope: string;
-    }> = [];
+    const out: SkillItem[] = [];
     let marketplaces: string[];
     try {
         marketplaces = await readdir(root);
@@ -139,9 +134,8 @@ async function readPluginSkills(): Promise<
     return out;
 }
 
-export async function ingestSkills(): Promise<{ count: number }> {
-    const db = await connect();
-    try {
+const collectSkills = (): Effect.Effect<SkillItem[]> =>
+    Effect.promise(async () => {
         const buckets = defaultSkillDirs();
         const fromBaseDirs = (
             await Promise.all(buckets.map(({ dir, scope }) => readSkillDir(dir, scope)))
@@ -150,36 +144,48 @@ export async function ingestSkills(): Promise<{ count: number }> {
         const all = [...fromBaseDirs, ...fromPlugins];
 
         // Dedup by name keeping highest-precedence (user dirs first, plugins last is fine)
-        const byName = new Map<string, (typeof all)[number]>();
+        const byName = new Map<string, SkillItem>();
         for (const item of all) {
             if (!byName.has(item.skill.name)) byName.set(item.skill.name, item);
         }
+        return [...byName.values()];
+    });
 
-        let count = 0;
-        for (const item of byName.values()) {
-            const hash = createHash("sha256")
-                .update(item.skill.body)
-                .digest("hex")
-                .slice(0, 16);
-            const id = new RecordId("skill", skillRecordKey(item.skill.name));
-            await db.upsert(id).content({
-                name: item.skill.name,
-                scope: item.scope,
-                dir_path: item.dir_path,
-                description: item.skill.description ?? null,
-                frontmatter: JSON.stringify(item.skill.frontmatter),
-                content_hash: hash,
-                bytes: item.bytes,
-            });
-            count++;
-        }
+export const ingestSkills = (): Effect.Effect<{ count: number }, DbError, SurrealClient> =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const items = yield* collectSkills();
+
+        yield* Effect.forEach(
+            items,
+            (item) => {
+                const hash = createHash("sha256")
+                    .update(item.skill.body)
+                    .digest("hex")
+                    .slice(0, 16);
+                const id = new RecordId("skill", skillRecordKey(item.skill.name));
+                return db.upsert(id, {
+                    name: item.skill.name,
+                    scope: item.scope,
+                    dir_path: item.dir_path,
+                    description: item.skill.description ?? null,
+                    frontmatter: JSON.stringify(item.skill.frontmatter),
+                    content_hash: hash,
+                    bytes: item.bytes,
+                });
+            },
+            { concurrency: 8, discard: true },
+        );
+
+        const count = items.length;
         console.log(`[skills] upserted ${count}`);
         return { count };
-    } finally {
-        await db.close();
-    }
-}
+    });
 
 if (import.meta.main) {
-    await ingestSkills();
+    await Effect.runPromise(
+        ingestSkills().pipe(Effect.provide(AppLayer), Effect.scoped) as Effect.Effect<
+            { count: number }
+        >,
+    );
 }

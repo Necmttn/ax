@@ -1,8 +1,11 @@
 import { readdir, stat, open } from "node:fs/promises";
 import { join, basename } from "node:path";
-import { connect, RecordId } from "../lib/db.ts";
+import { Effect } from "effect";
+import { RecordId, SurrealClient } from "../lib/db.ts";
 import { TRANSCRIPTS_DIR } from "../lib/paths.ts";
 import { skillRecordKey } from "../lib/skill-id.ts";
+import { AppLayer } from "../lib/layers.ts";
+import type { DbError } from "../lib/errors.ts";
 
 interface Session {
     id: string;
@@ -187,131 +190,136 @@ async function extractFile(filePath: string, projectDir: string): Promise<FileEx
     return { session, turns, invocations, edits };
 }
 
-async function bulkUpsertSessions(db: Awaited<ReturnType<typeof connect>>, sessions: Session[]) {
-    for (const s of sessions) {
-        const id = new RecordId("session", s.id);
-        await db.upsert(id).content({
-            project: s.project,
-            cwd: s.cwd,
-            started_at: s.started_at ? new Date(s.started_at) : null,
-            ended_at: s.ended_at ? new Date(s.ended_at) : null,
-        });
-    }
-}
-
-async function bulkUpsertTurns(db: Awaited<ReturnType<typeof connect>>, turns: Turn[]) {
-    // Use raw SQL for speed
-    const chunks: string[] = [];
-    for (const t of turns) {
-        const key = turnRecordKey(t.session, t.seq);
-        chunks.push(
-            `UPSERT turn:\`${key}\` CONTENT { session: session:\`${t.session}\`, seq: ${t.seq}, ts: d"${t.ts}", role: "${t.role}", text_excerpt: ${
-                t.text_excerpt === null ? "NONE" : JSON.stringify(t.text_excerpt)
-            }, has_tool_use: ${t.has_tool_use}, has_error: ${t.has_error} };`,
+const upsertSessions = (sessions: Session[]) =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        yield* Effect.forEach(
+            sessions,
+            (s) =>
+                db.upsert(new RecordId("session", s.id), {
+                    project: s.project,
+                    cwd: s.cwd,
+                    started_at: s.started_at ? new Date(s.started_at) : null,
+                    ended_at: s.ended_at ? new Date(s.ended_at) : null,
+                }),
+            { concurrency: 4, discard: true },
         );
-    }
-    if (chunks.length === 0) return;
-    // Send in batches of 500
-    for (let i = 0; i < chunks.length; i += 500) {
-        await db.query(chunks.slice(i, i + 500).join(""));
-    }
-}
+    });
 
-async function bulkRelateInvocations(
-    db: Awaited<ReturnType<typeof connect>>,
-    invocations: Invocation[],
-) {
-    const stmts: string[] = [];
-    for (const inv of invocations) {
-        const turnKey = turnRecordKey(inv.session, inv.seq);
-        const skillKey = skillRecordKey(inv.skill);
-        stmts.push(
-            `RELATE turn:\`${turnKey}\`->invoked->skill:\`${skillKey}\` SET ts = d"${inv.ts}", args = ${JSON.stringify(JSON.stringify(inv.args))};`,
+const upsertTurns = (turns: Turn[]) =>
+    Effect.gen(function* () {
+        if (turns.length === 0) return;
+        const db = yield* SurrealClient;
+        const chunks: string[] = turns.map(
+            (t) =>
+                `UPSERT turn:\`${turnRecordKey(t.session, t.seq)}\` CONTENT { session: session:\`${t.session}\`, seq: ${t.seq}, ts: d"${t.ts}", role: "${t.role}", text_excerpt: ${
+                    t.text_excerpt === null ? "NONE" : JSON.stringify(t.text_excerpt)
+                }, has_tool_use: ${t.has_tool_use}, has_error: ${t.has_error} };`,
         );
-    }
-    for (let i = 0; i < stmts.length; i += 500) {
-        await db.query(stmts.slice(i, i + 500).join(""));
-    }
-}
+        for (let i = 0; i < chunks.length; i += 500) {
+            yield* db.query(chunks.slice(i, i + 500).join(""));
+        }
+    });
 
-async function bulkUpsertEdits(db: Awaited<ReturnType<typeof connect>>, edits: Edit[]) {
-    const fileStmts: string[] = [];
-    const relStmts: string[] = [];
-    const seenFiles = new Set<string>();
-    for (const e of edits) {
-        const fileKey = fileRecordKey(e.repo, e.path);
-        if (!seenFiles.has(fileKey)) {
-            seenFiles.add(fileKey);
-            fileStmts.push(
-                `UPSERT file:\`${fileKey}\` CONTENT { repo: ${e.repo === null ? "NONE" : JSON.stringify(e.repo)}, path: ${JSON.stringify(e.path)} };`,
+const relateInvocations = (invocations: Invocation[]) =>
+    Effect.gen(function* () {
+        if (invocations.length === 0) return;
+        const db = yield* SurrealClient;
+        const stmts = invocations.map(
+            (inv) =>
+                `RELATE turn:\`${turnRecordKey(inv.session, inv.seq)}\`->invoked->skill:\`${skillRecordKey(inv.skill)}\` SET ts = d"${inv.ts}", args = ${JSON.stringify(JSON.stringify(inv.args))};`,
+        );
+        for (let i = 0; i < stmts.length; i += 500) {
+            yield* db.query(stmts.slice(i, i + 500).join(""));
+        }
+    });
+
+const upsertEdits = (edits: Edit[]) =>
+    Effect.gen(function* () {
+        if (edits.length === 0) return;
+        const db = yield* SurrealClient;
+        const fileStmts: string[] = [];
+        const relStmts: string[] = [];
+        const seenFiles = new Set<string>();
+        for (const e of edits) {
+            const fileKey = fileRecordKey(e.repo, e.path);
+            if (!seenFiles.has(fileKey)) {
+                seenFiles.add(fileKey);
+                fileStmts.push(
+                    `UPSERT file:\`${fileKey}\` CONTENT { repo: ${e.repo === null ? "NONE" : JSON.stringify(e.repo)}, path: ${JSON.stringify(e.path)} };`,
+                );
+            }
+            const turnKey = turnRecordKey(e.session, e.seq);
+            relStmts.push(
+                `RELATE turn:\`${turnKey}\`->edited->file:\`${fileKey}\` SET tool = "${e.tool}", ts = d"${e.ts}";`,
             );
         }
-        const turnKey = turnRecordKey(e.session, e.seq);
-        relStmts.push(
-            `RELATE turn:\`${turnKey}\`->edited->file:\`${fileKey}\` SET tool = "${e.tool}", ts = d"${e.ts}";`,
-        );
-    }
-    for (let i = 0; i < fileStmts.length; i += 500) {
-        await db.query(fileStmts.slice(i, i + 500).join(""));
-    }
-    for (let i = 0; i < relStmts.length; i += 500) {
-        await db.query(relStmts.slice(i, i + 500).join(""));
-    }
-}
+        for (let i = 0; i < fileStmts.length; i += 500) {
+            yield* db.query(fileStmts.slice(i, i + 500).join(""));
+        }
+        for (let i = 0; i < relStmts.length; i += 500) {
+            yield* db.query(relStmts.slice(i, i + 500).join(""));
+        }
+    });
 
 interface IngestOpts {
     sinceDays: number | undefined;
     project: string | undefined;
 }
 
-export async function ingestTranscripts(
-    opts: Partial<IngestOpts> = {},
-): Promise<{
+export interface TranscriptStats {
     files: number;
     sessions: number;
     turns: number;
     invocations: number;
     edits: number;
-}> {
-    const cutoff = opts.sinceDays
-        ? Date.now() - opts.sinceDays * 86400 * 1000
-        : 0;
-    const projectDirs = (await readdir(TRANSCRIPTS_DIR)).filter(
-        (d) => !opts.project || d === opts.project,
-    );
+}
 
-    const db = await connect();
-    let files = 0;
-    let sessions = 0;
-    let turnCount = 0;
-    let invCount = 0;
-    let editCount = 0;
-    try {
+export const ingestTranscripts = (
+    opts: Partial<IngestOpts> = {},
+): Effect.Effect<TranscriptStats, DbError, SurrealClient> =>
+    Effect.gen(function* () {
+        const cutoff = opts.sinceDays
+            ? Date.now() - opts.sinceDays * 86400 * 1000
+            : 0;
+        const projectDirs = (yield* Effect.promise(() => readdir(TRANSCRIPTS_DIR))).filter(
+            (d) => !opts.project || d === opts.project,
+        );
+
+        let files = 0;
+        let sessions = 0;
+        let turnCount = 0;
+        let invCount = 0;
+        let editCount = 0;
+
         for (const projectDir of projectDirs) {
             const fullProject = join(TRANSCRIPTS_DIR, projectDir);
-            let entries: string[];
-            try {
-                entries = await readdir(fullProject);
-            } catch {
-                continue;
-            }
+            const entries = yield* Effect.promise(async () => {
+                try {
+                    return await readdir(fullProject);
+                } catch {
+                    return [] as string[];
+                }
+            });
             for (const entry of entries) {
                 if (!entry.endsWith(".jsonl")) continue;
                 const filePath = join(fullProject, entry);
                 if (cutoff > 0) {
-                    const st = await stat(filePath);
+                    const st = yield* Effect.promise(() => stat(filePath));
                     if (st.mtimeMs < cutoff) continue;
                 }
-                const extracted = await extractFile(filePath, projectDir);
+                const extracted = yield* Effect.promise(() =>
+                    extractFile(filePath, projectDir),
+                );
                 if (!extracted) continue;
                 files += 1;
-                await bulkUpsertSessions(db, [extracted.session]);
+                yield* upsertSessions([extracted.session]);
                 sessions += 1;
-                await bulkUpsertTurns(db, extracted.turns);
+                yield* upsertTurns(extracted.turns);
                 turnCount += extracted.turns.length;
-                await bulkRelateInvocations(db, extracted.invocations);
+                yield* relateInvocations(extracted.invocations);
                 invCount += extracted.invocations.length;
-                await bulkUpsertEdits(db, extracted.edits);
+                yield* upsertEdits(extracted.edits);
                 editCount += extracted.edits.length;
                 if (files % 50 === 0) {
                     console.log(
@@ -324,13 +332,15 @@ export async function ingestTranscripts(
             `[transcripts] DONE files=${files} sessions=${sessions} turns=${turnCount} invocations=${invCount} edits=${editCount}`,
         );
         return { files, sessions, turns: turnCount, invocations: invCount, edits: editCount };
-    } finally {
-        await db.close();
-    }
-}
+    });
 
 if (import.meta.main) {
     const sinceArg = process.argv.find((a) => a.startsWith("--since="));
     const sinceDays = sinceArg ? parseInt(sinceArg.split("=")[1], 10) : undefined;
-    await ingestTranscripts({ sinceDays });
+    await Effect.runPromise(
+        ingestTranscripts({ sinceDays }).pipe(
+            Effect.provide(AppLayer),
+            Effect.scoped,
+        ) as Effect.Effect<TranscriptStats>,
+    );
 }
