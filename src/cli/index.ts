@@ -12,7 +12,7 @@ import { cmdInstall, cmdUninstall } from "./install.ts";
 const HELP = `agentctl - agent telemetry & taste graph
 
 Usage:
-  agentctl ingest [--skills-only|--transcripts-only|--codex-only|--git-only|--claude-only] [--since=DAYS]
+  agentctl ingest [filters] [--since=DAYS]
   agentctl derive-signals [--since=DAYS]
   agentctl search <query> [--limit=N]
   agentctl stats <skill>
@@ -25,11 +25,100 @@ Usage:
   agentctl install            # one-shot setup: daemon + watcher + symlink
   agentctl uninstall
   agentctl help
+
+Ingest filters (suppress everything else; combine to narrow further):
+  --skills-only        only re-scan SKILL.md files
+  --transcripts-only   only ingest Claude transcripts
+  --codex-only         only ingest Codex sessions
+  --git-only           only ingest git history
+  --claude-only        only Claude side: skills + transcripts (no Codex/git)
 `;
 
 function flag(name: string, args: string[]): string | undefined {
     const found = args.find((a) => a.startsWith(`--${name}=`));
     return found?.split("=")[1];
+}
+
+/**
+ * Parse a positive-integer CLI flag. Rejects NaN, ≤0 and (when a default is
+ * not provided) absent values. Exits 2 with a clear message instead of letting
+ * the bad value reach the SQL layer (which leaks bunfs source paths in errors -
+ * see issues #38, #45).
+ */
+function parsePositiveIntFlag(
+    cmd: string,
+    flagName: string,
+    args: string[],
+    fallback?: number,
+): number {
+    const raw = flag(flagName, args);
+    if (raw === undefined) {
+        if (fallback !== undefined) return fallback;
+        console.error(
+            `agentctl ${cmd}: --${flagName} is required (must be a positive integer)`,
+        );
+        process.exit(2);
+    }
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n <= 0) {
+        console.error(
+            `agentctl ${cmd}: --${flagName} must be a positive integer (got "${raw}")`,
+        );
+        process.exit(2);
+    }
+    return n;
+}
+
+/**
+ * Optional positive-integer flag (for `--since`-style values that may be
+ * omitted entirely). Returns undefined when not present; errors on garbage.
+ */
+function parseOptionalPositiveIntFlag(
+    cmd: string,
+    flagName: string,
+    args: string[],
+): number | undefined {
+    const raw = flag(flagName, args);
+    if (raw === undefined) return undefined;
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n <= 0) {
+        console.error(
+            `agentctl ${cmd}: --${flagName} must be a positive integer (got "${raw}")`,
+        );
+        process.exit(2);
+    }
+    return n;
+}
+
+/**
+ * Cheap human-friendly project label from either a Claude-style cwd-slug like
+ * `-Users-necmttn-Projects-quera` or a real path like `/Users/necmttn/quera`.
+ * Falls back to the raw value when nothing else produces something useful.
+ */
+function prettifyProjectSlug(raw: unknown): string {
+    if (raw == null) return "?";
+    const s = String(raw);
+    if (!s) return "?";
+    // Real filesystem path: just take the last segment.
+    if (s.includes("/")) {
+        const parts = s.split("/").filter((p) => p.length > 0);
+        if (parts.length > 0) return parts[parts.length - 1];
+    }
+    // Claude slug form: leading dash, segments joined by dashes.
+    const trimmed = s.startsWith("-") ? s.slice(1) : s;
+    const parts = trimmed.split("-").filter((p) => p.length > 0);
+    return parts.length > 0 ? parts[parts.length - 1] : s;
+}
+
+/**
+ * Format a numeric counter with thousand-separators (issue #46). Keeps short
+ * values short; long ones become e.g. `597,508` rather than blowing the
+ * column.
+ */
+function fmtCount(v: unknown): string {
+    const n = Number(v ?? 0);
+    if (!Number.isFinite(n)) return "0";
+    return n.toLocaleString("en-US");
 }
 
 const cmdIngest = (args: string[]) =>
@@ -39,15 +128,34 @@ const cmdIngest = (args: string[]) =>
         const claudeOnly = args.includes("--claude-only");
         const codexOnly = args.includes("--codex-only");
         const gitOnly = args.includes("--git-only");
-        const sinceArg = flag("since", args);
-        const sinceDays = sinceArg ? parseInt(sinceArg, 10) : undefined;
-        // Each "--X-only" flag suppresses every step except its own. Combining
-        // multiple is effectively "only run nothing", which we treat as a no-op
-        // (consistent with how the existing skills/codex flags compose).
+        // Issue #44: silent contradictions like `--codex-only --claude-only`
+        // turn the command into a no-op. Bail loudly instead.
+        const onlyFlags = [
+            ["--skills-only", skillsOnly],
+            ["--transcripts-only", transcriptsOnly],
+            ["--claude-only", claudeOnly],
+            ["--codex-only", codexOnly],
+            ["--git-only", gitOnly],
+        ] as const;
+        const setOnly = onlyFlags.filter(([, v]) => v).map(([k]) => k);
+        if (setOnly.length > 1) {
+            console.error(
+                `agentctl ingest: ${setOnly.join(", ")} are mutually exclusive (each is a complete-source filter)`,
+            );
+            process.exit(2);
+        }
+        const sinceDays = parseOptionalPositiveIntFlag("ingest", "since", args);
+        // Issue #44: --claude-only is the *Claude* side of the world, which
+        // includes both `~/.claude/skills` and `~/.claude/projects`
+        // transcripts. Codex + git stay suppressed.
+        // Each `--X-only` flag suppresses every step except the matching one
+        // (and, for `--claude-only`, the matching pair: skills + transcripts).
+        // The mutual-exclusion check above guarantees at most one is set, so
+        // these conditions just enumerate "is some other --only filter on".
         if (!transcriptsOnly && !codexOnly && !gitOnly) yield* ingestSkills();
         if (!skillsOnly && !codexOnly && !gitOnly)
             yield* ingestTranscripts({ sinceDays });
-        if (!skillsOnly && !claudeOnly && !gitOnly && !transcriptsOnly)
+        if (!skillsOnly && !transcriptsOnly && !claudeOnly && !gitOnly)
             yield* ingestCodex({ sinceDays });
         if (!skillsOnly && !transcriptsOnly && !codexOnly && !claudeOnly)
             yield* ingestGit({ sinceDays });
@@ -59,8 +167,11 @@ const cmdIngest = (args: string[]) =>
 
 const cmdDeriveSignals = (args: string[]) =>
     Effect.gen(function* () {
-        const sinceArg = flag("since", args);
-        const sinceDays = sinceArg ? parseInt(sinceArg, 10) : undefined;
+        const sinceDays = parseOptionalPositiveIntFlag(
+            "derive-signals",
+            "since",
+            args,
+        );
         yield* deriveSignals({ sinceDays });
     });
 
@@ -69,7 +180,7 @@ const cmdSearch = (args: string[]) =>
         const query = args
             .filter((a) => !a.startsWith("--"))
             .join(" ");
-        const limit = parseInt(flag("limit", args) ?? "10", 10);
+        const limit = parsePositiveIntFlag("search", "limit", args, 10);
         if (!query) {
             console.error("agentctl search: missing query");
             process.exit(1);
@@ -172,12 +283,29 @@ GROUP BY out;`;
         for (const r of rows) {
             const score = Number(r.score ?? 0);
             const scoreStr = score.toFixed(2);
-            const usage = `${r.inv_30d ?? 0}×30d / ${r.total_inv ?? 0}×total`;
+            const usage = `${fmtCount(r.inv_30d ?? 0)}×30d / ${fmtCount(r.total_inv ?? 0)}×total`;
             const desc = (r.description as string | null) ?? "";
             const truncDesc = desc.length > 100 ? desc.slice(0, 97) + "…" : desc;
             console.log(`${r.name}  [${r.scope}]  score=${scoreStr}  ${usage}`);
             if (truncDesc) console.log(`  ${truncDesc}`);
         }
+    });
+
+/**
+ * Issue #40: Pre-flight existence check so unknown skill names get a
+ * dedicated error instead of an empty-but-success rendering. Returns true
+ * if the skill exists. Pulls the SurrealClient itself rather than taking
+ * it as a parameter so the helper composes naturally inside Effect.gen.
+ */
+const skillExists = (name: string) =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const result = yield* db.query<[unknown[]]>(
+            "SELECT id FROM skill WHERE name = $name LIMIT 1;",
+            { name },
+        );
+        const rows = result?.[0];
+        return Array.isArray(rows) && rows.length > 0;
     });
 
 const cmdStats = (args: string[]) =>
@@ -188,6 +316,18 @@ const cmdStats = (args: string[]) =>
             process.exit(1);
         }
         const db = yield* SurrealClient;
+        const exists = yield* skillExists(name);
+        if (!exists) {
+            const hint = name.length > 20 ? name.slice(0, 20) : name;
+            console.error(
+                `agentctl: no skill named "${name}". try: agentctl search "${hint}"`,
+            );
+            process.exit(2);
+        }
+        // Issue #43: order recent_sessions by ts DESC (verified server-side),
+        // include the session id so we can de-dup in TS, and capture cwd so
+        // we can render a human-friendly project label rather than the raw
+        // Claude slug.
         const sql = `
 LET $s = (SELECT * FROM skill WHERE name = $name)[0];
 RETURN {
@@ -200,39 +340,95 @@ RETURN {
         last:  (SELECT ts FROM invoked WHERE out = $s.id ORDER BY ts DESC LIMIT 1)[0].ts,
     },
     recent_sessions: (
-        SELECT in.session.project AS project, in.ts AS ts
+        SELECT
+            in.session AS session_id,
+            in.session.project AS project_slug,
+            in.session.cwd AS cwd,
+            ts
         FROM invoked
         WHERE out = $s.id
         ORDER BY ts DESC
-        LIMIT 5
+        LIMIT 50
     )
 };`;
         const result = yield* db.query<unknown[]>(sql, { name });
         const payload = (Array.isArray(result)
             ? [...result].reverse().find((r) => r != null)
             : result) as
-            | { skill?: { dir_path?: string | null } | null }
+            | {
+                  skill?: { dir_path?: string | null } | null;
+                  recent_sessions?: Array<Record<string, unknown>>;
+              }
             | undefined;
+
+        // Dedupe + cap to the most recent 5 distinct sessions, then prettify.
+        if (payload?.recent_sessions) {
+            const seen = new Set<string>();
+            const clean: Array<{
+                project: string;
+                ts: unknown;
+            }> = [];
+            for (const row of payload.recent_sessions) {
+                const sid = String(row.session_id ?? "");
+                if (sid && seen.has(sid)) continue;
+                if (sid) seen.add(sid);
+                // cwd may come back as an array (per-edge projection) - take
+                // the first scalar for display purposes.
+                const cwdRaw = Array.isArray(row.cwd) ? row.cwd[0] : row.cwd;
+                const slugRaw = Array.isArray(row.project_slug)
+                    ? row.project_slug[0]
+                    : row.project_slug;
+                let project: string;
+                if (typeof cwdRaw === "string" && cwdRaw.length > 0) {
+                    // Mirrors path.basename without pulling node:path here.
+                    const parts = cwdRaw.split("/").filter((p) => p.length > 0);
+                    project = parts.length > 0 ? parts[parts.length - 1] : cwdRaw;
+                } else {
+                    project = prettifyProjectSlug(slugRaw);
+                }
+                clean.push({ project, ts: row.ts });
+                if (clean.length >= 5) break;
+            }
+            (payload as Record<string, unknown>).recent_sessions = clean;
+        }
+
         // Read body lazily from disk via dir_path (DB no longer stores body -
         // multi-file skills + cache-staleness make on-disk the canonical source).
         const dirPath = payload?.skill?.dir_path;
-        if (typeof dirPath === "string" && dirPath.length > 0) {
-            try {
-                const { readFile } = yield* Effect.promise(() => import("node:fs/promises"));
-                const { join } = yield* Effect.promise(() => import("node:path"));
-                const content = yield* Effect.promise(() =>
-                    readFile(join(dirPath, "SKILL.md"), "utf8"),
-                );
-                const m = content.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/);
-                const body = (m?.[1] ?? content).trim();
-                if (body.length > 0) {
-                    const excerpt = body.length > 500 ? body.slice(0, 500) + "…" : body;
+        // Issue #36: codex-side tools are recorded with a synthetic dir_path
+        // sentinel. They have no SKILL.md, so skip the disk read entirely
+        // instead of letting Effect.promise(...) crash with ENOENT.
+        if (
+            typeof dirPath === "string" &&
+            dirPath.length > 0 &&
+            dirPath !== "(synthetic)"
+        ) {
+            // Use plain Effect.promise with an inner try/catch that resolves
+            // to `null` on read failures (e.g. SKILL.md missing for the rare
+            // legacy plugin row whose dir_path is stale). Avoids tripping
+            // tryPromise's typed-error machinery when we just want a fall
+            // through. Catches issue #36 too: synthetic dir_path was already
+            // skipped above, but defence-in-depth keeps a future "(synthetic-
+            // like)" sentinel from regressing.
+            const body = yield* Effect.promise(async () => {
+                try {
+                    const { readFile } = await import("node:fs/promises");
+                    const { join } = await import("node:path");
+                    return await readFile(join(dirPath, "SKILL.md"), "utf8");
+                } catch {
+                    return null;
+                }
+            });
+            if (body !== null) {
+                const m = body.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/);
+                const trimmed = (m?.[1] ?? body).trim();
+                if (trimmed.length > 0) {
+                    const excerpt =
+                        trimmed.length > 500 ? trimmed.slice(0, 500) + "…" : trimmed;
                     console.log("--- body excerpt ---");
                     console.log(excerpt);
                     console.log("--- end body ---\n");
                 }
-            } catch {
-                // Skill file unreadable - fall through to JSON dump only.
             }
         }
         console.log(JSON.stringify(payload, null, 2));
@@ -240,7 +436,7 @@ RETURN {
 
 const cmdRecent = (args: string[]) =>
     Effect.gen(function* () {
-        const limit = parseInt(flag("limit", args) ?? "20", 10);
+        const limit = parsePositiveIntFlag("recent", "limit", args, 20);
         const db = yield* SurrealClient;
         const sql = `
 SELECT ts, out.name AS skill, in.session.project AS project
@@ -250,13 +446,15 @@ LIMIT ${limit};`;
         const result = yield* db.query<[Array<Record<string, unknown>>]>(sql);
         const rows = result?.[0];
         for (const r of rows ?? []) {
-            console.log(`${r.ts}  ${r.skill}  (${r.project ?? "?"})`);
+            console.log(
+                `${r.ts}  ${r.skill}  (${prettifyProjectSlug(r.project)})`,
+            );
         }
     });
 
 const cmdUnused = (args: string[]) =>
     Effect.gen(function* () {
-        const days = parseInt(flag("days", args) ?? "7", 10);
+        const days = parsePositiveIntFlag("unused", "days", args, 7);
         const db = yield* SurrealClient;
         // PERF (issue #31): Previous form ran a correlated subquery per skill
         // (`SELECT count() FROM invoked WHERE out = $parent.id AND ts > N`).
@@ -271,34 +469,52 @@ SELECT out AS skill_id, count() AS recent
 FROM invoked
 WHERE ts > time::now() - ${days}d
 GROUP BY out;`;
+        // Issue #34: `out.name AS name` over a GROUP BY scan returns the
+        // per-edge name array (e.g. ~500k entries for codex:exec_command).
+        // String() of that is a 17 MB single line. Aggregate over the edge
+        // table only, then look up the skill row by id in a separate cheap
+        // query and merge in TS.
         const summarySql = `
 SELECT
     out AS skill_id,
-    out.name AS name,
-    out.scope AS scope,
     count() AS total_inv,
     math::max(ts) AS last_used
 FROM invoked
 GROUP BY out;`;
+        const skillSql = `SELECT id, name, scope FROM skill;`;
         // Skills with literally zero invocations don't show up in the
         // GROUP BY scan; pull them straight from the skill table so the
         // "never used" rows still appear.
         const noInvSql = `
 SELECT name, scope FROM skill WHERE array::len(<-invoked) = 0;`;
-        const [recentRes, summaryRes, noInvRes] = yield* Effect.all(
+        const [recentRes, summaryRes, skillRes, noInvRes] = yield* Effect.all(
             [
                 db.query<[Array<Record<string, unknown>>]>(recentSql),
                 db.query<[Array<Record<string, unknown>>]>(summarySql),
+                db.query<[Array<Record<string, unknown>>]>(skillSql),
                 db.query<[Array<Record<string, unknown>>]>(noInvSql),
             ],
-            { concurrency: 3 },
+            { concurrency: 4 },
         );
         const recent = new Set<string>(
             (recentRes?.[0] ?? []).map((r) => String(r.skill_id ?? "")),
         );
+        const skillById = new Map<
+            string,
+            { name: string; scope: string }
+        >();
+        for (const s of (skillRes?.[0] ?? []) as Array<Record<string, unknown>>) {
+            skillById.set(String(s.id ?? ""), {
+                name: String(s.name ?? ""),
+                scope: String(s.scope ?? ""),
+            });
+        }
         const summary = (summaryRes?.[0] ?? []) as Array<Record<string, unknown>>;
         const fmtTs = (v: unknown): string => {
             if (v == null) return "never";
+            // SurrealDB's math::max returns -Infinity for empty groups; surface
+            // it as "never" rather than the literal "-Infinity" string.
+            if (typeof v === "number" && !Number.isFinite(v)) return "never";
             if (typeof v === "string") return v;
             if (v instanceof Date) return v.toISOString();
             return String(v);
@@ -312,12 +528,14 @@ SELECT name, scope FROM skill WHERE array::len(<-invoked) = 0;`;
         for (const r of summary) {
             const id = String(r.skill_id ?? "");
             if (recent.has(id)) continue;
-            // Drop orphans (invoked.out points at a skill record that was
-            // never UPSERTed - matches the original FROM-skill behaviour).
-            if (r.name == null) continue;
+            const meta = skillById.get(id);
+            // Drop orphan invocations whose target skill never had a row
+            // UPSERTed (matches the original FROM-skill behaviour, which
+            // started from skill rows and naturally excluded these).
+            if (!meta || !meta.name) continue;
             unused.push({
-                name: String(r.name),
-                scope: String(r.scope ?? ""),
+                name: meta.name,
+                scope: meta.scope,
                 total_inv: Number(r.total_inv ?? 0),
                 last_used: fmtTs(r.last_used),
             });
@@ -336,7 +554,7 @@ SELECT name, scope FROM skill WHERE array::len(<-invoked) = 0;`;
         );
         for (const r of unused) {
             console.log(
-                `${r.name}  [${r.scope}]  total=${r.total_inv}  last=${r.last_used}`,
+                `${r.name}  [${r.scope}]  total=${fmtCount(r.total_inv)}  last=${r.last_used}`,
             );
         }
         console.log(`\n${unused.length} skills unused in last ${days} days.`);
@@ -344,7 +562,7 @@ SELECT name, scope FROM skill WHERE array::len(<-invoked) = 0;`;
 
 const cmdTaste = (args: string[]) =>
     Effect.gen(function* () {
-        const limit = parseInt(flag("limit", args) ?? "30", 10);
+        const limit = parsePositiveIntFlag("taste", "limit", args, 30);
         const db = yield* SurrealClient;
         // Composite signal: invocations (positive), errors near invocation
         // (negative), corrections within 3 turns of invocation in the same
@@ -378,9 +596,9 @@ const cmdTaste = (args: string[]) =>
         // so that the `clean_inv` / `corrections` predicates become pure
         // edge-field filters. End-to-end taste runtime drops to ~13s.
         //
-        // The query runs in two server-side stages plus a client-side merge
-        // of the proposed-only skills (which have no `invoked` edges and
-        // therefore wouldn't appear in the GROUP BY result):
+        // The query runs in three server-side stages plus a client-side
+        // merge so that *every* skill row gets a slot, not just those with
+        // invoked or proposed edges (issue #47):
         //   (a) AGGREGATES_SQL  - per-skill counters from the invoked scan,
         //                         then enriches with `<-proposed` /
         //                         `<-invoked.in.session` traversals and
@@ -388,6 +606,9 @@ const cmdTaste = (args: string[]) =>
         //   (b) PROPOSED_ONLY_SQL - skills with no invocations but with
         //                           proposals, contributing the negative
         //                           taste_score floor (-0.5 * proposals).
+        //   (c) ZERO_SQL          - skills with neither invocations nor
+        //                           proposals; rendered with score 0 so the
+        //                           total skill count is honest.
         // Results are concatenated and sorted in TS to mirror the original
         // ORDER BY taste_score DESC, inv_30d DESC, inv_total DESC.
         const aggregatesSql = `
@@ -456,33 +677,79 @@ SELECT
 FROM skill
 WHERE array::len(<-invoked) = 0 AND array::len(<-proposed) > 0;`;
 
-        const aggResult = yield* db.query<[Array<Record<string, unknown>>]>(aggregatesSql);
-        const propResult = yield* db.query<[Array<Record<string, unknown>>]>(proposedOnlySql);
+        // Issue #47: skills with neither invocations nor proposals get
+        // dropped entirely from the merged set, so `taste --limit=200`
+        // returns ~35 rows instead of all 137. Pull them in with a flat
+        // zero score so the table reflects the real catalog.
+        const zeroSql = `
+SELECT
+    name,
+    scope,
+    0 AS inv_total,
+    0 AS inv_7d,
+    0 AS inv_30d,
+    0 AS clean_inv,
+    0 AS corrections,
+    0 AS proposals,
+    0 AS commits_after,
+    0 AS taste_score
+FROM skill
+WHERE array::len(<-invoked) = 0 AND array::len(<-proposed) = 0;`;
+
+        const [aggResult, propResult, zeroResult] = yield* Effect.all(
+            [
+                db.query<[Array<Record<string, unknown>>]>(aggregatesSql),
+                db.query<[Array<Record<string, unknown>>]>(proposedOnlySql),
+                db.query<[Array<Record<string, unknown>>]>(zeroSql),
+            ],
+            { concurrency: 3 },
+        );
         const aggRows = aggResult?.[0] ?? [];
         const propRows = propResult?.[0] ?? [];
+        const zeroRows = zeroResult?.[0] ?? [];
         // Merge + sort to mirror original ORDER BY (server-side ORDER BY
         // would force a second pass over the merged set, simpler in TS).
         const score = (r: Record<string, unknown>) => Number(r.taste_score ?? 0);
-        const merged = [...aggRows, ...propRows].sort((a, b) => {
+        const merged = [...aggRows, ...propRows, ...zeroRows].sort((a, b) => {
             const ds = score(b) - score(a);
             if (ds !== 0) return ds;
             const d30 = Number(b.inv_30d ?? 0) - Number(a.inv_30d ?? 0);
             if (d30 !== 0) return d30;
             return Number(b.inv_total ?? 0) - Number(a.inv_total ?? 0);
         });
+        const totalRows = merged.length;
         const rows = merged.slice(0, limit);
         const fmtScore = (n: unknown): string => {
             const v = Number(n ?? 0);
-            return Number.isInteger(v) ? String(v) : v.toFixed(1);
+            return Number.isInteger(v) ? fmtCount(v) : v.toFixed(1);
         };
+        // Issue #46: pre-compute column widths from the displayed rows so
+        // 6+ digit values (e.g. codex:exec_command at 597,508) don't bleed
+        // into the next column. Header width sets the floor.
+        const cols = [
+            { key: "score", header: "score", get: (r: Record<string, unknown>) => fmtScore(r.taste_score) },
+            { key: "7d", header: "7d", get: (r: Record<string, unknown>) => fmtCount(r.inv_7d) },
+            { key: "30d", header: "30d", get: (r: Record<string, unknown>) => fmtCount(r.inv_30d) },
+            { key: "total", header: "total", get: (r: Record<string, unknown>) => fmtCount(r.inv_total) },
+            { key: "clean", header: "clean", get: (r: Record<string, unknown>) => fmtCount(r.clean_inv) },
+            { key: "corr", header: "corr", get: (r: Record<string, unknown>) => fmtCount(r.corrections ?? 0) },
+            { key: "prop", header: "prop", get: (r: Record<string, unknown>) => fmtCount(r.proposals ?? 0) },
+            { key: "cmts", header: "cmts", get: (r: Record<string, unknown>) => fmtCount(r.commits_after ?? 0) },
+        ];
+        const widths = cols.map((c) =>
+            Math.max(c.header.length, ...rows.map((r) => c.get(r).length)),
+        );
+        const headerCells = cols.map((c, i) => c.header.padStart(widths[i])).join("  ");
         console.log(
-            `${"skill".padEnd(50)}  ${"scope".padEnd(16)}  score  7d  30d  total  clean  corr  prop  cmts`,
+            `${"skill".padEnd(50)}  ${"scope".padEnd(16)}  ${headerCells}`,
         );
         for (const r of rows ?? []) {
+            const cells = cols.map((c, i) => c.get(r).padStart(widths[i])).join("  ");
             console.log(
-                `${String(r.name).padEnd(50)}  ${String(r.scope).padEnd(16)}  ${fmtScore(r.taste_score).padStart(5)}  ${String(r.inv_7d).padStart(2)}  ${String(r.inv_30d).padStart(3)}  ${String(r.inv_total).padStart(5)}  ${String(r.clean_inv).padStart(5)}  ${String(r.corrections ?? 0).padStart(4)}  ${String(r.proposals ?? 0).padStart(4)}  ${String(r.commits_after ?? 0).padStart(4)}`,
+                `${String(r.name).padEnd(50)}  ${String(r.scope).padEnd(16)}  ${cells}`,
             );
         }
+        console.log(`\n(${rows.length} / ${totalRows} skills shown)`);
     });
 
 const cmdPairs = (args: string[]) =>
@@ -492,8 +759,16 @@ const cmdPairs = (args: string[]) =>
             console.error("agentctl pairs: missing skill name");
             process.exit(1);
         }
-        const limit = parseInt(flag("limit", args) ?? "20", 10);
+        const limit = parsePositiveIntFlag("pairs", "limit", args, 20);
         const db = yield* SurrealClient;
+        const exists = yield* skillExists(name);
+        if (!exists) {
+            const hint = name.length > 20 ? name.slice(0, 20) : name;
+            console.error(
+                `agentctl: no skill named "${name}". try: agentctl search "${hint}"`,
+            );
+            process.exit(2);
+        }
         // Pairs are stored undirected (lexicographically lo->hi). Look the
         // skill up on either endpoint so callers don't have to know the
         // canonical direction. Combine both legs into a single ranked list.
@@ -529,7 +804,7 @@ LIMIT ${limit};`;
 
 const cmdRecovery = (args: string[]) =>
     Effect.gen(function* () {
-        const limit = parseInt(flag("limit", args) ?? "20", 10);
+        const limit = parsePositiveIntFlag("recovery", "limit", args, 20);
         const db = yield* SurrealClient;
         const sql = `
 SELECT out.name AS skill, count() AS hits
