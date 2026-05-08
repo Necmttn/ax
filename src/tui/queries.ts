@@ -20,9 +20,16 @@
 // `GROUP BY out` scan over `invoked` yields every counter at once
 // (~1-2s vs ~150s+).
 //
-// `last_used` is computed in a second per-skill query because tracking a
-// max(ts) inside the GROUP BY is awkward and adds cost; the per-skill
-// `ORDER BY ts DESC LIMIT 1` is cheap (one btree seek per skill).
+// PERF (issue #33): The follow-up `last_used` per-skill subquery
+// (`SELECT ts FROM invoked WHERE out = $parent.skill_id ORDER BY ts DESC
+// LIMIT 1`) re-introduced the same ~24s regression on first paint - the
+// optimiser doesn't push the per-row predicate into the existing
+// (out, ts) index, so each call full-scans the per-skill edge set. Replace
+// with `time::max(ts)` inside the existing GROUP BY (free given we're
+// already scanning every edge). Mirrors the cmdUnused `summarySql`
+// pattern in src/cli/index.ts - except cmdUnused uses `math::max(ts)`
+// which silently returns NULL for datetime columns in current SurrealDB
+// (only `time::max` aggregates datetimes correctly).
 export const SKILL_SUMMARY_SQL = `
 SELECT
     name,
@@ -54,16 +61,17 @@ FROM (
         inv_7d,
         inv_30d,
         corrections,
+        last_used,
         array::len(skill_id<-proposed) AS proposals,
-        array::distinct(skill_id<-invoked.in.session ?? []) AS skill_sessions,
-        (SELECT ts FROM invoked WHERE out = $parent.skill_id ORDER BY ts DESC LIMIT 1)[0].ts AS last_used
+        array::distinct(skill_id<-invoked.in.session ?? []) AS skill_sessions
     FROM (
         SELECT
             out AS skill_id,
             count() AS total_inv,
             math::sum(IF ts > time::now() - 7d  THEN 1 ELSE 0 END) AS inv_7d,
             math::sum(IF ts > time::now() - 30d THEN 1 ELSE 0 END) AS inv_30d,
-            math::sum(IF was_corrected = true THEN 1 ELSE 0 END) AS corrections
+            math::sum(IF was_corrected = true THEN 1 ELSE 0 END) AS corrections,
+            time::max(ts) AS last_used
         FROM invoked
         GROUP BY out
     )
