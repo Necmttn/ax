@@ -4,3 +4,5 @@ data/
 .env
 .env.local
 bun.lockb
+.references/
+*.tsbuildinfo

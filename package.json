@@ -7,11 +7,14 @@
     "agentctl": "./bin/agentctl"
   },
   "scripts": {
+    "prepare": "effect-language-service patch",
+    "typecheck": "tsc --noEmit",
     "ingest": "bun src/cli/index.ts ingest",
     "search": "bun src/cli/index.ts search",
     "db:start": "scripts/db-start.sh",
     "db:stop": "scripts/db-stop.sh",
-    "db:schema": "scripts/apply-schema.sh"
+    "db:schema": "scripts/apply-schema.sh",
+    "refs:setup": "scripts/setup-references.sh"
   },
   "dependencies": {
     "effect": "^4.0.0-beta.64",
@@ -19,6 +22,7 @@
     "yaml": "^2.8.4"
   },
   "devDependencies": {
+    "@effect/language-service": "^0.85.1",
     "@types/bun": "latest",
     "typescript": "^5.5.0"
   }

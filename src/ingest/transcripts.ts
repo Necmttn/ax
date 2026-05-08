@@ -85,7 +85,6 @@ async function extractFile(filePath: string, projectDir: string): Promise<FileEx
     const invocations: Invocation[] = [];
     const edits: Edit[] = [];
     let seq = 0;
-    let lastTs: string | null = null;
     let cwd: string | null = null;
 
     for await (const line of fh.readLines()) {
@@ -100,7 +99,6 @@ async function extractFile(filePath: string, projectDir: string): Promise<FileEx
             (entry.ts as string | undefined) ??
             null;
         if (!ts) continue;
-        lastTs = ts;
         if (!cwd && typeof entry.cwd === "string") cwd = entry.cwd as string;
         if (!session) {
             session = {
@@ -262,11 +260,13 @@ async function bulkUpsertEdits(db: Awaited<ReturnType<typeof connect>>, edits: E
 }
 
 interface IngestOpts {
-    sinceDays?: number;
-    project?: string;
+    sinceDays: number | undefined;
+    project: string | undefined;
 }
 
-export async function ingestTranscripts(opts: IngestOpts = {}): Promise<{
+export async function ingestTranscripts(
+    opts: Partial<IngestOpts> = {},
+): Promise<{
     files: number;
     sessions: number;
     turns: number;

@@ -1,14 +1,25 @@
 {
   "compilerOptions": {
     "lib": ["ESNext"],
-    "target": "ESNext",
-    "module": "ESNext",
+    "target": "ES2022",
+    "module": "preserve",
     "moduleResolution": "bundler",
-    "strict": true,
-    "skipLibCheck": true,
-    "noEmit": true,
+    "moduleDetection": "force",
+    "verbatimModuleSyntax": false,
     "allowImportingTsExtensions": true,
-    "types": ["bun-types"]
+    "noEmit": true,
+    "incremental": true,
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": false,
+    "noImplicitOverride": true,
+    "skipLibCheck": true,
+    "sourceMap": true,
+    "types": ["bun-types"],
+    "plugins": [
+      { "name": "@effect/language-service" }
+    ]
   },
   "include": ["src/**/*.ts"]
 }

@@ -1,0 +1,13 @@
+{
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+  "typescript.tsserver.experimental.enableProjectDiagnostics": true,
+  "files.watcherExclude": {
+    "**/.references/**": true,
+    "**/data/**": true
+  },
+  "search.exclude": {
+    ".references/**": true,
+    "data/**": true
+  }
+}

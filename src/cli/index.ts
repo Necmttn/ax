@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { connect, surql } from "../lib/db.ts";
+import { connect } from "../lib/db.ts";
 import { ingestSkills } from "../ingest/skills.ts";
 import { ingestTranscripts } from "../ingest/transcripts.ts";
 import { ingestCodex } from "../ingest/codex.ts";

@@ -2,13 +2,13 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
-import { connect, RecordId, surql } from "../lib/db.ts";
+import { connect, RecordId } from "../lib/db.ts";
 import { defaultSkillDirs } from "../lib/paths.ts";
 import { skillRecordKey } from "../lib/skill-id.ts";
 
 interface ParsedSkill {
     name: string;
-    description?: string;
+    description: string | undefined;
     frontmatter: Record<string, unknown>;
     body: string;
 }
@@ -30,7 +30,7 @@ function looseLineParse(raw: string): Record<string, unknown> {
 function parseSkillFile(content: string, fallbackName: string): ParsedSkill {
     const m = content.match(FRONTMATTER_RE);
     if (!m) {
-        return { name: fallbackName, frontmatter: {}, body: content };
+        return { name: fallbackName, description: undefined, frontmatter: {}, body: content };
     }
     let fm: Record<string, unknown> = {};
     try {

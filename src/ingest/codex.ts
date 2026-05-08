@@ -154,10 +154,12 @@ async function extractCodexFile(filePath: string): Promise<{
 }
 
 interface CodexIngestOpts {
-    sinceDays?: number;
+    sinceDays: number | undefined;
 }
 
-export async function ingestCodex(opts: CodexIngestOpts = {}): Promise<{
+export async function ingestCodex(
+    opts: Partial<CodexIngestOpts> = {},
+): Promise<{
     files: number;
     sessions: number;
     turns: number;
