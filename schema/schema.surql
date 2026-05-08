@@ -13,6 +13,7 @@ DEFINE FIELD scope          ON skill TYPE string;          -- 'user' | 'project'
 DEFINE FIELD dir_path       ON skill TYPE string;
 DEFINE FIELD description    ON skill TYPE option<string>;
 DEFINE FIELD frontmatter    ON skill TYPE option<string>;   -- JSON-encoded
+DEFINE FIELD body           ON skill TYPE option<string>;   -- SKILL.md body content (post-frontmatter), powers FTS + TUI preview
 DEFINE FIELD content_hash   ON skill TYPE string;
 DEFINE FIELD bytes          ON skill TYPE option<int>;
 DEFINE FIELD ingested_at    ON skill TYPE datetime VALUE time::now();
