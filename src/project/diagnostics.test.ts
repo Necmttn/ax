@@ -33,6 +33,12 @@ async function writeDiagnosticConfig(
     await writeFile(join(dir, "config.json"), JSON.stringify({ diagnostics }), "utf8");
 }
 
+async function writeRawDiagnosticConfig(root: string, raw: string): Promise<void> {
+    const dir = join(root, ".agentctl");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "config.json"), raw, "utf8");
+}
+
 describe("parseDiagnosticConfig", () => {
     test("reads URLs from .agentctl config JSON", () => {
         const parsed = parseDiagnosticConfig(
@@ -51,6 +57,15 @@ describe("parseDiagnosticConfig", () => {
             statusUrl: "http://localhost:4319/internal/status",
             errorsUrl: "http://localhost:4319/internal/errors",
             timeoutMs: 750,
+        });
+    });
+
+    test("defaults top-level null config to empty diagnostics", () => {
+        expect(parseDiagnosticConfig("null")).toEqual({
+            healthUrl: null,
+            statusUrl: null,
+            errorsUrl: null,
+            timeoutMs: 1000,
         });
     });
 });
@@ -122,6 +137,26 @@ describe("queryLiveDiagnostics", () => {
                 checkedAt: expect.any(String),
                 error: null,
             });
+        });
+    });
+
+    test("returns configured unavailable diagnostics when config JSON is malformed", async () => {
+        await withTempRoot(async (root) => {
+            await writeRawDiagnosticConfig(root, "{invalid json");
+
+            const diagnostics = await Effect.runPromise(queryLiveDiagnostics(root));
+
+            expect(diagnostics).toEqual({
+                configured: true,
+                available: false,
+                source: null,
+                status: "unknown",
+                issues: [],
+                localUrls: [],
+                checkedAt: expect.any(String),
+                error: expect.any(String),
+            });
+            expect(diagnostics.error?.length).toBeGreaterThan(0);
         });
     });
 
