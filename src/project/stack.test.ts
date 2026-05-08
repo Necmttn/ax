@@ -1,5 +1,30 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
-import { extractInstructionMatches, packageSignals } from "./stack.ts";
+import { Effect } from "effect";
+import { extractInstructionMatches, loadPackageInfo, packageSignals } from "./stack.ts";
+
+describe("loadPackageInfo", () => {
+    test("invalid package.json returns empty dependencies/scripts instead of throwing", async () => {
+        const root = await mkdtemp(join(tmpdir(), "agentctl-stack-"));
+        try {
+            await writeFile(join(root, "package.json"), "{invalid json", "utf8");
+
+            const info = await Effect.runPromise(loadPackageInfo(root));
+
+            expect(info).toEqual({
+                packageJsonPath: null,
+                packageManager: null,
+                scripts: {},
+                dependencies: [],
+                devDependencies: [],
+            });
+        } finally {
+            await rm(root, { recursive: true, force: true });
+        }
+    });
+});
 
 describe("packageSignals", () => {
     test("detects Bun, TypeScript, Effect, and SurrealDB", () => {
@@ -53,5 +78,17 @@ describe("extractInstructionMatches", () => {
                 reason: "git",
             },
         ]);
+    });
+
+    test("does not match instruction keywords inside unrelated words", () => {
+        const matches = extractInstructionMatches(
+            "AGENTS.md",
+            [
+                "Use latest stable dependencies when practical.",
+                "Maintain project documentation for readers.",
+            ].join("\n"),
+        );
+
+        expect(matches).toEqual([]);
     });
 });

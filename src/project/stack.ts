@@ -6,6 +6,16 @@ import type { InstructionMatch, PackageInfo, ProjectStack, StackSignal } from ".
 
 const INSTRUCTION_FILES = ["AGENTS.md", "CLAUDE.md"] as const;
 
+function emptyPackageInfo(): PackageInfo {
+    return {
+        packageJsonPath: null,
+        packageManager: null,
+        scripts: {},
+        dependencies: [],
+        devDependencies: [],
+    };
+}
+
 function asStringRecord(value: unknown): Record<string, string> {
     if (!value || typeof value !== "object") return {};
     const out: Record<string, string> = {};
@@ -22,35 +32,24 @@ function packageNames(value: unknown): ReadonlyArray<string> {
 
 export const loadPackageInfo = (root: string | null): Effect.Effect<PackageInfo> =>
     Effect.gen(function* () {
-        if (!root) {
-            return {
-                packageJsonPath: null,
-                packageManager: null,
-                scripts: {},
-                dependencies: [],
-                devDependencies: [],
-            };
-        }
+        if (!root) return emptyPackageInfo();
 
         const path = join(root, "package.json");
-        if (!existsSync(path)) {
-            return {
-                packageJsonPath: null,
-                packageManager: null,
-                scripts: {},
-                dependencies: [],
-                devDependencies: [],
-            };
-        }
+        if (!existsSync(path)) return emptyPackageInfo();
 
-        const raw = yield* Effect.promise(() => readFile(path, "utf8"));
-        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        const parsed = yield* Effect.tryPromise({
+            try: () => Bun.file(path).json() as Promise<unknown>,
+            catch: () => "PackageJsonReadError" as const,
+        }).pipe(Effect.orElseSucceed(() => null));
+
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return emptyPackageInfo();
+        const record = parsed as Record<string, unknown>;
         return {
             packageJsonPath: path,
-            packageManager: typeof parsed.packageManager === "string" ? parsed.packageManager : null,
-            scripts: asStringRecord(parsed.scripts),
-            dependencies: packageNames(parsed.dependencies),
-            devDependencies: packageNames(parsed.devDependencies),
+            packageManager: typeof record.packageManager === "string" ? record.packageManager : null,
+            scripts: asStringRecord(record.scripts),
+            dependencies: packageNames(record.dependencies),
+            devDependencies: packageNames(record.devDependencies),
         };
     });
 
@@ -97,13 +96,17 @@ export function packageSignals(pkg: PackageInfo): ReadonlyArray<StackSignal> {
     return signals;
 }
 
-function classifyInstruction(line: string): string | null {
+function hasToken(line: string, tokens: ReadonlyArray<string>): boolean {
+    return tokens.some((token) => new RegExp(`\\b${token}\\b`, "i").test(line));
+}
+
+function classifyInstruction(line: string): InstructionMatch["reason"] | null {
     const lower = line.toLowerCase();
     if (lower.includes("effect-solutions") || lower.includes("effect code")) return "effect";
-    if (lower.includes("typecheck") || lower.includes("test") || lower.includes("lint")) return "verification";
-    if (lower.includes("surrealdb") || lower.includes("schema")) return "database";
-    if (lower.includes("commit") || lower.includes("branch") || lower.includes("worktree") || lower.includes("main")) return "git";
-    if (lower.includes("always") || lower.includes("never") || lower.includes("must")) return "rule";
+    if (hasToken(line, ["typecheck", "test", "tests", "testing", "lint", "lints", "linting"])) return "verification";
+    if (hasToken(line, ["surrealdb", "schema"])) return "database";
+    if (hasToken(line, ["commit", "commits", "branch", "branches", "worktree", "worktrees", "main"])) return "git";
+    if (hasToken(line, ["always", "never", "must"])) return "rule";
     return null;
 }
 
