@@ -19,13 +19,19 @@
     "watcher:uninstall": "bash scripts/uninstall-watcher.sh"
   },
   "dependencies": {
+    "@opentui/core": "^0.2.5",
+    "@opentui/react": "^0.2.5",
     "effect": "^4.0.0-beta.64",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
     "surrealdb": "^2.0.0",
     "yaml": "^2.8.4"
   },
   "devDependencies": {
     "@effect/language-service": "^0.85.1",
     "@types/bun": "latest",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
     "typescript": "^5.5.0"
   }
 }
