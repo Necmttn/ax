@@ -18,6 +18,8 @@ Usage:
   agentctl recent [--limit=N]
   agentctl unused [--days=N]
   agentctl taste [--limit=N]
+  agentctl pairs <skill> [--limit=N]
+  agentctl recovery [--limit=N]
   agentctl tui
   agentctl install            # one-shot setup: daemon + watcher + symlink
   agentctl uninstall
@@ -251,6 +253,70 @@ LIMIT ${limit};`;
         }
     });
 
+const cmdPairs = (args: string[]) =>
+    Effect.gen(function* () {
+        const name = args.filter((a) => !a.startsWith("--"))[0];
+        if (!name) {
+            console.error("agentctl pairs: missing skill name");
+            process.exit(1);
+        }
+        const limit = parseInt(flag("limit", args) ?? "20", 10);
+        const db = yield* SurrealClient;
+        // Pairs are stored undirected (lexicographically lo->hi). Look the
+        // skill up on either endpoint so callers don't have to know the
+        // canonical direction. Combine both legs into a single ranked list.
+        // Pairs are stored undirected (lexicographically lo->hi), so the
+        // queried skill could be on either endpoint. Use IF/ELSE to pick the
+        // partner regardless of position; SurrealDB lacks UNION on SELECTs.
+        const sql = `
+LET $s = (SELECT id FROM skill WHERE name = $name)[0].id;
+SELECT
+    (IF in = $s THEN out.name ELSE in.name END) AS partner,
+    count,
+    last_seen
+FROM skill_paired
+WHERE in = $s OR out = $s
+ORDER BY count DESC
+LIMIT ${limit};`;
+        const result = yield* db.query<unknown[]>(sql, { name });
+        const arr = Array.isArray(result)
+            ? [...result].reverse().find((r) => Array.isArray(r) && (r as unknown[]).length > 0)
+            : undefined;
+        const rows = (arr as Array<Record<string, unknown>> | undefined) ?? [];
+        if (rows.length === 0) {
+            console.log("(no co-occurring skills)");
+            return;
+        }
+        console.log(`${"partner".padEnd(50)}  count  last_seen`);
+        for (const r of rows) {
+            console.log(
+                `${String(r.partner).padEnd(50)}  ${String(r.count).padStart(5)}  ${r.last_seen ?? "-"}`,
+            );
+        }
+    });
+
+const cmdRecovery = (args: string[]) =>
+    Effect.gen(function* () {
+        const limit = parseInt(flag("limit", args) ?? "20", 10);
+        const db = yield* SurrealClient;
+        const sql = `
+SELECT out.name AS skill, count() AS hits
+FROM recovered_by
+GROUP BY skill
+ORDER BY hits DESC
+LIMIT ${limit};`;
+        const result = yield* db.query<[Array<Record<string, unknown>>]>(sql);
+        const rows = result?.[0];
+        if (!rows || rows.length === 0) {
+            console.log("(no recovery edges)");
+            return;
+        }
+        console.log(`${"skill".padEnd(50)}  hits`);
+        for (const r of rows) {
+            console.log(`${String(r.skill).padEnd(50)}  ${String(r.hits).padStart(4)}`);
+        }
+    });
+
 const dispatch = (
     cmd: string | undefined,
     rest: string[],
@@ -270,6 +336,10 @@ const dispatch = (
             return cmdUnused(rest);
         case "taste":
             return cmdTaste(rest);
+        case "pairs":
+            return cmdPairs(rest);
+        case "recovery":
+            return cmdRecovery(rest);
         default:
             return null;
     }
