@@ -1,8 +1,11 @@
 import { readdir, stat, open } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { connect, RecordId } from "../lib/db.ts";
+import { Effect } from "effect";
+import { RecordId, SurrealClient } from "../lib/db.ts";
 import { skillRecordKey } from "../lib/skill-id.ts";
+import { AppLayer } from "../lib/layers.ts";
+import type { DbError } from "../lib/errors.ts";
 
 const CODEX_ROOT = process.env.AGENTCTL_CODEX_DIR ?? join(homedir(), ".codex", "sessions");
 
@@ -62,11 +65,13 @@ async function walkJsonlFiles(root: string, cutoffMs: number): Promise<string[]>
     return out;
 }
 
-async function extractCodexFile(filePath: string): Promise<{
+interface CodexExtract {
     session: CodexSession;
     turns: CodexTurn[];
     invocations: CodexInvocation[];
-} | null> {
+}
+
+async function extractCodexFile(filePath: string): Promise<CodexExtract | null> {
     const fh = await open(filePath, "r");
     let session: CodexSession | null = null;
     const turns: CodexTurn[] = [];
@@ -157,28 +162,32 @@ interface CodexIngestOpts {
     sinceDays: number | undefined;
 }
 
-export async function ingestCodex(
-    opts: Partial<CodexIngestOpts> = {},
-): Promise<{
+export interface CodexStats {
     files: number;
     sessions: number;
     turns: number;
     invocations: number;
-}> {
-    const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
-    const files = await walkJsonlFiles(CODEX_ROOT, cutoff);
-    const db = await connect();
-    let fileCount = 0;
-    let sessionCount = 0;
-    let turnCount = 0;
-    let invCount = 0;
-    try {
+}
+
+export const ingestCodex = (
+    opts: Partial<CodexIngestOpts> = {},
+): Effect.Effect<CodexStats, DbError, SurrealClient> =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
+        const files = yield* Effect.promise(() => walkJsonlFiles(CODEX_ROOT, cutoff));
+
+        let fileCount = 0;
+        let sessionCount = 0;
+        let turnCount = 0;
+        let invCount = 0;
+
         for (const filePath of files) {
-            const extracted = await extractCodexFile(filePath);
+            const extracted = yield* Effect.promise(() => extractCodexFile(filePath));
             if (!extracted) continue;
             fileCount += 1;
 
-            await db.upsert(new RecordId("session", extracted.session.id)).content({
+            yield* db.upsert(new RecordId("session", extracted.session.id), {
                 project: extracted.session.cwd,
                 cwd: extracted.session.cwd,
                 model: extracted.session.model_provider,
@@ -194,7 +203,7 @@ export async function ingestCodex(
                     `UPSERT turn:\`${turnRecordKey(t.session, t.seq)}\` CONTENT { session: session:\`${t.session}\`, seq: ${t.seq}, ts: d"${t.ts}", role: ${JSON.stringify(t.role)}, text_excerpt: ${t.text_excerpt === null ? "NONE" : JSON.stringify(t.text_excerpt)}, has_tool_use: ${t.has_tool_use}, has_error: false };`,
             );
             for (let i = 0; i < turnStmts.length; i += 500) {
-                await db.query(turnStmts.slice(i, i + 500).join(""));
+                yield* db.query(turnStmts.slice(i, i + 500).join(""));
             }
             turnCount += extracted.turns.length;
 
@@ -205,7 +214,7 @@ export async function ingestCodex(
                     `UPSERT skill:\`${skillRecordKey(name)}\` MERGE { name: ${JSON.stringify(name)}, scope: "codex-tool", dir_path: "(synthetic)", content_hash: "codex" };`,
             );
             if (skillStmts.length > 0) {
-                await db.query(skillStmts.join(""));
+                yield* db.query(skillStmts.join(""));
             }
 
             const invStmts = extracted.invocations.map(
@@ -213,7 +222,7 @@ export async function ingestCodex(
                     `RELATE turn:\`${turnRecordKey(inv.session, inv.seq)}\`->invoked->skill:\`${skillRecordKey(inv.skill)}\` SET ts = d"${inv.ts}", args = ${JSON.stringify(JSON.stringify(inv.args))};`,
             );
             for (let i = 0; i < invStmts.length; i += 500) {
-                await db.query(invStmts.slice(i, i + 500).join(""));
+                yield* db.query(invStmts.slice(i, i + 500).join(""));
             }
             invCount += extracted.invocations.length;
 
@@ -226,14 +235,21 @@ export async function ingestCodex(
         console.log(
             `[codex] DONE files=${fileCount} sessions=${sessionCount} turns=${turnCount} invocations=${invCount}`,
         );
-        return { files: fileCount, sessions: sessionCount, turns: turnCount, invocations: invCount };
-    } finally {
-        await db.close();
-    }
-}
+        return {
+            files: fileCount,
+            sessions: sessionCount,
+            turns: turnCount,
+            invocations: invCount,
+        };
+    });
 
 if (import.meta.main) {
     const sinceArg = process.argv.find((a) => a.startsWith("--since="));
     const sinceDays = sinceArg ? parseInt(sinceArg.split("=")[1], 10) : undefined;
-    await ingestCodex({ sinceDays });
+    await Effect.runPromise(
+        ingestCodex({ sinceDays }).pipe(
+            Effect.provide(AppLayer),
+            Effect.scoped,
+        ) as Effect.Effect<CodexStats>,
+    );
 }
