@@ -86,6 +86,14 @@ DEFINE TABLE touched      TYPE RELATION FROM commit TO file;
 DEFINE FIELD additions    ON touched TYPE option<int>;
 DEFINE FIELD deletions    ON touched TYPE option<int>;
 
+DEFINE TABLE skill_paired TYPE RELATION FROM skill TO skill;  -- skills co-occurring in same session within N turns
+DEFINE FIELD count        ON skill_paired TYPE int DEFAULT 1;
+DEFINE FIELD last_seen    ON skill_paired TYPE datetime;
+
+DEFINE TABLE recovered_by TYPE RELATION FROM turn TO skill;   -- skill invoked after has_error=true turn
+DEFINE FIELD ts            ON recovered_by TYPE datetime;
+DEFINE FIELD error_excerpt ON recovered_by TYPE option<string>;
+
 -- ==== Materialized views (computed at query time) ====
 
 -- Per-skill counts, recent boost

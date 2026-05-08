@@ -52,12 +52,36 @@ function proposedEdgeId(fromTurnKey: string, skillKey: string): string {
     return `${fromTurnKey}__${skillKey}`;
 }
 
+/**
+ * Deterministic edge id for `skill_paired`. Pair is treated as undirected, so
+ * the lexicographically-smaller skill key always sits in the `in` slot. A
+ * short hash of the joined keys keeps the id stable + length-bounded
+ * regardless of skill-name length (Surreal record-id segment escaping).
+ */
+function skillPairedEdgeId(skillKeyA: string, skillKeyB: string): {
+    edgeId: string;
+    fromKey: string;
+    toKey: string;
+} {
+    const [lo, hi] = skillKeyA < skillKeyB ? [skillKeyA, skillKeyB] : [skillKeyB, skillKeyA];
+    const hash = Bun.hash(`${lo}__${hi}`).toString(16).slice(0, 12);
+    return { edgeId: `${lo.slice(0, 24)}__${hi.slice(0, 24)}__${hash}`, fromKey: lo, toKey: hi };
+}
+
+function recoveredByEdgeId(fromTurnKey: string, skillKey: string): string {
+    return `${fromTurnKey}__${skillKey}`;
+}
+
+const PAIR_WINDOW = 3;
+const RECOVERY_WINDOW = 3;
+
 interface TurnRow {
     id: { tb: string; id: string } | string;
     seq: number;
     role: string;
     text_excerpt: string | null;
     ts: string | Date;
+    has_error: boolean;
     invoked_skills: ReadonlyArray<string>; // skill names this turn already invoked
 }
 
@@ -99,6 +123,7 @@ SELECT
     role,
     text_excerpt,
     ts,
+    has_error,
     ->invoked->skill.name AS invoked_skills
 FROM turn
 ${sinceFilter}
@@ -218,6 +243,108 @@ function deriveProposed(
     return out;
 }
 
+interface SkillPairAccum {
+    fromKey: string;
+    toKey: string;
+    count: number;
+    lastSeen: string; // ISO
+}
+
+interface RecoveryEdge {
+    fromTurnKey: string;
+    skillKey: string;
+    skillName: string;
+    ts: string;
+    errorExcerpt: string | null;
+}
+
+/**
+ * Walk turns in seq order. For every pair of `invoked` skills firing within
+ * `PAIR_WINDOW` turns of each other in the same session, accumulate a
+ * count + max(ts). Pairs are undirected (sorted lexicographically) so
+ * `(a,b)` and `(b,a)` collapse to a single edge. Skills invoked together in
+ * the same turn count too (window includes seq delta = 0).
+ */
+function deriveSkillPairs(
+    bundle: SessionTurns,
+    accum: Map<string, SkillPairAccum>,
+): void {
+    const turns = bundle.turns;
+    // Dedupe invoked_skills per turn: a single assistant turn can fire the
+    // same tool dozens of times (e.g. codex:exec_command 30x in one turn),
+    // and we don't want that to multiply the pair count quadratically.
+    const skillsByTurn = turns.map((t) => [...new Set(t.invoked_skills ?? [])]);
+    for (let i = 0; i < turns.length; i += 1) {
+        const a = turns[i];
+        const aSkills = skillsByTurn[i];
+        if (aSkills.length === 0) continue;
+        for (let j = i; j < turns.length; j += 1) {
+            const b = turns[j];
+            if (b.seq - a.seq > PAIR_WINDOW) break;
+            const bSkills = skillsByTurn[j];
+            if (bSkills.length === 0) continue;
+            for (const sa of aSkills) {
+                for (const sb of bSkills) {
+                    if (sa === sb) continue;
+                    // Same turn pair: avoid double-counting the unordered pair.
+                    if (i === j && sa > sb) continue;
+                    const keyA = skillRecordKey(sa);
+                    const keyB = skillRecordKey(sb);
+                    const { edgeId, fromKey, toKey } = skillPairedEdgeId(keyA, keyB);
+                    const ts = tsToIso(b.ts);
+                    const existing = accum.get(edgeId);
+                    if (existing) {
+                        existing.count += 1;
+                        if (ts > existing.lastSeen) existing.lastSeen = ts;
+                    } else {
+                        accum.set(edgeId, {
+                            fromKey,
+                            toKey,
+                            count: 1,
+                            lastSeen: ts,
+                        });
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * For each turn whose `has_error` flag is true, look forward up to
+ * `RECOVERY_WINDOW` seq steps for the next `invoked` skill in the same
+ * session and emit a `recovered_by` edge from the erroring turn to that
+ * skill. Only the first invocation in the window counts (one recovery per
+ * error).
+ */
+function deriveRecovered(bundle: SessionTurns): RecoveryEdge[] {
+    const out: RecoveryEdge[] = [];
+    const turns = bundle.turns;
+    for (let i = 0; i < turns.length; i += 1) {
+        const t = turns[i];
+        if (!t.has_error) continue;
+        const errorTurnKey = rawTurnKey(t.id);
+        const excerpt = t.text_excerpt;
+        for (let j = i + 1; j < turns.length; j += 1) {
+            const next = turns[j];
+            if (next.seq - t.seq > RECOVERY_WINDOW) break;
+            const skills = next.invoked_skills ?? [];
+            if (skills.length === 0) continue;
+            for (const name of skills) {
+                out.push({
+                    fromTurnKey: errorTurnKey,
+                    skillKey: skillRecordKey(name),
+                    skillName: name,
+                    ts: tsToIso(next.ts),
+                    errorExcerpt: excerpt,
+                });
+            }
+            break; // first invocation window-step wins
+        }
+    }
+    return out;
+}
+
 const fetchSkillNames = (): Effect.Effect<string[], DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
@@ -260,11 +387,47 @@ const upsertProposed = (edges: ProposedEdge[]) =>
         }
     });
 
+/**
+ * Idempotent RELATE for `skill_paired`. We aggregate counts in-memory across
+ * all sessions in scope, then RELATE once per unique pair using a
+ * deterministic edge id so re-running `derive-signals` overwrites in place
+ * with identical totals (no count drift from re-fires).
+ */
+const upsertSkillPairs = (pairs: SkillPairAccum[], edgeIds: string[]) =>
+    Effect.gen(function* () {
+        if (pairs.length === 0) return;
+        const db = yield* SurrealClient;
+        const stmts = pairs.map((p, i) => {
+            const edgeId = edgeIds[i];
+            return `RELATE skill:\`${p.fromKey}\` -> skill_paired:\`${edgeId}\` -> skill:\`${p.toKey}\` SET count = ${p.count}, last_seen = d"${p.lastSeen}";`;
+        });
+        for (let i = 0; i < stmts.length; i += 500) {
+            yield* db.query(stmts.slice(i, i + 500).join(""));
+        }
+    });
+
+const upsertRecovered = (edges: RecoveryEdge[]) =>
+    Effect.gen(function* () {
+        if (edges.length === 0) return;
+        const db = yield* SurrealClient;
+        const stmts = edges.map((e) => {
+            const edgeId = recoveredByEdgeId(e.fromTurnKey, e.skillKey);
+            const excerpt =
+                e.errorExcerpt === null ? "NONE" : JSON.stringify(e.errorExcerpt);
+            return `RELATE turn:\`${e.fromTurnKey}\` -> recovered_by:\`${edgeId}\` -> skill:\`${e.skillKey}\` SET ts = d"${e.ts}", error_excerpt = ${excerpt};`;
+        });
+        for (let i = 0; i < stmts.length; i += 500) {
+            yield* db.query(stmts.slice(i, i + 500).join(""));
+        }
+    });
+
 export interface DeriveStats {
     sessions: number;
     turns: number;
     corrections: number;
     proposed: number;
+    skillPairs: number;
+    recoveries: number;
 }
 
 export interface DeriveOpts {
@@ -281,31 +444,51 @@ export const deriveSignals = (
         let corrections = 0;
         let proposed = 0;
         let turnCount = 0;
+        let recoveries = 0;
 
         const correctionBatch: CorrectionEdge[] = [];
         const proposedBatch: ProposedEdge[] = [];
+        const recoveryBatch: RecoveryEdge[] = [];
+        const pairsAccum = new Map<string, SkillPairAccum>();
 
         for (const bundle of bundles) {
             turnCount += bundle.turns.length;
             const c = deriveCorrections(bundle);
             const p = deriveProposed(bundle, skillNames);
+            const r = deriveRecovered(bundle);
             corrections += c.length;
             proposed += p.length;
+            recoveries += r.length;
             correctionBatch.push(...c);
             proposedBatch.push(...p);
+            recoveryBatch.push(...r);
+            deriveSkillPairs(bundle, pairsAccum);
         }
+
+        const pairsList = [...pairsAccum.values()];
+        const pairEdgeIds = [...pairsAccum.keys()];
 
         yield* upsertCorrections(correctionBatch);
         yield* upsertProposed(proposedBatch);
+        yield* upsertSkillPairs(pairsList, pairEdgeIds);
+        yield* upsertRecovered(recoveryBatch);
 
         console.log(
             `[derive-signals] DONE sessions=${bundles.length} turns=${turnCount} corrections=${corrections} proposed=${proposed}`,
+        );
+        console.log(
+            `[skill_pairs] DONE sessions=${bundles.length} pairs=${pairsList.length}`,
+        );
+        console.log(
+            `[recovery] DONE sessions=${bundles.length} edges=${recoveries}`,
         );
         return {
             sessions: bundles.length,
             turns: turnCount,
             corrections,
             proposed,
+            skillPairs: pairsList.length,
+            recoveries,
         };
     });
 
