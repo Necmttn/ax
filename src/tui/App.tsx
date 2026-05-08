@@ -10,6 +10,7 @@ import { DetailPane } from "./DetailPane.tsx";
 import { StatusBar } from "./StatusBar.tsx";
 
 const SORT_CYCLE: ReadonlyArray<SortKey> = [
+    "taste_score",
     "inv_30d",
     "inv_7d",
     "total_inv",
@@ -74,7 +75,7 @@ export function App({ client, onQuit }: AppProps) {
 
     const [query, setQuery] = useState("");
     const [mode, setMode] = useState<"list" | "search">("list");
-    const [sortKey, setSortKey] = useState<SortKey>("inv_30d");
+    const [sortKey, setSortKey] = useState<SortKey>("taste_score");
     const [reversed, setReversed] = useState(false);
     const [selectedIndex, setSelectedIndex] = useState(0);
 
