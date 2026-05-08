@@ -218,47 +218,97 @@ const cmdTaste = (args: string[]) =>
         const db = yield* SurrealClient;
         // Composite signal: invocations (positive), errors near invocation
         // (negative), corrections within 3 turns of invocation in the same
-        // session (negative - user pushed back), and proposed-but-not-invoked
-        // (signal of mismatch between assistant suggestions and tool firing).
+        // session (negative - user pushed back), commits produced by sessions
+        // that invoked this skill (positive - led to a real change), and
+        // proposed-but-not-invoked (negative - assistant suggested it but
+        // never fired, wasted suggestion).
         //
         // `corrections` counts invocations where the next user turn within 3
         // seq steps in the same session triggered a corrected_by edge.
+        // `commits_after` counts `produced` edges from sessions that invoked
+        // this skill (proxy for "skill use led to a commit").
         // `proposals` counts proposed edges into this skill.
+        // taste_score = inv_total - 2*corrections + commits_after - 0.5*proposals
+        //
         // NOTE: Filtered counts use explicit `invoked WHERE out = $parent.id`
         // form rather than `<-invoked WHERE ...`. The graph-traversal form
         // materialises the edges first and the WHERE filter then drops every
         // row (returns 0 even when matches exist). See issue #15.
+        //
+        // SurrealQL doesn't let column aliases reference each other in the
+        // same SELECT, so the score formula re-inlines the same sub-queries
+        // we already compute as columns. Keep the two in sync if the formula
+        // changes.
+        // Two-stage SELECT:
+        //
+        // (a) Inner SELECT projects per-skill columns. For commits_after we
+        //     materialise the distinct session set via the graph traversal
+        //     `<-invoked.in.session` (cheap - uses graph storage, not a
+        //     full-table scan of `invoked`). Doing the same lookup with
+        //     `(SELECT VALUE in.session FROM invoked WHERE out = $parent.id)`
+        //     drives a full scan per skill and is ~30x slower.
+        //
+        // (b) Outer SELECT consumes the inner row and computes
+        //     `commits_after` (count of `produced` edges whose session is in
+        //     the skill's session set) plus the taste_score formula. This
+        //     two-stage form is also why aliases like `corrections` /
+        //     `proposals` are visible in the score expression - SurrealDB
+        //     doesn't let aliases reference each other inside the same
+        //     SELECT.
         const sql = `
 SELECT
     name,
     scope,
-    array::len(<-invoked) AS inv_total,
-    (SELECT count() FROM invoked WHERE out = $parent.id AND ts > time::now() - 7d  GROUP ALL)[0].count ?? 0 AS inv_7d,
-    (SELECT count() FROM invoked WHERE out = $parent.id AND ts > time::now() - 30d GROUP ALL)[0].count ?? 0 AS inv_30d,
-    (SELECT count() FROM invoked WHERE out = $parent.id AND in.has_error = false GROUP ALL)[0].count ?? 0 AS clean_inv,
-    array::len((
-        SELECT * FROM invoked
-        WHERE out = $parent.id
-          AND array::len((
-            SELECT * FROM corrected_by
-            WHERE in.session = $parent.in.session
-              AND in.seq >= $parent.in.seq
-              AND in.seq <= $parent.in.seq + 3
-        )) > 0
-    )) AS corrections,
-    array::len(<-proposed) AS proposals
-FROM skill
-WHERE array::len(<-invoked) > 0 OR array::len(<-proposed) > 0
-ORDER BY inv_30d DESC, clean_inv DESC, inv_total DESC
+    inv_total,
+    inv_7d,
+    inv_30d,
+    clean_inv,
+    corrections,
+    proposals,
+    array::len((SELECT id FROM produced WHERE in IN $parent.skill_sessions)) AS commits_after,
+    (
+        inv_total
+        - 2 * corrections
+        + array::len((SELECT id FROM produced WHERE in IN $parent.skill_sessions))
+        - 0.5 * proposals
+    ) AS taste_score
+FROM (
+    SELECT
+        name,
+        scope,
+        array::distinct(<-invoked.in.session) AS skill_sessions,
+        array::len(<-invoked) AS inv_total,
+        (SELECT count() FROM invoked WHERE out = $parent.id AND ts > time::now() - 7d  GROUP ALL)[0].count ?? 0 AS inv_7d,
+        (SELECT count() FROM invoked WHERE out = $parent.id AND ts > time::now() - 30d GROUP ALL)[0].count ?? 0 AS inv_30d,
+        (SELECT count() FROM invoked WHERE out = $parent.id AND in.has_error = false GROUP ALL)[0].count ?? 0 AS clean_inv,
+        array::len((
+            SELECT * FROM invoked
+            WHERE out = $parent.id
+              AND array::len((
+                SELECT * FROM corrected_by
+                WHERE in.session = $parent.in.session
+                  AND in.seq >= $parent.in.seq
+                  AND in.seq <= $parent.in.seq + 3
+            )) > 0
+        )) AS corrections,
+        array::len(<-proposed) AS proposals
+    FROM skill
+    WHERE array::len(<-invoked) > 0 OR array::len(<-proposed) > 0
+)
+ORDER BY taste_score DESC, inv_30d DESC, inv_total DESC
 LIMIT ${limit};`;
         const result = yield* db.query<[Array<Record<string, unknown>>]>(sql);
         const rows = result?.[0];
+        const fmtScore = (n: unknown): string => {
+            const v = Number(n ?? 0);
+            return Number.isInteger(v) ? String(v) : v.toFixed(1);
+        };
         console.log(
-            `${"skill".padEnd(50)}  ${"scope".padEnd(16)}  7d  30d  total  clean  corr  prop`,
+            `${"skill".padEnd(50)}  ${"scope".padEnd(16)}  score  7d  30d  total  clean  corr  prop  cmts`,
         );
         for (const r of rows ?? []) {
             console.log(
-                `${String(r.name).padEnd(50)}  ${String(r.scope).padEnd(16)}  ${String(r.inv_7d).padStart(2)}  ${String(r.inv_30d).padStart(3)}  ${String(r.inv_total).padStart(5)}  ${String(r.clean_inv).padStart(5)}  ${String(r.corrections ?? 0).padStart(4)}  ${String(r.proposals ?? 0).padStart(4)}`,
+                `${String(r.name).padEnd(50)}  ${String(r.scope).padEnd(16)}  ${fmtScore(r.taste_score).padStart(5)}  ${String(r.inv_7d).padStart(2)}  ${String(r.inv_30d).padStart(3)}  ${String(r.inv_total).padStart(5)}  ${String(r.clean_inv).padStart(5)}  ${String(r.corrections ?? 0).padStart(4)}  ${String(r.proposals ?? 0).padStart(4)}  ${String(r.commits_after ?? 0).padStart(4)}`,
             );
         }
     });
