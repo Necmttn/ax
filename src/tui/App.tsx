@@ -63,14 +63,14 @@ interface AppProps {
  * in search mode; otherwise the list takes our keystrokes.
  */
 export function App({ client, onQuit }: AppProps) {
-    const liveTick = useLiveInvocations(client);
+    const live = useLiveInvocations(client, true);
     const skills = useSkills(client);
 
     // Re-fetch the list whenever live tick advances.
     useEffect(() => {
-        if (liveTick > 0) skills.refresh();
+        if (live.tick > 0) skills.refresh();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [liveTick]);
+    }, [live.tick]);
 
     const [query, setQuery] = useState("");
     const [mode, setMode] = useState<"list" | "search">("list");
@@ -95,7 +95,7 @@ export function App({ client, onQuit }: AppProps) {
     }, [visibleRows, selectedIndex]);
 
     const selectedSkill = visibleRows[selectedIndex] ?? null;
-    const detail = useSkillDetail(client, selectedSkill?.name ?? null, liveTick);
+    const detail = useSkillDetail(client, selectedSkill?.name ?? null, live.tick);
 
     useKeyboard((key) => {
         // Search mode: only intercept escape; let the input handle everything else.
@@ -198,6 +198,7 @@ export function App({ client, onQuit }: AppProps) {
                 total={skills.data.length}
                 mode={mode}
                 error={errorMessage}
+                lastEvent={live.lastEvent}
             />
         </box>
     );
