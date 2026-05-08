@@ -9,6 +9,7 @@ import { ingestCodex } from "../ingest/codex.ts";
 import { ingestGit } from "../ingest/git.ts";
 import { deriveSignals } from "../ingest/derive-signals.ts";
 import { cmdInstall, cmdUninstall } from "./install.ts";
+import { cmdProject } from "./project.ts";
 
 const HELP = `agentctl - agent telemetry & taste graph
 
@@ -22,6 +23,8 @@ Usage:
   agentctl taste [--limit=N]
   agentctl pairs <skill> [--limit=N]
   agentctl recovery [--limit=N]
+  agentctl project context [--json]
+  agentctl project verify [--json]
   agentctl tui
   agentctl install            # one-shot setup: daemon + watcher + symlink
   agentctl uninstall
@@ -855,6 +858,8 @@ const dispatch = (
             return cmdPairs(rest);
         case "recovery":
             return cmdRecovery(rest);
+        case "project":
+            return cmdProject(rest);
         default:
             return null;
     }
