@@ -17,6 +17,7 @@ Usage:
   agentctl recent [--limit=N]
   agentctl unused [--days=N]
   agentctl taste [--limit=N]
+  agentctl tui
   agentctl help
 `;
 
@@ -253,6 +254,14 @@ async function main() {
     const [, , cmd, ...rest] = process.argv;
     if (cmd === undefined || cmd === "help" || cmd === "--help" || cmd === "-h") {
         console.log(HELP);
+        return;
+    }
+    if (cmd === "tui") {
+        // TUI manages its own AppLayer scope so the SurrealDB connection
+        // outlives the React tree. Dynamic import keeps React/opentui out
+        // of the load path for non-TUI commands.
+        const { runTui } = await import("../tui/index.tsx");
+        await runTui();
         return;
     }
     const program = dispatch(cmd, rest);

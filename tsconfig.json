@@ -7,6 +7,8 @@
     "moduleDetection": "force",
     "verbatimModuleSyntax": false,
     "allowImportingTsExtensions": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "@opentui/react",
     "noEmit": true,
     "incremental": true,
     "strict": true,
@@ -21,5 +23,5 @@
       { "name": "@effect/language-service" }
     ]
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx"]
 }
