@@ -5,13 +5,14 @@ import { AppLayer } from "../lib/layers.ts";
 import { ingestSkills } from "../ingest/skills.ts";
 import { ingestTranscripts } from "../ingest/transcripts.ts";
 import { ingestCodex } from "../ingest/codex.ts";
+import { ingestGit } from "../ingest/git.ts";
 import { deriveSignals } from "../ingest/derive-signals.ts";
 import { cmdInstall, cmdUninstall } from "./install.ts";
 
 const HELP = `agentctl - agent telemetry & taste graph
 
 Usage:
-  agentctl ingest [--skills-only|--transcripts-only] [--since=DAYS]
+  agentctl ingest [--skills-only|--transcripts-only|--codex-only|--git-only|--claude-only] [--since=DAYS]
   agentctl derive-signals [--since=DAYS]
   agentctl search <query> [--limit=N]
   agentctl stats <skill>
@@ -35,14 +36,23 @@ const cmdIngest = (args: string[]) =>
         const transcriptsOnly = args.includes("--transcripts-only");
         const claudeOnly = args.includes("--claude-only");
         const codexOnly = args.includes("--codex-only");
+        const gitOnly = args.includes("--git-only");
         const sinceArg = flag("since", args);
         const sinceDays = sinceArg ? parseInt(sinceArg, 10) : undefined;
-        if (!transcriptsOnly && !codexOnly) yield* ingestSkills();
-        if (!skillsOnly && !codexOnly) yield* ingestTranscripts({ sinceDays });
-        if (!skillsOnly && !claudeOnly) yield* ingestCodex({ sinceDays });
+        // Each "--X-only" flag suppresses every step except its own. Combining
+        // multiple is effectively "only run nothing", which we treat as a no-op
+        // (consistent with how the existing skills/codex flags compose).
+        if (!transcriptsOnly && !codexOnly && !gitOnly) yield* ingestSkills();
+        if (!skillsOnly && !codexOnly && !gitOnly)
+            yield* ingestTranscripts({ sinceDays });
+        if (!skillsOnly && !claudeOnly && !gitOnly && !transcriptsOnly)
+            yield* ingestCodex({ sinceDays });
+        if (!skillsOnly && !transcriptsOnly && !codexOnly && !claudeOnly)
+            yield* ingestGit({ sinceDays });
         // Auto-derive signals so taste queries always see fresh
         // corrected_by / proposed edges. Cheap: O(turns) in-memory walk.
-        if (!skillsOnly) yield* deriveSignals({ sinceDays });
+        // Skip when only running git ingest - signals don't depend on commits.
+        if (!skillsOnly && !gitOnly) yield* deriveSignals({ sinceDays });
     });
 
 const cmdDeriveSignals = (args: string[]) =>
