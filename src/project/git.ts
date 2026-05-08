@@ -74,7 +74,8 @@ function parseStatusLine(line: string): ProjectFileChange | null {
     const stagedStatus = line[0] ?? " ";
     const unstagedStatus = line[1] ?? " ";
     const rawPath = line.slice(3);
-    const path = rawPath.includes(" -> ") ? rawPath.split(" -> ").at(-1)! : rawPath;
+    const isRenameOrCopy = stagedStatus === "R" || stagedStatus === "C";
+    const path = isRenameOrCopy && rawPath.includes(" -> ") ? rawPath.split(" -> ").at(-1)! : rawPath;
     const untracked = stagedStatus === "?" && unstagedStatus === "?";
     return {
         path,
@@ -110,6 +111,14 @@ export const getGitState = (cwd = process.cwd()): Effect.Effect<GitState> =>
             runGit(root, ["status", "--porcelain=v1", "-b"]),
             runGit(root, ["rev-parse", "--short", "HEAD"]),
         ]);
+
+        if (status.code !== 0) {
+            return yield* Effect.die(
+                new Error(
+                    `git status failed in ${root} with exit code ${status.code}\nstdout:\n${status.stdout}\nstderr:\n${status.stderr}`,
+                ),
+            );
+        }
 
         const lines = status.stdout.split("\n").filter((line) => line.length > 0);
         const branch = lines.length > 0 ? parseBranch(lines[0]!) : null;
