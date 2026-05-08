@@ -243,9 +243,14 @@ export const ingestCodex = (
                 yield* db.query(skillStmts.join(""));
             }
 
+            // Codex transcripts don't surface tool errors at the turn level
+            // (errors live inside `function_call_output` payloads we don't
+            // currently parse), so `turn_has_error` is always false here.
+            // The field is set explicitly anyway so the edge has the same
+            // shape as Claude-source edges (see issue #31).
             const invStmts = extracted.invocations.map(
                 (inv) =>
-                    `RELATE turn:\`${turnRecordKey(inv.session, inv.seq)}\`->invoked->skill:\`${skillRecordKey(inv.skill)}\` SET ts = d"${inv.ts}", args = ${JSON.stringify(JSON.stringify(inv.args))};`,
+                    `RELATE turn:\`${turnRecordKey(inv.session, inv.seq)}\`->invoked->skill:\`${skillRecordKey(inv.skill)}\` SET ts = d"${inv.ts}", args = ${JSON.stringify(JSON.stringify(inv.args))}, turn_has_error = false;`,
             );
             for (let i = 0; i < invStmts.length; i += 500) {
                 yield* db.query(invStmts.slice(i, i + 500).join(""));

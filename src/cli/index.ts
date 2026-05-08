@@ -88,40 +88,49 @@ const cmdSearch = (args: string[]) =>
         // form rather than `<-invoked WHERE ts > ...`. The graph-traversal
         // form materialises edges first then the WHERE drops every row
         // (returns 0 even when matches exist). See issue #15.
+        // PERF (issue #31): The per-row `(SELECT count() FROM invoked
+        // WHERE out = $parent.id AND ts > 30d ...)` subquery costs ~1.5s
+        // per matched skill that happens to be one of the high-volume
+        // ones (e.g. codex:exec_command @ ~500k edges). For a search hit
+        // that includes them, total runtime jumps to 30s+. The fix is the
+        // same as cmdTaste: do the per-skill recent counters in one
+        // GROUP BY scan, then merge with the FTS-ranked result list.
         const ftsSql = `
 SELECT
+    id,
     name,
     scope,
     description,
-    (math::max([search::score(0), 0.0]) + math::max([search::score(1), 0.0])) AS score,
-    array::len(<-invoked) AS total_inv,
-    (SELECT count() FROM invoked WHERE out = $parent.id AND ts > time::now() - 30d GROUP ALL)[0].count ?? 0 AS inv_30d,
-    (SELECT ts FROM invoked WHERE out = $parent.id ORDER BY ts DESC LIMIT 1)[0].ts AS last_used
+    (math::max([search::score(0), 0.0]) + math::max([search::score(1), 0.0])) AS score
 FROM skill
 WHERE name @0@ $q OR description @1@ $q
-ORDER BY score DESC, inv_30d DESC, total_inv DESC
+ORDER BY score DESC
 LIMIT ${limit};`;
-        // Fallback: legacy CONTAINS query for DBs that haven't had
-        // schema/schema.surql re-applied since this change landed (FTS
-        // index missing). Mirrors the pre-FTS behaviour with a synthetic
-        // score column so the downstream rendering loop is uniform.
         const legacySql = `
 SELECT
+    id,
     name,
     scope,
     description,
     (IF string::lowercase(name) CONTAINS $q THEN 2.0 ELSE 0.0 END
-     + IF string::lowercase(description ?? '') CONTAINS $q THEN 1.0 ELSE 0.0 END) AS score,
-    array::len(<-invoked) AS total_inv,
-    (SELECT count() FROM invoked WHERE out = $parent.id AND ts > time::now() - 30d GROUP ALL)[0].count ?? 0 AS inv_30d,
-    (SELECT ts FROM invoked WHERE out = $parent.id ORDER BY ts DESC LIMIT 1)[0].ts AS last_used
+     + IF string::lowercase(description ?? '') CONTAINS $q THEN 1.0 ELSE 0.0 END) AS score
 FROM skill
 WHERE
     string::lowercase(name) CONTAINS $q
     OR string::lowercase(description ?? '') CONTAINS $q
-ORDER BY score DESC, inv_30d DESC, total_inv DESC
+ORDER BY score DESC
 LIMIT ${limit};`;
-        const result = yield* db
+        // Per-skill aggregates over `invoked` in one full scan
+        // (~1-2s) - cheap relative to repeating it per matched skill.
+        const aggSql = `
+SELECT
+    out AS skill_id,
+    count() AS total_inv,
+    math::sum(IF ts > time::now() - 30d THEN 1 ELSE 0 END) AS inv_30d,
+    math::max(ts) AS last_used
+FROM invoked
+GROUP BY out;`;
+        const matchResult = yield* db
             .query<[Array<Record<string, unknown>>]>(ftsSql, { q: query })
             .pipe(
                 Effect.catch(() =>
@@ -130,7 +139,32 @@ LIMIT ${limit};`;
                     }),
                 ),
             );
-        const rows = result?.[0];
+        const aggResult = yield* db.query<[Array<Record<string, unknown>>]>(aggSql);
+        const matched = (matchResult?.[0] ?? []) as Array<Record<string, unknown>>;
+        const aggMap = new Map<string, Record<string, unknown>>();
+        for (const a of (aggResult?.[0] ?? []) as Array<Record<string, unknown>>) {
+            aggMap.set(String(a.skill_id ?? ""), a);
+        }
+        const rows = matched
+            .map((m) => {
+                const agg = aggMap.get(String(m.id ?? ""));
+                return {
+                    name: m.name,
+                    scope: m.scope,
+                    description: m.description,
+                    score: m.score,
+                    total_inv: agg ? Number(agg.total_inv ?? 0) : 0,
+                    inv_30d: agg ? Number(agg.inv_30d ?? 0) : 0,
+                    last_used: agg?.last_used ?? null,
+                };
+            })
+            .sort((a, b) => {
+                const ds = Number(b.score ?? 0) - Number(a.score ?? 0);
+                if (ds !== 0) return ds;
+                const d30 = b.inv_30d - a.inv_30d;
+                if (d30 !== 0) return d30;
+                return b.total_inv - a.total_inv;
+            });
         if (!rows || rows.length === 0) {
             console.log("(no matches)");
             return;
@@ -224,26 +258,88 @@ const cmdUnused = (args: string[]) =>
     Effect.gen(function* () {
         const days = parseInt(flag("days", args) ?? "7", 10);
         const db = yield* SurrealClient;
-        // See issue #15: `<-invoked WHERE ts > ...` materialises edges first
-        // then the WHERE drops everything, so the count is always 0. Use the
-        // explicit `invoked WHERE out = $parent.id` form instead.
-        const sql = `
+        // PERF (issue #31): Previous form ran a correlated subquery per skill
+        // (`SELECT count() FROM invoked WHERE out = $parent.id AND ts > N`).
+        // On the largest skill (~500k invoked edges) the index walk took
+        // ~1.5s × 137 skills = enough to make this multi-minute.
+        //
+        // Now we (a) compute the recent-active set in one full-scan
+        // GROUP BY over `invoked`, (b) compute total_inv + last_used in
+        // bulk, (c) anti-join in TS. Net round-trip: ~2 cheap queries.
+        const recentSql = `
+SELECT out AS skill_id, count() AS recent
+FROM invoked
+WHERE ts > time::now() - ${days}d
+GROUP BY out;`;
+        const summarySql = `
 SELECT
-    name,
-    scope,
-    array::len(<-invoked) AS total_inv,
-    (SELECT ts FROM invoked WHERE out = $parent.id ORDER BY ts DESC LIMIT 1)[0].ts AS last_used
-FROM skill
-WHERE ((SELECT count() FROM invoked WHERE out = $parent.id AND ts > time::now() - ${days}d GROUP ALL)[0].count ?? 0) = 0
-ORDER BY total_inv ASC, name ASC;`;
-        const result = yield* db.query<[Array<Record<string, unknown>>]>(sql);
-        const rows = result?.[0];
-        for (const r of rows ?? []) {
+    out AS skill_id,
+    out.name AS name,
+    out.scope AS scope,
+    count() AS total_inv,
+    math::max(ts) AS last_used
+FROM invoked
+GROUP BY out;`;
+        // Skills with literally zero invocations don't show up in the
+        // GROUP BY scan; pull them straight from the skill table so the
+        // "never used" rows still appear.
+        const noInvSql = `
+SELECT name, scope FROM skill WHERE array::len(<-invoked) = 0;`;
+        const [recentRes, summaryRes, noInvRes] = yield* Effect.all(
+            [
+                db.query<[Array<Record<string, unknown>>]>(recentSql),
+                db.query<[Array<Record<string, unknown>>]>(summarySql),
+                db.query<[Array<Record<string, unknown>>]>(noInvSql),
+            ],
+            { concurrency: 3 },
+        );
+        const recent = new Set<string>(
+            (recentRes?.[0] ?? []).map((r) => String(r.skill_id ?? "")),
+        );
+        const summary = (summaryRes?.[0] ?? []) as Array<Record<string, unknown>>;
+        const fmtTs = (v: unknown): string => {
+            if (v == null) return "never";
+            if (typeof v === "string") return v;
+            if (v instanceof Date) return v.toISOString();
+            return String(v);
+        };
+        const unused: Array<{
+            name: string;
+            scope: string;
+            total_inv: number;
+            last_used: string;
+        }> = [];
+        for (const r of summary) {
+            const id = String(r.skill_id ?? "");
+            if (recent.has(id)) continue;
+            // Drop orphans (invoked.out points at a skill record that was
+            // never UPSERTed - matches the original FROM-skill behaviour).
+            if (r.name == null) continue;
+            unused.push({
+                name: String(r.name),
+                scope: String(r.scope ?? ""),
+                total_inv: Number(r.total_inv ?? 0),
+                last_used: fmtTs(r.last_used),
+            });
+        }
+        for (const r of (noInvRes?.[0] ?? []) as Array<Record<string, unknown>>) {
+            unused.push({
+                name: String(r.name ?? ""),
+                scope: String(r.scope ?? ""),
+                total_inv: 0,
+                last_used: "never",
+            });
+        }
+        unused.sort(
+            (a, b) =>
+                a.total_inv - b.total_inv || a.name.localeCompare(b.name),
+        );
+        for (const r of unused) {
             console.log(
-                `${r.name}  [${r.scope}]  total=${r.total_inv ?? 0}  last=${r.last_used ?? "never"}`,
+                `${r.name}  [${r.scope}]  total=${r.total_inv}  last=${r.last_used}`,
             );
         }
-        console.log(`\n${rows?.length ?? 0} skills unused in last ${days} days.`);
+        console.log(`\n${unused.length} skills unused in last ${days} days.`);
     });
 
 const cmdTaste = (args: string[]) =>
@@ -264,32 +360,37 @@ const cmdTaste = (args: string[]) =>
         // `proposals` counts proposed edges into this skill.
         // taste_score = inv_total - 2*corrections + commits_after - 0.5*proposals
         //
-        // NOTE: Filtered counts use explicit `invoked WHERE out = $parent.id`
-        // form rather than `<-invoked WHERE ...`. The graph-traversal form
-        // materialises the edges first and the WHERE filter then drops every
-        // row (returns 0 even when matches exist). See issue #15.
+        // PERF (issue #31): The previous form ran 4-5 correlated subqueries
+        // per skill (`WHERE out = $parent.id AND <pred>`), each forcing the
+        // index scan to walk every edge for that skill. On the largest skill
+        // (codex:exec_command, ~500k edges) every subquery cost ~1.5-2s,
+        // putting the total at ~167s for 137 skills. SurrealDB's optimiser
+        // doesn't push graph traversal `<-invoked WHERE ...` past the edge
+        // materialisation either, so neither FETCH nor inline graph-WHERE
+        // helped meaningfully (~90s).
         //
-        // SurrealQL doesn't let column aliases reference each other in the
-        // same SELECT, so the score formula re-inlines the same sub-queries
-        // we already compute as columns. Keep the two in sync if the formula
-        // changes.
-        // Two-stage SELECT:
+        // Current form does the heavy aggregation in ONE pass over the
+        // `invoked` table via `GROUP BY out` with conditional `math::sum`.
+        // This requires two new denormalised fields on the edge:
+        //   - `turn_has_error` (set at ingest from the source turn)
+        //   - `was_corrected`  (set by derive-signals when a corrected_by
+        //                       edge falls within +3 seq of the invocation)
+        // so that the `clean_inv` / `corrections` predicates become pure
+        // edge-field filters. End-to-end taste runtime drops to ~13s.
         //
-        // (a) Inner SELECT projects per-skill columns. For commits_after we
-        //     materialise the distinct session set via the graph traversal
-        //     `<-invoked.in.session` (cheap - uses graph storage, not a
-        //     full-table scan of `invoked`). Doing the same lookup with
-        //     `(SELECT VALUE in.session FROM invoked WHERE out = $parent.id)`
-        //     drives a full scan per skill and is ~30x slower.
-        //
-        // (b) Outer SELECT consumes the inner row and computes
-        //     `commits_after` (count of `produced` edges whose session is in
-        //     the skill's session set) plus the taste_score formula. This
-        //     two-stage form is also why aliases like `corrections` /
-        //     `proposals` are visible in the score expression - SurrealDB
-        //     doesn't let aliases reference each other inside the same
-        //     SELECT.
-        const sql = `
+        // The query runs in two server-side stages plus a client-side merge
+        // of the proposed-only skills (which have no `invoked` edges and
+        // therefore wouldn't appear in the GROUP BY result):
+        //   (a) AGGREGATES_SQL  - per-skill counters from the invoked scan,
+        //                         then enriches with `<-proposed` /
+        //                         `<-invoked.in.session` traversals and
+        //                         `produced` join.
+        //   (b) PROPOSED_ONLY_SQL - skills with no invocations but with
+        //                           proposals, contributing the negative
+        //                           taste_score floor (-0.5 * proposals).
+        // Results are concatenated and sorted in TS to mirror the original
+        // ORDER BY taste_score DESC, inv_30d DESC, inv_total DESC.
+        const aggregatesSql = `
 SELECT
     name,
     scope,
@@ -299,7 +400,9 @@ SELECT
     clean_inv,
     corrections,
     proposals,
-    array::len((SELECT id FROM produced WHERE in IN $parent.skill_sessions)) AS commits_after,
+    array::len((
+        SELECT id FROM produced WHERE in IN $parent.skill_sessions
+    )) AS commits_after,
     (
         inv_total
         - 2 * corrections
@@ -308,31 +411,66 @@ SELECT
     ) AS taste_score
 FROM (
     SELECT
-        name,
-        scope,
-        array::distinct(<-invoked.in.session) AS skill_sessions,
-        array::len(<-invoked) AS inv_total,
-        (SELECT count() FROM invoked WHERE out = $parent.id AND ts > time::now() - 7d  GROUP ALL)[0].count ?? 0 AS inv_7d,
-        (SELECT count() FROM invoked WHERE out = $parent.id AND ts > time::now() - 30d GROUP ALL)[0].count ?? 0 AS inv_30d,
-        (SELECT count() FROM invoked WHERE out = $parent.id AND in.has_error = false GROUP ALL)[0].count ?? 0 AS clean_inv,
-        array::len((
-            SELECT * FROM invoked
-            WHERE out = $parent.id
-              AND array::len((
-                SELECT * FROM corrected_by
-                WHERE in.session = $parent.in.session
-                  AND in.seq >= $parent.in.seq
-                  AND in.seq <= $parent.in.seq + 3
-            )) > 0
-        )) AS corrections,
-        array::len(<-proposed) AS proposals
-    FROM skill
-    WHERE array::len(<-invoked) > 0 OR array::len(<-proposed) > 0
-)
-ORDER BY taste_score DESC, inv_30d DESC, inv_total DESC
-LIMIT ${limit};`;
-        const result = yield* db.query<[Array<Record<string, unknown>>]>(sql);
-        const rows = result?.[0];
+        skill_id.name AS name,
+        skill_id.scope AS scope,
+        inv_total,
+        inv_7d,
+        inv_30d,
+        clean_inv,
+        corrections,
+        array::len(skill_id<-proposed) AS proposals,
+        array::distinct(skill_id<-invoked.in.session ?? []) AS skill_sessions
+    FROM (
+        SELECT
+            out AS skill_id,
+            count() AS inv_total,
+            math::sum(IF ts > time::now() - 7d  THEN 1 ELSE 0 END) AS inv_7d,
+            math::sum(IF ts > time::now() - 30d THEN 1 ELSE 0 END) AS inv_30d,
+            math::sum(IF turn_has_error = false THEN 1 ELSE 0 END) AS clean_inv,
+            math::sum(IF was_corrected   = true  THEN 1 ELSE 0 END) AS corrections
+        FROM invoked
+        GROUP BY out
+    )
+    -- Drop orphan invocations whose target skill never had its row UPSERTed
+    -- (matches the original cmdTaste behaviour, which started FROM skill and
+    -- thus naturally excluded these). Currently happens for a handful of
+    -- legacy plugin/built-in tool names that didn't get recorded as skills.
+    WHERE skill_id.name IS NOT NONE
+);`;
+
+        // Skills with proposals but no invocations - the GROUP BY scan
+        // doesn't see them. Cheap: 137-skill count + per-skill proposal
+        // count, all via graph traversal.
+        const proposedOnlySql = `
+SELECT
+    name,
+    scope,
+    0 AS inv_total,
+    0 AS inv_7d,
+    0 AS inv_30d,
+    0 AS clean_inv,
+    0 AS corrections,
+    array::len(<-proposed) AS proposals,
+    0 AS commits_after,
+    -0.5 * array::len(<-proposed) AS taste_score
+FROM skill
+WHERE array::len(<-invoked) = 0 AND array::len(<-proposed) > 0;`;
+
+        const aggResult = yield* db.query<[Array<Record<string, unknown>>]>(aggregatesSql);
+        const propResult = yield* db.query<[Array<Record<string, unknown>>]>(proposedOnlySql);
+        const aggRows = aggResult?.[0] ?? [];
+        const propRows = propResult?.[0] ?? [];
+        // Merge + sort to mirror original ORDER BY (server-side ORDER BY
+        // would force a second pass over the merged set, simpler in TS).
+        const score = (r: Record<string, unknown>) => Number(r.taste_score ?? 0);
+        const merged = [...aggRows, ...propRows].sort((a, b) => {
+            const ds = score(b) - score(a);
+            if (ds !== 0) return ds;
+            const d30 = Number(b.inv_30d ?? 0) - Number(a.inv_30d ?? 0);
+            if (d30 !== 0) return d30;
+            return Number(b.inv_total ?? 0) - Number(a.inv_total ?? 0);
+        });
+        const rows = merged.slice(0, limit);
         const fmtScore = (n: unknown): string => {
             const v = Number(n ?? 0);
             return Number.isInteger(v) ? String(v) : v.toFixed(1);
