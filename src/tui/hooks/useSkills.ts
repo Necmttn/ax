@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Effect } from "effect";
 import { flushSync } from "@opentui/react";
 import type { SurrealClientShape } from "../../lib/db.ts";
-import { SKILL_SUMMARY_SQL } from "../queries.ts";
+import { SKILL_SUMMARY_SQL, SKILL_SUMMARY_PROPOSED_ONLY_SQL } from "../queries.ts";
 
 export interface SkillRow {
     readonly name: string;
@@ -45,12 +45,31 @@ export function useSkills(client: SurrealClientShape): SkillsState {
 
     useEffect(() => {
         let cancelled = false;
+        // Two queries because SurrealDB can't UNION SELECTs and the
+        // GROUP BY scan over `invoked` (the fast path post-#31) doesn't
+        // see skills that only have `proposed` edges. Both queries run
+        // in one round-trip from the SDK's perspective; the second is
+        // cheap (~tens of ms).
         Effect.runPromise(
-            client.query<[Array<SkillRow>]>(SKILL_SUMMARY_SQL),
+            Effect.all(
+                [
+                    client.query<[Array<SkillRow>]>(SKILL_SUMMARY_SQL),
+                    client.query<[Array<SkillRow>]>(SKILL_SUMMARY_PROPOSED_ONLY_SQL),
+                ],
+                { concurrency: 2 },
+            ),
         )
-            .then((result) => {
+            .then(([invokedResult, proposedResult]) => {
                 if (cancelled || !aliveRef.current) return;
-                const rows = (result?.[0] ?? []) as Array<SkillRow>;
+                const invokedRows = (invokedResult?.[0] ?? []) as Array<SkillRow>;
+                const proposedRows = (proposedResult?.[0] ?? []) as Array<SkillRow>;
+                const rows = [...invokedRows, ...proposedRows].sort((a, b) => {
+                    const ds = (b.taste_score ?? 0) - (a.taste_score ?? 0);
+                    if (ds !== 0) return ds;
+                    const d30 = (b.inv_30d ?? 0) - (a.inv_30d ?? 0);
+                    if (d30 !== 0) return d30;
+                    return (b.total_inv ?? 0) - (a.total_inv ?? 0);
+                });
                 // Coerce dates from RecordId/Date to ISO string so render code
                 // can treat the field as a primitive.
                 const normalised = rows.map((r) => ({

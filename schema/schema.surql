@@ -84,6 +84,18 @@ DEFINE INDEX commit_sha_uq  ON commit FIELDS repo, sha UNIQUE;
 DEFINE TABLE invoked      TYPE RELATION FROM turn TO skill;     -- explicit Skill tool call
 DEFINE FIELD args         ON invoked TYPE option<string>;       -- JSON-encoded
 DEFINE FIELD ts           ON invoked TYPE datetime;
+-- Denormalised copies of the source turn's `has_error` and "was corrected
+-- within 3 user turns" flags. cmdTaste's `clean_inv` / `corrections`
+-- subqueries previously dereferenced `in.has_error` / walked `corrected_by`
+-- per row, which forced a per-edge record fetch (~1-2s on the largest skill
+-- × 137 skills). With these flags on the edge, the same counts collapse to a
+-- single full-scan GROUP BY out aggregate (see issue #31). Default `false`
+-- so freshly-relate'd edges never carry NONE (which would break the
+-- `WHERE turn_has_error = false` predicate). Populated at ingest
+-- (transcripts.ts, codex.ts) and updated by derive-signals when a
+-- corrected_by edge is emitted.
+DEFINE FIELD turn_has_error ON invoked TYPE bool DEFAULT false;
+DEFINE FIELD was_corrected  ON invoked TYPE bool DEFAULT false;
 -- Most cmdTaste/cmdSearch/cmdUnused subqueries filter
 -- `WHERE out = $skill_id AND ts > time::now() - Nd`. Composite index
 -- covers both predicates from one seek.

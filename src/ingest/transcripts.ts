@@ -32,6 +32,11 @@ interface Invocation {
     ts: string;
     skill: string;
     args: unknown;
+    // Snapshot of the source turn's `has_error` at relate time. Denormalised
+    // onto the edge so cmdTaste's `clean_inv` count can hit a single
+    // GROUP BY scan instead of dereferencing `in.has_error` per row (~30x
+    // slower on the largest skills). See issue #31.
+    turn_has_error: boolean;
 }
 
 interface Edit {
@@ -130,6 +135,11 @@ async function extractFile(filePath: string, projectDir: string): Promise<FileEx
         let textExcerpt: string | null = null;
         let hasToolUse = false;
         let hasError = false;
+        // Track invocation indices added this iteration so we can backfill
+        // `turn_has_error` once `hasError` is finalised below (a tool_result
+        // block later in the same content array can flip it after the
+        // tool_use that emitted the invocation).
+        const turnInvStart = invocations.length;
 
         for (const block of content) {
             if (block.type === "text" && typeof block.text === "string" && !textExcerpt) {
@@ -149,6 +159,11 @@ async function extractFile(filePath: string, projectDir: string): Promise<FileEx
                             ts,
                             skill: skillName,
                             args: block.input,
+                            // Backfilled after the content loop below; assistant
+                            // turns essentially never carry has_error in current
+                            // data (it lives on tool_result turns) but we set
+                            // the field correctly in case future capture changes.
+                            turn_has_error: false,
                         });
                     }
                 } else if (
@@ -173,6 +188,15 @@ async function extractFile(filePath: string, projectDir: string): Promise<FileEx
             }
             if (block.type === "tool_result" && (block as { is_error?: boolean }).is_error) {
                 hasError = true;
+            }
+        }
+
+        // Propagate the (now finalised) hasError onto every invocation
+        // emitted by this turn so the edge-side flag matches the turn-side
+        // one. Cheap: O(skills_invoked_this_turn).
+        if (hasError) {
+            for (let i = turnInvStart; i < invocations.length; i += 1) {
+                invocations[i].turn_has_error = true;
             }
         }
 
@@ -262,7 +286,7 @@ const relateInvocations = (invocations: Invocation[]) =>
         const db = yield* SurrealClient;
         const stmts = invocations.map(
             (inv) =>
-                `RELATE turn:\`${turnRecordKey(inv.session, inv.seq)}\`->invoked->skill:\`${skillRecordKey(inv.skill)}\` SET ts = d"${inv.ts}", args = ${JSON.stringify(JSON.stringify(inv.args))};`,
+                `RELATE turn:\`${turnRecordKey(inv.session, inv.seq)}\`->invoked->skill:\`${skillRecordKey(inv.skill)}\` SET ts = d"${inv.ts}", args = ${JSON.stringify(JSON.stringify(inv.args))}, turn_has_error = ${inv.turn_has_error};`,
         );
         for (let i = 0; i < stmts.length; i += 500) {
             yield* db.query(stmts.slice(i, i + 500).join(""));

@@ -155,6 +155,12 @@ interface CorrectionEdge {
     toTurnKey: string;
     pattern: string;
     ts: string;
+    // Session + seq of the corrected (assistant) turn. Used to mark
+    // invoked edges as `was_corrected = true` for any invocation whose
+    // turn falls in [correctedSeq - 3, correctedSeq] (matches the
+    // pre-denormalisation cmdTaste +3 seq window). See issue #31.
+    correctedSession: string;
+    correctedSeq: number;
 }
 
 interface ProposedEdge {
@@ -197,6 +203,8 @@ function deriveCorrections(bundle: SessionTurns): CorrectionEdge[] {
                 toTurnKey: rawTurnKey(t.id),
                 pattern: matched,
                 ts: tsToIso(t.ts),
+                correctedSession: bundle.sessionId,
+                correctedSeq: prev.seq,
             });
         }
         // After a user turn fires, reset the anchor so the next correction
@@ -374,6 +382,48 @@ const upsertCorrections = (edges: CorrectionEdge[]) =>
         }
     });
 
+/**
+ * For each correction edge, mark every `invoked` edge whose source turn falls
+ * in `[correctedSeq - 3, correctedSeq]` of the same session as
+ * `was_corrected = true`. This denormalises the +3-seq-window check that
+ * cmdTaste's `corrections` subquery used to do per row (~6s on the largest
+ * skill); after this, the same count becomes a single GROUP BY scan with no
+ * record fetch. See issue #31.
+ *
+ * The window is inclusive on both ends: an invocation IS considered
+ * corrected if its turn is the one that got pushed back, OR if a later turn
+ * within 3 steps got pushed back. Mirrors the original SurrealQL predicate
+ * `in.seq >= $parent.in.seq AND in.seq <= $parent.in.seq + 3`.
+ */
+const markWasCorrected = (edges: CorrectionEdge[]) =>
+    Effect.gen(function* () {
+        if (edges.length === 0) return;
+        const db = yield* SurrealClient;
+        // Build the universe of (session, seq) tuples that should be marked.
+        // Multiple correction edges may overlap; dedupe via a Set keyed by
+        // the deterministic turn record-key so we issue exactly one UPDATE
+        // per turn regardless of overlap.
+        const turnsToMark = new Set<string>();
+        for (const e of edges) {
+            const lo = Math.max(1, e.correctedSeq - 3);
+            const hi = e.correctedSeq;
+            for (let seq = lo; seq <= hi; seq += 1) {
+                // turnRecordKey strips `-` from session id; replicate inline
+                // (separate file so we can't import the private helper).
+                const sess = e.correctedSession.replace(/-/g, "");
+                turnsToMark.add(`${sess}_${seq}`);
+            }
+        }
+        if (turnsToMark.size === 0) return;
+        const stmts = [...turnsToMark].map(
+            (turnKey) =>
+                `UPDATE invoked SET was_corrected = true WHERE in = turn:\`${turnKey}\` RETURN NONE;`,
+        );
+        for (let i = 0; i < stmts.length; i += 500) {
+            yield* db.query(stmts.slice(i, i + 500).join(""));
+        }
+    });
+
 const upsertProposed = (edges: ProposedEdge[]) =>
     Effect.gen(function* () {
         if (edges.length === 0) return;
@@ -469,6 +519,9 @@ export const deriveSignals = (
         const pairEdgeIds = [...pairsAccum.keys()];
 
         yield* upsertCorrections(correctionBatch);
+        // Denormalise was_corrected onto invoked edges so cmdTaste's
+        // corrections subquery becomes a pure index/scan filter (issue #31).
+        yield* markWasCorrected(correctionBatch);
         yield* upsertProposed(proposedBatch);
         yield* upsertSkillPairs(pairsList, pairEdgeIds);
         yield* upsertRecovered(recoveryBatch);
