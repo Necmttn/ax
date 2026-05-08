@@ -5,33 +5,50 @@ import { loadProjectStack } from "./stack.ts";
 import { deriveVerificationChecks } from "./verify.ts";
 import type { ProjectContext, ProjectVerification } from "./types.ts";
 
-export const buildProjectContext = (cwd = process.cwd()): Effect.Effect<ProjectContext> =>
-    Effect.gen(function* () {
-        const git = yield* getGitState(cwd);
-        const stack = yield* loadProjectStack(git.root);
-        const verification = deriveVerificationChecks({ git, stack });
-        const diagnostics = yield* queryLiveDiagnostics(git.root);
-        return {
-            kind: "agentctl.project.context",
-            generatedAt: new Date().toISOString(),
-            git,
-            stack,
-            verification,
-            diagnostics,
-        };
-    });
+interface ProjectGrounding {
+    readonly generatedAt: string;
+    readonly git: ProjectContext["git"];
+    readonly stack: ProjectContext["stack"];
+    readonly checks: ProjectContext["verification"];
+    readonly diagnostics: ProjectContext["diagnostics"];
+}
 
-export const buildProjectVerification = (cwd = process.cwd()): Effect.Effect<ProjectVerification> =>
+const buildProjectGrounding = (cwd = process.cwd()): Effect.Effect<ProjectGrounding> =>
     Effect.gen(function* () {
         const git = yield* getGitState(cwd);
         const stack = yield* loadProjectStack(git.root);
         const checks = deriveVerificationChecks({ git, stack });
         const diagnostics = yield* queryLiveDiagnostics(git.root);
         return {
-            kind: "agentctl.project.verify",
             generatedAt: new Date().toISOString(),
             git,
+            stack,
             checks,
             diagnostics,
+        };
+    });
+
+export const buildProjectContext = (cwd = process.cwd()): Effect.Effect<ProjectContext> =>
+    Effect.gen(function* () {
+        const grounding = yield* buildProjectGrounding(cwd);
+        return {
+            kind: "agentctl.project.context",
+            generatedAt: grounding.generatedAt,
+            git: grounding.git,
+            stack: grounding.stack,
+            verification: grounding.checks,
+            diagnostics: grounding.diagnostics,
+        };
+    });
+
+export const buildProjectVerification = (cwd = process.cwd()): Effect.Effect<ProjectVerification> =>
+    Effect.gen(function* () {
+        const grounding = yield* buildProjectGrounding(cwd);
+        return {
+            kind: "agentctl.project.verify",
+            generatedAt: grounding.generatedAt,
+            git: grounding.git,
+            checks: grounding.checks,
+            diagnostics: grounding.diagnostics,
         };
     });
