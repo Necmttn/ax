@@ -1,4 +1,5 @@
-import { mkdir, writeFile, unlink, symlink, lstat } from "node:fs/promises";
+import { mkdir, writeFile, unlink, symlink, lstat, chmod } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { execSync, spawnSync } from "node:child_process";
@@ -11,13 +12,17 @@ const LOG_DIR = join(DATA_DIR, "logs");
 const BUCKETS_DIR = join(DATA_DIR, "buckets");
 const LAUNCH_AGENTS_DIR = join(HOME, "Library", "LaunchAgents");
 const BIN_DIR = join(HOME, ".local", "bin");
+const VENDOR_BIN_DIR = join(DATA_DIR, "bin");
+
+// Pin to a known-good SurrealDB. Override via env to test newer versions.
+const SURREAL_VERSION = process.env.AGENTCTL_SURREAL_VERSION ?? "3.0.5";
 
 const DB_LABEL = "com.necmttn.agentctl-db";
 const WATCH_LABEL = "com.necmttn.agentctl-watch";
 const DB_PLIST = join(LAUNCH_AGENTS_DIR, `${DB_LABEL}.plist`);
 const WATCH_PLIST = join(LAUNCH_AGENTS_DIR, `${WATCH_LABEL}.plist`);
 
-const dbPlist = (binPath: string): string => `<?xml version="1.0" encoding="UTF-8"?>
+const dbPlist = (_binPath: string, surrealPath: string): string => `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -27,7 +32,7 @@ const dbPlist = (binPath: string): string => `<?xml version="1.0" encoding="UTF-
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>exec surreal start --user root --pass root --bind 127.0.0.1:8521 --log info --allow-experimental=files "rocksdb://${DATA_DIR}/db"</string>
+    <string>exec "${surrealPath}" start --user root --pass root --bind 127.0.0.1:8521 --log info --allow-experimental=files "rocksdb://${DATA_DIR}/db"</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
@@ -93,9 +98,113 @@ function which(cmd: string): string | null {
     return r.stdout.trim() || null;
 }
 
+function platformArtifact(): string | null {
+    const p = process.platform;
+    const a = process.arch;
+    if (p === "darwin" && a === "arm64") return "darwin-arm64";
+    if (p === "darwin" && a === "x64") return "darwin-amd64";
+    if (p === "linux" && a === "x64") return "linux-amd64";
+    if (p === "linux" && a === "arm64") return "linux-arm64";
+    return null;
+}
+
+function surrealVersionString(path: string): string | null {
+    const r = spawnSync(path, ["version"], { encoding: "utf8" });
+    if (r.status !== 0) return null;
+    return r.stdout.trim() || r.stderr.trim() || null;
+}
+
+/** True when version string starts with `3.` (any 3.x is acceptable). */
+function isSupportedVersion(v: string | null): boolean {
+    return !!v && /^\s*(?:surreal\s+)?3\.\d/.test(v);
+}
+
+/**
+ * Resolve the surreal CLI to use. Prefers a system install with version >= 3.0,
+ * falls back to a pinned download into ~/.local/share/agentctl/bin/surreal.
+ * Override via env: AGENTCTL_SURREAL_PATH (explicit path), AGENTCTL_FORCE_DOWNLOAD=1.
+ */
+async function ensureSurreal(): Promise<string> {
+    if (process.env.AGENTCTL_SURREAL_PATH) {
+        const v = surrealVersionString(process.env.AGENTCTL_SURREAL_PATH);
+        if (!v) throw new Error(`AGENTCTL_SURREAL_PATH is not executable`);
+        console.log(`  surreal: pinned ${process.env.AGENTCTL_SURREAL_PATH} (${v})`);
+        return process.env.AGENTCTL_SURREAL_PATH;
+    }
+
+    const localBin = join(VENDOR_BIN_DIR, "surreal");
+
+    // Reuse a previously-downloaded vendor binary if it boots - fastest path.
+    if (existsSync(localBin)) {
+        const v = surrealVersionString(localBin);
+        if (isSupportedVersion(v)) {
+            console.log(`  surreal: vendored ${localBin} (${v})`);
+            return localBin;
+        }
+    }
+
+    // Prefer system install when present and version-compatible (any 3.x).
+    if (!process.env.AGENTCTL_FORCE_DOWNLOAD) {
+        const sys = which("surreal");
+        if (sys) {
+            const v = surrealVersionString(sys);
+            if (isSupportedVersion(v)) {
+                console.log(`  surreal: system ${sys} (${v})`);
+                return sys;
+            }
+            console.log(`  surreal: system ${sys} unsupported (${v}); will download`);
+        }
+    }
+
+    const platform = platformArtifact();
+    if (!platform) {
+        throw new Error(
+            `Unsupported platform ${process.platform}/${process.arch}. ` +
+                `Install surreal manually: https://surrealdb.com/install`,
+        );
+    }
+
+    const tag = `v${SURREAL_VERSION}`;
+    const url = `https://github.com/surrealdb/surrealdb/releases/download/${tag}/surreal-${tag}.${platform}.tgz`;
+    console.log(`  surreal: downloading ${tag} for ${platform}`);
+
+    await mkdir(VENDOR_BIN_DIR, { recursive: true });
+    const tmpTar = join(VENDOR_BIN_DIR, "surreal.tgz");
+
+    try {
+        const res = await fetch(url);
+        if (!res.ok) {
+            throw new Error(`download failed: HTTP ${res.status} ${res.statusText}`);
+        }
+        const buf = await res.arrayBuffer();
+        await writeFile(tmpTar, new Uint8Array(buf));
+
+        const ex = spawnSync("tar", ["-xzf", tmpTar, "-C", VENDOR_BIN_DIR], {
+            stdio: "inherit",
+        });
+        if (ex.status !== 0) throw new Error("tar extract failed");
+        await chmod(localBin, 0o755);
+        await unlink(tmpTar).catch(() => undefined);
+
+        const v = surrealVersionString(localBin);
+        if (!v) throw new Error(`downloaded surreal at ${localBin} did not run`);
+        console.log(`  surreal: installed ${localBin} (${v})`);
+        return localBin;
+    } catch (err) {
+        // Offline / GitHub down - fall back to system surreal if present at all.
+        const sys = which("surreal");
+        if (sys) {
+            console.warn(`  surreal: download failed (${(err as Error).message}); falling back to ${sys}`);
+            return sys;
+        }
+        throw err;
+    }
+}
+
 async function ensureDirs() {
     await mkdir(DATA_DIR, { recursive: true });
     await mkdir(LOG_DIR, { recursive: true });
+    await mkdir(VENDOR_BIN_DIR, { recursive: true });
     await mkdir(join(BUCKETS_DIR, "transcripts"), { recursive: true });
     await mkdir(join(BUCKETS_DIR, "codex_artifacts"), { recursive: true });
     await mkdir(LAUNCH_AGENTS_DIR, { recursive: true });
@@ -150,10 +259,7 @@ export async function cmdInstall() {
     console.log("[agentctl] install");
     await ensureDirs();
 
-    if (!which("surreal")) {
-        console.error("ERROR: 'surreal' CLI not on PATH. Install: brew install surrealdb/tap/surreal");
-        process.exit(1);
-    }
+    const surrealPath = await ensureSurreal();
 
     const binSource = resolveBinaryPath();
     const binLink = join(BIN_DIR, "agentctl");
@@ -162,7 +268,7 @@ export async function cmdInstall() {
         console.log(`  symlink: ${binLink} → ${binSource}`);
     }
 
-    await writeFile(DB_PLIST, dbPlist(binSource));
+    await writeFile(DB_PLIST, dbPlist(binSource, surrealPath));
     console.log(`  wrote:  ${DB_PLIST}`);
     await loadAgent(DB_PLIST);
 
@@ -184,7 +290,7 @@ export async function cmdInstall() {
     const schemaPath = join(DATA_DIR, ".schema-cache.surql");
     await writeFile(schemaPath, schemaSurql);
     const r = spawnSync(
-        "surreal",
+        surrealPath,
         [
             "import",
             "--endpoint",
