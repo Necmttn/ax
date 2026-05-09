@@ -36,6 +36,21 @@ After install, two LaunchAgents run on boot:
 - `com.necmttn.agentctl-db` - SurrealDB daemon with `--allow-experimental=files` and bucket allowlist
 - `com.necmttn.agentctl-watch` - fires `agentctl ingest --since=1` on changes to `~/.claude/projects` or `~/.codex/sessions` (60s throttle)
 
+### Agent skill
+
+This repo ships an installable agent skill at `skill/SKILL.md` so Claude Code,
+Codex, and other skill-aware agents know when to call `agentctl`.
+
+```bash
+# from the agentctl repo
+mkdir -p ~/.claude/skills ~/.codex/skills
+ln -sfn "$PWD/skill" ~/.claude/skills/agentctl
+ln -sfn "$PWD/skill" ~/.codex/skills/agentctl
+```
+
+There is not a published `npx skills install agentctl` path yet; local symlink
+installation is the current route.
+
 ### Dev mode (run from source)
 
 ```bash

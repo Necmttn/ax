@@ -1,11 +1,11 @@
 ---
 name: agentctl
-description: Query the local agentctl skill+transcript graph (SurrealDB) before assuming a skill exists. Use when the user asks "is there a skill for X", "what skills do I use most", "find a skill that does Y", "show recent skill invocations", "which skills are unused", or any taste/discovery question about the user's own agent history. Replaces guessing-from-the-listing with data-backed answers.
+description: Use the local agentctl CLI for AI-agent grounding. Query the user's skill+transcript graph before assuming a skill exists, and run project context/verify before or after repo work. Use when the user asks "is there a skill for X", "what skills do I use most", "find a skill that does Y", "show recent skill invocations", "which skills are unused", or when project-local git, stack, instruction, verification, or diagnostics context would help.
 ---
 
 # agentctl
 
-`agentctl` is the user's local taste+telemetry graph. It indexes:
+`agentctl` is the user's local taste+telemetry graph and project-grounding CLI. It indexes:
 - All installed skills (name, scope, description, body)
 - Every `Skill` tool invocation across all Claude Code transcripts
 - Every Edit/Write tool invocation + which file it touched
@@ -20,6 +20,8 @@ ALWAYS before:
 - Recommending a workflow that touches multiple skills
 - Telling the user a feature/skill is missing
 - Listing "your most-used skills"
+- Starting non-trivial repo work where git state, project instructions, stack, and likely checks matter
+- Claiming repo work is done, when changed files should drive verification
 
 ## Commands
 
@@ -30,7 +32,27 @@ agentctl recent [--limit=N]         # last N invocations across all sessions
 agentctl unused [--days=N]          # skills with zero invocations in N days
 agentctl taste [--limit=N]          # composite taste score: invocations × clean-runs
 agentctl ingest [--since=DAYS]      # refresh index (skills + transcripts)
+agentctl project context --json     # read-only repo grounding: git, stack, instructions, checks
+agentctl project verify --json      # diff-aware checks + optional live diagnostics
 ```
+
+## Project workflow
+
+At the start of repo work, run:
+
+```bash
+agentctl project context --json
+```
+
+Use `git.changes` to understand the user's current worktree, `stack.signals` for detected frameworks, `stack.instructions` for relevant AGENTS/CLAUDE rules, and `verification` for likely checks.
+
+Before reporting completion or when debugging a changed project, run:
+
+```bash
+agentctl project verify --json
+```
+
+Run the returned `checks[].command` values that match the scope of the change unless the user only asked for analysis. Treat `diagnostics.issues` as live project feedback when `.agentctl/config.json` is configured.
 
 ## How to read results
 
@@ -49,6 +71,12 @@ A skill that returns `0×7d / 0×30d / 0×total` exists on disk but has never be
 ```bash
 # User: "is there a skill that helps with reviewing PRs?"
 agentctl search "review pull request"
+
+# Starting work in a repo
+agentctl project context --json
+
+# Before claiming a repo change is complete
+agentctl project verify --json
 
 # User: "what skills did I use this week?"
 agentctl recent --limit=50
