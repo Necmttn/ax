@@ -1,0 +1,22 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "include-component-in-tag": false,
+  "bump-minor-pre-major": true,
+  "packages": {
+    ".": {
+      "release-type": "node",
+      "component": "agentctl",
+      "package-name": "agentctl",
+      "changelog-sections": [
+        { "type": "feat", "section": "Features" },
+        { "type": "fix", "section": "Bug Fixes" },
+        { "type": "perf", "section": "Performance" },
+        { "type": "refactor", "section": "Refactoring", "hidden": true },
+        { "type": "docs", "section": "Documentation", "hidden": true },
+        { "type": "chore", "section": "Miscellaneous", "hidden": true },
+        { "type": "ci", "section": "CI", "hidden": true },
+        { "type": "test", "section": "Tests", "hidden": true }
+      ]
+    }
+  }
+}

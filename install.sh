@@ -1,0 +1,153 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO="${AGENTCTL_REPO:-Necmttn/agentctl}"
+VERSION="${AGENTCTL_VERSION:-latest}"
+INSTALL_ROOT="${AGENTCTL_INSTALL_ROOT:-$HOME/.local/share/agentctl}"
+BIN_DIR="${AGENTCTL_BIN_DIR:-$HOME/.local/bin}"
+RUN_INSTALL="${AGENTCTL_RUN_INSTALL:-1}"
+
+usage() {
+  cat <<'EOF'
+Install agentctl from a GitHub Release artifact.
+
+Environment:
+  AGENTCTL_REPO=owner/repo       GitHub repo to download from (default: Necmttn/agentctl)
+  AGENTCTL_VERSION=v0.1.0        Release tag to install (default: latest)
+  AGENTCTL_INSTALL_ROOT=path     Install root (default: ~/.local/share/agentctl)
+  AGENTCTL_BIN_DIR=path          Symlink dir (default: ~/.local/bin)
+  AGENTCTL_RUN_INSTALL=0         Only install the binary; skip `agentctl install`
+  GH_TOKEN/GITHUB_TOKEN=token    Token for private repo downloads when gh is unavailable
+EOF
+}
+
+case "${1:-}" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+esac
+
+need() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "agentctl install: missing required command: $1" >&2
+    exit 1
+  fi
+}
+
+detect_platform() {
+  local os arch
+  case "$(uname -s)" in
+    Darwin) os="darwin" ;;
+    Linux) os="linux" ;;
+    *)
+      echo "agentctl install: unsupported OS $(uname -s)" >&2
+      exit 1
+      ;;
+  esac
+
+  case "$(uname -m)" in
+    arm64|aarch64) arch="arm64" ;;
+    x86_64|amd64) arch="x64" ;;
+    *)
+      echo "agentctl install: unsupported architecture $(uname -m)" >&2
+      exit 1
+      ;;
+  esac
+
+  printf "%s-%s" "$os" "$arch"
+}
+
+asset_url() {
+  local asset="$1"
+  if [[ "$VERSION" == "latest" ]]; then
+    printf "https://github.com/%s/releases/latest/download/%s" "$REPO" "$asset"
+  else
+    printf "https://github.com/%s/releases/download/%s/%s" "$REPO" "$VERSION" "$asset"
+  fi
+}
+
+download_with_gh() {
+  local pattern="$1" out_dir="$2"
+  if ! command -v gh >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if [[ "$VERSION" == "latest" ]]; then
+    gh release download --repo "$REPO" --pattern "$pattern" --dir "$out_dir" --clobber
+  else
+    gh release download "$VERSION" --repo "$REPO" --pattern "$pattern" --dir "$out_dir" --clobber
+  fi
+}
+
+download_with_curl() {
+  local asset="$1" out_path="$2"
+  need curl
+
+  local token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+  local url
+  url="$(asset_url "$asset")"
+
+  if [[ -n "$token" ]]; then
+    curl -fsSL -H "Authorization: Bearer $token" -H "Accept: application/octet-stream" "$url" -o "$out_path"
+  else
+    curl -fsSL "$url" -o "$out_path"
+  fi
+}
+
+platform="$(detect_platform)"
+artifact="agentctl-${platform}.tar.gz"
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "$tmp_dir"' EXIT
+
+echo "[agentctl] downloading ${artifact} from ${REPO} (${VERSION})"
+
+if ! download_with_gh "$artifact" "$tmp_dir"; then
+  if ! download_with_curl "$artifact" "$tmp_dir/$artifact"; then
+    cat >&2 <<EOF
+agentctl install: failed to download ${artifact}
+
+For private repos, either:
+  1. run 'gh auth login', or
+  2. export GH_TOKEN or GITHUB_TOKEN with repo read access.
+
+If no release exists yet, run the Release Please workflow and merge the release PR first.
+EOF
+    exit 1
+  fi
+fi
+
+if download_with_gh "checksums.txt" "$tmp_dir" >/dev/null 2>&1 || download_with_curl "checksums.txt" "$tmp_dir/checksums.txt" >/dev/null 2>&1; then
+  if command -v shasum >/dev/null 2>&1; then
+    (cd "$tmp_dir" && grep "  ${artifact}$" checksums.txt | shasum -a 256 -c -)
+  elif command -v sha256sum >/dev/null 2>&1; then
+    (cd "$tmp_dir" && grep "  ${artifact}$" checksums.txt | sha256sum -c -)
+  else
+    echo "[agentctl] checksum file downloaded; no sha256 checker found, skipping verification"
+  fi
+else
+  echo "[agentctl] checksums.txt not found; skipping checksum verification"
+fi
+
+need tar
+tar -xzf "$tmp_dir/$artifact" -C "$tmp_dir"
+
+install_bin="$INSTALL_ROOT/bin/agentctl"
+mkdir -p "$INSTALL_ROOT/bin" "$BIN_DIR"
+install -m 755 "$tmp_dir/agentctl" "$install_bin"
+ln -sfn "$install_bin" "$BIN_DIR/agentctl"
+
+echo "[agentctl] installed binary: $install_bin"
+echo "[agentctl] symlink: $BIN_DIR/agentctl -> $install_bin"
+
+if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
+  echo "[agentctl] add this to PATH if needed: export PATH=\"$BIN_DIR:\$PATH\""
+fi
+
+if [[ "$RUN_INSTALL" == "1" ]]; then
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    "$install_bin" install
+  else
+    echo "[agentctl] binary installed. Full daemon install is currently macOS-only; skipping agentctl install."
+  fi
+fi

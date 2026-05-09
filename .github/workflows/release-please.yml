@@ -1,0 +1,91 @@
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      releases_created: ${{ steps.release.outputs.releases_created }}
+      release_created: ${{ steps.release.outputs['agentctl--release_created'] }}
+      tag_name: ${{ steps.release.outputs['agentctl--tag_name'] }}
+      version: ${{ steps.release.outputs['agentctl--version'] }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+
+  build-artifacts:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    name: Build ${{ matrix.artifact }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            artifact: agentctl-darwin-arm64
+          - runner: macos-13
+            artifact: agentctl-darwin-x64
+          - runner: ubuntu-24.04
+            artifact: agentctl-linux-x64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun run typecheck
+
+      - run: bun test src/project/stack.test.ts src/project/verify.test.ts src/project/diagnostics.test.ts
+
+      - run: bun build --compile --outfile=dist/agentctl src/cli/index.ts
+
+      - name: Package binary
+        run: |
+          set -euo pipefail
+          file dist/agentctl
+          mkdir -p package
+          cp dist/agentctl package/agentctl
+          chmod 755 package/agentctl
+          tar -czf "${{ matrix.artifact }}.tar.gz" -C package agentctl
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}.tar.gz
+          if-no-files-found: error
+
+  publish-artifacts:
+    needs: [release-please, build-artifacts]
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          cd release-assets
+          shasum -a 256 ./*.tar.gz > checksums.txt
+          gh release upload "$TAG_NAME" ./*.tar.gz checksums.txt --clobber

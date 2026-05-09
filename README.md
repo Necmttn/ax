@@ -1,7 +1,5 @@
 # agentctl
 
-[![skills.sh](https://skills.sh/b/Necmttn/agentctl)](https://skills.sh/Necmttn/agentctl)
-
 Local taste & telemetry graph for AI coding agents.
 
 `agentctl` ingests every Claude Code and Codex transcript on your machine into a dedicated SurrealDB graph, then surfaces *what skills you actually use*, *what you ignore*, and *which tools correlate with successful outcomes* - on demand, no daemon.
@@ -21,7 +19,33 @@ Claude Code and Codex both leave detailed transcripts on disk. They contain ever
 
 ## Install
 
-### Single-binary (recommended)
+### Release artifact (recommended)
+
+Release artifacts are built by GitHub Actions and installed by `install.sh`.
+For the current private repo, authenticate `gh` first, then run the script from
+a checkout:
+
+```bash
+gh auth login
+git clone git@github.com:Necmttn/agentctl.git ~/Projects/agentctl
+cd ~/Projects/agentctl
+./install.sh
+agentctl ingest --since=7
+```
+
+If the repo is public later, this also works:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Necmttn/agentctl/main/install.sh | bash
+agentctl ingest --since=7
+```
+
+`install.sh` downloads `agentctl-<os>-<arch>.tar.gz` from the latest GitHub
+Release, verifies `checksums.txt` when present, installs the binary to
+`~/.local/share/agentctl/bin/agentctl`, symlinks `~/.local/bin/agentctl`, then
+runs `agentctl install` on macOS.
+
+### Build from source
 
 ```bash
 git clone https://github.com/Necmttn/agentctl ~/Projects/agentctl
@@ -38,22 +62,39 @@ After install, two LaunchAgents run on boot:
 - `com.necmttn.agentctl-db` - SurrealDB daemon with `--allow-experimental=files` and bucket allowlist
 - `com.necmttn.agentctl-watch` - fires `agentctl ingest --since=1` on changes to `~/.claude/projects` or `~/.codex/sessions` (60s throttle)
 
+### Manual releases
+
+GitHub Actions has a `Release Please` workflow with `workflow_dispatch`.
+Run it manually from the Actions tab to open or update the release PR. Merge
+that PR, and the next `main` push creates the GitHub Release, builds native
+artifacts, and uploads checksums.
+
+Published assets:
+
+- `agentctl-darwin-arm64.tar.gz`
+- `agentctl-darwin-x64.tar.gz`
+- `agentctl-linux-x64.tar.gz`
+- `checksums.txt`
+
 ### Agent skill
 
 This repo ships an installable agent skill at `skill/SKILL.md` so Claude Code,
 Codex, and other skill-aware agents know when to call `agentctl`.
 
-Install through Vercel's `skills` CLI:
+Install through Vercel's `skills` CLI from the current private GitHub repo:
 
 ```bash
-npx skills add Necmttn/agentctl --skill agentctl -g -a claude-code -a codex -y
+npx skills add git@github.com:Necmttn/agentctl.git --skill agentctl -g -a claude-code -a codex -y
 ```
 
 Before installing, you can inspect what the repo exposes:
 
 ```bash
-npx skills add Necmttn/agentctl --list
+npx skills add git@github.com:Necmttn/agentctl.git --list
 ```
+
+If the repo is made public later, the shorter form also works:
+`npx skills add Necmttn/agentctl --skill agentctl -g -a claude-code -a codex -y`.
 
 For local development against this checkout:
 
@@ -67,7 +108,7 @@ ln -sfn "$PWD/skill" ~/.codex/skills/agentctl
 Agent checklist after install:
 
 1. Confirm `agentctl` exists with `command -v agentctl`.
-2. If missing, install the CLI with `git clone`, `bun install`, `bun run build`, and `./dist/agentctl install`.
+2. If missing, install the CLI with `./install.sh` from this repo checkout.
 3. Run `agentctl ingest --since=7` to refresh skill and transcript data.
 4. At the start of repo work, run `agentctl project context --json`.
 5. Before reporting completion, run `agentctl project verify --json` and follow the returned checks.
