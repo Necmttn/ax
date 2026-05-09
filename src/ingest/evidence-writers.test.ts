@@ -220,4 +220,33 @@ describe("evidence writer statement builders", () => {
         expect(sql).toContain("text: \"Inspect schema\"");
         expect(sql).toContain("raw: \"{\\\"key\\\":\\\"session-1__item__001`unsafe\\\",\\\"externalId\\\":\\\"todo-1\\\"");
     });
+
+    test("plan snapshot statements remove legacy item ids that conflict on plan sequence", () => {
+        const statements = buildPlanSnapshotStatements({
+            planKey: "plan-key",
+            sessionId: "session-1",
+            source: "codex_update_plan",
+            status: "in_progress",
+            createdAt: "2026-05-09T10:00:00.000Z",
+            updatedAt: "2026-05-09T10:00:00.000Z",
+            snapshotKey: "snapshot-key",
+            itemsJson: [],
+            explanation: null,
+            ts: "2026-05-09T10:00:00.000Z",
+            items: [
+                {
+                    key: "plan-key__item_001",
+                    seq: 1,
+                    content: "Run tests again",
+                    status: "in_progress",
+                },
+            ],
+        });
+
+        const sql = statements.join("\n");
+
+        expect(sql).toContain(
+            "DELETE plan_item WHERE plan = plan:`plan-key` AND seq = 1 AND id != plan_item:`plan-key__item_001`;",
+        );
+    });
 });
