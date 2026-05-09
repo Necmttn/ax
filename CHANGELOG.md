@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/Necmttn/agentctl/compare/v0.1.0...v0.1.1) (2026-05-09)
+
+
+### Bug Fixes
+
+* accept release checksum asset paths ([76859ff](https://github.com/Necmttn/agentctl/commit/76859ffbf6690e88790a75cc999df8900a1897c5))
+
 ## [0.1.0](https://github.com/Necmttn/agentctl/compare/v0.0.1...v0.1.0) (2026-05-09)
 
 
