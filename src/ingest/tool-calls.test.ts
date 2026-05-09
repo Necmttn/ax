@@ -12,6 +12,12 @@ describe("tool call normalization", () => {
         expect(toolKindForName("exec_command")).toBe("builtin");
         expect(toolKindForName("write_stdin")).toBe("builtin");
         expect(toolKindForName("apply_patch")).toBe("builtin");
+        expect(toolKindForName("view_image")).toBe("builtin");
+        expect(toolKindForName("update_plan")).toBe("builtin");
+        expect(toolKindForName("get_goal")).toBe("builtin");
+        expect(toolKindForName("list_mcp_resources")).toBe("builtin");
+        expect(toolKindForName("spawn_agent")).toBe("builtin");
+        expect(toolKindForName("wait_agent")).toBe("builtin");
         expect(toolKindForName("mcp__browser__open")).toBe("mcp");
         expect(toolKindForName("Skill")).toBe("skill");
         expect(toolKindForName("/insights")).toBe("slash_command");
