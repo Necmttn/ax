@@ -380,7 +380,7 @@ const writeRepo = (repo: RepoInfo, commits: CommitWithFiles[]) =>
 
         // 1. Bulk-upsert commits. If a previous ingest wrote this repo+sha
         // under the legacy local key, reuse that record id to satisfy the
-        // existing unique index while adding repository/checkout links.
+        // existing unique index while adding repository links.
         const commitIds = new Map<string, string>();
         const commitStmts: string[] = [];
         for (const c of commits) {
@@ -421,9 +421,9 @@ const writeRepo = (repo: RepoInfo, commits: CommitWithFiles[]) =>
             yield* db.query(fileStmts.slice(i, i + 500).join(""));
         }
 
-        // 3. Bulk-RELATE commit -> touched -> file. Idempotency: re-running
-        //    creates duplicate edge rows. Cheaper to dedupe at write time:
-        //    DELETE existing edges for this commit first, then RELATE fresh.
+        // 3. Bulk-RELATE commit -> touched -> file. Touched is checkout-scoped
+        //    edge evidence, so re-runs delete only this checkout's rows before
+        //    relating fresh rows. Sibling worktree evidence is preserved.
         let touchedCount = 0;
         for (const c of commits) {
             if (c.files.length === 0) continue;
