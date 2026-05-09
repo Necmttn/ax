@@ -258,4 +258,63 @@ describe("Claude transcript extraction", () => {
             ).size,
         ).toBe(2);
     });
+
+    test("keeps TodoWrite plan item keys stable when the same sequence changes", () => {
+        const extracted = __testExtractClaudeJsonlLines(
+            [
+                JSON.stringify({
+                    type: "assistant",
+                    timestamp: "2026-05-09T12:00:00.000Z",
+                    message: {
+                        content: [
+                            {
+                                type: "tool_use",
+                                id: "toolu_todo_1",
+                                name: "TodoWrite",
+                                input: {
+                                    todos: [
+                                        {
+                                            content: "Inspect failing ingest",
+                                            status: "in_progress",
+                                        },
+                                    ],
+                                },
+                            },
+                        ],
+                    },
+                }),
+                JSON.stringify({
+                    type: "assistant",
+                    timestamp: "2026-05-09T12:00:01.000Z",
+                    message: {
+                        content: [
+                            {
+                                type: "tool_use",
+                                id: "toolu_todo_2",
+                                name: "TodoWrite",
+                                input: {
+                                    todos: [
+                                        {
+                                            content: "Fix plan item identity",
+                                            status: "in_progress",
+                                        },
+                                    ],
+                                },
+                            },
+                        ],
+                    },
+                }),
+            ],
+            "-Users-necmttn-Projects-agentctl",
+            "claude-plan-session",
+        );
+
+        expect(extracted).not.toBeNull();
+        if (!extracted) return;
+
+        expect(extracted.planSnapshots).toHaveLength(2);
+        expect(extracted.planSnapshots[0]?.items[0]?.key).toBe(
+            extracted.planSnapshots[1]?.items[0]?.key,
+        );
+    });
 });

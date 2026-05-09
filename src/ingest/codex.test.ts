@@ -186,4 +186,50 @@ describe("Codex transcript extraction", () => {
             }),
         ]);
     });
+
+    test("keeps plan item keys stable when the same step sequence changes", () => {
+        const extracted = __testExtractCodexJsonlLines([
+            JSON.stringify({
+                type: "session_meta",
+                timestamp: "2026-05-09T10:00:00.000Z",
+                payload: {
+                    id: "codex-plan-session",
+                    cwd: "/Users/necmttn/Projects/agentctl",
+                    timestamp: "2026-05-09T10:00:00.000Z",
+                },
+            }),
+            JSON.stringify({
+                type: "response_item",
+                timestamp: "2026-05-09T10:00:01.000Z",
+                payload: {
+                    type: "function_call",
+                    name: "update_plan",
+                    call_id: "call_plan_1",
+                    arguments: JSON.stringify({
+                        plan: [{ step: "Inspect failing ingest", status: "in_progress" }],
+                    }),
+                },
+            }),
+            JSON.stringify({
+                type: "response_item",
+                timestamp: "2026-05-09T10:00:02.000Z",
+                payload: {
+                    type: "function_call",
+                    name: "update_plan",
+                    call_id: "call_plan_2",
+                    arguments: JSON.stringify({
+                        plan: [{ step: "Fix plan item identity", status: "in_progress" }],
+                    }),
+                },
+            }),
+        ]);
+
+        expect(extracted).not.toBeNull();
+        if (!extracted) return;
+
+        expect(extracted.planSnapshots).toHaveLength(2);
+        expect(extracted.planSnapshots[0]?.items[0]?.key).toBe(
+            extracted.planSnapshots[1]?.items[0]?.key,
+        );
+    });
 });
