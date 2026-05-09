@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
+import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
 import type { DbError } from "../lib/errors.ts";
 import { skillRecordKey } from "../lib/skill-id.ts";
 import { toolCallRecordKey, toolRecordKey } from "./record-keys.ts";
@@ -86,7 +86,16 @@ const sqlDate = (value: TimestampInput): string => {
 const sqlOptionDate = (value: TimestampInput | null | undefined): string =>
     value === null || value === undefined ? "NONE" : sqlDate(value);
 
-const recordRef = (table: string, key: string): string => `${table}:\`${key}\``;
+const escapeRecordKey = (key: string): string =>
+    key
+        .replace(/\\/g, "\\\\")
+        .replace(/`/g, "\\`")
+        .replace(/\n/g, "\\n")
+        .replace(/\r/g, "\\r")
+        .replace(/\t/g, "\\t");
+
+export const recordRef = (table: string, key: string): string =>
+    `${table}:\`${escapeRecordKey(key)}\``;
 
 const sqlOptionRecord = (
     table: string,
@@ -220,12 +229,6 @@ export function buildRelateToolCallSkillStatements(
     const skillRef = recordRef("skill", skillKey);
 
     return [
-        `UPSERT ${skillRef} MERGE ${sqlObject([
-            ["name", sqlString(input.skillName)],
-            ["scope", sqlString("unknown")],
-            ["dir_path", sqlString("(unknown)")],
-            ["content_hash", sqlString("unknown")],
-        ])};`,
         `DELETE concerns WHERE in = ${toolCallRef} AND out = ${skillRef} AND kind = "invoked_skill";`,
         `RELATE ${toolCallRef}->concerns->${skillRef} SET ${sqlSet([
             ["kind", sqlString("invoked_skill")],
@@ -233,6 +236,19 @@ export function buildRelateToolCallSkillStatements(
             ["labels", sqlJsonOption(input.labels)],
             ["metrics", sqlJsonOption(input.metrics)],
             ["reason", sqlOptionString(input.reason)],
+        ])};`,
+    ];
+}
+
+export function buildSkillPlaceholderStatements(skillName: string): string[] {
+    const skillRef = recordRef("skill", skillRecordKey(skillName));
+
+    return [
+        `UPSERT ${skillRef} CONTENT ${sqlObject([
+            ["name", sqlString(skillName)],
+            ["scope", sqlString("unknown")],
+            ["dir_path", sqlString("(unknown)")],
+            ["content_hash", sqlString("unknown")],
         ])};`,
     ];
 }
@@ -301,16 +317,34 @@ export function buildPlanSnapshotStatements(snapshot: PlanSnapshotWrite): string
     return statements;
 }
 
+const queryStatementsWithClient = (
+    db: SurrealClientShape,
+    statements: readonly string[],
+): Effect.Effect<void, DbError> =>
+    Effect.gen(function* () {
+        if (statements.length === 0) return;
+
+        for (let i = 0; i < statements.length; i += STATEMENT_CHUNK_SIZE) {
+            yield* db.query(statements.slice(i, i + STATEMENT_CHUNK_SIZE).join(""));
+        }
+    });
+
 const queryStatements = (
     statements: readonly string[],
 ): Effect.Effect<void, DbError, SurrealClient> =>
     Effect.gen(function* () {
-        if (statements.length === 0) return;
-
         const db = yield* SurrealClient;
-        for (let i = 0; i < statements.length; i += STATEMENT_CHUNK_SIZE) {
-            yield* db.query(statements.slice(i, i + STATEMENT_CHUNK_SIZE).join(""));
-        }
+        yield* queryStatementsWithClient(db, statements);
+    });
+
+const skillExists = (
+    db: SurrealClientShape,
+    skillName: string,
+): Effect.Effect<boolean, DbError> =>
+    Effect.gen(function* () {
+        const skillRef = recordRef("skill", skillRecordKey(skillName));
+        const result = yield* db.query<[unknown[]]>(`SELECT VALUE id FROM ${skillRef};`);
+        return (result[0] ?? []).length > 0;
     });
 
 export const writeToolCalls = (
@@ -324,7 +358,16 @@ export const writeToolCalls = (
 export const relateToolCallSkill = (
     input: ToolCallSkillRelationWrite,
 ): Effect.Effect<void, DbError, SurrealClient> =>
-    queryStatements(buildRelateToolCallSkillStatements(input));
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const placeholderStatements = (yield* skillExists(db, input.skillName))
+            ? []
+            : buildSkillPlaceholderStatements(input.skillName);
+        yield* queryStatementsWithClient(db, [
+            ...placeholderStatements,
+            ...buildRelateToolCallSkillStatements(input),
+        ]);
+    });
 
 export const writePlanSnapshot = (
     snapshot: PlanSnapshotWrite,
