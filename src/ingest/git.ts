@@ -2,7 +2,7 @@ import { lstat, readFile, stat } from "node:fs/promises";
 import { join, basename, dirname } from "node:path";
 import { homedir } from "node:os";
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
+import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
 import {
@@ -309,6 +309,63 @@ const dbRecordLiteral = (fallbackTable: string, id: unknown, fallbackKey: string
     return typeof id === "string" ? id : String(id);
 };
 
+interface CommitLookupInput {
+    repositoryId: string;
+    stableRepo: string;
+    checkoutPath: string;
+    sha: string;
+}
+
+interface FileLookupInput {
+    repositoryId: string;
+    stableRepo: string;
+    checkoutPath: string;
+    path: string;
+}
+
+interface CommitUpsertInput {
+    id: string;
+    stableRepo: string;
+    repositoryId: string;
+    sha: string;
+    message: string;
+    author: string;
+    ts: string;
+}
+
+interface FileUpsertInput {
+    id: string;
+    stableRepo: string;
+    repositoryId: string;
+    path: string;
+}
+
+export function buildCommitLookupQueries(input: CommitLookupInput): string[] {
+    return [
+        `SELECT id FROM commit WHERE repository = ${input.repositoryId} AND repo = ${sqlString(input.stableRepo)} AND sha = ${sqlString(input.sha)} LIMIT 1;`,
+        `SELECT id FROM commit WHERE repo = ${sqlString(input.stableRepo)} AND sha = ${sqlString(input.sha)} LIMIT 1;`,
+        `SELECT id FROM commit WHERE repository = ${input.repositoryId} AND sha = ${sqlString(input.sha)} LIMIT 1;`,
+        `SELECT id FROM commit WHERE repo = ${sqlString(input.checkoutPath)} AND sha = ${sqlString(input.sha)} LIMIT 1;`,
+    ];
+}
+
+export function buildFileLookupQueries(input: FileLookupInput): string[] {
+    return [
+        `SELECT id FROM file WHERE repository = ${input.repositoryId} AND repo = ${sqlString(input.stableRepo)} AND path = ${sqlString(input.path)} LIMIT 1;`,
+        `SELECT id FROM file WHERE repo = ${sqlString(input.stableRepo)} AND path = ${sqlString(input.path)} LIMIT 1;`,
+        `SELECT id FROM file WHERE repository = ${input.repositoryId} AND path = ${sqlString(input.path)} LIMIT 1;`,
+        `SELECT id FROM file WHERE repo = ${sqlString(input.checkoutPath)} AND path = ${sqlString(input.path)} LIMIT 1;`,
+    ];
+}
+
+export function buildCommitUpsertStatement(input: CommitUpsertInput): string {
+    return `UPSERT ${input.id} CONTENT { sha: ${sqlString(input.sha)}, repo: ${sqlString(input.stableRepo)}, message: ${sqlString(input.message)}, author: ${sqlString(input.author)}, ts: d"${input.ts}", repository: ${input.repositoryId} };`;
+}
+
+export function buildFileUpsertStatement(input: FileUpsertInput): string {
+    return `UPSERT ${input.id} CONTENT { repo: ${sqlString(input.stableRepo)}, path: ${sqlString(input.path)}, repository: ${input.repositoryId}, identity_scope: "repository" };`;
+}
+
 interface TouchedRelationFile {
     fileId: string;
     additions: number | null;
@@ -337,6 +394,19 @@ export function buildTouchedRelationStatements(input: TouchedRelationInput): str
     return stmts;
 }
 
+const findExistingRecord = (
+    db: SurrealClientShape,
+    queries: string[],
+): Effect.Effect<unknown | null, DbError> =>
+    Effect.gen(function* () {
+        for (const query of queries) {
+            const result = yield* db.query<[Array<{ id: unknown }>]>(query);
+            const id = result?.[0]?.[0]?.id;
+            if (id !== null && id !== undefined) return id;
+        }
+        return null;
+    });
+
 interface WriteStats {
     commits: number;
     files: number;
@@ -349,6 +419,7 @@ const writeRepo = (repo: RepoInfo, commits: CommitWithFiles[]) =>
         const db = yield* SurrealClient;
         const repositoryId = recordLiteral("repository", repo.repositoryKey);
         const checkoutId = recordLiteral("checkout", repo.checkoutKey);
+        const stableRepo = repo.repositoryKey;
 
         const repositoryName = basename(repo.path);
         yield* db.query(
@@ -385,14 +456,26 @@ const writeRepo = (repo: RepoInfo, commits: CommitWithFiles[]) =>
         const commitStmts: string[] = [];
         for (const c of commits) {
             const fallbackKey = commitRecordKey(repo.repositoryKey, c.sha);
-            const existing = yield* db.query<[Array<{ id: unknown }>]>(
-                `SELECT id FROM commit WHERE repo = ${sqlString(repo.path)} AND sha = ${sqlString(c.sha)} LIMIT 1;`,
+            const existing = yield* findExistingRecord(
+                db,
+                buildCommitLookupQueries({
+                    repositoryId,
+                    stableRepo,
+                    checkoutPath: repo.path,
+                    sha: c.sha,
+                }),
             );
-            const id = dbRecordLiteral("commit", existing?.[0]?.[0]?.id, fallbackKey);
+            const id = dbRecordLiteral("commit", existing, fallbackKey);
             commitIds.set(c.sha, id);
-            commitStmts.push(
-                `UPSERT ${id} CONTENT { sha: ${sqlString(c.sha)}, repo: ${sqlString(repo.path)}, message: ${sqlString(c.message)}, author: ${sqlString(c.author)}, ts: d"${c.ts}", repository: ${repositoryId} };`,
-            );
+            commitStmts.push(buildCommitUpsertStatement({
+                id,
+                stableRepo,
+                repositoryId,
+                sha: c.sha,
+                message: c.message,
+                author: c.author,
+                ts: c.ts,
+            }));
         }
         for (let i = 0; i < commitStmts.length; i += 500) {
             yield* db.query(commitStmts.slice(i, i + 500).join(""));
@@ -407,14 +490,23 @@ const writeRepo = (repo: RepoInfo, commits: CommitWithFiles[]) =>
                 if (seenFiles.has(f.path)) continue;
                 seenFiles.add(f.path);
                 const fallbackKey = fileRecordKey(repo.repositoryKey, f.path);
-                const existing = yield* db.query<[Array<{ id: unknown }>]>(
-                    `SELECT id FROM file WHERE repo = ${sqlString(repo.path)} AND path = ${sqlString(f.path)} LIMIT 1;`,
+                const existing = yield* findExistingRecord(
+                    db,
+                    buildFileLookupQueries({
+                        repositoryId,
+                        stableRepo,
+                        checkoutPath: repo.path,
+                        path: f.path,
+                    }),
                 );
-                const id = dbRecordLiteral("file", existing?.[0]?.[0]?.id, fallbackKey);
+                const id = dbRecordLiteral("file", existing, fallbackKey);
                 fileIds.set(f.path, id);
-                fileStmts.push(
-                    `UPSERT ${id} CONTENT { repo: ${sqlString(repo.path)}, path: ${sqlString(f.path)}, repository: ${repositoryId}, identity_scope: "repository" };`,
-                );
+                fileStmts.push(buildFileUpsertStatement({
+                    id,
+                    stableRepo,
+                    repositoryId,
+                    path: f.path,
+                }));
             }
         }
         for (let i = 0; i < fileStmts.length; i += 500) {
