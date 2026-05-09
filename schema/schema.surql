@@ -356,8 +356,13 @@ DEFINE FIELD deletions    ON touched TYPE option<int>;
 DEFINE FIELD status       ON touched TYPE option<string>;
 DEFINE FIELD old_path     ON touched TYPE option<string>;
 DEFINE FIELD new_path     ON touched TYPE option<string>;
+DEFINE FIELD repository   ON touched TYPE option<record<repository>>;
 DEFINE FIELD checkout     ON touched TYPE option<record<checkout>>;
 DEFINE FIELD ts           ON touched TYPE option<datetime>;
+DEFINE INDEX IF NOT EXISTS touched_in ON touched FIELDS in;
+DEFINE INDEX IF NOT EXISTS touched_out ON touched FIELDS out;
+DEFINE INDEX IF NOT EXISTS touched_repository_ts ON touched FIELDS repository, ts;
+DEFINE INDEX IF NOT EXISTS touched_checkout_ts ON touched FIELDS checkout, ts;
 
 DEFINE TABLE has_checkout TYPE RELATION FROM repository TO checkout;
 DEFINE FIELD ts           ON has_checkout TYPE datetime DEFAULT time::now();
