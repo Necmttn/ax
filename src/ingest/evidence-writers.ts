@@ -298,6 +298,9 @@ export function buildPlanSnapshotStatements(snapshot: PlanSnapshotWrite): string
 
     for (const item of snapshot.items) {
         statements.push(
+            `DELETE plan_item WHERE plan = ${recordRef("plan", snapshot.planKey)} AND seq = ${item.seq.toString(10)} AND id != ${recordRef("plan_item", item.key)};`,
+        );
+        statements.push(
             `UPSERT ${recordRef("plan_item", item.key)} CONTENT ${sqlObject([
                 ["plan", recordRef("plan", snapshot.planKey)],
                 ["external_id", sqlOptionString(item.externalId)],
