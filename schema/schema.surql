@@ -186,11 +186,25 @@ DEFINE FIELD input_json     ON tool_call TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD output_json    ON tool_call TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD raw            ON tool_call TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD duration_ms    ON tool_call TYPE option<int>;
+DEFINE FIELD seq            ON tool_call TYPE option<int>;
+DEFINE FIELD call_id        ON tool_call TYPE option<string>;
+DEFINE FIELD cwd            ON tool_call TYPE option<string>;
+DEFINE FIELD command_text   ON tool_call TYPE option<string>;
+DEFINE FIELD command_norm   ON tool_call TYPE option<string>;
+DEFINE FIELD command_tool   ON tool_call TYPE option<record<tool>>;
+DEFINE FIELD output_excerpt ON tool_call TYPE option<string>;
+DEFINE FIELD error_text     ON tool_call TYPE option<string>;
+DEFINE FIELD exit_code      ON tool_call TYPE option<int>;
+DEFINE FIELD has_error      ON tool_call TYPE bool DEFAULT false;
 DEFINE INDEX tool_call_session_ts ON tool_call FIELDS session, ts;
 DEFINE INDEX tool_call_tool_ts ON tool_call FIELDS tool, ts;
+DEFINE INDEX tool_call_command_norm_ts ON tool_call FIELDS command_norm, ts;
+DEFINE INDEX tool_call_command_tool_ts ON tool_call FIELDS command_tool, ts;
+DEFINE INDEX tool_call_error_ts ON tool_call FIELDS has_error, ts;
 
 DEFINE TABLE plan SCHEMAFULL;
 DEFINE FIELD session        ON plan TYPE option<record<session>>;
+DEFINE FIELD source         ON plan TYPE option<string>;
 DEFINE FIELD title          ON plan TYPE option<string>;
 DEFINE FIELD summary        ON plan TYPE option<string>;
 DEFINE FIELD status         ON plan TYPE option<string>;
@@ -198,15 +212,20 @@ DEFINE FIELD items          ON plan TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD created_at     ON plan TYPE datetime DEFAULT time::now();
 DEFINE FIELD updated_at     ON plan TYPE option<datetime>;
 DEFINE INDEX plan_session   ON plan FIELDS session;
+DEFINE INDEX plan_source_session ON plan FIELDS source, session;
 
 DEFINE TABLE plan_item SCHEMAFULL;
 DEFINE FIELD plan           ON plan_item TYPE record<plan>;
+DEFINE FIELD external_id    ON plan_item TYPE option<string>;
 DEFINE FIELD seq            ON plan_item TYPE int;
 DEFINE FIELD text           ON plan_item TYPE string;
+DEFINE FIELD active_form    ON plan_item TYPE option<string>;
 DEFINE FIELD status         ON plan_item TYPE option<string>;
 DEFINE FIELD raw            ON plan_item TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD created_at     ON plan_item TYPE datetime DEFAULT time::now();
 DEFINE FIELD updated_at     ON plan_item TYPE option<datetime>;
+DEFINE FIELD first_seen_at  ON plan_item TYPE option<datetime>;
+DEFINE FIELD last_seen_at   ON plan_item TYPE option<datetime>;
 DEFINE INDEX plan_item_plan_seq ON plan_item FIELDS plan, seq UNIQUE;
 
 DEFINE TABLE artifact SCHEMAFULL;
@@ -223,8 +242,11 @@ DEFINE INDEX artifact_hash  ON artifact FIELDS content_hash;
 DEFINE TABLE plan_snapshot SCHEMAFULL;
 DEFINE FIELD plan           ON plan_snapshot TYPE option<record<plan>>;
 DEFINE FIELD session        ON plan_snapshot TYPE option<record<session>>;
+DEFINE FIELD tool_call      ON plan_snapshot TYPE option<record<tool_call>>;
+DEFINE FIELD source         ON plan_snapshot TYPE option<string>;
 DEFINE FIELD items          ON plan_snapshot TYPE string;  -- JSON-encoded
 DEFINE FIELD summary        ON plan_snapshot TYPE option<string>;
+DEFINE FIELD explanation    ON plan_snapshot TYPE option<string>;
 DEFINE FIELD ts             ON plan_snapshot TYPE datetime DEFAULT time::now();
 DEFINE INDEX plan_snapshot_plan_ts ON plan_snapshot FIELDS plan, ts;
 
