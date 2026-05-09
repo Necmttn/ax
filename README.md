@@ -26,14 +26,13 @@ For the current private repo, this single command uses `gh` auth to fetch the
 installer and release artifact:
 
 ```bash
-GH_TOKEN="$(gh auth token)" bash -c 'curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github.raw" https://api.github.com/repos/Necmttn/agentctl/contents/install.sh | bash && agentctl ingest --since=7'
+GH_TOKEN="$(gh auth token)" bash -c 'curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github.raw" https://api.github.com/repos/Necmttn/agentctl/contents/install.sh | bash && PATH="$HOME/.local/bin:$PATH" agentctl ingest --since=7'
 ```
 
 If the repo is public later, this also works:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Necmttn/agentctl/main/install.sh | bash
-agentctl ingest --since=7
+curl -fsSL https://raw.githubusercontent.com/Necmttn/agentctl/main/install.sh | bash && PATH="$HOME/.local/bin:$PATH" agentctl ingest --since=7
 ```
 
 `install.sh` downloads `agentctl-<os>-<arch>.tar.gz` from the latest GitHub
@@ -98,9 +97,9 @@ For local development against this checkout:
 
 ```bash
 # from the agentctl repo
-mkdir -p ~/.claude/skills ~/.codex/skills
+mkdir -p ~/.claude/skills ~/.agents/skills
 ln -sfn "$PWD/skill" ~/.claude/skills/agentctl
-ln -sfn "$PWD/skill" ~/.codex/skills/agentctl
+ln -sfn "$PWD/skill" ~/.agents/skills/agentctl
 ```
 
 Agent checklist after install:

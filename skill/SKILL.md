@@ -41,7 +41,7 @@ agentctl project verify --json      # diff-aware checks + optional live diagnost
 If `agentctl` is not on PATH, tell the user the CLI must be installed first:
 
 ```bash
-GH_TOKEN="$(gh auth token)" bash -c 'curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github.raw" https://api.github.com/repos/Necmttn/agentctl/contents/install.sh | bash && agentctl ingest --since=7'
+GH_TOKEN="$(gh auth token)" bash -c 'curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github.raw" https://api.github.com/repos/Necmttn/agentctl/contents/install.sh | bash && PATH="$HOME/.local/bin:$PATH" agentctl ingest --since=7'
 ```
 
 If this skill itself is missing in a new agent environment, install it with:
