@@ -118,10 +118,17 @@ EOF
 fi
 
 if download_with_gh "checksums.txt" "$tmp_dir" >/dev/null 2>&1 || download_with_curl "checksums.txt" "$tmp_dir/checksums.txt" >/dev/null 2>&1; then
+  checksum_line="$(
+    cd "$tmp_dir"
+    awk -v f="$artifact" '$2 == f || $2 == "./" f { print; found = 1; exit } END { if (!found) exit 1 }' checksums.txt
+  )" || {
+    echo "[agentctl] checksums.txt did not include ${artifact}" >&2
+    exit 1
+  }
   if command -v shasum >/dev/null 2>&1; then
-    (cd "$tmp_dir" && grep "  ${artifact}$" checksums.txt | shasum -a 256 -c -)
+    (cd "$tmp_dir" && printf '%s\n' "$checksum_line" | shasum -a 256 -c -)
   elif command -v sha256sum >/dev/null 2>&1; then
-    (cd "$tmp_dir" && grep "  ${artifact}$" checksums.txt | sha256sum -c -)
+    (cd "$tmp_dir" && printf '%s\n' "$checksum_line" | sha256sum -c -)
   else
     echo "[agentctl] checksum file downloaded; no sha256 checker found, skipping verification"
   fi
