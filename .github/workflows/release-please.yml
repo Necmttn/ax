@@ -20,6 +20,8 @@ jobs:
   release-please:
     if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.tag_name == '') }}
     runs-on: ubuntu-latest
+    outputs:
+      releases_created: ${{ steps.release.outputs.releases_created }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
@@ -27,7 +29,8 @@ jobs:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
 
   build-artifacts:
-    if: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.tag_name != '') }}
+    needs: release-please
+    if: ${{ always() && (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.tag_name != '') || needs.release-please.outputs.releases_created == 'true') }}
     name: Build ${{ matrix.artifact }}
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -69,8 +72,8 @@ jobs:
           if-no-files-found: error
 
   publish-artifacts:
-    needs: build-artifacts
-    if: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.tag_name != '') }}
+    needs: [release-please, build-artifacts]
+    if: ${{ always() && needs.build-artifacts.result == 'success' && (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.tag_name != '') || needs.release-please.outputs.releases_created == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -88,5 +91,8 @@ jobs:
         run: |
           set -euo pipefail
           cd release-assets
+          if [ -z "$TAG_NAME" ]; then
+            TAG_NAME="$(gh release view --repo "$GH_REPO" --json tagName --jq .tagName)"
+          fi
           shasum -a 256 ./*.tar.gz > checksums.txt
           gh release upload "$TAG_NAME" ./*.tar.gz checksums.txt --repo "$GH_REPO" --clobber
