@@ -36,6 +36,25 @@ agentctl project context --json     # read-only repo grounding: git, stack, inst
 agentctl project verify --json      # diff-aware checks + optional live diagnostics
 ```
 
+## Setup checklist
+
+If `agentctl` is not on PATH, tell the user the CLI must be installed first:
+
+```bash
+git clone https://github.com/Necmttn/agentctl ~/Projects/agentctl
+cd ~/Projects/agentctl
+bun install
+bun run build
+./dist/agentctl install
+agentctl ingest --since=7
+```
+
+If this skill itself is missing in a new agent environment, install it with:
+
+```bash
+npx skills add Necmttn/agentctl --skill agentctl -g -a claude-code -a codex -y
+```
+
 ## Project workflow
 
 At the start of repo work, run:
