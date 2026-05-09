@@ -147,14 +147,10 @@ function planItemKey(input: {
     sessionId: string;
     source: string;
     seq: number;
-    externalId: string | null;
-    content: string;
 }): string {
-    const identity = input.externalId ?? input.content;
     return [
         planKey(input.sessionId, input.source),
         `item_${input.seq.toString(10).padStart(3, "0")}`,
-        stableHash(identity).slice(0, 12),
     ].join("__");
 }
 
@@ -391,8 +387,6 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
                         sessionId,
                         source,
                         seq: item.seq,
-                        externalId: item.externalId,
-                        content: item.content,
                     }),
                     externalId: item.externalId,
                     seq: item.seq,
