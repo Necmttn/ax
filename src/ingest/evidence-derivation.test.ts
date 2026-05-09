@@ -3,6 +3,7 @@ import {
     deriveDiagnosticsFromToolCalls,
     deriveFrictionFromToolCalls,
     deriveRecommendationFromFriction,
+    shouldDeriveAllTimeSkillPairs,
 } from "./derive-signals.ts";
 
 describe("evidence derivation helpers", () => {
@@ -129,5 +130,11 @@ describe("evidence derivation helpers", () => {
         ]);
 
         expect(recommendation).toBeNull();
+    });
+
+    test("skips all-time skill pair aggregate updates for since-scoped derives", () => {
+        expect(shouldDeriveAllTimeSkillPairs(undefined)).toBe(true);
+        expect(shouldDeriveAllTimeSkillPairs(0)).toBe(true);
+        expect(shouldDeriveAllTimeSkillPairs(1)).toBe(false);
     });
 });
