@@ -157,6 +157,12 @@ const PAIR_WINDOW = 3;
 const RECOVERY_WINDOW = 3;
 const CHECKOUT_GUIDANCE_THRESHOLD = 3;
 
+export function shouldDeriveAllTimeSkillPairs(
+    sinceDays: number | undefined,
+): boolean {
+    return sinceDays === undefined || sinceDays <= 0;
+}
+
 interface TurnRow {
     id: { tb: string; id: string } | string;
     seq: number;
@@ -1113,8 +1119,9 @@ export const deriveSignals = (
             deriveSkillPairs(bundle, pairsAccum);
         }
 
-        const pairsList = [...pairsAccum.values()];
-        const pairEdgeIds = [...pairsAccum.keys()];
+        const shouldWriteSkillPairs = shouldDeriveAllTimeSkillPairs(opts.sinceDays);
+        const pairsList = shouldWriteSkillPairs ? [...pairsAccum.values()] : [];
+        const pairEdgeIds = shouldWriteSkillPairs ? [...pairsAccum.keys()] : [];
         const failedToolCalls = yield* fetchFailedToolCalls(opts.sinceDays);
         const toolFrictionBatch = deriveFrictionFromToolCalls(failedToolCalls);
         const correctionFrictionBatch = deriveFrictionFromCorrections(correctionBatch);
@@ -1128,7 +1135,9 @@ export const deriveSignals = (
         // corrections subquery becomes a pure index/scan filter (issue #31).
         yield* markWasCorrected(correctionBatch);
         yield* upsertProposed(proposedBatch);
-        yield* upsertSkillPairs(pairsList, pairEdgeIds);
+        if (shouldWriteSkillPairs) {
+            yield* upsertSkillPairs(pairsList, pairEdgeIds);
+        }
         yield* upsertRecovered(recoveryBatch);
         yield* upsertFrictionEvents(frictionBatch);
         yield* upsertDiagnosticEvents(diagnosticBatch);
