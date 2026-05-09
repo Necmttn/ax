@@ -408,7 +408,7 @@ const writeRepo = (repo: RepoInfo, commits: CommitWithFiles[]) =>
                 const add = f.additions === null ? "NONE" : String(f.additions);
                 const del = f.deletions === null ? "NONE" : String(f.deletions);
                 stmts.push(
-                    `RELATE ${cid}->touched->${fkey} SET additions = ${add}, deletions = ${del}, checkout = ${checkoutId}, ts = d"${c.ts}";`,
+                    `RELATE ${cid}->touched->${fkey} SET additions = ${add}, deletions = ${del}, repository = ${repositoryId}, checkout = ${checkoutId}, ts = d"${c.ts}";`,
                 );
                 touchedCount += 1;
             }
@@ -425,26 +425,22 @@ const writeRepo = (repo: RepoInfo, commits: CommitWithFiles[]) =>
         let producedCount = 0;
         for (const c of commits) {
             const cid = commitIds.get(c.sha) ?? recordLiteral("commit", commitRecordKey(repo.repositoryKey, c.sha));
-            // Two-step: clear existing produced edges for this commit
-            // (idempotency), then look up matching session ids in JS and
-            // RELATE one-by-one. SurrealQL FOR-loop with `$s.id->produced->`
-            // hits a parser bug ('.' not allowed before '->'); the JS-driven
-            // form sidesteps it cleanly.
-            yield* db.query(`DELETE produced WHERE out = ${cid};`);
             const sel = yield* db.query<[Array<{ id: unknown }>]>(
                 `SELECT id FROM session WHERE string::starts_with(cwd ?? "", ${repoLit}) AND started_at <= d"${c.ts}" AND (ended_at IS NONE OR ended_at >= d"${c.ts}");`,
             );
             const sessions = sel?.[0] ?? [];
             if (sessions.length > 0) {
-                const stmts = sessions.map((s) => {
+                const sessionIds = sessions.map((s) => {
                     // SurrealDB SDK returns RecordId instances; toString()
                     // gives the canonical `table:⟨id⟩` literal (escapes UUIDs
                     // with angle brackets when needed). Strings are accepted
                     // verbatim for completeness but in practice never occur.
-                    const idStr =
-                        typeof s.id === "string" ? s.id : String(s.id);
-                    return `RELATE ${idStr}->produced->${cid};`;
+                    return typeof s.id === "string" ? s.id : String(s.id);
                 });
+                const stmts = [
+                    `DELETE produced WHERE out = ${cid} AND in IN [${sessionIds.join(",")}];`,
+                    ...sessionIds.map((id) => `RELATE ${id}->produced->${cid};`),
+                ];
                 for (let i = 0; i < stmts.length; i += 500) {
                     yield* db.query(stmts.slice(i, i + 500).join(""));
                 }
