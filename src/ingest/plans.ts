@@ -41,13 +41,13 @@ type CodexUpdatePlanInput = {
 type NormalizeClaudeTodoWriteInput = {
     readonly sessionId: string;
     readonly ts: string;
-    readonly input: ClaudeTodoWriteInput;
+    readonly input: unknown;
 };
 
 type NormalizeCodexUpdatePlanInput = {
     readonly sessionId: string;
     readonly ts: string;
-    readonly input: CodexUpdatePlanInput;
+    readonly input: unknown;
 };
 
 function normalizeStatus(status: string | null | undefined): PlanStatus {
@@ -64,23 +64,48 @@ function nonEmptyString(value: string | null | undefined): string | null {
     return trimmed.length > 0 ? trimmed : null;
 }
 
+function parseMaybeJsonObject(input: unknown): Record<string, unknown> {
+    if (typeof input === "string") {
+        try {
+            const parsed = JSON.parse(input);
+            return isRecord(parsed) ? parsed : {};
+        } catch {
+            return {};
+        }
+    }
+
+    return isRecord(input) ? input : {};
+}
+
+function isRecord(input: unknown): input is Record<string, unknown> {
+    return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
+function asRecordArray(input: unknown): Record<string, unknown>[] {
+    if (!Array.isArray(input)) return [];
+    return input.filter(isRecord);
+}
+
 export function normalizeClaudeTodoWrite({
     sessionId,
     ts,
     input,
 }: NormalizeClaudeTodoWriteInput): NormalizedPlanSnapshot {
     const items: NormalizedPlanItem[] = [];
+    const raw = parseMaybeJsonObject(input) as ClaudeTodoWriteInput;
 
-    for (const todo of input.todos ?? []) {
-        const content = nonEmptyString(todo.content);
+    for (const todo of asRecordArray(raw.todos)) {
+        const content = nonEmptyString(typeof todo.content === "string" ? todo.content : null);
         if (!content) continue;
 
         items.push({
             externalId: null,
             seq: items.length + 1,
             content,
-            activeForm: nonEmptyString(todo.activeForm),
-            status: normalizeStatus(todo.status),
+            activeForm: nonEmptyString(
+                typeof todo.activeForm === "string" ? todo.activeForm : null,
+            ),
+            status: normalizeStatus(typeof todo.status === "string" ? todo.status : null),
         });
     }
 
@@ -99,9 +124,10 @@ export function normalizeCodexUpdatePlan({
     input,
 }: NormalizeCodexUpdatePlanInput): NormalizedPlanSnapshot {
     const items: NormalizedPlanItem[] = [];
+    const raw = parseMaybeJsonObject(input) as CodexUpdatePlanInput;
 
-    for (const planItem of input.plan ?? []) {
-        const content = nonEmptyString(planItem.step);
+    for (const planItem of asRecordArray(raw.plan)) {
+        const content = nonEmptyString(typeof planItem.step === "string" ? planItem.step : null);
         if (!content) continue;
 
         items.push({
@@ -109,7 +135,7 @@ export function normalizeCodexUpdatePlan({
             seq: items.length + 1,
             content,
             activeForm: null,
-            status: normalizeStatus(planItem.status),
+            status: normalizeStatus(typeof planItem.status === "string" ? planItem.status : null),
         });
     }
 
@@ -117,7 +143,7 @@ export function normalizeCodexUpdatePlan({
         sessionId,
         source: "codex_update_plan",
         ts,
-        explanation: nonEmptyString(input.explanation),
+        explanation: nonEmptyString(typeof raw.explanation === "string" ? raw.explanation : null),
         items,
     };
 }

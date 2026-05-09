@@ -48,6 +48,60 @@ describe("plan normalization", () => {
         });
     });
 
+    test("normalizes Codex update_plan arguments from transcript JSON string", () => {
+        const snapshot = normalizeCodexUpdatePlan({
+            sessionId: "s1",
+            ts: "2026-05-09T10:00:00.000Z",
+            input: JSON.stringify({
+                explanation: "Transcript payload.",
+                plan: [
+                    { step: "Read transcript", status: "completed" },
+                    { step: "Write evidence", status: "in_progress" },
+                ],
+            }),
+        });
+
+        expect(snapshot.explanation).toBe("Transcript payload.");
+        expect(snapshot.items).toEqual([
+            {
+                externalId: null,
+                seq: 1,
+                content: "Read transcript",
+                activeForm: null,
+                status: "completed",
+            },
+            {
+                externalId: null,
+                seq: 2,
+                content: "Write evidence",
+                activeForm: null,
+                status: "in_progress",
+            },
+        ]);
+    });
+
+    test("handles malformed unknown payloads without throwing", () => {
+        expect(
+            normalizeCodexUpdatePlan({
+                sessionId: "s1",
+                ts: "2026-05-09T10:00:00.000Z",
+                input: "{not-json",
+            }),
+        ).toMatchObject({
+            source: "codex_update_plan",
+            explanation: null,
+            items: [],
+        });
+
+        expect(
+            normalizeClaudeTodoWrite({
+                sessionId: "s1",
+                ts: "2026-05-09T10:00:00.000Z",
+                input: null,
+            }).items,
+        ).toEqual([]);
+    });
+
     test("filters empty items and defaults unknown statuses to pending", () => {
         expect(
             normalizeClaudeTodoWrite({
