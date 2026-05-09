@@ -1,5 +1,7 @@
 # agentctl
 
+[![skills.sh](https://skills.sh/b/Necmttn/agentctl)](https://skills.sh/Necmttn/agentctl)
+
 Local taste & telemetry graph for AI coding agents.
 
 `agentctl` ingests every Claude Code and Codex transcript on your machine into a dedicated SurrealDB graph, then surfaces *what skills you actually use*, *what you ignore*, and *which tools correlate with successful outcomes* - on demand, no daemon.
@@ -41,6 +43,20 @@ After install, two LaunchAgents run on boot:
 This repo ships an installable agent skill at `skill/SKILL.md` so Claude Code,
 Codex, and other skill-aware agents know when to call `agentctl`.
 
+Install through Vercel's `skills` CLI:
+
+```bash
+npx skills add Necmttn/agentctl --skill agentctl -g -a claude-code -a codex -y
+```
+
+Before installing, you can inspect what the repo exposes:
+
+```bash
+npx skills add Necmttn/agentctl --list
+```
+
+For local development against this checkout:
+
 ```bash
 # from the agentctl repo
 mkdir -p ~/.claude/skills ~/.codex/skills
@@ -48,8 +64,13 @@ ln -sfn "$PWD/skill" ~/.claude/skills/agentctl
 ln -sfn "$PWD/skill" ~/.codex/skills/agentctl
 ```
 
-There is not a published `npx skills install agentctl` path yet; local symlink
-installation is the current route.
+Agent checklist after install:
+
+1. Confirm `agentctl` exists with `command -v agentctl`.
+2. If missing, install the CLI with `git clone`, `bun install`, `bun run build`, and `./dist/agentctl install`.
+3. Run `agentctl ingest --since=7` to refresh skill and transcript data.
+4. At the start of repo work, run `agentctl project context --json`.
+5. Before reporting completion, run `agentctl project verify --json` and follow the returned checks.
 
 ### Dev mode (run from source)
 
