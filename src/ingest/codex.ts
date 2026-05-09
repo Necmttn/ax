@@ -6,6 +6,22 @@ import { RecordId, SurrealClient, filePointer } from "../lib/db.ts";
 import { skillRecordKey } from "../lib/skill-id.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
+import {
+    relateToolCallSkill,
+    writePlanSnapshot,
+    writeToolCalls,
+    type PlanSnapshotWrite,
+    type ToolCallSkillRelationWrite,
+    type ToolCallWrite,
+} from "./evidence-writers.ts";
+import {
+    extractCommandTool,
+    normalizeCommand,
+    parseCodexFunctionOutput,
+    toolKindForName,
+} from "./tool-calls.ts";
+import { normalizeCodexUpdatePlan, type PlanStatus } from "./plans.ts";
+import { toolCallRecordKey } from "./record-keys.ts";
 
 const CODEX_ROOT = process.env.AGENTCTL_CODEX_DIR ?? join(homedir(), ".codex", "sessions");
 
@@ -39,6 +55,144 @@ function turnRecordKey(sessionId: string, seq: number): string {
     return `${sessionId.replace(/-/g, "")}_${seq}`;
 }
 
+function parseJsonl(line: string): Record<string, unknown> | null {
+    try {
+        return JSON.parse(line);
+    } catch {
+        return null;
+    }
+}
+
+function isRecord(input: unknown): input is Record<string, unknown> {
+    return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
+function stringField(input: Record<string, unknown>, field: string): string | null {
+    const value = input[field];
+    return typeof value === "string" ? value : null;
+}
+
+function parseCodexArguments(input: unknown): unknown {
+    if (typeof input !== "string") return input ?? null;
+
+    try {
+        return JSON.parse(input);
+    } catch {
+        return input;
+    }
+}
+
+function jsonText(input: unknown): string | null {
+    try {
+        const encoded = JSON.stringify(input);
+        return encoded === undefined ? null : encoded;
+    } catch {
+        return null;
+    }
+}
+
+function outputText(input: unknown): string | null {
+    return typeof input === "string" ? input : jsonText(input);
+}
+
+function stableHash(input: string): string {
+    return Bun.hash(input).toString(16).padStart(16, "0");
+}
+
+function recordKeyPart(input: string, fallback = "_"): string {
+    const sanitized = input
+        .replace(/[^a-zA-Z0-9]/g, "_")
+        .replace(/_+/g, "_")
+        .replace(/^_+|_+$/g, "");
+    return sanitized.length > 0 ? sanitized : fallback;
+}
+
+function planKey(sessionId: string, source: string): string {
+    return [
+        "codex",
+        recordKeyPart(sessionId, "session").slice(0, 80),
+        recordKeyPart(source, "source"),
+        stableHash(`${sessionId}:${source}`).slice(0, 16),
+    ].join("__");
+}
+
+function planSnapshotKey(input: {
+    sessionId: string;
+    source: string;
+    snapshotSeq: number;
+    toolCallKey: string;
+}): string {
+    return [
+        planKey(input.sessionId, input.source),
+        `snapshot_${input.snapshotSeq.toString(10).padStart(6, "0")}`,
+        stableHash(input.toolCallKey).slice(0, 12),
+    ].join("__");
+}
+
+function planItemKey(input: {
+    sessionId: string;
+    source: string;
+    seq: number;
+    externalId: string | null;
+    content: string;
+}): string {
+    const identity = input.externalId ?? input.content;
+    return [
+        planKey(input.sessionId, input.source),
+        `item_${input.seq.toString(10).padStart(3, "0")}`,
+        stableHash(identity).slice(0, 12),
+    ].join("__");
+}
+
+function planStatus(items: readonly { status: PlanStatus }[]): PlanStatus {
+    if (items.some((item) => item.status === "in_progress")) return "in_progress";
+    if (items.length > 0 && items.every((item) => item.status === "completed")) {
+        return "completed";
+    }
+    if (items.some((item) => item.status === "pending")) return "pending";
+    if (items.length > 0 && items.every((item) => item.status === "abandoned")) {
+        return "abandoned";
+    }
+    return "pending";
+}
+
+type MutableToolCallWrite = {
+    -readonly [Key in keyof ToolCallWrite]: ToolCallWrite[Key];
+};
+
+type ToolResultFields = {
+    outputJson: unknown;
+    outputExcerpt: string | null;
+    errorText: string | null;
+    exitCode: number | null;
+    durationMs: number | null;
+    hasError: boolean;
+};
+
+function codexOutputFields(output: unknown): ToolResultFields {
+    const text = outputText(output);
+    const parsed = parseCodexFunctionOutput(text);
+    const excerpt = parsed.outputExcerpt.length > 0 ? parsed.outputExcerpt : null;
+
+    return {
+        outputJson: output ?? null,
+        outputExcerpt: excerpt,
+        errorText: parsed.hasError ? excerpt : null,
+        exitCode: parsed.exitCode,
+        durationMs: parsed.durationMs,
+        hasError: parsed.hasError,
+    };
+}
+
+function applyToolResult(call: MutableToolCallWrite, result: ToolResultFields): void {
+    call.outputJson = result.outputJson;
+    call.outputExcerpt = result.outputExcerpt;
+    call.errorText = result.errorText;
+    call.exitCode = result.exitCode;
+    call.durationMs = result.durationMs;
+    call.hasError = result.hasError;
+}
+
 async function walkJsonlFiles(root: string, cutoffMs: number): Promise<string[]> {
     const out: string[] = [];
     async function visit(dir: string) {
@@ -69,94 +223,299 @@ interface CodexExtract {
     session: CodexSession;
     turns: CodexTurn[];
     invocations: CodexInvocation[];
+    toolCalls: ToolCallWrite[];
+    skillRelations: ToolCallSkillRelationWrite[];
+    planSnapshots: PlanSnapshotWrite[];
+}
+
+function createCodexExtractor(filePath: string) {
+    let session: CodexSession | null = null;
+    const turns: CodexTurn[] = [];
+    const invocations: CodexInvocation[] = [];
+    const toolCalls: MutableToolCallWrite[] = [];
+    const skillRelations: ToolCallSkillRelationWrite[] = [];
+    const planSnapshots: PlanSnapshotWrite[] = [];
+    const toolCallsByCallId = new Map<string, MutableToolCallWrite>();
+    const pendingToolResultsByCallId = new Map<string, ToolResultFields>();
+    const planCreatedAtBySource = new Map<string, string>();
+    const planSnapshotCountsBySource = new Map<string, number>();
+    const anonymousFunctionCallCountsByTurn = new Map<number, number>();
+    let seq = 0;
+
+    const nextAnonymousFunctionCallId = (): string => {
+        const next = (anonymousFunctionCallCountsByTurn.get(seq) ?? 0) + 1;
+        anonymousFunctionCallCountsByTurn.set(seq, next);
+        return `anonymous_function_call_${seq.toString(10).padStart(6, "0")}_${next
+            .toString(10)
+            .padStart(3, "0")}`;
+    };
+
+    const nextPlanSnapshotSeq = (source: string): number => {
+        const next = (planSnapshotCountsBySource.get(source) ?? 0) + 1;
+        planSnapshotCountsBySource.set(source, next);
+        return next;
+    };
+
+    const rememberPlanCreatedAt = (source: string, ts: string): string => {
+        const existing = planCreatedAtBySource.get(source);
+        if (existing) return existing;
+        planCreatedAtBySource.set(source, ts);
+        return ts;
+    };
+
+    const processFunctionCall = (
+        payload: Record<string, unknown>,
+        ts: string,
+        currentSession: CodexSession,
+    ): void => {
+        const toolName = stringField(payload, "name");
+        if (!toolName) return;
+
+        const transcriptCallId = stringField(payload, "call_id");
+        const callId = transcriptCallId ?? nextAnonymousFunctionCallId();
+        const inputJson = parseCodexArguments(payload.arguments);
+        const turnKey = turnRecordKey(currentSession.id, seq);
+        const toolCallKey = toolCallRecordKey({
+            sessionId: currentSession.id,
+            seq,
+            callId,
+        });
+        const call: MutableToolCallWrite = {
+            provider: "codex",
+            toolName,
+            toolKind: toolKindForName(toolName),
+            sessionId: currentSession.id,
+            seq,
+            turnKey,
+            callId,
+            ts,
+            cwd: currentSession.cwd,
+            inputJson,
+            rawJson: payload,
+            hasError: false,
+        };
+
+        if (toolName === "exec_command" && isRecord(inputJson)) {
+            const command = stringField(inputJson, "command") ?? stringField(inputJson, "cmd");
+            if (command) {
+                call.commandText = command;
+                call.commandToolName = extractCommandTool(command);
+                call.commandNorm = normalizeCommand(command);
+            }
+        }
+
+        toolCalls.push(call);
+        toolCallsByCallId.set(callId, call);
+        const pendingResult = pendingToolResultsByCallId.get(callId);
+        if (pendingResult) {
+            applyToolResult(call, pendingResult);
+            pendingToolResultsByCallId.delete(callId);
+        }
+
+        const skillName = `codex:${toolName}`;
+        invocations.push({
+            session: currentSession.id,
+            seq,
+            ts,
+            skill: skillName,
+            args: payload.arguments ?? {},
+        });
+        skillRelations.push({
+            toolCallKey,
+            skillName,
+            ts,
+            reason: "Codex function call",
+            labels: {
+                provider: "codex",
+                toolName,
+                source: "transcript",
+            },
+            metrics: { turnSeq: seq },
+        });
+
+        if (toolName === "update_plan") {
+            const normalized = normalizeCodexUpdatePlan({
+                sessionId: currentSession.id,
+                ts,
+                input: payload.arguments,
+            });
+            if (normalized.items.length > 0) {
+                const source = normalized.source;
+                const snapshotSeq = nextPlanSnapshotSeq(source);
+                const createdAt = rememberPlanCreatedAt(source, ts);
+                const items = normalized.items.map((item) => ({
+                    key: planItemKey({
+                        sessionId: currentSession.id,
+                        source,
+                        seq: item.seq,
+                        externalId: item.externalId,
+                        content: item.content,
+                    }),
+                    externalId: item.externalId,
+                    seq: item.seq,
+                    content: item.content,
+                    activeForm: item.activeForm,
+                    status: item.status,
+                }));
+
+                planSnapshots.push({
+                    planKey: planKey(currentSession.id, source),
+                    sessionId: currentSession.id,
+                    source,
+                    status: planStatus(normalized.items),
+                    createdAt,
+                    updatedAt: ts,
+                    snapshotKey: planSnapshotKey({
+                        sessionId: currentSession.id,
+                        source,
+                        snapshotSeq,
+                        toolCallKey,
+                    }),
+                    toolCallKey,
+                    itemsJson: normalized.items,
+                    explanation: normalized.explanation,
+                    ts: normalized.ts,
+                    items,
+                });
+            }
+        }
+    };
+
+    const processFunctionOutput = (payload: Record<string, unknown>): void => {
+        const callId = stringField(payload, "call_id");
+        if (!callId) return;
+
+        const result = codexOutputFields(payload.output);
+        const call = toolCallsByCallId.get(callId);
+        if (call) {
+            applyToolResult(call, result);
+        } else {
+            pendingToolResultsByCallId.set(callId, result);
+        }
+    };
+
+    return {
+        processLine(line: string): void {
+            if (!line.trim()) return;
+            const entry = parseJsonl(line);
+            if (!entry) return;
+            const type = stringField(entry, "type");
+            const ts = stringField(entry, "timestamp");
+            if (!ts) return;
+            const payload = isRecord(entry.payload) ? entry.payload : null;
+
+            if (type === "session_meta" && payload) {
+                session = {
+                    id: stringField(payload, "id") ?? filePath,
+                    cwd: stringField(payload, "cwd"),
+                    cli_version: stringField(payload, "cli_version"),
+                    model_provider: stringField(payload, "model_provider"),
+                    started_at: stringField(payload, "timestamp") ?? ts,
+                    ended_at: ts,
+                };
+                return;
+            }
+            if (!session) return;
+            session.ended_at = ts;
+
+            if (type === "response_item" && payload) {
+                seq += 1;
+                const itemType = stringField(payload, "type");
+                const message = isRecord(payload.message) ? payload.message : null;
+                const role =
+                    itemType === "function_call"
+                        ? "tool_call"
+                        : itemType === "message"
+                          ? (stringField(message ?? {}, "role") ?? "assistant")
+                          : (itemType ?? "unknown");
+
+                let textExcerpt: string | null = null;
+                const messageContent = message?.content;
+                if (Array.isArray(messageContent)) {
+                    for (const block of messageContent.filter(isRecord)) {
+                        const blockType = stringField(block, "type");
+                        const blockText = stringField(block, "text");
+                        if (
+                            (blockType === "text" || blockType === "output_text") &&
+                            blockText &&
+                            !textExcerpt
+                        ) {
+                            textExcerpt = blockText.slice(0, 500);
+                        }
+                    }
+                }
+
+                const isToolCall = itemType === "function_call";
+                turns.push({
+                    session: session.id,
+                    seq,
+                    ts,
+                    role,
+                    text_excerpt: textExcerpt,
+                    has_tool_use: isToolCall,
+                });
+
+                if (isToolCall) {
+                    processFunctionCall(payload, ts, session);
+                } else if (itemType === "function_call_output") {
+                    processFunctionOutput(payload);
+                }
+            }
+        },
+        finish(): CodexExtract | null {
+            if (!session) return null;
+            return {
+                session,
+                turns,
+                invocations,
+                toolCalls,
+                skillRelations,
+                planSnapshots,
+            };
+        },
+    };
+}
+
+export function __testExtractCodexJsonlLines(lines: Iterable<string>): CodexExtract | null {
+    const extractor = createCodexExtractor("codex-test.jsonl");
+    for (const line of lines) {
+        extractor.processLine(line);
+    }
+    return extractor.finish();
 }
 
 async function extractCodexFile(filePath: string): Promise<CodexExtract | null> {
     const fh = await open(filePath, "r");
-    let session: CodexSession | null = null;
-    const turns: CodexTurn[] = [];
-    const invocations: CodexInvocation[] = [];
-    let seq = 0;
+    const extractor = createCodexExtractor(filePath);
 
-    for await (const line of fh.readLines()) {
-        if (!line.trim()) continue;
-        let entry: Record<string, unknown>;
-        try {
-            entry = JSON.parse(line);
-        } catch {
-            continue;
+    try {
+        for await (const line of fh.readLines()) {
+            extractor.processLine(line);
         }
-        const type = entry.type as string | undefined;
-        const ts = entry.timestamp as string | undefined;
-        if (!ts) continue;
-        const payload = entry.payload as Record<string, unknown> | undefined;
-
-        if (type === "session_meta" && payload) {
-            session = {
-                id: (payload.id as string) ?? filePath,
-                cwd: (payload.cwd as string) ?? null,
-                cli_version: (payload.cli_version as string) ?? null,
-                model_provider: (payload.model_provider as string) ?? null,
-                started_at: (payload.timestamp as string) ?? ts,
-                ended_at: ts,
-            };
-            continue;
-        }
-        if (!session) continue;
-        session.ended_at = ts;
-
-        if (type === "response_item" && payload) {
-            seq += 1;
-            const itemType = payload.type as string | undefined;
-            const role =
-                itemType === "function_call"
-                    ? "tool_call"
-                    : itemType === "message"
-                      ? ((payload.message as { role?: string } | undefined)?.role ?? "assistant")
-                      : (itemType ?? "unknown");
-
-            let textExcerpt: string | null = null;
-            const messageContent = (payload.message as { content?: unknown[] } | undefined)
-                ?.content;
-            if (Array.isArray(messageContent)) {
-                for (const block of messageContent as Array<{ type?: string; text?: string }>) {
-                    if (block.type === "text" || block.type === "output_text") {
-                        if (typeof block.text === "string" && !textExcerpt) {
-                            textExcerpt = block.text.slice(0, 500);
-                        }
-                    }
-                }
-            }
-
-            const isToolCall = itemType === "function_call";
-            turns.push({
-                session: session.id,
-                seq,
-                ts,
-                role,
-                text_excerpt: textExcerpt,
-                has_tool_use: isToolCall,
-            });
-
-            if (isToolCall) {
-                const toolName = payload.name as string | undefined;
-                if (toolName) {
-                    invocations.push({
-                        session: session.id,
-                        seq,
-                        ts,
-                        skill: `codex:${toolName}`,
-                        args: payload.arguments ?? {},
-                    });
-                }
-            }
-        }
+    } finally {
+        await fh.close();
     }
 
-    await fh.close();
-    if (!session) return null;
-    return { session, turns, invocations };
+    return extractor.finish();
 }
+
+const relateToolCallSkills = (relations: ToolCallSkillRelationWrite[]) =>
+    Effect.gen(function* () {
+        if (relations.length === 0) return;
+        yield* Effect.forEach(relations, relateToolCallSkill, {
+            concurrency: 4,
+            discard: true,
+        });
+    });
+
+const writePlanSnapshots = (snapshots: PlanSnapshotWrite[]) =>
+    Effect.gen(function* () {
+        if (snapshots.length === 0) return;
+        yield* Effect.forEach(snapshots, writePlanSnapshot, {
+            concurrency: 4,
+            discard: true,
+        });
+    });
 
 interface CodexIngestOpts {
     sinceDays: number | undefined;
@@ -167,6 +526,8 @@ export interface CodexStats {
     sessions: number;
     turns: number;
     invocations: number;
+    toolCalls: number;
+    planSnapshots: number;
 }
 
 export const ingestCodex = (
@@ -181,6 +542,8 @@ export const ingestCodex = (
         let sessionCount = 0;
         let turnCount = 0;
         let invCount = 0;
+        let toolCallCount = 0;
+        let planSnapshotCount = 0;
 
         for (const filePath of files) {
             const extracted = yield* Effect.promise(() => extractCodexFile(filePath));
@@ -236,7 +599,14 @@ export const ingestCodex = (
             }
             turnCount += extracted.turns.length;
 
-            // First, ensure codex tool skills exist as skill records
+            yield* writeToolCalls(extracted.toolCalls);
+            toolCallCount += extracted.toolCalls.length;
+            yield* relateToolCallSkills(extracted.skillRelations);
+            yield* writePlanSnapshots(extracted.planSnapshots);
+            planSnapshotCount += extracted.planSnapshots.length;
+
+            // Preserve legacy synthetic Codex skill records and
+            // turn->invoked->skill edges alongside the canonical evidence graph.
             const codexTools = new Set(extracted.invocations.map((i) => i.skill));
             const skillStmts = [...codexTools].map(
                 (name) =>
@@ -246,11 +616,9 @@ export const ingestCodex = (
                 yield* db.query(skillStmts.join(""));
             }
 
-            // Codex transcripts don't surface tool errors at the turn level
-            // (errors live inside `function_call_output` payloads we don't
-            // currently parse), so `turn_has_error` is always false here.
-            // The field is set explicitly anyway so the edge has the same
-            // shape as Claude-source edges (see issue #31).
+            // Codex tool errors live on the canonical tool_call records. The
+            // legacy turn->skill edge never had turn-level error data, so keep
+            // the old false value while preserving the edge shape from issue #31.
             const invStmts = extracted.invocations.map(
                 (inv) =>
                     `RELATE turn:\`${turnRecordKey(inv.session, inv.seq)}\`->invoked->skill:\`${skillRecordKey(inv.skill)}\` SET ts = d"${inv.ts}", args = ${JSON.stringify(JSON.stringify(inv.args))}, turn_has_error = false;`,
@@ -262,18 +630,20 @@ export const ingestCodex = (
 
             if (fileCount % 25 === 0) {
                 console.log(
-                    `[codex] files=${fileCount} sessions=${sessionCount} turns=${turnCount} inv=${invCount}`,
+                    `[codex] files=${fileCount} sessions=${sessionCount} turns=${turnCount} inv=${invCount} toolCalls=${toolCallCount} planSnapshots=${planSnapshotCount}`,
                 );
             }
         }
         console.log(
-            `[codex] DONE files=${fileCount} sessions=${sessionCount} turns=${turnCount} invocations=${invCount}`,
+            `[codex] DONE files=${fileCount} sessions=${sessionCount} turns=${turnCount} invocations=${invCount} toolCalls=${toolCallCount} planSnapshots=${planSnapshotCount}`,
         );
         return {
             files: fileCount,
             sessions: sessionCount,
             turns: turnCount,
             invocations: invCount,
+            toolCalls: toolCallCount,
+            planSnapshots: planSnapshotCount,
         };
     });
 
