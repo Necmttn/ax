@@ -212,4 +212,50 @@ describe("Claude transcript extraction", () => {
         expect(secondSnapshot.updatedAt).toBe("2026-05-09T10:00:03.000Z");
         expect(secondSnapshot.snapshotKey).not.toBe(firstSnapshot.snapshotKey);
     });
+
+    test("assigns stable fallback ids to anonymous tool uses in the same turn", () => {
+        const extracted = __testExtractClaudeJsonlLines(
+            [
+                JSON.stringify({
+                    type: "assistant",
+                    timestamp: "2026-05-09T11:00:00.000Z",
+                    message: {
+                        content: [
+                            {
+                                type: "tool_use",
+                                name: "Bash",
+                                input: { command: "pwd" },
+                            },
+                            {
+                                type: "tool_use",
+                                name: "Bash",
+                                input: { command: "git status --short" },
+                            },
+                        ],
+                    },
+                }),
+            ],
+            "-Users-necmttn-Projects-agentctl",
+            "session-anonymous",
+        );
+
+        expect(extracted).not.toBeNull();
+        if (!extracted) return;
+
+        expect(extracted.toolCalls.map((call) => call.callId)).toEqual([
+            "anonymous_tool_use_000001_001",
+            "anonymous_tool_use_000001_002",
+        ]);
+        expect(
+            new Set(
+                extracted.toolCalls.map((call) =>
+                    toolCallRecordKey({
+                        sessionId: call.sessionId,
+                        seq: call.seq,
+                        callId: call.callId ?? null,
+                    }),
+                ),
+            ).size,
+        ).toBe(2);
+    });
 });
