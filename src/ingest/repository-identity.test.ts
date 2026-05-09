@@ -18,6 +18,18 @@ describe("repository identity", () => {
         );
     });
 
+    test("preserves ports on http remotes", () => {
+        expect(normalizeGitRemoteUrl("https://git.example.com:8443/org/repo.git")).toBe(
+            "git.example.com:8443/org/repo",
+        );
+    });
+
+    test("preserves ports on ssh URL remotes", () => {
+        expect(normalizeGitRemoteUrl("ssh://git@git.example.com:2222/org/repo.git")).toBe(
+            "git.example.com:2222/org/repo",
+        );
+    });
+
     test("returns null for blank remotes", () => {
         expect(normalizeGitRemoteUrl("")).toBeNull();
     });

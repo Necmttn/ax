@@ -309,6 +309,34 @@ const dbRecordLiteral = (fallbackTable: string, id: unknown, fallbackKey: string
     return typeof id === "string" ? id : String(id);
 };
 
+interface TouchedRelationFile {
+    fileId: string;
+    additions: number | null;
+    deletions: number | null;
+}
+
+interface TouchedRelationInput {
+    commitId: string;
+    files: TouchedRelationFile[];
+    repositoryId: string;
+    checkoutId: string;
+    ts: string;
+}
+
+export function buildTouchedRelationStatements(input: TouchedRelationInput): string[] {
+    const stmts = [
+        `DELETE touched WHERE in = ${input.commitId} AND checkout = ${input.checkoutId};`,
+    ];
+    for (const file of input.files) {
+        const add = file.additions === null ? "NONE" : String(file.additions);
+        const del = file.deletions === null ? "NONE" : String(file.deletions);
+        stmts.push(
+            `RELATE ${input.commitId}->touched->${file.fileId} SET additions = ${add}, deletions = ${del}, repository = ${input.repositoryId}, checkout = ${input.checkoutId}, ts = d"${input.ts}";`,
+        );
+    }
+    return stmts;
+}
+
 interface WriteStats {
     commits: number;
     files: number;
@@ -363,7 +391,7 @@ const writeRepo = (repo: RepoInfo, commits: CommitWithFiles[]) =>
             const id = dbRecordLiteral("commit", existing?.[0]?.[0]?.id, fallbackKey);
             commitIds.set(c.sha, id);
             commitStmts.push(
-                `UPSERT ${id} CONTENT { sha: ${sqlString(c.sha)}, repo: ${sqlString(repo.path)}, message: ${sqlString(c.message)}, author: ${sqlString(c.author)}, ts: d"${c.ts}", repository: ${repositoryId}, checkout: ${checkoutId} };`,
+                `UPSERT ${id} CONTENT { sha: ${sqlString(c.sha)}, repo: ${sqlString(repo.path)}, message: ${sqlString(c.message)}, author: ${sqlString(c.author)}, ts: d"${c.ts}", repository: ${repositoryId} };`,
             );
         }
         for (let i = 0; i < commitStmts.length; i += 500) {
@@ -385,7 +413,7 @@ const writeRepo = (repo: RepoInfo, commits: CommitWithFiles[]) =>
                 const id = dbRecordLiteral("file", existing?.[0]?.[0]?.id, fallbackKey);
                 fileIds.set(f.path, id);
                 fileStmts.push(
-                    `UPSERT ${id} CONTENT { repo: ${sqlString(repo.path)}, path: ${sqlString(f.path)}, repository: ${repositoryId}, checkout: ${checkoutId}, identity_scope: "repository" };`,
+                    `UPSERT ${id} CONTENT { repo: ${sqlString(repo.path)}, path: ${sqlString(f.path)}, repository: ${repositoryId}, identity_scope: "repository" };`,
                 );
             }
         }
@@ -400,18 +428,20 @@ const writeRepo = (repo: RepoInfo, commits: CommitWithFiles[]) =>
         for (const c of commits) {
             if (c.files.length === 0) continue;
             const cid = commitIds.get(c.sha) ?? recordLiteral("commit", commitRecordKey(repo.repositoryKey, c.sha));
-            const stmts: string[] = [
-                `DELETE touched WHERE in = ${cid};`,
-            ];
-            for (const f of c.files) {
-                const fkey = fileIds.get(f.path) ?? recordLiteral("file", fileRecordKey(repo.repositoryKey, f.path));
-                const add = f.additions === null ? "NONE" : String(f.additions);
-                const del = f.deletions === null ? "NONE" : String(f.deletions);
-                stmts.push(
-                    `RELATE ${cid}->touched->${fkey} SET additions = ${add}, deletions = ${del}, repository = ${repositoryId}, checkout = ${checkoutId}, ts = d"${c.ts}";`,
-                );
-                touchedCount += 1;
-            }
+            const stmts = buildTouchedRelationStatements({
+                commitId: cid,
+                files: c.files.map((f) => ({
+                    fileId:
+                        fileIds.get(f.path) ??
+                        recordLiteral("file", fileRecordKey(repo.repositoryKey, f.path)),
+                    additions: f.additions,
+                    deletions: f.deletions,
+                })),
+                repositoryId,
+                checkoutId,
+                ts: c.ts,
+            });
+            touchedCount += c.files.length;
             for (let i = 0; i < stmts.length; i += 500) {
                 yield* db.query(stmts.slice(i, i + 500).join(""));
             }
