@@ -22,15 +22,11 @@ Claude Code and Codex both leave detailed transcripts on disk. They contain ever
 ### Release artifact (recommended)
 
 Release artifacts are built by GitHub Actions and installed by `install.sh`.
-For the current private repo, authenticate `gh` first, then run the script from
-a checkout:
+For the current private repo, this single command uses `gh` auth to fetch the
+installer and release artifact:
 
 ```bash
-gh auth login
-git clone git@github.com:Necmttn/agentctl.git ~/Projects/agentctl
-cd ~/Projects/agentctl
-./install.sh
-agentctl ingest --since=7
+GH_TOKEN="$(gh auth token)" bash -c 'curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github.raw" https://api.github.com/repos/Necmttn/agentctl/contents/install.sh | bash && agentctl ingest --since=7'
 ```
 
 If the repo is public later, this also works:
