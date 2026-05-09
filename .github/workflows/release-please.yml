@@ -36,8 +36,6 @@ jobs:
         include:
           - runner: macos-14
             artifact: agentctl-darwin-arm64
-          - runner: macos-13
-            artifact: agentctl-darwin-x64
           - runner: ubuntu-24.04
             artifact: agentctl-linux-x64
     steps:
