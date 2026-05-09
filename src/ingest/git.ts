@@ -1,10 +1,22 @@
-import { readFile, stat } from "node:fs/promises";
+import { lstat, readFile, stat } from "node:fs/promises";
 import { join, basename, dirname } from "node:path";
 import { homedir } from "node:os";
 import { Effect } from "effect";
 import { SurrealClient } from "../lib/db.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
+import {
+    checkoutRecordKey,
+    commitRecordKey,
+    fileRecordKey,
+} from "./record-keys.ts";
+import {
+    chooseIdentity,
+    classifyCheckoutKind,
+    normalizeGitRemoteUrl,
+    type CheckoutKind,
+    type RepositoryIdentityKind,
+} from "./repository-identity.ts";
 
 /**
  * Optional override file: one absolute repo path per line. Lines starting with
@@ -21,8 +33,16 @@ const MAX_SINCE_DAYS = 90;
 interface RepoInfo {
     /** Canonical absolute path to the repo root (parent of .git). */
     path: string;
-    /** Stable slug used in record keys: basename + 8-char path hash. */
-    slug: string;
+    repositoryKey: string;
+    checkoutKey: string;
+    identityKind: RepositoryIdentityKind;
+    remoteUrl: string | null;
+    remoteUrlNormalized: string | null;
+    initialCommit: string | null;
+    gitDir: string | null;
+    branch: string | null;
+    headSha: string | null;
+    worktreeKind: CheckoutKind;
 }
 
 interface CommitRow {
@@ -98,12 +118,6 @@ const deriveReposFromSessions = (): Effect.Effect<string[], DbError, SurrealClie
         return out;
     });
 
-const repoSlug = (path: string): string => {
-    const base = basename(path).replace(/[^a-zA-Z0-9]/g, "_") || "repo";
-    const hash = Bun.hash(path).toString(16).slice(0, 8);
-    return `${base}__${hash}`;
-};
-
 const discoverRepos = (): Effect.Effect<RepoInfo[], DbError, SurrealClient> =>
     Effect.gen(function* () {
         const fromFile = yield* readRepoListFile();
@@ -124,7 +138,7 @@ const discoverRepos = (): Effect.Effect<RepoInfo[], DbError, SurrealClient> =>
         for (const p of candidates) {
             if (seen.has(p)) continue;
             seen.add(p);
-            repos.push({ path: p, slug: repoSlug(p) });
+            repos.push(yield* buildRepoInfo(p));
         }
         return repos;
     });
@@ -145,6 +159,58 @@ const runGit = (cwd: string, args: string[]): Effect.Effect<RunResult> =>
         const stdout = await new Response(proc.stdout).text();
         await proc.exited;
         return { stdout, code: proc.exitCode ?? 0 };
+    });
+
+const trimmedGitOutput = (cwd: string, args: string[]): Effect.Effect<string | null> =>
+    Effect.gen(function* () {
+        const result = yield* runGit(cwd, args);
+        if (result.code !== 0) return null;
+        const trimmed = result.stdout.trim();
+        return trimmed.length > 0 ? trimmed : null;
+    });
+
+const readGitEntry = (path: string): Effect.Effect<string> =>
+    Effect.promise(async () => {
+        const gitPath = join(path, ".git");
+        const st = await lstat(gitPath);
+        if (st.isDirectory()) return "directory";
+        return (await readFile(gitPath, "utf8")).trim();
+    });
+
+const buildRepoInfo = (path: string): Effect.Effect<RepoInfo> =>
+    Effect.gen(function* () {
+        const [remoteUrl, initialCommit, gitDir, branch, headSha, gitEntry] = yield* Effect.all(
+            [
+                trimmedGitOutput(path, ["config", "--get", "remote.origin.url"]),
+                trimmedGitOutput(path, ["rev-list", "--max-parents=0", "HEAD"]),
+                trimmedGitOutput(path, ["rev-parse", "--git-dir"]),
+                trimmedGitOutput(path, ["branch", "--show-current"]),
+                trimmedGitOutput(path, ["rev-parse", "HEAD"]),
+                readGitEntry(path),
+            ],
+            { concurrency: 4 },
+        );
+        const firstInitialCommit = initialCommit?.split("\n")[0]?.trim() || null;
+        const remoteUrlNormalized = remoteUrl ? normalizeGitRemoteUrl(remoteUrl) : null;
+        const identity = chooseIdentity({
+            remoteUrlNormalized,
+            initialCommit: firstInitialCommit,
+            checkoutRoot: path,
+        });
+
+        return {
+            path,
+            repositoryKey: identity.repositoryKey,
+            checkoutKey: checkoutRecordKey(path),
+            identityKind: identity.kind,
+            remoteUrl,
+            remoteUrlNormalized,
+            initialCommit: firstInitialCommit,
+            gitDir,
+            branch,
+            headSha,
+            worktreeKind: classifyCheckoutKind(gitEntry),
+        };
     });
 
 const COMMIT_DELIM = "--AGENTCTL-END--";
@@ -236,14 +302,12 @@ const sqlString = (s: string): string => {
     return `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 };
 
-const fileRecordKey = (repoSlugStr: string, path: string): string => {
-    const pathPart = path.replace(/[^a-zA-Z0-9]/g, "_").slice(0, 80);
-    const hash = Bun.hash(path).toString(16).slice(0, 8);
-    return `${repoSlugStr}__${pathPart}__${hash}`;
-};
+const recordLiteral = (table: string, key: string): string => `${table}:\`${key}\``;
 
-const commitRecordKey = (repoSlugStr: string, sha: string): string =>
-    `${repoSlugStr}__${sha}`;
+const dbRecordLiteral = (fallbackTable: string, id: unknown, fallbackKey: string): string => {
+    if (id === null || id === undefined) return recordLiteral(fallbackTable, fallbackKey);
+    return typeof id === "string" ? id : String(id);
+};
 
 interface WriteStats {
     commits: number;
@@ -254,29 +318,74 @@ interface WriteStats {
 
 const writeRepo = (repo: RepoInfo, commits: CommitWithFiles[]) =>
     Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const repositoryId = recordLiteral("repository", repo.repositoryKey);
+        const checkoutId = recordLiteral("checkout", repo.checkoutKey);
+
+        const repositoryName = basename(repo.path);
+        yield* db.query(
+            [
+                `UPSERT ${repositoryId} MERGE {`,
+                `name: ${sqlString(repositoryName)},`,
+                `remote_url: ${repo.remoteUrl === null ? "NONE" : sqlString(repo.remoteUrl)},`,
+                `root_path: ${sqlString(repo.path)},`,
+                `initial_commit: ${repo.initialCommit === null ? "NONE" : sqlString(repo.initialCommit)},`,
+                `default_branch: ${repo.branch === null ? "NONE" : sqlString(repo.branch)},`,
+                "updated_at: time::now()",
+                "};",
+                `UPSERT ${checkoutId} MERGE {`,
+                `repository: ${repositoryId},`,
+                `path: ${sqlString(repo.path)},`,
+                `branch: ${repo.branch === null ? "NONE" : sqlString(repo.branch)},`,
+                `head_sha: ${repo.headSha === null ? "NONE" : sqlString(repo.headSha)},`,
+                `worktree_name: ${repo.worktreeKind === "worktree" ? sqlString(basename(repo.path)) : "NONE"},`,
+                "dirty: false,",
+                "updated_at: time::now()",
+                "};",
+                `DELETE has_checkout WHERE in = ${repositoryId} AND out = ${checkoutId};`,
+                `RELATE ${repositoryId}->has_checkout->${checkoutId} SET ts = time::now();`,
+            ].join(""),
+        );
+
         if (commits.length === 0)
             return { commits: 0, files: 0, produced: 0, touched: 0 } satisfies WriteStats;
-        const db = yield* SurrealClient;
 
-        // 1. Bulk-upsert commits.
-        const commitStmts = commits.map((c) => {
-            const id = commitRecordKey(repo.slug, c.sha);
-            return `UPSERT commit:\`${id}\` CONTENT { sha: ${sqlString(c.sha)}, repo: ${sqlString(repo.path)}, message: ${sqlString(c.message)}, author: ${sqlString(c.author)}, ts: d"${c.ts}" };`;
-        });
+        // 1. Bulk-upsert commits. If a previous ingest wrote this repo+sha
+        // under the legacy local key, reuse that record id to satisfy the
+        // existing unique index while adding repository/checkout links.
+        const commitIds = new Map<string, string>();
+        const commitStmts: string[] = [];
+        for (const c of commits) {
+            const fallbackKey = commitRecordKey(repo.repositoryKey, c.sha);
+            const existing = yield* db.query<[Array<{ id: unknown }>]>(
+                `SELECT id FROM commit WHERE repo = ${sqlString(repo.path)} AND sha = ${sqlString(c.sha)} LIMIT 1;`,
+            );
+            const id = dbRecordLiteral("commit", existing?.[0]?.[0]?.id, fallbackKey);
+            commitIds.set(c.sha, id);
+            commitStmts.push(
+                `UPSERT ${id} CONTENT { sha: ${sqlString(c.sha)}, repo: ${sqlString(repo.path)}, message: ${sqlString(c.message)}, author: ${sqlString(c.author)}, ts: d"${c.ts}", repository: ${repositoryId}, checkout: ${checkoutId} };`,
+            );
+        }
         for (let i = 0; i < commitStmts.length; i += 500) {
             yield* db.query(commitStmts.slice(i, i + 500).join(""));
         }
 
         // 2. Bulk-upsert files (deduped by path).
         const seenFiles = new Set<string>();
+        const fileIds = new Map<string, string>();
         const fileStmts: string[] = [];
         for (const c of commits) {
             for (const f of c.files) {
-                const key = fileRecordKey(repo.slug, f.path);
-                if (seenFiles.has(key)) continue;
-                seenFiles.add(key);
+                if (seenFiles.has(f.path)) continue;
+                seenFiles.add(f.path);
+                const fallbackKey = fileRecordKey(repo.repositoryKey, f.path);
+                const existing = yield* db.query<[Array<{ id: unknown }>]>(
+                    `SELECT id FROM file WHERE repo = ${sqlString(repo.path)} AND path = ${sqlString(f.path)} LIMIT 1;`,
+                );
+                const id = dbRecordLiteral("file", existing?.[0]?.[0]?.id, fallbackKey);
+                fileIds.set(f.path, id);
                 fileStmts.push(
-                    `UPSERT file:\`${key}\` CONTENT { repo: ${sqlString(repo.path)}, path: ${sqlString(f.path)} };`,
+                    `UPSERT ${id} CONTENT { repo: ${sqlString(repo.path)}, path: ${sqlString(f.path)}, repository: ${repositoryId}, checkout: ${checkoutId}, identity_scope: "repository" };`,
                 );
             }
         }
@@ -290,16 +399,16 @@ const writeRepo = (repo: RepoInfo, commits: CommitWithFiles[]) =>
         let touchedCount = 0;
         for (const c of commits) {
             if (c.files.length === 0) continue;
-            const cid = commitRecordKey(repo.slug, c.sha);
+            const cid = commitIds.get(c.sha) ?? recordLiteral("commit", commitRecordKey(repo.repositoryKey, c.sha));
             const stmts: string[] = [
-                `DELETE touched WHERE in = commit:\`${cid}\`;`,
+                `DELETE touched WHERE in = ${cid};`,
             ];
             for (const f of c.files) {
-                const fkey = fileRecordKey(repo.slug, f.path);
+                const fkey = fileIds.get(f.path) ?? recordLiteral("file", fileRecordKey(repo.repositoryKey, f.path));
                 const add = f.additions === null ? "NONE" : String(f.additions);
                 const del = f.deletions === null ? "NONE" : String(f.deletions);
                 stmts.push(
-                    `RELATE commit:\`${cid}\`->touched->file:\`${fkey}\` SET additions = ${add}, deletions = ${del};`,
+                    `RELATE ${cid}->touched->${fkey} SET additions = ${add}, deletions = ${del}, checkout = ${checkoutId}, ts = d"${c.ts}";`,
                 );
                 touchedCount += 1;
             }
@@ -315,13 +424,13 @@ const writeRepo = (repo: RepoInfo, commits: CommitWithFiles[]) =>
         const repoLit = sqlString(repo.path);
         let producedCount = 0;
         for (const c of commits) {
-            const cid = commitRecordKey(repo.slug, c.sha);
+            const cid = commitIds.get(c.sha) ?? recordLiteral("commit", commitRecordKey(repo.repositoryKey, c.sha));
             // Two-step: clear existing produced edges for this commit
             // (idempotency), then look up matching session ids in JS and
             // RELATE one-by-one. SurrealQL FOR-loop with `$s.id->produced->`
             // hits a parser bug ('.' not allowed before '->'); the JS-driven
             // form sidesteps it cleanly.
-            yield* db.query(`DELETE produced WHERE out = commit:\`${cid}\`;`);
+            yield* db.query(`DELETE produced WHERE out = ${cid};`);
             const sel = yield* db.query<[Array<{ id: unknown }>]>(
                 `SELECT id FROM session WHERE string::starts_with(cwd ?? "", ${repoLit}) AND started_at <= d"${c.ts}" AND (ended_at IS NONE OR ended_at >= d"${c.ts}");`,
             );
@@ -334,7 +443,7 @@ const writeRepo = (repo: RepoInfo, commits: CommitWithFiles[]) =>
                     // verbatim for completeness but in practice never occur.
                     const idStr =
                         typeof s.id === "string" ? s.id : String(s.id);
-                    return `RELATE ${idStr}->produced->commit:\`${cid}\`;`;
+                    return `RELATE ${idStr}->produced->${cid};`;
                 });
                 for (let i = 0; i < stmts.length; i += 500) {
                     yield* db.query(stmts.slice(i, i + 500).join(""));
