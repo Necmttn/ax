@@ -1,6 +1,6 @@
 {
   "name": "agentctl",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Agent telemetry & taste graph for Claude Code. Ingests transcripts, skills, and git history into SurrealDB; surfaces 'what skills are worth keeping' and 'what does this user actually do' on demand.",
   "type": "module",
   "bin": {
