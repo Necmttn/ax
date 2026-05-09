@@ -84,8 +84,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tag_name }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           cd release-assets
           shasum -a 256 ./*.tar.gz > checksums.txt
-          gh release upload "$TAG_NAME" ./*.tar.gz checksums.txt --clobber
+          gh release upload "$TAG_NAME" ./*.tar.gz checksums.txt --repo "$GH_REPO" --clobber
