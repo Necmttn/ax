@@ -4,6 +4,13 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      tag_name:
+        description: Existing release tag to build artifacts for. Leave empty to run release-please.
+        required: false
+        type: string
+  release:
+    types: [published]
 
 permissions:
   contents: write
@@ -11,12 +18,8 @@ permissions:
 
 jobs:
   release-please:
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.tag_name == '') }}
     runs-on: ubuntu-latest
-    outputs:
-      releases_created: ${{ steps.release.outputs.releases_created }}
-      release_created: ${{ steps.release.outputs['agentctl--release_created'] }}
-      tag_name: ${{ steps.release.outputs['agentctl--tag_name'] }}
-      version: ${{ steps.release.outputs['agentctl--version'] }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
@@ -24,8 +27,7 @@ jobs:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
 
   build-artifacts:
-    needs: release-please
-    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    if: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.tag_name != '') }}
     name: Build ${{ matrix.artifact }}
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -69,8 +71,8 @@ jobs:
           if-no-files-found: error
 
   publish-artifacts:
-    needs: [release-please, build-artifacts]
-    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    needs: build-artifacts
+    if: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.tag_name != '') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -83,7 +85,7 @@ jobs:
       - name: Upload release assets
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+          TAG_NAME: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tag_name }}
         run: |
           set -euo pipefail
           cd release-assets
