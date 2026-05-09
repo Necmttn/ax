@@ -82,7 +82,7 @@ DEFINE FIELD kind           ON file TYPE option<string>;
 DEFINE FIELD identity_scope ON file TYPE option<string>;
 DEFINE INDEX file_path_uq   ON file FIELDS repo, path UNIQUE;
 DEFINE INDEX file_repository_path ON file FIELDS repository, path;
-DEFINE INDEX file_checkout_path ON file FIELDS checkout, path;
+REMOVE INDEX IF EXISTS file_checkout_path ON file;
 DEFINE INDEX file_workspace_path ON file FIELDS workspace, path;
 
 DEFINE TABLE commit SCHEMAFULL;
@@ -95,7 +95,7 @@ DEFINE FIELD repository     ON commit TYPE option<record<repository>>;
 DEFINE FIELD checkout       ON commit TYPE option<record<checkout>>;
 DEFINE INDEX commit_sha_uq  ON commit FIELDS repo, sha UNIQUE;
 DEFINE INDEX commit_repository_ts ON commit FIELDS repository, ts;
-DEFINE INDEX commit_checkout_ts ON commit FIELDS checkout, ts;
+REMOVE INDEX IF EXISTS commit_checkout_ts ON commit;
 
 DEFINE TABLE repository SCHEMAFULL;
 DEFINE FIELD name           ON repository TYPE option<string>;

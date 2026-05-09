@@ -28,7 +28,7 @@ export function normalizeGitRemoteUrl(remoteUrl: string): string | null {
         const url = new URL(withoutGitSuffix);
         const pathname = url.pathname.replace(/^\/+|\/+$/g, "");
         if (url.hostname.length === 0 || pathname.length === 0) return null;
-        return `${url.hostname}/${pathname}`.toLowerCase();
+        return `${url.host}/${pathname}`.toLowerCase();
     } catch {
         const scpLike = withoutGitSuffix.match(/^([^:]+):(.+)$/);
         if (scpLike) {
