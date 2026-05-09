@@ -7,6 +7,7 @@ import { ingestCommands } from "../ingest/commands.ts";
 import { ingestTranscripts } from "../ingest/transcripts.ts";
 import { ingestCodex } from "../ingest/codex.ts";
 import { ingestGit } from "../ingest/git.ts";
+import { ingestClaudeInsights } from "../ingest/claude-insights.ts";
 import { deriveSignals } from "../ingest/derive-signals.ts";
 import { cmdInstall, cmdUninstall } from "./install.ts";
 import { cmdProject } from "./project.ts";
@@ -15,6 +16,7 @@ const HELP = `agentctl - agent telemetry & taste graph
 
 Usage:
   agentctl ingest [filters] [--since=DAYS]
+  agentctl ingest-insights
   agentctl derive-signals [--since=DAYS]
   agentctl search <query> [--limit=N]
   agentctl stats <skill>
@@ -185,6 +187,8 @@ const cmdDeriveSignals = (args: string[]) =>
         );
         yield* deriveSignals({ sinceDays });
     });
+
+const cmdIngestInsights = () => ingestClaudeInsights().pipe(Effect.asVoid);
 
 const cmdSearch = (args: string[]) =>
     Effect.gen(function* () {
@@ -844,6 +848,8 @@ const dispatch = (
             return cmdIngest(rest);
         case "derive-signals":
             return cmdDeriveSignals(rest);
+        case "ingest-insights":
+            return cmdIngestInsights();
         case "search":
             return cmdSearch(rest);
         case "stats":
