@@ -33,6 +33,9 @@ const BUILTIN_TOOL_NAMES = new Set([
     "WebFetch",
     "WebSearch",
     "Write",
+    "apply_patch",
+    "exec_command",
+    "write_stdin",
 ]);
 
 const CLI_TOOL_NAMES = new Set([
@@ -121,6 +124,7 @@ const OPTIONS_WITH_VALUES = new Set([
     "--unset",
     "--user",
 ]);
+const TIME_OPTIONS_WITH_VALUES = new Set(["-f", "-o", "--format", "--output"]);
 
 const ASSIGNMENT_RE = /^[A-Za-z_][A-Za-z0-9_]*=.*/;
 const MAX_OUTPUT_EXCERPT_CHARS = 1200;
@@ -226,6 +230,13 @@ function tokenizeShell(command: string): string[] {
             continue;
         }
 
+        if (char === "\n" || char === "\r") {
+            pushCurrent();
+            tokens.push(";");
+            if (char === "\r" && next === "\n") i += 1;
+            continue;
+        }
+
         if (/\s/.test(char)) {
             pushCurrent();
             continue;
@@ -289,12 +300,17 @@ function stripCommandPrefixes(segment: string[]): string[] {
         }
 
         if (token === "sudo") {
-            index = skipOptions(segment, index + 1);
+            index = skipOptions(segment, index + 1, OPTIONS_WITH_VALUES);
             continue;
         }
 
-        if (token === "time" || token === "nice") {
-            index = skipOptions(segment, index + 1);
+        if (token === "time") {
+            index = skipOptions(segment, index + 1, TIME_OPTIONS_WITH_VALUES);
+            continue;
+        }
+
+        if (token === "nice") {
+            index = skipOptions(segment, index + 1, OPTIONS_WITH_VALUES);
             continue;
         }
 
@@ -321,20 +337,20 @@ function skipEnv(segment: string[], start: number): number {
 
         if (!token.startsWith("-")) break;
 
-        index += optionConsumesValue(token) ? 2 : 1;
+        index += optionConsumesValue(token, OPTIONS_WITH_VALUES) ? 2 : 1;
     }
 
     return index;
 }
 
-function skipOptions(segment: string[], start: number): number {
+function skipOptions(segment: string[], start: number, optionsWithValues: Set<string>): number {
     let index = start;
 
     while (index < segment.length) {
         const token = segment[index];
         if (!token.startsWith("-")) break;
 
-        index += optionConsumesValue(token) ? 2 : 1;
+        index += optionConsumesValue(token, optionsWithValues) ? 2 : 1;
     }
 
     return index;
@@ -347,7 +363,7 @@ function firstPatternArg(args: string[]): string | null {
         if (isAssignment(token)) continue;
 
         if (token.startsWith("-")) {
-            if (optionConsumesValue(token)) index += 1;
+            if (optionConsumesValue(token, OPTIONS_WITH_VALUES)) index += 1;
             continue;
         }
 
@@ -363,8 +379,8 @@ function isAssignment(token: string): boolean {
     return ASSIGNMENT_RE.test(token);
 }
 
-function optionConsumesValue(token: string): boolean {
-    return !token.includes("=") && OPTIONS_WITH_VALUES.has(token);
+function optionConsumesValue(token: string, optionsWithValues: Set<string>): boolean {
+    return !token.includes("=") && optionsWithValues.has(token);
 }
 
 function isLikelyValue(token: string): boolean {
