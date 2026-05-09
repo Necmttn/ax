@@ -75,7 +75,6 @@ To rebuild assets for an existing release, run the workflow manually with
 Published assets:
 
 - `agentctl-darwin-arm64.tar.gz`
-- `agentctl-darwin-x64.tar.gz`
 - `agentctl-linux-x64.tar.gz`
 - `checksums.txt`
 
