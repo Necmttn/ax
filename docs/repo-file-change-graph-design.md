@@ -29,3 +29,35 @@ directly for now. Tests should prefer isolated databases or namespaces so
 query/integration runs do not mutate the user's main `agentctl/main` graph.
 A future schema sync and rollout workflow can be added once the evidence graph
 stabilizes.
+
+## Prototype Verification Notes
+
+The prototype writes the new evidence graph beside the legacy taste graph.
+Existing taste/search commands continue to read legacy edges while the new
+insight commands read through `src/queries/insights.ts`.
+
+Verification commands run:
+
+- `bun run db:schema`
+- `bun src/cli/index.ts ingest --since=1`
+- `bun src/cli/index.ts ingest-insights`
+- `bun src/cli/index.ts insights repositories --limit=5`
+- `bun src/cli/index.ts insights friction --limit=5`
+- `bun src/cli/index.ts insights tools --limit=5`
+- `bun src/cli/index.ts insights sessions --limit=5`
+- `bun test`
+- `bun run typecheck`
+- `bun src/cli/index.ts project verify --json`
+
+Live dogfood counts after the smoke:
+
+- `tool_call`: 8,870
+- `plan_snapshot`: 100
+- `insight`: 131
+- `friction_event`: 621
+- `diagnostic_event`: 451
+
+The final ingest smoke also found and fixed a plan-item identity bug: plan item
+records now use plan+sequence identity, and the writer deletes legacy
+content-hashed item rows that conflict on the `plan_item_plan_seq` unique index
+before upserting the canonical row.
