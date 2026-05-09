@@ -246,6 +246,7 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
     const pendingToolResultsByCallId = new Map<string, ToolResultFields>();
     const planCreatedAtBySource = new Map<string, string>();
     const planSnapshotCountsBySource = new Map<string, number>();
+    const anonymousToolUseCountsByTurn = new Map<number, number>();
     let seq = 0;
     let cwd: string | null = null;
 
@@ -271,7 +272,20 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
         if (!name) return;
 
         const input = isRecord(block.input) ? block.input : undefined;
-        const callId = stringField(block, "id");
+        const transcriptCallId = stringField(block, "id");
+        const callId =
+            transcriptCallId ??
+            `anonymous_tool_use_${seq.toString(10).padStart(6, "0")}_${(
+                (anonymousToolUseCountsByTurn.get(seq) ?? 0) + 1
+            )
+                .toString(10)
+                .padStart(3, "0")}`;
+        if (!transcriptCallId) {
+            anonymousToolUseCountsByTurn.set(
+                seq,
+                (anonymousToolUseCountsByTurn.get(seq) ?? 0) + 1,
+            );
+        }
         const currentTurnKey = turnRecordKey(sessionId, seq);
         const toolCallKey = toolCallRecordKey({
             sessionId,
