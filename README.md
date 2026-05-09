@@ -66,8 +66,11 @@ After install, two LaunchAgents run on boot:
 
 GitHub Actions has a `Release Please` workflow with `workflow_dispatch`.
 Run it manually from the Actions tab to open or update the release PR. Merge
-that PR, and the next `main` push creates the GitHub Release, builds native
-artifacts, and uploads checksums.
+that PR, and the next `main` push creates the GitHub Release. When the release
+is published, the same workflow builds native artifacts and uploads checksums.
+
+To rebuild assets for an existing release, run the workflow manually with
+`tag_name` set to the release tag, for example `v0.1.0`.
 
 Published assets:
 
