@@ -371,7 +371,16 @@ DEFINE FIELD ts           ON corrected_by TYPE datetime;
 -- (the assistant turn that was corrected).
 DEFINE INDEX IF NOT EXISTS corrected_by_in ON corrected_by FIELDS in;
 
-DEFINE TABLE produced     TYPE RELATION FROM session TO commit;
+DEFINE TABLE produced TYPE RELATION FROM session TO commit;
+DEFINE FIELD repository   ON produced TYPE option<record<repository>>;
+DEFINE FIELD checkout     ON produced TYPE option<record<checkout>>;
+DEFINE FIELD ts           ON produced TYPE option<datetime>;
+DEFINE FIELD source       ON produced TYPE option<string>;
+DEFINE FIELD kind         ON produced TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS produced_in_ts ON produced FIELDS in, ts;
+DEFINE INDEX IF NOT EXISTS produced_out_ts ON produced FIELDS out, ts;
+DEFINE INDEX IF NOT EXISTS produced_repository_checkout_ts ON produced FIELDS repository, checkout, ts;
+
 DEFINE TABLE touched      TYPE RELATION FROM commit TO file;
 DEFINE FIELD additions    ON touched TYPE option<int>;
 DEFINE FIELD deletions    ON touched TYPE option<int>;
@@ -385,6 +394,7 @@ DEFINE INDEX IF NOT EXISTS touched_in ON touched FIELDS in;
 DEFINE INDEX IF NOT EXISTS touched_out ON touched FIELDS out;
 DEFINE INDEX IF NOT EXISTS touched_repository_ts ON touched FIELDS repository, ts;
 DEFINE INDEX IF NOT EXISTS touched_checkout_ts ON touched FIELDS checkout, ts;
+DEFINE INDEX IF NOT EXISTS touched_in_checkout ON touched FIELDS in, checkout;
 
 DEFINE TABLE has_checkout TYPE RELATION FROM repository TO checkout;
 DEFINE FIELD ts           ON has_checkout TYPE datetime DEFAULT time::now();
