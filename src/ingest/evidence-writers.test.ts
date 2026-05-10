@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
+import { skillRecordKey } from "../lib/skill-id.ts";
 import {
     buildPlanSnapshotStatements,
     buildRelateToolCallSkillStatements,
@@ -140,7 +141,7 @@ describe("evidence writer statement builders", () => {
         const sql = statements.join("\n");
 
         expect(sql).toContain("DELETE concerns WHERE");
-        expect(sql).toContain("RELATE tool_call:`session__call`->concerns->skill:`superpowers__test-driven-development`");
+        expect(sql).toContain(`RELATE tool_call:\`session__call\`->concerns->skill:\`${skillRecordKey("superpowers:test-driven-development")}\``);
         expect(sql).toContain("kind = \"invoked_skill\"");
         expect(sql).toContain("labels = \"{\\\"source\\\":\\\"codex\\\"}\"");
         expect(sql).toContain("metrics = \"{\\\"confidence\\\":1}\"");
@@ -160,7 +161,7 @@ describe("evidence writer statement builders", () => {
         }).join("\n");
 
         expect(placeholderSql).toContain(
-            "UPSERT skill:`superpowers__test-driven-development` CONTENT",
+            `UPSERT skill:\`${skillRecordKey("superpowers:test-driven-development")}\` CONTENT`,
         );
         expect(placeholderSql).toContain("scope: \"unknown\"");
         expect(relationSql).not.toContain("scope: \"unknown\"");
@@ -179,7 +180,7 @@ describe("evidence writer statement builders", () => {
             }).pipe(Effect.provide(Layer.succeed(SurrealClient, client))),
         );
 
-        expect(queries[0]).toContain("SELECT VALUE id FROM skill:`superpowers__test-driven-development`");
+        expect(queries[0]).toContain(`SELECT VALUE id FROM skill:\`${skillRecordKey("superpowers:test-driven-development")}\``);
         expect(queries.slice(1).join("\n")).not.toContain("UPSERT skill:");
         expect(queries.slice(1).join("\n")).toContain("->concerns->");
     });
