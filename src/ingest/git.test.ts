@@ -5,8 +5,13 @@ import {
     buildFileLookupQueries,
     buildFileUpsertStatement,
     buildProducedRelationStatements,
+    buildSessionCheckoutWhere,
+    buildSessionCheckoutUpdateStatement,
+    buildSessionRepoWhere,
     buildTouchedRelationStatements,
     touchedRelationRecordKey,
+    deriveRepositoryDisplayName,
+    nestedCheckoutPaths,
 } from "./git.ts";
 
 describe("git ingest relation statements", () => {
@@ -133,5 +138,61 @@ describe("git ingest relation statements", () => {
         expect(fileStatement).not.toContain("/tmp/worktree-a");
         expect(commitStatement).not.toContain("checkout:");
         expect(fileStatement).not.toContain("checkout:");
+    });
+
+    test("links sessions to checkout with exact path boundary", () => {
+        const where = buildSessionRepoWhere("/tmp/worktree-a");
+        const statement = buildSessionCheckoutUpdateStatement(
+            "/tmp/worktree-a",
+            "repository:`repo`",
+            "checkout:`checkout-a`",
+        );
+
+        expect(where).toBe(
+            '(cwd = "/tmp/worktree-a" OR string::starts_with(cwd ?? "", "/tmp/worktree-a/"))',
+        );
+        expect(statement).toBe(
+            'UPDATE session SET repository = repository:`repo`, checkout = checkout:`checkout-a` WHERE (cwd = "/tmp/worktree-a" OR string::starts_with(cwd ?? "", "/tmp/worktree-a/")) RETURN NONE;',
+        );
+        expect(statement).not.toContain("/tmp/worktree-ab");
+    });
+
+    test("excludes nested checkout roots from parent checkout session linking", () => {
+        expect(
+            nestedCheckoutPaths("/repo", [
+                "/repo",
+                "/repo/.worktrees/feature-a",
+                "/repo/.worktrees/feature-a/packages/app",
+                "/repo2/.worktrees/feature-b",
+            ]),
+        ).toEqual([
+            "/repo/.worktrees/feature-a/packages/app",
+            "/repo/.worktrees/feature-a",
+        ]);
+
+        const where = buildSessionCheckoutWhere("/repo", ["/repo/.worktrees/feature-a"]);
+        const statement = buildSessionCheckoutUpdateStatement(
+            "/repo",
+            "repository:`repo`",
+            "checkout:`main`",
+            ["/repo/.worktrees/feature-a"],
+        );
+
+        expect(where).toBe(
+            '((cwd = "/repo" OR string::starts_with(cwd ?? "", "/repo/")) AND NOT ((cwd = "/repo/.worktrees/feature-a" OR string::starts_with(cwd ?? "", "/repo/.worktrees/feature-a/"))))',
+        );
+        expect(statement).toContain("checkout = checkout:`main`");
+        expect(statement).toContain("AND NOT");
+        expect(statement).toContain("/repo/.worktrees/feature-a/");
+    });
+
+    test("derives repository display name from remote before checkout path", () => {
+        expect(
+            deriveRepositoryDisplayName(
+                "github.com/noktadev/quera",
+                "/Users/necmttn/Projects/quera/.claude/worktrees/fix-kg",
+            ),
+        ).toBe("quera");
+        expect(deriveRepositoryDisplayName(null, "/tmp/worktree-a")).toBe("worktree-a");
     });
 });

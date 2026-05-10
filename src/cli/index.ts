@@ -22,7 +22,7 @@ Usage:
   agentctl ingest [filters] [--since=DAYS]
   agentctl ingest-insights
   agentctl derive-signals [--since=DAYS]
-  agentctl insights [schema|repositories|friction|tools|sessions|graph-health] [--limit=N]
+  agentctl insights [schema|repositories|checkouts|git|friction|tools|sessions|graph-health] [--limit=N]
   agentctl dashboard [--limit=N] [--out=PATH]
   agentctl dashboard serve [--port=1738]
   agentctl search <query> [--limit=N]
@@ -206,7 +206,7 @@ const cmdInsights = (args: string[]) =>
             args.filter((a) => !a.startsWith("--"))[0] ?? "repositories";
         if (!isInsightView(rawView)) {
             console.error(
-                `agentctl insights: unknown view "${rawView}" (expected schema, repositories, friction, tools, sessions, or graph-health)`,
+                `agentctl insights: unknown view "${rawView}" (expected schema, repositories, checkouts, git, friction, tools, sessions, or graph-health)`,
             );
             process.exit(2);
         }

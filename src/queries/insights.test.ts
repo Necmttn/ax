@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
     SCHEMA_TABLES,
+    checkoutActivitySql,
+    gitCorrelationSql,
     recentFrictionSql,
     repositoryOverviewSql,
     schemaCoverageSql,
@@ -41,6 +43,40 @@ describe("insights query builders", () => {
         expect(sql).toContain("LIMIT 12");
         expectNoStaleFields(sql);
     });
+
+    test("gitCorrelationSql summarizes session to git history links", () => {
+        const sql = gitCorrelationSql(6);
+
+        expect(sql).toContain("FROM repository");
+        expect(sql).toContain("SELECT id FROM session WHERE repository = $parent.id");
+        expect(sql).toContain("SELECT id FROM commit WHERE repository = $parent.id");
+        expect(sql).toContain("SELECT id FROM touched WHERE repository = $parent.id");
+        expect(sql).toContain("SELECT id FROM produced WHERE out.repository = $parent.id");
+        expect(sql).toContain("checkout_linked_session_count");
+        expect(sql).toContain("ORDER BY session_count DESC");
+        expect(sql).toContain("LIMIT 6");
+        expectNoStaleFields(sql);
+    });
+
+    test("checkoutActivitySql summarizes worktree-level activity", () => {
+        const sql = checkoutActivitySql(8);
+
+        expect(sql).toContain("FROM checkout");
+        expect(sql).toContain("repository.name AS repository_name");
+        expect(sql).toContain("worktree_name");
+        expect(sql).toContain("SELECT id FROM session WHERE checkout = $parent.id");
+        expect(sql).toContain("SELECT id FROM turn WHERE session.checkout = $parent.id");
+        expect(sql).toContain("SELECT id FROM tool_call WHERE session.checkout = $parent.id");
+        expect(sql).toContain(
+            "SELECT id FROM tool_call WHERE session.checkout = $parent.id AND has_error = true",
+        );
+        expect(sql).toContain("SELECT id FROM produced WHERE in.checkout = $parent.id");
+        expect(sql).toContain("SELECT id FROM touched WHERE checkout = $parent.id");
+        expect(sql).toContain("ORDER BY session_count DESC, turn_count DESC");
+        expect(sql).toContain("LIMIT 8");
+        expectNoStaleFields(sql);
+    });
+
 
     test("recentFrictionSql reads JSON payload fields without flattened evidence columns", () => {
         const sql = recentFrictionSql(25);

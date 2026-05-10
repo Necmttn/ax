@@ -10,9 +10,12 @@ Example commands:
 agentctl insights
 agentctl insights schema
 agentctl insights repositories --limit=25
+agentctl insights checkouts --limit=25
+agentctl insights git --limit=25
 agentctl insights friction --limit=50
 agentctl insights tools --limit=20
 agentctl insights sessions --limit=20
+agentctl insights graph-health --limit=10
 agentctl dashboard --limit=25
 ```
 
@@ -20,6 +23,12 @@ The builders target the current schema fields directly:
 
 - `repositoryOverviewSql` reads `repository` and counts
   `->has_checkout->checkout`.
+- `checkoutActivitySql` reads `checkout` and counts linked sessions, turns,
+  tool calls, failures, produced commits, and touched files per worktree or
+  local checkout.
+- `gitCorrelationSql` reads repository-linked sessions, commits, `produced`,
+  and `touched` evidence so a dashboard can show whether transcript activity
+  is attached to Git history.
 - `recentFrictionSql` reads `friction_event` and returns the JSON-encoded
   `labels`, `metrics`, and `raw` fields rather than flattened draft fields.
 - `toolFailuresSql` groups `tool_call` rows with `WHERE has_error = true`.
@@ -35,6 +44,11 @@ query/integration runs do not mutate the user's main `agentctl/main` graph.
 A future schema sync and rollout workflow can be added once the evidence graph
 stabilizes.
 
+Implementation-pattern reference: `docs/effect-reference-t3code.md` captures
+Effect practices from the local `.references/t3code` clone that are worth
+adapting as the prototype grows, especially typed config, process services,
+schema decoders, and layer-based tests.
+
 ## Prototype Verification Notes
 
 The prototype writes the new evidence graph beside the legacy taste graph.
@@ -48,6 +62,8 @@ Verification commands run:
 - `bun src/cli/index.ts ingest-insights`
 - `bun src/cli/index.ts insights schema --limit=5`
 - `bun src/cli/index.ts insights repositories --limit=5`
+- `bun src/cli/index.ts insights checkouts --limit=5`
+- `bun src/cli/index.ts insights git --limit=5`
 - `bun src/cli/index.ts insights friction --limit=5`
 - `bun src/cli/index.ts insights tools --limit=5`
 - `bun src/cli/index.ts insights sessions --limit=5`
@@ -74,6 +90,27 @@ threshold.
 Dashboard generated at:
 
 `file:///Users/necmttn/.local/share/agentctl/dashboard.html`
+
+## Empty DB Benchmarks
+
+Use `scripts/bench-empty-db.sh` for cold ingest timing without mutating
+`agentctl/main`:
+
+```bash
+scripts/bench-empty-db.sh --since=90
+```
+
+The script selects a unique `AGENTCTL_DB_DB=bench_<timestamp>`, applies the
+schema, runs ingest, imports Claude insights, writes `schema.json`,
+`checkouts.json`, and `git.json`, and generates a static dashboard under
+`~/.local/share/agentctl/benchmarks/<db>/`.
+
+Repo initialization is not per-project. Ingest discovers repositories from
+existing transcript `cwd` values and optionally from
+`~/.local/share/agentctl/agentctl-repos.txt`. The Git pass backfills
+`session.repository` and `session.checkout`; `produced` edges are then tied to
+the checkout plus commit timestamp, while `touched` edges connect commits to
+canonical repository-relative files.
 
 The final ingest smoke also found and fixed a plan-item identity bug: plan item
 records now use plan+sequence identity, and the writer deletes legacy
