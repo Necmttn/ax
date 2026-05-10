@@ -1,8 +1,24 @@
 import { describe, expect, test } from "bun:test";
 import { toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
-import { __testExtractCodexJsonlLines } from "./codex.ts";
+import {
+    __testExtractCodexJsonlLines,
+    codexProgressEvery,
+    shouldSnapshotCodexRaw,
+} from "./codex.ts";
 
 describe("Codex transcript extraction", () => {
+    test("skips oversized raw artifact snapshots", () => {
+        expect(shouldSnapshotCodexRaw(1024, 1024)).toBe(true);
+        expect(shouldSnapshotCodexRaw(1025, 1024)).toBe(false);
+    });
+
+    test("codexProgressEvery rejects invalid values", () => {
+        expect(codexProgressEvery(undefined)).toBe(10);
+        expect(codexProgressEvery("5")).toBe(5);
+        expect(codexProgressEvery("0")).toBe(10);
+        expect(codexProgressEvery("nope")).toBe(10);
+    });
+
     test("extracts function calls, matched outputs, synthetic skill relations, and update_plan snapshots", () => {
         const execOutput =
             "Chunk ID: abc\nWall time: 0.2000 seconds\nProcess exited with code 1\nOriginal token count: 30\nOutput:\nfatal: not a git repository\n";
