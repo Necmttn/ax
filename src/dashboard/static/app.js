@@ -46,3 +46,27 @@ document.addEventListener("click", async (event) => {
 
 status.textContent = "ready";
 showIngest();
+
+async function fetchJsonPost(path, body) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+document.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement) || target.id !== "run") return;
+  const sql = document.querySelector("#sql").value;
+  const result = document.querySelector("#result");
+  result.textContent = "running";
+  try {
+    const json = await fetchJsonPost("/api/query", { sql });
+    result.innerHTML = table(json.result);
+  } catch (error) {
+    result.innerHTML = `<pre>${String(error.message ?? error)}</pre>`;
+  }
+});

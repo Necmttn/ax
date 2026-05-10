@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseDashboardServeArgs, routeStaticAsset } from "./server.ts";
+import { parseDashboardServeArgs, parseQueryRequest, routeStaticAsset } from "./server.ts";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
@@ -21,5 +21,12 @@ describe("dashboard server", () => {
         expect(existsSync(join(dir, "index.html"))).toBe(true);
         expect(existsSync(join(dir, "app.js"))).toBe(true);
         expect(existsSync(join(dir, "styles.css"))).toBe(true);
+    });
+
+    test("parseQueryRequest rejects non-select mutations", async () => {
+        await expect(parseQueryRequest(new Request("http://x/api/query", {
+            method: "POST",
+            body: JSON.stringify({ sql: "DELETE session;" }),
+        }))).rejects.toThrow("Only SELECT, RETURN, and INFO queries are allowed");
     });
 });

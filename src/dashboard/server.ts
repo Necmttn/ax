@@ -22,6 +22,16 @@ export function routeStaticAsset(url: URL): { path: string; contentType: string 
     return { path: join(STATIC_DIR, pathname.slice(1)), contentType };
 }
 
+export async function parseQueryRequest(req: Request): Promise<{ sql: string }> {
+    const body = await req.json() as { sql?: unknown };
+    const sql = typeof body.sql === "string" ? body.sql.trim() : "";
+    if (!sql) throw new Error("SQL is required");
+    if (!/^(SELECT|RETURN|INFO)\b/i.test(sql)) {
+        throw new Error("Only SELECT, RETURN, and INFO queries are allowed");
+    }
+    return { sql };
+}
+
 async function jsonResponse(value: unknown, status = 200): Promise<Response> {
     return new Response(JSON.stringify(value), {
         status,
@@ -45,6 +55,19 @@ async function queryApi(pathname: string): Promise<Response> {
 
 export async function handleDashboardRequest(req: Request): Promise<Response> {
     const url = new URL(req.url);
+    if (url.pathname === "/api/query" && req.method === "POST") {
+        try {
+            const { sql } = await parseQueryRequest(req);
+            const started = performance.now();
+            const result = await Effect.runPromise(Effect.gen(function* () {
+                const db = yield* SurrealClient;
+                return yield* db.query(sql);
+            }).pipe(Effect.provide(AppLayer), Effect.scoped) as Effect.Effect<unknown>);
+            return jsonResponse({ result, durationMs: Math.round(performance.now() - started) });
+        } catch (error) {
+            return jsonResponse({ error: error instanceof Error ? error.message : String(error) }, 400);
+        }
+    }
     if (url.pathname.startsWith("/api/")) return queryApi(url.pathname);
     const asset = routeStaticAsset(url);
     if (!asset) return new Response("not found", { status: 404 });
