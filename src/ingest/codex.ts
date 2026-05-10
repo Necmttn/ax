@@ -21,7 +21,7 @@ import {
     toolKindForName,
 } from "./tool-calls.ts";
 import { normalizeCodexUpdatePlan, type PlanStatus } from "./plans.ts";
-import { toolCallRecordKey } from "./record-keys.ts";
+import { toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 
 const CODEX_ROOT = process.env.AGENTCTL_CODEX_DIR ?? join(homedir(), ".codex", "sessions");
 
@@ -49,10 +49,6 @@ interface CodexInvocation {
     ts: string;
     skill: string; // namespaced as "codex:<tool>"
     args: unknown;
-}
-
-function turnRecordKey(sessionId: string, seq: number): string {
-    return `${sessionId.replace(/-/g, "")}_${seq}`;
 }
 
 function parseJsonl(line: string): Record<string, unknown> | null {
