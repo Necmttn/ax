@@ -1,6 +1,8 @@
 import { Effect } from "effect";
 import { SurrealClient } from "../lib/db.ts";
 import type { DbError } from "../lib/errors.ts";
+import { buildGuidanceWriteStatements, guidanceFromSignal } from "./guidance.ts";
+import { deriveSignalsForSelfImprove, type SignalInput } from "./signals.ts";
 
 export type SelfImproveCommand =
     | { readonly command: "guidance-next"; readonly json: boolean }
@@ -40,14 +42,28 @@ LIMIT 5;`);
         return result?.[0] ?? [];
     });
 
-export const selfImproveWeekly = (): Effect.Effect<unknown, DbError, SurrealClient> =>
+export function weeklyEvidenceSql(days: number): string {
+    return `
+SELECT id, project, started_at AS startedAt FROM session WHERE started_at > time::now() - ${days}d;
+SELECT session AS sessionId, command_norm AS commandNorm, has_error AS hasError, ts FROM tool_call WHERE ts > time::now() - ${days}d;
+SELECT session AS sessionId, status, ts FROM plan_snapshot WHERE ts > time::now() - ${days}d;`;
+}
+
+export const deriveWeeklyGuidance = (days = 7): Effect.Effect<unknown, DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
-        const result = yield* db.query(`
-SELECT kind, count() AS count, time::max(ts) AS last_seen
-FROM friction_event
-WHERE ts > time::now() - 7d
-GROUP BY kind
-ORDER BY count DESC;`);
-        return result?.[0] ?? [];
+        const result = yield* db.query(weeklyEvidenceSql(days));
+        const input: SignalInput = {
+            sessions: (result?.[0] ?? []) as SignalInput["sessions"],
+            toolCalls: (result?.[1] ?? []) as SignalInput["toolCalls"],
+            planSnapshots: (result?.[2] ?? []) as SignalInput["planSnapshots"],
+        };
+        const guidance = deriveSignalsForSelfImprove(input).map(guidanceFromSignal);
+        for (const draft of guidance) {
+            yield* db.query(buildGuidanceWriteStatements(draft).join("\n"));
+        }
+        return { guidanceCount: guidance.length, guidance };
     });
+
+export const selfImproveWeekly = (): Effect.Effect<unknown, DbError, SurrealClient> =>
+    deriveWeeklyGuidance(7);
