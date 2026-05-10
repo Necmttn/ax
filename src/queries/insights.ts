@@ -168,6 +168,40 @@ export function schemaCoverageSql(): string {
     return `RETURN [${rows}];`;
 }
 
+export function checkoutActivitySql(limit: number): string {
+    const safeLimit = checkedLimit(limit);
+    return `
+SELECT
+    id AS checkout_id,
+    repository,
+    path,
+    branch,
+    head_sha,
+    worktree_name,
+    dirty,
+    created_at,
+    updated_at,
+    (updated_at ?? created_at) AS last_seen_at,
+    (SELECT count() FROM session WHERE checkout = $parent.id GROUP ALL)[0].count AS session_count
+FROM checkout
+ORDER BY (updated_at ?? created_at) DESC
+LIMIT ${safeLimit};`.trim();
+}
+
+export function gitCorrelationSql(limit: number): string {
+    const safeLimit = checkedLimit(limit);
+    return `
+SELECT
+    out AS commit,
+    in AS session,
+    repository,
+    checkout,
+    ts
+FROM produced
+ORDER BY ts DESC
+LIMIT ${safeLimit};`.trim();
+}
+
 export function insightSqlForView(view: InsightView, limit: number): string {
     switch (view) {
         case "schema":
