@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
     checkoutRecordKey,
+    commitRecordKey,
     fileRecordKey,
     repositoryRecordKey,
     toolCallRecordKey,
     toolRecordKey,
+    turnRecordKey,
 } from "./record-keys.ts";
 
 const HASH = "[0-9a-f]{12,16}";
@@ -173,5 +175,30 @@ describe("record keys", () => {
         expect(dashedSessionKey).not.toBe(compactSessionKey);
         expect(dashedSessionKey).toMatch(new RegExp(`^a_b__${HASH}__seq_000001$`));
         expect(compactSessionKey).toMatch(new RegExp(`^ab__${HASH}__seq_000001$`));
+    });
+
+    test("fileRecordKey normalizes SDK-style repository record IDs", () => {
+        expect(fileRecordKey("repository:`remote__github_com_org_repo__abc123`", "src/index.ts"))
+            .toBe(fileRecordKey("remote__github_com_org_repo__abc123", "src/index.ts"));
+    });
+
+    test("commitRecordKey normalizes plain and record-literal repository keys", () => {
+        expect(commitRecordKey("repository:`remote__repo__001`", "a".repeat(40)))
+            .toBe(commitRecordKey("remote__repo__001", "a".repeat(40)));
+    });
+
+    test("turnRecordKey is centralized and deterministic", () => {
+        expect(turnRecordKey("session-abc", 7)).toMatch(/^session_abc__[a-f0-9]{16}__seq_000007$/);
+    });
+
+    test("toolCallRecordKey keeps call id distinct from seq fallback", () => {
+        expect(toolCallRecordKey({ sessionId: "s1", seq: 1, callId: "seq_000001" }))
+            .not.toBe(toolCallRecordKey({ sessionId: "s1", seq: 1 }));
+    });
+
+    test("repository and checkout IDs stay deterministic", () => {
+        expect(repositoryRecordKey({ remoteUrlNormalized: "github.com/org/repo" }))
+            .toBe(repositoryRecordKey({ remoteUrlNormalized: "github.com/org/repo" }));
+        expect(checkoutRecordKey("/tmp/repo")).toBe(checkoutRecordKey("/tmp/repo"));
     });
 });
