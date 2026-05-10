@@ -5,6 +5,7 @@ import { SurrealClient } from "../lib/db.ts";
 import { AppLayer } from "../lib/layers.ts";
 import { graphHealthSql } from "../queries/graph-health.ts";
 import { checkoutActivitySql, gitCorrelationSql } from "../queries/insights.ts";
+import { addIngestEventSubscriber, removeIngestEventSubscriber } from "./telemetry.ts";
 
 const STATIC_DIR = join(import.meta.dir, "static");
 
@@ -34,6 +35,16 @@ export async function parseQueryRequest(req: Request): Promise<{ sql: string }> 
 
 export function formatSseEvent(event: string, data: unknown): string {
     return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+}
+
+export function recentIngestEventsSql(sinceIso: string, limit = 50): string {
+    const safeLimit = Number.isInteger(limit) && limit > 0 ? limit : 50;
+    return `
+SELECT id, run, source, stage, level, message, counts, raw, ts
+FROM ingest_event
+WHERE ts > d"${sinceIso}"
+ORDER BY ts ASC
+LIMIT ${safeLimit};`.trim();
 }
 
 export function dashboardApiKind(pathname: string): "graph-health" | "worktrees" | "self-improve" | "unknown" {
@@ -87,9 +98,43 @@ export async function handleDashboardRequest(req: Request): Promise<Response> {
         }
     }
     if (url.pathname === "/api/events") {
+        let subscriber: ((event: unknown) => void) | null = null;
+        let interval: ReturnType<typeof setInterval> | null = null;
+        let closed = false;
+        let sinceIso = new Date(Date.now() - 5 * 60 * 1000).toISOString();
         const stream = new ReadableStream({
             start(controller) {
                 controller.enqueue(new TextEncoder().encode(formatSseEvent("ready", { ts: new Date().toISOString() })));
+                subscriber = (event: unknown) => {
+                    controller.enqueue(new TextEncoder().encode(formatSseEvent("ingest_event", event)));
+                };
+                addIngestEventSubscriber(subscriber);
+                interval = setInterval(async () => {
+                    if (closed) return;
+                    try {
+                        const result = await Effect.runPromise(Effect.gen(function* () {
+                            const db = yield* SurrealClient;
+                            return yield* db.query<[Array<Record<string, unknown>>]>(recentIngestEventsSql(sinceIso));
+                        }).pipe(Effect.provide(AppLayer), Effect.scoped) as Effect.Effect<[Array<Record<string, unknown>>]>);
+                        for (const row of result?.[0] ?? []) {
+                            if (closed) return;
+                            controller.enqueue(new TextEncoder().encode(formatSseEvent("ingest_event", row)));
+                            const ts = row.ts;
+                            if (typeof ts === "string" || ts instanceof Date) {
+                                sinceIso = new Date(ts).toISOString();
+                            }
+                        }
+                    } catch (error) {
+                        if (!closed) {
+                            controller.enqueue(new TextEncoder().encode(formatSseEvent("error", { message: error instanceof Error ? error.message : String(error) })));
+                        }
+                    }
+                }, 2000);
+            },
+            cancel() {
+                closed = true;
+                if (interval) clearInterval(interval);
+                if (subscriber) removeIngestEventSubscriber(subscriber);
             },
         });
         return new Response(stream, {

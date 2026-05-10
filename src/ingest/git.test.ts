@@ -44,10 +44,10 @@ describe("git ingest relation statements", () => {
         expect(keyA).not.toBe(keyB);
         expect(checkoutA.join("\n")).toContain(`touched:\`${keyA}\``);
         expect(checkoutB.join("\n")).toContain(`touched:\`${keyB}\``);
-        expect(checkoutA.join("\n")).toContain("repository: repository:`repo`");
-        expect(checkoutB.join("\n")).toContain("repository: repository:`repo`");
-        expect(checkoutA.join("\n")).toContain("checkout: checkout:`a`");
-        expect(checkoutB.join("\n")).toContain("checkout: checkout:`b`");
+        expect(checkoutA.join("\n")).toContain("repository = repository:`repo`");
+        expect(checkoutB.join("\n")).toContain("repository = repository:`repo`");
+        expect(checkoutA.join("\n")).toContain("checkout = checkout:`a`");
+        expect(checkoutB.join("\n")).toContain("checkout = checkout:`b`");
         expect(checkoutA.join("\n")).not.toContain("checkout:`b`");
         expect(checkoutB.join("\n")).not.toContain("checkout:`a`");
     });
@@ -66,8 +66,10 @@ describe("git ingest relation statements", () => {
             files: [{ fileId: "file:`f1`", additions: 1, deletions: 2 }],
         });
         expect(statements.join("\n")).toContain("touched:");  // explicit edge id
-        expect(statements.join("\n")).toContain("repository: repository:`r1`");
-        expect(statements.join("\n")).toContain("checkout: checkout:`co1`");
+        expect(statements.join("\n")).toContain("RELATE commit:`c1`->touched:");
+        expect(statements.join("\n")).not.toContain("UPSERT touched:");
+        expect(statements.join("\n")).toContain("repository = repository:`r1`");
+        expect(statements.join("\n")).toContain("checkout = checkout:`co1`");
     });
 
     test("produced relation statements include repository checkout and ts", () => {
@@ -78,9 +80,11 @@ describe("git ingest relation statements", () => {
             checkoutId: "checkout:`co1`",
             ts: "2026-05-10T00:00:00.000Z",
         });
-        expect(statements.join("\n")).toContain("repository: repository:`r1`");
-        expect(statements.join("\n")).toContain("checkout: checkout:`co1`");
-        expect(statements.join("\n")).toContain('ts: d"2026-05-10T00:00:00.000Z"');
+        expect(statements.join("\n")).toContain("RELATE session:`s1`->produced:");
+        expect(statements.join("\n")).not.toContain("UPSERT produced:");
+        expect(statements.join("\n")).toContain("repository = repository:`r1`");
+        expect(statements.join("\n")).toContain("checkout = checkout:`co1`");
+        expect(statements.join("\n")).toContain('ts = d"2026-05-10T00:00:00.000Z"');
     });
 
     test("looks up commits canonically before legacy checkout path rows", () => {

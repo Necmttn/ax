@@ -13,6 +13,8 @@ export interface IngestEvent {
 }
 
 const sqlString = (value: string): string => JSON.stringify(value);
+const sqlIdPart = (value: string): string =>
+    value.replace(/[^A-Za-z0-9_:-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 96) || "stage";
 // Encodes a value as a SurrealDB string literal containing compact JSON.
 // Single-quotes are used so inner double-quotes don't need escaping.
 const sqlJsonOption = (value: unknown): string => {
@@ -44,6 +46,46 @@ export function buildIngestRunFinishStatement(input: {
     return `UPDATE ingest_run:\`${input.runId}\` SET status = ${sqlString(input.status)}, ended_at = time::now(), metrics = ${sqlJsonOption(input.metrics ?? {})} RETURN NONE;`;
 }
 
+export function buildIngestStageStartStatement(input: {
+    readonly runId: string;
+    readonly source: string;
+    readonly stage: string;
+}): string {
+    const id = `${sqlIdPart(input.runId)}__${sqlIdPart(input.source)}__${sqlIdPart(input.stage)}`;
+    return `UPSERT ingest_stage:\`${id}\` MERGE { run: ingest_run:\`${input.runId}\`, source: ${sqlString(input.source)}, stage: ${sqlString(input.stage)}, status: "running", started_at: time::now() };`;
+}
+
+export function buildIngestStageFinishStatement(input: {
+    readonly runId: string;
+    readonly source: string;
+    readonly stage: string;
+    readonly status: "ok" | "error";
+    readonly counts?: Record<string, number>;
+    readonly errorText?: string;
+}): string {
+    const id = `${sqlIdPart(input.runId)}__${sqlIdPart(input.source)}__${sqlIdPart(input.stage)}`;
+    const errorText = input.errorText === undefined ? "NONE" : sqlString(input.errorText);
+    return `UPDATE ingest_stage:\`${id}\` SET status = ${sqlString(input.status)}, ended_at = time::now(), counts = ${sqlJsonOption(input.counts ?? {})}, error_text = ${errorText} RETURN NONE;`;
+}
+
 export function buildIngestEventStatement(event: IngestEvent): string {
     return `UPSERT ingest_event:\`${event.id}\` CONTENT { run: ingest_run:\`${event.runId}\`, source: ${sqlString(event.source)}, stage: ${sqlString(event.stage)}, level: ${sqlString(event.level)}, message: ${sqlString(event.message)}, counts: ${sqlJsonOption(event.counts)}, raw: ${sqlJsonOption(event)}, ts: d${sqlString(event.ts)} };`;
+}
+
+export type IngestEventSubscriber = (event: IngestEvent) => void;
+
+const subscribers = new Set<IngestEventSubscriber>();
+
+export function addIngestEventSubscriber(subscriber: IngestEventSubscriber): void {
+    subscribers.add(subscriber);
+}
+
+export function removeIngestEventSubscriber(subscriber: IngestEventSubscriber): void {
+    subscribers.delete(subscriber);
+}
+
+export function publishIngestEvent(event: IngestEvent): void {
+    for (const subscriber of subscribers) {
+        subscriber(event);
+    }
 }
