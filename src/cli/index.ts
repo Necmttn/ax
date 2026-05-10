@@ -11,6 +11,7 @@ import { ingestClaudeInsights } from "../ingest/claude-insights.ts";
 import { deriveSignals } from "../ingest/derive-signals.ts";
 import { insightSqlForView, isInsightView } from "../queries/insights.ts";
 import { writeDashboard } from "../dashboard/report.ts";
+import { serveDashboard } from "../dashboard/server.ts";
 import { cmdInstall, cmdUninstall } from "./install.ts";
 import { cmdProject } from "./project.ts";
 
@@ -22,6 +23,7 @@ Usage:
   agentctl derive-signals [--since=DAYS]
   agentctl insights [schema|repositories|friction|tools|sessions|graph-health] [--limit=N]
   agentctl dashboard [--limit=N] [--out=PATH]
+  agentctl dashboard serve [--port=1738]
   agentctl search <query> [--limit=N]
   agentctl stats <skill>
   agentctl recent [--limit=N]
@@ -890,6 +892,10 @@ const dispatch = (
         case "insights":
             return cmdInsights(rest);
         case "dashboard":
+            if (rest[0] === "serve") {
+                serveDashboard(rest.slice(1));
+                return Effect.succeed(undefined);
+            }
             return cmdDashboard(rest);
         case "search":
             return cmdSearch(rest);
