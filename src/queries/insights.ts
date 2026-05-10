@@ -4,6 +4,7 @@ export const INSIGHT_VIEWS = [
     "friction",
     "tools",
     "sessions",
+    "graph-health",
 ] as const;
 
 export type InsightView = (typeof INSIGHT_VIEWS)[number];
@@ -13,6 +14,8 @@ export interface SchemaTableSpec {
     readonly stage: "active" | "conditional" | "staged";
     readonly note: string;
 }
+
+import { graphHealthSql } from "./graph-health.ts";
 
 export const SCHEMA_TABLES: readonly SchemaTableSpec[] = [
     { table: "skill", stage: "active", note: "Installed skills and slash commands." },
@@ -177,5 +180,7 @@ export function insightSqlForView(view: InsightView, limit: number): string {
             return toolFailuresSql(limit);
         case "sessions":
             return sessionEvidenceSql(limit);
+        case "graph-health":
+            return graphHealthSql(limit);
     }
 }
