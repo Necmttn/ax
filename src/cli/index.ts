@@ -7,15 +7,24 @@ import { ingestCommands } from "../ingest/commands.ts";
 import { ingestTranscripts } from "../ingest/transcripts.ts";
 import { ingestCodex } from "../ingest/codex.ts";
 import { ingestGit } from "../ingest/git.ts";
+import { ingestClaudeInsights } from "../ingest/claude-insights.ts";
 import { deriveSignals } from "../ingest/derive-signals.ts";
+import { insightSqlForView, isInsightView } from "../queries/insights.ts";
+import { writeDashboard } from "../dashboard/report.ts";
+import { serveDashboard } from "../dashboard/server.ts";
 import { cmdInstall, cmdUninstall } from "./install.ts";
 import { cmdProject } from "./project.ts";
+import { guidanceNext, parseSelfImproveArgs, selfImproveWeekly, sessionSummary } from "../self-improve/commands.ts";
 
 const HELP = `agentctl - agent telemetry & taste graph
 
 Usage:
   agentctl ingest [filters] [--since=DAYS]
+  agentctl ingest-insights
   agentctl derive-signals [--since=DAYS]
+  agentctl insights [schema|repositories|friction|tools|sessions|graph-health] [--limit=N]
+  agentctl dashboard [--limit=N] [--out=PATH]
+  agentctl dashboard serve [--port=1738]
   agentctl search <query> [--limit=N]
   agentctl stats <skill>
   agentctl recent [--limit=N]
@@ -25,6 +34,9 @@ Usage:
   agentctl recovery [--limit=N]
   agentctl project context [--json]
   agentctl project verify [--json]
+  agentctl guidance next --json
+  agentctl session summary --json
+  agentctl self-improve weekly --json
   agentctl tui
   agentctl install            # one-shot setup: daemon + watcher + symlink
   agentctl uninstall
@@ -184,6 +196,41 @@ const cmdDeriveSignals = (args: string[]) =>
             args,
         );
         yield* deriveSignals({ sinceDays });
+    });
+
+const cmdIngestInsights = () => ingestClaudeInsights().pipe(Effect.asVoid);
+
+const cmdInsights = (args: string[]) =>
+    Effect.gen(function* () {
+        const rawView =
+            args.filter((a) => !a.startsWith("--"))[0] ?? "repositories";
+        if (!isInsightView(rawView)) {
+            console.error(
+                `agentctl insights: unknown view "${rawView}" (expected schema, repositories, friction, tools, sessions, or graph-health)`,
+            );
+            process.exit(2);
+        }
+        const limit = parsePositiveIntFlag("insights", "limit", args, 20);
+        const db = yield* SurrealClient;
+        const result = yield* db.query<[Array<Record<string, unknown>>]>(
+            insightSqlForView(rawView, limit),
+        );
+        console.log(JSON.stringify(result?.[0] ?? [], null, 2));
+    });
+
+const cmdDashboard = (args: string[]) =>
+    Effect.gen(function* () {
+        const limit = parsePositiveIntFlag("dashboard", "limit", args, 12);
+        const out = flag("out", args);
+        const result = yield* writeDashboard({ out, limit });
+        console.log(`dashboard: ${result.url}`);
+        console.log(
+            `evidence: tools=${fmtCount(result.data.counts.toolCalls)} plans=${fmtCount(
+                result.data.counts.planSnapshots,
+            )} friction=${fmtCount(
+                result.data.counts.frictionEvents,
+            )} sessions=${fmtCount(result.data.counts.sessions)}`,
+        );
     });
 
 const cmdSearch = (args: string[]) =>
@@ -844,6 +891,16 @@ const dispatch = (
             return cmdIngest(rest);
         case "derive-signals":
             return cmdDeriveSignals(rest);
+        case "ingest-insights":
+            return cmdIngestInsights();
+        case "insights":
+            return cmdInsights(rest);
+        case "dashboard":
+            if (rest[0] === "serve") {
+                serveDashboard(rest.slice(1));
+                return Effect.succeed(undefined);
+            }
+            return cmdDashboard(rest);
         case "search":
             return cmdSearch(rest);
         case "stats":
@@ -860,6 +917,19 @@ const dispatch = (
             return cmdRecovery(rest);
         case "project":
             return cmdProject(rest);
+        case "guidance":
+        case "session":
+        case "self-improve": {
+            const parsed = parseSelfImproveArgs(cmd, rest);
+            const effect =
+                parsed.command === "guidance-next" ? guidanceNext() :
+                parsed.command === "session-summary" ? sessionSummary() :
+                selfImproveWeekly();
+            return Effect.gen(function* () {
+                const result = yield* effect;
+                console.log(JSON.stringify(result, null, 2));
+            });
+        }
         default:
             return null;
     }

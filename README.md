@@ -1,21 +1,22 @@
 # agentctl
 
-Local taste & telemetry graph for AI coding agents.
+Local evidence graph for AI coding agents.
 
-`agentctl` ingests every Claude Code and Codex transcript on your machine into a dedicated SurrealDB graph, then surfaces *what skills you actually use*, *what you ignore*, and *which tools correlate with successful outcomes* - on demand, no daemon.
+`agentctl` ingests Claude Code transcripts, Codex transcripts, installed agent skills, CLI/tool calls, plans, Git repositories, commits, checkouts, touched files, and Claude `/insights` exports into a dedicated SurrealDB graph. The goal is simple: preserve the operational memory that normally disappears when an agent finishes a session.
 
-The primitive is the graph. Skills are nodes. Invocations are relations. Edits, corrections, and commits are signals. Cost optimization, deprecation, and taste-based recommendations are queries you write on top.
+The primitive is the graph. Sessions, turns, tools, plans, repositories, checkouts, commits, files, insights, and friction events are first-class records. Relations keep the shape traversable: sessions use tools, commits touch files, repositories have checkouts, and agent work can be tied back to the files and commands that made it happen.
 
 ## Why
 
-Claude Code and Codex both leave detailed transcripts on disk. They contain everything: which skills got invoked, which files got edited, where you pushed back on the agent, what made the cut into a commit. But the data sits in 5,000+ jsonl files no one reads.
+Claude Code and Codex already write detailed local transcripts. They contain the reasoning, plans, failed commands, tool outputs, file edits, user corrections, and commit context that explain how work actually happened. Without a graph, that evidence is buried in thousands of jsonl files and cannot guide the next agent.
 
-`agentctl` flattens that into a graph you can query in 50ms, and a CLI that answers questions like:
+`agentctl` turns that raw history into reusable signals:
 
-- *Which of my 100 installed skills have I actually invoked in the last 30 days?*
-- *Which skill did I push back on most often last week?*
-- *Find a skill matching "review pull request"*
-- *What tools does Codex use most? (`exec_command` × 4269 in a week, turns out.)*
+- **Better agent memory**: recover why a file was edited, what plan led there, which commands failed, and what eventually worked.
+- **Better repo understanding**: track repositories, checkouts, commits, and canonical file identities so worktrees and machine-specific paths do not split the same file history.
+- **Better process metrics**: measure friction from lint/test failures, tool mistakes, root-checkout edits, missing Git context, or repeated failed attempts.
+- **Better skill hygiene**: see which skills and slash commands are used, ignored, paired together, or correlated with corrections.
+- **Better product surface**: expose the same data through CLI JSON queries, direct SurrealQL in Surrealist, and a static dashboard that is useful immediately after ingest.
 
 ## Install
 
@@ -126,13 +127,30 @@ Requirements: bun ≥ 1.3, SurrealDB ≥ 3.0 CLI on PATH (`brew install surreald
 ## Use
 
 ```bash
-agentctl search "<keywords>"        # ranked match on name + description
-agentctl stats <skill>              # full drill-down
+agentctl ingest [--since=DAYS]      # skills + Claude + Codex + Git + derived signals
+agentctl ingest-insights            # import Claude ~/.claude/usage-data insights
+agentctl insights schema            # table counts with active/staged status
+agentctl insights repositories      # repo + checkout coverage as JSON
+agentctl insights friction          # recent friction events as JSON
+agentctl insights tools             # failing tool/command clusters as JSON
+agentctl insights sessions          # sessions with tool/plan/friction density
+agentctl dashboard [--limit=N] [--out=PATH] # write a self-contained HTML dashboard
+agentctl search "<keywords>"        # ranked match on skill name + description
+agentctl stats <skill>              # skill drill-down
 agentctl recent [--limit=N]         # latest invocations
 agentctl unused [--days=N]          # zero-invocation candidates
 agentctl taste [--limit=N]          # composite signal score
-agentctl ingest [--since=DAYS]      # refresh (skills + transcripts + codex)
 ```
+
+Typical local refresh:
+
+```bash
+agentctl ingest --since=7
+agentctl ingest-insights
+agentctl dashboard
+```
+
+`agentctl dashboard` writes `~/.local/share/agentctl/dashboard.html` by default and prints a `file://` URL. It is intentionally static, so it can be opened, archived, or attached to a review without running a web server.
 
 ### Project Grounding
 
@@ -151,6 +169,40 @@ Optional diagnostics config in `.agentctl/config.json`:
 ```
 
 `--since=N` limits ingest to files modified in the last N days - useful for the Stop-hook fast path.
+
+### Surrealist
+
+The local database is a normal SurrealDB instance:
+
+- endpoint: `ws://127.0.0.1:8521`
+- namespace: `agentctl`
+- database: `main`
+- user/password: `root` / `root` by default
+
+Open those settings in Surrealist to inspect the graph directly. The schema is `SCHEMAFULL`; JSON-ish nested payloads such as labels, metrics, raw tool output excerpts, and imported insight payloads are stored as strings so the same records work consistently on SurrealDB v3.
+
+Some tables are deliberately staged. `workspace`, `changeset`, `file_memory`, `artifact`, `feedback_event`, `guidance`, and their artifact/memory relations are present so migrations and query design can settle before the next writer lands. Use `agentctl insights schema` or the dashboard's Schema Coverage section to see which tables are active, conditional, or staged in the current prototype.
+
+Example queries:
+
+```sql
+SELECT name, remote_url, root_path, array::len(->has_checkout->checkout) AS checkouts
+FROM repository
+ORDER BY updated_at DESC
+LIMIT 20;
+
+SELECT name, command_norm, exit_code, count() AS failures
+FROM tool_call
+WHERE has_error = true
+GROUP BY name, command_norm, exit_code
+ORDER BY failures DESC
+LIMIT 20;
+
+SELECT kind, text, session.project AS project, ts
+FROM friction_event
+ORDER BY ts DESC
+LIMIT 20;
+```
 
 ## Reactivity
 
@@ -196,29 +248,35 @@ launchctl list | grep com.necmttn.agentctl-watch
 ## Schema
 
 ```
-skill   ← invoked   ← turn → edited       → file
-                     turn → corrected_by  → turn   (planned v0.1)
-                     session → produced   → commit (planned v0.1)
-                                             commit → touched → file
+repository -> has_checkout -> checkout
+session    -> produced      -> commit
+commit     -> touched       -> file
+turn       -> edited        -> file
+turn       -> invoked       -> skill
+turn       -> corrected_by  -> turn
+tool_call  -> concerns      -> skill
+insight    -> concerns      -> session
 ```
 
-Sessions tagged `source: "claude" | "codex"`. Codex tools (`exec_command`, `apply_patch`, …) are ingested as synthetic skills `codex:<tool>` so they appear in the same `taste` view as Claude skills.
+Records also hold direct references where a relation would be too noisy: `session.repository`, `session.checkout`, `tool_call.turn`, `tool_call.tool`, `plan_snapshot.plan`, and `plan_item.plan`.
+
+Files are canonicalized relative to the repository root when possible, so the same file can be tracked across worktrees and machine-specific checkout paths. Edge tables hold useful values, not just links; for example `touched` records file paths, status, additions/deletions, and commit context.
+
+Sessions are tagged `source: "claude" | "codex"`. Codex tools (`exec_command`, `apply_patch`, …) are ingested as synthetic skills `codex:<tool>` so they appear in the same `taste` view as Claude skills.
 
 See `schema/schema.surql` for the full SurrealQL definitions.
 
 ## Status
 
-v0 - scaffolding + skills + Claude transcripts + Codex transcripts + CLI. Works.
+Prototype works end to end for local ingest, query adapters, Claude insights import, derived evidence signals, and the static dashboard.
 
-Planned (v0.1):
-- Effect v4 refactor (foundation)
-- SurrealDB file buckets for transcript snapshots + codex artifacts
-- OpenTUI dashboard (`agentctl tui`)
-- Correction signal (next-user-turn negation detection)
-- Proposed-but-not-invoked signal (assistant text mentions skill, never calls it)
-- Git ingest (commits + file touches)
-- Self-improve `lib/deprecate.ts` integration (auto-PR deprecation of zero-use skills)
-- Live queries in TUI
+Current focus:
+
+- richer semantic/BM25 search over commit messages, plans, tool failures, and touched files
+- language-aware file structure tracing inspired by Composto-style dependency graphs
+- just-in-time guidance hooks from repeated friction patterns
+- OpenTUI/live dashboard after the static report stabilizes
+- paid/team surfaces later, once the local evidence model is useful enough to justify sync and sharing
 
 ## License
 

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>agentctl dashboard</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="topbar">
+        <h1>agentctl</h1>
+        <nav>
+          <button data-view="ingest">Ingest</button>
+          <button data-view="health">Graph Health</button>
+          <button data-view="worktrees">Worktrees</button>
+          <button data-view="self-improve">Self-Improve</button>
+          <button data-view="query">Query</button>
+        </nav>
+      </header>
+      <section id="status" class="status">connecting</section>
+      <section id="view" class="view"></section>
+    </main>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
