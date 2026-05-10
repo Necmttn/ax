@@ -32,6 +32,10 @@ export async function parseQueryRequest(req: Request): Promise<{ sql: string }> 
     return { sql };
 }
 
+export function formatSseEvent(event: string, data: unknown): string {
+    return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+}
+
 async function jsonResponse(value: unknown, status = 200): Promise<Response> {
     return new Response(JSON.stringify(value), {
         status,
@@ -67,6 +71,20 @@ export async function handleDashboardRequest(req: Request): Promise<Response> {
         } catch (error) {
             return jsonResponse({ error: error instanceof Error ? error.message : String(error) }, 400);
         }
+    }
+    if (url.pathname === "/api/events") {
+        const stream = new ReadableStream({
+            start(controller) {
+                controller.enqueue(new TextEncoder().encode(formatSseEvent("ready", { ts: new Date().toISOString() })));
+            },
+        });
+        return new Response(stream, {
+            headers: {
+                "content-type": "text/event-stream",
+                "cache-control": "no-cache",
+                connection: "keep-alive",
+            },
+        });
     }
     if (url.pathname.startsWith("/api/")) return queryApi(url.pathname);
     const asset = routeStaticAsset(url);
