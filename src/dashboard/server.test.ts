@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseDashboardServeArgs, parseQueryRequest, routeStaticAsset } from "./server.ts";
+import { formatSseEvent, parseDashboardServeArgs, parseQueryRequest, routeStaticAsset } from "./server.ts";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
@@ -28,5 +28,9 @@ describe("dashboard server", () => {
             method: "POST",
             body: JSON.stringify({ sql: "DELETE session;" }),
         }))).rejects.toThrow("Only SELECT, RETURN, and INFO queries are allowed");
+    });
+
+    test("formatSseEvent emits valid SSE frame", () => {
+        expect(formatSseEvent("message", { ok: true })).toBe('event: message\ndata: {"ok":true}\n\n');
     });
 });

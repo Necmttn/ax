@@ -47,6 +47,21 @@ document.addEventListener("click", async (event) => {
 status.textContent = "ready";
 showIngest();
 
+const events = new EventSource("/api/events");
+events.addEventListener("ready", (event) => {
+  status.textContent = `live ${JSON.parse(event.data).ts}`;
+});
+events.addEventListener("ingest_event", (event) => {
+  const list = document.querySelector("#events");
+  if (!list) return;
+  const item = document.createElement("li");
+  item.textContent = event.data;
+  list.prepend(item);
+});
+events.onerror = () => {
+  status.textContent = "live stream disconnected";
+};
+
 async function fetchJsonPost(path, body) {
   const res = await fetch(path, {
     method: "POST",
