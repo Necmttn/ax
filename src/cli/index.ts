@@ -14,6 +14,7 @@ import { writeDashboard } from "../dashboard/report.ts";
 import { serveDashboard } from "../dashboard/server.ts";
 import { cmdInstall, cmdUninstall } from "./install.ts";
 import { cmdProject } from "./project.ts";
+import { guidanceNext, parseSelfImproveArgs, selfImproveWeekly, sessionSummary } from "../self-improve/commands.ts";
 
 const HELP = `agentctl - agent telemetry & taste graph
 
@@ -33,6 +34,9 @@ Usage:
   agentctl recovery [--limit=N]
   agentctl project context [--json]
   agentctl project verify [--json]
+  agentctl guidance next --json
+  agentctl session summary --json
+  agentctl self-improve weekly --json
   agentctl tui
   agentctl install            # one-shot setup: daemon + watcher + symlink
   agentctl uninstall
@@ -913,6 +917,19 @@ const dispatch = (
             return cmdRecovery(rest);
         case "project":
             return cmdProject(rest);
+        case "guidance":
+        case "session":
+        case "self-improve": {
+            const parsed = parseSelfImproveArgs(cmd, rest);
+            const effect =
+                parsed.command === "guidance-next" ? guidanceNext() :
+                parsed.command === "session-summary" ? sessionSummary() :
+                selfImproveWeekly();
+            return Effect.gen(function* () {
+                const result = yield* effect;
+                console.log(JSON.stringify(result, null, 2));
+            });
+        }
         default:
             return null;
     }
