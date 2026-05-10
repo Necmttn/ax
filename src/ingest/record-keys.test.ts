@@ -8,6 +8,7 @@ import {
     toolRecordKey,
     turnRecordKey,
 } from "./record-keys.ts";
+import { legacySkillRecordKey, skillRecordKey } from "../lib/skill-id.ts";
 
 const HASH = "[0-9a-f]{12,16}";
 
@@ -201,4 +202,12 @@ describe("record keys", () => {
             .toBe(repositoryRecordKey({ remoteUrlNormalized: "github.com/org/repo" }));
         expect(checkoutRecordKey("/tmp/repo")).toBe(checkoutRecordKey("/tmp/repo"));
     });
+});
+
+test("skillRecordKey does not collide on colon and double underscore names", () => {
+    expect(skillRecordKey("a:b")).not.toBe(skillRecordKey("a__b"));
+});
+
+test("legacySkillRecordKey preserves old lookup behavior", () => {
+    expect(legacySkillRecordKey("plugin:name")).toBe("plugin__name");
 });
