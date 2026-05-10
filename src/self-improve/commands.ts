@@ -17,28 +17,38 @@ export function parseSelfImproveArgs(root: string, args: string[]): SelfImproveC
     throw new Error(`unknown self-improve command: ${root} ${args.join(" ")}`);
 }
 
-export const guidanceNext = (): Effect.Effect<unknown, DbError, SurrealClient> =>
-    Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const result = yield* db.query(`
+export function guidanceNextSql(): string {
+    return `
 SELECT id, guidance, version, text, status, scope, risk, evidence, metrics_before
+    , created_at
 FROM guidance_version
 WHERE status = "proposed"
 ORDER BY created_at DESC
-LIMIT 5;`);
+LIMIT 5;`;
+}
+
+export const guidanceNext = (): Effect.Effect<unknown, DbError, SurrealClient> =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const result = yield* db.query(guidanceNextSql());
         return result?.[0] ?? [];
     });
+
+export function sessionSummarySql(): string {
+    return `
+SELECT id, project, cwd, started_at, ended_at,
+    (ended_at ?? started_at) AS last_seen_at,
+    array::len((SELECT id FROM tool_call WHERE session = $parent.id)) AS tool_calls,
+    array::len((SELECT id FROM tool_call WHERE session = $parent.id AND has_error = true)) AS failures
+FROM session
+ORDER BY last_seen_at DESC
+LIMIT 5;`;
+}
 
 export const sessionSummary = (): Effect.Effect<unknown, DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
-        const result = yield* db.query(`
-SELECT id, project, cwd, started_at, ended_at,
-    array::len((SELECT id FROM tool_call WHERE session = $parent.id)) AS tool_calls,
-    array::len((SELECT id FROM tool_call WHERE session = $parent.id AND has_error = true)) AS failures
-FROM session
-ORDER BY (ended_at ?? started_at) DESC
-LIMIT 5;`);
+        const result = yield* db.query(sessionSummarySql());
         return result?.[0] ?? [];
     });
 

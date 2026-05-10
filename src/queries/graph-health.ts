@@ -5,13 +5,19 @@ function checkedLimit(limit: number): number {
     return limit;
 }
 
+function withoutTerminator(sql: string): string {
+    return sql.replace(/;\s*$/, "");
+}
+
 export function duplicateFileIdentitySql(limit: number): string {
     const safeLimit = checkedLimit(limit);
     return `
+SELECT * FROM (
 SELECT repository, path, count() AS row_count, array::group(id) AS ids
 FROM file
 GROUP BY repository, path
-HAVING row_count > 1
+)
+WHERE row_count > 1
 ORDER BY row_count DESC
 LIMIT ${safeLimit};`.trim();
 }
@@ -19,11 +25,13 @@ LIMIT ${safeLimit};`.trim();
 export function repositorySiblingSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
     return `
+SELECT * FROM (
 SELECT initial_commit, remote_url, count() AS row_count, array::group(id) AS ids
 FROM repository
 WHERE initial_commit IS NOT NONE OR remote_url IS NOT NONE
 GROUP BY initial_commit, remote_url
-HAVING row_count > 1
+)
+WHERE row_count > 1
 ORDER BY row_count DESC
 LIMIT ${safeLimit};`.trim();
 }
@@ -40,19 +48,21 @@ LIMIT ${safeLimit};`.trim();
 export function legacySkillCollisionSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
     return `
+SELECT * FROM (
 SELECT string::replace(name, ":", "__") AS legacy_key, count() AS row_count, array::group(name) AS names
 FROM skill
 GROUP BY legacy_key
-HAVING row_count > 1
+)
+WHERE row_count > 1
 ORDER BY row_count DESC
 LIMIT ${safeLimit};`.trim();
 }
 
 export function graphHealthSql(limit: number): string {
     return `RETURN {
-    duplicate_file_identity: (${duplicateFileIdentitySql(limit)}),
-    repository_sibling: (${repositorySiblingSql(limit)}),
-    missing_produced_scope: (${missingProducedScopeSql(limit)}),
-    legacy_skill_collision: (${legacySkillCollisionSql(limit)})
+    duplicate_file_identity: (${withoutTerminator(duplicateFileIdentitySql(limit))}),
+    repository_sibling: (${withoutTerminator(repositorySiblingSql(limit))}),
+    missing_produced_scope: (${withoutTerminator(missingProducedScopeSql(limit))}),
+    legacy_skill_collision: (${withoutTerminator(legacySkillCollisionSql(limit))})
 };`;
 }
