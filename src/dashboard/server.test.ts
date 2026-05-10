@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { formatSseEvent, parseDashboardServeArgs, parseQueryRequest, routeStaticAsset } from "./server.ts";
+import { dashboardApiKind, formatSseEvent, parseDashboardServeArgs, parseQueryRequest, routeStaticAsset } from "./server.ts";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
@@ -32,5 +32,9 @@ describe("dashboard server", () => {
 
     test("formatSseEvent emits valid SSE frame", () => {
         expect(formatSseEvent("message", { ok: true })).toBe('event: message\ndata: {"ok":true}\n\n');
+    });
+
+    test("dashboardApiKind recognizes self improve route", () => {
+        expect(dashboardApiKind("/api/self-improve")).toBe("self-improve");
     });
 });

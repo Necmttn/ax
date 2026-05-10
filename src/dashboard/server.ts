@@ -36,6 +36,13 @@ export function formatSseEvent(event: string, data: unknown): string {
     return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
+export function dashboardApiKind(pathname: string): "graph-health" | "worktrees" | "self-improve" | "unknown" {
+    if (pathname === "/api/graph-health") return "graph-health";
+    if (pathname === "/api/worktrees") return "worktrees";
+    if (pathname === "/api/self-improve") return "self-improve";
+    return "unknown";
+}
+
 async function jsonResponse(value: unknown, status = 200): Promise<Response> {
     return new Response(JSON.stringify(value), {
         status,
@@ -51,6 +58,13 @@ async function queryApi(pathname: string): Promise<Response> {
             const activity = yield* db.query(checkoutActivitySql(50));
             const git = yield* db.query(gitCorrelationSql(50));
             return { activity, git };
+        }
+        if (pathname === "/api/self-improve") {
+            return yield* db.query(`
+SELECT id, guidance, version, text, status, scope, risk, evidence, metrics_before, metrics_after, created_at
+FROM guidance_version
+ORDER BY created_at DESC
+LIMIT 50;`);
         }
         return { error: "not_found" };
     }).pipe(Effect.provide(AppLayer), Effect.scoped);

@@ -26,6 +26,11 @@ async function showWorktrees() {
   view.innerHTML = `<h2>Worktrees</h2>${table(await fetchJson("/api/worktrees"))}`;
 }
 
+async function showSelfImprove() {
+  view.innerHTML = "<h2>Self-Improve</h2><p>Loading...</p>";
+  view.innerHTML = `<h2>Self-Improve</h2>${table(await fetchJson("/api/self-improve"))}`;
+}
+
 function showIngest() {
   view.innerHTML = "<h2>Ingest Live</h2><ol id='events'></ol>";
 }
@@ -41,6 +46,7 @@ document.addEventListener("click", async (event) => {
   if (selected === "ingest") showIngest();
   if (selected === "health") await showHealth();
   if (selected === "worktrees") await showWorktrees();
+  if (selected === "self-improve") await showSelfImprove();
   if (selected === "query") showQuery();
 });
 
