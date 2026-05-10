@@ -10,6 +10,7 @@ import { ingestGit } from "../ingest/git.ts";
 import { ingestClaudeInsights } from "../ingest/claude-insights.ts";
 import { deriveSignals } from "../ingest/derive-signals.ts";
 import { insightSqlForView, isInsightView } from "../queries/insights.ts";
+import { writeDashboard } from "../dashboard/report.ts";
 import { cmdInstall, cmdUninstall } from "./install.ts";
 import { cmdProject } from "./project.ts";
 
@@ -19,7 +20,8 @@ Usage:
   agentctl ingest [filters] [--since=DAYS]
   agentctl ingest-insights
   agentctl derive-signals [--since=DAYS]
-  agentctl insights [repositories|friction|tools|sessions] [--limit=N]
+  agentctl insights [schema|repositories|friction|tools|sessions] [--limit=N]
+  agentctl dashboard [--limit=N] [--out=PATH]
   agentctl search <query> [--limit=N]
   agentctl stats <skill>
   agentctl recent [--limit=N]
@@ -198,7 +200,7 @@ const cmdInsights = (args: string[]) =>
             args.filter((a) => !a.startsWith("--"))[0] ?? "repositories";
         if (!isInsightView(rawView)) {
             console.error(
-                `agentctl insights: unknown view "${rawView}" (expected repositories, friction, tools, or sessions)`,
+                `agentctl insights: unknown view "${rawView}" (expected schema, repositories, friction, tools, or sessions)`,
             );
             process.exit(2);
         }
@@ -208,6 +210,21 @@ const cmdInsights = (args: string[]) =>
             insightSqlForView(rawView, limit),
         );
         console.log(JSON.stringify(result?.[0] ?? [], null, 2));
+    });
+
+const cmdDashboard = (args: string[]) =>
+    Effect.gen(function* () {
+        const limit = parsePositiveIntFlag("dashboard", "limit", args, 12);
+        const out = flag("out", args);
+        const result = yield* writeDashboard({ out, limit });
+        console.log(`dashboard: ${result.url}`);
+        console.log(
+            `evidence: tools=${fmtCount(result.data.counts.toolCalls)} plans=${fmtCount(
+                result.data.counts.planSnapshots,
+            )} friction=${fmtCount(
+                result.data.counts.frictionEvents,
+            )} sessions=${fmtCount(result.data.counts.sessions)}`,
+        );
     });
 
 const cmdSearch = (args: string[]) =>
@@ -872,6 +889,8 @@ const dispatch = (
             return cmdIngestInsights();
         case "insights":
             return cmdInsights(rest);
+        case "dashboard":
+            return cmdDashboard(rest);
         case "search":
             return cmdSearch(rest);
         case "stats":

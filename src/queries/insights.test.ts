@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
+    SCHEMA_TABLES,
     recentFrictionSql,
     repositoryOverviewSql,
+    schemaCoverageSql,
     sessionEvidenceSql,
     toolFailuresSql,
 } from "./insights.ts";
@@ -82,6 +84,19 @@ describe("insights query builders", () => {
         expect(sql).toContain("ORDER BY last_seen DESC");
         expect(sql).toContain("LIMIT 9");
         expectNoStaleFields(sql);
+    });
+
+    test("schemaCoverageSql returns scalar counts for active and staged tables", () => {
+        const sql = schemaCoverageSql();
+
+        expect(sql).toContain("RETURN [");
+        expect(sql).toContain('table: "tool_call"');
+        expect(sql).toContain('stage: "active"');
+        expect(sql).toContain('table: "file_memory"');
+        expect(sql).toContain('stage: "staged"');
+        expect(sql).toContain("SELECT count() AS count FROM tool_call GROUP ALL");
+        expect(sql).not.toContain("AS table");
+        expect(SCHEMA_TABLES.some((spec) => spec.stage === "conditional")).toBe(true);
     });
 
     test("builders reject non-positive or fractional limits before interpolation", () => {
