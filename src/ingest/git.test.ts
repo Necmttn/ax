@@ -4,7 +4,9 @@ import {
     buildCommitUpsertStatement,
     buildFileLookupQueries,
     buildFileUpsertStatement,
+    buildProducedRelationStatements,
     buildTouchedRelationStatements,
+    touchedRelationRecordKey,
 } from "./git.ts";
 
 describe("git ingest relation statements", () => {
@@ -31,12 +33,49 @@ describe("git ingest relation statements", () => {
             checkoutId: "checkout:`b`",
         });
 
-        expect(checkoutA[0]).toBe("DELETE touched WHERE in = commit:`repo__abc` AND checkout = checkout:`a`;");
-        expect(checkoutB[0]).toBe("DELETE touched WHERE in = commit:`repo__abc` AND checkout = checkout:`b`;");
-        expect(checkoutA.join("\n")).toContain("repository = repository:`repo`, checkout = checkout:`a`");
-        expect(checkoutB.join("\n")).toContain("repository = repository:`repo`, checkout = checkout:`b`");
+        // Deterministic edge keys differ across checkouts so sibling worktree evidence is preserved
+        const keyA = touchedRelationRecordKey("commit:`repo__abc`", "file:`repo__src_index_ts`", "checkout:`a`");
+        const keyB = touchedRelationRecordKey("commit:`repo__abc`", "file:`repo__src_index_ts`", "checkout:`b`");
+        expect(keyA).not.toBe(keyB);
+        expect(checkoutA.join("\n")).toContain(`touched:\`${keyA}\``);
+        expect(checkoutB.join("\n")).toContain(`touched:\`${keyB}\``);
+        expect(checkoutA.join("\n")).toContain("repository: repository:`repo`");
+        expect(checkoutB.join("\n")).toContain("repository: repository:`repo`");
+        expect(checkoutA.join("\n")).toContain("checkout: checkout:`a`");
+        expect(checkoutB.join("\n")).toContain("checkout: checkout:`b`");
         expect(checkoutA.join("\n")).not.toContain("checkout:`b`");
         expect(checkoutB.join("\n")).not.toContain("checkout:`a`");
+    });
+
+    test("touchedRelationRecordKey is deterministic per commit file checkout", () => {
+        expect(touchedRelationRecordKey("commit:`c1`", "file:`f1`", "checkout:`co1`"))
+            .toBe(touchedRelationRecordKey("commit:`c1`", "file:`f1`", "checkout:`co1`"));
+    });
+
+    test("touched relation statements upsert deterministic relation ids", () => {
+        const statements = buildTouchedRelationStatements({
+            commitId: "commit:`c1`",
+            repositoryId: "repository:`r1`",
+            checkoutId: "checkout:`co1`",
+            ts: "2026-05-10T00:00:00.000Z",
+            files: [{ fileId: "file:`f1`", additions: 1, deletions: 2 }],
+        });
+        expect(statements.join("\n")).toContain("touched:");  // explicit edge id
+        expect(statements.join("\n")).toContain("repository: repository:`r1`");
+        expect(statements.join("\n")).toContain("checkout: checkout:`co1`");
+    });
+
+    test("produced relation statements include repository checkout and ts", () => {
+        const statements = buildProducedRelationStatements({
+            sessionIds: ["session:`s1`"],
+            commitId: "commit:`c1`",
+            repositoryId: "repository:`r1`",
+            checkoutId: "checkout:`co1`",
+            ts: "2026-05-10T00:00:00.000Z",
+        });
+        expect(statements.join("\n")).toContain("repository: repository:`r1`");
+        expect(statements.join("\n")).toContain("checkout: checkout:`co1`");
+        expect(statements.join("\n")).toContain('ts: d"2026-05-10T00:00:00.000Z"');
     });
 
     test("looks up commits canonically before legacy checkout path rows", () => {

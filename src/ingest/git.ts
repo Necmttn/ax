@@ -380,18 +380,42 @@ interface TouchedRelationInput {
     ts: string;
 }
 
+export function touchedRelationRecordKey(
+    commitId: string,
+    fileId: string,
+    checkoutId: string,
+): string {
+    return Bun.hash(`${commitId}|${fileId}|${checkoutId}`).toString(16).padStart(16, "0");
+}
+
+export function producedRelationRecordKey(sessionId: string, commitId: string): string {
+    return Bun.hash(`${sessionId}|${commitId}`).toString(16).padStart(16, "0");
+}
+
 export function buildTouchedRelationStatements(input: TouchedRelationInput): string[] {
-    const stmts = [
-        `DELETE touched WHERE in = ${input.commitId} AND checkout = ${input.checkoutId};`,
-    ];
+    const stmts: string[] = [];
     for (const file of input.files) {
         const add = file.additions === null ? "NONE" : String(file.additions);
         const del = file.deletions === null ? "NONE" : String(file.deletions);
+        const edgeKey = touchedRelationRecordKey(input.commitId, file.fileId, input.checkoutId);
         stmts.push(
-            `RELATE ${input.commitId}->touched->${file.fileId} SET additions = ${add}, deletions = ${del}, repository = ${input.repositoryId}, checkout = ${input.checkoutId}, ts = d"${input.ts}";`,
+            `UPSERT touched:\`${edgeKey}\` MERGE { in: ${input.commitId}, out: ${file.fileId}, additions: ${add}, deletions: ${del}, repository: ${input.repositoryId}, checkout: ${input.checkoutId}, ts: d"${input.ts}" };`,
         );
     }
     return stmts;
+}
+
+export function buildProducedRelationStatements(input: {
+    readonly sessionIds: readonly string[];
+    readonly commitId: string;
+    readonly repositoryId: string;
+    readonly checkoutId: string;
+    readonly ts: string;
+}): string[] {
+    return input.sessionIds.map((sessionId) => {
+        const edgeKey = producedRelationRecordKey(sessionId, input.commitId);
+        return `UPSERT produced:\`${edgeKey}\` MERGE { in: ${sessionId}, out: ${input.commitId}, repository: ${input.repositoryId}, checkout: ${input.checkoutId}, ts: d"${input.ts}", source: "git", kind: "commit" };`;
+    });
 }
 
 const findExistingRecord = (
@@ -559,10 +583,13 @@ const writeRepo = (repo: RepoInfo, commits: CommitWithFiles[]) =>
                     // verbatim for completeness but in practice never occur.
                     return typeof s.id === "string" ? s.id : String(s.id);
                 });
-                const stmts = [
-                    `DELETE produced WHERE out = ${cid} AND in IN [${sessionIds.join(",")}];`,
-                    ...sessionIds.map((id) => `RELATE ${id}->produced->${cid};`),
-                ];
+                const stmts = buildProducedRelationStatements({
+                    sessionIds,
+                    commitId: cid,
+                    repositoryId,
+                    checkoutId,
+                    ts: c.ts,
+                });
                 for (let i = 0; i < stmts.length; i += 500) {
                     yield* db.query(stmts.slice(i, i + 500).join(""));
                 }
