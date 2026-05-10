@@ -6,6 +6,8 @@ import { Effect } from "effect";
 import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
 import type { DbError } from "../lib/errors.ts";
 import {
+    checkoutActivitySql,
+    gitCorrelationSql,
     recentFrictionSql,
     repositoryOverviewSql,
     schemaCoverageSql,
@@ -30,6 +32,8 @@ export interface DashboardData {
     readonly generatedAt: string;
     readonly counts: DashboardCounts;
     readonly tableCounts: readonly Row[];
+    readonly git: readonly Row[];
+    readonly checkoutActivity: readonly Row[];
     readonly repositories: readonly Row[];
     readonly friction: readonly Row[];
     readonly tools: readonly Row[];
@@ -84,11 +88,13 @@ export const fetchDashboardData = (
 ): Effect.Effect<DashboardData, DbError, SurrealClient> =>
     Effect.gen(function* () {
         const client = yield* SurrealClient;
-        const [countResult, tableCounts, repositories, friction, tools, sessions] =
+        const [countResult, tableCounts, git, checkoutActivity, repositories, friction, tools, sessions] =
             yield* Effect.all(
                 [
                     client.query<unknown[]>(COUNT_SQL),
                     queryRows(client, schemaCoverageSql()),
+                    queryRows(client, gitCorrelationSql(limit)),
+                    queryRows(client, checkoutActivitySql(limit)),
                     queryRows(client, repositoryOverviewSql(limit)),
                     queryRows(client, recentFrictionSql(limit)),
                     queryRows(client, toolFailuresSql(limit)),
@@ -110,6 +116,8 @@ export const fetchDashboardData = (
                 sessions: countAt(countResult, 7),
             },
             tableCounts,
+            git,
+            checkoutActivity,
             repositories,
             friction,
             tools,
@@ -214,6 +222,56 @@ const repositoriesTable = (rows: readonly Row[]): string => `
                 <td>${htmlEscape(row.checkout_count ?? 0)}</td>
                 <td>${htmlEscape(firstScalar(row.checkout_branches) ?? row.default_branch)}</td>
                 <td><code>${htmlEscape(truncate(row.root_path, 86))}</code></td>
+              </tr>`,
+                    )
+                    .join("")
+      }
+    </tbody>
+  </table>
+</section>`;
+
+const gitCorrelationTable = (rows: readonly Row[]): string => `
+<section class="panel wide">
+  <header><h2>Git Correlation</h2><span>${rows.length} repositories</span></header>
+  <table>
+    <thead><tr><th>Repository</th><th>Sessions</th><th>Produced</th><th>Commits</th><th>Touched</th></tr></thead>
+    <tbody>
+      ${
+          rows.length === 0
+              ? `<tr><td colspan="5" class="empty">No git correlation evidence ingested yet.</td></tr>`
+              : rows
+                    .map(
+                        (row) => `<tr>
+                <td><strong>${htmlEscape(row.name ?? row.id)}</strong><small>${htmlEscape(row.remote_url ?? row.root_path)}</small></td>
+                <td>${htmlEscape(row.session_count ?? 0)}<small>${htmlEscape(row.checkout_linked_session_count ?? 0)} checkout-linked</small></td>
+                <td>${htmlEscape(row.produced_count ?? 0)}</td>
+                <td>${htmlEscape(row.commit_count ?? 0)}</td>
+                <td>${htmlEscape(row.touched_count ?? 0)}</td>
+              </tr>`,
+                    )
+                    .join("")
+      }
+    </tbody>
+  </table>
+</section>`;
+
+const checkoutActivityTable = (rows: readonly Row[]): string => `
+<section class="panel wide">
+  <header><h2>Checkout Activity</h2><span>${rows.length} checkouts</span></header>
+  <table>
+    <thead><tr><th>Checkout</th><th>Sessions</th><th>Turns</th><th>Tools</th><th>Git Evidence</th></tr></thead>
+    <tbody>
+      ${
+          rows.length === 0
+              ? `<tr><td colspan="5" class="empty">No checkout activity evidence ingested yet.</td></tr>`
+              : rows
+                    .map(
+                        (row) => `<tr>
+                <td><strong>${htmlEscape(row.worktree_name ?? row.repository_name ?? row.id)}</strong><small>${htmlEscape(row.branch ?? "detached")} · ${htmlEscape(truncate(row.path, 96))}</small></td>
+                <td>${htmlEscape(row.session_count ?? 0)}</td>
+                <td>${htmlEscape(row.turn_count ?? 0)}</td>
+                <td>${htmlEscape(row.tool_call_count ?? 0)}<small>${htmlEscape(row.tool_failure_count ?? 0)} failures</small></td>
+                <td>${htmlEscape(row.produced_count ?? 0)} produced<small>${htmlEscape(row.touched_count ?? 0)} touched</small></td>
               </tr>`,
                     )
                     .join("")
@@ -399,6 +457,8 @@ export function renderDashboardHtml(data: DashboardData): string {
     </section>
     <section class="grid">
       ${schemaCoverageTable(data.tableCounts)}
+      ${gitCorrelationTable(data.git)}
+      ${checkoutActivityTable(data.checkoutActivity)}
       ${repositoriesTable(data.repositories)}
       ${toolFailures(data.tools)}
       ${frictionList(data.friction)}

@@ -131,6 +131,8 @@ agentctl ingest [--since=DAYS]      # skills + Claude + Codex + Git + derived si
 agentctl ingest-insights            # import Claude ~/.claude/usage-data insights
 agentctl insights schema            # table counts with active/staged status
 agentctl insights repositories      # repo + checkout coverage as JSON
+agentctl insights checkouts         # worktree/checkout activity counts
+agentctl insights git               # sessions linked to git commits/touched files
 agentctl insights friction          # recent friction events as JSON
 agentctl insights tools             # failing tool/command clusters as JSON
 agentctl insights sessions          # sessions with tool/plan/friction density
@@ -151,6 +153,41 @@ agentctl dashboard
 ```
 
 `agentctl dashboard` writes `~/.local/share/agentctl/dashboard.html` by default and prints a `file://` URL. It is intentionally static, so it can be opened, archived, or attached to a review without running a web server.
+
+### Empty DB Benchmark
+
+Benchmark a clean database without touching `agentctl/main`:
+
+```bash
+scripts/bench-empty-db.sh --since=90
+```
+
+The script creates a unique database such as `agentctl/bench_20260510_090000`,
+applies the schema, runs ingest, imports Claude insights, writes schema/git
+JSON reports, and generates a dashboard under
+`~/.local/share/agentctl/benchmarks/<db>/`.
+
+Use `--db=NAME` when you want a stable benchmark database. The script does not
+drop or clear databases, so the default unique name is the safest empty run.
+
+### Repository Discovery
+
+You do not need to initialize every project separately. Git ingest derives
+repository roots from `session.cwd` in Claude and Codex transcripts, then
+links matching sessions to `repository` and `checkout` records. If a repo has
+never appeared in a transcript, add its absolute path to
+`~/.local/share/agentctl/agentctl-repos.txt` or point `AGENTCTL_REPO_LIST` at a
+file with one repo path per line.
+
+Session-to-commit correlation uses the linked checkout plus commit timestamps:
+if a commit lands inside a session's `[started_at, ended_at]` window, ingest
+writes `session -> produced -> commit`; commits then traverse to files through
+`commit -> touched -> file`.
+
+Use `agentctl insights checkouts` to see the worktree-level shape: sessions,
+turns, tool calls, tool failures, produced commits, and touched files per
+checkout. This is the view that answers questions like "which feature worktree
+absorbed most of the agent work?"
 
 ### Project Grounding
 

@@ -1,6 +1,8 @@
 export const INSIGHT_VIEWS = [
     "schema",
     "repositories",
+    "checkouts",
+    "git",
     "friction",
     "tools",
     "sessions",
@@ -92,6 +94,53 @@ ORDER BY last_seen DESC
 LIMIT ${safeLimit};`.trim();
 }
 
+export function checkoutActivitySql(limit: number): string {
+    const safeLimit = checkedLimit(limit);
+    return `
+SELECT
+    id,
+    repository,
+    repository.name AS repository_name,
+    repository.remote_url AS remote_url,
+    path,
+    branch,
+    worktree_name,
+    head_sha,
+    dirty,
+    created_at,
+    updated_at,
+    (updated_at ?? created_at) AS last_seen,
+    array::len((SELECT id FROM session WHERE checkout = $parent.id)) AS session_count,
+    array::len((SELECT id FROM turn WHERE session.checkout = $parent.id)) AS turn_count,
+    array::len((SELECT id FROM tool_call WHERE session.checkout = $parent.id)) AS tool_call_count,
+    array::len((SELECT id FROM tool_call WHERE session.checkout = $parent.id AND has_error = true)) AS tool_failure_count,
+    array::len((SELECT id FROM produced WHERE in.checkout = $parent.id)) AS produced_count,
+    array::len((SELECT id FROM touched WHERE checkout = $parent.id)) AS touched_count
+FROM checkout
+ORDER BY session_count DESC, turn_count DESC, produced_count DESC, last_seen DESC
+LIMIT ${safeLimit};`.trim();
+}
+
+export function gitCorrelationSql(limit: number): string {
+    const safeLimit = checkedLimit(limit);
+    return `
+SELECT
+    id,
+    name,
+    remote_url,
+    root_path,
+    (updated_at ?? created_at) AS last_seen,
+    array::len(->has_checkout->checkout) AS checkout_count,
+    array::len((SELECT id FROM session WHERE repository = $parent.id)) AS session_count,
+    array::len((SELECT id FROM session WHERE repository = $parent.id AND checkout IS NOT NONE)) AS checkout_linked_session_count,
+    array::len((SELECT id FROM commit WHERE repository = $parent.id)) AS commit_count,
+    array::len((SELECT id FROM touched WHERE repository = $parent.id)) AS touched_count,
+    array::len((SELECT id FROM produced WHERE out.repository = $parent.id)) AS produced_count
+FROM repository
+ORDER BY session_count DESC, produced_count DESC, commit_count DESC, last_seen DESC
+LIMIT ${safeLimit};`.trim();
+}
+
 export function recentFrictionSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
     return `
@@ -168,46 +217,16 @@ export function schemaCoverageSql(): string {
     return `RETURN [${rows}];`;
 }
 
-export function checkoutActivitySql(limit: number): string {
-    const safeLimit = checkedLimit(limit);
-    return `
-SELECT
-    id AS checkout_id,
-    repository,
-    path,
-    branch,
-    head_sha,
-    worktree_name,
-    dirty,
-    created_at,
-    updated_at,
-    (updated_at ?? created_at) AS last_seen_at,
-    (SELECT count() FROM session WHERE checkout = $parent.id GROUP ALL)[0].count AS session_count
-FROM checkout
-ORDER BY (updated_at ?? created_at) DESC
-LIMIT ${safeLimit};`.trim();
-}
-
-export function gitCorrelationSql(limit: number): string {
-    const safeLimit = checkedLimit(limit);
-    return `
-SELECT
-    out AS commit,
-    in AS session,
-    repository,
-    checkout,
-    ts
-FROM produced
-ORDER BY ts DESC
-LIMIT ${safeLimit};`.trim();
-}
-
 export function insightSqlForView(view: InsightView, limit: number): string {
     switch (view) {
         case "schema":
             return schemaCoverageSql();
         case "repositories":
             return repositoryOverviewSql(limit);
+        case "checkouts":
+            return checkoutActivitySql(limit);
+        case "git":
+            return gitCorrelationSql(limit);
         case "friction":
             return recentFrictionSql(limit);
         case "tools":

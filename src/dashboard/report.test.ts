@@ -28,6 +28,31 @@ const sampleData: DashboardData = {
             note: "Reserved for per-file tribal knowledge and BM25 search.",
         },
     ],
+    git: [
+        {
+            name: "agentctl",
+            remote_url: "git@github.com:Necmttn/agentctl.git",
+            session_count: 12,
+            checkout_linked_session_count: 12,
+            produced_count: 4,
+            commit_count: 9,
+            touched_count: 33,
+        },
+    ],
+    checkoutActivity: [
+        {
+            repository_name: "agentctl",
+            path: "/Users/necmttn/Projects/agentctl/.worktrees/evidence-graph-prototype",
+            branch: "feature/evidence-graph-prototype",
+            worktree_name: "evidence-graph-prototype",
+            session_count: 12,
+            turn_count: 244,
+            tool_call_count: 60,
+            tool_failure_count: 3,
+            produced_count: 4,
+            touched_count: 33,
+        },
+    ],
     repositories: [
         {
             id: "repository:agentctl",
@@ -75,10 +100,13 @@ describe("dashboard report renderer", () => {
         expect(html).toContain("8,870");
         expect(html).toContain("Repository Coverage");
         expect(html).toContain("Schema Coverage");
+        expect(html).toContain("Git Correlation");
+        expect(html).toContain("Checkout Activity");
         expect(html).toContain("Failure Hotspots");
         expect(html).toContain("Recent Friction");
         expect(html).toContain("Active Sessions");
         expect(html).toContain("feature/evidence-graph-prototype");
+        expect(html).toContain("evidence-graph-prototype");
         expect(html).toContain("file_memory");
         expect(html).toContain("staged");
     });
@@ -93,6 +121,8 @@ describe("dashboard report renderer", () => {
     test("keeps empty dashboard useful", () => {
         const html = renderDashboardHtml({
             ...sampleData,
+            git: [],
+            checkoutActivity: [],
             repositories: [],
             friction: [],
             tools: [],
@@ -100,6 +130,8 @@ describe("dashboard report renderer", () => {
         });
 
         expect(html).toContain("No repository evidence ingested yet.");
+        expect(html).toContain("No git correlation evidence ingested yet.");
+        expect(html).toContain("No checkout activity evidence ingested yet.");
         expect(html).toContain("No failing tool calls found.");
         expect(html).toContain("No friction events found.");
         expect(html).toContain("No session evidence ingested yet.");

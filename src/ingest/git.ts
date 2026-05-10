@@ -143,6 +143,19 @@ const discoverRepos = (): Effect.Effect<RepoInfo[], DbError, SurrealClient> =>
         return repos;
     });
 
+const groupReposByRepositoryKey = (repos: readonly RepoInfo[]): RepoInfo[][] => {
+    const groups = new Map<string, RepoInfo[]>();
+    for (const repo of repos) {
+        const group = groups.get(repo.repositoryKey);
+        if (group) {
+            group.push(repo);
+        } else {
+            groups.set(repo.repositoryKey, [repo]);
+        }
+    }
+    return [...groups.values()];
+};
+
 // ---------- git subprocess helpers ----------
 
 interface RunResult {
@@ -436,26 +449,92 @@ interface WriteStats {
     files: number;
     produced: number;
     touched: number;
+    sessions: number;
 }
 
-const writeRepo = (repo: RepoInfo, commits: CommitWithFiles[]) =>
+export function buildSessionRepoWhere(repoPath: string): string {
+    const repoLit = sqlString(repoPath);
+    const prefixLit = sqlString(repoPath.endsWith("/") ? repoPath : `${repoPath}/`);
+    return `(cwd = ${repoLit} OR string::starts_with(cwd ?? "", ${prefixLit}))`;
+}
+
+export function nestedCheckoutPaths(
+    repoPath: string,
+    candidates: readonly string[],
+): string[] {
+    const prefix = repoPath.endsWith("/") ? repoPath : `${repoPath}/`;
+    return candidates
+        .filter((candidate) => candidate !== repoPath && candidate.startsWith(prefix))
+        .sort((a, b) => b.length - a.length);
+}
+
+export function buildSessionCheckoutWhere(
+    repoPath: string,
+    excludedRepoPaths: readonly string[] = [],
+): string {
+    const base = buildSessionRepoWhere(repoPath);
+    if (excludedRepoPaths.length === 0) return base;
+    const excluded = excludedRepoPaths.map(buildSessionRepoWhere).join(" OR ");
+    return `(${base} AND NOT (${excluded}))`;
+}
+
+export function buildSessionCheckoutUpdateStatement(
+    repoPath: string,
+    repositoryId: string,
+    checkoutId: string,
+    excludedRepoPaths: readonly string[] = [],
+): string {
+    return `UPDATE session SET repository = ${repositoryId}, checkout = ${checkoutId} WHERE ${buildSessionCheckoutWhere(repoPath, excludedRepoPaths)} RETURN NONE;`;
+}
+
+const linkedSessionCount = (
+    db: SurrealClientShape,
+    repoPath: string,
+    excludedRepoPaths: readonly string[],
+): Effect.Effect<number, DbError> =>
+    Effect.gen(function* () {
+        const result = yield* db.query<[Array<{ count?: unknown }>]>(
+            `SELECT count() AS count FROM session WHERE ${buildSessionCheckoutWhere(repoPath, excludedRepoPaths)} GROUP ALL;`,
+        );
+        const count = Number(result?.[0]?.[0]?.count ?? 0);
+        return Number.isFinite(count) ? count : 0;
+    });
+
+export function deriveRepositoryDisplayName(
+    remoteUrlNormalized: string | null,
+    repoPath: string,
+): string {
+    const remoteName = remoteUrlNormalized?.split("/").filter(Boolean).at(-1);
+    return remoteName && remoteName.length > 0 ? remoteName : basename(repoPath);
+}
+
+const writeRepo = (
+    repo: RepoInfo,
+    commits: CommitWithFiles[],
+    allRepoPaths: readonly string[],
+) =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         const repositoryId = recordLiteral("repository", repo.repositoryKey);
         const checkoutId = recordLiteral("checkout", repo.checkoutKey);
         const stableRepo = repo.repositoryKey;
+        const excludedSessionPaths = nestedCheckoutPaths(repo.path, allRepoPaths);
 
-        const repositoryName = basename(repo.path);
+        const repositoryName = deriveRepositoryDisplayName(repo.remoteUrlNormalized, repo.path);
+        const shouldUpdateRepositoryRoot =
+            repo.worktreeKind === "normal" ? "true" : "root_path IS NONE";
         yield* db.query(
             [
                 `UPSERT ${repositoryId} MERGE {`,
                 `name: ${sqlString(repositoryName)},`,
                 `remote_url: ${repo.remoteUrl === null ? "NONE" : sqlString(repo.remoteUrl)},`,
-                `root_path: ${sqlString(repo.path)},`,
                 `initial_commit: ${repo.initialCommit === null ? "NONE" : sqlString(repo.initialCommit)},`,
-                `default_branch: ${repo.branch === null ? "NONE" : sqlString(repo.branch)},`,
                 "updated_at: time::now()",
                 "};",
+                `UPDATE ${repositoryId} SET root_path = ${sqlString(repo.path)} WHERE ${shouldUpdateRepositoryRoot} RETURN NONE;`,
+                repo.worktreeKind === "normal" && repo.branch !== null
+                    ? `UPDATE ${repositoryId} SET default_branch = ${sqlString(repo.branch)} RETURN NONE;`
+                    : "",
                 `UPSERT ${checkoutId} MERGE {`,
                 `repository: ${repositoryId},`,
                 `path: ${sqlString(repo.path)},`,
@@ -469,9 +548,24 @@ const writeRepo = (repo: RepoInfo, commits: CommitWithFiles[]) =>
                 `RELATE ${repositoryId}->has_checkout->${checkoutId} SET ts = time::now();`,
             ].join(""),
         );
+        const linkedSessions = yield* linkedSessionCount(db, repo.path, excludedSessionPaths);
+        yield* db.query(
+            buildSessionCheckoutUpdateStatement(
+                repo.path,
+                repositoryId,
+                checkoutId,
+                excludedSessionPaths,
+            ),
+        );
 
         if (commits.length === 0)
-            return { commits: 0, files: 0, produced: 0, touched: 0 } satisfies WriteStats;
+            return {
+                commits: 0,
+                files: 0,
+                produced: 0,
+                touched: 0,
+                sessions: linkedSessions,
+            } satisfies WriteStats;
 
         // 1. Bulk-upsert commits. If a previous ingest wrote this repo+sha
         // under the legacy local key, reuse that record id to satisfy the
@@ -567,12 +661,11 @@ const writeRepo = (repo: RepoInfo, commits: CommitWithFiles[]) =>
         //    cwd starts with the repo path AND whose [started_at, ended_at]
         //    range covers the commit ts. Done per-commit in SurrealQL so we
         //    don't pull the session table to JS.
-        const repoLit = sqlString(repo.path);
         let producedCount = 0;
         for (const c of commits) {
             const cid = commitIds.get(c.sha) ?? recordLiteral("commit", commitRecordKey(repo.repositoryKey, c.sha));
             const sel = yield* db.query<[Array<{ id: unknown }>]>(
-                `SELECT id FROM session WHERE string::starts_with(cwd ?? "", ${repoLit}) AND started_at <= d"${c.ts}" AND (ended_at IS NONE OR ended_at >= d"${c.ts}");`,
+                `SELECT id FROM session WHERE checkout = ${checkoutId} AND started_at <= d"${c.ts}" AND (ended_at IS NONE OR ended_at >= d"${c.ts}");`,
             );
             const sessions = sel?.[0] ?? [];
             if (sessions.length > 0) {
@@ -602,6 +695,7 @@ const writeRepo = (repo: RepoInfo, commits: CommitWithFiles[]) =>
             files: seenFiles.size,
             produced: producedCount,
             touched: touchedCount,
+            sessions: linkedSessions,
         } satisfies WriteStats;
     });
 
@@ -617,6 +711,7 @@ export interface GitStats {
     files: number;
     produced: number;
     touched: number;
+    sessions: number;
 }
 
 export const ingestGit = (
@@ -629,26 +724,36 @@ export const ingestGit = (
         const repos = yield* discoverRepos();
         if (repos.length === 0) {
             console.log("[git] no repos discovered (empty agentctl-repos.txt + no session.cwd hits)");
-            return { repos: 0, commits: 0, files: 0, produced: 0, touched: 0 };
+            return { repos: 0, commits: 0, files: 0, produced: 0, touched: 0, sessions: 0 };
         }
         console.log(`[git] ingesting ${repos.length} repo(s) since=${sinceDays}d`);
+        const allRepoPaths = repos.map((repo) => repo.path);
 
-        // Collect per-repo work. Concurrency=4: each repo spawns its own git
-        // subprocesses + DB writes; 4 wide is a sweet spot before disk/git
-        // contention dominates.
-        const perRepo = yield* Effect.forEach(
-            repos,
-            (repo) =>
-                Effect.gen(function* () {
-                    const commits = yield* fetchCommits(repo, sinceDays);
-                    const stats = yield* writeRepo(repo, commits);
-                    console.log(
-                        `[git] ${repo.path}  commits=${stats.commits} files=${stats.files} produced=${stats.produced} touched=${stats.touched}`,
-                    );
-                    return stats;
-                }),
+        // Collect per-repo work. Different logical repositories can run in
+        // parallel, but checkouts/worktrees of the same repo are serialized.
+        // Legacy data can contain multiple checkout-scoped commit rows for
+        // the same repo+sha; parallel canonicalization would race on the
+        // `commit_sha_uq` index.
+        const repoGroups = groupReposByRepositoryKey(repos);
+        const perGroup = yield* Effect.forEach(
+            repoGroups,
+            (group) =>
+                Effect.forEach(
+                    group,
+                    (repo) =>
+                        Effect.gen(function* () {
+                            const commits = yield* fetchCommits(repo, sinceDays);
+                            const stats = yield* writeRepo(repo, commits, allRepoPaths);
+                            console.log(
+                                `[git] ${repo.path}  sessions=${stats.sessions} commits=${stats.commits} files=${stats.files} produced=${stats.produced} touched=${stats.touched}`,
+                            );
+                            return stats;
+                        }),
+                    { concurrency: 1 },
+                ),
             { concurrency: 4 },
         );
+        const perRepo = perGroup.flat();
 
         const totals: WriteStats = perRepo.reduce<WriteStats>(
             (acc, s) => ({
@@ -656,12 +761,13 @@ export const ingestGit = (
                 files: acc.files + s.files,
                 produced: acc.produced + s.produced,
                 touched: acc.touched + s.touched,
+                sessions: acc.sessions + s.sessions,
             }),
-            { commits: 0, files: 0, produced: 0, touched: 0 },
+            { commits: 0, files: 0, produced: 0, touched: 0, sessions: 0 },
         );
         const out: GitStats = { repos: repos.length, ...totals };
         console.log(
-            `[git] DONE repos=${out.repos} commits=${out.commits} files=${out.files} produced=${out.produced} touched=${out.touched}`,
+            `[git] DONE repos=${out.repos} sessions=${out.sessions} commits=${out.commits} files=${out.files} produced=${out.produced} touched=${out.touched}`,
         );
         return out;
     });
