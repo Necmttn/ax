@@ -326,6 +326,57 @@ DEFINE FIELD raw            ON guidance_version TYPE option<string>;  -- JSON-en
 DEFINE FIELD created_at     ON guidance_version TYPE datetime DEFAULT time::now();
 DEFINE INDEX guidance_version_uq ON guidance_version FIELDS guidance, version UNIQUE;
 
+-- ==== Ingest telemetry tables ====
+
+DEFINE TABLE ingest_run SCHEMAFULL;
+DEFINE FIELD command       ON ingest_run TYPE string;
+DEFINE FIELD status        ON ingest_run TYPE string DEFAULT 'running';
+DEFINE FIELD since_days    ON ingest_run TYPE option<int>;
+DEFINE FIELD started_at    ON ingest_run TYPE datetime DEFAULT time::now();
+DEFINE FIELD ended_at      ON ingest_run TYPE option<datetime>;
+DEFINE FIELD metrics       ON ingest_run TYPE option<string>;
+DEFINE INDEX ingest_run_status_started ON ingest_run FIELDS status, started_at;
+
+DEFINE TABLE ingest_stage SCHEMAFULL;
+DEFINE FIELD run           ON ingest_stage TYPE record<ingest_run>;
+DEFINE FIELD source        ON ingest_stage TYPE string;
+DEFINE FIELD stage         ON ingest_stage TYPE string;
+DEFINE FIELD status        ON ingest_stage TYPE string DEFAULT 'running';
+DEFINE FIELD started_at    ON ingest_stage TYPE datetime DEFAULT time::now();
+DEFINE FIELD ended_at      ON ingest_stage TYPE option<datetime>;
+DEFINE FIELD counts        ON ingest_stage TYPE option<string>;
+DEFINE FIELD error_text    ON ingest_stage TYPE option<string>;
+DEFINE INDEX ingest_stage_run ON ingest_stage FIELDS run, started_at;
+
+DEFINE TABLE ingest_event SCHEMAFULL;
+DEFINE FIELD run           ON ingest_event TYPE record<ingest_run>;
+DEFINE FIELD source        ON ingest_event TYPE string;
+DEFINE FIELD stage         ON ingest_event TYPE string;
+DEFINE FIELD level         ON ingest_event TYPE string;
+DEFINE FIELD message       ON ingest_event TYPE string;
+DEFINE FIELD counts        ON ingest_event TYPE option<string>;
+DEFINE FIELD raw           ON ingest_event TYPE option<string>;
+DEFINE FIELD ts            ON ingest_event TYPE datetime DEFAULT time::now();
+DEFINE INDEX ingest_event_run_ts ON ingest_event FIELDS run, ts;
+DEFINE INDEX ingest_event_source_ts ON ingest_event FIELDS source, ts;
+
+DEFINE TABLE query_sample SCHEMAFULL;
+DEFINE FIELD name          ON query_sample TYPE option<string>;
+DEFINE FIELD sql           ON query_sample TYPE string;
+DEFINE FIELD status        ON query_sample TYPE string;
+DEFINE FIELD duration_ms   ON query_sample TYPE option<int>;
+DEFINE FIELD error_text    ON query_sample TYPE option<string>;
+DEFINE FIELD row_count     ON query_sample TYPE option<int>;
+DEFINE FIELD created_at    ON query_sample TYPE datetime DEFAULT time::now();
+
+DEFINE TABLE graph_health_check SCHEMAFULL;
+DEFINE FIELD kind          ON graph_health_check TYPE string;
+DEFINE FIELD status        ON graph_health_check TYPE string;
+DEFINE FIELD count         ON graph_health_check TYPE int DEFAULT 0;
+DEFINE FIELD rows          ON graph_health_check TYPE option<string>;
+DEFINE FIELD created_at    ON graph_health_check TYPE datetime DEFAULT time::now();
+DEFINE INDEX graph_health_kind_created ON graph_health_check FIELDS kind, created_at;
+
 -- ==== Relations (taste graph) ====
 
 DEFINE TABLE invoked      TYPE RELATION FROM turn TO skill;     -- explicit Skill tool call
