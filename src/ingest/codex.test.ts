@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { toolCallRecordKey } from "./record-keys.ts";
+import { toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import { __testExtractCodexJsonlLines } from "./codex.ts";
 
 describe("Codex transcript extraction", () => {
@@ -100,7 +100,7 @@ describe("Codex transcript extraction", () => {
             toolKind: "builtin",
             sessionId: "codex-session",
             seq: 1,
-            turnKey: "codexsession_1",
+            turnKey: turnRecordKey("codex-session", 1),
             callId: "call_exec",
             ts: "2026-05-09T10:00:01.000Z",
             cwd: "/Users/necmttn/Projects/agentctl",
@@ -185,6 +185,37 @@ describe("Codex transcript extraction", () => {
                 status: "in_progress",
             }),
         ]);
+    });
+
+    test("turn IDs use centralized turnRecordKey format", () => {
+        const extracted = __testExtractCodexJsonlLines([
+            JSON.stringify({
+                type: "session_meta",
+                timestamp: "2026-05-09T10:00:00.000Z",
+                payload: {
+                    id: "codex-id-check",
+                    cwd: "/Users/necmttn/Projects/agentctl",
+                    timestamp: "2026-05-09T10:00:00.000Z",
+                },
+            }),
+            JSON.stringify({
+                type: "response_item",
+                timestamp: "2026-05-09T10:00:01.000Z",
+                payload: {
+                    type: "function_call",
+                    name: "exec_command",
+                    call_id: "call_check",
+                    arguments: JSON.stringify({ cmd: "pwd" }),
+                },
+            }),
+        ]);
+
+        expect(extracted).not.toBeNull();
+        if (!extracted) return;
+
+        const expectedTurnKey = turnRecordKey("codex-id-check", 1);
+        const execCall = extracted.toolCalls.find((c) => c.toolName === "exec_command");
+        expect(execCall?.turnKey).toBe(expectedTurnKey);
     });
 
     test("keeps plan item keys stable when the same step sequence changes", () => {

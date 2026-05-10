@@ -20,7 +20,7 @@ import {
     toolKindForName,
 } from "./tool-calls.ts";
 import { normalizeClaudeTodoWrite, type PlanStatus } from "./plans.ts";
-import { toolCallRecordKey } from "./record-keys.ts";
+import { fileRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 
 const MAX_OUTPUT_EXCERPT_CHARS = 1200;
 
@@ -69,16 +69,6 @@ function deriveProject(transcriptDir: string): string {
     // ~/.claude/projects encodes cwd as `-Users-necmttn-Projects-quera`
     const m = basename(transcriptDir);
     return m;
-}
-
-function turnRecordKey(sessionId: string, seq: number): string {
-    return `${sessionId.replace(/-/g, "")}_${seq}`;
-}
-
-function fileRecordKey(repo: string | null, path: string): string {
-    const repoPart = (repo ?? "_").replace(/[^a-zA-Z0-9]/g, "_");
-    const pathPart = path.replace(/[^a-zA-Z0-9]/g, "_").slice(0, 80);
-    return `${repoPart}__${pathPart}__${Bun.hash(path).toString(16).slice(0, 8)}`;
 }
 
 function repoFromCwd(cwd: string | null): string | null {
@@ -688,11 +678,13 @@ const upsertEdits = (edits: Edit[]) =>
         const relStmts: string[] = [];
         const seenFiles = new Set<string>();
         for (const e of edits) {
-            const fileKey = fileRecordKey(e.repo, e.path);
+            const repositoryKey = e.repo ?? "_";
+            const fileKey = fileRecordKey(repositoryKey, e.path);
             if (!seenFiles.has(fileKey)) {
                 seenFiles.add(fileKey);
+                const identityScope = e.repo === null ? `, identity_scope: "legacy_local"` : "";
                 fileStmts.push(
-                    `UPSERT file:\`${fileKey}\` CONTENT { repo: ${e.repo === null ? "NONE" : JSON.stringify(e.repo)}, path: ${JSON.stringify(e.path)} };`,
+                    `UPSERT file:\`${fileKey}\` CONTENT { repo: ${e.repo === null ? "NONE" : JSON.stringify(e.repo)}, path: ${JSON.stringify(e.path)}${identityScope} };`,
                 );
             }
             const turnKey = turnRecordKey(e.session, e.seq);

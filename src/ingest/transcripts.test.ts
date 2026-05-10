@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { toolCallRecordKey } from "./record-keys.ts";
+import { fileRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import { __testExtractClaudeJsonlLines } from "./transcripts.ts";
 
 describe("Claude transcript extraction", () => {
@@ -130,7 +130,7 @@ describe("Claude transcript extraction", () => {
             toolKind: "skill",
             sessionId: "session-abc",
             seq: 1,
-            turnKey: "sessionabc_1",
+            turnKey: turnRecordKey("session-abc", 1),
             callId: "toolu_skill",
             cwd: "/Users/necmttn/Projects/agentctl",
             hasError: false,
@@ -151,7 +151,7 @@ describe("Claude transcript extraction", () => {
             toolKind: "builtin",
             sessionId: "session-abc",
             seq: 1,
-            turnKey: "sessionabc_1",
+            turnKey: turnRecordKey("session-abc", 1),
             callId: "toolu_bash",
             commandText: "cd src && bun test src/ingest/transcripts.test.ts",
             commandToolName: "bun",
@@ -257,6 +257,78 @@ describe("Claude transcript extraction", () => {
                 ),
             ).size,
         ).toBe(2);
+    });
+
+    test("turn IDs use centralized turnRecordKey format", () => {
+        const extracted = __testExtractClaudeJsonlLines(
+            [
+                JSON.stringify({
+                    type: "assistant",
+                    timestamp: "2026-05-09T10:00:00.000Z",
+                    cwd: "/Users/necmttn/Projects/agentctl",
+                    message: {
+                        content: [
+                            {
+                                type: "tool_use",
+                                id: "toolu_bash",
+                                name: "Bash",
+                                input: { command: "pwd" },
+                            },
+                        ],
+                    },
+                }),
+            ],
+            "-Users-necmttn-Projects-agentctl",
+            "session-id-check",
+        );
+
+        expect(extracted).not.toBeNull();
+        if (!extracted) return;
+
+        const expectedTurnKey = turnRecordKey("session-id-check", 1);
+        const bashCall = extracted.toolCalls.find((c) => c.toolName === "Bash");
+        expect(bashCall?.turnKey).toBe(expectedTurnKey);
+    });
+
+    test("edited-file IDs use centralized fileRecordKey scoped to repository identity", () => {
+        const extracted = __testExtractClaudeJsonlLines(
+            [
+                JSON.stringify({
+                    type: "assistant",
+                    timestamp: "2026-05-09T10:00:00.000Z",
+                    cwd: "/Users/necmttn/Projects/agentctl",
+                    message: {
+                        content: [
+                            {
+                                type: "tool_use",
+                                id: "toolu_edit_check",
+                                name: "Edit",
+                                input: { file_path: "/Users/necmttn/Projects/agentctl/src/a.ts" },
+                            },
+                        ],
+                    },
+                }),
+            ],
+            "-Users-necmttn-Projects-agentctl",
+            "session-file-check",
+        );
+
+        expect(extracted).not.toBeNull();
+        if (!extracted) return;
+
+        // The repo derived from cwd "/Users/necmttn/Projects/agentctl" is "agentctl"
+        // centralized fileRecordKey takes (repositoryKey, path)
+        const expectedFileKey = fileRecordKey(
+            "agentctl",
+            "/Users/necmttn/Projects/agentctl/src/a.ts",
+        );
+        expect(extracted.edits).toHaveLength(1);
+        const edit = extracted.edits[0];
+        // Verify the edit record exposes the correct file key via the centralized helper
+        // (the key must match what upsertEdits would write to the DB)
+        expect(
+            fileRecordKey(edit?.repo ?? "_", edit?.path ?? ""),
+        ).toBe(expectedFileKey);
     });
 
     test("keeps TodoWrite plan item keys stable when the same sequence changes", () => {
