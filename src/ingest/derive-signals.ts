@@ -3,6 +3,7 @@ import { SurrealClient } from "../lib/db.ts";
 import { skillRecordKey } from "../lib/skill-id.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
+import { recordRef } from "./evidence-writers.ts";
 
 /**
  * Negation patterns that signal a user pushed back on the previous assistant
@@ -72,8 +73,95 @@ function recoveredByEdgeId(fromTurnKey: string, skillKey: string): string {
     return `${fromTurnKey}__${skillKey}`;
 }
 
+type RecordRefLike = string | { tb?: string; id?: unknown };
+type JsonRecord = Record<string, unknown>;
+type TimestampInput = Date | string;
+
+export interface ToolCallLike {
+    readonly id?: RecordRefLike | null;
+    readonly session?: RecordRefLike | null;
+    readonly turn?: RecordRefLike | null;
+    readonly tool?: RecordRefLike | { name?: unknown } | null;
+    readonly tool_name?: string | null;
+    readonly toolName?: string | null;
+    readonly name?: string | null;
+    readonly command_norm?: string | null;
+    readonly commandNorm?: string | null;
+    readonly output_excerpt?: string | null;
+    readonly outputExcerpt?: string | null;
+    readonly error_text?: string | null;
+    readonly errorText?: string | null;
+    readonly exit_code?: number | null;
+    readonly exitCode?: number | null;
+    readonly duration_ms?: number | null;
+    readonly durationMs?: number | null;
+    readonly status?: string | null;
+    readonly has_error?: boolean | null;
+    readonly hasError?: boolean | null;
+    readonly ts?: TimestampInput | null;
+    readonly cwd?: string | null;
+    readonly seq?: number | null;
+    readonly call_id?: string | null;
+    readonly callId?: string | null;
+    readonly repository?: RecordRefLike | null;
+    readonly checkout?: RecordRefLike | null;
+}
+
+export interface DerivedFrictionEvent {
+    readonly key: string;
+    readonly kind: string;
+    readonly sessionId: string | null;
+    readonly turnKey: string | null;
+    readonly targetType?: string;
+    readonly targetName?: string;
+    readonly source?: string;
+    readonly confidence?: number;
+    readonly text: string | null;
+    readonly labels: JsonRecord;
+    readonly metrics: JsonRecord;
+    readonly raw: JsonRecord;
+    readonly ts: string;
+}
+
+export interface DerivedDiagnosticEvent {
+    readonly key: string;
+    readonly kind: string;
+    readonly status: string | null;
+    readonly sessionId: string | null;
+    readonly turnKey: string | null;
+    readonly targetType?: string;
+    readonly targetName?: string;
+    readonly source?: string;
+    readonly confidence?: number;
+    readonly text: string | null;
+    readonly labels: JsonRecord;
+    readonly metrics: JsonRecord;
+    readonly raw: JsonRecord;
+    readonly ts: string;
+}
+
+export interface DerivedRecommendation {
+    readonly key: string;
+    readonly subjectType: string | null;
+    readonly subjectId: string | null;
+    readonly status: string;
+    readonly text: string;
+    readonly rationale: string;
+    readonly labels: JsonRecord;
+    readonly metrics: JsonRecord;
+    readonly createdAt: string;
+    readonly updatedAt: string | null;
+}
+
 const PAIR_WINDOW = 3;
 const RECOVERY_WINDOW = 3;
+const CHECKOUT_GUIDANCE_THRESHOLD = 3;
+
+export function shouldDeriveAllTimeSkillPairs(
+    sinceDays: number | undefined,
+): boolean {
+    return sinceDays === undefined || sinceDays <= 0;
+}
 
 interface TurnRow {
     id: { tb: string; id: string } | string;
@@ -83,24 +171,368 @@ interface TurnRow {
     ts: string | Date;
     has_error: boolean;
     invoked_skills: ReadonlyArray<string>; // skill names this turn already invoked
+    repository?: RecordRefLike | null;
+    checkout?: RecordRefLike | null;
+    cwd?: string | null;
 }
 
 interface SessionTurns {
     sessionId: string;
+    repositoryKey: string | null;
+    checkoutKey: string | null;
+    cwd: string | null;
     turns: TurnRow[];
 }
 
+const sqlString = (value: string): string => JSON.stringify(value);
+
+const sqlOptionString = (value: string | null | undefined): string =>
+    value === null || value === undefined ? "NONE" : sqlString(value);
+
+const sqlDate = (value: TimestampInput): string => {
+    const iso = value instanceof Date ? value.toISOString() : value;
+    return `d${JSON.stringify(iso)}`;
+};
+
+const sqlOptionDate = (value: TimestampInput | null | undefined): string =>
+    value === null || value === undefined ? "NONE" : sqlDate(value);
+
+const sqlOptionRecord = (
+    table: string,
+    key: string | null | undefined,
+): string => (key === null || key === undefined ? "NONE" : recordRef(table, key));
+
+const sqlJsonString = (value: unknown): string =>
+    sqlString(typeof value === "string" ? value : JSON.stringify(value) ?? "null");
+
+const sqlJsonOption = (value: unknown | null | undefined): string =>
+    value === null || value === undefined ? "NONE" : sqlJsonString(value);
+
+const sqlObject = (fields: readonly (readonly [string, string])[]): string =>
+    `{ ${fields.map(([name, value]) => `${name}: ${value}`).join(", ")} }`;
+
+const nonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== "string") return null;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+};
+
+const compactRecord = (input: JsonRecord): JsonRecord =>
+    Object.fromEntries(
+        Object.entries(input).filter(([, value]) => value !== null && value !== undefined),
+    );
+
+const recordKeyPart = (value: unknown, expectedTable?: string): string | null => {
+    if (value === null || value === undefined) return null;
+
+    if (typeof value === "string") {
+        let raw = value.trim();
+        if (raw.length === 0) return null;
+        const expectedPrefix = expectedTable ? `${expectedTable}:` : null;
+        if (expectedPrefix && raw.startsWith(expectedPrefix)) {
+            raw = raw.slice(expectedPrefix.length);
+        } else {
+            const colon = raw.indexOf(":");
+            if (colon !== -1) raw = raw.slice(colon + 1);
+        }
+        if (
+            (raw.startsWith("`") && raw.endsWith("`")) ||
+            (raw.startsWith("⟨") && raw.endsWith("⟩"))
+        ) {
+            raw = raw.slice(1, -1);
+        }
+        return raw.length > 0 ? raw : null;
+    }
+
+    if (typeof value === "object" && "id" in value) {
+        const id = (value as { id: unknown }).id;
+        return id === null || id === undefined ? null : String(id);
+    }
+
+    return null;
+};
+
+const recordLabel = (table: string, value: unknown): string | null => {
+    const key = recordKeyPart(value, table);
+    return key === null ? null : `${table}:${key}`;
+};
+
+const isoTimestamp = (value: TimestampInput | null | undefined): string => {
+    if (value instanceof Date) return value.toISOString();
+    const text = nonEmptyString(value);
+    return text ?? new Date(0).toISOString();
+};
+
+const safeKeyPart = (value: string): string => {
+    const sanitized = value
+        .replace(/:/g, "__")
+        .replace(/[^a-zA-Z0-9_]+/g, "_")
+        .replace(/_{3,}/g, "__")
+        .replace(/^_+|_+$/g, "");
+    return sanitized.length > 0 ? sanitized : Bun.hash(value).toString(16);
+};
+
 /** Extract the raw `id` portion of a turn record-id (`turn:⟨xyz⟩` → `xyz`). */
 function rawTurnKey(id: TurnRow["id"]): string {
-    if (typeof id === "string") {
-        const colon = id.indexOf(":");
-        return colon === -1 ? id : id.slice(colon + 1);
-    }
-    return id.id;
+    return recordKeyPart(id, "turn") ?? String(id);
 }
 
 function tsToIso(ts: TurnRow["ts"]): string {
-    return ts instanceof Date ? ts.toISOString() : String(ts);
+    return isoTimestamp(ts);
+}
+
+const toolCallStableKey = (call: ToolCallLike, index: number): string => {
+    const idKey = recordKeyPart(call.id, "tool_call");
+    if (idKey) return idKey;
+
+    const sessionKey = recordKeyPart(call.session, "session") ?? "unknown_session";
+    const callId = nonEmptyString(call.call_id) ?? nonEmptyString(call.callId);
+    const seq = typeof call.seq === "number" ? `seq_${call.seq.toString(10)}` : null;
+    const target = toolTargetName(call);
+    const fallback = [sessionKey, callId ?? seq ?? target ?? `idx_${index}`].join("__");
+    return `${safeKeyPart(fallback)}__${Bun.hash(fallback).toString(16)}`;
+};
+
+const callString = (
+    call: ToolCallLike,
+    snakeKey: keyof ToolCallLike,
+    camelKey: keyof ToolCallLike,
+): string | null => nonEmptyString(call[snakeKey]) ?? nonEmptyString(call[camelKey]);
+
+const callNumber = (
+    call: ToolCallLike,
+    snakeKey: keyof ToolCallLike,
+    camelKey: keyof ToolCallLike,
+): number | null => {
+    const value = call[snakeKey] ?? call[camelKey];
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+};
+
+const toolNameFromTool = (tool: ToolCallLike["tool"]): string | null => {
+    if (tool === null || tool === undefined) return null;
+    if (typeof tool === "string") return recordKeyPart(tool, "tool") ?? tool;
+    if (typeof tool === "object" && "name" in tool) return nonEmptyString(tool.name);
+    return null;
+};
+
+const toolTargetName = (call: ToolCallLike): string =>
+    callString(call, "command_norm", "commandNorm") ??
+    nonEmptyString(call.tool_name) ??
+    nonEmptyString(call.toolName) ??
+    toolNameFromTool(call.tool) ??
+    nonEmptyString(call.name) ??
+    "unknown_tool";
+
+const toolEvidenceText = (call: ToolCallLike): string | null =>
+    callString(call, "error_text", "errorText") ??
+    callString(call, "output_excerpt", "outputExcerpt");
+
+const isFailedToolCall = (call: ToolCallLike): boolean => {
+    if (call.has_error === true || call.hasError === true) return true;
+    if ((call.status ?? "").toLowerCase() === "error") return true;
+    const exitCode = callNumber(call, "exit_code", "exitCode");
+    return exitCode !== null && exitCode !== 0;
+};
+
+const toolCallLabels = (
+    call: ToolCallLike,
+    toolCallKey: string,
+    targetName: string,
+): JsonRecord =>
+    compactRecord({
+        source: "derive_signals",
+        evidenceSource: "tool_call",
+        targetType: "tool",
+        targetName,
+        toolCallId: `tool_call:${toolCallKey}`,
+        toolName: nonEmptyString(call.name),
+        commandNorm: callString(call, "command_norm", "commandNorm"),
+        repository: recordLabel("repository", call.repository),
+        checkout: recordLabel("checkout", call.checkout),
+        cwd: nonEmptyString(call.cwd),
+    });
+
+const toolCallMetrics = (call: ToolCallLike): JsonRecord =>
+    compactRecord({
+        confidence: 1,
+        exitCode: callNumber(call, "exit_code", "exitCode"),
+        durationMs: callNumber(call, "duration_ms", "durationMs"),
+    });
+
+const toolCallRaw = (
+    call: ToolCallLike,
+    toolCallKey: string,
+    targetName: string,
+): JsonRecord =>
+    compactRecord({
+        toolCallId: `tool_call:${toolCallKey}`,
+        status: call.status ?? (isFailedToolCall(call) ? "error" : null),
+        name: nonEmptyString(call.name),
+        targetName,
+        commandNorm: callString(call, "command_norm", "commandNorm"),
+        exitCode: callNumber(call, "exit_code", "exitCode"),
+    });
+
+export function deriveFrictionFromToolCalls(
+    calls: readonly ToolCallLike[],
+): DerivedFrictionEvent[] {
+    const out: DerivedFrictionEvent[] = [];
+    calls.forEach((call, index) => {
+        if (!isFailedToolCall(call)) return;
+        const toolCallKey = toolCallStableKey(call, index);
+        const targetName = toolTargetName(call);
+        const labels = toolCallLabels(call, toolCallKey, targetName);
+        const metrics = toolCallMetrics(call);
+        out.push({
+            key: `tool_error__${toolCallKey}`,
+            kind: "tool_error",
+            sessionId: recordKeyPart(call.session, "session"),
+            turnKey: recordKeyPart(call.turn, "turn"),
+            targetType: "tool",
+            targetName,
+            source: "tool_call",
+            confidence: 1,
+            text: toolEvidenceText(call),
+            labels,
+            metrics,
+            raw: toolCallRaw(call, toolCallKey, targetName),
+            ts: isoTimestamp(call.ts),
+        });
+    });
+    return out;
+}
+
+export function deriveDiagnosticsFromToolCalls(
+    calls: readonly ToolCallLike[],
+): DerivedDiagnosticEvent[] {
+    const out: DerivedDiagnosticEvent[] = [];
+    calls.forEach((call, index) => {
+        if (!isFailedToolCall(call)) return;
+        const toolCallKey = toolCallStableKey(call, index);
+        const targetName = toolTargetName(call);
+        out.push({
+            key: `tool_failure__${toolCallKey}`,
+            kind: "tool_failure",
+            status: "error",
+            sessionId: recordKeyPart(call.session, "session"),
+            turnKey: recordKeyPart(call.turn, "turn"),
+            targetType: "tool",
+            targetName,
+            source: "tool_call",
+            confidence: 1,
+            text: toolEvidenceText(call),
+            labels: toolCallLabels(call, toolCallKey, targetName),
+            metrics: toolCallMetrics(call),
+            raw: toolCallRaw(call, toolCallKey, targetName),
+            ts: isoTimestamp(call.ts),
+        });
+    });
+    return out;
+}
+
+const CHECKOUT_TEXT_RE =
+    /\b(checkout|worktree|wrong\s+repo(?:sitory)?|branch|git\s+(?:status|checkout|worktree|switch))\b/i;
+
+const isUserCorrectionFriction = (event: Pick<DerivedFrictionEvent, "kind" | "labels">): boolean => {
+    const kind = event.kind.toLowerCase();
+    if (kind === "user_correction" || kind === "correction") return true;
+    return event.labels.kind === "user_correction" || event.labels.source === "corrected_by";
+};
+
+const labelString = (labels: JsonRecord, key: string): string | null =>
+    nonEmptyString(labels[key]);
+
+const checkoutCorrectionScope = (
+    event: Pick<DerivedFrictionEvent, "labels">,
+): { subjectType: string; subjectId: string } => {
+    const labels = event.labels;
+    const repository = labelString(labels, "repository") ?? labelString(labels, "repositoryId");
+    if (repository) return { subjectType: "repository", subjectId: repository };
+
+    const checkout = labelString(labels, "checkout") ?? labelString(labels, "checkoutId");
+    if (checkout) return { subjectType: "checkout", subjectId: checkout };
+
+    const scopeId = labelString(labels, "scopeId") ?? labelString(labels, "cwd");
+    const scope = labelString(labels, "scope") ?? "scope";
+    return { subjectType: scope, subjectId: scopeId ?? scope };
+};
+
+export function deriveRecommendationFromFriction(
+    events: readonly Pick<DerivedFrictionEvent, "key" | "kind" | "text" | "labels" | "ts">[],
+): DerivedRecommendation | null {
+    const groups = new Map<
+        string,
+        {
+            subjectType: string;
+            subjectId: string;
+            count: number;
+            firstSeen: string;
+            lastSeen: string;
+            eventKeys: string[];
+        }
+    >();
+
+    for (const event of events) {
+        if (!isUserCorrectionFriction(event)) continue;
+        if (!CHECKOUT_TEXT_RE.test(event.text ?? "")) continue;
+
+        const scope = checkoutCorrectionScope(event);
+        const groupKey = `${scope.subjectType}:${scope.subjectId}`;
+        const ts = isoTimestamp(event.ts);
+        const existing = groups.get(groupKey);
+        if (existing) {
+            existing.count += 1;
+            existing.eventKeys.push(event.key);
+            if (ts < existing.firstSeen) existing.firstSeen = ts;
+            if (ts > existing.lastSeen) existing.lastSeen = ts;
+        } else {
+            groups.set(groupKey, {
+                ...scope,
+                count: 1,
+                firstSeen: ts,
+                lastSeen: ts,
+                eventKeys: [event.key],
+            });
+        }
+    }
+
+    const winner = [...groups.values()]
+        .filter((group) => group.count >= CHECKOUT_GUIDANCE_THRESHOLD)
+        .sort((a, b) => b.count - a.count || b.lastSeen.localeCompare(a.lastSeen))[0];
+    if (!winner) return null;
+
+    const text =
+        winner.subjectType === "repository"
+            ? "Show just-in-time checkout guidance for this repository before edits, tests, or git commands."
+            : "Show just-in-time checkout guidance for this scope before edits, tests, or git commands.";
+    const rationale = `Observed ${winner.count} checkout-related user corrections for ${winner.subjectId}. Remind the agent to confirm checkout path, branch, and worktree before acting.`;
+    const labels = compactRecord({
+        source: "derive_signals",
+        kind: "jit_checkout_guidance",
+        trigger: "checkout_user_corrections",
+        subjectType: winner.subjectType,
+        subjectId: winner.subjectId,
+        repository: winner.subjectType === "repository" ? winner.subjectId : null,
+    });
+
+    return {
+        key: `jit_checkout_guidance__${safeKeyPart(winner.subjectId)}`,
+        subjectType: winner.subjectType,
+        subjectId: winner.subjectId,
+        status: "open",
+        text,
+        rationale,
+        labels,
+        metrics: {
+            correctionCount: winner.count,
+            threshold: CHECKOUT_GUIDANCE_THRESHOLD,
+            firstSeen: winner.firstSeen,
+            lastSeen: winner.lastSeen,
+            evidenceCount: winner.eventKeys.length,
+        },
+        createdAt: winner.firstSeen,
+        updatedAt: winner.lastSeen,
+    };
 }
 
 /**
@@ -124,6 +556,9 @@ SELECT
     text_excerpt,
     ts,
     has_error,
+    session.repository AS repository,
+    session.checkout AS checkout,
+    session.cwd AS cwd,
     ->invoked->skill.name AS invoked_skills
 FROM turn
 ${sinceFilter}
@@ -132,6 +567,10 @@ ORDER BY session ASC, seq ASC;`;
         const rows = (result?.[0] ?? []) as Array<TurnRow & { session: unknown }>;
 
         const bySession = new Map<string, TurnRow[]>();
+        const metaBySession = new Map<
+            string,
+            { repositoryKey: string | null; checkoutKey: string | null; cwd: string | null }
+        >();
         for (const row of rows) {
             const sess = row.session;
             const sessionId =
@@ -143,9 +582,21 @@ ORDER BY session ASC, seq ASC;`;
             const list = bySession.get(sessionId) ?? [];
             list.push(row);
             bySession.set(sessionId, list);
+            if (!metaBySession.has(sessionId)) {
+                metaBySession.set(sessionId, {
+                    repositoryKey: recordKeyPart(row.repository, "repository"),
+                    checkoutKey: recordKeyPart(row.checkout, "checkout"),
+                    cwd: nonEmptyString(row.cwd),
+                });
+            }
         }
         return [...bySession.entries()].map(([sessionId, turns]) => ({
             sessionId,
+            ...(metaBySession.get(sessionId) ?? {
+                repositoryKey: null,
+                checkoutKey: null,
+                cwd: null,
+            }),
             turns,
         }));
     });
@@ -154,7 +605,11 @@ interface CorrectionEdge {
     fromTurnKey: string;
     toTurnKey: string;
     pattern: string;
+    text: string;
     ts: string;
+    repositoryKey: string | null;
+    checkoutKey: string | null;
+    cwd: string | null;
     // Session + seq of the corrected (assistant) turn. Used to mark
     // invoked edges as `was_corrected = true` for any invocation whose
     // turn falls in [correctedSeq - 3, correctedSeq] (matches the
@@ -202,7 +657,11 @@ function deriveCorrections(bundle: SessionTurns): CorrectionEdge[] {
                 fromTurnKey: rawTurnKey(prev.id),
                 toTurnKey: rawTurnKey(t.id),
                 pattern: matched,
+                text,
                 ts: tsToIso(t.ts),
+                repositoryKey: bundle.repositoryKey,
+                checkoutKey: bundle.checkoutKey,
+                cwd: bundle.cwd,
                 correctedSession: bundle.sessionId,
                 correctedSeq: prev.seq,
             });
@@ -353,6 +812,45 @@ function deriveRecovered(bundle: SessionTurns): RecoveryEdge[] {
     return out;
 }
 
+function deriveFrictionFromCorrections(edges: readonly CorrectionEdge[]): DerivedFrictionEvent[] {
+    return edges.map((edge) => {
+        const repository = edge.repositoryKey ? `repository:${edge.repositoryKey}` : null;
+        const checkout = edge.checkoutKey ? `checkout:${edge.checkoutKey}` : null;
+        const scope =
+            repository !== null ? "repository" : checkout !== null ? "checkout" : edge.cwd ? "workspace" : "session";
+        const scopeId = repository ?? checkout ?? edge.cwd ?? edge.correctedSession;
+
+        return {
+            key: `user_correction__${edge.toTurnKey}`,
+            kind: "user_correction",
+            sessionId: edge.correctedSession,
+            turnKey: edge.toTurnKey,
+            source: "corrected_by",
+            confidence: 0.8,
+            text: edge.text,
+            labels: compactRecord({
+                source: "corrected_by",
+                kind: "user_correction",
+                pattern: edge.pattern,
+                repository,
+                checkout,
+                cwd: edge.cwd,
+                scope,
+                scopeId,
+            }),
+            metrics: {
+                confidence: 0.8,
+            },
+            raw: {
+                correctedTurn: `turn:${edge.fromTurnKey}`,
+                correctionTurn: `turn:${edge.toTurnKey}`,
+                correctedSeq: edge.correctedSeq,
+            },
+            ts: edge.ts,
+        };
+    });
+}
+
 const fetchSkillNames = (): Effect.Effect<string[], DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
@@ -360,6 +858,41 @@ const fetchSkillNames = (): Effect.Effect<string[], DbError, SurrealClient> =>
             `SELECT name FROM skill;`,
         );
         return (result?.[0] ?? []).map((r) => r.name).filter((n): n is string => Boolean(n));
+    });
+
+const fetchFailedToolCalls = (
+    sinceDays: number | undefined,
+): Effect.Effect<ToolCallLike[], DbError, SurrealClient> =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const sinceFilter =
+            sinceDays && sinceDays > 0 ? `AND ts > time::now() - ${sinceDays}d` : "";
+        const sql = `
+SELECT
+    id,
+    session,
+    turn,
+    tool,
+    tool.name AS tool_name,
+    name,
+    ts,
+    status,
+    command_norm,
+    output_excerpt,
+    error_text,
+    exit_code,
+    duration_ms,
+    has_error,
+    cwd,
+    seq,
+    call_id,
+    session.repository AS repository,
+    session.checkout AS checkout
+FROM tool_call
+WHERE has_error = true ${sinceFilter}
+ORDER BY ts DESC;`;
+        const result = yield* db.query<[ToolCallLike[]]>(sql);
+        return result?.[0] ?? [];
     });
 
 /**
@@ -471,6 +1004,74 @@ const upsertRecovered = (edges: RecoveryEdge[]) =>
         }
     });
 
+const upsertFrictionEvents = (events: readonly DerivedFrictionEvent[]) =>
+    Effect.gen(function* () {
+        if (events.length === 0) return;
+        const db = yield* SurrealClient;
+        const stmts = events.map(
+            (event) =>
+                `UPSERT ${recordRef("friction_event", event.key)} MERGE ${sqlObject([
+                    ["session", sqlOptionRecord("session", event.sessionId)],
+                    ["turn", sqlOptionRecord("turn", event.turnKey)],
+                    ["kind", sqlString(event.kind)],
+                    ["text", sqlOptionString(event.text)],
+                    ["labels", sqlJsonOption(event.labels)],
+                    ["metrics", sqlJsonOption(event.metrics)],
+                    ["raw", sqlJsonOption(event.raw)],
+                    ["ts", sqlDate(event.ts)],
+                ])};`,
+        );
+        for (let i = 0; i < stmts.length; i += 500) {
+            yield* db.query(stmts.slice(i, i + 500).join(""));
+        }
+    });
+
+const upsertDiagnosticEvents = (events: readonly DerivedDiagnosticEvent[]) =>
+    Effect.gen(function* () {
+        if (events.length === 0) return;
+        const db = yield* SurrealClient;
+        const stmts = events.map(
+            (event) =>
+                `UPSERT ${recordRef("diagnostic_event", event.key)} MERGE ${sqlObject([
+                    ["session", sqlOptionRecord("session", event.sessionId)],
+                    ["turn", sqlOptionRecord("turn", event.turnKey)],
+                    ["kind", sqlString(event.kind)],
+                    ["status", sqlOptionString(event.status)],
+                    ["text", sqlOptionString(event.text)],
+                    ["labels", sqlJsonOption(event.labels)],
+                    ["metrics", sqlJsonOption(event.metrics)],
+                    ["raw", sqlJsonOption(event.raw)],
+                    ["ts", sqlDate(event.ts)],
+                ])};`,
+        );
+        for (let i = 0; i < stmts.length; i += 500) {
+            yield* db.query(stmts.slice(i, i + 500).join(""));
+        }
+    });
+
+const upsertRecommendations = (recommendations: readonly DerivedRecommendation[]) =>
+    Effect.gen(function* () {
+        if (recommendations.length === 0) return;
+        const db = yield* SurrealClient;
+        const stmts = recommendations.map(
+            (recommendation) =>
+                `UPSERT ${recordRef("recommendation", recommendation.key)} MERGE ${sqlObject([
+                    ["subject_type", sqlOptionString(recommendation.subjectType)],
+                    ["subject_id", sqlOptionString(recommendation.subjectId)],
+                    ["status", sqlString(recommendation.status)],
+                    ["text", sqlString(recommendation.text)],
+                    ["rationale", sqlOptionString(recommendation.rationale)],
+                    ["labels", sqlJsonOption(recommendation.labels)],
+                    ["metrics", sqlJsonOption(recommendation.metrics)],
+                    ["created_at", sqlDate(recommendation.createdAt)],
+                    ["updated_at", sqlOptionDate(recommendation.updatedAt)],
+                ])};`,
+        );
+        for (let i = 0; i < stmts.length; i += 500) {
+            yield* db.query(stmts.slice(i, i + 500).join(""));
+        }
+    });
+
 export interface DeriveStats {
     sessions: number;
     turns: number;
@@ -478,6 +1079,9 @@ export interface DeriveStats {
     proposed: number;
     skillPairs: number;
     recoveries: number;
+    frictionEvents: number;
+    diagnosticEvents: number;
+    recommendations: number;
 }
 
 export interface DeriveOpts {
@@ -515,16 +1119,29 @@ export const deriveSignals = (
             deriveSkillPairs(bundle, pairsAccum);
         }
 
-        const pairsList = [...pairsAccum.values()];
-        const pairEdgeIds = [...pairsAccum.keys()];
+        const shouldWriteSkillPairs = shouldDeriveAllTimeSkillPairs(opts.sinceDays);
+        const pairsList = shouldWriteSkillPairs ? [...pairsAccum.values()] : [];
+        const pairEdgeIds = shouldWriteSkillPairs ? [...pairsAccum.keys()] : [];
+        const failedToolCalls = yield* fetchFailedToolCalls(opts.sinceDays);
+        const toolFrictionBatch = deriveFrictionFromToolCalls(failedToolCalls);
+        const correctionFrictionBatch = deriveFrictionFromCorrections(correctionBatch);
+        const frictionBatch = [...toolFrictionBatch, ...correctionFrictionBatch];
+        const diagnosticBatch = deriveDiagnosticsFromToolCalls(failedToolCalls);
+        const recommendation = deriveRecommendationFromFriction(correctionFrictionBatch);
+        const recommendationBatch = recommendation === null ? [] : [recommendation];
 
         yield* upsertCorrections(correctionBatch);
         // Denormalise was_corrected onto invoked edges so cmdTaste's
         // corrections subquery becomes a pure index/scan filter (issue #31).
         yield* markWasCorrected(correctionBatch);
         yield* upsertProposed(proposedBatch);
-        yield* upsertSkillPairs(pairsList, pairEdgeIds);
+        if (shouldWriteSkillPairs) {
+            yield* upsertSkillPairs(pairsList, pairEdgeIds);
+        }
         yield* upsertRecovered(recoveryBatch);
+        yield* upsertFrictionEvents(frictionBatch);
+        yield* upsertDiagnosticEvents(diagnosticBatch);
+        yield* upsertRecommendations(recommendationBatch);
 
         console.log(
             `[derive-signals] DONE sessions=${bundles.length} turns=${turnCount} corrections=${corrections} proposed=${proposed}`,
@@ -535,6 +1152,9 @@ export const deriveSignals = (
         console.log(
             `[recovery] DONE sessions=${bundles.length} edges=${recoveries}`,
         );
+        console.log(
+            `[evidence] DONE friction=${frictionBatch.length} diagnostics=${diagnosticBatch.length} recommendations=${recommendationBatch.length}`,
+        );
         return {
             sessions: bundles.length,
             turns: turnCount,
@@ -542,6 +1162,9 @@ export const deriveSignals = (
             proposed,
             skillPairs: pairsList.length,
             recoveries,
+            frictionEvents: frictionBatch.length,
+            diagnosticEvents: diagnosticBatch.length,
+            recommendations: recommendationBatch.length,
         };
     });
 

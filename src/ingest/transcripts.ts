@@ -6,6 +6,23 @@ import { TRANSCRIPTS_DIR } from "../lib/paths.ts";
 import { skillRecordKey } from "../lib/skill-id.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
+import {
+    relateToolCallSkill,
+    writePlanSnapshot,
+    writeToolCalls,
+    type PlanSnapshotWrite,
+    type ToolCallSkillRelationWrite,
+    type ToolCallWrite,
+} from "./evidence-writers.ts";
+import {
+    extractCommandTool,
+    normalizeCommand,
+    toolKindForName,
+} from "./tool-calls.ts";
+import { normalizeClaudeTodoWrite, type PlanStatus } from "./plans.ts";
+import { fileRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
+
+const MAX_OUTPUT_EXCERPT_CHARS = 1200;
 
 interface Session {
     id: string;
@@ -54,16 +71,6 @@ function deriveProject(transcriptDir: string): string {
     return m;
 }
 
-function turnRecordKey(sessionId: string, seq: number): string {
-    return `${sessionId.replace(/-/g, "")}_${seq}`;
-}
-
-function fileRecordKey(repo: string | null, path: string): string {
-    const repoPart = (repo ?? "_").replace(/[^a-zA-Z0-9]/g, "_");
-    const pathPart = path.replace(/[^a-zA-Z0-9]/g, "_").slice(0, 80);
-    return `${repoPart}__${pathPart}__${Bun.hash(path).toString(16).slice(0, 8)}`;
-}
-
 function repoFromCwd(cwd: string | null): string | null {
     if (!cwd) return null;
     // Best effort: last path segment after Projects/ or worktrees/ etc.
@@ -79,141 +86,467 @@ function parseJsonl(line: string): Record<string, unknown> | null {
     }
 }
 
+function isRecord(input: unknown): input is Record<string, unknown> {
+    return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
+function asContentBlocks(input: unknown): Record<string, unknown>[] {
+    return Array.isArray(input) ? input.filter(isRecord) : [];
+}
+
+function stringField(input: Record<string, unknown>, field: string): string | null {
+    const value = input[field];
+    return typeof value === "string" ? value : null;
+}
+
+function stableHash(input: string): string {
+    return Bun.hash(input).toString(16).padStart(16, "0");
+}
+
+function recordKeyPart(input: string, fallback = "_"): string {
+    const sanitized = input
+        .replace(/[^a-zA-Z0-9]/g, "_")
+        .replace(/_+/g, "_")
+        .replace(/^_+|_+$/g, "");
+    return sanitized.length > 0 ? sanitized : fallback;
+}
+
+function planKey(sessionId: string, source: string): string {
+    return [
+        "claude",
+        recordKeyPart(sessionId, "session").slice(0, 80),
+        recordKeyPart(source, "source"),
+        stableHash(`${sessionId}:${source}`).slice(0, 16),
+    ].join("__");
+}
+
+function planSnapshotKey(input: {
+    sessionId: string;
+    source: string;
+    snapshotSeq: number;
+    toolCallKey: string;
+}): string {
+    return [
+        planKey(input.sessionId, input.source),
+        `snapshot_${input.snapshotSeq.toString(10).padStart(6, "0")}`,
+        stableHash(input.toolCallKey).slice(0, 12),
+    ].join("__");
+}
+
+function planItemKey(input: {
+    sessionId: string;
+    source: string;
+    seq: number;
+}): string {
+    return [
+        planKey(input.sessionId, input.source),
+        `item_${input.seq.toString(10).padStart(3, "0")}`,
+    ].join("__");
+}
+
+function planStatus(items: readonly { status: PlanStatus }[]): PlanStatus {
+    if (items.some((item) => item.status === "in_progress")) return "in_progress";
+    if (items.length > 0 && items.every((item) => item.status === "completed")) {
+        return "completed";
+    }
+    if (items.some((item) => item.status === "pending")) return "pending";
+    if (items.length > 0 && items.every((item) => item.status === "abandoned")) {
+        return "abandoned";
+    }
+    return "pending";
+}
+
+function boundedExcerpt(input: string): string {
+    const text = input.replace(/\r\n/g, "\n").trim();
+    return text.length > MAX_OUTPUT_EXCERPT_CHARS
+        ? text.slice(0, MAX_OUTPUT_EXCERPT_CHARS)
+        : text;
+}
+
+function jsonText(input: unknown): string | null {
+    try {
+        const encoded = JSON.stringify(input);
+        return encoded === undefined ? null : encoded;
+    } catch {
+        return null;
+    }
+}
+
+function outputText(input: unknown): string | null {
+    if (typeof input === "string") return input;
+    if (Array.isArray(input)) {
+        const parts = input
+            .filter(isRecord)
+            .map((item) => stringField(item, "text") ?? stringField(item, "content"))
+            .filter((text): text is string => text !== null);
+        if (parts.length > 0) return parts.join("\n");
+    }
+
+    return jsonText(input);
+}
+
+function outputExcerpt(input: unknown): string | null {
+    const text = outputText(input);
+    if (!text) return null;
+    const excerpt = boundedExcerpt(text);
+    return excerpt.length > 0 ? excerpt : null;
+}
+
+type MutableToolCallWrite = {
+    -readonly [Key in keyof ToolCallWrite]: ToolCallWrite[Key];
+};
+
+type ToolResultFields = {
+    outputJson: unknown;
+    outputExcerpt: string | null;
+    errorText: string | null;
+    hasError: boolean;
+};
+
+function applyToolResult(call: MutableToolCallWrite, result: ToolResultFields): void {
+    call.outputJson = result.outputJson;
+    call.outputExcerpt = result.outputExcerpt;
+    call.errorText = result.errorText;
+    call.hasError = result.hasError;
+}
+
 interface FileExtract {
     session: Session;
     turns: Turn[];
     invocations: Invocation[];
     edits: Edit[];
+    toolCalls: ToolCallWrite[];
+    skillRelations: ToolCallSkillRelationWrite[];
+    planSnapshots: PlanSnapshotWrite[];
+}
+
+function createClaudeExtractor(projectDir: string, sessionId: string) {
+    let session: Session | null = null;
+    const turns: Turn[] = [];
+    const invocations: Invocation[] = [];
+    const edits: Edit[] = [];
+    const toolCalls: MutableToolCallWrite[] = [];
+    const skillRelations: ToolCallSkillRelationWrite[] = [];
+    const planSnapshots: PlanSnapshotWrite[] = [];
+    const toolCallsByCallId = new Map<string, MutableToolCallWrite>();
+    const pendingToolResultsByCallId = new Map<string, ToolResultFields>();
+    const planCreatedAtBySource = new Map<string, string>();
+    const planSnapshotCountsBySource = new Map<string, number>();
+    const anonymousToolUseCountsByTurn = new Map<number, number>();
+    let seq = 0;
+    let cwd: string | null = null;
+
+    const nextPlanSnapshotSeq = (source: string): number => {
+        const next = (planSnapshotCountsBySource.get(source) ?? 0) + 1;
+        planSnapshotCountsBySource.set(source, next);
+        return next;
+    };
+
+    const rememberPlanCreatedAt = (source: string, ts: string): string => {
+        const existing = planCreatedAtBySource.get(source);
+        if (existing) return existing;
+        planCreatedAtBySource.set(source, ts);
+        return ts;
+    };
+
+    const processToolUse = (
+        block: Record<string, unknown>,
+        ts: string,
+        turnCwd: string | null,
+    ): void => {
+        const name = stringField(block, "name");
+        if (!name) return;
+
+        const input = isRecord(block.input) ? block.input : undefined;
+        const transcriptCallId = stringField(block, "id");
+        const callId =
+            transcriptCallId ??
+            `anonymous_tool_use_${seq.toString(10).padStart(6, "0")}_${(
+                (anonymousToolUseCountsByTurn.get(seq) ?? 0) + 1
+            )
+                .toString(10)
+                .padStart(3, "0")}`;
+        if (!transcriptCallId) {
+            anonymousToolUseCountsByTurn.set(
+                seq,
+                (anonymousToolUseCountsByTurn.get(seq) ?? 0) + 1,
+            );
+        }
+        const currentTurnKey = turnRecordKey(sessionId, seq);
+        const toolCallKey = toolCallRecordKey({
+            sessionId,
+            seq,
+            callId,
+        });
+        const call: MutableToolCallWrite = {
+            provider: "claude",
+            toolName: name,
+            toolKind: toolKindForName(name),
+            sessionId,
+            seq,
+            turnKey: currentTurnKey,
+            callId,
+            ts,
+            cwd: turnCwd,
+            inputJson: input ?? null,
+            rawJson: block,
+            hasError: false,
+        };
+
+        if (name === "Bash") {
+            const command = input ? stringField(input, "command") : null;
+            if (command) {
+                call.commandText = command;
+                call.commandToolName = extractCommandTool(command);
+                call.commandNorm = normalizeCommand(command);
+            }
+        }
+
+        toolCalls.push(call);
+        if (callId) {
+            toolCallsByCallId.set(callId, call);
+            const pendingResult = pendingToolResultsByCallId.get(callId);
+            if (pendingResult) {
+                applyToolResult(call, pendingResult);
+                pendingToolResultsByCallId.delete(callId);
+            }
+        }
+
+        if (name === "Skill" && input) {
+            const skillName =
+                stringField(input, "skill") ?? stringField(input, "skill_name");
+            if (skillName) {
+                invocations.push({
+                    session: sessionId,
+                    seq,
+                    ts,
+                    skill: skillName,
+                    args: input,
+                    // Backfilled after the content loop below; assistant
+                    // turns essentially never carry has_error in current
+                    // data (it lives on tool_result turns) but we set
+                    // the field correctly in case future capture changes.
+                    turn_has_error: false,
+                });
+                skillRelations.push({
+                    toolCallKey,
+                    skillName,
+                    ts,
+                    reason: "Claude Skill tool invocation",
+                    labels: {
+                        provider: "claude",
+                        toolName: "Skill",
+                        source: "transcript",
+                    },
+                    metrics: { turnSeq: seq },
+                });
+            }
+        } else if (
+            (name === "Edit" || name === "Write" || name === "NotebookEdit") &&
+            input
+        ) {
+            const path =
+                stringField(input, "file_path") ??
+                stringField(input, "path") ??
+                stringField(input, "notebook_path");
+            if (path) {
+                edits.push({
+                    session: sessionId,
+                    seq,
+                    ts,
+                    repo: repoFromCwd(cwd),
+                    path,
+                    tool: name,
+                });
+            }
+        }
+
+        if (name === "TodoWrite" && input) {
+            const normalized = normalizeClaudeTodoWrite({
+                sessionId,
+                ts,
+                input,
+            });
+            if (normalized.items.length > 0) {
+                const source = normalized.source;
+                const snapshotSeq = nextPlanSnapshotSeq(source);
+                const createdAt = rememberPlanCreatedAt(source, ts);
+                const currentPlanKey = planKey(sessionId, source);
+                const items = normalized.items.map((item) => ({
+                    key: planItemKey({
+                        sessionId,
+                        source,
+                        seq: item.seq,
+                    }),
+                    externalId: item.externalId,
+                    seq: item.seq,
+                    content: item.content,
+                    activeForm: item.activeForm,
+                    status: item.status,
+                }));
+
+                planSnapshots.push({
+                    planKey: currentPlanKey,
+                    sessionId,
+                    source,
+                    status: planStatus(normalized.items),
+                    createdAt,
+                    updatedAt: ts,
+                    snapshotKey: planSnapshotKey({
+                        sessionId,
+                        source,
+                        snapshotSeq,
+                        toolCallKey,
+                    }),
+                    toolCallKey,
+                    itemsJson: normalized.items,
+                    explanation: normalized.explanation,
+                    ts: normalized.ts,
+                    items,
+                });
+            }
+        }
+    };
+
+    const processToolResult = (block: Record<string, unknown>): boolean => {
+        const callId = stringField(block, "tool_use_id");
+        const hasError = block.is_error === true;
+        const result: ToolResultFields = {
+            outputJson: block.content ?? null,
+            outputExcerpt: outputExcerpt(block.content ?? null),
+            errorText: hasError ? outputExcerpt(block.content ?? null) : null,
+            hasError,
+        };
+
+        if (callId) {
+            const call = toolCallsByCallId.get(callId);
+            if (call) {
+                applyToolResult(call, result);
+            } else {
+                pendingToolResultsByCallId.set(callId, result);
+            }
+        }
+
+        return hasError;
+    };
+
+    return {
+        processLine(line: string): void {
+            if (!line.trim()) return;
+            const entry = parseJsonl(line);
+            if (!entry) return;
+            const type = entry.type as string | undefined;
+            if (type === "summary") return;
+
+            const ts =
+                (entry.timestamp as string | undefined) ??
+                (entry.ts as string | undefined) ??
+                null;
+            if (!ts) return;
+            const turnCwd = typeof entry.cwd === "string" ? entry.cwd : cwd;
+            if (!cwd && turnCwd) cwd = turnCwd;
+            if (!session) {
+                session = {
+                    id: sessionId,
+                    project: deriveProject(projectDir),
+                    cwd,
+                    started_at: ts,
+                    ended_at: ts,
+                    raw_file: null,
+                };
+            }
+            session.ended_at = ts;
+            if (cwd && !session.cwd) session.cwd = cwd;
+
+            seq += 1;
+            const role = (type as string) ?? "unknown";
+            const message = isRecord(entry.message) ? entry.message : null;
+            const content = asContentBlocks(message?.content);
+
+            let textExcerpt: string | null = null;
+            let hasToolUse = false;
+            let hasError = false;
+            // Track invocation indices added this iteration so we can backfill
+            // `turn_has_error` once `hasError` is finalised below (a tool_result
+            // block later in the same content array can flip it after the
+            // tool_use that emitted the invocation).
+            const turnInvStart = invocations.length;
+
+            for (const block of content) {
+                const blockType = stringField(block, "type");
+                const blockText = stringField(block, "text");
+                if (blockType === "text" && blockText && !textExcerpt) {
+                    textExcerpt = blockText.slice(0, 500);
+                }
+                if (blockType === "tool_use") {
+                    hasToolUse = true;
+                    processToolUse(block, ts, turnCwd);
+                }
+                if (blockType === "tool_result" && processToolResult(block)) {
+                    hasError = true;
+                }
+            }
+
+            // Propagate the (now finalised) hasError onto every invocation
+            // emitted by this turn so the edge-side flag matches the turn-side
+            // one. Cheap: O(skills_invoked_this_turn).
+            if (hasError) {
+                for (let i = turnInvStart; i < invocations.length; i += 1) {
+                    invocations[i].turn_has_error = true;
+                }
+            }
+
+            turns.push({
+                session: sessionId,
+                seq,
+                ts,
+                role,
+                text_excerpt: textExcerpt,
+                has_tool_use: hasToolUse,
+                has_error: hasError,
+            });
+        },
+        finish(): FileExtract | null {
+            if (!session) return null;
+            return {
+                session,
+                turns,
+                invocations,
+                edits,
+                toolCalls,
+                skillRelations,
+                planSnapshots,
+            };
+        },
+    };
+}
+
+export function __testExtractClaudeJsonlLines(
+    lines: Iterable<string>,
+    projectDir: string,
+    sessionId: string,
+): FileExtract | null {
+    const extractor = createClaudeExtractor(projectDir, sessionId);
+    for (const line of lines) {
+        extractor.processLine(line);
+    }
+    return extractor.finish();
 }
 
 async function extractFile(filePath: string, projectDir: string): Promise<FileExtract | null> {
     const sessionId = basename(filePath, ".jsonl");
     const fh = await open(filePath, "r");
-    let session: Session | null = null;
-    const turns: Turn[] = [];
-    const invocations: Invocation[] = [];
-    const edits: Edit[] = [];
-    let seq = 0;
-    let cwd: string | null = null;
+    const extractor = createClaudeExtractor(projectDir, sessionId);
 
-    for await (const line of fh.readLines()) {
-        if (!line.trim()) continue;
-        const entry = parseJsonl(line);
-        if (!entry) continue;
-        const type = entry.type as string | undefined;
-        if (type === "summary") continue;
-
-        const ts =
-            (entry.timestamp as string | undefined) ??
-            (entry.ts as string | undefined) ??
-            null;
-        if (!ts) continue;
-        if (!cwd && typeof entry.cwd === "string") cwd = entry.cwd as string;
-        if (!session) {
-            session = {
-                id: sessionId,
-                project: deriveProject(projectDir),
-                cwd,
-                started_at: ts,
-                ended_at: ts,
-                raw_file: null,
-            };
+    try {
+        for await (const line of fh.readLines()) {
+            extractor.processLine(line);
         }
-        session.ended_at = ts;
-        if (cwd && !session.cwd) session.cwd = cwd;
-
-        seq += 1;
-        const role = (type as string) ?? "unknown";
-        const message = entry.message as { content?: unknown[]; role?: string } | undefined;
-        const content = (message?.content ?? []) as Array<{
-            type?: string;
-            text?: string;
-            name?: string;
-            input?: Record<string, unknown>;
-        }>;
-
-        let textExcerpt: string | null = null;
-        let hasToolUse = false;
-        let hasError = false;
-        // Track invocation indices added this iteration so we can backfill
-        // `turn_has_error` once `hasError` is finalised below (a tool_result
-        // block later in the same content array can flip it after the
-        // tool_use that emitted the invocation).
-        const turnInvStart = invocations.length;
-
-        for (const block of content) {
-            if (block.type === "text" && typeof block.text === "string" && !textExcerpt) {
-                textExcerpt = block.text.slice(0, 500);
-            }
-            if (block.type === "tool_use") {
-                hasToolUse = true;
-                const name = block.name;
-                if (name === "Skill" && block.input) {
-                    const skillName =
-                        (block.input.skill as string | undefined) ??
-                        (block.input.skill_name as string | undefined);
-                    if (skillName) {
-                        invocations.push({
-                            session: sessionId,
-                            seq,
-                            ts,
-                            skill: skillName,
-                            args: block.input,
-                            // Backfilled after the content loop below; assistant
-                            // turns essentially never carry has_error in current
-                            // data (it lives on tool_result turns) but we set
-                            // the field correctly in case future capture changes.
-                            turn_has_error: false,
-                        });
-                    }
-                } else if (
-                    (name === "Edit" || name === "Write" || name === "NotebookEdit") &&
-                    block.input
-                ) {
-                    const path =
-                        (block.input.file_path as string | undefined) ??
-                        (block.input.path as string | undefined) ??
-                        (block.input.notebook_path as string | undefined);
-                    if (path) {
-                        edits.push({
-                            session: sessionId,
-                            seq,
-                            ts,
-                            repo: repoFromCwd(cwd),
-                            path,
-                            tool: name,
-                        });
-                    }
-                }
-            }
-            if (block.type === "tool_result" && (block as { is_error?: boolean }).is_error) {
-                hasError = true;
-            }
-        }
-
-        // Propagate the (now finalised) hasError onto every invocation
-        // emitted by this turn so the edge-side flag matches the turn-side
-        // one. Cheap: O(skills_invoked_this_turn).
-        if (hasError) {
-            for (let i = turnInvStart; i < invocations.length; i += 1) {
-                invocations[i].turn_has_error = true;
-            }
-        }
-
-        turns.push({
-            session: sessionId,
-            seq,
-            ts,
-            role,
-            text_excerpt: textExcerpt,
-            has_tool_use: hasToolUse,
-            has_error: hasError,
-        });
+    } finally {
+        await fh.close();
     }
-    await fh.close();
 
-    if (!session) return null;
-    return { session, turns, invocations, edits };
+    return extractor.finish();
 }
 
 const upsertSessions = (sessions: Session[]) =>
@@ -345,11 +678,13 @@ const upsertEdits = (edits: Edit[]) =>
         const relStmts: string[] = [];
         const seenFiles = new Set<string>();
         for (const e of edits) {
-            const fileKey = fileRecordKey(e.repo, e.path);
+            const repositoryKey = e.repo ?? "_";
+            const fileKey = fileRecordKey(repositoryKey, e.path);
             if (!seenFiles.has(fileKey)) {
                 seenFiles.add(fileKey);
+                const identityScope = e.repo === null ? `, identity_scope: "legacy_local"` : "";
                 fileStmts.push(
-                    `UPSERT file:\`${fileKey}\` CONTENT { repo: ${e.repo === null ? "NONE" : JSON.stringify(e.repo)}, path: ${JSON.stringify(e.path)} };`,
+                    `UPSERT file:\`${fileKey}\` CONTENT { repo: ${e.repo === null ? "NONE" : JSON.stringify(e.repo)}, path: ${JSON.stringify(e.path)}${identityScope} };`,
                 );
             }
             const turnKey = turnRecordKey(e.session, e.seq);
@@ -365,6 +700,24 @@ const upsertEdits = (edits: Edit[]) =>
         }
     });
 
+const relateToolCallSkills = (relations: ToolCallSkillRelationWrite[]) =>
+    Effect.gen(function* () {
+        if (relations.length === 0) return;
+        yield* Effect.forEach(relations, relateToolCallSkill, {
+            concurrency: 4,
+            discard: true,
+        });
+    });
+
+const writePlanSnapshots = (snapshots: PlanSnapshotWrite[]) =>
+    Effect.gen(function* () {
+        if (snapshots.length === 0) return;
+        yield* Effect.forEach(snapshots, writePlanSnapshot, {
+            concurrency: 4,
+            discard: true,
+        });
+    });
+
 interface IngestOpts {
     sinceDays: number | undefined;
     project: string | undefined;
@@ -376,6 +729,8 @@ export interface TranscriptStats {
     turns: number;
     invocations: number;
     edits: number;
+    toolCalls: number;
+    planSnapshots: number;
 }
 
 export const ingestTranscripts = (
@@ -394,6 +749,8 @@ export const ingestTranscripts = (
         let turnCount = 0;
         let invCount = 0;
         let editCount = 0;
+        let toolCallCount = 0;
+        let planSnapshotCount = 0;
 
         for (const projectDir of projectDirs) {
             const fullProject = join(TRANSCRIPTS_DIR, projectDir);
@@ -425,21 +782,34 @@ export const ingestTranscripts = (
                 sessions += 1;
                 yield* upsertTurns(extracted.turns);
                 turnCount += extracted.turns.length;
+                yield* writeToolCalls(extracted.toolCalls);
+                toolCallCount += extracted.toolCalls.length;
+                yield* relateToolCallSkills(extracted.skillRelations);
+                yield* writePlanSnapshots(extracted.planSnapshots);
+                planSnapshotCount += extracted.planSnapshots.length;
                 yield* relateInvocations(extracted.invocations);
                 invCount += extracted.invocations.length;
                 yield* upsertEdits(extracted.edits);
                 editCount += extracted.edits.length;
                 if (files % 50 === 0) {
                     console.log(
-                        `[transcripts] files=${files} sessions=${sessions} turns=${turnCount} inv=${invCount} edits=${editCount}`,
+                        `[transcripts] files=${files} sessions=${sessions} turns=${turnCount} inv=${invCount} edits=${editCount} toolCalls=${toolCallCount} planSnapshots=${planSnapshotCount}`,
                     );
                 }
             }
         }
         console.log(
-            `[transcripts] DONE files=${files} sessions=${sessions} turns=${turnCount} invocations=${invCount} edits=${editCount}`,
+            `[transcripts] DONE files=${files} sessions=${sessions} turns=${turnCount} invocations=${invCount} edits=${editCount} toolCalls=${toolCallCount} planSnapshots=${planSnapshotCount}`,
         );
-        return { files, sessions, turns: turnCount, invocations: invCount, edits: editCount };
+        return {
+            files,
+            sessions,
+            turns: turnCount,
+            invocations: invCount,
+            edits: editCount,
+            toolCalls: toolCallCount,
+            planSnapshots: planSnapshotCount,
+        };
     });
 
 if (import.meta.main) {

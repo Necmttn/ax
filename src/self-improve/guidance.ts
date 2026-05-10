@@ -1,0 +1,56 @@
+import type { DerivedSignal } from "./signals.ts";
+
+export interface GuidanceDraft {
+    readonly key: string;
+    readonly versionKey: string;
+    readonly slug: string;
+    readonly title: string;
+    readonly text: string;
+    readonly status: "proposed";
+    readonly scope: "project" | "repository" | "checkout" | "global";
+    readonly risk: "low" | "medium" | "high";
+    readonly evidenceIds: readonly string[];
+    readonly metrics: Record<string, number>;
+    readonly createdAt: string;
+}
+
+const sqlString = (value: string): string => JSON.stringify(value);
+const sqlJson = (value: unknown): string => JSON.stringify(JSON.stringify(value));
+
+function hashKey(value: string): string {
+    return Bun.hash(value).toString(16).padStart(16, "0");
+}
+
+export function guidanceFromSignal(signal: DerivedSignal): GuidanceDraft {
+    const slug = `${signal.kind}__${hashKey(signal.subjectId).slice(0, 12)}`;
+    const title = signal.kind === "missing_verification"
+        ? "Require verification after edits"
+        : "Reduce repeated command failures";
+    const text = signal.kind === "missing_verification"
+        ? "After changing files, run the narrowest relevant verification command before reporting completion."
+        : `When ${signal.subjectId} fails repeatedly, inspect the first failure before retrying.`;
+    return {
+        key: slug,
+        versionKey: `${slug}__v1`,
+        slug,
+        title,
+        text,
+        status: "proposed",
+        scope: "project",
+        risk: "low",
+        evidenceIds: signal.evidenceIds,
+        metrics: signal.metrics,
+        createdAt: signal.ts,
+    };
+}
+
+export function buildGuidanceWriteStatements(guidance: GuidanceDraft): string[] {
+    return [
+        `UPSERT guidance:\`${guidance.key}\` MERGE { slug: ${sqlString(guidance.slug)}, title: ${sqlString(guidance.title)}, status: "proposed", updated_at: time::now() };`,
+        `UPSERT guidance_version:\`${guidance.versionKey}\` CONTENT { guidance: guidance:\`${guidance.key}\`, version: "v1", text: ${sqlString(guidance.text)}, status: ${sqlString(guidance.status)}, scope: ${sqlString(guidance.scope)}, risk: ${sqlString(guidance.risk)}, evidence: ${sqlJson(guidance.evidenceIds)}, metrics_before: ${sqlJson(guidance.metrics)}, metrics_after: NONE, raw: ${sqlJson(guidance)}, created_at: d${sqlString(guidance.createdAt)} };`,
+        ...guidance.evidenceIds.map((evidenceId) => {
+            const edgeKey = hashKey(`${guidance.versionKey}|${evidenceId}`);
+            return `RELATE guidance_version:\`${guidance.versionKey}\`->derived_from:\`${edgeKey}\`->artifact:\`${hashKey(evidenceId)}\` SET kind = "signal_evidence", labels = ${sqlJson({ evidenceId })};`;
+        }),
+    ];
+}
