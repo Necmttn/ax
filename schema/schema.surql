@@ -325,6 +325,13 @@ DEFINE FIELD text           ON guidance_version TYPE string;
 DEFINE FIELD raw            ON guidance_version TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD created_at     ON guidance_version TYPE datetime DEFAULT time::now();
 DEFINE INDEX guidance_version_uq ON guidance_version FIELDS guidance, version UNIQUE;
+DEFINE FIELD status         ON guidance_version TYPE string DEFAULT 'proposed';
+DEFINE FIELD scope          ON guidance_version TYPE option<string>;
+DEFINE FIELD risk           ON guidance_version TYPE option<string>;
+DEFINE FIELD evidence       ON guidance_version TYPE option<string>;
+DEFINE FIELD metrics_before ON guidance_version TYPE option<string>;
+DEFINE FIELD metrics_after  ON guidance_version TYPE option<string>;
+DEFINE INDEX guidance_version_status ON guidance_version FIELDS status, created_at;
 
 -- ==== Ingest telemetry tables ====
 
