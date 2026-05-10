@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { dashboardApiKind, formatSseEvent, parseDashboardServeArgs, parseQueryRequest, routeStaticAsset } from "./server.ts";
+import { dashboardApiKind, formatSseEvent, parseDashboardServeArgs, parseQueryRequest, recentIngestEventsSql, routeStaticAsset } from "./server.ts";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
@@ -32,6 +32,14 @@ describe("dashboard server", () => {
 
     test("formatSseEvent emits valid SSE frame", () => {
         expect(formatSseEvent("message", { ok: true })).toBe('event: message\ndata: {"ok":true}\n\n');
+    });
+
+    test("recentIngestEventsSql reads persisted ingest events", () => {
+        const sql = recentIngestEventsSql("2026-05-10T00:00:00.000Z", 12);
+        expect(sql).toContain("FROM ingest_event");
+        expect(sql).toContain('WHERE ts > d"2026-05-10T00:00:00.000Z"');
+        expect(sql).toContain("ORDER BY ts ASC");
+        expect(sql).toContain("LIMIT 12");
     });
 
     test("dashboardApiKind recognizes self improve route", () => {

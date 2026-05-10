@@ -412,7 +412,7 @@ export function buildTouchedRelationStatements(input: TouchedRelationInput): str
         const del = file.deletions === null ? "NONE" : String(file.deletions);
         const edgeKey = touchedRelationRecordKey(input.commitId, file.fileId, input.checkoutId);
         stmts.push(
-            `UPSERT touched:\`${edgeKey}\` MERGE { in: ${input.commitId}, out: ${file.fileId}, additions: ${add}, deletions: ${del}, repository: ${input.repositoryId}, checkout: ${input.checkoutId}, ts: d"${input.ts}" };`,
+            `RELATE ${input.commitId}->touched:\`${edgeKey}\`->${file.fileId} SET additions = ${add}, deletions = ${del}, repository = ${input.repositoryId}, checkout = ${input.checkoutId}, ts = d"${input.ts}";`,
         );
     }
     return stmts;
@@ -427,7 +427,7 @@ export function buildProducedRelationStatements(input: {
 }): string[] {
     return input.sessionIds.map((sessionId) => {
         const edgeKey = producedRelationRecordKey(sessionId, input.commitId);
-        return `UPSERT produced:\`${edgeKey}\` MERGE { in: ${sessionId}, out: ${input.commitId}, repository: ${input.repositoryId}, checkout: ${input.checkoutId}, ts: d"${input.ts}", source: "git", kind: "commit" };`;
+        return `RELATE ${sessionId}->produced:\`${edgeKey}\`->${input.commitId} SET repository = ${input.repositoryId}, checkout = ${input.checkoutId}, ts = d"${input.ts}", source = "git", kind = "commit";`;
     });
 }
 

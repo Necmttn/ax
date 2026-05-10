@@ -1,8 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
+    addIngestEventSubscriber,
     buildIngestEventStatement,
+    buildIngestStageFinishStatement,
+    buildIngestStageStartStatement,
     buildIngestRunStartStatement,
     makeIngestEvent,
+    publishIngestEvent,
+    removeIngestEventSubscriber,
 } from "./telemetry.ts";
 
 describe("dashboard telemetry", () => {
@@ -35,5 +40,36 @@ describe("dashboard telemetry", () => {
             counts: { files: 3 },
         });
         expect(buildIngestEventStatement(event)).toContain('"files":3');
+    });
+
+    test("stage statements use deterministic stage ids", () => {
+        expect(buildIngestStageStartStatement({ runId: "r1", source: "git", stage: "fetch" }))
+            .toContain("UPSERT ingest_stage:`r1__git__fetch`");
+        expect(buildIngestStageFinishStatement({
+            runId: "r1",
+            source: "git",
+            stage: "fetch",
+            status: "ok",
+            counts: { commits: 2 },
+        })).toContain("counts = '{\"commits\":2}'");
+    });
+
+    test("publishIngestEvent fans out to subscribers", () => {
+        const received: unknown[] = [];
+        const subscriber = (event: unknown) => {
+            received.push(event);
+        };
+        addIngestEventSubscriber(subscriber);
+        const event = makeIngestEvent({
+            runId: "run1",
+            source: "git",
+            stage: "write",
+            level: "info",
+            message: "ok",
+            counts: {},
+        });
+        publishIngestEvent(event);
+        removeIngestEventSubscriber(subscriber);
+        expect(received).toEqual([event]);
     });
 });

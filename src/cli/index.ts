@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
+import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
 import { AppLayer } from "../lib/layers.ts";
 import { ingestSkills } from "../ingest/skills.ts";
 import { ingestCommands } from "../ingest/commands.ts";
@@ -15,6 +15,16 @@ import { serveDashboard } from "../dashboard/server.ts";
 import { cmdInstall, cmdUninstall } from "./install.ts";
 import { cmdProject } from "./project.ts";
 import { guidanceNext, parseSelfImproveArgs, selfImproveWeekly, sessionSummary } from "../self-improve/commands.ts";
+import {
+    buildIngestEventStatement,
+    buildIngestRunFinishStatement,
+    buildIngestRunStartStatement,
+    buildIngestStageFinishStatement,
+    buildIngestStageStartStatement,
+    makeIngestEvent,
+    publishIngestEvent,
+} from "../dashboard/telemetry.ts";
+import type { DbError } from "../lib/errors.ts";
 
 const HELP = `agentctl - agent telemetry & taste graph
 
@@ -137,8 +147,99 @@ function fmtCount(v: unknown): string {
     return n.toLocaleString("en-US");
 }
 
+function runIdFor(command: string): string {
+    return Bun.hash(`${command}|${Date.now()}|${Math.random()}`).toString(16).padStart(16, "0");
+}
+
+function numericCounts(value: unknown): Record<string, number> {
+    if (typeof value !== "object" || value === null) return {};
+    const counts: Record<string, number> = {};
+    for (const [key, raw] of Object.entries(value)) {
+        if (typeof raw === "number" && Number.isFinite(raw)) counts[key] = raw;
+    }
+    return counts;
+}
+
+function errorText(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
+
+const writeIngestEvent = (
+    db: SurrealClientShape,
+    input: {
+        readonly runId: string;
+        readonly source: string;
+        readonly stage: string;
+        readonly level: "debug" | "info" | "warn" | "error";
+        readonly message: string;
+        readonly counts?: Record<string, number>;
+    },
+): Effect.Effect<void, DbError> =>
+    Effect.gen(function* () {
+        const event = makeIngestEvent({ ...input, counts: input.counts ?? {} });
+        yield* db.query(buildIngestEventStatement(event));
+        publishIngestEvent(event);
+    }).pipe(Effect.asVoid);
+
+const telemetryStage = <A>(
+    db: SurrealClientShape,
+    runId: string,
+    source: string,
+    stage: string,
+    program: Effect.Effect<A, DbError, SurrealClient>,
+): Effect.Effect<A, DbError, SurrealClient> =>
+    Effect.gen(function* () {
+        yield* db.query(buildIngestStageStartStatement({ runId, source, stage }));
+        const result = yield* program.pipe(
+            Effect.tap((value) => {
+                const counts = numericCounts(value);
+                return Effect.gen(function* () {
+                    yield* db.query(buildIngestStageFinishStatement({
+                        runId,
+                        source,
+                        stage,
+                        status: "ok",
+                        counts,
+                    }));
+                    yield* writeIngestEvent(db, {
+                        runId,
+                        source,
+                        stage,
+                        level: "info",
+                        message: `${source} ${stage} complete`,
+                        counts,
+                    });
+                });
+            }),
+            Effect.catch((error) =>
+                Effect.gen(function* () {
+                    const message = errorText(error);
+                    yield* db.query(buildIngestStageFinishStatement({
+                        runId,
+                        source,
+                        stage,
+                        status: "error",
+                        counts: {},
+                        errorText: message,
+                    }));
+                    yield* writeIngestEvent(db, {
+                        runId,
+                        source,
+                        stage,
+                        level: "error",
+                        message,
+                    });
+                    return yield* error;
+                }),
+            ),
+        );
+        return result;
+    });
+
 const cmdIngest = (args: string[]) =>
     Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const runId = runIdFor("ingest");
         const skillsOnly = args.includes("--skills-only");
         const transcriptsOnly = args.includes("--transcripts-only");
         const claudeOnly = args.includes("--claude-only");
@@ -161,6 +262,12 @@ const cmdIngest = (args: string[]) =>
             process.exit(2);
         }
         const sinceDays = parseOptionalPositiveIntFlag("ingest", "since", args);
+        yield* db.query(buildIngestRunStartStatement({
+            runId,
+            command: "ingest",
+            ...(sinceDays === undefined ? {} : { sinceDays }),
+        }));
+        const program = Effect.gen(function* () {
         // Issue #44: --claude-only is the *Claude* side of the world, which
         // includes both `~/.claude/skills` and `~/.claude/projects`
         // transcripts. Codex + git stay suppressed.
@@ -169,36 +276,87 @@ const cmdIngest = (args: string[]) =>
         // The mutual-exclusion check above guarantees at most one is set, so
         // these conditions just enumerate "is some other --only filter on".
         if (!transcriptsOnly && !codexOnly && !gitOnly) {
-            yield* ingestSkills();
+            yield* telemetryStage(db, runId, "skills", "upsert", ingestSkills());
             // Slash commands live in `~/.claude/commands/` (and plugin
             // command dirs) and aren't indexed by ingestSkills. Without
             // this, every Skill-tool call against a slash command becomes
             // an orphan `invoked` edge. See issues #41 / #42.
-            yield* ingestCommands();
+            yield* telemetryStage(db, runId, "commands", "upsert", ingestCommands());
         }
         if (!skillsOnly && !codexOnly && !gitOnly)
-            yield* ingestTranscripts({ sinceDays });
+            yield* telemetryStage(db, runId, "claude", "transcripts", ingestTranscripts({ sinceDays }));
         if (!skillsOnly && !transcriptsOnly && !claudeOnly && !gitOnly)
-            yield* ingestCodex({ sinceDays });
+            yield* telemetryStage(db, runId, "codex", "sessions", ingestCodex({ sinceDays }));
         if (!skillsOnly && !transcriptsOnly && !codexOnly && !claudeOnly)
-            yield* ingestGit({ sinceDays });
+            yield* telemetryStage(db, runId, "git", "history", ingestGit({ sinceDays }));
         // Auto-derive signals so taste queries always see fresh
         // corrected_by / proposed edges. Cheap: O(turns) in-memory walk.
         // Skip when only running git ingest - signals don't depend on commits.
-        if (!skillsOnly && !gitOnly) yield* deriveSignals({ sinceDays });
+        if (!skillsOnly && !gitOnly) yield* telemetryStage(db, runId, "signals", "derive", deriveSignals({ sinceDays }));
+        }).pipe(
+            Effect.tap(() => db.query(buildIngestRunFinishStatement({ runId, status: "ok" })).pipe(Effect.asVoid)),
+            Effect.catch((error) =>
+                Effect.gen(function* () {
+                    yield* db.query(buildIngestRunFinishStatement({
+                        runId,
+                        status: "error",
+                        metrics: { error: errorText(error) },
+                    }));
+                    return yield* error;
+                }),
+            ),
+        );
+        yield* program;
     });
 
 const cmdDeriveSignals = (args: string[]) =>
     Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const runId = runIdFor("derive-signals");
         const sinceDays = parseOptionalPositiveIntFlag(
             "derive-signals",
             "since",
             args,
         );
-        yield* deriveSignals({ sinceDays });
+        yield* db.query(buildIngestRunStartStatement({
+            runId,
+            command: "derive-signals",
+            ...(sinceDays === undefined ? {} : { sinceDays }),
+        }));
+        yield* telemetryStage(db, runId, "signals", "derive", deriveSignals({ sinceDays })).pipe(
+            Effect.tap(() => db.query(buildIngestRunFinishStatement({ runId, status: "ok" })).pipe(Effect.asVoid)),
+            Effect.catch((error) =>
+                Effect.gen(function* () {
+                    yield* db.query(buildIngestRunFinishStatement({
+                        runId,
+                        status: "error",
+                        metrics: { error: errorText(error) },
+                    }));
+                    return yield* error;
+                }),
+            ),
+        );
     });
 
-const cmdIngestInsights = () => ingestClaudeInsights().pipe(Effect.asVoid);
+const cmdIngestInsights = () =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const runId = runIdFor("ingest-insights");
+        yield* db.query(buildIngestRunStartStatement({ runId, command: "ingest-insights" }));
+        yield* telemetryStage(db, runId, "claude", "insights", ingestClaudeInsights()).pipe(
+            Effect.tap(() => db.query(buildIngestRunFinishStatement({ runId, status: "ok" })).pipe(Effect.asVoid)),
+            Effect.catch((error) =>
+                Effect.gen(function* () {
+                    yield* db.query(buildIngestRunFinishStatement({
+                        runId,
+                        status: "error",
+                        metrics: { error: errorText(error) },
+                    }));
+                    return yield* error;
+                }),
+            ),
+        );
+    }).pipe(Effect.asVoid);
 
 const cmdInsights = (args: string[]) =>
     Effect.gen(function* () {
