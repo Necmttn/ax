@@ -24,6 +24,8 @@ import { normalizeCodexUpdatePlan, type PlanStatus } from "./plans.ts";
 import { toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 
 const CODEX_ROOT = process.env.AGENTCTL_CODEX_DIR ?? join(homedir(), ".codex", "sessions");
+const DEFAULT_CODEX_RAW_MAX_BYTES = 5 * 1024 * 1024;
+const DEFAULT_CODEX_PROGRESS_EVERY = 10;
 
 interface CodexSession {
     id: string;
@@ -93,6 +95,31 @@ function outputText(input: unknown): string | null {
 
 function stableHash(input: string): string {
     return Bun.hash(input).toString(16).padStart(16, "0");
+}
+
+export function shouldSnapshotCodexRaw(
+    sizeBytes: number,
+    maxBytes = DEFAULT_CODEX_RAW_MAX_BYTES,
+): boolean {
+    return sizeBytes <= maxBytes;
+}
+
+export function codexProgressEvery(raw: string | undefined): number {
+    if (!raw) return DEFAULT_CODEX_PROGRESS_EVERY;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CODEX_PROGRESS_EVERY;
+}
+
+function codexRawMaxBytes(raw = process.env.AGENTCTL_CODEX_RAW_MAX_BYTES): number {
+    if (!raw) return DEFAULT_CODEX_RAW_MAX_BYTES;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_CODEX_RAW_MAX_BYTES;
+}
+
+function formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes}B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KiB`;
+    return `${(bytes / 1024 / 1024).toFixed(1)}MiB`;
 }
 
 function recordKeyPart(input: string, fallback = "_"): string {
@@ -527,6 +554,8 @@ export const ingestCodex = (
         const db = yield* SurrealClient;
         const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
         const files = yield* Effect.promise(() => walkJsonlFiles(CODEX_ROOT, cutoff));
+        const rawMaxBytes = codexRawMaxBytes();
+        const progressEvery = codexProgressEvery(process.env.AGENTCTL_CODEX_PROGRESS_EVERY);
 
         let fileCount = 0;
         let sessionCount = 0;
@@ -536,20 +565,40 @@ export const ingestCodex = (
         let planSnapshotCount = 0;
 
         for (const filePath of files) {
+            const fileStartedAt = Date.now();
+            const fileStat = yield* Effect.promise(async () => {
+                try {
+                    return await stat(filePath);
+                } catch {
+                    return null;
+                }
+            });
+            const sizeBytes = fileStat?.size ?? 0;
+            const snapshotRaw = shouldSnapshotCodexRaw(sizeBytes, rawMaxBytes);
+            if (!snapshotRaw) {
+                console.log(
+                    `[codex] file=${fileCount + 1}/${files.length} rawSnapshot=skipped size=${formatBytes(sizeBytes)} max=${formatBytes(rawMaxBytes)} path=${filePath}`,
+                );
+            }
+
             const extracted = yield* Effect.promise(() => extractCodexFile(filePath));
             if (!extracted) continue;
             fileCount += 1;
 
             // Snapshot the raw codex jsonl into the `codex_artifacts` bucket as
-            // best-effort cold storage. Failure does not abort ingest.
+            // best-effort cold storage for modest files. Large Codex sessions
+            // are parsed line-by-line above; reading them again just to copy the
+            // raw transcript can dominate benchmark runs.
             const bucketPath = `${extracted.session.id}.jsonl`;
-            const rawContent = yield* Effect.promise(async () => {
-                try {
-                    return await Bun.file(filePath).text();
-                } catch {
-                    return null;
-                }
-            });
+            const rawContent = snapshotRaw
+                ? yield* Effect.promise(async () => {
+                      try {
+                          return await Bun.file(filePath).text();
+                      } catch {
+                          return null;
+                      }
+                  })
+                : null;
             let rawPointer: string | null = null;
             if (rawContent !== null) {
                 rawPointer = yield* db
@@ -618,7 +667,13 @@ export const ingestCodex = (
             }
             invCount += extracted.invocations.length;
 
-            if (fileCount % 25 === 0) {
+            if (!snapshotRaw) {
+                console.log(
+                    `[codex] file=${fileCount}/${files.length} done session=${extracted.session.id} ms=${Date.now() - fileStartedAt} turns=${extracted.turns.length} toolCalls=${extracted.toolCalls.length}`,
+                );
+            }
+
+            if (fileCount % progressEvery === 0) {
                 console.log(
                     `[codex] files=${fileCount} sessions=${sessionCount} turns=${turnCount} inv=${invCount} toolCalls=${toolCallCount} planSnapshots=${planSnapshotCount}`,
                 );
