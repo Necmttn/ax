@@ -235,6 +235,14 @@ const telemetryStage = <A>(
         return result;
     });
 
+const progressUpdater = (
+    progress: ProgressReporter | undefined,
+    source: string,
+    stage: string,
+) =>
+    (counts: Record<string, number>): Effect.Effect<void> =>
+        Effect.sync(() => progress?.update({ source, stage }, counts));
+
 function ingestStages(args: string[]): ProgressStage[] {
     const skillsOnly = args.includes("--skills-only");
     const transcriptsOnly = args.includes("--transcripts-only");
@@ -318,9 +326,23 @@ const cmdIngest = (args: string[]) =>
             yield* telemetryStage(db, runId, "commands", "upsert", ingestCommands(), progress);
         }
         if (!skillsOnly && !codexOnly && !gitOnly)
-            yield* telemetryStage(db, runId, "claude", "transcripts", ingestTranscripts({ sinceDays }), progress);
+            yield* telemetryStage(
+                db,
+                runId,
+                "claude",
+                "transcripts",
+                ingestTranscripts({ sinceDays, onProgress: progressUpdater(progress, "claude", "transcripts") }),
+                progress,
+            );
         if (!skillsOnly && !transcriptsOnly && !claudeOnly && !gitOnly)
-            yield* telemetryStage(db, runId, "codex", "sessions", ingestCodex({ sinceDays }), progress);
+            yield* telemetryStage(
+                db,
+                runId,
+                "codex",
+                "sessions",
+                ingestCodex({ sinceDays, onProgress: progressUpdater(progress, "codex", "sessions") }),
+                progress,
+            );
         if (!skillsOnly && !transcriptsOnly && !codexOnly && !claudeOnly)
             yield* telemetryStage(db, runId, "git", "history", ingestGit({ sinceDays }), progress);
         // Auto-derive signals so taste queries always see fresh

@@ -721,6 +721,7 @@ const writePlanSnapshots = (snapshots: PlanSnapshotWrite[]) =>
 interface IngestOpts {
     sinceDays: number | undefined;
     project: string | undefined;
+    onProgress: (counts: Record<string, number>) => Effect.Effect<void>;
 }
 
 export interface TranscriptStats {
@@ -792,7 +793,7 @@ export const ingestTranscripts = (
                 yield* upsertEdits(extracted.edits);
                 editCount += extracted.edits.length;
                 if (files % 50 === 0) {
-                    yield* Effect.logDebug("transcript ingest progress", {
+                    const counts = {
                         files,
                         sessions,
                         turns: turnCount,
@@ -800,6 +801,10 @@ export const ingestTranscripts = (
                         edits: editCount,
                         toolCalls: toolCallCount,
                         planSnapshots: planSnapshotCount,
+                    };
+                    if (opts.onProgress) yield* opts.onProgress(counts);
+                    yield* Effect.logDebug("transcript ingest progress", {
+                        ...counts,
                     });
                 }
             }

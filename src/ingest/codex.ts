@@ -536,6 +536,7 @@ const writePlanSnapshots = (snapshots: PlanSnapshotWrite[]) =>
 
 interface CodexIngestOpts {
     sinceDays: number | undefined;
+    onProgress: (counts: Record<string, number>) => Effect.Effect<void>;
 }
 
 export interface CodexStats {
@@ -683,14 +684,16 @@ export const ingestCodex = (
             }
 
             if (fileCount % progressEvery === 0) {
-                yield* Effect.logDebug("codex ingest progress", {
+                const counts = {
                     files: fileCount,
                     sessions: sessionCount,
                     turns: turnCount,
                     invocations: invCount,
                     toolCalls: toolCallCount,
                     planSnapshots: planSnapshotCount,
-                });
+                };
+                if (opts.onProgress) yield* opts.onProgress(counts);
+                yield* Effect.logDebug("codex ingest progress", counts);
             }
         }
         yield* Effect.logDebug("codex ingest complete", {
