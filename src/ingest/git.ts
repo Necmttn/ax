@@ -723,10 +723,10 @@ export const ingestGit = (
 
         const repos = yield* discoverRepos();
         if (repos.length === 0) {
-            console.log("[git] no repos discovered (empty agentctl-repos.txt + no session.cwd hits)");
+            yield* Effect.logDebug("git ingest found no repositories");
             return { repos: 0, commits: 0, files: 0, produced: 0, touched: 0, sessions: 0 };
         }
-        console.log(`[git] ingesting ${repos.length} repo(s) since=${sinceDays}d`);
+        yield* Effect.logDebug("git ingest started", { repos: repos.length, sinceDays });
         const allRepoPaths = repos.map((repo) => repo.path);
 
         // Collect per-repo work. Different logical repositories can run in
@@ -744,9 +744,14 @@ export const ingestGit = (
                         Effect.gen(function* () {
                             const commits = yield* fetchCommits(repo, sinceDays);
                             const stats = yield* writeRepo(repo, commits, allRepoPaths);
-                            console.log(
-                                `[git] ${repo.path}  sessions=${stats.sessions} commits=${stats.commits} files=${stats.files} produced=${stats.produced} touched=${stats.touched}`,
-                            );
+                            yield* Effect.logDebug("git repository ingested", {
+                                path: repo.path,
+                                sessions: stats.sessions,
+                                commits: stats.commits,
+                                files: stats.files,
+                                produced: stats.produced,
+                                touched: stats.touched,
+                            });
                             return stats;
                         }),
                     { concurrency: 1 },
@@ -766,9 +771,7 @@ export const ingestGit = (
             { commits: 0, files: 0, produced: 0, touched: 0, sessions: 0 },
         );
         const out: GitStats = { repos: repos.length, ...totals };
-        console.log(
-            `[git] DONE repos=${out.repos} sessions=${out.sessions} commits=${out.commits} files=${out.files} produced=${out.produced} touched=${out.touched}`,
-        );
+        yield* Effect.logDebug("git ingest complete", out);
         return out;
     });
 

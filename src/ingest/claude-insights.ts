@@ -596,9 +596,13 @@ export const ingestClaudeInsights = (
             frictionEvents += item.conversion.frictionEvents.length;
         }
 
-        console.log(
-            `[claude-insights] DONE facets=${loaded.stats.facets} sessionMeta=${loaded.stats.sessionMeta} insights=${insights} frictionEvents=${frictionEvents} malformed=${loaded.stats.malformed}`,
-        );
+        yield* Effect.logDebug("claude insights ingested", {
+            facets: loaded.stats.facets,
+            sessionMeta: loaded.stats.sessionMeta,
+            insights,
+            frictionEvents,
+            malformed: loaded.stats.malformed,
+        });
 
         return {
             facets: loaded.stats.facets,

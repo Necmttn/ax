@@ -176,7 +176,7 @@ export const ingestSkills = (): Effect.Effect<{ count: number }, DbError, Surrea
         );
 
         const count = items.length;
-        console.log(`[skills] upserted ${count}`);
+        yield* Effect.logDebug("skills upserted", { count });
         return { count };
     });
 

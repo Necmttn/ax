@@ -590,12 +590,12 @@ const snapshotTranscript = (sessionId: string, filePath: string) =>
             .putFile("transcripts", bucketPath, content)
             .pipe(
                 Effect.map(() => filePointer("transcripts", bucketPath)),
-                Effect.catch((err) => {
-                    console.error(
-                        `[transcripts] putFile failed ${sessionId}: ${err.message}`,
-                    );
-                    return Effect.succeed(null as string | null);
-                }),
+                Effect.catch((err) =>
+                    Effect.logDebug("transcript snapshot failed", {
+                        sessionId,
+                        message: err.message,
+                    }).pipe(Effect.as(null as string | null)),
+                ),
             );
         return result;
     });
@@ -792,15 +792,27 @@ export const ingestTranscripts = (
                 yield* upsertEdits(extracted.edits);
                 editCount += extracted.edits.length;
                 if (files % 50 === 0) {
-                    console.log(
-                        `[transcripts] files=${files} sessions=${sessions} turns=${turnCount} inv=${invCount} edits=${editCount} toolCalls=${toolCallCount} planSnapshots=${planSnapshotCount}`,
-                    );
+                    yield* Effect.logDebug("transcript ingest progress", {
+                        files,
+                        sessions,
+                        turns: turnCount,
+                        invocations: invCount,
+                        edits: editCount,
+                        toolCalls: toolCallCount,
+                        planSnapshots: planSnapshotCount,
+                    });
                 }
             }
         }
-        console.log(
-            `[transcripts] DONE files=${files} sessions=${sessions} turns=${turnCount} invocations=${invCount} edits=${editCount} toolCalls=${toolCallCount} planSnapshots=${planSnapshotCount}`,
-        );
+        yield* Effect.logDebug("transcript ingest complete", {
+            files,
+            sessions,
+            turns: turnCount,
+            invocations: invCount,
+            edits: editCount,
+            toolCalls: toolCallCount,
+            planSnapshots: planSnapshotCount,
+        });
         return {
             files,
             sessions,

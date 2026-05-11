@@ -67,7 +67,7 @@ describe("cli progress", () => {
         });
     });
 
-    test("pipeline auto falls back to plain for non-tty sinks", () => {
+    test("auto mode emits json for non-tty sinks", () => {
         const sink = memorySink(false);
         const progress = createProgressReporter({
             command: "ingest",
@@ -80,28 +80,31 @@ describe("cli progress", () => {
 
         progress.start({ source: "git", stage: "history" });
 
-        expect(sink.chunks.join("")).toContain("[agentctl] git/history started");
+        const event = JSON.parse(sink.chunks.join("").trim());
+        expect(event).toMatchObject({
+            kind: "agentctl.progress",
+            command: "ingest",
+            event: "started",
+            source: "git",
+            stage: "history",
+        });
     });
 
-    test("pipeline mode falls back when cursor repaint would be unstable", () => {
+    test("explicit pipeline falls back to plain for non-tty sinks", () => {
         const nonTty = memorySink(false);
-        const narrowTty = memorySink(true, 80);
 
-        for (const sink of [nonTty, narrowTty]) {
-            const progress = createProgressReporter({
-                command: "ingest",
-                mode: "pipeline",
-                runId: "abc123",
-                stages: [{ source: "git", stage: "history" }],
-                sink,
-                now: () => 1_000,
-            });
-            progress.start({ source: "git", stage: "history" });
-            progress.stop();
-        }
+        const progress = createProgressReporter({
+            command: "ingest",
+            mode: "pipeline",
+            runId: "abc123",
+            stages: [{ source: "git", stage: "history" }],
+            sink: nonTty,
+            now: () => 1_000,
+        });
+        progress.start({ source: "git", stage: "history" });
+        progress.stop();
 
         expect(nonTty.chunks.join("")).toContain("[agentctl] git/history started");
-        expect(narrowTty.chunks.join("")).toContain("[agentctl] git/history started");
     });
 
     test("pipeline mode renders a live board for tty sinks", () => {

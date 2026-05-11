@@ -260,7 +260,7 @@ export const ingestCommands = (): Effect.Effect<{ count: number }, DbError, Surr
         );
 
         const count = items.length;
-        console.log(`[commands] upserted ${count}`);
+        yield* Effect.logDebug("commands upserted", { count });
         return { count };
     });
 

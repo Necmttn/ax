@@ -576,9 +576,13 @@ export const ingestCodex = (
             const sizeBytes = fileStat?.size ?? 0;
             const snapshotRaw = shouldSnapshotCodexRaw(sizeBytes, rawMaxBytes);
             if (!snapshotRaw) {
-                console.log(
-                    `[codex] file=${fileCount + 1}/${files.length} rawSnapshot=skipped size=${formatBytes(sizeBytes)} max=${formatBytes(rawMaxBytes)} path=${filePath}`,
-                );
+                yield* Effect.logDebug("codex raw snapshot skipped", {
+                    file: fileCount + 1,
+                    totalFiles: files.length,
+                    size: formatBytes(sizeBytes),
+                    max: formatBytes(rawMaxBytes),
+                    path: filePath,
+                });
             }
 
             const extracted = yield* Effect.promise(() => extractCodexFile(filePath));
@@ -605,12 +609,12 @@ export const ingestCodex = (
                     .putFile("codex_artifacts", bucketPath, rawContent)
                     .pipe(
                         Effect.map(() => filePointer("codex_artifacts", bucketPath)),
-                        Effect.catch((err) => {
-                            console.error(
-                                `[codex] putFile failed ${extracted.session.id}: ${err.message}`,
-                            );
-                            return Effect.succeed(null as string | null);
-                        }),
+                        Effect.catch((err) =>
+                            Effect.logDebug("codex raw snapshot failed", {
+                                sessionId: extracted.session.id,
+                                message: err.message,
+                            }).pipe(Effect.as(null as string | null)),
+                        ),
                     );
             }
 
@@ -668,20 +672,35 @@ export const ingestCodex = (
             invCount += extracted.invocations.length;
 
             if (!snapshotRaw) {
-                console.log(
-                    `[codex] file=${fileCount}/${files.length} done session=${extracted.session.id} ms=${Date.now() - fileStartedAt} turns=${extracted.turns.length} toolCalls=${extracted.toolCalls.length}`,
-                );
+                yield* Effect.logDebug("codex file ingested", {
+                    file: fileCount,
+                    totalFiles: files.length,
+                    sessionId: extracted.session.id,
+                    ms: Date.now() - fileStartedAt,
+                    turns: extracted.turns.length,
+                    toolCalls: extracted.toolCalls.length,
+                });
             }
 
             if (fileCount % progressEvery === 0) {
-                console.log(
-                    `[codex] files=${fileCount} sessions=${sessionCount} turns=${turnCount} inv=${invCount} toolCalls=${toolCallCount} planSnapshots=${planSnapshotCount}`,
-                );
+                yield* Effect.logDebug("codex ingest progress", {
+                    files: fileCount,
+                    sessions: sessionCount,
+                    turns: turnCount,
+                    invocations: invCount,
+                    toolCalls: toolCallCount,
+                    planSnapshots: planSnapshotCount,
+                });
             }
         }
-        console.log(
-            `[codex] DONE files=${fileCount} sessions=${sessionCount} turns=${turnCount} invocations=${invCount} toolCalls=${toolCallCount} planSnapshots=${planSnapshotCount}`,
-        );
+        yield* Effect.logDebug("codex ingest complete", {
+            files: fileCount,
+            sessions: sessionCount,
+            turns: turnCount,
+            invocations: invCount,
+            toolCalls: toolCallCount,
+            planSnapshots: planSnapshotCount,
+        });
         return {
             files: fileCount,
             sessions: sessionCount,

@@ -55,20 +55,17 @@ const isTransactionConflict = (err: DbError): boolean =>
  * (100ms, 200ms, 400ms) capped at 3 retries. Only retries while the error
  * looks like a transaction conflict - any other DbError fails fast.
  */
-const transactionConflictRetry = {
-    schedule: Schedule.exponential("100 millis", 2),
-    times: 3,
-    while: (err: DbError) => {
-        if (isTransactionConflict(err)) {
-            // Best-effort observability so concurrent-ingest dogfooding shows
-            // retries actually happened. Stays on stderr to keep stdout clean
-            // for piped output (`agentctl recent | jq`).
-            console.error(`[db] retry on conflict: ${err.message}`);
-            return true;
-        }
-        return false;
-    },
-} as const;
+const transactionConflictRetry = Schedule.exponential("100 millis", 2).pipe(
+    Schedule.take(3),
+    Schedule.while<DbError, unknown>((metadata) => isTransactionConflict(metadata.input)),
+    Schedule.tapInput((err: DbError) =>
+        Effect.logDebug("db transaction conflict retry", {
+            operation: err.operation,
+            message: err.message,
+            sql: err.sql,
+        }),
+    ),
+);
 
 /**
  * Effect-friendly wrapper around the SurrealDB client. Acquired as a Layer so
