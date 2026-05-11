@@ -27,6 +27,8 @@ const CODEX_ROOT = process.env.AGENTCTL_CODEX_DIR ?? join(homedir(), ".codex", "
 const DEFAULT_CODEX_RAW_MAX_BYTES = 5 * 1024 * 1024;
 const DEFAULT_CODEX_PROGRESS_EVERY = 10;
 const DEFAULT_CODEX_FLUSH_EVERY = 500;
+const DEFAULT_CODEX_CONCURRENCY = 1;
+const CODEX_PROGRESS_LINE_EVERY = 100;
 
 interface CodexSession {
     id: string;
@@ -115,6 +117,12 @@ export function codexFlushEvery(raw: string | undefined): number {
     if (!raw) return DEFAULT_CODEX_FLUSH_EVERY;
     const parsed = Number.parseInt(raw, 10);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CODEX_FLUSH_EVERY;
+}
+
+export function codexConcurrency(raw: string | undefined): number {
+    if (!raw) return DEFAULT_CODEX_CONCURRENCY;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CODEX_CONCURRENCY;
 }
 
 function codexRawMaxBytes(raw = process.env.AGENTCTL_CODEX_RAW_MAX_BYTES): number {
@@ -705,6 +713,7 @@ export const ingestCodex = (
         const rawMaxBytes = codexRawMaxBytes();
         const progressEvery = codexProgressEvery(process.env.AGENTCTL_CODEX_PROGRESS_EVERY);
         const flushEvery = codexFlushEvery(process.env.AGENTCTL_CODEX_FLUSH_EVERY);
+        const concurrency = codexConcurrency(process.env.AGENTCTL_CODEX_CONCURRENCY);
 
         let fileCount = 0;
         let byteCount = 0;
@@ -713,9 +722,11 @@ export const ingestCodex = (
         let invCount = 0;
         let toolCallCount = 0;
         let planSnapshotCount = 0;
+        let activeFiles = 0;
         const recordCount = () => turnCount + invCount + toolCallCount + planSnapshotCount;
 
-        for (const [index, file] of files.entries()) {
+        yield* Effect.forEach(files.map((file, index) => ({ file, index })), ({ file, index }) => Effect.gen(function* () {
+            activeFiles += 1;
             if (opts.onProgress && (index < 5 || index % 10 === 0)) {
                 yield* opts.onProgress({
                     currentFile: index + 1,
@@ -725,6 +736,9 @@ export const ingestCodex = (
                     files: fileCount,
                     bytes: byteCount,
                     records: recordCount(),
+                    lines: 0,
+                    activeFiles,
+                    phase: 1,
                     sessions: sessionCount,
                     turns: turnCount,
                     invocations: invCount,
@@ -754,6 +768,29 @@ export const ingestCodex = (
             let fileInvocations = 0;
             let fileToolCalls = 0;
             let filePlanSnapshots = 0;
+
+            const emitProgress = (phase: number) =>
+                opts.onProgress
+                    ? opts.onProgress({
+                        currentFile: index + 1,
+                        totalFiles: files.length,
+                        currentFileBytes: sizeBytes,
+                        totalBytes,
+                        files: fileCount,
+                        bytes: byteCount,
+                        records: recordCount(),
+                        lines: lineCount,
+                        fileTurns,
+                        fileToolCalls,
+                        activeFiles,
+                        phase,
+                        sessions: sessionCount + (sessionUpserted ? 1 : 0),
+                        turns: turnCount,
+                        invocations: invCount,
+                        toolCalls: toolCallCount,
+                        planSnapshots: planSnapshotCount,
+                    })
+                    : Effect.void;
 
             const upsertSession = (
                 session: CodexSession,
@@ -800,26 +837,12 @@ export const ingestCodex = (
                     if (next.done) break;
                     extractor.processLine(next.value);
                     lineCount += 1;
+                    if (lineCount % CODEX_PROGRESS_LINE_EVERY === 0) {
+                        yield* emitProgress(1);
+                    }
                     if (lineCount % flushEvery === 0) {
                         yield* writeBatch(extractor.drain(false));
-                        if (opts.onProgress && currentSession) {
-                            yield* opts.onProgress({
-                                currentFile: index + 1,
-                                totalFiles: files.length,
-                                currentFileBytes: sizeBytes,
-                                totalBytes,
-                                files: fileCount,
-                                bytes: byteCount,
-                                records: recordCount(),
-                                fileTurns,
-                                fileToolCalls,
-                                sessions: sessionCount + (sessionUpserted ? 1 : 0),
-                                turns: turnCount,
-                                invocations: invCount,
-                                toolCalls: toolCallCount,
-                                planSnapshots: planSnapshotCount,
-                            });
-                        }
+                        yield* emitProgress(2);
                     }
                 }
             } finally {
@@ -829,7 +852,10 @@ export const ingestCodex = (
             const finalBatch = extractor.drain(true);
             yield* writeBatch(finalBatch);
             const completedSession = finalBatch.session ?? currentSession;
-            if (!completedSession) continue;
+            if (!completedSession) {
+                activeFiles -= 1;
+                return;
+            }
 
             // Snapshot the raw codex jsonl into the `codex_artifacts` bucket as
             // best-effort cold storage for modest files. Large Codex sessions
@@ -837,13 +863,15 @@ export const ingestCodex = (
             // raw transcript can dominate benchmark runs.
             const bucketPath = `${completedSession.id}.jsonl`;
             const rawContent = snapshotRaw
-                ? yield* Effect.promise(async () => {
+                ? yield* emitProgress(3).pipe(
+                    Effect.andThen(Effect.promise(async () => {
                       try {
                           return await Bun.file(filePath).text();
                       } catch {
                           return null;
                       }
-                  })
+                  })),
+                )
                 : null;
             let rawPointer: string | null = null;
             if (rawContent !== null) {
@@ -890,8 +918,11 @@ export const ingestCodex = (
                     files: fileCount,
                     bytes: byteCount,
                     records: recordCount(),
+                    lines: lineCount,
                     fileTurns,
                     fileToolCalls,
+                    activeFiles,
+                    phase: 2,
                     sessions: sessionCount,
                     turns: turnCount,
                     invocations: invCount,
@@ -901,7 +932,8 @@ export const ingestCodex = (
                 if (opts.onProgress) yield* opts.onProgress(counts);
                 yield* Effect.logDebug("codex ingest progress", counts);
             }
-        }
+            activeFiles -= 1;
+        }), { concurrency, discard: true });
         yield* Effect.logDebug("codex ingest complete", {
             files: fileCount,
             sessions: sessionCount,
