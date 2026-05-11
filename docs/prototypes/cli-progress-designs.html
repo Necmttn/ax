@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>agentctl CLI Progress Concepts</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b0f14;
+      --panel: #111820;
+      --panel-2: #0f151d;
+      --line: #26313c;
+      --text: #d7dee8;
+      --muted: #7f8a99;
+      --good: #6ee7a8;
+      --warn: #ffd166;
+      --bad: #ff6b7a;
+      --blue: #78a7ff;
+      --cyan: #6bdcff;
+      --violet: #a99cff;
+      --shadow: 0 24px 80px rgba(0, 0, 0, .35);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 20% 0%, rgba(120, 167, 255, .14), transparent 32rem),
+        linear-gradient(180deg, #0b0f14 0%, #0a0d12 100%);
+      color: var(--text);
+    }
+
+    main {
+      width: min(1280px, calc(100vw - 48px));
+      margin: 0 auto;
+      padding: 40px 0 56px;
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 24px;
+      align-items: end;
+      margin-bottom: 28px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 32px;
+      line-height: 1.1;
+      letter-spacing: 0;
+    }
+
+    .lede {
+      margin: 0;
+      max-width: 780px;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.55;
+    }
+
+    .meta {
+      border: 1px solid var(--line);
+      background: rgba(17, 24, 32, .8);
+      padding: 10px 12px;
+      border-radius: 8px;
+      color: var(--muted);
+      font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+      white-space: nowrap;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .concept {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: linear-gradient(180deg, rgba(17, 24, 32, .96), rgba(12, 17, 24, .96));
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      min-height: 640px;
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+    }
+
+    .concept-head {
+      padding: 18px 18px 14px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, .02);
+    }
+
+    h2 {
+      margin: 0 0 7px;
+      font-size: 18px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    .tagline {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .terminal {
+      margin: 16px;
+      border: 1px solid #1f2a35;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #05080d;
+      font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .chrome {
+      height: 34px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 0 12px;
+      border-bottom: 1px solid #1c2631;
+      background: #0c1118;
+      color: #667283;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: #2a3440;
+    }
+
+    .dot:nth-child(1) { background: #ff6b7a; }
+    .dot:nth-child(2) { background: #ffd166; }
+    .dot:nth-child(3) { background: #6ee7a8; }
+
+    .title {
+      margin-left: auto;
+      font-size: 11px;
+    }
+
+    pre {
+      margin: 0;
+      padding: 16px;
+      white-space: pre-wrap;
+      color: #d6dde7;
+    }
+
+    .dim { color: #667283; }
+    .good { color: var(--good); }
+    .warn { color: var(--warn); }
+    .bad { color: var(--bad); }
+    .blue { color: var(--blue); }
+    .cyan { color: var(--cyan); }
+    .violet { color: var(--violet); }
+
+    .notes {
+      padding: 0 18px 18px;
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+
+    .note {
+      border: 1px solid rgba(120, 138, 153, .18);
+      border-radius: 8px;
+      padding: 10px 11px;
+      background: rgba(255, 255, 255, .025);
+    }
+
+    .note strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 12px;
+      color: #eef3f8;
+    }
+
+    .note span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .verdict {
+      border-top: 1px solid var(--line);
+      padding: 14px 18px;
+      color: #bec8d6;
+      background: rgba(255, 255, 255, .025);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .bars {
+      display: grid;
+      gap: 5px;
+      margin-top: 10px;
+    }
+
+    .bar {
+      height: 7px;
+      background: #111a24;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .bar > i {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--blue), var(--cyan));
+    }
+
+    @media (max-width: 1080px) {
+      .grid { grid-template-columns: 1fr; }
+      .concept { min-height: auto; }
+      header { grid-template-columns: 1fr; }
+      .meta { white-space: normal; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>agentctl ingest progress concepts</h1>
+        <p class="lede">
+          Three terminal-first directions for making long ingest runs feel alive while keeping logs clean.
+          The default should be useful in a normal shell, degrade to plain text in CI, and reserve heavier visuals for explicit modes.
+        </p>
+      </div>
+      <div class="meta">mockup only / no runtime code</div>
+    </header>
+
+    <section class="grid" aria-label="CLI progress design concepts">
+      <article class="concept">
+        <div class="concept-head">
+          <h2>1. Compact Default</h2>
+          <p class="tagline">Best everyday mode. One live block, final summary, no screen takeover.</p>
+        </div>
+        <div class="terminal">
+          <div class="chrome"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span class="title">agentctl ingest --since=7</span></div>
+<pre><span class="dim">$</span> agentctl ingest --since=7
+
+<span class="blue">agentctl ingest</span>  run=7f42a9  since=7d
+
+<span class="good">✓</span> skills       upsert        205 skills      0.4s
+<span class="good">✓</span> commands     upsert         42 commands    0.2s
+<span class="cyan">⠋</span> claude       transcripts    1,284 sessions  8.1s
+<span class="dim">•</span> codex        sessions       pending
+<span class="dim">•</span> git          history        pending
+<span class="dim">•</span> signals      derive         pending
+
+<span class="dim">stage claude/transcripts</span>
+read 189,420 turns · 4,211 tool calls · 28 plans
+
+<span class="dim">press ctrl-c once to stop after current stage</span></pre>
+        </div>
+        <div class="notes">
+          <div class="note"><strong>Behavior</strong><span>Updates in place when stdout is a TTY. Prints normal lines when redirected or in CI.</span></div>
+          <div class="note"><strong>Why it works</strong><span>Small enough to trust as the default. Shows exactly where time is going without hiding errors.</span></div>
+          <div class="note"><strong>Implementation</strong><span>Hook into existing telemetryStage start/finish events. No ingest rewrite.</span></div>
+        </div>
+        <div class="verdict">Recommendation: ship this first as the default interactive progress view.</div>
+      </article>
+
+      <article class="concept">
+        <div class="concept-head">
+          <h2>2. Pipeline Board</h2>
+          <p class="tagline">More visual, still terminal-native. Good for long backfills and demos.</p>
+        </div>
+        <div class="terminal">
+          <div class="chrome"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span class="title">agentctl ingest --since=90 --progress=pipeline</span></div>
+<pre><span class="dim">$</span> agentctl ingest --since=90 --progress=full
+
+┌─ <span class="blue">agentctl ingest</span> ─────────────────────────┐
+│ run     7f42a9                               │
+│ window  90 days                              │
+│ elapsed 00:01:42   eta 00:00:38              │
+│ speed   1,380 turns/s · 42 sessions/s        │
+└──────────────────────────────────────────────┘
+
+stage       progress              rows       speed          time
+<span class="good">skills</span>      ████████████████████  205        512/s          0.6s
+<span class="good">commands</span>    ████████████████████   42        190/s          0.3s
+<span class="good">claude</span>      ████████████████████ 3193        149/s         21.4s
+<span class="cyan">codex</span>       ███████████░░░░░░░░░  842/1186    21/s         39.8s
+<span class="dim">git</span>         ░░░░░░░░░░░░░░░░░░░░  pending    --            --
+<span class="dim">signals</span>     ░░░░░░░░░░░░░░░░░░░░  pending    --            --
+
+<span class="cyan">current</span> codex/sessions
+session  842 / 1186
+turns    41,920
+tools    9,541
+write    18,220 records/s
+memory   312 MB rss
+
+<span class="warn">slow query hint</span> git/history usually follows codex</pre>
+        </div>
+        <div class="notes">
+          <div class="note"><strong>Behavior</strong><span>Shows elapsed time, ETA, rows processed, rows per second, current stage counters, write speed, and memory.</span></div>
+          <div class="note"><strong>Risk</strong><span>Some stages do not know total work upfront. Those show counters and speed without fake percentages.</span></div>
+          <div class="note"><strong>Implementation</strong><span>Add progress events: planned, started, advanced, written, finished, failed.</span></div>
+        </div>
+        <div class="verdict">Preferred direction: make this the interactive default as <code>--progress=pipeline</code>, with plain logs for non-TTY.</div>
+      </article>
+
+      <article class="concept">
+        <div class="concept-head">
+          <h2>3. Agent Cockpit</h2>
+          <p class="tagline">A polished “show me what the agent is learning” mode for humans watching runs.</p>
+        </div>
+        <div class="terminal">
+          <div class="chrome"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span class="title">agentctl ingest --watch --progress=cockpit</span></div>
+<pre><span class="dim">$</span> agentctl ingest --watch --progress=cockpit
+
+<span class="violet">AGENTCTL LIVE</span>  ingesting local agent memory
+
+┌ evidence graph ─────────────┐  ┌ recent signal ───────────────┐
+│ sessions        3,193  <span class="good">+12</span> │  │ <span class="warn">verification gap</span>            │
+│ turns         204,579  <span class="good">+881</span>│  │ repo agentctl                │
+│ tool calls      9,055  <span class="good">+47</span> │  │ 3 edits no tests             │
+│ skills            205   <span class="dim">+0</span> │  └────────────────────────────┘
+└─────────────────────────────┘
+
+pipeline
+<span class="good">●</span> skills       indexed installed skills
+<span class="good">●</span> commands     indexed slash commands
+<span class="good">●</span> claude       imported 12 new sessions
+<span class="cyan">●</span> codex        scanning session chunks
+<span class="dim">○</span> git          waiting
+<span class="dim">○</span> signals      waiting
+
+<span class="cyan">animation</span> streaming transcript chunks ▰▰▰▰▱▱</pre>
+        </div>
+        <div class="notes">
+          <div class="note"><strong>Behavior</strong><span>Feels like a live dashboard in the terminal. Best for demos, not scripts.</span></div>
+          <div class="note"><strong>Risk</strong><span>Can become theatrical and noisy. Should be opt-in, never the default.</span></div>
+          <div class="note"><strong>Implementation</strong><span>Probably uses OpenTUI later, reusing the same progress event model.</span></div>
+        </div>
+        <div class="verdict">Keep as an explicit future mode: <code>--progress=cockpit</code>.</div>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

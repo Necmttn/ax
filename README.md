@@ -108,9 +108,9 @@ agentctl self-improve weekly --json
 ## CLI Reference
 
 ```text
-agentctl ingest [filters] [--since=DAYS]
-agentctl ingest-insights
-agentctl derive-signals [--since=DAYS]
+agentctl ingest [filters] [--since=DAYS] [--progress=auto|pipeline|plain|json|off]
+agentctl ingest-insights [--progress=auto|pipeline|plain|json|off]
+agentctl derive-signals [--since=DAYS] [--progress=auto|pipeline|plain|json|off]
 agentctl insights [schema|repositories|checkouts|git|friction|tools|sessions|graph-health] [--limit=N]
 agentctl dashboard [--limit=N] [--out=PATH]
 agentctl dashboard serve [--port=1738]
