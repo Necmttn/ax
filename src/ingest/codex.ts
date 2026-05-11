@@ -7,7 +7,7 @@ import { skillRecordKey } from "../lib/skill-id.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
 import {
-    relateToolCallSkill,
+    buildRelateToolCallSkillStatements,
     writePlanSnapshot,
     writeToolCalls,
     type PlanSnapshotWrite,
@@ -637,10 +637,13 @@ export function __testStreamCodexJsonlLines(lines: Iterable<string>, every: numb
 const relateToolCallSkills = (relations: ToolCallSkillRelationWrite[]) =>
     Effect.gen(function* () {
         if (relations.length === 0) return;
-        yield* Effect.forEach(relations, relateToolCallSkill, {
-            concurrency: 4,
-            discard: true,
-        });
+        const db = yield* SurrealClient;
+        const stmts = relations.flatMap((relation) =>
+            buildRelateToolCallSkillStatements(relation),
+        );
+        for (let i = 0; i < stmts.length; i += 500) {
+            yield* db.query(stmts.slice(i, i + 500).join(""));
+        }
     });
 
 const writePlanSnapshots = (snapshots: PlanSnapshotWrite[]) =>
@@ -820,13 +823,13 @@ export const ingestCodex = (
                     yield* writeToolCalls(batch.toolCalls);
                     toolCallCount += batch.toolCalls.length;
                     fileToolCalls += batch.toolCalls.length;
+                    yield* writeSyntheticSkillsAndInvocations(batch.invocations);
+                    invCount += batch.invocations.length;
+                    fileInvocations += batch.invocations.length;
                     yield* relateToolCallSkills(batch.skillRelations);
                     yield* writePlanSnapshots(batch.planSnapshots);
                     planSnapshotCount += batch.planSnapshots.length;
                     filePlanSnapshots += batch.planSnapshots.length;
-                    yield* writeSyntheticSkillsAndInvocations(batch.invocations);
-                    invCount += batch.invocations.length;
-                    fileInvocations += batch.invocations.length;
                 });
 
             const fh = yield* Effect.promise(() => open(filePath, "r"));
