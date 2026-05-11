@@ -52,6 +52,7 @@ describe("cli progress", () => {
         });
 
         progress.start({ source: "codex", stage: "sessions" });
+        progress.update({ source: "codex", stage: "sessions" }, { files: 10, sessions: 9 });
         progress.finish({ source: "codex", stage: "sessions" }, { sessions: 12 });
 
         const events = sink.chunks.join("").trim().split("\n").map((line) => JSON.parse(line));
@@ -62,6 +63,10 @@ describe("cli progress", () => {
             source: "codex",
         });
         expect(events[1]).toMatchObject({
+            event: "updated",
+            counts: { files: 10, sessions: 9 },
+        });
+        expect(events[2]).toMatchObject({
             event: "finished",
             counts: { sessions: 12 },
         });
@@ -126,6 +131,7 @@ describe("cli progress", () => {
 
         progress.start({ source: "skills", stage: "upsert" });
         now = 2_000;
+        progress.update({ source: "skills", stage: "upsert" }, { files: 50, sessions: 49, turns: 500 });
         progress.finish({ source: "skills", stage: "upsert" }, { skills: 205 });
         progress.stop();
 
@@ -133,6 +139,7 @@ describe("cli progress", () => {
         expect(output).toContain("agentctl ingest");
         expect(output).toContain("stage       progress");
         expect(output).toContain("skills");
+        expect(output).toContain("files=50 sessions=49 turns=500");
         expect(output).toContain("205");
     });
 });

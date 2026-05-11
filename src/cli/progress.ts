@@ -14,6 +14,7 @@ export interface ProgressSink {
 export interface ProgressReporter {
     readonly live: boolean;
     start(stage: ProgressStage): void;
+    update(stage: ProgressStage, counts: Record<string, number>): void;
     finish(stage: ProgressStage, counts: Record<string, number>): void;
     fail(stage: ProgressStage, message: string): void;
     stop(): void;
@@ -41,6 +42,26 @@ export interface ProgressOptions {
 }
 
 const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const countDisplayOrder = [
+    "files",
+    "sessions",
+    "turns",
+    "toolCalls",
+    "tool_calls",
+    "invocations",
+    "commits",
+    "repos",
+    "produced",
+    "touched",
+    "edits",
+    "planSnapshots",
+    "skills",
+    "commands",
+    "insights",
+    "signals",
+    "pairs",
+    "recoveries",
+] as const;
 
 export function parseProgressMode(raw: string | undefined): ProgressMode {
     if (raw === undefined || raw === "") return "auto";
@@ -93,7 +114,12 @@ function totalRows(counts: Record<string, number>): number {
 function summarizeCounts(counts: Record<string, number>): string {
     const entries = Object.entries(counts)
         .filter(([, value]) => Number.isFinite(value))
-        .sort(([a], [b]) => a.localeCompare(b));
+        .sort(([a], [b]) => {
+            const ai = countDisplayOrder.indexOf(a as (typeof countDisplayOrder)[number]);
+            const bi = countDisplayOrder.indexOf(b as (typeof countDisplayOrder)[number]);
+            if (ai !== -1 || bi !== -1) return (ai === -1 ? Number.POSITIVE_INFINITY : ai) - (bi === -1 ? Number.POSITIVE_INFINITY : bi);
+            return a.localeCompare(b);
+        });
     if (entries.length === 0) return "";
     return entries.slice(0, 4).map(([key, value]) => `${key}=${formatCount(value)}`).join(" ");
 }
@@ -109,6 +135,7 @@ function shouldUsePipeline(mode: ProgressMode, sink: ProgressSink, env: Record<s
 class NoopProgress implements ProgressReporter {
     readonly live = false;
     start(): void {}
+    update(): void {}
     finish(): void {}
     fail(): void {}
     stop(): void {}
@@ -123,6 +150,10 @@ class JsonProgress implements ProgressReporter {
 
     start(stage: ProgressStage): void {
         this.write("started", stage, {});
+    }
+
+    update(stage: ProgressStage, counts: Record<string, number>): void {
+        this.write("updated", stage, { counts });
     }
 
     finish(stage: ProgressStage, counts: Record<string, number>): void {
@@ -157,6 +188,8 @@ class PlainProgress implements ProgressReporter {
     start(stage: ProgressStage): void {
         this.sink.write(`[agentctl] ${stageKey(stage)} started\n`);
     }
+
+    update(): void {}
 
     finish(stage: ProgressStage, counts: Record<string, number>): void {
         const summary = summarizeCounts(counts);
@@ -200,6 +233,16 @@ class PipelineProgress implements ProgressReporter {
         const state = this.stateFor(stage);
         state.status = "running";
         state.startedAt = this.options.now();
+        this.render();
+    }
+
+    update(stage: ProgressStage, counts: Record<string, number>): void {
+        const state = this.stateFor(stage);
+        if (state.status === "pending") {
+            state.status = "running";
+            state.startedAt = this.options.now();
+        }
+        state.counts = counts;
         this.render();
     }
 
