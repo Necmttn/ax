@@ -72,6 +72,7 @@ Ground an agent before and after repo work:
 agentctl project context --json
 agentctl project verify --json
 agentctl project harness --json
+agentctl onboarding --json
 ```
 
 Inspect the graph:
@@ -114,6 +115,9 @@ Self-improve queries:
 agentctl guidance next --json
 agentctl session summary --json
 agentctl self-improve weekly --json
+agentctl interventions list --json
+agentctl interventions candidates --json
+agentctl interventions regressions --json
 ```
 
 ## CLI Reference
@@ -133,6 +137,8 @@ agentctl taste [--limit=N]
 agentctl pairs <skill> [--limit=N]
 agentctl recovery [--limit=N]
 agentctl project context [--json]
+agentctl onboarding [--json]
+agentctl interventions [list|show|impact|regressions|candidates] [--limit=N] [--json]
 agentctl project verify [--json]
 agentctl project harness [--json]
 agentctl guidance next --json

@@ -97,6 +97,9 @@ Current implementation status:
   `session-health/derive` ingest stage.
 - Default `agentctl ingest` persists commit lifecycle, post-feature fix-chain,
   and skill-candidate records via the `closure/derive` ingest stage.
+- Default `agentctl ingest` persists gotchas, taste signals, workflows,
+  learning feedback, learning matches, and draft adoptions via the
+  `learning-registry/derive` ingest stage.
 
 The harness ingest stage is idempotent and:
 
@@ -175,6 +178,30 @@ post-feature fixes as evidence that closure quality could improve.
 signals into candidate skills or guardrails, such as ingest idempotency checks,
 schema-change smoke tests, live query dogfooding, or session closure quality
 gates.
+
+## Learning Registry And Onboarding
+
+The learning-registry slice adds:
+
+- `gotcha`
+- `taste_signal`
+- `workflow`
+- `learning_feedback`
+- `learning_match`
+- `adoption`
+
+`learning-registry/derive` converts local skill candidates and Harness Doctor
+learnings into draft-only local registry rows. Hosted sharing, public taste
+cards, and auto-publishing are intentionally disabled in these seed records.
+
+`agentctl onboarding --json` checks whether global Claude, Codex, and shared
+agent guidance directories are git-tracked. This gives future guidance and
+skill experiments commit evidence before agentctl starts recommending harness
+changes.
+
+`agentctl interventions list|impact|regressions|candidates --json` is the first
+read surface for intervention lifecycle work: proposed interventions, measured
+observations, high-risk regression sessions, and candidate skills.
 
 SurrealKit workflow takeaway: local development can keep importing the schema
 directly for now. Tests should prefer isolated databases or namespaces so

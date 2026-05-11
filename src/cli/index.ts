@@ -12,6 +12,7 @@ import { ingestHarness } from "../ingest/harness.ts";
 import { deriveOutcomes } from "../ingest/outcomes.ts";
 import { deriveSessionHealth } from "../ingest/session-health.ts";
 import { deriveClosure } from "../ingest/closure.ts";
+import { deriveLearningRegistry } from "../ingest/learning-registry.ts";
 import { ingestClaudeInsights } from "../ingest/claude-insights.ts";
 import { deriveSignals } from "../ingest/derive-signals.ts";
 import { INSIGHT_VIEWS, insightSqlForView, isInsightView } from "../queries/insights.ts";
@@ -26,6 +27,7 @@ import {
 } from "./progress.ts";
 import { cmdProject } from "./project.ts";
 import { AGENTCTL_VERSION, liveVersionDeps, printVersion, updateAgentctl } from "./version.ts";
+import { buildOnboardingReport, formatOnboardingReport } from "./onboarding.ts";
 import { guidanceNext, parseSelfImproveArgs, selfImproveWeekly, sessionSummary } from "../self-improve/commands.ts";
 import {
     buildIngestEventStatement,
@@ -272,6 +274,7 @@ function ingestStages(args: string[]): ProgressStage[] {
         stages.push({ source: "outcomes", stage: "derive" });
         stages.push({ source: "session-health", stage: "derive" });
         stages.push({ source: "closure", stage: "derive" });
+        stages.push({ source: "learning-registry", stage: "derive" });
     }
     if (!skillsOnly && !transcriptsOnly && !claudeOnly && !codexOnly && !gitOnly) {
         stages.push({ source: "harness", stage: "doctor" });
@@ -395,7 +398,15 @@ const cmdIngest = (args: string[]) =>
                     runId,
                     "closure",
                     "derive",
-                    deriveClosure({ sinceDays }),
+                    deriveClosure(),
+                    progress,
+                );
+                yield* telemetryStage(
+                    db,
+                    runId,
+                    "learning-registry",
+                    "derive",
+                    deriveLearningRegistry(),
                     progress,
                 );
             }
@@ -512,6 +523,34 @@ const cmdInsights = (args: string[]) =>
             insightSqlForView(rawView, limit),
         );
         console.log(JSON.stringify(result?.[0] ?? [], null, 2));
+    });
+
+const cmdOnboarding = (args: string[]) =>
+    Effect.sync(() => {
+        const json = args.includes("--json");
+        console.log(formatOnboardingReport(buildOnboardingReport(), json));
+    });
+
+const cmdInterventions = (args: string[]) =>
+    Effect.gen(function* () {
+        const subcommand = args.filter((a) => !a.startsWith("--"))[0] ?? "list";
+        const json = args.includes("--json");
+        const limit = parsePositiveIntFlag("interventions", "limit", args, 20);
+        const db = yield* SurrealClient;
+        const sql =
+            subcommand === "candidates" ? `SELECT id, name, confidence, IF confidence = "high" THEN 3 ELSE IF confidence = "medium" THEN 2 ELSE 1 END AS confidence_score, expected_impact, proposed_behavior, metrics, created_at FROM skill_candidate ORDER BY confidence_score DESC, created_at DESC LIMIT ${limit};` :
+            subcommand === "impact" ? `SELECT id, target, metric, baseline_value, observed_value, delta, confidence, observed_at FROM intervention_observation ORDER BY observed_at DESC LIMIT ${limit};` :
+            subcommand === "regressions" ? `SELECT session, source, tool_errors, interruptions, context_pressure, estimated_tokens, ts FROM session_health WHERE context_pressure = "high" OR tool_errors >= 5 OR interruptions > 0 ORDER BY estimated_tokens DESC, tool_errors DESC LIMIT ${limit};` :
+            subcommand === "list" ? `SELECT id, name, kind, status, expected_effect, target_metrics, created_at FROM intervention ORDER BY created_at DESC LIMIT ${limit};` :
+            `SELECT id, name, kind, status, expected_effect, target_metrics, owner_notes, created_at FROM intervention WHERE string::lowercase(name) CONTAINS ${JSON.stringify(subcommand.toLowerCase())} LIMIT ${limit};`;
+        const result = yield* db.query<[Array<Record<string, unknown>>]>(sql);
+        if (json) {
+            console.log(JSON.stringify(result?.[0] ?? [], null, 2));
+            return;
+        }
+        for (const row of result?.[0] ?? []) {
+            console.log(`${row.name ?? row.id}  ${row.status ?? row.confidence ?? ""}`);
+        }
     });
 
 const cmdDashboard = (args: string[]) =>
@@ -1237,6 +1276,24 @@ const insightsCommand = Command.make(
     ({ view, limit }) => cmdInsights([view, `--limit=${limit}`]),
 ).pipe(Command.withDescription("Run built-in graph insight queries"));
 
+const onboardingCommand = Command.make(
+    "onboarding",
+    { json: jsonFlag },
+    ({ json }) => cmdOnboarding(boolArg("json", json)),
+).pipe(Command.withDescription("Check guidance tracking setup for learning loops"));
+
+const interventionAction = Argument.choice("action", ["list", "show", "impact", "regressions", "candidates"] as const).pipe(Argument.withDefault("list"));
+
+const interventionsCommand = Command.make(
+    "interventions",
+    {
+        action: interventionAction,
+        limit: positiveLimit(20),
+        json: jsonFlag,
+    },
+    ({ action, limit, json }) => cmdInterventions([action, `--limit=${limit}`, ...boolArg("json", json)]),
+).pipe(Command.withDescription("Inspect intervention lifecycle, impact, regressions, and candidates"));
+
 const dashboardServeCommand = Command.make(
     "serve",
     { port: Flag.integer("port").pipe(Flag.withDefault(1738)) },
@@ -1454,6 +1511,8 @@ export const rootCommand = Command.make("agentctl").pipe(
         ingestInsightsCommand,
         deriveSignalsCommand,
         insightsCommand,
+        onboardingCommand,
+        interventionsCommand,
         dashboardCommand,
         searchCommand,
         statsCommand,
