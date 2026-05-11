@@ -14,6 +14,7 @@ import { writeDashboard } from "../dashboard/report.ts";
 import { serveDashboard } from "../dashboard/server.ts";
 import { cmdInstall, cmdUninstall } from "./install.ts";
 import { cmdProject } from "./project.ts";
+import { liveVersionDeps, printVersion, updateAgentctl } from "./version.ts";
 import { guidanceNext, parseSelfImproveArgs, selfImproveWeekly, sessionSummary } from "../self-improve/commands.ts";
 import {
     buildIngestEventStatement,
@@ -47,6 +48,8 @@ Usage:
   agentctl guidance next --json
   agentctl session summary --json
   agentctl self-improve weekly --json
+  agentctl version [--check] [--json]
+  agentctl update [--check] [--json]
   agentctl tui
   agentctl install            # one-shot setup: daemon + watcher + symlink
   agentctl uninstall
@@ -1097,6 +1100,14 @@ async function main() {
     const [, , cmd, ...rest] = process.argv;
     if (cmd === undefined || cmd === "help" || cmd === "--help" || cmd === "-h") {
         console.log(HELP);
+        return;
+    }
+    if (cmd === "version" || cmd === "--version" || cmd === "-V") {
+        await printVersion(rest, liveVersionDeps);
+        return;
+    }
+    if (cmd === "update" || cmd === "upgrade") {
+        await updateAgentctl(rest, liveVersionDeps);
         return;
     }
     if (cmd === "tui") {

@@ -51,6 +51,14 @@ agentctl ingest-insights
 agentctl dashboard
 ```
 
+Check or update the installed release:
+
+```bash
+agentctl version --check
+agentctl update --check
+agentctl update
+```
+
 Ground an agent before and after repo work:
 
 ```bash
