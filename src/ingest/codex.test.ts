@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import {
+    __testCompactCodexToolCall,
     __testExtractCodexJsonlLines,
     __testStreamCodexJsonlLines,
     codexConcurrency,
     codexFlushEvery,
+    codexPayloadMaxBytes,
     codexProgressEvery,
     shouldSnapshotCodexRaw,
 } from "./codex.ts";
@@ -34,6 +36,53 @@ describe("Codex transcript extraction", () => {
         expect(codexConcurrency("3")).toBe(3);
         expect(codexConcurrency("0")).toBe(1);
         expect(codexConcurrency("nope")).toBe(1);
+    });
+
+    test("codexPayloadMaxBytes rejects invalid values", () => {
+        expect(codexPayloadMaxBytes(undefined)).toBe(1200);
+        expect(codexPayloadMaxBytes("0")).toBe(0);
+        expect(codexPayloadMaxBytes("4096")).toBe(4096);
+        expect(codexPayloadMaxBytes("-1")).toBe(1200);
+        expect(codexPayloadMaxBytes("nope")).toBe(1200);
+    });
+
+    test("compacts oversized Codex tool call payloads for storage", () => {
+        const compacted = __testCompactCodexToolCall({
+            provider: "codex",
+            toolName: "exec_command",
+            toolKind: "builtin",
+            sessionId: "session-1",
+            seq: 1,
+            turnKey: turnRecordKey("session-1", 1),
+            callId: "call-1",
+            ts: "2026-05-09T10:00:01.000Z",
+            cwd: "/tmp/project",
+            inputJson: { cmd: "printf hello" },
+            outputJson: "x".repeat(2000),
+            rawJson: {
+                type: "function_call",
+                name: "exec_command",
+                call_id: "call-1",
+                arguments: "x".repeat(2000),
+            },
+            outputExcerpt: "hello",
+            hasError: false,
+        }, 64);
+
+        expect(compacted.inputJson).toEqual({ cmd: "printf hello" });
+        expect(compacted.outputJson).toMatchObject({
+            truncated: true,
+            bytes: expect.any(Number),
+            excerpt: expect.stringContaining("x"),
+        });
+        expect(compacted.rawJson).toMatchObject({
+            truncated: true,
+            bytes: expect.any(Number),
+            type: "function_call",
+            name: "exec_command",
+            call_id: "call-1",
+        });
+        expect(compacted.outputExcerpt).toBe("hello");
     });
 
     test("extracts function calls, matched outputs, synthetic skill relations, and update_plan snapshots", () => {
