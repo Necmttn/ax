@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+    duplicateRelationEdgesSql,
     duplicateFileIdentitySql,
     graphHealthSql,
     legacySkillCollisionSql,
@@ -29,7 +30,18 @@ describe("graph health SQL", () => {
         expect(legacySkillCollisionSql(10)).not.toContain("HAVING");
     });
 
+    test("duplicateRelationEdgesSql checks semantic relation keys", () => {
+        const sql = duplicateRelationEdgesSql(10);
+        expect(sql).toContain("invoked");
+        expect(sql).toContain("GROUP BY in, out, args");
+        expect(sql).toContain("GROUP BY in, out, tool");
+        expect(sql).toContain("GROUP BY in, out, kind");
+        expect(sql).toContain("GROUP BY in, out, checkout");
+        expect(sql).not.toContain("HAVING");
+    });
+
     test("graphHealthSql embeds subqueries without inner terminators", () => {
         expect(graphHealthSql(10)).not.toContain(";),");
+        expect(graphHealthSql(10)).toContain("duplicate_relation_edges");
     });
 });
