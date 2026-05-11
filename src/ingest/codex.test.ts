@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import {
     __testExtractCodexJsonlLines,
+    __testStreamCodexJsonlLines,
+    codexFlushEvery,
     codexProgressEvery,
     shouldSnapshotCodexRaw,
 } from "./codex.ts";
@@ -17,6 +19,13 @@ describe("Codex transcript extraction", () => {
         expect(codexProgressEvery("5")).toBe(5);
         expect(codexProgressEvery("0")).toBe(10);
         expect(codexProgressEvery("nope")).toBe(10);
+    });
+
+    test("codexFlushEvery rejects invalid values", () => {
+        expect(codexFlushEvery(undefined)).toBe(500);
+        expect(codexFlushEvery("1000")).toBe(1000);
+        expect(codexFlushEvery("0")).toBe(500);
+        expect(codexFlushEvery("nope")).toBe(500);
     });
 
     test("extracts function calls, matched outputs, synthetic skill relations, and update_plan snapshots", () => {
@@ -201,6 +210,59 @@ describe("Codex transcript extraction", () => {
                 status: "in_progress",
             }),
         ]);
+    });
+
+    test("streaming extraction drains completed tool calls after their output arrives", () => {
+        const batches = __testStreamCodexJsonlLines([
+            JSON.stringify({
+                type: "session_meta",
+                timestamp: "2026-05-09T10:00:00.000Z",
+                payload: {
+                    id: "codex-stream-session",
+                    cwd: "/Users/necmttn/Projects/agentctl",
+                    timestamp: "2026-05-09T10:00:00.000Z",
+                },
+            }),
+            JSON.stringify({
+                type: "response_item",
+                timestamp: "2026-05-09T10:00:01.000Z",
+                payload: {
+                    type: "function_call",
+                    name: "exec_command",
+                    call_id: "call_one",
+                    arguments: JSON.stringify({ cmd: "pwd" }),
+                },
+            }),
+            JSON.stringify({
+                type: "response_item",
+                timestamp: "2026-05-09T10:00:02.000Z",
+                payload: {
+                    type: "function_call",
+                    name: "exec_command",
+                    call_id: "call_two",
+                    arguments: JSON.stringify({ cmd: "git status --short" }),
+                },
+            }),
+            JSON.stringify({
+                type: "response_item",
+                timestamp: "2026-05-09T10:00:03.000Z",
+                payload: {
+                    type: "function_call_output",
+                    call_id: "call_one",
+                    output: "Chunk ID: one\nProcess exited with code 0\nOutput:\n/Users/necmttn/Projects/agentctl\n",
+                },
+            }),
+        ], 2);
+
+        expect(batches).toHaveLength(3);
+        expect(batches[0]?.turns).toHaveLength(1);
+        expect(batches[0]?.toolCalls).toHaveLength(0);
+        expect(batches[1]?.turns).toHaveLength(2);
+        expect(batches[1]?.toolCalls.map((call) => call.callId)).toEqual(["call_one"]);
+        expect(batches[1]?.toolCalls[0]?.outputExcerpt).toBe("/Users/necmttn/Projects/agentctl");
+        expect(batches[2]?.turns).toHaveLength(0);
+        expect(batches[2]?.toolCalls.map((call) => call.callId)).toEqual(["call_two"]);
+        expect(batches[2]?.toolCalls[0]?.outputExcerpt).toBeUndefined();
     });
 
     test("turn IDs use centralized turnRecordKey format", () => {
