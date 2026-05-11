@@ -713,6 +713,7 @@ export const ingestCodex = (
         let invCount = 0;
         let toolCallCount = 0;
         let planSnapshotCount = 0;
+        const recordCount = () => turnCount + invCount + toolCallCount + planSnapshotCount;
 
         for (const [index, file] of files.entries()) {
             if (opts.onProgress && (index < 5 || index % 10 === 0)) {
@@ -723,6 +724,7 @@ export const ingestCodex = (
                     totalBytes,
                     files: fileCount,
                     bytes: byteCount,
+                    records: recordCount(),
                     sessions: sessionCount,
                     turns: turnCount,
                     invocations: invCount,
@@ -808,6 +810,7 @@ export const ingestCodex = (
                                 totalBytes,
                                 files: fileCount,
                                 bytes: byteCount,
+                                records: recordCount(),
                                 fileTurns,
                                 fileToolCalls,
                                 sessions: sessionCount + (sessionUpserted ? 1 : 0),
@@ -886,6 +889,7 @@ export const ingestCodex = (
                     totalBytes,
                     files: fileCount,
                     bytes: byteCount,
+                    records: recordCount(),
                     fileTurns,
                     fileToolCalls,
                     sessions: sessionCount,

@@ -107,6 +107,7 @@ function formatDuration(ms: number): string {
 
 function totalRows(counts: Record<string, number>): number {
     const preferred = [
+        "records",
         "files",
         "sessions",
         "turns",
@@ -139,7 +140,7 @@ function summarizeCounts(counts: Record<string, number>): string {
             }`
             : "";
     const entries = Object.entries(counts)
-        .filter(([key]) => key !== "currentFile" && key !== "totalFiles" && key !== "currentFileBytes" && key !== "totalBytes")
+        .filter(([key]) => key !== "currentFile" && key !== "totalFiles" && key !== "currentFileBytes" && key !== "totalBytes" && key !== "records")
         .filter(([, value]) => Number.isFinite(value))
         .sort(([a], [b]) => {
             const ai = countDisplayOrder.indexOf(a as (typeof countDisplayOrder)[number]);
