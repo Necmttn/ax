@@ -240,4 +240,58 @@ describe("cli progress", () => {
 
         expect(sink.chunks.join("")).toContain("831");
     });
+
+    test("pipeline mode uses Claude record count instead of file count", () => {
+        const sink = memorySink(true, 120);
+        const progress = createProgressReporter({
+            command: "ingest",
+            mode: "pipeline",
+            runId: "abc123456789",
+            stages: [{ source: "claude", stage: "transcripts" }],
+            sink,
+            now: () => 1_000,
+            intervalMs: 10_000,
+            env: {},
+        });
+
+        progress.start({ source: "claude", stage: "transcripts" });
+        progress.update({ source: "claude", stage: "transcripts" }, {
+            currentFile: 117,
+            totalFiles: 2_764,
+            files: 116,
+            records: 31_184,
+            turns: 25_580,
+            toolCalls: 4_409,
+        });
+        progress.stop();
+
+        expect(sink.chunks.join("")).toContain("31,184");
+    });
+
+    test("pipeline mode keeps Claude record count on finish", () => {
+        const sink = memorySink(true, 120);
+        const progress = createProgressReporter({
+            command: "ingest",
+            mode: "pipeline",
+            runId: "abc123456789",
+            stages: [{ source: "claude", stage: "transcripts" }],
+            sink,
+            now: () => 1_000,
+            intervalMs: 10_000,
+            env: {},
+        });
+
+        progress.start({ source: "claude", stage: "transcripts" });
+        progress.finish({ source: "claude", stage: "transcripts" }, {
+            files: 2_764,
+            records: 67_084,
+            turns: 58_605,
+            toolCalls: 4_409,
+        });
+        progress.stop();
+
+        const output = sink.chunks.join("");
+        expect(output).toContain("67,084");
+        expect(output).not.toContain("     2,764");
+    });
 });

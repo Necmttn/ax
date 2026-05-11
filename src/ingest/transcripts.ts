@@ -742,6 +742,7 @@ interface IngestOpts {
 }
 
 export interface TranscriptStats {
+    records: number;
     files: number;
     sessions: number;
     turns: number;
@@ -773,6 +774,7 @@ export const ingestTranscripts = (
         let planSnapshotCount = 0;
         let activeFiles = 0;
         const concurrency = claudeConcurrency();
+        const recordCount = () => turnCount + invCount + editCount + toolCallCount + planSnapshotCount;
 
         for (const projectDir of projectDirs) {
             const fullProject = join(TRANSCRIPTS_DIR, projectDir);
@@ -804,6 +806,7 @@ export const ingestTranscripts = (
                     totalFiles: candidates.length,
                     files,
                     activeFiles,
+                    records: recordCount(),
                     sessions,
                     turns: turnCount,
                     invocations: invCount,
@@ -844,6 +847,7 @@ export const ingestTranscripts = (
                     totalFiles: candidates.length,
                     files,
                     activeFiles,
+                    records: recordCount(),
                     sessions,
                     turns: turnCount,
                     invocations: invCount,
@@ -858,6 +862,7 @@ export const ingestTranscripts = (
                     totalFiles: candidates.length,
                     files,
                     activeFiles,
+                    records: recordCount(),
                     sessions,
                     turns: turnCount,
                     invocations: invCount,
@@ -874,6 +879,7 @@ export const ingestTranscripts = (
         }), { concurrency, discard: true });
         yield* Effect.logDebug("transcript ingest complete", {
             files,
+            records: recordCount(),
             sessions,
             turns: turnCount,
             invocations: invCount,
@@ -882,6 +888,7 @@ export const ingestTranscripts = (
             planSnapshots: planSnapshotCount,
         });
         return {
+            records: recordCount(),
             files,
             sessions,
             turns: turnCount,
