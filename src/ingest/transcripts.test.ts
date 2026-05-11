@@ -1,8 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { fileRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
-import { __testExtractClaudeJsonlLines } from "./transcripts.ts";
+import { __testExtractClaudeJsonlLines, claudeConcurrency } from "./transcripts.ts";
 
 describe("Claude transcript extraction", () => {
+    test("claudeConcurrency rejects invalid values", () => {
+        expect(claudeConcurrency(undefined)).toBe(4);
+        expect(claudeConcurrency("8")).toBe(8);
+        expect(claudeConcurrency("0")).toBe(4);
+        expect(claudeConcurrency("nope")).toBe(4);
+    });
+
     test("extracts tool calls, tool results, skill relations, edits, and TodoWrite snapshots", () => {
         const longOutput = `${"x".repeat(1600)}\nfinal line`;
         const extracted = __testExtractClaudeJsonlLines(
