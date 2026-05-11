@@ -157,10 +157,11 @@ describe("cli progress", () => {
         });
 
         progress.start({ source: "claude", stage: "transcripts" });
-        progress.update({ source: "claude", stage: "transcripts" }, { totalFiles: 2784 });
+        progress.update({ source: "claude", stage: "transcripts" }, { totalFiles: 2784, totalBytes: 9_437_184 });
         progress.stop();
 
-        expect(sink.chunks.join("")).toContain("discovered 2,784 files");
+        const output = sink.chunks.join("");
+        expect(output).toContain("discovered 2,784 files / 9.0MiB");
     });
 
     test("pipeline mode treats generic count as row count", () => {
@@ -181,5 +182,34 @@ describe("cli progress", () => {
         progress.stop();
 
         expect(sink.chunks.join("")).toContain("59");
+    });
+
+    test("pipeline mode shows current file size for large Codex sessions", () => {
+        const sink = memorySink(true, 120);
+        const progress = createProgressReporter({
+            command: "ingest",
+            mode: "pipeline",
+            runId: "abc123456789",
+            stages: [{ source: "codex", stage: "sessions" }],
+            sink,
+            now: () => 1_000,
+            intervalMs: 10_000,
+            env: {},
+        });
+
+        progress.start({ source: "codex", stage: "sessions" });
+        progress.update({ source: "codex", stage: "sessions" }, {
+            currentFile: 3,
+            totalFiles: 245,
+            currentFileBytes: 90_243_914,
+            totalBytes: 236_000_000,
+            files: 2,
+            bytes: 91_000_000,
+        });
+        progress.stop();
+
+        const output = sink.chunks.join("");
+        expect(output).toContain("processing 3/245 (86.1MiB)");
+        expect(output).toContain("bytes=86.8MiB");
     });
 });

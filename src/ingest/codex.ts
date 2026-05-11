@@ -212,8 +212,13 @@ function applyToolResult(call: MutableToolCallWrite, result: ToolResultFields): 
     call.hasError = result.hasError;
 }
 
-async function walkJsonlFiles(root: string, cutoffMs: number): Promise<string[]> {
-    const out: string[] = [];
+interface CodexFileCandidate {
+    path: string;
+    sizeBytes: number;
+}
+
+async function walkJsonlFiles(root: string, cutoffMs: number): Promise<CodexFileCandidate[]> {
+    const out: CodexFileCandidate[] = [];
     async function visit(dir: string) {
         let entries;
         try {
@@ -226,11 +231,16 @@ async function walkJsonlFiles(root: string, cutoffMs: number): Promise<string[]>
             if (e.isDirectory()) {
                 await visit(full);
             } else if (e.isFile() && full.endsWith(".jsonl")) {
+                let st;
+                try {
+                    st = await stat(full);
+                } catch {
+                    continue;
+                }
                 if (cutoffMs > 0) {
-                    const st = await stat(full);
                     if (st.mtimeMs < cutoffMs) continue;
                 }
-                out.push(full);
+                out.push({ path: full, sizeBytes: st.size });
             }
         }
     }
@@ -555,23 +565,28 @@ export const ingestCodex = (
         const db = yield* SurrealClient;
         const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
         const files = yield* Effect.promise(() => walkJsonlFiles(CODEX_ROOT, cutoff));
-        if (opts.onProgress) yield* opts.onProgress({ totalFiles: files.length });
+        const totalBytes = files.reduce((sum, file) => sum + file.sizeBytes, 0);
+        if (opts.onProgress) yield* opts.onProgress({ totalFiles: files.length, totalBytes });
         const rawMaxBytes = codexRawMaxBytes();
         const progressEvery = codexProgressEvery(process.env.AGENTCTL_CODEX_PROGRESS_EVERY);
 
         let fileCount = 0;
+        let byteCount = 0;
         let sessionCount = 0;
         let turnCount = 0;
         let invCount = 0;
         let toolCallCount = 0;
         let planSnapshotCount = 0;
 
-        for (const filePath of files) {
-            if (opts.onProgress && (fileCount < 5 || fileCount % 10 === 0)) {
+        for (const [index, file] of files.entries()) {
+            if (opts.onProgress && (index < 5 || index % 10 === 0)) {
                 yield* opts.onProgress({
-                    currentFile: fileCount + 1,
+                    currentFile: index + 1,
                     totalFiles: files.length,
+                    currentFileBytes: file.sizeBytes,
+                    totalBytes,
                     files: fileCount,
+                    bytes: byteCount,
                     sessions: sessionCount,
                     turns: turnCount,
                     invocations: invCount,
@@ -579,15 +594,9 @@ export const ingestCodex = (
                     planSnapshots: planSnapshotCount,
                 });
             }
+            const filePath = file.path;
             const fileStartedAt = Date.now();
-            const fileStat = yield* Effect.promise(async () => {
-                try {
-                    return await stat(filePath);
-                } catch {
-                    return null;
-                }
-            });
-            const sizeBytes = fileStat?.size ?? 0;
+            const sizeBytes = file.sizeBytes;
             const snapshotRaw = shouldSnapshotCodexRaw(sizeBytes, rawMaxBytes);
             if (!snapshotRaw) {
                 yield* Effect.logDebug("codex raw snapshot skipped", {
@@ -602,6 +611,24 @@ export const ingestCodex = (
             const extracted = yield* Effect.promise(() => extractCodexFile(filePath));
             if (!extracted) continue;
             fileCount += 1;
+            byteCount += sizeBytes;
+            if (opts.onProgress) {
+                yield* opts.onProgress({
+                    currentFile: index + 1,
+                    totalFiles: files.length,
+                    currentFileBytes: sizeBytes,
+                    totalBytes,
+                    files: fileCount,
+                    bytes: byteCount,
+                    fileTurns: extracted.turns.length,
+                    fileToolCalls: extracted.toolCalls.length,
+                    sessions: sessionCount,
+                    turns: turnCount,
+                    invocations: invCount,
+                    toolCalls: toolCallCount,
+                    planSnapshots: planSnapshotCount,
+                });
+            }
 
             // Snapshot the raw codex jsonl into the `codex_artifacts` bucket as
             // best-effort cold storage for modest files. Large Codex sessions
@@ -689,6 +716,8 @@ export const ingestCodex = (
                 yield* Effect.logDebug("codex file ingested", {
                     file: fileCount,
                     totalFiles: files.length,
+                    bytes: formatBytes(byteCount),
+                    totalBytes: formatBytes(totalBytes),
                     sessionId: extracted.session.id,
                     ms: Date.now() - fileStartedAt,
                     turns: extracted.turns.length,
@@ -698,7 +727,12 @@ export const ingestCodex = (
 
             if (fileCount % progressEvery === 0) {
                 const counts = {
+                    currentFile: index + 1,
+                    totalFiles: files.length,
+                    currentFileBytes: sizeBytes,
+                    totalBytes,
                     files: fileCount,
+                    bytes: byteCount,
                     sessions: sessionCount,
                     turns: turnCount,
                     invocations: invCount,

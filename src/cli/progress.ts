@@ -44,6 +44,9 @@ export interface ProgressOptions {
 const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const countDisplayOrder = [
     "files",
+    "bytes",
+    "fileTurns",
+    "fileToolCalls",
     "sessions",
     "turns",
     "toolCalls",
@@ -80,6 +83,18 @@ function formatCount(value: number): string {
     return Math.round(value).toLocaleString("en-US");
 }
 
+function formatBytes(value: number): string {
+    if (!Number.isFinite(value) || value <= 0) return "0B";
+    if (value < 1024) return `${Math.round(value)}B`;
+    if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)}KiB`;
+    if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)}MiB`;
+    return `${(value / 1024 / 1024 / 1024).toFixed(1)}GiB`;
+}
+
+function formatMetric(key: string, value: number): string {
+    return key.toLowerCase().includes("bytes") ? formatBytes(value) : formatCount(value);
+}
+
 function formatDuration(ms: number): string {
     if (!Number.isFinite(ms) || ms < 0) return "--";
     if (ms < 1000) return `${Math.max(0.1, ms / 1000).toFixed(1)}s`;
@@ -92,6 +107,7 @@ function formatDuration(ms: number): string {
 
 function totalRows(counts: Record<string, number>): number {
     const preferred = [
+        "files",
         "sessions",
         "turns",
         "toolCalls",
@@ -100,7 +116,6 @@ function totalRows(counts: Record<string, number>): number {
         "commands",
         "count",
         "commits",
-        "files",
         "insights",
         "signals",
         "pairs",
@@ -115,12 +130,16 @@ function totalRows(counts: Record<string, number>): number {
 
 function summarizeCounts(counts: Record<string, number>): string {
     const status = typeof counts.currentFile === "number" && typeof counts.totalFiles === "number"
-        ? `processing ${formatCount(counts.currentFile)}/${formatCount(counts.totalFiles)}`
+        ? `processing ${formatCount(counts.currentFile)}/${formatCount(counts.totalFiles)}${
+            typeof counts.currentFileBytes === "number" ? ` (${formatBytes(counts.currentFileBytes)})` : ""
+        }`
         : typeof counts.totalFiles === "number"
-            ? `discovered ${formatCount(counts.totalFiles)} files`
+            ? `discovered ${formatCount(counts.totalFiles)} files${
+                typeof counts.totalBytes === "number" ? ` / ${formatBytes(counts.totalBytes)}` : ""
+            }`
             : "";
     const entries = Object.entries(counts)
-        .filter(([key]) => key !== "currentFile" && key !== "totalFiles")
+        .filter(([key]) => key !== "currentFile" && key !== "totalFiles" && key !== "currentFileBytes" && key !== "totalBytes")
         .filter(([, value]) => Number.isFinite(value))
         .sort(([a], [b]) => {
             const ai = countDisplayOrder.indexOf(a as (typeof countDisplayOrder)[number]);
@@ -129,7 +148,7 @@ function summarizeCounts(counts: Record<string, number>): string {
             return a.localeCompare(b);
         });
     if (entries.length === 0) return status;
-    const summary = entries.slice(0, 4).map(([key, value]) => `${key}=${formatCount(value)}`).join(" ");
+    const summary = entries.slice(0, 4).map(([key, value]) => `${key}=${formatMetric(key, value)}`).join(" ");
     return status ? `${status}  ${summary}` : summary;
 }
 
