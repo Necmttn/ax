@@ -321,4 +321,44 @@ describe("cli progress", () => {
         expect(output).toContain("70,184");
         expect(output).not.toContain("       259");
     });
+
+    test("pipeline mode renders multiple running stage details", () => {
+        const sink = memorySink(true, 120);
+        const progress = createProgressReporter({
+            command: "ingest",
+            mode: "pipeline",
+            runId: "abc123456789",
+            stages: [
+                { source: "claude", stage: "transcripts" },
+                { source: "codex", stage: "sessions" },
+            ],
+            sink,
+            now: () => 1_000,
+            intervalMs: 10_000,
+            env: {},
+        });
+
+        progress.start({ source: "claude", stage: "transcripts" });
+        progress.start({ source: "codex", stage: "sessions" });
+        progress.update({ source: "claude", stage: "transcripts" }, {
+            currentFile: 20,
+            totalFiles: 100,
+            records: 1_200,
+            turns: 900,
+        });
+        progress.update({ source: "codex", stage: "sessions" }, {
+            currentFile: 5,
+            totalFiles: 40,
+            records: 2_400,
+            turns: 2_000,
+        });
+        progress.stop();
+
+        const output = sink.chunks.join("");
+        expect(output).toContain("current=claude/transcripts + codex/sessions");
+        expect(output).toContain("current claude/transcripts");
+        expect(output).toContain("current codex/sessions");
+        expect(output).toContain("processing 20/100");
+        expect(output).toContain("processing 5/40");
+    });
 });

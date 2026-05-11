@@ -310,54 +310,61 @@ const cmdIngest = (args: string[]) =>
             stages,
         });
         const program = Effect.gen(function* () {
-        // Issue #44: --claude-only is the *Claude* side of the world, which
-        // includes both `~/.claude/skills` and `~/.claude/projects`
-        // transcripts. Codex + git stay suppressed.
-        // Each `--X-only` flag suppresses every step except the matching one
-        // (and, for `--claude-only`, the matching pair: skills + transcripts).
-        // The mutual-exclusion check above guarantees at most one is set, so
-        // these conditions just enumerate "is some other --only filter on".
-        if (!transcriptsOnly && !codexOnly && !gitOnly) {
-            yield* telemetryStage(db, runId, "skills", "upsert", ingestSkills(), progress);
-            // Slash commands live in `~/.claude/commands/` (and plugin
-            // command dirs) and aren't indexed by ingestSkills. Without
-            // this, every Skill-tool call against a slash command becomes
-            // an orphan `invoked` edge. See issues #41 / #42.
-            yield* telemetryStage(db, runId, "commands", "upsert", ingestCommands(), progress);
-        }
-        if (!skillsOnly && !codexOnly && !gitOnly)
-            yield* telemetryStage(
-                db,
-                runId,
-                "claude",
-                "transcripts",
-                ingestTranscripts({ sinceDays, onProgress: progressUpdater(progress, "claude", "transcripts") }),
-                progress,
-            );
-        if (!skillsOnly && !transcriptsOnly && !claudeOnly && !gitOnly)
-            yield* telemetryStage(
-                db,
-                runId,
-                "codex",
-                "sessions",
-                ingestCodex({ sinceDays, onProgress: progressUpdater(progress, "codex", "sessions") }),
-                progress,
-            );
-        if (!skillsOnly && !transcriptsOnly && !codexOnly && !claudeOnly)
-            yield* telemetryStage(db, runId, "git", "history", ingestGit({ sinceDays }), progress);
-        // Auto-derive signals so taste queries always see fresh
-        // corrected_by / proposed edges. Cheap: O(turns) in-memory walk.
-        // Skip when only running git ingest - signals don't depend on commits.
-        if (!skillsOnly && !gitOnly) {
-            yield* telemetryStage(
-                db,
-                runId,
-                "signals",
-                "derive",
-                deriveSignals({ sinceDays, onProgress: progressUpdater(progress, "signals", "derive") }),
-                progress,
-            );
-        }
+            // Issue #44: --claude-only is the *Claude* side of the world, which
+            // includes both `~/.claude/skills` and `~/.claude/projects`
+            // transcripts. Codex + git stay suppressed.
+            // Each `--X-only` flag suppresses every step except the matching one
+            // (and, for `--claude-only`, the matching pair: skills + transcripts).
+            // The mutual-exclusion check above guarantees at most one is set, so
+            // these conditions just enumerate "is some other --only filter on".
+            if (!transcriptsOnly && !codexOnly && !gitOnly) {
+                yield* telemetryStage(db, runId, "skills", "upsert", ingestSkills(), progress);
+                // Slash commands live in `~/.claude/commands/` (and plugin
+                // command dirs) and aren't indexed by ingestSkills. Without
+                // this, every Skill-tool call against a slash command becomes
+                // an orphan `invoked` edge. See issues #41 / #42.
+                yield* telemetryStage(db, runId, "commands", "upsert", ingestCommands(), progress);
+            }
+
+            const transcriptStages: Array<Effect.Effect<unknown, DbError, SurrealClient>> = [];
+            if (!skillsOnly && !codexOnly && !gitOnly) {
+                transcriptStages.push(telemetryStage(
+                    db,
+                    runId,
+                    "claude",
+                    "transcripts",
+                    ingestTranscripts({ sinceDays, onProgress: progressUpdater(progress, "claude", "transcripts") }),
+                    progress,
+                ));
+            }
+            if (!skillsOnly && !transcriptsOnly && !claudeOnly && !gitOnly) {
+                transcriptStages.push(telemetryStage(
+                    db,
+                    runId,
+                    "codex",
+                    "sessions",
+                    ingestCodex({ sinceDays, onProgress: progressUpdater(progress, "codex", "sessions") }),
+                    progress,
+                ));
+            }
+            yield* Effect.all(transcriptStages, { concurrency: 2, discard: true });
+
+            if (!skillsOnly && !transcriptsOnly && !codexOnly && !claudeOnly) {
+                yield* telemetryStage(db, runId, "git", "history", ingestGit({ sinceDays }), progress);
+            }
+            // Auto-derive signals so taste queries always see fresh
+            // corrected_by / proposed edges. Cheap: O(turns) in-memory walk.
+            // Skip when only running git ingest - signals don't depend on commits.
+            if (!skillsOnly && !gitOnly) {
+                yield* telemetryStage(
+                    db,
+                    runId,
+                    "signals",
+                    "derive",
+                    deriveSignals({ sinceDays, onProgress: progressUpdater(progress, "signals", "derive") }),
+                    progress,
+                );
+            }
         }).pipe(
             Effect.tap(() => db.query(buildIngestRunFinishStatement({ runId, status: "ok" })).pipe(Effect.asVoid)),
             Effect.catch((error) =>
