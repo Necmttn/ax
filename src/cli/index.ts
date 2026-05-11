@@ -9,9 +9,10 @@ import { ingestTranscripts } from "../ingest/transcripts.ts";
 import { ingestCodex } from "../ingest/codex.ts";
 import { ingestGit } from "../ingest/git.ts";
 import { ingestHarness } from "../ingest/harness.ts";
+import { deriveOutcomes } from "../ingest/outcomes.ts";
 import { ingestClaudeInsights } from "../ingest/claude-insights.ts";
 import { deriveSignals } from "../ingest/derive-signals.ts";
-import { insightSqlForView, isInsightView } from "../queries/insights.ts";
+import { INSIGHT_VIEWS, insightSqlForView, isInsightView } from "../queries/insights.ts";
 import { writeDashboard } from "../dashboard/report.ts";
 import { serveDashboard } from "../dashboard/server.ts";
 import { cmdDaemon, cmdDoctor, cmdInstall, cmdUninstall } from "./install.ts";
@@ -266,6 +267,7 @@ function ingestStages(args: string[]): ProgressStage[] {
     }
     if (!skillsOnly && !gitOnly) {
         stages.push({ source: "signals", stage: "derive" });
+        stages.push({ source: "outcomes", stage: "derive" });
     }
     if (!skillsOnly && !transcriptsOnly && !claudeOnly && !codexOnly && !gitOnly) {
         stages.push({ source: "harness", stage: "doctor" });
@@ -366,6 +368,14 @@ const cmdIngest = (args: string[]) =>
                     "signals",
                     "derive",
                     deriveSignals({ sinceDays, onProgress: progressUpdater(progress, "signals", "derive") }),
+                    progress,
+                );
+                yield* telemetryStage(
+                    db,
+                    runId,
+                    "outcomes",
+                    "derive",
+                    deriveOutcomes({ sinceDays }),
                     progress,
                 );
             }
@@ -472,7 +482,7 @@ const cmdInsights = (args: string[]) =>
             args.filter((a) => !a.startsWith("--"))[0] ?? "repositories";
         if (!isInsightView(rawView)) {
             console.error(
-                `agentctl insights: unknown view "${rawView}" (expected schema, repositories, checkouts, git, friction, tools, sessions, or graph-health)`,
+                `agentctl insights: unknown view "${rawView}" (expected ${INSIGHT_VIEWS.join(", ")})`,
             );
             process.exit(2);
         }
@@ -1196,16 +1206,7 @@ const deriveSignalsCommand = Command.make(
         cmdDeriveSignals([...intArg("since", optionValue(since)), `--progress=${progress}`, ...boolArg("verbose", verbose)]),
 ).pipe(Command.withDescription("Derive friction, diagnostic, recommendation, and recovery signals"));
 
-const insightView = Argument.choice("view", [
-    "schema",
-    "repositories",
-    "checkouts",
-    "git",
-    "friction",
-    "tools",
-    "sessions",
-    "graph-health",
-] as const).pipe(Argument.withDefault("repositories"));
+const insightView = Argument.choice("view", INSIGHT_VIEWS).pipe(Argument.withDefault("repositories"));
 
 const insightsCommand = Command.make(
     "insights",

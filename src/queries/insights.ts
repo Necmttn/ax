@@ -6,6 +6,9 @@ export const INSIGHT_VIEWS = [
     "friction",
     "tools",
     "sessions",
+    "feedback-loops",
+    "verification-gaps",
+    "user-language",
     "graph-health",
 ] as const;
 
@@ -60,6 +63,8 @@ export const SCHEMA_TABLES: readonly SchemaTableSpec[] = [
     { table: "harness_learning", stage: "staged", note: "Local/share-candidate/shared evidence-backed Harness Learnings." },
     { table: "intervention", stage: "staged", note: "Approval-gated behavior-change experiments." },
     { table: "intervention_observation", stage: "staged", note: "Measured before/after effects of Interventions." },
+    { table: "command_outcome", stage: "staged", note: "Semantic command result classifications." },
+    { table: "user_message_ngram", stage: "staged", note: "Derived user-language n-grams for preference and correction mining." },
     { table: "includes", stage: "staged", note: "Reserved changeset-to-file-memory relation." },
     { table: "involves", stage: "staged", note: "Reserved changeset-to-file relation." },
     { table: "resulted_in", stage: "staged", note: "Reserved generic outcome relation." },
@@ -209,6 +214,64 @@ ORDER BY last_seen DESC
 LIMIT ${safeLimit};`.trim();
 }
 
+export function feedbackLoopsSql(limit: number): string {
+    const safeLimit = checkedLimit(limit);
+    return `
+SELECT
+    kind,
+    command_norm,
+    count() AS runs,
+    math::sum(IF status = "error" THEN 1 ELSE 0 END) AS errors,
+    time::max(ts) AS last_seen
+FROM command_outcome
+WHERE kind != "success" AND command_norm IS NOT NONE
+GROUP BY kind, command_norm
+ORDER BY errors DESC, runs DESC, last_seen DESC
+LIMIT ${safeLimit};`.trim();
+}
+
+export function verificationGapsSql(limit: number): string {
+    const safeLimit = checkedLimit(limit);
+    return `
+SELECT * FROM (
+    SELECT
+        session AS id,
+        session.project AS project,
+        session.cwd AS cwd,
+        session.started_at AS started_at,
+        session.ended_at AS ended_at,
+        edits,
+        array::len((SELECT id FROM command_outcome WHERE session = $parent.session AND kind IN ["expected_feedback", "product_bug_signal", "guardrail"])) AS verification_commands
+    FROM (
+        SELECT in.session AS session, count() AS edits
+        FROM edited
+        GROUP BY session
+    )
+)
+WHERE edits > 0 AND verification_commands = 0
+ORDER BY edits DESC, ended_at DESC
+LIMIT ${safeLimit};`.trim();
+}
+
+export function userLanguageSql(limit: number): string {
+    const safeLimit = checkedLimit(limit);
+    return `
+SELECT
+    ngram,
+    n,
+    count,
+    near_correction_count,
+    near_failed_tool_count,
+    near_edit_count,
+    near_verification_count,
+    (near_correction_count + near_failed_tool_count + near_edit_count + near_verification_count) AS signal_count,
+    first_seen,
+    last_seen
+FROM user_message_ngram
+ORDER BY signal_count DESC, count DESC, last_seen DESC
+LIMIT ${safeLimit};`.trim();
+}
+
 const sqlString = (value: string): string =>
     `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 
@@ -240,6 +303,12 @@ export function insightSqlForView(view: InsightView, limit: number): string {
             return toolFailuresSql(limit);
         case "sessions":
             return sessionEvidenceSql(limit);
+        case "feedback-loops":
+            return feedbackLoopsSql(limit);
+        case "verification-gaps":
+            return verificationGapsSql(limit);
+        case "user-language":
+            return userLanguageSql(limit);
         case "graph-health":
             return graphHealthSql(limit);
     }

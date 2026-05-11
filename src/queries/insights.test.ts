@@ -7,6 +7,9 @@ import {
     repositoryOverviewSql,
     schemaCoverageSql,
     sessionEvidenceSql,
+    feedbackLoopsSql,
+    userLanguageSql,
+    verificationGapsSql,
     toolFailuresSql,
 } from "./insights.ts";
 
@@ -134,9 +137,39 @@ describe("insights query builders", () => {
         expect(sql).toContain('table: "guidance_revision"');
         expect(sql).toContain('table: "harness_learning"');
         expect(sql).toContain('table: "intervention_observation"');
+        expect(sql).toContain('table: "command_outcome"');
+        expect(sql).toContain('table: "user_message_ngram"');
         expect(sql).toContain("SELECT count() AS count FROM tool_call GROUP ALL");
         expect(sql).not.toContain("AS table");
         expect(SCHEMA_TABLES.some((spec) => spec.stage === "conditional")).toBe(true);
+    });
+
+    test("feedbackLoopsSql reads semantic command outcome rows", () => {
+        const sql = feedbackLoopsSql(10);
+
+        expect(sql).toContain("FROM command_outcome");
+        expect(sql).toContain('WHERE kind != "success" AND command_norm IS NOT NONE');
+        expect(sql).toContain("GROUP BY kind, command_norm");
+        expect(sql).toContain("ORDER BY errors DESC, runs DESC");
+        expect(sql).toContain("LIMIT 10");
+    });
+
+    test("verificationGapsSql finds edited sessions without verification outcomes", () => {
+        const sql = verificationGapsSql(10);
+
+        expect(sql).toContain("FROM edited");
+        expect(sql).toContain("GROUP BY session");
+        expect(sql).toContain("FROM command_outcome WHERE session = $parent.session");
+        expect(sql).toContain("verification_commands = 0");
+    });
+
+    test("userLanguageSql reads user-message ngrams", () => {
+        const sql = userLanguageSql(10);
+
+        expect(sql).toContain("FROM user_message_ngram");
+        expect(sql).toContain("near_correction_count");
+        expect(sql).toContain("AS signal_count");
+        expect(sql).toContain("ORDER BY signal_count DESC");
     });
 
     test("builders reject non-positive or fractional limits before interpolation", () => {

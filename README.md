@@ -84,6 +84,9 @@ agentctl insights git
 agentctl insights friction
 agentctl insights tools
 agentctl insights sessions
+agentctl insights feedback-loops
+agentctl insights verification-gaps
+agentctl insights user-language
 ```
 
 Skill and command hygiene:
@@ -112,7 +115,7 @@ agentctl self-improve weekly --json
 agentctl ingest [filters] [--since=DAYS] [--progress=auto|pipeline|plain|json|off]
 agentctl ingest-insights [--progress=auto|pipeline|plain|json|off]
 agentctl derive-signals [--since=DAYS] [--progress=auto|pipeline|plain|json|off]
-agentctl insights [schema|repositories|checkouts|git|friction|tools|sessions|graph-health] [--limit=N]
+agentctl insights [schema|repositories|checkouts|git|friction|tools|sessions|feedback-loops|verification-gaps|user-language|graph-health] [--limit=N]
 agentctl dashboard [--limit=N] [--out=PATH]
 agentctl dashboard serve [--port=1738]
 agentctl search <query> [--limit=N]

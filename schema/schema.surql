@@ -417,6 +417,34 @@ DEFINE FIELD notes        ON intervention_observation TYPE option<string>;  -- J
 DEFINE FIELD observed_at  ON intervention_observation TYPE datetime DEFAULT time::now();
 DEFINE INDEX intervention_observation_target ON intervention_observation FIELDS target, observed_at;
 
+DEFINE TABLE command_outcome SCHEMAFULL;
+DEFINE FIELD tool_call     ON command_outcome TYPE option<record<tool_call>>;
+DEFINE FIELD session       ON command_outcome TYPE option<record<session>>;
+DEFINE FIELD command_norm  ON command_outcome TYPE option<string>;
+DEFINE FIELD command_tool  ON command_outcome TYPE option<string>;
+DEFINE FIELD kind          ON command_outcome TYPE string;
+DEFINE FIELD status        ON command_outcome TYPE string;
+DEFINE FIELD text          ON command_outcome TYPE option<string>;
+DEFINE FIELD labels        ON command_outcome TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD metrics       ON command_outcome TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD ts            ON command_outcome TYPE datetime DEFAULT time::now();
+DEFINE INDEX command_outcome_kind_ts ON command_outcome FIELDS kind, ts;
+DEFINE INDEX command_outcome_session ON command_outcome FIELDS session, ts;
+
+DEFINE TABLE user_message_ngram SCHEMAFULL;
+DEFINE FIELD ngram         ON user_message_ngram TYPE string;
+DEFINE FIELD n             ON user_message_ngram TYPE int;
+DEFINE FIELD count         ON user_message_ngram TYPE int DEFAULT 0;
+DEFINE FIELD sessions      ON user_message_ngram TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD near_correction_count ON user_message_ngram TYPE int DEFAULT 0;
+DEFINE FIELD near_failed_tool_count ON user_message_ngram TYPE int DEFAULT 0;
+DEFINE FIELD near_edit_count ON user_message_ngram TYPE int DEFAULT 0;
+DEFINE FIELD near_verification_count ON user_message_ngram TYPE int DEFAULT 0;
+DEFINE FIELD first_seen    ON user_message_ngram TYPE option<datetime>;
+DEFINE FIELD last_seen     ON user_message_ngram TYPE option<datetime>;
+DEFINE INDEX user_message_ngram_n_count ON user_message_ngram FIELDS n, count;
+DEFINE INDEX user_message_ngram_text ON user_message_ngram FIELDS ngram;
+
 -- ==== Ingest telemetry tables ====
 
 DEFINE TABLE ingest_run SCHEMAFULL;

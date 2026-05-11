@@ -15,6 +15,9 @@ agentctl insights git --limit=25
 agentctl insights friction --limit=50
 agentctl insights tools --limit=20
 agentctl insights sessions --limit=20
+agentctl insights feedback-loops --limit=20
+agentctl insights verification-gaps --limit=20
+agentctl insights user-language --limit=20
 agentctl insights graph-health --limit=10
 agentctl dashboard --limit=25
 ```
@@ -34,6 +37,12 @@ The builders target the current schema fields directly:
 - `toolFailuresSql` groups `tool_call` rows with `WHERE has_error = true`.
 - `sessionEvidenceSql` summarizes session-linked tool calls, failures,
   friction events, and plan snapshots.
+- `feedbackLoopsSql` groups persisted `command_outcome` rows so expected test
+  feedback, guardrails, search misses, and real blockers can be separated.
+- `verificationGapsSql` finds sessions with edits but no verification-shaped
+  command outcomes.
+- `userLanguageSql` reads persisted `user_message_ngram` aggregates from user
+  turns, including correction and verification proximity counters.
 - `schemaCoverageSql` reports every schema table as `active`, `conditional`,
   or `staged`, so intentionally empty tables are visible instead of surprising
   in Surrealist.
@@ -63,6 +72,8 @@ Current implementation status:
   signals are grounded in the current database.
 - Default `agentctl ingest` persists the Harness Doctor report into the staged
   Harness Doctor tables via the `harness/doctor` ingest stage.
+- Default `agentctl ingest` also persists command outcome classifications and
+  user-message n-grams via the `outcomes/derive` ingest stage.
 
 The harness ingest stage is idempotent and:
 
@@ -77,6 +88,25 @@ The harness ingest stage is idempotent and:
 
 Use `agentctl project harness --json` as the canonical report surface and
 `agentctl insights schema` to verify durable table population after ingest.
+
+## Command Outcome And User Language Tables
+
+The command outcome slice adds:
+
+- `command_outcome`
+- `user_message_ngram`
+
+`command_outcome` is keyed from the original `tool_call` record and classifies
+commands into `success`, `expected_feedback`, `search_miss`, `guardrail`,
+`environment_blocker`, `workflow_error`, `product_bug_signal`, or `unknown`.
+This keeps useful TDD/lint/typecheck feedback distinct from real workflow
+friction.
+
+`user_message_ngram` is derived from `turn.role = "user"` excerpts and stores
+bi-gram/tri-gram frequency plus correction, failed-tool, edit, and verification
+proximity counters. It is an intentionally small first pass for mining repeated
+preferences, corrections, and language that should become taste or harness
+learning candidates.
 
 SurrealKit workflow takeaway: local development can keep importing the schema
 directly for now. Tests should prefer isolated databases or namespaces so

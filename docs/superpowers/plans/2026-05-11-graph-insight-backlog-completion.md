@@ -37,11 +37,11 @@
 - Modify: `src/queries/insights.ts`
 - Modify: `src/cli/index.ts`
 
-- [ ] Add `command_outcome` table and classify command failures as `expected_feedback`, `search_miss`, `guardrail`, `environment_blocker`, `workflow_error`, `product_bug_signal`, or `unknown`.
-- [ ] Add `user_message_ngram` table from `turn.role = "user"` excerpts.
-- [ ] Add CLI views: `agentctl insights feedback-loops`, `verification-gaps`, and `user-language`.
-- [ ] Dogfood: run derive/ingest and inspect the top n-grams plus feedback-loop classifications.
-- [ ] Commit: `feat: derive command outcomes and user language`.
+- [x] Add `command_outcome` table and classify command failures as `expected_feedback`, `search_miss`, `guardrail`, `environment_blocker`, `workflow_error`, `product_bug_signal`, or `unknown`.
+- [x] Add `user_message_ngram` table from `turn.role = "user"` excerpts.
+- [x] Add CLI views: `agentctl insights feedback-loops`, `verification-gaps`, and `user-language`.
+- [x] Dogfood: run derive/ingest and inspect the top n-grams plus feedback-loop classifications.
+- [x] Commit: `feat: derive command outcomes and user language`.
 
 ### Task 3: Token, Cache, Workflow, And Codex Insight Health
 
