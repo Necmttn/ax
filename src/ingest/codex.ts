@@ -7,9 +7,9 @@ import { skillRecordKey } from "../lib/skill-id.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
 import {
+    buildPlanSnapshotStatements,
     buildRelateToolCallSkillStatements,
-    writePlanSnapshot,
-    writeToolCalls,
+    buildToolCallStatements,
     type PlanSnapshotWrite,
     type ToolCallSkillRelationWrite,
     type ToolCallWrite,
@@ -29,6 +29,7 @@ const DEFAULT_CODEX_PROGRESS_EVERY = 10;
 const DEFAULT_CODEX_FLUSH_EVERY = 500;
 const DEFAULT_CODEX_CONCURRENCY = 1;
 const CODEX_PROGRESS_LINE_EVERY = 100;
+const CODEX_STATEMENT_CHUNK_SIZE = 500;
 
 interface CodexSession {
     id: string;
@@ -634,59 +635,47 @@ export function __testStreamCodexJsonlLines(lines: Iterable<string>, every: numb
     return batches;
 }
 
-const relateToolCallSkills = (relations: ToolCallSkillRelationWrite[]) =>
+const buildTurnStatements = (turns: readonly CodexTurn[]): string[] =>
+    turns.map(
+        (t) =>
+            `UPSERT turn:\`${turnRecordKey(t.session, t.seq)}\` CONTENT { session: session:\`${t.session}\`, seq: ${t.seq}, ts: d"${t.ts}", role: ${JSON.stringify(t.role)}, text_excerpt: ${t.text_excerpt === null ? "NONE" : JSON.stringify(t.text_excerpt)}, has_tool_use: ${t.has_tool_use}, has_error: false };`,
+    );
+
+const buildSyntheticSkillAndInvocationStatements = (
+    invocations: readonly CodexInvocation[],
+): string[] => {
+    if (invocations.length === 0) return [];
+    const codexTools = new Set(invocations.map((i) => i.skill));
+    const skillStmts = [...codexTools].map(
+        (name) =>
+            `UPSERT skill:\`${skillRecordKey(name)}\` MERGE { name: ${JSON.stringify(name)}, scope: "codex-tool", dir_path: "(synthetic)", content_hash: "codex" };`,
+    );
+
+    const invStmts = invocations.map(
+        (inv) =>
+            `RELATE turn:\`${turnRecordKey(inv.session, inv.seq)}\`->invoked->skill:\`${skillRecordKey(inv.skill)}\` SET ts = d"${inv.ts}", args = ${JSON.stringify(JSON.stringify(inv.args))}, turn_has_error = false;`,
+    );
+    return [...skillStmts, ...invStmts];
+};
+
+const buildCodexBatchStatements = (batch: MutableCodexExtract): string[] => [
+    ...buildTurnStatements(batch.turns),
+    ...buildToolCallStatements(batch.toolCalls),
+    ...buildSyntheticSkillAndInvocationStatements(batch.invocations),
+    ...batch.skillRelations.flatMap((relation) =>
+        buildRelateToolCallSkillStatements(relation),
+    ),
+    ...batch.planSnapshots.flatMap((snapshot) =>
+        buildPlanSnapshotStatements(snapshot),
+    ),
+];
+
+const queryCodexStatements = (statements: readonly string[]) =>
     Effect.gen(function* () {
-        if (relations.length === 0) return;
+        if (statements.length === 0) return;
         const db = yield* SurrealClient;
-        const stmts = relations.flatMap((relation) =>
-            buildRelateToolCallSkillStatements(relation),
-        );
-        for (let i = 0; i < stmts.length; i += 500) {
-            yield* db.query(stmts.slice(i, i + 500).join(""));
-        }
-    });
-
-const writePlanSnapshots = (snapshots: PlanSnapshotWrite[]) =>
-    Effect.gen(function* () {
-        if (snapshots.length === 0) return;
-        yield* Effect.forEach(snapshots, writePlanSnapshot, {
-            concurrency: 4,
-            discard: true,
-        });
-    });
-
-const writeTurns = (turns: readonly CodexTurn[]) =>
-    Effect.gen(function* () {
-        if (turns.length === 0) return;
-        const db = yield* SurrealClient;
-        const turnStmts = turns.map(
-            (t) =>
-                `UPSERT turn:\`${turnRecordKey(t.session, t.seq)}\` CONTENT { session: session:\`${t.session}\`, seq: ${t.seq}, ts: d"${t.ts}", role: ${JSON.stringify(t.role)}, text_excerpt: ${t.text_excerpt === null ? "NONE" : JSON.stringify(t.text_excerpt)}, has_tool_use: ${t.has_tool_use}, has_error: false };`,
-        );
-        for (let i = 0; i < turnStmts.length; i += 500) {
-            yield* db.query(turnStmts.slice(i, i + 500).join(""));
-        }
-    });
-
-const writeSyntheticSkillsAndInvocations = (invocations: readonly CodexInvocation[]) =>
-    Effect.gen(function* () {
-        if (invocations.length === 0) return;
-        const db = yield* SurrealClient;
-        const codexTools = new Set(invocations.map((i) => i.skill));
-        const skillStmts = [...codexTools].map(
-            (name) =>
-                `UPSERT skill:\`${skillRecordKey(name)}\` MERGE { name: ${JSON.stringify(name)}, scope: "codex-tool", dir_path: "(synthetic)", content_hash: "codex" };`,
-        );
-        if (skillStmts.length > 0) {
-            yield* db.query(skillStmts.join(""));
-        }
-
-        const invStmts = invocations.map(
-            (inv) =>
-                `RELATE turn:\`${turnRecordKey(inv.session, inv.seq)}\`->invoked->skill:\`${skillRecordKey(inv.skill)}\` SET ts = d"${inv.ts}", args = ${JSON.stringify(JSON.stringify(inv.args))}, turn_has_error = false;`,
-        );
-        for (let i = 0; i < invStmts.length; i += 500) {
-            yield* db.query(invStmts.slice(i, i + 500).join(""));
+        for (let i = 0; i < statements.length; i += CODEX_STATEMENT_CHUNK_SIZE) {
+            yield* db.query(statements.slice(i, i + CODEX_STATEMENT_CHUNK_SIZE).join(""));
         }
     });
 
@@ -817,17 +806,13 @@ export const ingestCodex = (
                         yield* upsertSession(batch.session, null);
                         sessionUpserted = true;
                     }
-                    yield* writeTurns(batch.turns);
+                    yield* queryCodexStatements(buildCodexBatchStatements(batch));
                     turnCount += batch.turns.length;
                     fileTurns += batch.turns.length;
-                    yield* writeToolCalls(batch.toolCalls);
                     toolCallCount += batch.toolCalls.length;
                     fileToolCalls += batch.toolCalls.length;
-                    yield* writeSyntheticSkillsAndInvocations(batch.invocations);
                     invCount += batch.invocations.length;
                     fileInvocations += batch.invocations.length;
-                    yield* relateToolCallSkills(batch.skillRelations);
-                    yield* writePlanSnapshots(batch.planSnapshots);
                     planSnapshotCount += batch.planSnapshots.length;
                     filePlanSnapshots += batch.planSnapshots.length;
                 });
