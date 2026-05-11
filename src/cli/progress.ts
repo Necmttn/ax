@@ -45,8 +45,10 @@ const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "
 const countDisplayOrder = [
     "files",
     "bytes",
+    "lines",
     "fileTurns",
     "fileToolCalls",
+    "activeFiles",
     "sessions",
     "turns",
     "toolCalls",
@@ -130,8 +132,11 @@ function totalRows(counts: Record<string, number>): number {
 }
 
 function summarizeCounts(counts: Record<string, number>): string {
+    const phase = typeof counts.phase === "number"
+        ? counts.phase === 1 ? "reading" : counts.phase === 2 ? "writing" : counts.phase === 3 ? "snapshotting" : "working"
+        : "";
     const status = typeof counts.currentFile === "number" && typeof counts.totalFiles === "number"
-        ? `processing ${formatCount(counts.currentFile)}/${formatCount(counts.totalFiles)}${
+        ? `${phase ? `${phase} ` : "processing "}${formatCount(counts.currentFile)}/${formatCount(counts.totalFiles)}${
             typeof counts.currentFileBytes === "number" ? ` (${formatBytes(counts.currentFileBytes)})` : ""
         }`
         : typeof counts.totalFiles === "number"
@@ -140,7 +145,7 @@ function summarizeCounts(counts: Record<string, number>): string {
             }`
             : "";
     const entries = Object.entries(counts)
-        .filter(([key]) => key !== "currentFile" && key !== "totalFiles" && key !== "currentFileBytes" && key !== "totalBytes" && key !== "records")
+        .filter(([key]) => key !== "currentFile" && key !== "totalFiles" && key !== "currentFileBytes" && key !== "totalBytes" && key !== "records" && key !== "phase")
         .filter(([, value]) => Number.isFinite(value))
         .sort(([a], [b]) => {
             const ai = countDisplayOrder.indexOf(a as (typeof countDisplayOrder)[number]);

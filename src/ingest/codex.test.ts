@@ -3,6 +3,7 @@ import { toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import {
     __testExtractCodexJsonlLines,
     __testStreamCodexJsonlLines,
+    codexConcurrency,
     codexFlushEvery,
     codexProgressEvery,
     shouldSnapshotCodexRaw,
@@ -26,6 +27,13 @@ describe("Codex transcript extraction", () => {
         expect(codexFlushEvery("1000")).toBe(1000);
         expect(codexFlushEvery("0")).toBe(500);
         expect(codexFlushEvery("nope")).toBe(500);
+    });
+
+    test("codexConcurrency rejects invalid values", () => {
+        expect(codexConcurrency(undefined)).toBe(1);
+        expect(codexConcurrency("3")).toBe(3);
+        expect(codexConcurrency("0")).toBe(1);
+        expect(codexConcurrency("nope")).toBe(1);
     });
 
     test("extracts function calls, matched outputs, synthetic skill relations, and update_plan snapshots", () => {
