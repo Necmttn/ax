@@ -60,6 +60,7 @@ export const SCHEMA_TABLES: readonly SchemaTableSpec[] = [
     { table: "changeset", stage: "staged", note: "Reserved for activity-first semantic memory." },
     { table: "file_memory", stage: "staged", note: "Reserved for per-file tribal knowledge and BM25 search." },
     { table: "artifact", stage: "staged", note: "Reserved for generated reports, patches, and external artifacts." },
+    { table: "self_improve_run", stage: "staged", note: "Imported legacy self-improve runs, treated as evidence artifacts." },
     { table: "feedback_event", stage: "staged", note: "Reserved for explicit user feedback separate from friction." },
     { table: "guidance", stage: "staged", note: "Persisted behavior controls such as rules, skills, hooks, and commands." },
     { table: "guidance_version", stage: "staged", note: "Legacy guidance history table kept until migration to guidance_revision." },

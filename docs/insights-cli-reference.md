@@ -251,6 +251,9 @@ Full backlog dogfood ran:
 - `bun src/cli/index.ts insights <new-view> --limit=3` for feedback loops,
   user language, token/cache/workflow/Codex health, closure, post-feature
   fixes, skill candidates, and graph health.
+- `bun src/cli/index.ts ingest-insights --progress=plain` now imports both
+  Claude usage-data facets and legacy dotfiles self-improve artifacts from
+  `~/.dotfiles/claude/.claude/self-improve/runs/*`.
 
 Observed outputs:
 
@@ -300,6 +303,17 @@ tables are `workspace`, `changeset`, `file_memory`, `artifact`,
 changeset/artifact/provenance relation tables. `recommendation` is active but
 conditional; it stays empty until repeated friction crosses the current
 threshold.
+
+Legacy self-improve importer behavior:
+
+- `runs/*/events.jsonl` becomes stable `friction_event` rows with
+  `source=legacy_self_improve`.
+- `clusters.json`, `proposed-claudemd.md`, and `_spend.log` become compact
+  `artifact` evidence plus `insight` summaries.
+- `self_improve_run` records hold run-level counts, spend metrics, and event
+  type totals.
+- `has_artifact` and `derived_from` edges keep provenance queryable; the
+  imported rows are evidence, not authoritative truth.
 
 Harness Doctor schema additions are populated by default ingest. If they are
 empty, run `agentctl ingest --since=1` and inspect the `harness/doctor` ingest

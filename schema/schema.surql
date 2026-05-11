@@ -239,6 +239,18 @@ DEFINE FIELD created_at     ON artifact TYPE datetime DEFAULT time::now();
 DEFINE FIELD updated_at     ON artifact TYPE option<datetime>;
 DEFINE INDEX artifact_hash  ON artifact FIELDS content_hash;
 
+DEFINE TABLE self_improve_run SCHEMAFULL;
+DEFINE FIELD run_id        ON self_improve_run TYPE string;
+DEFINE FIELD path          ON self_improve_run TYPE string;
+DEFINE FIELD event_count   ON self_improve_run TYPE int DEFAULT 0;
+DEFINE FIELD cluster_count ON self_improve_run TYPE int DEFAULT 0;
+DEFINE FIELD proposal_path ON self_improve_run TYPE option<string>;
+DEFINE FIELD spend_total   ON self_improve_run TYPE option<float>;
+DEFINE FIELD labels        ON self_improve_run TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD metrics       ON self_improve_run TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD created_at    ON self_improve_run TYPE datetime DEFAULT time::now();
+DEFINE INDEX self_improve_run_id ON self_improve_run FIELDS run_id UNIQUE;
+
 DEFINE TABLE plan_snapshot SCHEMAFULL;
 DEFINE FIELD plan           ON plan_snapshot TYPE option<record<plan>>;
 DEFINE FIELD session        ON plan_snapshot TYPE option<record<session>>;

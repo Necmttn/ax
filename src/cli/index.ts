@@ -14,6 +14,7 @@ import { deriveSessionHealth } from "../ingest/session-health.ts";
 import { deriveClosure } from "../ingest/closure.ts";
 import { deriveLearningRegistry } from "../ingest/learning-registry.ts";
 import { ingestClaudeInsights } from "../ingest/claude-insights.ts";
+import { ingestLegacySelfImprove } from "../ingest/legacy-self-improve.ts";
 import { deriveSignals } from "../ingest/derive-signals.ts";
 import { INSIGHT_VIEWS, insightSqlForView, isInsightView } from "../queries/insights.ts";
 import { writeDashboard } from "../dashboard/report.ts";
@@ -488,9 +489,16 @@ const cmdIngestInsights = (args: string[] = []) =>
             command: "ingest-insights",
             mode: progressMode,
             runId,
-            stages: [{ source: "claude", stage: "insights" }],
+            stages: [
+                { source: "claude", stage: "insights" },
+                { source: "legacy-self-improve", stage: "artifacts" },
+            ],
         });
-        yield* telemetryStage(db, runId, "claude", "insights", ingestClaudeInsights(), progress).pipe(
+        const program = Effect.gen(function* () {
+            yield* telemetryStage(db, runId, "claude", "insights", ingestClaudeInsights(), progress);
+            yield* telemetryStage(db, runId, "legacy-self-improve", "artifacts", ingestLegacySelfImprove(), progress);
+        });
+        yield* program.pipe(
             Effect.tap(() => db.query(buildIngestRunFinishStatement({ runId, status: "ok" })).pipe(Effect.asVoid)),
             Effect.catch((error) =>
                 Effect.gen(function* () {
