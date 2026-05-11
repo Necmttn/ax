@@ -28,6 +28,7 @@ const DEFAULT_CODEX_RAW_MAX_BYTES = 5 * 1024 * 1024;
 const DEFAULT_CODEX_PROGRESS_EVERY = 10;
 const DEFAULT_CODEX_FLUSH_EVERY = 500;
 const DEFAULT_CODEX_CONCURRENCY = 1;
+const DEFAULT_CODEX_PAYLOAD_MAX_BYTES = 1200;
 const CODEX_PROGRESS_LINE_EVERY = 100;
 const CODEX_STATEMENT_CHUNK_SIZE = 500;
 
@@ -132,10 +133,67 @@ function codexRawMaxBytes(raw = process.env.AGENTCTL_CODEX_RAW_MAX_BYTES): numbe
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_CODEX_RAW_MAX_BYTES;
 }
 
+export function codexPayloadMaxBytes(raw = process.env.AGENTCTL_CODEX_PAYLOAD_MAX_BYTES): number {
+    if (!raw) return DEFAULT_CODEX_PAYLOAD_MAX_BYTES;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_CODEX_PAYLOAD_MAX_BYTES;
+}
+
 function formatBytes(bytes: number): string {
     if (bytes < 1024) return `${bytes}B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KiB`;
     return `${(bytes / 1024 / 1024).toFixed(1)}MiB`;
+}
+
+function jsonBytes(value: unknown): number {
+    try {
+        return Buffer.byteLength(JSON.stringify(value) ?? "null");
+    } catch {
+        return Buffer.byteLength(String(value));
+    }
+}
+
+function compactText(text: string): string {
+    return text.length <= 1200 ? text : `${text.slice(0, 1200)}…`;
+}
+
+function compactPayload(value: unknown, maxBytes: number): unknown {
+    if (value === null || value === undefined) return value;
+    const bytes = jsonBytes(value);
+    if (bytes <= maxBytes) return value;
+
+    if (typeof value === "string") {
+        return {
+            truncated: true,
+            bytes,
+            excerpt: compactText(value),
+        };
+    }
+
+    if (isRecord(value)) {
+        return {
+            truncated: true,
+            bytes,
+            type: stringField(value, "type"),
+            name: stringField(value, "name"),
+            call_id: stringField(value, "call_id"),
+        };
+    }
+
+    return {
+        truncated: true,
+        bytes,
+        excerpt: compactText(String(value)),
+    };
+}
+
+function compactCodexToolCall(call: MutableToolCallWrite, maxBytes: number): MutableToolCallWrite {
+    return {
+        ...call,
+        inputJson: compactPayload(call.inputJson, maxBytes),
+        outputJson: compactPayload(call.outputJson, maxBytes),
+        rawJson: compactPayload(call.rawJson, maxBytes),
+    };
 }
 
 function recordKeyPart(input: string, fallback = "_"): string {
@@ -658,9 +716,16 @@ const buildSyntheticSkillAndInvocationStatements = (
     return [...skillStmts, ...invStmts];
 };
 
-const buildCodexBatchStatements = (batch: MutableCodexExtract): string[] => [
+export const __testCompactCodexToolCall = compactCodexToolCall;
+
+const buildCodexBatchStatements = (
+    batch: MutableCodexExtract,
+    payloadMaxBytes: number,
+): string[] => [
     ...buildTurnStatements(batch.turns),
-    ...buildToolCallStatements(batch.toolCalls),
+    ...buildToolCallStatements(batch.toolCalls.map((call) =>
+        compactCodexToolCall(call, payloadMaxBytes),
+    )),
     ...buildSyntheticSkillAndInvocationStatements(batch.invocations),
     ...batch.skillRelations.flatMap((relation) =>
         buildRelateToolCallSkillStatements(relation),
@@ -706,6 +771,7 @@ export const ingestCodex = (
         const progressEvery = codexProgressEvery(process.env.AGENTCTL_CODEX_PROGRESS_EVERY);
         const flushEvery = codexFlushEvery(process.env.AGENTCTL_CODEX_FLUSH_EVERY);
         const concurrency = codexConcurrency(process.env.AGENTCTL_CODEX_CONCURRENCY);
+        const payloadMaxBytes = codexPayloadMaxBytes();
 
         let fileCount = 0;
         let byteCount = 0;
@@ -806,7 +872,7 @@ export const ingestCodex = (
                         yield* upsertSession(batch.session, null);
                         sessionUpserted = true;
                     }
-                    yield* queryCodexStatements(buildCodexBatchStatements(batch));
+                    yield* queryCodexStatements(buildCodexBatchStatements(batch, payloadMaxBytes));
                     turnCount += batch.turns.length;
                     fileTurns += batch.turns.length;
                     toolCallCount += batch.toolCalls.length;

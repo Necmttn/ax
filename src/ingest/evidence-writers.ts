@@ -227,10 +227,12 @@ export function buildRelateToolCallSkillStatements(
     const skillKey = skillRecordKey(input.skillName);
     const toolCallRef = recordRef("tool_call", input.toolCallKey);
     const skillRef = recordRef("skill", skillKey);
+    const edgeKey = Bun.hash(`${input.toolCallKey}|${skillKey}|invoked_skill`)
+        .toString(16)
+        .padStart(16, "0");
 
     return [
-        `DELETE concerns WHERE in = ${toolCallRef} AND out = ${skillRef} AND kind = "invoked_skill";`,
-        `RELATE ${toolCallRef}->concerns->${skillRef} SET ${sqlSet([
+        `RELATE ${toolCallRef}->concerns:\`${edgeKey}\`->${skillRef} SET ${sqlSet([
             ["kind", sqlString("invoked_skill")],
             ["ts", sqlDate(input.ts)],
             ["labels", sqlJsonOption(input.labels)],

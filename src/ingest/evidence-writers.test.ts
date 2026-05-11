@@ -140,8 +140,9 @@ describe("evidence writer statement builders", () => {
 
         const sql = statements.join("\n");
 
-        expect(sql).toContain("DELETE concerns WHERE");
-        expect(sql).toContain(`RELATE tool_call:\`session__call\`->concerns->skill:\`${skillRecordKey("superpowers:test-driven-development")}\``);
+        expect(sql).not.toContain("DELETE concerns WHERE");
+        expect(sql).toContain(`RELATE tool_call:\`session__call\`->concerns:\``);
+        expect(sql).toContain(`->skill:\`${skillRecordKey("superpowers:test-driven-development")}\``);
         expect(sql).toContain("kind = \"invoked_skill\"");
         expect(sql).toContain("labels = \"{\\\"source\\\":\\\"codex\\\"}\"");
         expect(sql).toContain("metrics = \"{\\\"confidence\\\":1}\"");
@@ -182,7 +183,7 @@ describe("evidence writer statement builders", () => {
 
         expect(queries[0]).toContain(`SELECT VALUE id FROM skill:\`${skillRecordKey("superpowers:test-driven-development")}\``);
         expect(queries.slice(1).join("\n")).not.toContain("UPSERT skill:");
-        expect(queries.slice(1).join("\n")).toContain("->concerns->");
+        expect(queries.slice(1).join("\n")).toContain("->concerns:");
     });
 
     test("plan snapshot statements persist snapshot items and item raw JSON", () => {
