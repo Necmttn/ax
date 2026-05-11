@@ -7,6 +7,12 @@
       "release-type": "node",
       "component": "agentctl",
       "package-name": "agentctl",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "src/cli/version.ts"
+        }
+      ],
       "changelog-sections": [
         { "type": "feat", "section": "Features" },
         { "type": "fix", "section": "Bug Fixes" },
