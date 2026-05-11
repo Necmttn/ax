@@ -61,11 +61,10 @@ Current implementation status:
 - `agentctl project harness` also reads existing `tool_call`, `edited`, and
   `produced` graph evidence so observed tooling and main-branch write-risk
   signals are grounded in the current database.
-- The new tables are schema-ready but are not yet populated by
-  `agentctl ingest`. They should remain `staged` in schema coverage until a
-  dedicated ingest writer persists the report rows.
+- Default `agentctl ingest` persists the Harness Doctor report into the staged
+  Harness Doctor tables via the `harness/doctor` ingest stage.
 
-The next ingestion step should add an idempotent harness ingest stage that:
+The harness ingest stage is idempotent and:
 
 1. Upserts `guidance_source` rows keyed by path.
 2. Upserts `guidance_revision` rows keyed by source path plus content hash.
@@ -76,8 +75,8 @@ The next ingestion step should add an idempotent harness ingest stage that:
 6. Upserts approval-gated `intervention` suggestions.
 7. Upserts `intervention_observation` rows with before/after metric fields.
 
-Until that stage exists, use `agentctl project harness --json` as the canonical
-read surface for the Harness Doctor tracer bullet, not table row counts.
+Use `agentctl project harness --json` as the canonical report surface and
+`agentctl insights schema` to verify durable table population after ingest.
 
 SurrealKit workflow takeaway: local development can keep importing the schema
 directly for now. Tests should prefer isolated databases or namespaces so
@@ -128,9 +127,9 @@ changeset/artifact/provenance relation tables. `recommendation` is active but
 conditional; it stays empty until repeated friction crosses the current
 threshold.
 
-Harness Doctor schema additions are expected to be empty in row-count based
-schema coverage until the harness ingest writer is added. Their report-time
-source of truth is `agentctl project harness --json`.
+Harness Doctor schema additions are populated by default ingest. If they are
+empty, run `agentctl ingest --since=1` and inspect the `harness/doctor` ingest
+stage.
 
 Dashboard generated at:
 
