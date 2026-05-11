@@ -744,7 +744,9 @@ export const ingestTranscripts = (
         const projectDirs = (yield* Effect.promise(() => readdir(TRANSCRIPTS_DIR))).filter(
             (d) => !opts.project || d === opts.project,
         );
+        if (opts.onProgress) yield* opts.onProgress({ projectDirs: projectDirs.length });
 
+        const candidates: Array<{ projectDir: string; filePath: string }> = [];
         let files = 0;
         let sessions = 0;
         let turnCount = 0;
@@ -769,44 +771,78 @@ export const ingestTranscripts = (
                     const st = yield* Effect.promise(() => stat(filePath));
                     if (st.mtimeMs < cutoff) continue;
                 }
-                const extracted = yield* Effect.promise(() =>
-                    extractFile(filePath, projectDir),
-                );
-                if (!extracted) continue;
-                files += 1;
-                const pointer = yield* snapshotTranscript(
-                    extracted.session.id,
-                    filePath,
-                );
-                extracted.session.raw_file = pointer;
-                yield* upsertSessions([extracted.session]);
-                sessions += 1;
-                yield* upsertTurns(extracted.turns);
-                turnCount += extracted.turns.length;
-                yield* writeToolCalls(extracted.toolCalls);
-                toolCallCount += extracted.toolCalls.length;
-                yield* relateToolCallSkills(extracted.skillRelations);
-                yield* writePlanSnapshots(extracted.planSnapshots);
-                planSnapshotCount += extracted.planSnapshots.length;
-                yield* relateInvocations(extracted.invocations);
-                invCount += extracted.invocations.length;
-                yield* upsertEdits(extracted.edits);
-                editCount += extracted.edits.length;
-                if (files % 50 === 0) {
-                    const counts = {
-                        files,
-                        sessions,
-                        turns: turnCount,
-                        invocations: invCount,
-                        edits: editCount,
-                        toolCalls: toolCallCount,
-                        planSnapshots: planSnapshotCount,
-                    };
-                    if (opts.onProgress) yield* opts.onProgress(counts);
-                    yield* Effect.logDebug("transcript ingest progress", {
-                        ...counts,
-                    });
-                }
+                candidates.push({ projectDir, filePath });
+            }
+        }
+
+        if (opts.onProgress) yield* opts.onProgress({ totalFiles: candidates.length });
+
+        for (const [index, candidate] of candidates.entries()) {
+            if (opts.onProgress && (index < 5 || index % 10 === 0)) {
+                yield* opts.onProgress({
+                    currentFile: index + 1,
+                    totalFiles: candidates.length,
+                    files,
+                    sessions,
+                    turns: turnCount,
+                    invocations: invCount,
+                    edits: editCount,
+                    toolCalls: toolCallCount,
+                    planSnapshots: planSnapshotCount,
+                });
+            }
+            const extracted = yield* Effect.promise(() =>
+                extractFile(candidate.filePath, candidate.projectDir),
+            );
+            if (!extracted) continue;
+            files += 1;
+            const pointer = yield* snapshotTranscript(
+                extracted.session.id,
+                candidate.filePath,
+            );
+            extracted.session.raw_file = pointer;
+            yield* upsertSessions([extracted.session]);
+            sessions += 1;
+            yield* upsertTurns(extracted.turns);
+            turnCount += extracted.turns.length;
+            yield* writeToolCalls(extracted.toolCalls);
+            toolCallCount += extracted.toolCalls.length;
+            yield* relateToolCallSkills(extracted.skillRelations);
+            yield* writePlanSnapshots(extracted.planSnapshots);
+            planSnapshotCount += extracted.planSnapshots.length;
+            yield* relateInvocations(extracted.invocations);
+            invCount += extracted.invocations.length;
+            yield* upsertEdits(extracted.edits);
+            editCount += extracted.edits.length;
+            if (opts.onProgress && (files <= 5 || files % 10 === 0)) {
+                yield* opts.onProgress({
+                    currentFile: index + 1,
+                    totalFiles: candidates.length,
+                    files,
+                    sessions,
+                    turns: turnCount,
+                    invocations: invCount,
+                    edits: editCount,
+                    toolCalls: toolCallCount,
+                    planSnapshots: planSnapshotCount,
+                });
+            }
+            if (files % 50 === 0) {
+                const counts = {
+                    currentFile: index + 1,
+                    totalFiles: candidates.length,
+                    files,
+                    sessions,
+                    turns: turnCount,
+                    invocations: invCount,
+                    edits: editCount,
+                    toolCalls: toolCallCount,
+                    planSnapshots: planSnapshotCount,
+                };
+                if (opts.onProgress) yield* opts.onProgress(counts);
+                yield* Effect.logDebug("transcript ingest progress", {
+                    ...counts,
+                });
             }
         }
         yield* Effect.logDebug("transcript ingest complete", {

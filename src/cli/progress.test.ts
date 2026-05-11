@@ -142,4 +142,44 @@ describe("cli progress", () => {
         expect(output).toContain("files=50 sessions=49 turns=500");
         expect(output).toContain("205");
     });
+
+    test("pipeline mode shows discovery totals before row counts exist", () => {
+        const sink = memorySink(true, 120);
+        const progress = createProgressReporter({
+            command: "ingest",
+            mode: "pipeline",
+            runId: "abc123456789",
+            stages: [{ source: "claude", stage: "transcripts" }],
+            sink,
+            now: () => 1_000,
+            intervalMs: 10_000,
+            env: {},
+        });
+
+        progress.start({ source: "claude", stage: "transcripts" });
+        progress.update({ source: "claude", stage: "transcripts" }, { totalFiles: 2784 });
+        progress.stop();
+
+        expect(sink.chunks.join("")).toContain("discovered 2,784 files");
+    });
+
+    test("pipeline mode treats generic count as row count", () => {
+        const sink = memorySink(true, 120);
+        const progress = createProgressReporter({
+            command: "ingest",
+            mode: "pipeline",
+            runId: "abc123456789",
+            stages: [{ source: "commands", stage: "upsert" }],
+            sink,
+            now: () => 1_000,
+            intervalMs: 10_000,
+            env: {},
+        });
+
+        progress.start({ source: "commands", stage: "upsert" });
+        progress.finish({ source: "commands", stage: "upsert" }, { count: 59 });
+        progress.stop();
+
+        expect(sink.chunks.join("")).toContain("59");
+    });
 });

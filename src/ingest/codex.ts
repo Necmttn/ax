@@ -555,6 +555,7 @@ export const ingestCodex = (
         const db = yield* SurrealClient;
         const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
         const files = yield* Effect.promise(() => walkJsonlFiles(CODEX_ROOT, cutoff));
+        if (opts.onProgress) yield* opts.onProgress({ totalFiles: files.length });
         const rawMaxBytes = codexRawMaxBytes();
         const progressEvery = codexProgressEvery(process.env.AGENTCTL_CODEX_PROGRESS_EVERY);
 
@@ -566,6 +567,18 @@ export const ingestCodex = (
         let planSnapshotCount = 0;
 
         for (const filePath of files) {
+            if (opts.onProgress && (fileCount < 5 || fileCount % 10 === 0)) {
+                yield* opts.onProgress({
+                    currentFile: fileCount + 1,
+                    totalFiles: files.length,
+                    files: fileCount,
+                    sessions: sessionCount,
+                    turns: turnCount,
+                    invocations: invCount,
+                    toolCalls: toolCallCount,
+                    planSnapshots: planSnapshotCount,
+                });
+            }
             const fileStartedAt = Date.now();
             const fileStat = yield* Effect.promise(async () => {
                 try {

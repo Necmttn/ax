@@ -1086,6 +1086,7 @@ export interface DeriveStats {
 
 export interface DeriveOpts {
     sinceDays: number | undefined;
+    onProgress: (counts: Record<string, number>) => Effect.Effect<void>;
 }
 
 export const deriveSignals = (
@@ -1094,6 +1095,7 @@ export const deriveSignals = (
     Effect.gen(function* () {
         const skillNames = yield* fetchSkillNames();
         const bundles = yield* fetchSessionTurns(opts.sinceDays);
+        if (opts.onProgress) yield* opts.onProgress({ sessions: bundles.length });
 
         let corrections = 0;
         let proposed = 0;
@@ -1105,7 +1107,7 @@ export const deriveSignals = (
         const recoveryBatch: RecoveryEdge[] = [];
         const pairsAccum = new Map<string, SkillPairAccum>();
 
-        for (const bundle of bundles) {
+        for (const [index, bundle] of bundles.entries()) {
             turnCount += bundle.turns.length;
             const c = deriveCorrections(bundle);
             const p = deriveProposed(bundle, skillNames);
@@ -1117,11 +1119,33 @@ export const deriveSignals = (
             proposedBatch.push(...p);
             recoveryBatch.push(...r);
             deriveSkillPairs(bundle, pairsAccum);
+            if (opts.onProgress && (index < 5 || (index + 1) % 50 === 0)) {
+                yield* opts.onProgress({
+                    currentFile: index + 1,
+                    totalFiles: bundles.length,
+                    sessions: index + 1,
+                    turns: turnCount,
+                    corrections,
+                    proposed,
+                    recoveries,
+                    skillPairs: pairsAccum.size,
+                });
+            }
         }
 
         const shouldWriteSkillPairs = shouldDeriveAllTimeSkillPairs(opts.sinceDays);
         const pairsList = shouldWriteSkillPairs ? [...pairsAccum.values()] : [];
         const pairEdgeIds = shouldWriteSkillPairs ? [...pairsAccum.keys()] : [];
+        if (opts.onProgress) {
+            yield* opts.onProgress({
+                sessions: bundles.length,
+                turns: turnCount,
+                corrections,
+                proposed,
+                recoveries,
+                skillPairs: pairsList.length,
+            });
+        }
         const failedToolCalls = yield* fetchFailedToolCalls(opts.sinceDays);
         const toolFrictionBatch = deriveFrictionFromToolCalls(failedToolCalls);
         const correctionFrictionBatch = deriveFrictionFromCorrections(correctionBatch);
@@ -1129,6 +1153,19 @@ export const deriveSignals = (
         const diagnosticBatch = deriveDiagnosticsFromToolCalls(failedToolCalls);
         const recommendation = deriveRecommendationFromFriction(correctionFrictionBatch);
         const recommendationBatch = recommendation === null ? [] : [recommendation];
+        if (opts.onProgress) {
+            yield* opts.onProgress({
+                sessions: bundles.length,
+                turns: turnCount,
+                corrections,
+                proposed,
+                recoveries,
+                skillPairs: pairsList.length,
+                frictionEvents: frictionBatch.length,
+                diagnosticEvents: diagnosticBatch.length,
+                recommendations: recommendationBatch.length,
+            });
+        }
 
         yield* upsertCorrections(correctionBatch);
         // Denormalise was_corrected onto invoked edges so cmdTaste's

@@ -57,6 +57,7 @@ const countDisplayOrder = [
     "planSnapshots",
     "skills",
     "commands",
+    "count",
     "insights",
     "signals",
     "pairs",
@@ -97,6 +98,7 @@ function totalRows(counts: Record<string, number>): number {
         "tool_calls",
         "skills",
         "commands",
+        "count",
         "commits",
         "files",
         "insights",
@@ -108,11 +110,17 @@ function totalRows(counts: Record<string, number>): number {
         const value = counts[key];
         if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
     }
-    return Object.values(counts).reduce((sum, value) => sum + (Number.isFinite(value) && value > 0 ? value : 0), 0);
+    return 0;
 }
 
 function summarizeCounts(counts: Record<string, number>): string {
+    const status = typeof counts.currentFile === "number" && typeof counts.totalFiles === "number"
+        ? `processing ${formatCount(counts.currentFile)}/${formatCount(counts.totalFiles)}`
+        : typeof counts.totalFiles === "number"
+            ? `discovered ${formatCount(counts.totalFiles)} files`
+            : "";
     const entries = Object.entries(counts)
+        .filter(([key]) => key !== "currentFile" && key !== "totalFiles")
         .filter(([, value]) => Number.isFinite(value))
         .sort(([a], [b]) => {
             const ai = countDisplayOrder.indexOf(a as (typeof countDisplayOrder)[number]);
@@ -120,8 +128,9 @@ function summarizeCounts(counts: Record<string, number>): string {
             if (ai !== -1 || bi !== -1) return (ai === -1 ? Number.POSITIVE_INFINITY : ai) - (bi === -1 ? Number.POSITIVE_INFINITY : bi);
             return a.localeCompare(b);
         });
-    if (entries.length === 0) return "";
-    return entries.slice(0, 4).map(([key, value]) => `${key}=${formatCount(value)}`).join(" ");
+    if (entries.length === 0) return status;
+    const summary = entries.slice(0, 4).map(([key, value]) => `${key}=${formatCount(value)}`).join(" ");
+    return status ? `${status}  ${summary}` : summary;
 }
 
 function shouldUsePipeline(mode: ProgressMode, sink: ProgressSink, env: Record<string, string | undefined>): boolean {
@@ -313,7 +322,7 @@ class PipelineProgress implements ProgressReporter {
             rows.push("");
             rows.push(`current ${stageKey(current)}`);
             const summary = summarizeCounts(current.counts);
-            rows.push(summary || `${spinnerFrames[this.frame]} loading stage output`);
+            rows.push(summary || `${spinnerFrames[this.frame]} discovering work`);
         }
         return rows;
     }
