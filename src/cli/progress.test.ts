@@ -294,4 +294,31 @@ describe("cli progress", () => {
         expect(output).toContain("67,084");
         expect(output).not.toContain("     2,764");
     });
+
+    test("pipeline mode keeps Codex record count on finish", () => {
+        const sink = memorySink(true, 120);
+        const progress = createProgressReporter({
+            command: "ingest",
+            mode: "pipeline",
+            runId: "abc123456789",
+            stages: [{ source: "codex", stage: "sessions" }],
+            sink,
+            now: () => 1_000,
+            intervalMs: 10_000,
+            env: {},
+        });
+
+        progress.start({ source: "codex", stage: "sessions" });
+        progress.finish({ source: "codex", stage: "sessions" }, {
+            files: 259,
+            records: 70_184,
+            turns: 58_605,
+            toolCalls: 7_409,
+        });
+        progress.stop();
+
+        const output = sink.chunks.join("");
+        expect(output).toContain("70,184");
+        expect(output).not.toContain("       259");
+    });
 });

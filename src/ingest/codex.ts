@@ -750,6 +750,7 @@ interface CodexIngestOpts {
 }
 
 export interface CodexStats {
+    records: number;
     files: number;
     sessions: number;
     turns: number;
@@ -990,6 +991,7 @@ export const ingestCodex = (
         }), { concurrency, discard: true });
         yield* Effect.logDebug("codex ingest complete", {
             files: fileCount,
+            records: recordCount(),
             sessions: sessionCount,
             turns: turnCount,
             invocations: invCount,
@@ -997,6 +999,7 @@ export const ingestCodex = (
             planSnapshots: planSnapshotCount,
         });
         return {
+            records: recordCount(),
             files: fileCount,
             sessions: sessionCount,
             turns: turnCount,
