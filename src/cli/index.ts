@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
+import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
 import { AppLayer } from "../lib/layers.ts";
 import { ingestSkills } from "../ingest/skills.ts";
@@ -14,7 +15,7 @@ import { writeDashboard } from "../dashboard/report.ts";
 import { serveDashboard } from "../dashboard/server.ts";
 import { cmdDaemon, cmdDoctor, cmdInstall, cmdUninstall } from "./install.ts";
 import { cmdProject } from "./project.ts";
-import { liveVersionDeps, printVersion, updateAgentctl } from "./version.ts";
+import { AGENTCTL_VERSION, liveVersionDeps, printVersion, updateAgentctl } from "./version.ts";
 import { guidanceNext, parseSelfImproveArgs, selfImproveWeekly, sessionSummary } from "../self-improve/commands.ts";
 import {
     buildIngestEventStatement,
@@ -27,44 +28,17 @@ import {
 } from "../dashboard/telemetry.ts";
 import type { DbError } from "../lib/errors.ts";
 
-const HELP = `agentctl - agent telemetry & taste graph
+const boolArg = (name: string, enabled: boolean): string[] =>
+    enabled ? [`--${name}`] : [];
 
-Usage:
-  agentctl ingest [filters] [--since=DAYS]
-  agentctl ingest-insights
-  agentctl derive-signals [--since=DAYS]
-  agentctl insights [schema|repositories|checkouts|git|friction|tools|sessions|graph-health] [--limit=N]
-  agentctl dashboard [--limit=N] [--out=PATH]
-  agentctl dashboard serve [--port=1738]
-  agentctl search <query> [--limit=N]
-  agentctl stats <skill>
-  agentctl recent [--limit=N]
-  agentctl unused [--days=N]
-  agentctl taste [--limit=N]
-  agentctl pairs <skill> [--limit=N]
-  agentctl recovery [--limit=N]
-  agentctl project context [--json]
-  agentctl project verify [--json]
-  agentctl guidance next --json
-  agentctl session summary --json
-  agentctl self-improve weekly --json
-  agentctl version [--check] [--json]
-  agentctl update [--check] [--json]
-  agentctl tui
-  agentctl install            # one-shot setup: daemon + watcher + symlink
-  agentctl daemon status [--json]
-  agentctl daemon start|stop|restart
-  agentctl doctor [--json]
-  agentctl uninstall
-  agentctl help
+const intArg = (name: string, value: number | undefined): string[] =>
+    value === undefined ? [] : [`--${name}=${value}`];
 
-Ingest filters (suppress everything else; combine to narrow further):
-  --skills-only        only re-scan SKILL.md files
-  --transcripts-only   only ingest Claude transcripts
-  --codex-only         only ingest Codex sessions
-  --git-only           only ingest git history
-  --claude-only        only Claude side: skills + transcripts (no Codex/git)
-`;
+const stringArg = (name: string, value: string | undefined): string[] =>
+    value === undefined ? [] : [`--${name}=${value}`];
+
+const optionValue = <A>(value: Option.Option<A>): A | undefined =>
+    Option.getOrUndefined(value);
 
 function flag(name: string, args: string[]): string | undefined {
     const found = args.find((a) => a.startsWith(`--${name}=`));
@@ -1046,109 +1020,324 @@ LIMIT ${limit};`;
         }
     });
 
-const dispatch = (
-    cmd: string | undefined,
-    rest: string[],
-): Effect.Effect<void, unknown, SurrealClient> | null => {
-    switch (cmd) {
-        case "ingest":
-            return cmdIngest(rest);
-        case "derive-signals":
-            return cmdDeriveSignals(rest);
-        case "ingest-insights":
-            return cmdIngestInsights();
-        case "insights":
-            return cmdInsights(rest);
-        case "dashboard":
-            if (rest[0] === "serve") {
-                serveDashboard(rest.slice(1));
-                return Effect.succeed(undefined);
-            }
-            return cmdDashboard(rest);
-        case "search":
-            return cmdSearch(rest);
-        case "stats":
-            return cmdStats(rest);
-        case "recent":
-            return cmdRecent(rest);
-        case "unused":
-            return cmdUnused(rest);
-        case "taste":
-            return cmdTaste(rest);
-        case "pairs":
-            return cmdPairs(rest);
-        case "recovery":
-            return cmdRecovery(rest);
-        case "project":
-            return cmdProject(rest);
-        case "guidance":
-        case "session":
-        case "self-improve": {
-            const parsed = parseSelfImproveArgs(cmd, rest);
-            const effect =
-                parsed.command === "guidance-next" ? guidanceNext() :
-                parsed.command === "session-summary" ? sessionSummary() :
-                selfImproveWeekly();
-            return Effect.gen(function* () {
-                const result = yield* effect;
-                console.log(JSON.stringify(result, null, 2));
-            });
-        }
-        default:
-            return null;
-    }
+const positiveLimit = (fallback: number) =>
+    Flag.integer("limit").pipe(Flag.withDefault(fallback));
+const optionalSince = Flag.integer("since").pipe(Flag.optional);
+const jsonFlag = Flag.boolean("json").pipe(Flag.withDefault(false));
+const checkFlag = Flag.boolean("check").pipe(Flag.withDefault(false));
+
+const ingestCommand = Command.make(
+    "ingest",
+    {
+        skillsOnly: Flag.boolean("skills-only").pipe(Flag.withDefault(false)),
+        transcriptsOnly: Flag.boolean("transcripts-only").pipe(Flag.withDefault(false)),
+        codexOnly: Flag.boolean("codex-only").pipe(Flag.withDefault(false)),
+        gitOnly: Flag.boolean("git-only").pipe(Flag.withDefault(false)),
+        claudeOnly: Flag.boolean("claude-only").pipe(Flag.withDefault(false)),
+        since: optionalSince,
+    },
+    ({ skillsOnly, transcriptsOnly, codexOnly, gitOnly, claudeOnly, since }) =>
+        cmdIngest([
+            ...boolArg("skills-only", skillsOnly),
+            ...boolArg("transcripts-only", transcriptsOnly),
+            ...boolArg("codex-only", codexOnly),
+            ...boolArg("git-only", gitOnly),
+            ...boolArg("claude-only", claudeOnly),
+            ...intArg("since", optionValue(since)),
+        ]),
+).pipe(Command.withDescription("Ingest skills, transcripts, Codex sessions, and git history"));
+
+const ingestInsightsCommand = Command.make("ingest-insights", {}, () =>
+    cmdIngestInsights(),
+).pipe(Command.withDescription("Ingest Claude insight artifacts"));
+
+const deriveSignalsCommand = Command.make(
+    "derive-signals",
+    { since: optionalSince },
+    ({ since }) => cmdDeriveSignals(intArg("since", optionValue(since))),
+).pipe(Command.withDescription("Derive friction, diagnostic, recommendation, and recovery signals"));
+
+const insightView = Argument.choice("view", [
+    "schema",
+    "repositories",
+    "checkouts",
+    "git",
+    "friction",
+    "tools",
+    "sessions",
+    "graph-health",
+] as const).pipe(Argument.withDefault("repositories"));
+
+const insightsCommand = Command.make(
+    "insights",
+    {
+        view: insightView,
+        limit: positiveLimit(20),
+    },
+    ({ view, limit }) => cmdInsights([view, `--limit=${limit}`]),
+).pipe(Command.withDescription("Run built-in graph insight queries"));
+
+const dashboardServeCommand = Command.make(
+    "serve",
+    { port: Flag.integer("port").pipe(Flag.withDefault(1738)) },
+    ({ port }) => Effect.sync(() => serveDashboard([`--port=${port}`])),
+).pipe(Command.withDescription("Serve the generated dashboard locally"));
+
+const dashboardCommand = Command.make(
+    "dashboard",
+    {
+        limit: positiveLimit(12),
+        out: Flag.string("out").pipe(Flag.optional),
+    },
+    ({ limit, out }) => cmdDashboard([`--limit=${limit}`, ...stringArg("out", optionValue(out))]),
+).pipe(
+    Command.withDescription("Write a static evidence dashboard"),
+    Command.withSubcommands([dashboardServeCommand]),
+);
+
+const searchCommand = Command.make(
+    "search",
+    {
+        query: Argument.string("query").pipe(Argument.variadic({ min: 1 })),
+        limit: positiveLimit(10),
+    },
+    ({ query, limit }) => cmdSearch([...query, `--limit=${limit}`]),
+).pipe(Command.withDescription("Search skills by name or description"));
+
+const statsCommand = Command.make(
+    "stats",
+    { skill: Argument.string("skill") },
+    ({ skill }) => cmdStats([skill]),
+).pipe(Command.withDescription("Show detailed stats for one skill"));
+
+const recentCommand = Command.make(
+    "recent",
+    { limit: positiveLimit(20) },
+    ({ limit }) => cmdRecent([`--limit=${limit}`]),
+).pipe(Command.withDescription("Show recent skill invocations"));
+
+const unusedCommand = Command.make(
+    "unused",
+    { days: Flag.integer("days").pipe(Flag.withDefault(7)) },
+    ({ days }) => cmdUnused([`--days=${days}`]),
+).pipe(Command.withDescription("List skills unused within a time window"));
+
+const tasteCommand = Command.make(
+    "taste",
+    { limit: positiveLimit(30) },
+    ({ limit }) => cmdTaste([`--limit=${limit}`]),
+).pipe(Command.withDescription("Rank skills by usage, corrections, proposals, and produced commits"));
+
+const pairsCommand = Command.make(
+    "pairs",
+    {
+        skill: Argument.string("skill"),
+        limit: positiveLimit(20),
+    },
+    ({ skill, limit }) => cmdPairs([skill, `--limit=${limit}`]),
+).pipe(Command.withDescription("Show co-occurring skills"));
+
+const recoveryCommand = Command.make(
+    "recovery",
+    { limit: positiveLimit(20) },
+    ({ limit }) => cmdRecovery([`--limit=${limit}`]),
+).pipe(Command.withDescription("Show skills that recovered failed work"));
+
+const projectContextCommand = Command.make(
+    "context",
+    { json: jsonFlag },
+    ({ json }) => cmdProject(["context", ...boolArg("json", json)]),
+).pipe(Command.withDescription("Print repo grounding context"));
+
+const projectVerifyCommand = Command.make(
+    "verify",
+    { json: jsonFlag },
+    ({ json }) => cmdProject(["verify", ...boolArg("json", json)]),
+).pipe(Command.withDescription("Print verification checks for the current diff"));
+
+const projectCommand = Command.make("project").pipe(
+    Command.withDescription("Ground agent work in the current repository"),
+    Command.withSubcommands([projectContextCommand, projectVerifyCommand]),
+);
+
+const jsonSelfImprove = (cmd: "guidance" | "session" | "self-improve", rest: string[]) => {
+    const parsed = parseSelfImproveArgs(cmd, rest);
+    const effect =
+        parsed.command === "guidance-next" ? guidanceNext() :
+        parsed.command === "session-summary" ? sessionSummary() :
+        selfImproveWeekly();
+    return Effect.gen(function* () {
+        const result = yield* effect;
+        console.log(JSON.stringify(result, null, 2));
+    });
 };
 
-async function main() {
-    const [, , cmd, ...rest] = process.argv;
-    if (cmd === undefined || cmd === "help" || cmd === "--help" || cmd === "-h") {
-        console.log(HELP);
-        return;
-    }
-    if (cmd === "version" || cmd === "--version" || cmd === "-V") {
-        await printVersion(rest, liveVersionDeps);
-        return;
-    }
-    if (cmd === "update" || cmd === "upgrade") {
-        await updateAgentctl(rest, liveVersionDeps);
-        return;
-    }
-    if (cmd === "tui") {
+const guidanceNextCommand = Command.make(
+    "next",
+    { json: jsonFlag },
+    ({ json }) => jsonSelfImprove("guidance", ["next", ...boolArg("json", json)]),
+).pipe(Command.withDescription("Return the next self-improvement guidance"));
+
+const guidanceCommand = Command.make("guidance").pipe(
+    Command.withDescription("Self-improvement guidance queries"),
+    Command.withSubcommands([guidanceNextCommand]),
+);
+
+const sessionSummaryCommand = Command.make(
+    "summary",
+    { json: jsonFlag },
+    ({ json }) => jsonSelfImprove("session", ["summary", ...boolArg("json", json)]),
+).pipe(Command.withDescription("Summarize recent session evidence"));
+
+const sessionCommand = Command.make("session").pipe(
+    Command.withDescription("Session evidence queries"),
+    Command.withSubcommands([sessionSummaryCommand]),
+);
+
+const selfImproveWeeklyCommand = Command.make(
+    "weekly",
+    { json: jsonFlag },
+    ({ json }) => jsonSelfImprove("self-improve", ["weekly", ...boolArg("json", json)]),
+).pipe(Command.withDescription("Run weekly self-improvement evidence query"));
+
+const selfImproveCommand = Command.make("self-improve").pipe(
+    Command.withDescription("Self-improvement evidence queries"),
+    Command.withSubcommands([selfImproveWeeklyCommand]),
+);
+
+const versionCommand = Command.make(
+    "version",
+    {
+        check: checkFlag,
+        json: jsonFlag,
+    },
+    ({ check, json }) =>
+        Effect.promise(() =>
+            printVersion([...boolArg("check", check), ...boolArg("json", json)], liveVersionDeps),
+        ),
+).pipe(Command.withDescription("Print the installed version and optionally check GitHub releases"));
+
+const updateCommand = Command.make(
+    "update",
+    {
+        check: checkFlag,
+        json: jsonFlag,
+    },
+    ({ check, json }) =>
+        Effect.promise(() =>
+            updateAgentctl([...boolArg("check", check), ...boolArg("json", json)], liveVersionDeps),
+        ),
+).pipe(Command.withDescription("Update agentctl from the latest GitHub release"));
+
+const tuiCommand = Command.make("tui", {}, () =>
+    Effect.promise(async () => {
         // TUI manages its own AppLayer scope so the SurrealDB connection
         // outlives the React tree. Dynamic import keeps React/opentui out
         // of the load path for non-TUI commands.
         const { runTui } = await import("../tui/index.tsx");
         await runTui();
+    }),
+).pipe(Command.withDescription("Open the interactive dashboard"));
+
+const installCommand = Command.make("install", {}, () =>
+    Effect.promise(() => cmdInstall()),
+).pipe(Command.withDescription("One-shot setup: daemon, watcher, and symlink"));
+
+const daemonStatusCommand = Command.make(
+    "status",
+    { json: jsonFlag },
+    ({ json }) => Effect.promise(() => cmdDaemon(["status", ...boolArg("json", json)])),
+).pipe(Command.withDescription("Show daemon and watcher status"));
+
+const daemonStartCommand = Command.make("start", {}, () =>
+    Effect.promise(() => cmdDaemon(["start"])),
+).pipe(Command.withDescription("Start the daemon and watcher"));
+
+const daemonStopCommand = Command.make("stop", {}, () =>
+    Effect.promise(() => cmdDaemon(["stop"])),
+).pipe(Command.withDescription("Stop the daemon and watcher without deleting plists"));
+
+const daemonRestartCommand = Command.make("restart", {}, () =>
+    Effect.promise(() => cmdDaemon(["restart"])),
+).pipe(Command.withDescription("Restart the daemon and watcher"));
+
+const daemonCommand = Command.make("daemon").pipe(
+    Command.withDescription("Manage local launchd services"),
+    Command.withSubcommands([
+        daemonStatusCommand,
+        daemonStartCommand,
+        daemonStopCommand,
+        daemonRestartCommand,
+    ]),
+);
+
+const doctorCommand = Command.make(
+    "doctor",
+    { json: jsonFlag },
+    ({ json }) => Effect.promise(() => cmdDoctor(boolArg("json", json))),
+).pipe(Command.withDescription("Check local installation health"));
+
+const uninstallCommand = Command.make("uninstall", {}, () =>
+    Effect.promise(() => cmdUninstall()),
+).pipe(Command.withDescription("Remove launchd plists and the agentctl symlink"));
+
+export const rootCommand = Command.make("agentctl").pipe(
+    Command.withDescription("agent telemetry & taste graph"),
+    Command.withSubcommands([
+        ingestCommand,
+        ingestInsightsCommand,
+        deriveSignalsCommand,
+        insightsCommand,
+        dashboardCommand,
+        searchCommand,
+        statsCommand,
+        recentCommand,
+        unusedCommand,
+        tasteCommand,
+        pairsCommand,
+        recoveryCommand,
+        projectCommand,
+        guidanceCommand,
+        sessionCommand,
+        selfImproveCommand,
+        versionCommand,
+        updateCommand,
+        tuiCommand,
+        installCommand,
+        daemonCommand,
+        doctorCommand,
+        uninstallCommand,
+    ]),
+);
+
+export const runCli = (args: ReadonlyArray<string>): Effect.Effect<void, unknown, SurrealClient> =>
+    Command.runWith(rootCommand, { version: AGENTCTL_VERSION })(args) as unknown as Effect.Effect<void, unknown, SurrealClient>;
+
+async function main() {
+    const [, , ...args] = process.argv;
+    if (args[0] === undefined || args[0] === "help") {
+        await Effect.runPromise(runCli(["--help"]).pipe(Effect.provide(AppLayer), Effect.scoped) as Effect.Effect<void>);
         return;
     }
-    if (cmd === "install") {
-        await cmdInstall();
+    if (args[0] === "-V") {
+        await printVersion(args.slice(1), liveVersionDeps);
         return;
     }
-    if (cmd === "daemon") {
-        await cmdDaemon(rest);
+    if (args[0] === "upgrade") {
+        await Effect.runPromise(runCli(["update", ...args.slice(1)]).pipe(Effect.provide(AppLayer), Effect.scoped) as Effect.Effect<void>);
         return;
-    }
-    if (cmd === "doctor") {
-        await cmdDoctor(rest);
-        return;
-    }
-    if (cmd === "uninstall") {
-        await cmdUninstall();
-        return;
-    }
-    const program = dispatch(cmd, rest);
-    if (program === null) {
-        console.error(`agentctl: unknown command "${cmd}"`);
-        console.error(HELP);
-        process.exit(1);
     }
     await Effect.runPromise(
-        program.pipe(Effect.provide(AppLayer), Effect.scoped) as Effect.Effect<void>,
+        runCli(args).pipe(Effect.provide(AppLayer), Effect.scoped) as Effect.Effect<void>,
     );
 }
 
-main().catch((err) => {
-    console.error("agentctl error:", err);
-    process.exit(1);
-});
+if (import.meta.main) {
+    main().catch((err) => {
+        if (err && typeof err === "object" && "_tag" in err && err._tag === "ShowHelp") {
+            process.exit(1);
+        }
+        console.error("agentctl error:", err);
+        process.exit(1);
+    });
+}
