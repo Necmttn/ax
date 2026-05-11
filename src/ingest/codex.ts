@@ -26,6 +26,7 @@ import { toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 const CODEX_ROOT = process.env.AGENTCTL_CODEX_DIR ?? join(homedir(), ".codex", "sessions");
 const DEFAULT_CODEX_RAW_MAX_BYTES = 5 * 1024 * 1024;
 const DEFAULT_CODEX_PROGRESS_EVERY = 10;
+const DEFAULT_CODEX_FLUSH_EVERY = 500;
 
 interface CodexSession {
     id: string;
@@ -108,6 +109,12 @@ export function codexProgressEvery(raw: string | undefined): number {
     if (!raw) return DEFAULT_CODEX_PROGRESS_EVERY;
     const parsed = Number.parseInt(raw, 10);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CODEX_PROGRESS_EVERY;
+}
+
+export function codexFlushEvery(raw: string | undefined): number {
+    if (!raw) return DEFAULT_CODEX_FLUSH_EVERY;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CODEX_FLUSH_EVERY;
 }
 
 function codexRawMaxBytes(raw = process.env.AGENTCTL_CODEX_RAW_MAX_BYTES): number {
@@ -257,6 +264,15 @@ interface CodexExtract {
     planSnapshots: PlanSnapshotWrite[];
 }
 
+interface MutableCodexExtract {
+    session: CodexSession | null;
+    turns: CodexTurn[];
+    invocations: CodexInvocation[];
+    toolCalls: MutableToolCallWrite[];
+    skillRelations: ToolCallSkillRelationWrite[];
+    planSnapshots: PlanSnapshotWrite[];
+}
+
 function createCodexExtractor(filePath: string) {
     let session: CodexSession | null = null;
     const turns: CodexTurn[] = [];
@@ -269,6 +285,8 @@ function createCodexExtractor(filePath: string) {
     const planCreatedAtBySource = new Map<string, string>();
     const planSnapshotCountsBySource = new Map<string, number>();
     const anonymousFunctionCallCountsByTurn = new Map<number, number>();
+    const pendingToolCallKeys = new Set<string>();
+    const flushedToolCallKeys = new Set<string>();
     let seq = 0;
 
     const nextAnonymousFunctionCallId = (): string => {
@@ -335,9 +353,11 @@ function createCodexExtractor(filePath: string) {
 
         toolCalls.push(call);
         toolCallsByCallId.set(callId, call);
+        pendingToolCallKeys.add(toolCallKey);
         const pendingResult = pendingToolResultsByCallId.get(callId);
         if (pendingResult) {
             applyToolResult(call, pendingResult);
+            pendingToolCallKeys.delete(toolCallKey);
             pendingToolResultsByCallId.delete(callId);
         }
 
@@ -416,9 +436,69 @@ function createCodexExtractor(filePath: string) {
         const call = toolCallsByCallId.get(callId);
         if (call) {
             applyToolResult(call, result);
+            pendingToolCallKeys.delete(toolCallRecordKey({
+                sessionId: call.sessionId,
+                seq: call.seq,
+                callId: call.callId ?? null,
+            }));
         } else {
             pendingToolResultsByCallId.set(callId, result);
         }
+    };
+
+    const take = <T>(items: T[], predicate: (item: T) => boolean): T[] => {
+        const taken: T[] = [];
+        let write = 0;
+        for (const item of items) {
+            if (predicate(item)) {
+                taken.push(item);
+            } else {
+                items[write] = item;
+                write += 1;
+            }
+        }
+        items.length = write;
+        return taken;
+    };
+
+    const drain = (includePendingToolCalls = false): MutableCodexExtract => {
+        const flushableToolCallKeys = new Set<string>();
+        const drainedToolCalls = take(toolCalls, (call) => {
+            const key = toolCallRecordKey({
+                sessionId: call.sessionId,
+                seq: call.seq,
+                callId: call.callId ?? null,
+            });
+            if (flushedToolCallKeys.has(key)) return false;
+            if (!includePendingToolCalls && pendingToolCallKeys.has(key)) return false;
+            flushedToolCallKeys.add(key);
+            pendingToolCallKeys.delete(key);
+            flushableToolCallKeys.add(key);
+            if (call.callId) toolCallsByCallId.delete(call.callId);
+            return true;
+        });
+        const drainedTurns = turns.splice(0, turns.length);
+        const drainedInvocations = take(invocations, (invocation) =>
+            flushableToolCallKeys.has(toolCallRecordKey({
+                sessionId: invocation.session,
+                seq: invocation.seq,
+                callId: null,
+            })) || drainedToolCalls.some((call) => call.sessionId === invocation.session && call.seq === invocation.seq),
+        );
+        const drainedRelations = take(skillRelations, (relation) =>
+            flushableToolCallKeys.has(relation.toolCallKey),
+        );
+        const drainedSnapshots = take(planSnapshots, (snapshot) =>
+            snapshot.toolCallKey === null || snapshot.toolCallKey === undefined || flushableToolCallKeys.has(snapshot.toolCallKey),
+        );
+        return {
+            session,
+            turns: drainedTurns,
+            invocations: drainedInvocations,
+            toolCalls: drainedToolCalls,
+            skillRelations: drainedRelations,
+            planSnapshots: drainedSnapshots,
+        };
     };
 
     return {
@@ -490,16 +570,18 @@ function createCodexExtractor(filePath: string) {
             }
         },
         finish(): CodexExtract | null {
+            const remaining = drain(true);
             if (!session) return null;
             return {
                 session,
-                turns,
-                invocations,
-                toolCalls,
-                skillRelations,
-                planSnapshots,
+                turns: remaining.turns,
+                invocations: remaining.invocations,
+                toolCalls: remaining.toolCalls,
+                skillRelations: remaining.skillRelations,
+                planSnapshots: remaining.planSnapshots,
             };
         },
+        drain,
     };
 }
 
@@ -511,19 +593,37 @@ export function __testExtractCodexJsonlLines(lines: Iterable<string>): CodexExtr
     return extractor.finish();
 }
 
-async function extractCodexFile(filePath: string): Promise<CodexExtract | null> {
-    const fh = await open(filePath, "r");
-    const extractor = createCodexExtractor(filePath);
-
-    try {
-        for await (const line of fh.readLines()) {
-            extractor.processLine(line);
+export function __testStreamCodexJsonlLines(lines: Iterable<string>, every: number): CodexExtract[] {
+    const extractor = createCodexExtractor("codex-test.jsonl");
+    const batches: CodexExtract[] = [];
+    let seen = 0;
+    for (const line of lines) {
+        extractor.processLine(line);
+        seen += 1;
+        if (seen % every === 0) {
+            const batch = extractor.drain(false);
+            if (batch.session && (
+                batch.turns.length > 0 ||
+                batch.invocations.length > 0 ||
+                batch.toolCalls.length > 0 ||
+                batch.skillRelations.length > 0 ||
+                batch.planSnapshots.length > 0
+            )) {
+                batches.push({ ...batch, session: batch.session });
+            }
         }
-    } finally {
-        await fh.close();
     }
-
-    return extractor.finish();
+    const final = extractor.drain(true);
+    if (final.session && (
+        final.turns.length > 0 ||
+        final.invocations.length > 0 ||
+        final.toolCalls.length > 0 ||
+        final.skillRelations.length > 0 ||
+        final.planSnapshots.length > 0
+    )) {
+        batches.push({ ...final, session: final.session });
+    }
+    return batches;
 }
 
 const relateToolCallSkills = (relations: ToolCallSkillRelationWrite[]) =>
@@ -542,6 +642,41 @@ const writePlanSnapshots = (snapshots: PlanSnapshotWrite[]) =>
             concurrency: 4,
             discard: true,
         });
+    });
+
+const writeTurns = (turns: readonly CodexTurn[]) =>
+    Effect.gen(function* () {
+        if (turns.length === 0) return;
+        const db = yield* SurrealClient;
+        const turnStmts = turns.map(
+            (t) =>
+                `UPSERT turn:\`${turnRecordKey(t.session, t.seq)}\` CONTENT { session: session:\`${t.session}\`, seq: ${t.seq}, ts: d"${t.ts}", role: ${JSON.stringify(t.role)}, text_excerpt: ${t.text_excerpt === null ? "NONE" : JSON.stringify(t.text_excerpt)}, has_tool_use: ${t.has_tool_use}, has_error: false };`,
+        );
+        for (let i = 0; i < turnStmts.length; i += 500) {
+            yield* db.query(turnStmts.slice(i, i + 500).join(""));
+        }
+    });
+
+const writeSyntheticSkillsAndInvocations = (invocations: readonly CodexInvocation[]) =>
+    Effect.gen(function* () {
+        if (invocations.length === 0) return;
+        const db = yield* SurrealClient;
+        const codexTools = new Set(invocations.map((i) => i.skill));
+        const skillStmts = [...codexTools].map(
+            (name) =>
+                `UPSERT skill:\`${skillRecordKey(name)}\` MERGE { name: ${JSON.stringify(name)}, scope: "codex-tool", dir_path: "(synthetic)", content_hash: "codex" };`,
+        );
+        if (skillStmts.length > 0) {
+            yield* db.query(skillStmts.join(""));
+        }
+
+        const invStmts = invocations.map(
+            (inv) =>
+                `RELATE turn:\`${turnRecordKey(inv.session, inv.seq)}\`->invoked->skill:\`${skillRecordKey(inv.skill)}\` SET ts = d"${inv.ts}", args = ${JSON.stringify(JSON.stringify(inv.args))}, turn_has_error = false;`,
+        );
+        for (let i = 0; i < invStmts.length; i += 500) {
+            yield* db.query(invStmts.slice(i, i + 500).join(""));
+        }
     });
 
 interface CodexIngestOpts {
@@ -569,6 +704,7 @@ export const ingestCodex = (
         if (opts.onProgress) yield* opts.onProgress({ totalFiles: files.length, totalBytes });
         const rawMaxBytes = codexRawMaxBytes();
         const progressEvery = codexProgressEvery(process.env.AGENTCTL_CODEX_PROGRESS_EVERY);
+        const flushEvery = codexFlushEvery(process.env.AGENTCTL_CODEX_FLUSH_EVERY);
 
         let fileCount = 0;
         let byteCount = 0;
@@ -608,33 +744,95 @@ export const ingestCodex = (
                 });
             }
 
-            const extracted = yield* Effect.promise(() => extractCodexFile(filePath));
-            if (!extracted) continue;
-            fileCount += 1;
-            byteCount += sizeBytes;
-            if (opts.onProgress) {
-                yield* opts.onProgress({
-                    currentFile: index + 1,
-                    totalFiles: files.length,
-                    currentFileBytes: sizeBytes,
-                    totalBytes,
-                    files: fileCount,
-                    bytes: byteCount,
-                    fileTurns: extracted.turns.length,
-                    fileToolCalls: extracted.toolCalls.length,
-                    sessions: sessionCount,
-                    turns: turnCount,
-                    invocations: invCount,
-                    toolCalls: toolCallCount,
-                    planSnapshots: planSnapshotCount,
+            const extractor = createCodexExtractor(filePath);
+            let lineCount = 0;
+            let currentSession: CodexSession | null = null;
+            let sessionUpserted = false;
+            let fileTurns = 0;
+            let fileInvocations = 0;
+            let fileToolCalls = 0;
+            let filePlanSnapshots = 0;
+
+            const upsertSession = (
+                session: CodexSession,
+                rawPointer: string | null,
+            ) =>
+                db.upsert(new RecordId("session", session.id), {
+                    project: session.cwd ?? undefined,
+                    cwd: session.cwd ?? undefined,
+                    model: session.model_provider ?? undefined,
+                    source: "codex",
+                    started_at: new Date(session.started_at),
+                    ended_at: new Date(session.ended_at),
+                    raw_file: rawPointer ?? undefined,
                 });
+
+            const writeBatch = (batch: MutableCodexExtract) =>
+                Effect.gen(function* () {
+                    if (!batch.session) return;
+                    currentSession = batch.session;
+                    if (!sessionUpserted) {
+                        yield* upsertSession(batch.session, null);
+                        sessionUpserted = true;
+                    }
+                    yield* writeTurns(batch.turns);
+                    turnCount += batch.turns.length;
+                    fileTurns += batch.turns.length;
+                    yield* writeToolCalls(batch.toolCalls);
+                    toolCallCount += batch.toolCalls.length;
+                    fileToolCalls += batch.toolCalls.length;
+                    yield* relateToolCallSkills(batch.skillRelations);
+                    yield* writePlanSnapshots(batch.planSnapshots);
+                    planSnapshotCount += batch.planSnapshots.length;
+                    filePlanSnapshots += batch.planSnapshots.length;
+                    yield* writeSyntheticSkillsAndInvocations(batch.invocations);
+                    invCount += batch.invocations.length;
+                    fileInvocations += batch.invocations.length;
+                });
+
+            const fh = yield* Effect.promise(() => open(filePath, "r"));
+            try {
+                const iterator = fh.readLines()[Symbol.asyncIterator]();
+                while (true) {
+                    const next = yield* Effect.promise(() => iterator.next());
+                    if (next.done) break;
+                    extractor.processLine(next.value);
+                    lineCount += 1;
+                    if (lineCount % flushEvery === 0) {
+                        yield* writeBatch(extractor.drain(false));
+                        if (opts.onProgress && currentSession) {
+                            yield* opts.onProgress({
+                                currentFile: index + 1,
+                                totalFiles: files.length,
+                                currentFileBytes: sizeBytes,
+                                totalBytes,
+                                files: fileCount,
+                                bytes: byteCount,
+                                fileTurns,
+                                fileToolCalls,
+                                sessions: sessionCount + (sessionUpserted ? 1 : 0),
+                                turns: turnCount,
+                                invocations: invCount,
+                                toolCalls: toolCallCount,
+                                planSnapshots: planSnapshotCount,
+                            });
+                        }
+                    }
+                }
+            } finally {
+                yield* Effect.promise(() => fh.close());
             }
+
+            const finalBatch = extractor.drain(true);
+            yield* writeBatch(finalBatch);
+            const completedSession = finalBatch.session ?? currentSession;
+            if (!completedSession) continue;
 
             // Snapshot the raw codex jsonl into the `codex_artifacts` bucket as
             // best-effort cold storage for modest files. Large Codex sessions
             // are parsed line-by-line above; reading them again just to copy the
             // raw transcript can dominate benchmark runs.
-            const bucketPath = `${extracted.session.id}.jsonl`;
+            const bucketPath = `${completedSession.id}.jsonl`;
             const rawContent = snapshotRaw
                 ? yield* Effect.promise(async () => {
                       try {
@@ -652,65 +850,19 @@ export const ingestCodex = (
                         Effect.map(() => filePointer("codex_artifacts", bucketPath)),
                         Effect.catch((err) =>
                             Effect.logDebug("codex raw snapshot failed", {
-                                sessionId: extracted.session.id,
+                                sessionId: completedSession.id,
                                 message: err.message,
                             }).pipe(Effect.as(null as string | null)),
                         ),
                     );
             }
 
-            // SurrealDB v3 rejects JS `null` for `option<T>` fields (CBOR
-            // encodes null as SurrealQL NULL, not NONE). Coalesce to
-            // `undefined` so the JS client maps it to NONE. See issue #37.
-            yield* db.upsert(new RecordId("session", extracted.session.id), {
-                project: extracted.session.cwd ?? undefined,
-                cwd: extracted.session.cwd ?? undefined,
-                model: extracted.session.model_provider ?? undefined,
-                source: "codex",
-                started_at: new Date(extracted.session.started_at),
-                ended_at: new Date(extracted.session.ended_at),
-                raw_file: rawPointer ?? undefined,
-            });
+            // Final session upsert carries the latest ended_at and raw artifact
+            // pointer after the streaming writes have completed.
+            yield* upsertSession(completedSession, rawPointer);
+            fileCount += 1;
+            byteCount += sizeBytes;
             sessionCount += 1;
-
-            // Bulk turns
-            const turnStmts = extracted.turns.map(
-                (t) =>
-                    `UPSERT turn:\`${turnRecordKey(t.session, t.seq)}\` CONTENT { session: session:\`${t.session}\`, seq: ${t.seq}, ts: d"${t.ts}", role: ${JSON.stringify(t.role)}, text_excerpt: ${t.text_excerpt === null ? "NONE" : JSON.stringify(t.text_excerpt)}, has_tool_use: ${t.has_tool_use}, has_error: false };`,
-            );
-            for (let i = 0; i < turnStmts.length; i += 500) {
-                yield* db.query(turnStmts.slice(i, i + 500).join(""));
-            }
-            turnCount += extracted.turns.length;
-
-            yield* writeToolCalls(extracted.toolCalls);
-            toolCallCount += extracted.toolCalls.length;
-            yield* relateToolCallSkills(extracted.skillRelations);
-            yield* writePlanSnapshots(extracted.planSnapshots);
-            planSnapshotCount += extracted.planSnapshots.length;
-
-            // Preserve legacy synthetic Codex skill records and
-            // turn->invoked->skill edges alongside the canonical evidence graph.
-            const codexTools = new Set(extracted.invocations.map((i) => i.skill));
-            const skillStmts = [...codexTools].map(
-                (name) =>
-                    `UPSERT skill:\`${skillRecordKey(name)}\` MERGE { name: ${JSON.stringify(name)}, scope: "codex-tool", dir_path: "(synthetic)", content_hash: "codex" };`,
-            );
-            if (skillStmts.length > 0) {
-                yield* db.query(skillStmts.join(""));
-            }
-
-            // Codex tool errors live on the canonical tool_call records. The
-            // legacy turn->skill edge never had turn-level error data, so keep
-            // the old false value while preserving the edge shape from issue #31.
-            const invStmts = extracted.invocations.map(
-                (inv) =>
-                    `RELATE turn:\`${turnRecordKey(inv.session, inv.seq)}\`->invoked->skill:\`${skillRecordKey(inv.skill)}\` SET ts = d"${inv.ts}", args = ${JSON.stringify(JSON.stringify(inv.args))}, turn_has_error = false;`,
-            );
-            for (let i = 0; i < invStmts.length; i += 500) {
-                yield* db.query(invStmts.slice(i, i + 500).join(""));
-            }
-            invCount += extracted.invocations.length;
 
             if (!snapshotRaw) {
                 yield* Effect.logDebug("codex file ingested", {
@@ -718,10 +870,11 @@ export const ingestCodex = (
                     totalFiles: files.length,
                     bytes: formatBytes(byteCount),
                     totalBytes: formatBytes(totalBytes),
-                    sessionId: extracted.session.id,
+                    sessionId: completedSession.id,
                     ms: Date.now() - fileStartedAt,
-                    turns: extracted.turns.length,
-                    toolCalls: extracted.toolCalls.length,
+                    lines: lineCount,
+                    turns: fileTurns,
+                    toolCalls: fileToolCalls,
                 });
             }
 
@@ -733,6 +886,8 @@ export const ingestCodex = (
                     totalBytes,
                     files: fileCount,
                     bytes: byteCount,
+                    fileTurns,
+                    fileToolCalls,
                     sessions: sessionCount,
                     turns: turnCount,
                     invocations: invCount,
