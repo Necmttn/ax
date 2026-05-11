@@ -3,11 +3,11 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
 import { Effect } from "effect";
-import { RecordId, SurrealClient } from "../lib/db.ts";
+import { SurrealClient } from "../lib/db.ts";
 import { defaultSkillDirs } from "../lib/paths.ts";
-import { skillRecordKey } from "../lib/skill-id.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
+import { upsertSkillByName } from "./skill-upsert.ts";
 
 interface ParsedSkill {
     name: string;
@@ -163,8 +163,7 @@ export const ingestSkills = (): Effect.Effect<{ count: number }, DbError, Surrea
                     .update(item.skill.body)
                     .digest("hex")
                     .slice(0, 16);
-                const id = new RecordId("skill", skillRecordKey(item.skill.name));
-                return db.upsert(id, {
+                return upsertSkillByName(db, {
                     name: item.skill.name,
                     scope: item.scope,
                     dir_path: item.dir_path,

@@ -4,10 +4,10 @@ import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
 import { Effect } from "effect";
-import { RecordId, SurrealClient } from "../lib/db.ts";
-import { skillRecordKey } from "../lib/skill-id.ts";
+import { SurrealClient } from "../lib/db.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
+import { upsertSkillByName } from "./skill-upsert.ts";
 
 // Slash commands live alongside skills but in `~/.claude/commands/` (and
 // per-project `<repo>/.claude/commands/`) and aren't indexed by ingestSkills.
@@ -245,10 +245,9 @@ export const ingestCommands = (): Effect.Effect<{ count: number }, DbError, Surr
                     .update(item.parsed.body)
                     .digest("hex")
                     .slice(0, 16);
-                const id = new RecordId("skill", skillRecordKey(item.parsed.name));
                 // Schema is `option<string>` for description and bytes, so
                 // coalesce to `undefined` (NONE) instead of leaving JS null.
-                return db.upsert(id, {
+                return upsertSkillByName(db, {
                     name: item.parsed.name,
                     scope: item.scope,
                     dir_path: item.dir_path,
