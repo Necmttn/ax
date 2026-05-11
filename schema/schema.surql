@@ -445,6 +445,54 @@ DEFINE FIELD last_seen     ON user_message_ngram TYPE option<datetime>;
 DEFINE INDEX user_message_ngram_n_count ON user_message_ngram FIELDS n, count;
 DEFINE INDEX user_message_ngram_text ON user_message_ngram FIELDS ngram;
 
+DEFINE TABLE workflow_epoch SCHEMAFULL;
+DEFINE FIELD name          ON workflow_epoch TYPE string;
+DEFINE FIELD starts_at     ON workflow_epoch TYPE option<datetime>;
+DEFINE FIELD ends_at       ON workflow_epoch TYPE option<datetime>;
+DEFINE FIELD evidence_kind ON workflow_epoch TYPE option<string>;
+DEFINE FIELD evidence_ref  ON workflow_epoch TYPE option<string>;
+DEFINE FIELD notes         ON workflow_epoch TYPE option<string>;
+DEFINE INDEX workflow_epoch_name ON workflow_epoch FIELDS name UNIQUE;
+
+DEFINE TABLE session_token_usage SCHEMAFULL;
+DEFINE FIELD session       ON session_token_usage TYPE record<session>;
+DEFINE FIELD source        ON session_token_usage TYPE string;
+DEFINE FIELD workflow_epoch ON session_token_usage TYPE option<record<workflow_epoch>>;
+DEFINE FIELD model         ON session_token_usage TYPE option<string>;
+DEFINE FIELD prompt_tokens ON session_token_usage TYPE option<int>;
+DEFINE FIELD completion_tokens ON session_token_usage TYPE option<int>;
+DEFINE FIELD cache_creation_input_tokens ON session_token_usage TYPE option<int>;
+DEFINE FIELD cache_read_input_tokens ON session_token_usage TYPE option<int>;
+DEFINE FIELD estimated_tokens ON session_token_usage TYPE int;
+DEFINE FIELD transcript_bytes ON session_token_usage TYPE int;
+DEFINE FIELD context_window ON session_token_usage TYPE option<int>;
+DEFINE FIELD labels        ON session_token_usage TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD metrics       ON session_token_usage TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD ts            ON session_token_usage TYPE datetime DEFAULT time::now();
+DEFINE INDEX session_token_usage_session ON session_token_usage FIELDS session UNIQUE;
+DEFINE INDEX session_token_usage_epoch ON session_token_usage FIELDS workflow_epoch, source, ts;
+
+DEFINE TABLE session_health SCHEMAFULL;
+DEFINE FIELD session       ON session_health TYPE record<session>;
+DEFINE FIELD source        ON session_health TYPE string;
+DEFINE FIELD workflow_epoch ON session_health TYPE option<record<workflow_epoch>>;
+DEFINE FIELD turns         ON session_health TYPE int DEFAULT 0;
+DEFINE FIELD tool_calls    ON session_health TYPE int DEFAULT 0;
+DEFINE FIELD tool_errors   ON session_health TYPE int DEFAULT 0;
+DEFINE FIELD user_corrections ON session_health TYPE int DEFAULT 0;
+DEFINE FIELD interruptions ON session_health TYPE int DEFAULT 0;
+DEFINE FIELD subagent_dispatches ON session_health TYPE int DEFAULT 0;
+DEFINE FIELD plan_snapshots ON session_health TYPE int DEFAULT 0;
+DEFINE FIELD estimated_tokens ON session_health TYPE int DEFAULT 0;
+DEFINE FIELD cache_read_ratio ON session_health TYPE option<float>;
+DEFINE FIELD cache_creation_ratio ON session_health TYPE option<float>;
+DEFINE FIELD context_pressure ON session_health TYPE string DEFAULT 'unknown';
+DEFINE FIELD labels        ON session_health TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD metrics       ON session_health TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD ts            ON session_health TYPE datetime DEFAULT time::now();
+DEFINE INDEX session_health_session ON session_health FIELDS session UNIQUE;
+DEFINE INDEX session_health_epoch ON session_health FIELDS workflow_epoch, source, ts;
+
 -- ==== Ingest telemetry tables ====
 
 DEFINE TABLE ingest_run SCHEMAFULL;

@@ -10,6 +10,10 @@ import {
     feedbackLoopsSql,
     userLanguageSql,
     verificationGapsSql,
+    tokenImpactSql,
+    cacheHealthSql,
+    workflowImpactSql,
+    codexHealthSql,
     toolFailuresSql,
 } from "./insights.ts";
 
@@ -139,6 +143,9 @@ describe("insights query builders", () => {
         expect(sql).toContain('table: "intervention_observation"');
         expect(sql).toContain('table: "command_outcome"');
         expect(sql).toContain('table: "user_message_ngram"');
+        expect(sql).toContain('table: "workflow_epoch"');
+        expect(sql).toContain('table: "session_token_usage"');
+        expect(sql).toContain('table: "session_health"');
         expect(sql).toContain("SELECT count() AS count FROM tool_call GROUP ALL");
         expect(sql).not.toContain("AS table");
         expect(SCHEMA_TABLES.some((spec) => spec.stage === "conditional")).toBe(true);
@@ -170,6 +177,16 @@ describe("insights query builders", () => {
         expect(sql).toContain("near_correction_count");
         expect(sql).toContain("AS signal_count");
         expect(sql).toContain("ORDER BY signal_count DESC");
+    });
+
+    test("token and workflow health builders read derived session health tables", () => {
+        expect(tokenImpactSql(5)).toContain("FROM session_token_usage");
+        expect(tokenImpactSql(5)).toContain("GROUP BY workflow_epoch, source");
+        expect(cacheHealthSql(5)).toContain("cache_read_input_tokens / prompt_tokens");
+        expect(workflowImpactSql(5)).toContain("FROM session_health");
+        expect(workflowImpactSql(5)).toContain("avg_interruptions");
+        expect(codexHealthSql(5)).toContain('WHERE source = "codex" AND estimated_tokens > 0');
+        expect(codexHealthSql(5)).toContain("ORDER BY estimated_tokens DESC");
     });
 
     test("builders reject non-positive or fractional limits before interpolation", () => {

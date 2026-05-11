@@ -9,6 +9,10 @@ export const INSIGHT_VIEWS = [
     "feedback-loops",
     "verification-gaps",
     "user-language",
+    "token-impact",
+    "cache-health",
+    "workflow-impact",
+    "codex-health",
     "graph-health",
 ] as const;
 
@@ -65,6 +69,9 @@ export const SCHEMA_TABLES: readonly SchemaTableSpec[] = [
     { table: "intervention_observation", stage: "staged", note: "Measured before/after effects of Interventions." },
     { table: "command_outcome", stage: "staged", note: "Semantic command result classifications." },
     { table: "user_message_ngram", stage: "staged", note: "Derived user-language n-grams for preference and correction mining." },
+    { table: "workflow_epoch", stage: "staged", note: "Derived workflow eras for before/after comparisons." },
+    { table: "session_token_usage", stage: "staged", note: "Actual or estimated session token/cache usage." },
+    { table: "session_health", stage: "staged", note: "Derived session-level workflow, context, and interruption health." },
     { table: "includes", stage: "staged", note: "Reserved changeset-to-file-memory relation." },
     { table: "involves", stage: "staged", note: "Reserved changeset-to-file relation." },
     { table: "resulted_in", stage: "staged", note: "Reserved generic outcome relation." },
@@ -272,6 +279,88 @@ ORDER BY signal_count DESC, count DESC, last_seen DESC
 LIMIT ${safeLimit};`.trim();
 }
 
+export function tokenImpactSql(limit: number): string {
+    const safeLimit = checkedLimit(limit);
+    return `
+SELECT
+    workflow_epoch.name AS workflow_epoch,
+    source,
+    count() AS sessions,
+    math::mean(estimated_tokens) AS avg_estimated_tokens,
+    math::sum(estimated_tokens) AS total_estimated_tokens,
+    math::mean(prompt_tokens ?? estimated_tokens) AS avg_prompt_or_estimated_tokens,
+    time::max(ts) AS last_seen
+FROM session_token_usage
+GROUP BY workflow_epoch, source
+ORDER BY last_seen DESC, sessions DESC
+LIMIT ${safeLimit};`.trim();
+}
+
+export function cacheHealthSql(limit: number): string {
+    const safeLimit = checkedLimit(limit);
+    return `
+SELECT
+    session,
+    source,
+    workflow_epoch.name AS workflow_epoch,
+    model,
+    prompt_tokens,
+    completion_tokens,
+    cache_read_input_tokens,
+    cache_creation_input_tokens,
+    cache_read_input_tokens / prompt_tokens AS cache_read_ratio,
+    cache_creation_input_tokens / prompt_tokens AS cache_creation_ratio,
+    estimated_tokens,
+    transcript_bytes,
+    ts
+FROM session_token_usage
+WHERE prompt_tokens IS NOT NONE OR cache_read_input_tokens IS NOT NONE OR estimated_tokens > 40000
+ORDER BY cache_read_ratio ASC, estimated_tokens DESC, ts DESC
+LIMIT ${safeLimit};`.trim();
+}
+
+export function workflowImpactSql(limit: number): string {
+    const safeLimit = checkedLimit(limit);
+    return `
+SELECT
+    workflow_epoch.name AS workflow_epoch,
+    source,
+    count() AS sessions,
+    math::mean(turns) AS avg_turns,
+    math::mean(tool_calls) AS avg_tool_calls,
+    math::mean(tool_errors) AS avg_tool_errors,
+    math::mean(user_corrections) AS avg_user_corrections,
+    math::mean(interruptions) AS avg_interruptions,
+    math::mean(subagent_dispatches) AS avg_subagent_dispatches,
+    math::mean(estimated_tokens) AS avg_estimated_tokens,
+    time::max(ts) AS last_seen
+FROM session_health
+GROUP BY workflow_epoch, source
+ORDER BY last_seen DESC, sessions DESC
+LIMIT ${safeLimit};`.trim();
+}
+
+export function codexHealthSql(limit: number): string {
+    const safeLimit = checkedLimit(limit);
+    return `
+SELECT
+    session,
+    workflow_epoch.name AS workflow_epoch,
+    turns,
+    tool_calls,
+    tool_errors,
+    interruptions,
+    subagent_dispatches,
+    plan_snapshots,
+    estimated_tokens,
+    context_pressure,
+    ts
+FROM session_health
+WHERE source = "codex" AND estimated_tokens > 0
+ORDER BY estimated_tokens DESC, tool_errors DESC, turns DESC, ts DESC
+LIMIT ${safeLimit};`.trim();
+}
+
 const sqlString = (value: string): string =>
     `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 
@@ -309,6 +398,14 @@ export function insightSqlForView(view: InsightView, limit: number): string {
             return verificationGapsSql(limit);
         case "user-language":
             return userLanguageSql(limit);
+        case "token-impact":
+            return tokenImpactSql(limit);
+        case "cache-health":
+            return cacheHealthSql(limit);
+        case "workflow-impact":
+            return workflowImpactSql(limit);
+        case "codex-health":
+            return codexHealthSql(limit);
         case "graph-health":
             return graphHealthSql(limit);
     }
