@@ -506,6 +506,10 @@ Recommended unification:
 
 - Keep Claude usage-data import as the source of session-level classifications and metrics.
 - Add a legacy self-improve artifact importer for `runs/*/events.jsonl`, `clusters.json`, `proposed-claudemd.md`, and `_spend.log`.
+  Implemented in `src/ingest/legacy-self-improve.ts` and wired into
+  `agentctl ingest-insights`; imported rows are modeled as evidence artifacts
+  with `self_improve_run`, `artifact`, `friction_event`, `insight`,
+  `has_artifact`, and `derived_from`.
 - Move reusable detectors from dotfiles into `agentctl` signal derivation or a shared package.
 - Model both sources as evidence, not final truth, so graph insights can compare Claude's classification against local transcript-derived signals.
 
