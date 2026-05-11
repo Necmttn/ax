@@ -54,12 +54,12 @@
 - Modify: `src/queries/insights.ts`
 - Modify: `src/cli/index.ts`
 
-- [ ] Add `session_token_usage`, `workflow_epoch`, and derived health records.
-- [ ] Extract available Claude token/cache metrics from usage metadata.
-- [ ] Extract Codex token/cache/context/interruption/goal/delegation signals from raw telemetry already ingested.
-- [ ] Add CLI views: `token-impact`, `cache-health`, `workflow-impact`, and `codex-health`.
-- [ ] Dogfood: compare recent Superpowers-era sessions against older sessions using available proxies.
-- [ ] Commit: `feat: derive session token and workflow health`.
+- [x] Add `session_token_usage`, `workflow_epoch`, and derived health records.
+- [x] Extract available Claude token/cache metrics from usage metadata.
+- [x] Extract Codex token/cache/context/interruption/goal/delegation signals from raw telemetry already ingested.
+- [x] Add CLI views: `token-impact`, `cache-health`, `workflow-impact`, and `codex-health`.
+- [x] Dogfood: compare recent Superpowers-era sessions against older sessions using available proxies.
+- [x] Commit: `feat: derive session token and workflow health`.
 
 ### Task 4: Post-Closure Quality And Skill Candidates
 

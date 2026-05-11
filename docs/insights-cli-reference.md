@@ -18,6 +18,10 @@ agentctl insights sessions --limit=20
 agentctl insights feedback-loops --limit=20
 agentctl insights verification-gaps --limit=20
 agentctl insights user-language --limit=20
+agentctl insights token-impact --limit=20
+agentctl insights cache-health --limit=20
+agentctl insights workflow-impact --limit=20
+agentctl insights codex-health --limit=20
 agentctl insights graph-health --limit=10
 agentctl dashboard --limit=25
 ```
@@ -43,6 +47,13 @@ The builders target the current schema fields directly:
   command outcomes.
 - `userLanguageSql` reads persisted `user_message_ngram` aggregates from user
   turns, including correction and verification proximity counters.
+- `tokenImpactSql` compares actual or estimated token usage by workflow epoch
+  and provider.
+- `cacheHealthSql` surfaces sessions with actual cache metrics when present,
+  otherwise high estimated-token sessions that need better provider metadata.
+- `workflowImpactSql` compares turns, tool calls, tool errors, corrections,
+  interruptions, subagent dispatches, and estimated tokens by workflow epoch.
+- `codexHealthSql` ranks non-empty Codex sessions by estimated context cost.
 - `schemaCoverageSql` reports every schema table as `active`, `conditional`,
   or `staged`, so intentionally empty tables are visible instead of surprising
   in Surrealist.
@@ -74,6 +85,8 @@ Current implementation status:
   Harness Doctor tables via the `harness/doctor` ingest stage.
 - Default `agentctl ingest` also persists command outcome classifications and
   user-message n-grams via the `outcomes/derive` ingest stage.
+- Default `agentctl ingest` persists token/cache/workflow health via the
+  `session-health/derive` ingest stage.
 
 The harness ingest stage is idempotent and:
 
@@ -107,6 +120,29 @@ bi-gram/tri-gram frequency plus correction, failed-tool, edit, and verification
 proximity counters. It is an intentionally small first pass for mining repeated
 preferences, corrections, and language that should become taste or harness
 learning candidates.
+
+## Session Token And Workflow Health Tables
+
+The session health slice adds:
+
+- `workflow_epoch`
+- `session_token_usage`
+- `session_health`
+
+`workflow_epoch` currently derives a `gsd` to `superpowers` split from the first
+observed `superpowers:*` skill invocation. This is a heuristic, but it creates a
+stable comparison anchor for dogfooding workflow migration questions.
+
+`session_token_usage` uses Claude insights usage metadata when available
+(`input_tokens`, `output_tokens`, cache token counters, context window) and
+falls back to a transcript-byte token estimate for Claude/Codex sessions without
+provider metrics.
+
+`session_health` records turns, tool calls, tool errors, correction-like user
+messages, interruption/status/redirect-like user messages, subagent dispatches,
+plan snapshots, estimated tokens, cache ratios, and a coarse context-pressure
+bucket. These rows power `token-impact`, `cache-health`, `workflow-impact`, and
+`codex-health`.
 
 SurrealKit workflow takeaway: local development can keep importing the schema
 directly for now. Tests should prefer isolated databases or namespaces so
