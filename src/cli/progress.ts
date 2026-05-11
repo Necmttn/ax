@@ -330,20 +330,21 @@ class PipelineProgress implements ProgressReporter {
         const elapsed = now - this.startedAt;
         const done = this.states.filter((state) => state.status === "done").length;
         const total = this.states.length;
-        const current = this.states.find((state) => state.status === "running");
+        const running = this.states.filter((state) => state.status === "running");
+        const currentLabel = running.length > 0 ? running.map(stageKey).join(" + ") : "idle";
         const observedRows = this.states.reduce((sum, state) => sum + totalRows(state.counts), 0);
         const speed = elapsed > 0 ? observedRows / (elapsed / 1000) : 0;
         const eta = done > 0 && done < total ? formatDuration((elapsed / done) * (total - done)) : "--";
         const rows = [
             `agentctl ${this.options.command}  run=${this.options.runId.slice(0, 8)}  elapsed=${formatDuration(elapsed)}  eta=${eta}`,
-            `speed ${speed > 0 ? `${formatCount(speed)}/s` : "--"}  current=${current ? stageKey(current) : "idle"}`,
+            `speed ${speed > 0 ? `${formatCount(speed)}/s` : "--"}  current=${currentLabel}`,
             "",
             "stage       progress              rows       speed       time",
         ];
         for (const state of this.states) {
             rows.push(this.stageLine(state, now));
         }
-        if (current) {
+        for (const current of running) {
             rows.push("");
             rows.push(`current ${stageKey(current)}`);
             const summary = summarizeCounts(current.counts);
