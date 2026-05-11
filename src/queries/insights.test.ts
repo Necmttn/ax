@@ -152,6 +152,9 @@ describe("insights query builders", () => {
         expect(sql).toContain('table: "commit_classification"');
         expect(sql).toContain('table: "skill_candidate"');
         expect(sql).toContain('table: "later_fixed_by"');
+        expect(sql).toContain('table: "gotcha"');
+        expect(sql).toContain('table: "learning_match"');
+        expect(sql).toContain('table: "adoption"');
         expect(sql).toContain("SELECT count() AS count FROM tool_call GROUP ALL");
         expect(sql).not.toContain("AS table");
         expect(SCHEMA_TABLES.some((spec) => spec.stage === "conditional")).toBe(true);

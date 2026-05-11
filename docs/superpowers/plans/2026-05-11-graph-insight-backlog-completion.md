@@ -88,13 +88,13 @@
 - Modify: `src/cli/index.ts`
 - Modify: `README.md`
 
-- [ ] Add lifecycle commands for interventions: list, show, impact, regressions, candidates.
-- [ ] Add onboarding checks for global/local guidance tracking and dotfiles recommendations.
-- [ ] Add `gotcha`, `taste_signal`, `workflow`, `learning_feedback`, `learning_match`, and `adoption` schema and seed derivations.
-- [ ] Add lean Stack/Workflow matching for Harness Learnings.
-- [ ] Keep hosted hub, public taste cards, and auto-publishing local-only/draft-only.
-- [ ] Dogfood onboarding against this machine and verify weak evidence warnings are useful.
-- [ ] Commit: `feat: add learning registry and onboarding loop`.
+- [x] Add lifecycle commands for interventions: list, show, impact, regressions, candidates.
+- [x] Add onboarding checks for global/local guidance tracking and dotfiles recommendations.
+- [x] Add `gotcha`, `taste_signal`, `workflow`, `learning_feedback`, `learning_match`, and `adoption` schema and seed derivations.
+- [x] Add lean Stack/Workflow matching for Harness Learnings.
+- [x] Keep hosted hub, public taste cards, and auto-publishing local-only/draft-only.
+- [x] Dogfood onboarding against this machine and verify weak evidence warnings are useful.
+- [x] Commit: `feat: add learning registry and onboarding loop`.
 
 ### Task 6: E2E Dogfood And Iteration
 

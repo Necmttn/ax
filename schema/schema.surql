@@ -519,6 +519,61 @@ DEFINE FIELD created_at    ON skill_candidate TYPE datetime DEFAULT time::now();
 DEFINE INDEX skill_candidate_name ON skill_candidate FIELDS name UNIQUE;
 DEFINE INDEX skill_candidate_status ON skill_candidate FIELDS status, created_at;
 
+DEFINE TABLE gotcha SCHEMAFULL;
+DEFINE FIELD name          ON gotcha TYPE string;
+DEFINE FIELD kind          ON gotcha TYPE string;
+DEFINE FIELD pattern       ON gotcha TYPE string;
+DEFINE FIELD mitigation    ON gotcha TYPE string;
+DEFINE FIELD strength      ON gotcha TYPE string;
+DEFINE FIELD labels        ON gotcha TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD metrics       ON gotcha TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD created_at    ON gotcha TYPE datetime DEFAULT time::now();
+DEFINE INDEX gotcha_name ON gotcha FIELDS name UNIQUE;
+
+DEFINE TABLE taste_signal SCHEMAFULL;
+DEFINE FIELD subject       ON taste_signal TYPE string;
+DEFINE FIELD preference    ON taste_signal TYPE string;
+DEFINE FIELD polarity      ON taste_signal TYPE string;
+DEFINE FIELD strength      ON taste_signal TYPE string;
+DEFINE FIELD evidence      ON taste_signal TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD created_at    ON taste_signal TYPE datetime DEFAULT time::now();
+DEFINE INDEX taste_signal_subject ON taste_signal FIELDS subject, created_at;
+
+DEFINE TABLE workflow SCHEMAFULL;
+DEFINE FIELD name          ON workflow TYPE string;
+DEFINE FIELD kind          ON workflow TYPE string;
+DEFINE FIELD description   ON workflow TYPE option<string>;
+DEFINE FIELD labels        ON workflow TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD metrics       ON workflow TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD created_at    ON workflow TYPE datetime DEFAULT time::now();
+DEFINE INDEX workflow_name ON workflow FIELDS name UNIQUE;
+
+DEFINE TABLE learning_feedback SCHEMAFULL;
+DEFINE FIELD target        ON learning_feedback TYPE string;
+DEFINE FIELD signal        ON learning_feedback TYPE string;
+DEFINE FIELD sentiment     ON learning_feedback TYPE string;
+DEFINE FIELD evidence      ON learning_feedback TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD created_at    ON learning_feedback TYPE datetime DEFAULT time::now();
+DEFINE INDEX learning_feedback_target ON learning_feedback FIELDS target, created_at;
+
+DEFINE TABLE learning_match SCHEMAFULL;
+DEFINE FIELD learning      ON learning_match TYPE option<record<harness_learning>>;
+DEFINE FIELD skill_candidate ON learning_match TYPE option<record<skill_candidate>>;
+DEFINE FIELD stack         ON learning_match TYPE option<record<stack>>;
+DEFINE FIELD workflow      ON learning_match TYPE option<record<workflow>>;
+DEFINE FIELD score         ON learning_match TYPE float DEFAULT 0;
+DEFINE FIELD reason        ON learning_match TYPE option<string>;
+DEFINE FIELD labels        ON learning_match TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD created_at    ON learning_match TYPE datetime DEFAULT time::now();
+
+DEFINE TABLE adoption SCHEMAFULL;
+DEFINE FIELD target        ON adoption TYPE string;
+DEFINE FIELD scope         ON adoption TYPE string;
+DEFINE FIELD status        ON adoption TYPE string;
+DEFINE FIELD evidence      ON adoption TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD created_at    ON adoption TYPE datetime DEFAULT time::now();
+DEFINE INDEX adoption_target ON adoption FIELDS target, scope, status;
+
 -- ==== Ingest telemetry tables ====
 
 DEFINE TABLE ingest_run SCHEMAFULL;
