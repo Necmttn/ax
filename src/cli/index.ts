@@ -348,7 +348,16 @@ const cmdIngest = (args: string[]) =>
         // Auto-derive signals so taste queries always see fresh
         // corrected_by / proposed edges. Cheap: O(turns) in-memory walk.
         // Skip when only running git ingest - signals don't depend on commits.
-        if (!skillsOnly && !gitOnly) yield* telemetryStage(db, runId, "signals", "derive", deriveSignals({ sinceDays }), progress);
+        if (!skillsOnly && !gitOnly) {
+            yield* telemetryStage(
+                db,
+                runId,
+                "signals",
+                "derive",
+                deriveSignals({ sinceDays, onProgress: progressUpdater(progress, "signals", "derive") }),
+                progress,
+            );
+        }
         }).pipe(
             Effect.tap(() => db.query(buildIngestRunFinishStatement({ runId, status: "ok" })).pipe(Effect.asVoid)),
             Effect.catch((error) =>
@@ -389,7 +398,14 @@ const cmdDeriveSignals = (args: string[]) =>
             runId,
             stages: [{ source: "signals", stage: "derive" }],
         });
-        yield* telemetryStage(db, runId, "signals", "derive", deriveSignals({ sinceDays }), progress).pipe(
+        yield* telemetryStage(
+            db,
+            runId,
+            "signals",
+            "derive",
+            deriveSignals({ sinceDays, onProgress: progressUpdater(progress, "signals", "derive") }),
+            progress,
+        ).pipe(
             Effect.tap(() => db.query(buildIngestRunFinishStatement({ runId, status: "ok" })).pipe(Effect.asVoid)),
             Effect.catch((error) =>
                 Effect.gen(function* () {
