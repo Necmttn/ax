@@ -91,6 +91,9 @@ agentctl insights token-impact
 agentctl insights cache-health
 agentctl insights workflow-impact
 agentctl insights codex-health
+agentctl insights closure
+agentctl insights post-feature-fixes
+agentctl insights skill-candidates
 ```
 
 Skill and command hygiene:
@@ -119,7 +122,7 @@ agentctl self-improve weekly --json
 agentctl ingest [filters] [--since=DAYS] [--progress=auto|pipeline|plain|json|off]
 agentctl ingest-insights [--progress=auto|pipeline|plain|json|off]
 agentctl derive-signals [--since=DAYS] [--progress=auto|pipeline|plain|json|off]
-agentctl insights [schema|repositories|checkouts|git|friction|tools|sessions|feedback-loops|verification-gaps|user-language|token-impact|cache-health|workflow-impact|codex-health|graph-health] [--limit=N]
+agentctl insights [schema|repositories|checkouts|git|friction|tools|sessions|feedback-loops|verification-gaps|user-language|token-impact|cache-health|workflow-impact|codex-health|closure|post-feature-fixes|skill-candidates|graph-health] [--limit=N]
 agentctl dashboard [--limit=N] [--out=PATH]
 agentctl dashboard serve [--port=1738]
 agentctl search <query> [--limit=N]

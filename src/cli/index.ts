@@ -11,6 +11,7 @@ import { ingestGit } from "../ingest/git.ts";
 import { ingestHarness } from "../ingest/harness.ts";
 import { deriveOutcomes } from "../ingest/outcomes.ts";
 import { deriveSessionHealth } from "../ingest/session-health.ts";
+import { deriveClosure } from "../ingest/closure.ts";
 import { ingestClaudeInsights } from "../ingest/claude-insights.ts";
 import { deriveSignals } from "../ingest/derive-signals.ts";
 import { INSIGHT_VIEWS, insightSqlForView, isInsightView } from "../queries/insights.ts";
@@ -270,6 +271,7 @@ function ingestStages(args: string[]): ProgressStage[] {
         stages.push({ source: "signals", stage: "derive" });
         stages.push({ source: "outcomes", stage: "derive" });
         stages.push({ source: "session-health", stage: "derive" });
+        stages.push({ source: "closure", stage: "derive" });
     }
     if (!skillsOnly && !transcriptsOnly && !claudeOnly && !codexOnly && !gitOnly) {
         stages.push({ source: "harness", stage: "doctor" });
@@ -386,6 +388,14 @@ const cmdIngest = (args: string[]) =>
                     "session-health",
                     "derive",
                     deriveSessionHealth({ sinceDays }),
+                    progress,
+                );
+                yield* telemetryStage(
+                    db,
+                    runId,
+                    "closure",
+                    "derive",
+                    deriveClosure({ sinceDays }),
                     progress,
                 );
             }
