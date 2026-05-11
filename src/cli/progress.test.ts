@@ -212,4 +212,32 @@ describe("cli progress", () => {
         expect(output).toContain("processing 3/245 (86.1MiB)");
         expect(output).toContain("bytes=86.8MiB");
     });
+
+    test("pipeline mode uses streamed records for stage row progress", () => {
+        const sink = memorySink(true, 120);
+        const progress = createProgressReporter({
+            command: "ingest",
+            mode: "pipeline",
+            runId: "abc123456789",
+            stages: [{ source: "codex", stage: "sessions" }],
+            sink,
+            now: () => 1_000,
+            intervalMs: 10_000,
+            env: {},
+        });
+
+        progress.start({ source: "codex", stage: "sessions" });
+        progress.update({ source: "codex", stage: "sessions" }, {
+            currentFile: 3,
+            totalFiles: 251,
+            currentFileBytes: 34_049_847,
+            files: 2,
+            records: 831,
+            turns: 612,
+            toolCalls: 219,
+        });
+        progress.stop();
+
+        expect(sink.chunks.join("")).toContain("831");
+    });
 });
