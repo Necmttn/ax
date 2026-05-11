@@ -22,6 +22,9 @@ agentctl insights token-impact --limit=20
 agentctl insights cache-health --limit=20
 agentctl insights workflow-impact --limit=20
 agentctl insights codex-health --limit=20
+agentctl insights closure --limit=20
+agentctl insights post-feature-fixes --limit=20
+agentctl insights skill-candidates --limit=20
 agentctl insights graph-health --limit=10
 agentctl dashboard --limit=25
 ```
@@ -54,6 +57,11 @@ The builders target the current schema fields directly:
 - `workflowImpactSql` compares turns, tool calls, tool errors, corrections,
   interruptions, subagent dispatches, and estimated tokens by workflow epoch.
 - `codexHealthSql` ranks non-empty Codex sessions by estimated context cost.
+- `closureSql` summarizes commit lifecycle classifications.
+- `postFeatureFixesSql` lists feature commits followed by overlapping fix
+  commits within the configured window.
+- `skillCandidatesSql` lists evidence-backed skill or guardrail candidates
+  derived from fix chains and risky sessions.
 - `schemaCoverageSql` reports every schema table as `active`, `conditional`,
   or `staged`, so intentionally empty tables are visible instead of surprising
   in Surrealist.
@@ -87,6 +95,8 @@ Current implementation status:
   user-message n-grams via the `outcomes/derive` ingest stage.
 - Default `agentctl ingest` persists token/cache/workflow health via the
   `session-health/derive` ingest stage.
+- Default `agentctl ingest` persists commit lifecycle, post-feature fix-chain,
+  and skill-candidate records via the `closure/derive` ingest stage.
 
 The harness ingest stage is idempotent and:
 
@@ -143,6 +153,28 @@ messages, interruption/status/redirect-like user messages, subagent dispatches,
 plan snapshots, estimated tokens, cache ratios, and a coarse context-pressure
 bucket. These rows power `token-impact`, `cache-health`, `workflow-impact`, and
 `codex-health`.
+
+## Closure Quality And Skill Candidate Tables
+
+The closure-quality slice adds:
+
+- `commit_classification`
+- `later_fixed_by`
+- `skill_candidate`
+- `suggests_skill`
+
+`commit_classification` classifies commit messages as `feature`, `fix`,
+`refactor`, `test`, `docs`, `chore`, or `unknown`.
+
+`later_fixed_by` links a feature commit to a later fix commit when they share a
+repository, land within the time window, and touch one or more of the same
+files. This is a deliberately conservative first pass: it treats same-file
+post-feature fixes as evidence that closure quality could improve.
+
+`skill_candidate` turns repeated fix-chain patterns and risky session health
+signals into candidate skills or guardrails, such as ingest idempotency checks,
+schema-change smoke tests, live query dogfooding, or session closure quality
+gates.
 
 SurrealKit workflow takeaway: local development can keep importing the schema
 directly for now. Tests should prefer isolated databases or namespaces so

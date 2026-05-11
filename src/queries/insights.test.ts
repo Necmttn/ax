@@ -14,6 +14,9 @@ import {
     cacheHealthSql,
     workflowImpactSql,
     codexHealthSql,
+    closureSql,
+    postFeatureFixesSql,
+    skillCandidatesSql,
     toolFailuresSql,
 } from "./insights.ts";
 
@@ -146,6 +149,9 @@ describe("insights query builders", () => {
         expect(sql).toContain('table: "workflow_epoch"');
         expect(sql).toContain('table: "session_token_usage"');
         expect(sql).toContain('table: "session_health"');
+        expect(sql).toContain('table: "commit_classification"');
+        expect(sql).toContain('table: "skill_candidate"');
+        expect(sql).toContain('table: "later_fixed_by"');
         expect(sql).toContain("SELECT count() AS count FROM tool_call GROUP ALL");
         expect(sql).not.toContain("AS table");
         expect(SCHEMA_TABLES.some((spec) => spec.stage === "conditional")).toBe(true);
@@ -187,6 +193,15 @@ describe("insights query builders", () => {
         expect(workflowImpactSql(5)).toContain("avg_interruptions");
         expect(codexHealthSql(5)).toContain('WHERE source = "codex" AND estimated_tokens > 0');
         expect(codexHealthSql(5)).toContain("ORDER BY estimated_tokens DESC");
+    });
+
+    test("closure builders read commit lifecycle and skill candidate tables", () => {
+        expect(closureSql(5)).toContain("FROM commit_classification");
+        expect(postFeatureFixesSql(5)).toContain("FROM later_fixed_by");
+        expect(postFeatureFixesSql(5)).toContain("overlap_count");
+        expect(skillCandidatesSql(5)).toContain("FROM skill_candidate");
+        expect(skillCandidatesSql(5)).toContain("proposed_behavior");
+        expect(skillCandidatesSql(5)).toContain("AS confidence_score");
     });
 
     test("builders reject non-positive or fractional limits before interpolation", () => {

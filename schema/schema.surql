@@ -493,6 +493,32 @@ DEFINE FIELD ts            ON session_health TYPE datetime DEFAULT time::now();
 DEFINE INDEX session_health_session ON session_health FIELDS session UNIQUE;
 DEFINE INDEX session_health_epoch ON session_health FIELDS workflow_epoch, source, ts;
 
+DEFINE TABLE commit_classification SCHEMAFULL;
+DEFINE FIELD commit        ON commit_classification TYPE record<commit>;
+DEFINE FIELD repository    ON commit_classification TYPE option<record<repository>>;
+DEFINE FIELD kind          ON commit_classification TYPE string;
+DEFINE FIELD confidence    ON commit_classification TYPE string;
+DEFINE FIELD message       ON commit_classification TYPE option<string>;
+DEFINE FIELD labels        ON commit_classification TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD metrics       ON commit_classification TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD ts            ON commit_classification TYPE datetime DEFAULT time::now();
+DEFINE INDEX commit_classification_commit ON commit_classification FIELDS commit UNIQUE;
+DEFINE INDEX commit_classification_kind_ts ON commit_classification FIELDS kind, ts;
+
+DEFINE TABLE skill_candidate SCHEMAFULL;
+DEFINE FIELD name          ON skill_candidate TYPE string;
+DEFINE FIELD trigger_pattern ON skill_candidate TYPE string;
+DEFINE FIELD suspected_gap ON skill_candidate TYPE string;
+DEFINE FIELD proposed_behavior ON skill_candidate TYPE string;
+DEFINE FIELD confidence    ON skill_candidate TYPE string;
+DEFINE FIELD expected_impact ON skill_candidate TYPE option<string>;
+DEFINE FIELD status        ON skill_candidate TYPE string DEFAULT 'candidate';
+DEFINE FIELD labels        ON skill_candidate TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD metrics       ON skill_candidate TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD created_at    ON skill_candidate TYPE datetime DEFAULT time::now();
+DEFINE INDEX skill_candidate_name ON skill_candidate FIELDS name UNIQUE;
+DEFINE INDEX skill_candidate_status ON skill_candidate FIELDS status, created_at;
+
 -- ==== Ingest telemetry tables ====
 
 DEFINE TABLE ingest_run SCHEMAFULL;
@@ -610,6 +636,21 @@ DEFINE FIELD new_path     ON touched TYPE option<string>;
 DEFINE FIELD repository   ON touched TYPE option<record<repository>>;
 DEFINE FIELD checkout     ON touched TYPE option<record<checkout>>;
 DEFINE FIELD ts           ON touched TYPE option<datetime>;
+
+DEFINE TABLE later_fixed_by TYPE RELATION FROM commit TO commit;
+DEFINE FIELD repository   ON later_fixed_by TYPE option<record<repository>>;
+DEFINE FIELD overlap_files ON later_fixed_by TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD overlap_count ON later_fixed_by TYPE int DEFAULT 0;
+DEFINE FIELD days_between ON later_fixed_by TYPE option<float>;
+DEFINE FIELD confidence   ON later_fixed_by TYPE string;
+DEFINE FIELD reason       ON later_fixed_by TYPE option<string>;
+DEFINE FIELD ts           ON later_fixed_by TYPE datetime DEFAULT time::now();
+
+DEFINE TABLE suggests_skill TYPE RELATION FROM commit TO skill_candidate;
+DEFINE FIELD reason        ON suggests_skill TYPE option<string>;
+DEFINE FIELD evidence      ON suggests_skill TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD confidence    ON suggests_skill TYPE string;
+DEFINE FIELD ts            ON suggests_skill TYPE datetime DEFAULT time::now();
 DEFINE INDEX IF NOT EXISTS touched_in ON touched FIELDS in;
 DEFINE INDEX IF NOT EXISTS touched_out ON touched FIELDS out;
 DEFINE INDEX IF NOT EXISTS touched_repository_ts ON touched FIELDS repository, ts;

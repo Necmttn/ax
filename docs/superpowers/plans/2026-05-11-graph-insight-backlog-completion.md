@@ -71,12 +71,12 @@
 - Modify: `src/queries/insights.ts`
 - Modify: `src/cli/index.ts`
 
-- [ ] Add commit classification: feature, fix, refactor, test, docs, chore.
-- [ ] Derive feature-to-later-fix relations using time window plus overlapping files.
-- [ ] Add `skill_candidate` records from repeated fix chains, corrections, and verification gaps.
-- [ ] Add CLI views: `closure`, `post-feature-fixes`, and `skill-candidates`.
-- [ ] Dogfood: inspect this repo's recent feature/fix chains and candidate skills.
-- [ ] Commit: `feat: derive closure quality and skill candidates`.
+- [x] Add commit classification: feature, fix, refactor, test, docs, chore.
+- [x] Derive feature-to-later-fix relations using time window plus overlapping files.
+- [x] Add `skill_candidate` records from repeated fix chains, corrections, and verification gaps.
+- [x] Add CLI views: `closure`, `post-feature-fixes`, and `skill-candidates`.
+- [x] Dogfood: inspect this repo's recent feature/fix chains and candidate skills.
+- [x] Commit: `feat: derive closure quality and skill candidates`.
 
 ### Task 5: Intervention, Onboarding, Registry, Taste, Gotchas, Matching
 

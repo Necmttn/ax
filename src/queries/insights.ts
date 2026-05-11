@@ -13,6 +13,9 @@ export const INSIGHT_VIEWS = [
     "cache-health",
     "workflow-impact",
     "codex-health",
+    "closure",
+    "post-feature-fixes",
+    "skill-candidates",
     "graph-health",
 ] as const;
 
@@ -72,6 +75,10 @@ export const SCHEMA_TABLES: readonly SchemaTableSpec[] = [
     { table: "workflow_epoch", stage: "staged", note: "Derived workflow eras for before/after comparisons." },
     { table: "session_token_usage", stage: "staged", note: "Actual or estimated session token/cache usage." },
     { table: "session_health", stage: "staged", note: "Derived session-level workflow, context, and interruption health." },
+    { table: "commit_classification", stage: "staged", note: "Commit message lifecycle classification." },
+    { table: "skill_candidate", stage: "staged", note: "Evidence-backed candidate skills or guardrails." },
+    { table: "later_fixed_by", stage: "staged", note: "Feature commit to later overlapping fix commit relation." },
+    { table: "suggests_skill", stage: "staged", note: "Fix or evidence commit to skill candidate relation." },
     { table: "includes", stage: "staged", note: "Reserved changeset-to-file-memory relation." },
     { table: "involves", stage: "staged", note: "Reserved changeset-to-file relation." },
     { table: "resulted_in", stage: "staged", note: "Reserved generic outcome relation." },
@@ -361,6 +368,60 @@ ORDER BY estimated_tokens DESC, tool_errors DESC, turns DESC, ts DESC
 LIMIT ${safeLimit};`.trim();
 }
 
+export function closureSql(limit: number): string {
+    const safeLimit = checkedLimit(limit);
+    return `
+SELECT
+    kind,
+    count() AS commits,
+    math::sum(IF confidence = "high" THEN 1 ELSE 0 END) AS high_confidence,
+    time::max(ts) AS last_seen
+FROM commit_classification
+GROUP BY kind
+ORDER BY commits DESC, last_seen DESC
+LIMIT ${safeLimit};`.trim();
+}
+
+export function postFeatureFixesSql(limit: number): string {
+    const safeLimit = checkedLimit(limit);
+    return `
+SELECT
+    in AS feature_commit,
+    in.message AS feature_message,
+    out AS fix_commit,
+    out.message AS fix_message,
+    repository,
+    overlap_count,
+    overlap_files,
+    days_between,
+    confidence,
+    reason,
+    ts
+FROM later_fixed_by
+ORDER BY overlap_count DESC, days_between ASC, ts DESC
+LIMIT ${safeLimit};`.trim();
+}
+
+export function skillCandidatesSql(limit: number): string {
+    const safeLimit = checkedLimit(limit);
+    return `
+SELECT
+    id,
+    name,
+    trigger_pattern,
+    suspected_gap,
+    proposed_behavior,
+    confidence,
+    IF confidence = "high" THEN 3 ELSE IF confidence = "medium" THEN 2 ELSE 1 END AS confidence_score,
+    expected_impact,
+    status,
+    metrics,
+    created_at
+FROM skill_candidate
+ORDER BY confidence_score DESC, created_at DESC
+LIMIT ${safeLimit};`.trim();
+}
+
 const sqlString = (value: string): string =>
     `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 
@@ -406,6 +467,12 @@ export function insightSqlForView(view: InsightView, limit: number): string {
             return workflowImpactSql(limit);
         case "codex-health":
             return codexHealthSql(limit);
+        case "closure":
+            return closureSql(limit);
+        case "post-feature-fixes":
+            return postFeatureFixesSql(limit);
+        case "skill-candidates":
+            return skillCandidatesSql(limit);
         case "graph-health":
             return graphHealthSql(limit);
     }
