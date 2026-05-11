@@ -58,11 +58,42 @@ ORDER BY row_count DESC
 LIMIT ${safeLimit};`.trim();
 }
 
+function duplicateRelationTableSql(
+    table: string,
+    groupFields: readonly string[],
+    limit: number,
+): string {
+    const group = groupFields.join(", ");
+    const fields = groupFields.join(", ");
+    return `(SELECT * FROM (
+SELECT ${fields}, count() AS row_count, array::group(id) AS ids
+FROM ${table}
+GROUP BY ${group}
+)
+WHERE row_count > 1
+ORDER BY row_count DESC
+LIMIT ${limit})`;
+}
+
+export function duplicateRelationEdgesSql(limit: number): string {
+    const safeLimit = checkedLimit(limit);
+    return `{
+    invoked: ${duplicateRelationTableSql("invoked", ["in", "out", "args"], safeLimit)},
+    edited: ${duplicateRelationTableSql("edited", ["in", "out", "tool"], safeLimit)},
+    concerns: ${duplicateRelationTableSql("concerns", ["in", "out", "kind"], safeLimit)},
+    produced: ${duplicateRelationTableSql("produced", ["in", "out", "checkout"], safeLimit)},
+    touched: ${duplicateRelationTableSql("touched", ["in", "out", "checkout"], safeLimit)},
+    proposed: ${duplicateRelationTableSql("proposed", ["in", "out"], safeLimit)},
+    corrected_by: ${duplicateRelationTableSql("corrected_by", ["in", "out"], safeLimit)}
+}`;
+}
+
 export function graphHealthSql(limit: number): string {
     return `RETURN {
     duplicate_file_identity: (${withoutTerminator(duplicateFileIdentitySql(limit))}),
     repository_sibling: (${withoutTerminator(repositorySiblingSql(limit))}),
     missing_produced_scope: (${withoutTerminator(missingProducedScopeSql(limit))}),
-    legacy_skill_collision: (${withoutTerminator(legacySkillCollisionSql(limit))})
+    legacy_skill_collision: (${withoutTerminator(legacySkillCollisionSql(limit))}),
+    duplicate_relation_edges: ${duplicateRelationEdgesSql(limit)}
 };`;
 }
