@@ -549,8 +549,9 @@ const cmdInterventions = (args: string[]) =>
             subcommand === "candidates" ? `SELECT id, name, confidence, IF confidence = "high" THEN 3 ELSE IF confidence = "medium" THEN 2 ELSE 1 END AS confidence_score, expected_impact, proposed_behavior, metrics, created_at FROM skill_candidate ORDER BY confidence_score DESC, created_at DESC LIMIT ${limit};` :
             subcommand === "impact" ? `SELECT id, target, metric, baseline_value, observed_value, delta, confidence, observed_at FROM intervention_observation ORDER BY observed_at DESC LIMIT ${limit};` :
             subcommand === "regressions" ? `SELECT session, source, tool_errors, interruptions, context_pressure, estimated_tokens, ts FROM session_health WHERE context_pressure = "high" OR tool_errors >= 5 OR interruptions > 0 ORDER BY estimated_tokens DESC, tool_errors DESC LIMIT ${limit};` :
+            subcommand === "show" ? `SELECT id, name, kind, status, expected_effect, target_metrics, owner_notes, created_at FROM intervention ORDER BY created_at DESC LIMIT ${limit};` :
             subcommand === "list" ? `SELECT id, name, kind, status, expected_effect, target_metrics, created_at FROM intervention ORDER BY created_at DESC LIMIT ${limit};` :
-            `SELECT id, name, kind, status, expected_effect, target_metrics, owner_notes, created_at FROM intervention WHERE string::lowercase(name) CONTAINS ${JSON.stringify(subcommand.toLowerCase())} LIMIT ${limit};`;
+            `SELECT id, name, kind, status, expected_effect, target_metrics, owner_notes, created_at FROM intervention WHERE string::lowercase(name ?? "") CONTAINS ${JSON.stringify(subcommand.toLowerCase())} LIMIT ${limit};`;
         const result = yield* db.query<[Array<Record<string, unknown>>]>(sql);
         if (json) {
             console.log(JSON.stringify(result?.[0] ?? [], null, 2));
