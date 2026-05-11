@@ -142,7 +142,7 @@ artifact="agentctl-${platform}.tar.gz"
 
 if [[ -z "$BINARY_PATH" && "$VERSION" != "latest" && "$(command -v agentctl || true)" != "" ]]; then
   installed="$(agentctl --version 2>/dev/null || true)"
-  if [[ "$installed" == "${VERSION#v}" || "$installed" == *"agentctl ${VERSION#v}"* ]]; then
+  if [[ "$installed" == "${VERSION#v}" || "$installed" == *"agentctl ${VERSION#v}"* || "$installed" == *"agentctl v${VERSION#v}"* ]]; then
     echo "[agentctl] version ${VERSION#v} already installed"
     exit 0
   fi

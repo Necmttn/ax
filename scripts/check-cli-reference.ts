@@ -11,18 +11,21 @@ if (help.status !== 0) {
 }
 
 const readme = readFileSync("README.md", "utf8");
-const commands = help.stdout
-    .split("\n")
+const lines = help.stdout.split("\n").map((line) => line.trim());
+const subcommandsStart = lines.findIndex((line) => line === "SUBCOMMANDS");
+const subcommands = lines
+    .slice(subcommandsStart + 1)
     .map((line) => line.trim())
-    .filter((line) => line.startsWith("agentctl ") && !line.startsWith("agentctl -"))
-    .map((line) => line.replace(/\s+#.*$/, ""));
+    .filter((line) => /^[a-z][a-z-]+(\s|$)/.test(line))
+    .map((line) => line.split(/\s+/)[0])
+    .filter((name) => !["DESCRIPTION", "USAGE", "GLOBAL", "SUBCOMMANDS"].includes(name));
 
-const missing = commands.filter((command) => !readme.includes(command));
+const missing = subcommands.filter((command) => !readme.includes(`agentctl ${command}`));
 
 if (missing.length > 0) {
-    console.error("README.md is missing CLI help entries:");
+    console.error("README.md is missing CLI subcommands:");
     for (const command of missing) console.error(`  ${command}`);
     process.exit(1);
 }
 
-console.log(`README.md covers ${commands.length} CLI help entries.`);
+console.log(`README.md covers ${subcommands.length} CLI subcommands.`);
