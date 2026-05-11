@@ -159,6 +159,15 @@ function progressModeFor(command: string, args: string[]) {
     }
 }
 
+function silenceConsoleLogWhileLive(progress: ProgressReporter): () => void {
+    if (!progress.live) return () => {};
+    const original = console.log;
+    console.log = () => {};
+    return () => {
+        console.log = original;
+    };
+}
+
 const writeIngestEvent = (
     db: SurrealClientShape,
     input: {
@@ -300,6 +309,7 @@ const cmdIngest = (args: string[]) =>
             runId,
             stages,
         });
+        const restoreConsole = silenceConsoleLogWhileLive(progress);
         const program = Effect.gen(function* () {
         // Issue #44: --claude-only is the *Claude* side of the world, which
         // includes both `~/.claude/skills` and `~/.claude/projects`
@@ -338,7 +348,10 @@ const cmdIngest = (args: string[]) =>
                     return yield* error;
                 }),
             ),
-            Effect.ensuring(Effect.sync(() => progress.stop())),
+            Effect.ensuring(Effect.sync(() => {
+                progress.stop();
+                restoreConsole();
+            })),
         );
         yield* program;
     });
@@ -364,6 +377,7 @@ const cmdDeriveSignals = (args: string[]) =>
             runId,
             stages: [{ source: "signals", stage: "derive" }],
         });
+        const restoreConsole = silenceConsoleLogWhileLive(progress);
         yield* telemetryStage(db, runId, "signals", "derive", deriveSignals({ sinceDays }), progress).pipe(
             Effect.tap(() => db.query(buildIngestRunFinishStatement({ runId, status: "ok" })).pipe(Effect.asVoid)),
             Effect.catch((error) =>
@@ -376,7 +390,10 @@ const cmdDeriveSignals = (args: string[]) =>
                     return yield* error;
                 }),
             ),
-            Effect.ensuring(Effect.sync(() => progress.stop())),
+            Effect.ensuring(Effect.sync(() => {
+                progress.stop();
+                restoreConsole();
+            })),
         );
     });
 
@@ -392,6 +409,7 @@ const cmdIngestInsights = (args: string[] = []) =>
             runId,
             stages: [{ source: "claude", stage: "insights" }],
         });
+        const restoreConsole = silenceConsoleLogWhileLive(progress);
         yield* telemetryStage(db, runId, "claude", "insights", ingestClaudeInsights(), progress).pipe(
             Effect.tap(() => db.query(buildIngestRunFinishStatement({ runId, status: "ok" })).pipe(Effect.asVoid)),
             Effect.catch((error) =>
@@ -404,7 +422,10 @@ const cmdIngestInsights = (args: string[] = []) =>
                     return yield* error;
                 }),
             ),
-            Effect.ensuring(Effect.sync(() => progress.stop())),
+            Effect.ensuring(Effect.sync(() => {
+                progress.stop();
+                restoreConsole();
+            })),
         );
     }).pipe(Effect.asVoid);
 

@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { createProgressReporter, parseProgressMode, type ProgressSink } from "./progress.ts";
 
-function memorySink(isTTY = false): ProgressSink & { chunks: string[] } {
+function memorySink(isTTY = false, columns = 120): ProgressSink & { chunks: string[] } {
     const chunks: string[] = [];
     return {
         isTTY,
+        columns,
         chunks,
         write(chunk: string) {
             chunks.push(chunk);
@@ -82,8 +83,29 @@ describe("cli progress", () => {
         expect(sink.chunks.join("")).toContain("[agentctl] git/history started");
     });
 
+    test("pipeline mode falls back when cursor repaint would be unstable", () => {
+        const nonTty = memorySink(false);
+        const narrowTty = memorySink(true, 80);
+
+        for (const sink of [nonTty, narrowTty]) {
+            const progress = createProgressReporter({
+                command: "ingest",
+                mode: "pipeline",
+                runId: "abc123",
+                stages: [{ source: "git", stage: "history" }],
+                sink,
+                now: () => 1_000,
+            });
+            progress.start({ source: "git", stage: "history" });
+            progress.stop();
+        }
+
+        expect(nonTty.chunks.join("")).toContain("[agentctl] git/history started");
+        expect(narrowTty.chunks.join("")).toContain("[agentctl] git/history started");
+    });
+
     test("pipeline mode renders a live board for tty sinks", () => {
-        const sink = memorySink(true);
+        const sink = memorySink(true, 120);
         let now = 1_000;
         const progress = createProgressReporter({
             command: "ingest",
@@ -96,6 +118,7 @@ describe("cli progress", () => {
             sink,
             now: () => now,
             intervalMs: 10_000,
+            env: {},
         });
 
         progress.start({ source: "skills", stage: "upsert" });

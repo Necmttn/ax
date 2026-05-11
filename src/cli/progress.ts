@@ -7,10 +7,12 @@ export interface ProgressStage {
 
 export interface ProgressSink {
     readonly isTTY?: boolean;
+    readonly columns?: number;
     write(chunk: string): unknown;
 }
 
 export interface ProgressReporter {
+    readonly live: boolean;
     start(stage: ProgressStage): void;
     finish(stage: ProgressStage, counts: Record<string, number>): void;
     fail(stage: ProgressStage, message: string): void;
@@ -39,6 +41,7 @@ export interface ProgressOptions {
 }
 
 const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const minPipelineColumns = 100;
 
 export function parseProgressMode(raw: string | undefined): ProgressMode {
     if (raw === undefined || raw === "") return "auto";
@@ -98,13 +101,15 @@ function summarizeCounts(counts: Record<string, number>): string {
 
 function shouldUsePipeline(mode: ProgressMode, sink: ProgressSink, env: Record<string, string | undefined>): boolean {
     if (mode !== "auto" && mode !== "pipeline") return false;
-    if (mode === "pipeline") return true;
+    if (env.AGENTCTL_PROGRESS_FORCE_PIPELINE === "1") return true;
     if (!sink.isTTY) return false;
-    if (env.CI === "true" || env.NO_COLOR) return false;
+    if (env.CI === "true" || env.NO_COLOR || env.TERM === "dumb") return false;
+    if (typeof sink.columns === "number" && sink.columns < minPipelineColumns) return false;
     return true;
 }
 
 class NoopProgress implements ProgressReporter {
+    readonly live = false;
     start(): void {}
     finish(): void {}
     fail(): void {}
@@ -112,6 +117,8 @@ class NoopProgress implements ProgressReporter {
 }
 
 class JsonProgress implements ProgressReporter {
+    readonly live = false;
+
     constructor(
         private readonly options: Required<Pick<ProgressOptions, "command" | "runId" | "now">> & { sink: ProgressSink },
     ) {}
@@ -145,6 +152,8 @@ class JsonProgress implements ProgressReporter {
 }
 
 class PlainProgress implements ProgressReporter {
+    readonly live = false;
+
     constructor(private readonly sink: ProgressSink, private readonly now: () => number) {}
 
     start(stage: ProgressStage): void {
@@ -166,6 +175,8 @@ class PlainProgress implements ProgressReporter {
 }
 
 class PipelineProgress implements ProgressReporter {
+    readonly live = true;
+
     private readonly states: StageState[];
     private readonly startedAt: number;
     private timer: ReturnType<typeof setInterval> | undefined;
