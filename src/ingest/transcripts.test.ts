@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { fileRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
-import { __testExtractClaudeJsonlLines, claudeConcurrency } from "./transcripts.ts";
+import {
+    __testExtractClaudeJsonlLines,
+    claudeConcurrency,
+    transcriptEditFileRecordKey,
+} from "./transcripts.ts";
 
 describe("Claude transcript extraction", () => {
     test("claudeConcurrency rejects invalid values", () => {
@@ -126,7 +130,7 @@ describe("Claude transcript extraction", () => {
                 seq: 1,
                 ts: "2026-05-09T10:00:00.000Z",
                 repo: "agentctl",
-                path: "src/ingest/transcripts.ts",
+                path: "/Users/necmttn/Projects/agentctl/src/ingest/transcripts.ts",
                 tool: "Edit",
             },
         ]);
@@ -297,7 +301,7 @@ describe("Claude transcript extraction", () => {
         expect(bashCall?.turnKey).toBe(expectedTurnKey);
     });
 
-    test("edited-file IDs use centralized fileRecordKey scoped to repository identity", () => {
+    test("edited-file IDs use local path identity before repository canonicalization", () => {
         const extracted = __testExtractClaudeJsonlLines(
             [
                 JSON.stringify({
@@ -323,19 +327,60 @@ describe("Claude transcript extraction", () => {
         expect(extracted).not.toBeNull();
         if (!extracted) return;
 
-        // The repo derived from cwd "/Users/necmttn/Projects/agentctl" is "agentctl"
-        // centralized fileRecordKey takes (repositoryKey, path)
-        const expectedFileKey = fileRecordKey(
-            "agentctl",
-            "/Users/necmttn/Projects/agentctl/src/a.ts",
-        );
+        const expectedFileKey = fileRecordKey("_", "/Users/necmttn/Projects/agentctl/src/a.ts");
         expect(extracted.edits).toHaveLength(1);
         const edit = extracted.edits[0];
-        // Verify the edit record exposes the correct file key via the centralized helper
-        // (the key must match what upsertEdits would write to the DB)
-        expect(
-            fileRecordKey(edit?.repo ?? "_", edit?.path ?? ""),
-        ).toBe(expectedFileKey);
+        expect(transcriptEditFileRecordKey(edit?.path ?? "")).toBe(expectedFileKey);
+    });
+
+    test("edited-file IDs merge the same local file across cwd-derived repo labels", () => {
+        const first = __testExtractClaudeJsonlLines(
+            [
+                JSON.stringify({
+                    type: "assistant",
+                    timestamp: "2026-05-09T10:00:00.000Z",
+                    cwd: "/Users/necmttn/Projects/apps",
+                    message: {
+                        content: [
+                            {
+                                type: "tool_use",
+                                id: "toolu_edit_apps",
+                                name: "Edit",
+                                input: { file_path: "/Users/necmttn/.claude/hooks/block-em-dash.sh" },
+                            },
+                        ],
+                    },
+                }),
+            ],
+            "-Users-necmttn-Projects-apps",
+            "session-file-apps",
+        );
+        const second = __testExtractClaudeJsonlLines(
+            [
+                JSON.stringify({
+                    type: "assistant",
+                    timestamp: "2026-05-09T10:00:00.000Z",
+                    cwd: "/Users/necmttn/Projects/quera",
+                    message: {
+                        content: [
+                            {
+                                type: "tool_use",
+                                id: "toolu_edit_quera",
+                                name: "Edit",
+                                input: { file_path: "/Users/necmttn/.claude/hooks/block-em-dash.sh" },
+                            },
+                        ],
+                    },
+                }),
+            ],
+            "-Users-necmttn-Projects-quera",
+            "session-file-quera",
+        );
+
+        expect(first?.edits[0]?.repo).toBe("apps");
+        expect(second?.edits[0]?.repo).toBe("quera");
+        expect(transcriptEditFileRecordKey(first?.edits[0]?.path ?? ""))
+            .toBe(transcriptEditFileRecordKey(second?.edits[0]?.path ?? ""));
     });
 
     test("keeps TodoWrite plan item keys stable when the same sequence changes", () => {

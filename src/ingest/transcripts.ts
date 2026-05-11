@@ -1,5 +1,5 @@
 import { readdir, stat, open } from "node:fs/promises";
-import { join, basename } from "node:path";
+import { join, basename, isAbsolute, resolve } from "node:path";
 import { Effect } from "effect";
 import { RecordId, SurrealClient, filePointer } from "../lib/db.ts";
 import { TRANSCRIPTS_DIR } from "../lib/paths.ts";
@@ -84,6 +84,15 @@ function repoFromCwd(cwd: string | null): string | null {
     // Best effort: last path segment after Projects/ or worktrees/ etc.
     const m = cwd.match(/\/(?:Projects|workspaces|worktrees)\/([^/]+)/);
     return m?.[1] ?? null;
+}
+
+function normalizeEditPath(path: string, cwd: string | null): string {
+    if (isAbsolute(path) || !cwd) return path;
+    return resolve(cwd, path);
+}
+
+export function transcriptEditFileRecordKey(path: string): string {
+    return fileRecordKey("_", path);
 }
 
 function parseJsonl(line: string): Record<string, unknown> | null {
@@ -369,7 +378,7 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
                     seq,
                     ts,
                     repo: repoFromCwd(cwd),
-                    path,
+                    path: normalizeEditPath(path, turnCwd),
                     tool: name,
                 });
             }
@@ -705,13 +714,11 @@ const upsertEdits = (edits: Edit[]) =>
         const relStmts: string[] = [];
         const seenFiles = new Set<string>();
         for (const e of edits) {
-            const repositoryKey = e.repo ?? "_";
-            const fileKey = fileRecordKey(repositoryKey, e.path);
+            const fileKey = transcriptEditFileRecordKey(e.path);
             if (!seenFiles.has(fileKey)) {
                 seenFiles.add(fileKey);
-                const identityScope = e.repo === null ? `, identity_scope: "legacy_local"` : "";
                 fileStmts.push(
-                    `UPSERT file:\`${fileKey}\` CONTENT { repo: ${e.repo === null ? "NONE" : JSON.stringify(e.repo)}, path: ${JSON.stringify(e.path)}${identityScope} };`,
+                    `UPSERT file:\`${fileKey}\` CONTENT { repo: NONE, path: ${JSON.stringify(e.path)}, identity_scope: "local_path" };`,
                 );
             }
             const turnKey = turnRecordKey(e.session, e.seq);
