@@ -12,7 +12,7 @@ import { deriveSignals } from "../ingest/derive-signals.ts";
 import { insightSqlForView, isInsightView } from "../queries/insights.ts";
 import { writeDashboard } from "../dashboard/report.ts";
 import { serveDashboard } from "../dashboard/server.ts";
-import { cmdInstall, cmdUninstall } from "./install.ts";
+import { cmdDaemon, cmdDoctor, cmdInstall, cmdUninstall } from "./install.ts";
 import { cmdProject } from "./project.ts";
 import { liveVersionDeps, printVersion, updateAgentctl } from "./version.ts";
 import { guidanceNext, parseSelfImproveArgs, selfImproveWeekly, sessionSummary } from "../self-improve/commands.ts";
@@ -52,6 +52,9 @@ Usage:
   agentctl update [--check] [--json]
   agentctl tui
   agentctl install            # one-shot setup: daemon + watcher + symlink
+  agentctl daemon status [--json]
+  agentctl daemon start|stop|restart
+  agentctl doctor [--json]
   agentctl uninstall
   agentctl help
 
@@ -1120,6 +1123,14 @@ async function main() {
     }
     if (cmd === "install") {
         await cmdInstall();
+        return;
+    }
+    if (cmd === "daemon") {
+        await cmdDaemon(rest);
+        return;
+    }
+    if (cmd === "doctor") {
+        await cmdDoctor(rest);
         return;
     }
     if (cmd === "uninstall") {

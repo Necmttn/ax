@@ -19,7 +19,8 @@
     "watcher:uninstall": "bash scripts/uninstall-watcher.sh",
     "daemon:install": "bash scripts/install-daemon.sh",
     "daemon:uninstall": "bash scripts/uninstall-daemon.sh",
-    "build": "bun build --compile --outfile=dist/agentctl src/cli/index.ts"
+    "build": "bun build --compile --outfile=dist/agentctl src/cli/index.ts",
+    "check:cli-reference": "bun scripts/check-cli-reference.ts"
   },
   "dependencies": {
     "@opentui/core": "^0.2.5",

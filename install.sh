@@ -6,10 +6,21 @@ VERSION="${AGENTCTL_VERSION:-latest}"
 INSTALL_ROOT="${AGENTCTL_INSTALL_ROOT:-$HOME/.local/share/agentctl}"
 BIN_DIR="${AGENTCTL_BIN_DIR:-$HOME/.local/bin}"
 RUN_INSTALL="${AGENTCTL_RUN_INSTALL:-1}"
+BINARY_PATH=""
+MODIFY_PATH=1
 
 usage() {
   cat <<'EOF'
 Install agentctl from a GitHub Release artifact.
+
+Usage: install.sh [options]
+
+Options:
+  -h, --help                Display this help message
+  -v, --version VERSION     Install a specific release tag/version (for example v0.2.0)
+  -b, --binary PATH         Install from a local binary instead of downloading
+      --no-run-install      Only install the binary; skip `agentctl install`
+      --no-modify-path      Do not append PATH instructions to shell config files
 
 Environment:
   AGENTCTL_REPO=owner/repo       GitHub repo to download from (default: Necmttn/agentctl)
@@ -21,12 +32,43 @@ Environment:
 EOF
 }
 
-case "${1:-}" in
-  -h|--help)
-    usage
-    exit 0
-    ;;
-esac
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    -v|--version)
+      if [[ -z "${2:-}" ]]; then
+        echo "agentctl install: --version requires a value" >&2
+        exit 2
+      fi
+      VERSION="$2"
+      shift 2
+      ;;
+    -b|--binary)
+      if [[ -z "${2:-}" ]]; then
+        echo "agentctl install: --binary requires a path" >&2
+        exit 2
+      fi
+      BINARY_PATH="$2"
+      shift 2
+      ;;
+    --no-run-install)
+      RUN_INSTALL=0
+      shift
+      ;;
+    --no-modify-path)
+      MODIFY_PATH=0
+      shift
+      ;;
+    *)
+      echo "agentctl install: unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
 
 need() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -97,14 +139,30 @@ download_with_curl() {
 
 platform="$(detect_platform)"
 artifact="agentctl-${platform}.tar.gz"
+
+if [[ -z "$BINARY_PATH" && "$VERSION" != "latest" && "$(command -v agentctl || true)" != "" ]]; then
+  installed="$(agentctl --version 2>/dev/null || true)"
+  if [[ "$installed" == "${VERSION#v}" || "$installed" == *"agentctl ${VERSION#v}"* ]]; then
+    echo "[agentctl] version ${VERSION#v} already installed"
+    exit 0
+  fi
+fi
+
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
-echo "[agentctl] downloading ${artifact} from ${REPO} (${VERSION})"
+if [[ -n "$BINARY_PATH" ]]; then
+  if [[ ! -f "$BINARY_PATH" ]]; then
+    echo "agentctl install: local binary not found: $BINARY_PATH" >&2
+    exit 1
+  fi
+  echo "[agentctl] installing local binary: $BINARY_PATH"
+else
+  echo "[agentctl] downloading ${artifact} from ${REPO} (${VERSION})"
 
-if ! download_with_gh "$artifact" "$tmp_dir"; then
-  if ! download_with_curl "$artifact" "$tmp_dir/$artifact"; then
-    cat >&2 <<EOF
+  if ! download_with_gh "$artifact" "$tmp_dir"; then
+    if ! download_with_curl "$artifact" "$tmp_dir/$artifact"; then
+      cat >&2 <<EOF
 agentctl install: failed to download ${artifact}
 
 For private repos, either:
@@ -113,41 +171,46 @@ For private repos, either:
 
 If no release exists yet, run the Release Please workflow and merge the release PR first.
 EOF
-    exit 1
+      exit 1
+    fi
   fi
-fi
 
-if download_with_gh "checksums.txt" "$tmp_dir" >/dev/null 2>&1 || download_with_curl "checksums.txt" "$tmp_dir/checksums.txt" >/dev/null 2>&1; then
-  checksum_line="$(
-    cd "$tmp_dir"
-    awk -v f="$artifact" '$2 == f || $2 == "./" f { print; found = 1; exit } END { if (!found) exit 1 }' checksums.txt
-  )" || {
-    echo "[agentctl] checksums.txt did not include ${artifact}" >&2
-    exit 1
-  }
-  if command -v shasum >/dev/null 2>&1; then
-    (cd "$tmp_dir" && printf '%s\n' "$checksum_line" | shasum -a 256 -c -)
-  elif command -v sha256sum >/dev/null 2>&1; then
-    (cd "$tmp_dir" && printf '%s\n' "$checksum_line" | sha256sum -c -)
+  if download_with_gh "checksums.txt" "$tmp_dir" >/dev/null 2>&1 || download_with_curl "checksums.txt" "$tmp_dir/checksums.txt" >/dev/null 2>&1; then
+    checksum_line="$(
+      cd "$tmp_dir"
+      awk -v f="$artifact" '$2 == f || $2 == "./" f { print; found = 1; exit } END { if (!found) exit 1 }' checksums.txt
+    )" || {
+      echo "[agentctl] checksums.txt did not include ${artifact}" >&2
+      exit 1
+    }
+    if command -v shasum >/dev/null 2>&1; then
+      (cd "$tmp_dir" && printf '%s\n' "$checksum_line" | shasum -a 256 -c -)
+    elif command -v sha256sum >/dev/null 2>&1; then
+      (cd "$tmp_dir" && printf '%s\n' "$checksum_line" | sha256sum -c -)
+    else
+      echo "[agentctl] checksum file downloaded; no sha256 checker found, skipping verification"
+    fi
   else
-    echo "[agentctl] checksum file downloaded; no sha256 checker found, skipping verification"
+    echo "[agentctl] checksums.txt not found; skipping checksum verification"
   fi
-else
-  echo "[agentctl] checksums.txt not found; skipping checksum verification"
-fi
 
-need tar
-tar -xzf "$tmp_dir/$artifact" -C "$tmp_dir"
+  need tar
+  tar -xzf "$tmp_dir/$artifact" -C "$tmp_dir"
+fi
 
 install_bin="$INSTALL_ROOT/bin/agentctl"
 mkdir -p "$INSTALL_ROOT/bin" "$BIN_DIR"
-install -m 755 "$tmp_dir/agentctl" "$install_bin"
+if [[ -n "$BINARY_PATH" ]]; then
+  install -m 755 "$BINARY_PATH" "$install_bin"
+else
+  install -m 755 "$tmp_dir/agentctl" "$install_bin"
+fi
 ln -sfn "$install_bin" "$BIN_DIR/agentctl"
 
 echo "[agentctl] installed binary: $install_bin"
 echo "[agentctl] symlink: $BIN_DIR/agentctl -> $install_bin"
 
-if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
+if [[ "$MODIFY_PATH" == "1" && ":$PATH:" != *":$BIN_DIR:"* ]]; then
   echo "[agentctl] add this to PATH if needed: export PATH=\"$BIN_DIR:\$PATH\""
 fi
 

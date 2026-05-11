@@ -230,13 +230,17 @@ async function loadAgent(plistPath: string) {
     execSync(`launchctl load -w "${plistPath}"`, { stdio: "inherit" });
 }
 
-/** Unload + delete a LaunchAgent plist. Returns true when the file existed and was removed. */
-async function unloadAgent(plistPath: string): Promise<boolean> {
+async function unloadAgentKeepPlist(plistPath: string): Promise<void> {
     try {
         execSync(`launchctl unload "${plistPath}" 2>/dev/null`, { stdio: "ignore" });
     } catch {
         // ok
     }
+}
+
+/** Unload + delete a LaunchAgent plist. Returns true when the file existed and was removed. */
+async function unloadAgent(plistPath: string): Promise<boolean> {
+    await unloadAgentKeepPlist(plistPath);
     if (!existsSync(plistPath)) return false;
     try {
         await unlink(plistPath);
@@ -266,6 +270,164 @@ function resolveBinaryPath(): string {
         return join(import.meta.dir, "..", "..", "bin", "agentctl");
     }
     return process.execPath;
+}
+
+export type DaemonCommand = "status" | "start" | "stop" | "restart";
+
+export interface ParsedDaemonCommand {
+    readonly command: DaemonCommand;
+    readonly json: boolean;
+}
+
+export interface AgentRuntimeStatus {
+    readonly label: string;
+    readonly plist: string;
+    readonly plistExists: boolean;
+    readonly loaded: boolean;
+    readonly pid: number | null;
+}
+
+export interface DaemonStatus {
+    readonly platform: NodeJS.Platform;
+    readonly macosLaunchd: boolean;
+    readonly dataDir: string;
+    readonly logDir: string;
+    readonly dbListening: boolean;
+    readonly agents: readonly AgentRuntimeStatus[];
+}
+
+export interface DoctorCheck {
+    readonly name: string;
+    readonly ok: boolean;
+    readonly detail: string;
+}
+
+export interface DoctorReport {
+    readonly platform: NodeJS.Platform;
+    readonly checks: readonly DoctorCheck[];
+}
+
+export function parseDaemonCommand(args: string[]): ParsedDaemonCommand {
+    const json = args.includes("--json");
+    const positional = args.filter((arg) => !arg.startsWith("--"));
+    const command = positional[0] ?? "status";
+    if (!["status", "start", "stop", "restart"].includes(command)) {
+        throw new Error(
+            `agentctl daemon: unknown command "${command}" (expected status, start, stop, or restart)`,
+        );
+    }
+    return { command: command as DaemonCommand, json };
+}
+
+function isMacos(): boolean {
+    return process.platform === "darwin";
+}
+
+function isDbListening(): boolean {
+    const r = spawnSync("lsof", ["-iTCP:8521", "-sTCP:LISTEN", "-nP"], { stdio: "ignore" });
+    return r.status === 0;
+}
+
+function launchdStatus(label: string, plist: string): AgentRuntimeStatus {
+    if (!isMacos()) {
+        return { label, plist, plistExists: existsSync(plist), loaded: false, pid: null };
+    }
+    const r = spawnSync("launchctl", ["list", label], { encoding: "utf8" });
+    const output = `${r.stdout ?? ""}${r.stderr ?? ""}`;
+    const pidMatch = output.match(/"PID"\s*=\s*(\d+);/);
+    return {
+        label,
+        plist,
+        plistExists: existsSync(plist),
+        loaded: r.status === 0,
+        pid: pidMatch ? Number(pidMatch[1]) : null,
+    };
+}
+
+function collectDaemonStatus(): DaemonStatus {
+    return {
+        platform: process.platform,
+        macosLaunchd: isMacos(),
+        dataDir: DATA_DIR,
+        logDir: LOG_DIR,
+        dbListening: isDbListening(),
+        agents: [
+            launchdStatus(DB_LABEL, DB_PLIST),
+            launchdStatus(WATCH_LABEL, WATCH_PLIST),
+        ],
+    };
+}
+
+export function formatDaemonStatus(status: DaemonStatus, json = false): string {
+    if (json) return JSON.stringify(status, null, 2);
+    const lines = [
+        "agentctl daemon",
+        `  platform: ${status.platform}${status.macosLaunchd ? "" : " (launchd unavailable)"}`,
+        `  database: ${status.dbListening ? "listening on 127.0.0.1:8521" : "not listening on 127.0.0.1:8521"}`,
+        `  data: ${status.dataDir}`,
+        `  logs: ${status.logDir}`,
+    ];
+    for (const agent of status.agents) {
+        const runtime = agent.loaded
+            ? `loaded${agent.pid === null ? "" : ` pid=${agent.pid}`}`
+            : "not loaded";
+        lines.push(`  ${agent.label}: ${runtime}; plist=${agent.plistExists ? "present" : "absent"}`);
+    }
+    return lines.join("\n");
+}
+
+function collectDoctorReport(): DoctorReport {
+    const binLink = join(BIN_DIR, "agentctl");
+    const surrealPath = process.env.AGENTCTL_SURREAL_PATH ?? which("surreal") ?? join(VENDOR_BIN_DIR, "surreal");
+    const surrealVersion = existsSync(surrealPath) ? surrealVersionString(surrealPath) : null;
+    const daemon = collectDaemonStatus();
+    const checks: DoctorCheck[] = [
+        {
+            name: "platform",
+            ok: isMacos(),
+            detail: isMacos() ? "macOS launchd supported" : `${process.platform}; daemon install is macOS-only`,
+        },
+        {
+            name: "binary",
+            ok: existsSync(binLink),
+            detail: existsSync(binLink) ? binLink : `${binLink} missing; run agentctl install`,
+        },
+        {
+            name: "data-dir",
+            ok: existsSync(DATA_DIR),
+            detail: DATA_DIR,
+        },
+        {
+            name: "logs-dir",
+            ok: existsSync(LOG_DIR),
+            detail: LOG_DIR,
+        },
+        {
+            name: "surreal",
+            ok: isSupportedVersion(surrealVersion),
+            detail: surrealVersion ? `${surrealPath} (${surrealVersion})` : `${surrealPath} missing or not executable`,
+        },
+        {
+            name: "db-listener",
+            ok: daemon.dbListening,
+            detail: daemon.dbListening ? "127.0.0.1:8521 is listening" : "127.0.0.1:8521 is not listening",
+        },
+        ...daemon.agents.map((agent): DoctorCheck => ({
+            name: agent.label,
+            ok: !isMacos() || (agent.plistExists && agent.loaded),
+            detail: `${agent.loaded ? "loaded" : "not loaded"}; plist=${agent.plistExists ? "present" : "absent"}`,
+        })),
+    ];
+    return { platform: process.platform, checks };
+}
+
+export function formatDoctorReport(report: DoctorReport, json = false): string {
+    if (json) return JSON.stringify(report, null, 2);
+    const lines = ["agentctl doctor"];
+    for (const check of report.checks) {
+        lines.push(`  ${check.ok ? "ok  " : "warn"} ${check.name}: ${check.detail}`);
+    }
+    return lines.join("\n");
 }
 
 export async function cmdInstall() {
@@ -340,6 +502,46 @@ export async function cmdInstall() {
     console.log("  agentctl ingest          # initial fill");
     console.log("  agentctl tui             # interactive dashboard");
     console.log("  launchctl list | grep agentctl   # verify both LaunchAgents loaded");
+}
+
+export async function cmdDaemon(args: string[]) {
+    const parsed = parseDaemonCommand(args);
+    if (!isMacos()) {
+        console.log(formatDaemonStatus(collectDaemonStatus(), parsed.json));
+        if (parsed.command !== "status") {
+            console.error("agentctl daemon: start/stop/restart use launchd and are macOS-only");
+            process.exit(2);
+        }
+        return;
+    }
+
+    if (parsed.command === "start") {
+        if (!existsSync(DB_PLIST) || !existsSync(WATCH_PLIST)) {
+            await cmdInstall();
+        } else {
+            await loadAgent(DB_PLIST);
+            await loadAgent(WATCH_PLIST);
+        }
+    } else if (parsed.command === "stop") {
+        await unloadAgentKeepPlist(WATCH_PLIST);
+        await unloadAgentKeepPlist(DB_PLIST);
+    } else if (parsed.command === "restart") {
+        await unloadAgentKeepPlist(WATCH_PLIST);
+        await unloadAgentKeepPlist(DB_PLIST);
+        if (!existsSync(DB_PLIST) || !existsSync(WATCH_PLIST)) {
+            await cmdInstall();
+        } else {
+            await loadAgent(DB_PLIST);
+            await loadAgent(WATCH_PLIST);
+        }
+    }
+
+    console.log(formatDaemonStatus(collectDaemonStatus(), parsed.json));
+}
+
+export async function cmdDoctor(args: string[]) {
+    const json = args.includes("--json");
+    console.log(formatDoctorReport(collectDoctorReport(), json));
 }
 
 export async function cmdUninstall() {
