@@ -165,9 +165,9 @@ insight    -> concerns      -> session
 Files are canonicalized by repository-relative path when possible, so worktrees
 and machine-specific checkout paths do not split the same file history.
 
-`agentctl project harness --json` currently computes the Harness Doctor report
-at read time. The staged Harness Doctor tables are schema-ready but not yet
-populated by `agentctl ingest`.
+`agentctl project harness --json` computes the Harness Doctor report at read
+time. Default `agentctl ingest` also persists the report into the staged Harness
+Doctor tables through the `harness/doctor` ingest stage.
 
 ## Agent Integration
 
