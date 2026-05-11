@@ -38,6 +38,47 @@ The builders target the current schema fields directly:
   or `staged`, so intentionally empty tables are visible instead of surprising
   in Surrealist.
 
+## Harness Doctor Tables And Ingestion Status
+
+The Harness Doctor slice adds schema support for these tables:
+
+- `guidance_source`
+- `guidance_revision`
+- `stack`
+- `agent_tooling`
+- `harness_learning`
+- `intervention`
+- `intervention_observation`
+
+Current implementation status:
+
+- `agentctl project harness` scans repo-local and global guidance sources at
+  report time.
+- `agentctl project harness --json` returns Guidance Sources, Guidance
+  Revisions, Stack signals, Agent Tooling signals, Harness Doctor findings, the
+  first local Harness Learning candidate, an Intervention suggestion, and an
+  Intervention Observation.
+- `agentctl project harness` also reads existing `tool_call`, `edited`, and
+  `produced` graph evidence so observed tooling and main-branch write-risk
+  signals are grounded in the current database.
+- The new tables are schema-ready but are not yet populated by
+  `agentctl ingest`. They should remain `staged` in schema coverage until a
+  dedicated ingest writer persists the report rows.
+
+The next ingestion step should add an idempotent harness ingest stage that:
+
+1. Upserts `guidance_source` rows keyed by path.
+2. Upserts `guidance_revision` rows keyed by source path plus content hash.
+3. Upserts declared and observed `stack` records.
+4. Upserts `agent_tooling` records from package scripts, global tools, and
+   observed tool calls.
+5. Upserts local `harness_learning` candidates.
+6. Upserts approval-gated `intervention` suggestions.
+7. Upserts `intervention_observation` rows with before/after metric fields.
+
+Until that stage exists, use `agentctl project harness --json` as the canonical
+read surface for the Harness Doctor tracer bullet, not table row counts.
+
 SurrealKit workflow takeaway: local development can keep importing the schema
 directly for now. Tests should prefer isolated databases or namespaces so
 query/integration runs do not mutate the user's main `agentctl/main` graph.
@@ -86,6 +127,10 @@ tables are `workspace`, `changeset`, `file_memory`, `artifact`,
 changeset/artifact/provenance relation tables. `recommendation` is active but
 conditional; it stays empty until repeated friction crosses the current
 threshold.
+
+Harness Doctor schema additions are expected to be empty in row-count based
+schema coverage until the harness ingest writer is added. Their report-time
+source of truth is `agentctl project harness --json`.
 
 Dashboard generated at:
 

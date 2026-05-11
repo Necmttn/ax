@@ -1287,9 +1287,15 @@ const projectVerifyCommand = Command.make(
     ({ json }) => cmdProject(["verify", ...boolArg("json", json)]),
 ).pipe(Command.withDescription("Print verification checks for the current diff"));
 
+const projectHarnessCommand = Command.make(
+    "harness",
+    { json: jsonFlag },
+    ({ json }) => cmdProject(["harness", ...boolArg("json", json)]),
+).pipe(Command.withDescription("Print Harness Doctor and local learning candidates"));
+
 const projectCommand = Command.make("project").pipe(
     Command.withDescription("Ground agent work in the current repository"),
-    Command.withSubcommands([projectContextCommand, projectVerifyCommand]),
+    Command.withSubcommands([projectContextCommand, projectVerifyCommand, projectHarnessCommand]),
 );
 
 const jsonSelfImprove = (cmd: "guidance" | "session" | "self-improve", rest: string[]) => {

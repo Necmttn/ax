@@ -130,6 +130,10 @@ describe("insights query builders", () => {
         expect(sql).toContain('stage: "active"');
         expect(sql).toContain('table: "file_memory"');
         expect(sql).toContain('stage: "staged"');
+        expect(sql).toContain('table: "guidance_source"');
+        expect(sql).toContain('table: "guidance_revision"');
+        expect(sql).toContain('table: "harness_learning"');
+        expect(sql).toContain('table: "intervention_observation"');
         expect(sql).toContain("SELECT count() AS count FROM tool_call GROUP ALL");
         expect(sql).not.toContain("AS table");
         expect(SCHEMA_TABLES.some((spec) => spec.stage === "conditional")).toBe(true);

@@ -71,6 +71,7 @@ Ground an agent before and after repo work:
 ```bash
 agentctl project context --json
 agentctl project verify --json
+agentctl project harness --json
 ```
 
 Inspect the graph:
@@ -123,6 +124,7 @@ agentctl pairs <skill> [--limit=N]
 agentctl recovery [--limit=N]
 agentctl project context [--json]
 agentctl project verify [--json]
+agentctl project harness [--json]
 agentctl guidance next --json
 agentctl session summary --json
 agentctl self-improve weekly --json
@@ -144,6 +146,9 @@ Core records:
 - `session`, `turn`, `tool_call`, `plan`, `plan_snapshot`
 - `skill`, `tool`, `repository`, `checkout`, `commit`, `file`
 - `insight`, `friction_event`, `diagnostic_event`, `recommendation`
+- staged Harness Doctor records: `guidance_source`, `guidance_revision`,
+  `stack`, `agent_tooling`, `harness_learning`, `intervention`,
+  `intervention_observation`
 
 Core relations:
 
@@ -159,6 +164,10 @@ insight    -> concerns      -> session
 
 Files are canonicalized by repository-relative path when possible, so worktrees
 and machine-specific checkout paths do not split the same file history.
+
+`agentctl project harness --json` currently computes the Harness Doctor report
+at read time. The staged Harness Doctor tables are schema-ready but not yet
+populated by `agentctl ingest`.
 
 ## Agent Integration
 
@@ -184,6 +193,8 @@ Agent checklist:
 2. Use the returned stack, instructions, git state, and checks.
 3. Run `agentctl project verify --json` before reporting completion.
 4. Run the recommended verification commands.
+5. Use `agentctl project harness --json` when changing agent guidance,
+   verification tooling, branch/worktree policy, or local harness setup.
 
 ## Reactivity
 

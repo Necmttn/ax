@@ -3,7 +3,10 @@ import { queryLiveDiagnostics } from "./diagnostics.ts";
 import { getGitState } from "./git.ts";
 import { loadProjectStack } from "./stack.ts";
 import { deriveVerificationChecks } from "./verify.ts";
-import type { ProjectContext, ProjectVerification } from "./types.ts";
+import { buildProjectHarnessReport } from "./harness.ts";
+import { SurrealClient } from "../lib/db.ts";
+import type { DbError } from "../lib/errors.ts";
+import type { ProjectContext, ProjectHarnessReport, ProjectVerification } from "./types.ts";
 
 interface ProjectGrounding {
     readonly generatedAt: string;
@@ -52,3 +55,6 @@ export const buildProjectVerification = (cwd = process.cwd()): Effect.Effect<Pro
             diagnostics: grounding.diagnostics,
         };
     });
+
+export const buildProjectHarness = (cwd = process.cwd()): Effect.Effect<ProjectHarnessReport, DbError, SurrealClient> =>
+    buildProjectHarnessReport(cwd);
