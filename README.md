@@ -59,6 +59,13 @@ agentctl update --check
 agentctl update
 ```
 
+Check local services:
+
+```bash
+agentctl daemon status --json
+agentctl doctor --json
+```
+
 Ground an agent before and after repo work:
 
 ```bash
@@ -96,6 +103,38 @@ Self-improve queries:
 agentctl guidance next --json
 agentctl session summary --json
 agentctl self-improve weekly --json
+```
+
+## CLI Reference
+
+```text
+agentctl ingest [filters] [--since=DAYS]
+agentctl ingest-insights
+agentctl derive-signals [--since=DAYS]
+agentctl insights [schema|repositories|checkouts|git|friction|tools|sessions|graph-health] [--limit=N]
+agentctl dashboard [--limit=N] [--out=PATH]
+agentctl dashboard serve [--port=1738]
+agentctl search <query> [--limit=N]
+agentctl stats <skill>
+agentctl recent [--limit=N]
+agentctl unused [--days=N]
+agentctl taste [--limit=N]
+agentctl pairs <skill> [--limit=N]
+agentctl recovery [--limit=N]
+agentctl project context [--json]
+agentctl project verify [--json]
+agentctl guidance next --json
+agentctl session summary --json
+agentctl self-improve weekly --json
+agentctl version [--check] [--json]
+agentctl update [--check] [--json]
+agentctl tui
+agentctl install
+agentctl daemon status [--json]
+agentctl daemon start|stop|restart
+agentctl doctor [--json]
+agentctl uninstall
+agentctl help
 ```
 
 ## What Gets Stored
