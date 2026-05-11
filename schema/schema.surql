@@ -333,6 +333,90 @@ DEFINE FIELD metrics_before ON guidance_version TYPE option<string>;
 DEFINE FIELD metrics_after  ON guidance_version TYPE option<string>;
 DEFINE INDEX guidance_version_status ON guidance_version FIELDS status, created_at;
 
+DEFINE TABLE guidance_source SCHEMAFULL;
+DEFINE FIELD path              ON guidance_source TYPE string;
+DEFINE FIELD kind              ON guidance_source TYPE string;
+DEFINE FIELD scope             ON guidance_source TYPE string;
+DEFINE FIELD provider          ON guidance_source TYPE string;
+DEFINE FIELD evidence_strength ON guidance_source TYPE string;
+DEFINE FIELD git_root          ON guidance_source TYPE option<string>;
+DEFINE FIELD tracked           ON guidance_source TYPE bool DEFAULT false;
+DEFINE FIELD observed_at       ON guidance_source TYPE datetime DEFAULT time::now();
+DEFINE INDEX guidance_source_path_uq ON guidance_source FIELDS path UNIQUE;
+DEFINE INDEX guidance_source_scope ON guidance_source FIELDS scope, provider;
+
+DEFINE TABLE guidance_revision SCHEMAFULL;
+DEFINE FIELD source            ON guidance_revision TYPE option<record<guidance_source>>;
+DEFINE FIELD source_path       ON guidance_revision TYPE string;
+DEFINE FIELD scope             ON guidance_revision TYPE string;
+DEFINE FIELD content_hash      ON guidance_revision TYPE string;
+DEFINE FIELD evidence_strength ON guidance_revision TYPE string;
+DEFINE FIELD commit_evidence   ON guidance_revision TYPE option<string>;
+DEFINE FIELD file_evidence     ON guidance_revision TYPE option<string>;
+DEFINE FIELD observed_at       ON guidance_revision TYPE datetime DEFAULT time::now();
+DEFINE INDEX guidance_revision_source_hash ON guidance_revision FIELDS source_path, content_hash UNIQUE;
+DEFINE INDEX guidance_revision_scope ON guidance_revision FIELDS scope, observed_at;
+
+DEFINE TABLE stack SCHEMAFULL;
+DEFINE FIELD name        ON stack TYPE string;
+DEFINE FIELD aliases     ON stack TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD labels      ON stack TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD created_at  ON stack TYPE datetime DEFAULT time::now();
+DEFINE FIELD updated_at  ON stack TYPE option<datetime>;
+DEFINE INDEX stack_name_uq ON stack FIELDS name UNIQUE;
+
+DEFINE TABLE agent_tooling SCHEMAFULL;
+DEFINE FIELD name        ON agent_tooling TYPE string;
+DEFINE FIELD layer       ON agent_tooling TYPE string;
+DEFINE FIELD source      ON agent_tooling TYPE string;
+DEFINE FIELD evidence    ON agent_tooling TYPE option<string>;
+DEFINE FIELD labels      ON agent_tooling TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD created_at  ON agent_tooling TYPE datetime DEFAULT time::now();
+DEFINE FIELD updated_at  ON agent_tooling TYPE option<datetime>;
+DEFINE INDEX agent_tooling_name_layer ON agent_tooling FIELDS name, layer UNIQUE;
+
+DEFINE TABLE harness_learning SCHEMAFULL;
+DEFINE FIELD title                  ON harness_learning TYPE string;
+DEFINE FIELD status                 ON harness_learning TYPE string DEFAULT 'local';
+DEFINE FIELD problem                ON harness_learning TYPE string;
+DEFINE FIELD pattern                ON harness_learning TYPE string;
+DEFINE FIELD harness_layer          ON harness_learning TYPE string;
+DEFINE FIELD applicability          ON harness_learning TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD counterconditions      ON harness_learning TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD evidence_summary       ON harness_learning TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD observed_effect        ON harness_learning TYPE option<string>;
+DEFINE FIELD side_effects           ON harness_learning TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD confidence             ON harness_learning TYPE string;
+DEFINE FIELD privacy_level          ON harness_learning TYPE option<string>;
+DEFINE FIELD suggested_intervention ON harness_learning TYPE option<string>;
+DEFINE FIELD risk                   ON harness_learning TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD created_at             ON harness_learning TYPE datetime DEFAULT time::now();
+DEFINE FIELD updated_at             ON harness_learning TYPE option<datetime>;
+DEFINE INDEX harness_learning_status ON harness_learning FIELDS status, harness_layer;
+
+DEFINE TABLE intervention SCHEMAFULL;
+DEFINE FIELD title           ON intervention TYPE string;
+DEFINE FIELD status          ON intervention TYPE string DEFAULT 'suggested';
+DEFINE FIELD strength        ON intervention TYPE string;
+DEFINE FIELD risk            ON intervention TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD expected_effect ON intervention TYPE option<string>;
+DEFINE FIELD review_criteria ON intervention TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD approval_required ON intervention TYPE bool DEFAULT true;
+DEFINE FIELD created_at      ON intervention TYPE datetime DEFAULT time::now();
+DEFINE FIELD updated_at      ON intervention TYPE option<datetime>;
+DEFINE INDEX intervention_status ON intervention FIELDS status, strength;
+
+DEFINE TABLE intervention_observation SCHEMAFULL;
+DEFINE FIELD intervention ON intervention_observation TYPE option<record<intervention>>;
+DEFINE FIELD target       ON intervention_observation TYPE string;
+DEFINE FIELD status       ON intervention_observation TYPE string;
+DEFINE FIELD metrics_before ON intervention_observation TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD metrics_after  ON intervention_observation TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD metrics      ON intervention_observation TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD notes        ON intervention_observation TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD observed_at  ON intervention_observation TYPE datetime DEFAULT time::now();
+DEFINE INDEX intervention_observation_target ON intervention_observation FIELDS target, observed_at;
+
 -- ==== Ingest telemetry tables ====
 
 DEFINE TABLE ingest_run SCHEMAFULL;

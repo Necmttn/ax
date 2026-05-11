@@ -1,12 +1,15 @@
 import { Effect } from "effect";
-import { buildProjectContext, buildProjectVerification } from "../project/context.ts";
-import type { ProjectContext, ProjectVerification, VerificationCheck } from "../project/types.ts";
+import { SurrealClient } from "../lib/db.ts";
+import type { DbError } from "../lib/errors.ts";
+import { buildProjectContext, buildProjectHarness, buildProjectVerification } from "../project/context.ts";
+import type { HarnessDoctorFinding, ProjectContext, ProjectHarnessReport, ProjectVerification, VerificationCheck } from "../project/types.ts";
 
 const PROJECT_HELP = `agentctl project - project-local agent grounding
 
 Usage:
   agentctl project context [--json]
   agentctl project verify [--json]
+  agentctl project harness [--json]
 `;
 
 function wantsJson(args: ReadonlyArray<string>): boolean {
@@ -56,7 +59,27 @@ function printVerification(payload: ProjectVerification): void {
     }
 }
 
-export const cmdProject = (args: string[]): Effect.Effect<void> =>
+function formatFinding(finding: HarnessDoctorFinding): string {
+    const evidence = finding.evidence.length > 0 ? `\n    evidence: ${finding.evidence.join("; ")}` : "";
+    const rec = finding.recommendation ? `\n    recommendation: ${finding.recommendation}` : "";
+    return `  [${finding.status}] ${finding.layer}: ${finding.title}${evidence}${rec}`;
+}
+
+function printHarness(payload: ProjectHarnessReport): void {
+    console.log(`Harness: ${payload.git.root ?? payload.git.cwd}`);
+    console.log(`Guidance sources: ${payload.guidanceSources.length}  revisions: ${payload.guidanceRevisions.length}`);
+    console.log(`Stacks: ${payload.stacks.map((s) => s.name).join(", ") || "unknown"}`);
+    console.log("\nDoctor:");
+    for (const finding of payload.doctor) console.log(formatFinding(finding));
+    console.log("\nLearning candidate:");
+    for (const candidate of payload.learningCandidates) {
+        console.log(`  ${candidate.title} [${candidate.harnessLayer}/${candidate.risk.level}]`);
+        console.log(`    confidence: ${candidate.confidence}`);
+        console.log(`    intervention: ${candidate.suggestedIntervention}`);
+    }
+}
+
+export const cmdProject = (args: string[]): Effect.Effect<void, DbError, SurrealClient> =>
     Effect.gen(function* () {
         const [subcommand, ...rest] = args;
         if (!subcommand || subcommand === "help" || subcommand === "--help" || subcommand === "-h") {
@@ -75,6 +98,13 @@ export const cmdProject = (args: string[]): Effect.Effect<void> =>
             const payload = yield* buildProjectVerification();
             if (wantsJson(rest)) printJson(payload);
             else printVerification(payload);
+            return;
+        }
+
+        if (subcommand === "harness") {
+            const payload = yield* buildProjectHarness();
+            if (wantsJson(rest)) printJson(payload);
+            else printHarness(payload);
             return;
         }
 

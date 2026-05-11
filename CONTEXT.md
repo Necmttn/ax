@@ -93,10 +93,129 @@ An agent behavior control such as CLAUDE.md, AGENTS.md, Codex instructions,
 settings, hooks, rules, skills, or commands.
 _Avoid_: recommendation
 
-**Guidance Version**:
-A content-addressed version of **Guidance**, bounded by Git commits when
-available and filesystem observation time otherwise.
+**Guidance Revision**:
+A specific observed revision of **Guidance**, with content hash and optional
+commit, file, or filesystem evidence.
 _Avoid_: current rule
+
+**Guidance Scope**:
+The boundary where a **Guidance** artifact applies, such as global, repository,
+checkout, provider, skill, command, hook, or task type.
+_Avoid_: location
+
+**Intervention**:
+A controlled, scoped behavior-change experiment that creates, edits, enables,
+disables, or removes one or more **Guidance** artifacts.
+_Avoid_: suggestion
+
+**Intervention Observation**:
+A measured before/after effect of an **Intervention** on targeted signals and
+side effects.
+_Avoid_: result
+
+**Intervention Strength**:
+The control level of an **Intervention**, from advisory guidance to hard
+boundary enforcement.
+_Avoid_: severity
+
+**Guidance Source**:
+The storage authority where **Guidance** is observed, such as a project
+Repository, global dotfiles Repository, plugin cache, or untracked filesystem
+location.
+_Avoid_: config path
+
+**Onboarding Checklist**:
+A setup validation flow that makes `agentctl` evidence reliable before deeper
+insight or optimization workflows run.
+_Avoid_: install steps
+
+**Harness**:
+The complete behavior-shaping setup around one or more agents, including
+Guidance, tools, checks, integrations, workflows, and provider configuration.
+_Avoid_: agent config
+
+**Agent Tooling**:
+Developer tooling intentionally exposed to agents to improve perception,
+representation, verification, or boundary control.
+_Avoid_: dev tool
+
+**Harness Layer**:
+One of the behavior-shaping layers of a **Harness**: perception,
+representation, verification, or boundary.
+_Avoid_: category
+
+**Harness Doctor**:
+A setup and readiness diagnostic for the **Harness**, organized by Harness
+Layer.
+_Avoid_: insight
+
+**Local Evidence**:
+Private graph evidence observed on one user's machine or organization.
+_Avoid_: telemetry
+
+**Taste Signal**:
+Evidence of a user's preferences, judgment, quality bar, or repeated choices
+extracted from Local Evidence.
+_Avoid_: preference
+
+**Public Taste Card**:
+A user-curated, shareable profile of engineering likes, dislikes, preferred
+Stacks, avoided defaults, Workflows, and agent style.
+_Avoid_: taste signal
+
+**Know-How Pattern**:
+A reusable agent-work technique or operating pattern distilled from evidence.
+_Avoid_: tip
+
+**Harness Learning**:
+A curated, shareable learning about a Harness, Workflow, Guidance, or Harness
+Tool, backed by evidence summaries rather than raw transcripts.
+_Avoid_: feedback
+
+**Shared Learning Hub**:
+An opt-in collection of **Harness Learnings** contributed by users or teams.
+_Avoid_: telemetry dump
+
+**Learning Feedback**:
+A structured response from an agent or user after applying a **Harness Learning**,
+describing whether it worked, failed, or needs revision.
+_Avoid_: comment
+
+**Learning Registry**:
+The controlled index of **Harness Learnings**, experiments, Learning Feedback,
+status, owners, evidence, and review dates.
+_Avoid_: lifecycle
+
+**Share Candidate**:
+A local **Harness Learning** that meets criteria for possible publication to the
+Shared Learning Hub.
+_Avoid_: auto-share
+
+**Learning Match**:
+An external **Harness Learning** found relevant to local evidence, Harness
+configuration, or a user query.
+_Avoid_: search result
+
+**Adoption**:
+The local application of an external **Harness Learning** as a tracked
+Intervention or Guidance/Harness change.
+_Avoid_: install
+
+**Gotcha**:
+A reusable warning about a tool, stack, workflow, or agent behavior that
+prevents misapplying a **Harness Learning**.
+_Avoid_: note
+
+**Stack**:
+A technology, platform, framework, runtime, or operating environment that
+conditions whether a Harness Learning applies.
+_Avoid_: tag
+
+**Workflow**:
+A repeatable operating pattern for agent work, such as browser QA, code review,
+merge flow, CI healing, self-improve, subagent implementation, or spec-first
+testing.
+_Avoid_: task
 
 ## Relationships
 
@@ -135,6 +254,77 @@ _Avoid_: current rule
 - **Tool Calls** are canonical execution evidence; edit, skill, command, MCP, and diagnostic signals should attach to Tool Calls when possible.
 - **Friction Events**, **Feedback Events**, and **Diagnostic Events** are evidence/events, while **Insights**, **Recommendations**, **Change Sets**, and **File Memories** are derived memory/product layer records.
 - **Guidance** must be versioned so `agentctl` can compare agent behavior before and after CLAUDE.md, AGENTS.md, hook, settings, or instruction changes.
+- **Guidance** can be repo-local or global; **Guidance Scope** distinguishes where it applies rather than creating separate concepts for repo instructions, global skills, hooks, or commands.
+- A **Guidance Source** can be local to a project or global to the user; global guidance should be tracked through a dotfiles Repository when possible.
+- An **Intervention** materializes a recommendation into one or more **Guidance** changes, and should have scope, expected effect, review criteria, and cleanup rules.
+- An **Intervention Observation** evaluates whether an **Intervention** changed targeted signals without introducing unacceptable side effects.
+- **Intervention Observation** is local measured impact; **Learning Feedback** is structured feedback on a Harness Learning for possible revision or sharing.
+- **Intervention Strength** lets `agentctl` recommend the least forceful Harness change likely to work, then escalate only when observations show the behavior persists.
+- Intervention Strength levels are advisory, workflow, automation, guardrail, and hard boundary.
+- If advisory Guidance repeatedly fails for a high-value behavior, `agentctl` can recommend a stronger Intervention such as a skill, command, preflight script, hook, policy, or branch protection.
+- Stronger Interventions should track side effects such as false positives, latency, blocked legitimate work, or user bypasses.
+- Escalation is a recommendation kind, not a separate domain concept: it proposes moving from a weaker Intervention Strength to a stronger one because observed behavior persisted.
+- Escalation recommendations should be agent-actionable and approval-gated, so an agent can ask the user to apply the stronger control and then monitor the result.
+- Escalation recommendations should consider both recurrence and risk severity; high-blast-radius violations can justify stronger controls with fewer observations than low-risk preferences.
+- Risk is a dimension on Interventions, Harness Learnings, and recommendations, not a separate graph node in the first implementation.
+- Risk dimensions should include kind and level, such as branch safety, production, data loss, privacy, cost, security, or workflow noise.
+- **Interventions** should be scarce and lifecycle-managed; recommendations and skill candidates can be many, but active Interventions require explicit promotion.
+- **Guidance Revisions** belong to **Guidance** and can be linked to the **Intervention** that created or changed them.
+- A **Guidance Revision** records observed change evidence for a **Guidance** artifact, usually by linking a commit and **File** when available.
+- A **Guidance Revision** may be part of an **Intervention**, but not every Guidance Revision is an intentional Intervention.
+- A session can be compared against nearby **Guidance Revisions** by time, Checkout, Repository, provider, and scope even when the exact runtime Guidance Revision is uncertain.
+- Project-local and global **Guidance** should both be scanned; when global guidance is Git-tracked, its commits become durable evidence for Guidance Revisions.
+- Untracked global **Guidance** should still be ingested because it affects agent behavior, but `agentctl` should mark its evidence quality as weak and recommend Git tracking.
+- `agentctl` should treat Git-tracked global guidance as a prerequisite for reliable proactive harness optimization, not as a hard requirement for ingestion.
+- The **Onboarding Checklist** should validate project-local and global Guidance Sources, report untracked guidance, and recommend moving global guidance into a Git-tracked dotfiles Repository.
+- The **Onboarding Checklist** should distinguish blocking setup issues from weak-evidence warnings so users can ingest immediately while improving evidence quality over time.
+- A **Harness** includes **Guidance** but is broader than Guidance; linting, typechecking, tests, MCPs, CI, review tooling, browser QA tooling, and shipping tooling can all shape agent behavior.
+- **Agent Tooling** can be optimized as part of the Harness when it improves or degrades the agent feedback loop.
+- Replacing `tsc` with faster or sharper checks such as `tsgo`, `oxc`, or `rs lint` is a Harness change when the intent is to improve agent feedback and code quality.
+- **Harness Layers** classify why a Harness change matters: perception improves what agents can find, representation improves what agents can parse, verification improves how quickly reality pushes back, and boundary improves what agents can safely touch.
+- **Agent Tooling** is channel-agnostic; CLI tools, MCP servers, browser automation, APIs, CI systems, and local scripts can all be Agent Tooling when they shape the agent loop.
+- **Harness Doctor** reports whether the environment is capable of good agent work; **Insights** report whether observed agent behavior improved or regressed.
+- **Harness Doctor** is setup/config/evidence readiness; **Interventions** manage lifecycle; **Insights** measure empirical behavior and impact.
+- **Harness Doctor** should inspect global machine setup, global Guidance Sources, repo-local Guidance, package scripts, test/lint/typecheck commands, Git settings, worktree support, and CI configuration.
+- A tool being installed globally is not enough; the active Repository should expose reliable commands or workflows that agents can discover and run.
+- **Harness Doctor** should use observed Insights to report whether agents actually use available Agent Tooling and Guidance, not only whether those capabilities exist.
+- **Harness Doctor** can recommend making underused or misused Harness capabilities more discoverable through scripts, Guidance, skills, or commands.
+- **Local Evidence** stays private by default and is the source for Taste Signals, Know-How Patterns, and local Insights.
+- A **Taste Signal** may become a local recommendation or contribute to a Know-How Pattern when it repeats across sessions or outcomes.
+- A technology preference such as TanStack over Next.js or Hono over Express is a **Taste Signal** with preferred and avoided Stack references.
+- Local or team **Taste Signals** can override Shared Learning Hub recommendations during Adoption; shared learnings suggest, but local taste controls what should be applied.
+- **Taste Signals** can be explicit, inferred, codified in Guidance, or outcome-backed; provenance determines confidence and how strongly they should affect recommendations.
+- Negative preferences are first-class **Taste Signals** because avoided tools, stacks, workflows, or behaviors often prevent wrong defaults.
+- A **Public Taste Card** is a curated identity/share surface, not raw Taste Signal evidence.
+- GitHub login may identify a user for a Public Taste Card, but publishing should be explicit rather than automatic.
+- A **Public Taste Card** should start as an evidence-generated draft from local Taste Signals and Harness Learnings, then require user editing or approval before publishing.
+- A **Public Taste Card** can link to shareable Harness Learnings for credibility, while allowing users to hide evidence links for a cleaner public profile.
+- Public Taste Cards are a later hosted-hub surface; the first implementation should focus on local evidence, Harness Doctor, Guidance tracking, and Harness Learnings.
+- A **Know-How Pattern** can be promoted into a **Harness Learning** when it is reusable beyond one session or repo.
+- A **Harness Learning** is the shared unit for opt-in contribution; it should include evidence summaries and applicability conditions, not raw transcripts.
+- The **Shared Learning Hub** should distribute curated Harness Learnings, not raw telemetry or unreviewed event dumps.
+- A **Harness Learning** should describe the problem, reusable pattern, Harness Layer, applicability, counterconditions, evidence summary, observed effect, side effects, confidence, source count, privacy level, and suggested Intervention.
+- Local, share-candidate, and shared **Harness Learnings** use the same domain type; visibility and status distinguish where they are in the sharing flow.
+- Sharing a **Harness Learning** is agent-proposed and user-approved; `agentctl` should not auto-share Local Evidence or Harness Learnings.
+- Agents may automatically create draft issues or pull requests containing **Learning Feedback**, but publishing, merging, or promoting shared Harness Learnings remains approval-gated.
+- **Learning Feedback** is part of the compounding improvement loop for the Shared Learning Hub, while human review preserves taste and trust.
+- **Learning Feedback** should be stored in the local graph first; GitHub issues or pull requests are collaboration surfaces for shareable feedback.
+- The **Learning Registry** prevents shared learnings and experiments from becoming a mess by requiring active items to have scope, owner, status, evidence, and review criteria.
+- The **Learning Registry** is an index/control surface over Harness Learnings, Interventions, and Learning Feedback; it does not need a separate registry-entry node in the first implementation.
+- Agents may add Learning Feedback to the **Learning Registry**, but they should not silently create canonical Harness Learnings.
+- Duplicates and replacements in the **Learning Registry** should be linked through supersession rather than left as unrelated variants.
+- A **Share Candidate** can be proposed automatically when a local Harness Learning has enough evidence, reusable scope, acceptable privacy risk, and positive observed effect, but publication still requires approval.
+- A **Learning Match** lets local users discover external Harness Learnings by similarity, stack, provider, task type, Harness Layer, or query.
+- An **Adoption** records that a Learning Match was applied locally, preserving the link back to the external Harness Learning for future Learning Feedback.
+- Every **Adoption** should create a local **Intervention** so the adopted Harness Learning can be measured in the local Harness.
+- A **Gotcha** can attach to Harness Learnings, Agent Tooling, stacks, Guidance, Workflows, or Interventions.
+- Tool feedback Gotchas are first-class because they explain how Agent Tooling can improve one feedback loop while failing or misleading another.
+- **Gotchas** can be shared independently from Harness Learnings when they are broadly reusable, but most adoptions will encounter them through related Harness Learnings.
+- A **Stack** should be first-class but lean, so Harness Learnings, Gotchas, Guidance, Agent Tooling, Repositories, and Sessions can reference the technologies they depend on.
+- Stack references should start as stable records with names and aliases; richer taxonomy can emerge later from observed usage and shared learnings.
+- **Stack** can be declared by Repository files and observed from session/tool behavior; both forms should be preserved because declared capability and actual work context differ.
+- A **Workflow** can involve Guidance, Agent Tooling, Stacks, Sessions, Interventions, Gotchas, and Harness Learnings.
+- A **Workflow** is repeatable and measurable; a one-off user request is not a Workflow unless it recurs as an operating pattern.
 - `edited` edges should preserve observed edit evidence such as Checkout and absolute path seen while pointing to the canonical **File**.
 - `touched` edges should preserve commit diff evidence such as status, rename paths, additions, and deletions while pointing to the canonical **File**.
 - Claude and Codex session edits should resolve through **Checkout** before linking to canonical **Files**.
