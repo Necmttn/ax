@@ -398,11 +398,18 @@ export function touchedRelationRecordKey(
     fileId: string,
     checkoutId: string,
 ): string {
-    return Bun.hash(`${commitId}|${fileId}|${checkoutId}`).toString(16).padStart(16, "0");
+    return Bun.hash(`${relationEndpointKey(commitId)}|${relationEndpointKey(fileId)}|${relationEndpointKey(checkoutId)}`).toString(16).padStart(16, "0");
 }
 
 export function producedRelationRecordKey(sessionId: string, commitId: string): string {
-    return Bun.hash(`${sessionId}|${commitId}`).toString(16).padStart(16, "0");
+    return Bun.hash(`${relationEndpointKey(sessionId)}|${relationEndpointKey(commitId)}`).toString(16).padStart(16, "0");
+}
+
+function relationEndpointKey(record: string): string {
+    const trimmed = record.trim();
+    const tagged = trimmed.match(/^([a-zA-Z_][a-zA-Z0-9_]*):`(.+)`$/);
+    if (tagged) return `${tagged[1]}:${tagged[2]}`;
+    return trimmed;
 }
 
 export function buildTouchedRelationStatements(input: TouchedRelationInput): string[] {
@@ -411,9 +418,6 @@ export function buildTouchedRelationStatements(input: TouchedRelationInput): str
         const add = file.additions === null ? "NONE" : String(file.additions);
         const del = file.deletions === null ? "NONE" : String(file.deletions);
         const edgeKey = touchedRelationRecordKey(input.commitId, file.fileId, input.checkoutId);
-        stmts.push(
-            `DELETE touched WHERE in = ${input.commitId} AND out = ${file.fileId} AND checkout = ${input.checkoutId} AND id != touched:\`${edgeKey}\`;`,
-        );
         stmts.push(
             `RELATE ${input.commitId}->touched:\`${edgeKey}\`->${file.fileId} SET additions = ${add}, deletions = ${del}, repository = ${input.repositoryId}, checkout = ${input.checkoutId}, ts = d"${input.ts}";`,
         );
@@ -428,12 +432,9 @@ export function buildProducedRelationStatements(input: {
     readonly checkoutId: string;
     readonly ts: string;
 }): string[] {
-    return input.sessionIds.flatMap((sessionId) => {
+    return input.sessionIds.map((sessionId) => {
         const edgeKey = producedRelationRecordKey(sessionId, input.commitId);
-        return [
-            `DELETE produced WHERE in = ${sessionId} AND out = ${input.commitId} AND checkout = ${input.checkoutId} AND id != produced:\`${edgeKey}\`;`,
-            `RELATE ${sessionId}->produced:\`${edgeKey}\`->${input.commitId} SET repository = ${input.repositoryId}, checkout = ${input.checkoutId}, ts = d"${input.ts}", source = "git", kind = "commit";`,
-        ];
+        return `RELATE ${sessionId}->produced:\`${edgeKey}\`->${input.commitId} SET repository = ${input.repositoryId}, checkout = ${input.checkoutId}, ts = d"${input.ts}", source = "git", kind = "commit";`;
     });
 }
 

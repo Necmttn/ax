@@ -232,7 +232,6 @@ export function buildRelateToolCallSkillStatements(
         .padStart(16, "0");
 
     return [
-        `DELETE concerns WHERE in = ${toolCallRef} AND out = ${skillRef} AND kind = "invoked_skill" AND id != concerns:\`${edgeKey}\`;`,
         `RELATE ${toolCallRef}->concerns:\`${edgeKey}\`->${skillRef} SET ${sqlSet([
             ["kind", sqlString("invoked_skill")],
             ["ts", sqlDate(input.ts)],

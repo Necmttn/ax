@@ -689,7 +689,6 @@ const relateInvocations = (invocations: Invocation[]) =>
             const args = JSON.stringify(inv.args);
             const edgeKey = invokedRelationRecordKey({ turnKey, skillKey, args });
             return [
-                `DELETE invoked WHERE in = turn:\`${turnKey}\` AND out = skill:\`${skillKey}\` AND args = ${JSON.stringify(args)} AND id != invoked:\`${edgeKey}\`;`,
                 `RELATE turn:\`${turnKey}\`->invoked:\`${edgeKey}\`->skill:\`${skillKey}\` SET ts = d"${inv.ts}", args = ${JSON.stringify(args)}, turn_has_error = ${inv.turn_has_error};`,
             ];
         });
@@ -717,9 +716,6 @@ const upsertEdits = (edits: Edit[]) =>
             }
             const turnKey = turnRecordKey(e.session, e.seq);
             const edgeKey = editedRelationRecordKey({ turnKey, fileKey, tool: e.tool });
-            relStmts.push(
-                `DELETE edited WHERE in = turn:\`${turnKey}\` AND out = file:\`${fileKey}\` AND tool = ${JSON.stringify(e.tool)} AND id != edited:\`${edgeKey}\`;`,
-            );
             relStmts.push(
                 `RELATE turn:\`${turnKey}\`->edited:\`${edgeKey}\`->file:\`${fileKey}\` SET tool = "${e.tool}", ts = d"${e.ts}";`,
             );

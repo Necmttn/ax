@@ -9,6 +9,7 @@ import {
     buildSessionCheckoutUpdateStatement,
     buildSessionRepoWhere,
     buildTouchedRelationStatements,
+    producedRelationRecordKey,
     touchedRelationRecordKey,
     deriveRepositoryDisplayName,
     nestedCheckoutPaths,
@@ -57,6 +58,16 @@ describe("git ingest relation statements", () => {
             .toBe(touchedRelationRecordKey("commit:`c1`", "file:`f1`", "checkout:`co1`"));
     });
 
+    test("touchedRelationRecordKey normalizes record-literal formatting", () => {
+        expect(touchedRelationRecordKey("commit:c1", "file:f1", "checkout:co1"))
+            .toBe(touchedRelationRecordKey("commit:`c1`", "file:`f1`", "checkout:`co1`"));
+    });
+
+    test("producedRelationRecordKey normalizes record-literal formatting", () => {
+        expect(producedRelationRecordKey("session:s1", "commit:c1"))
+            .toBe(producedRelationRecordKey("session:`s1`", "commit:`c1`"));
+    });
+
     test("touched relation statements upsert deterministic relation ids", () => {
         const statements = buildTouchedRelationStatements({
             commitId: "commit:`c1`",
@@ -72,21 +83,6 @@ describe("git ingest relation statements", () => {
         expect(statements.join("\n")).toContain("checkout = checkout:`co1`");
     });
 
-    test("touched relation statements remove legacy duplicate edges", () => {
-        const statements = buildTouchedRelationStatements({
-            commitId: "commit:`c1`",
-            repositoryId: "repository:`r1`",
-            checkoutId: "checkout:`co1`",
-            ts: "2026-05-10T00:00:00.000Z",
-            files: [{ fileId: "file:`f1`", additions: 1, deletions: 2 }],
-        });
-        const key = touchedRelationRecordKey("commit:`c1`", "file:`f1`", "checkout:`co1`");
-        expect(statements[0]).toBe(
-            `DELETE touched WHERE in = commit:\`c1\` AND out = file:\`f1\` AND checkout = checkout:\`co1\` AND id != touched:\`${key}\`;`,
-        );
-        expect(statements[1]).toContain(`RELATE commit:\`c1\`->touched:\`${key}\`->file:\`f1\``);
-    });
-
     test("produced relation statements include repository checkout and ts", () => {
         const statements = buildProducedRelationStatements({
             sessionIds: ["session:`s1`"],
@@ -100,21 +96,6 @@ describe("git ingest relation statements", () => {
         expect(statements.join("\n")).toContain("repository = repository:`r1`");
         expect(statements.join("\n")).toContain("checkout = checkout:`co1`");
         expect(statements.join("\n")).toContain('ts = d"2026-05-10T00:00:00.000Z"');
-    });
-
-    test("produced relation statements remove legacy duplicate edges", () => {
-        const statements = buildProducedRelationStatements({
-            sessionIds: ["session:`s1`"],
-            commitId: "commit:`c1`",
-            repositoryId: "repository:`r1`",
-            checkoutId: "checkout:`co1`",
-            ts: "2026-05-10T00:00:00.000Z",
-        });
-        const key = Bun.hash("session:`s1`|commit:`c1`").toString(16).padStart(16, "0");
-        expect(statements[0]).toBe(
-            `DELETE produced WHERE in = session:\`s1\` AND out = commit:\`c1\` AND checkout = checkout:\`co1\` AND id != produced:\`${key}\`;`,
-        );
-        expect(statements[1]).toContain(`RELATE session:\`s1\`->produced:\`${key}\`->commit:\`c1\``);
     });
 
     test("looks up commits canonically before legacy checkout path rows", () => {

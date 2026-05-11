@@ -715,7 +715,6 @@ const buildSyntheticSkillAndInvocationStatements = (
         const args = JSON.stringify(inv.args);
         const edgeKey = invokedRelationRecordKey({ turnKey, skillKey, args });
         return [
-            `DELETE invoked WHERE in = turn:\`${turnKey}\` AND out = skill:\`${skillKey}\` AND args = ${JSON.stringify(args)} AND id != invoked:\`${edgeKey}\`;`,
             `RELATE turn:\`${turnKey}\`->invoked:\`${edgeKey}\`->skill:\`${skillKey}\` SET ts = d"${inv.ts}", args = ${JSON.stringify(args)}, turn_has_error = false;`,
         ];
     });

@@ -140,9 +140,7 @@ describe("evidence writer statement builders", () => {
 
         const sql = statements.join("\n");
 
-        expect(sql).toContain("DELETE concerns WHERE");
-        expect(sql).toContain("kind = \"invoked_skill\"");
-        expect(sql).toContain("id != concerns:");
+        expect(sql).not.toContain("DELETE concerns WHERE");
         expect(sql).toContain(`RELATE tool_call:\`session__call\`->concerns:\``);
         expect(sql).toContain(`->skill:\`${skillRecordKey("superpowers:test-driven-development")}\``);
         expect(sql).toContain("kind = \"invoked_skill\"");
