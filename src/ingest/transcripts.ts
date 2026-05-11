@@ -7,9 +7,9 @@ import { skillRecordKey } from "../lib/skill-id.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
 import {
-    relateToolCallSkill,
-    writePlanSnapshot,
-    writeToolCalls,
+    buildPlanSnapshotStatements,
+    buildRelateToolCallSkillStatements,
+    buildToolCallStatements,
     type PlanSnapshotWrite,
     type ToolCallSkillRelationWrite,
     type ToolCallWrite,
@@ -23,6 +23,8 @@ import { normalizeClaudeTodoWrite, type PlanStatus } from "./plans.ts";
 import { fileRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 
 const MAX_OUTPUT_EXCERPT_CHARS = 1200;
+const DEFAULT_CLAUDE_CONCURRENCY = 4;
+const CLAUDE_STATEMENT_CHUNK_SIZE = 500;
 
 interface Session {
     id: string;
@@ -161,6 +163,12 @@ function boundedExcerpt(input: string): string {
     return text.length > MAX_OUTPUT_EXCERPT_CHARS
         ? text.slice(0, MAX_OUTPUT_EXCERPT_CHARS)
         : text;
+}
+
+export function claudeConcurrency(raw = process.env.AGENTCTL_CLAUDE_CONCURRENCY): number {
+    if (!raw) return DEFAULT_CLAUDE_CONCURRENCY;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CLAUDE_CONCURRENCY;
 }
 
 function jsonText(input: unknown): string | null {
@@ -603,15 +611,23 @@ const snapshotTranscript = (sessionId: string, filePath: string) =>
 const upsertTurns = (turns: Turn[]) =>
     Effect.gen(function* () {
         if (turns.length === 0) return;
+        yield* queryTranscriptStatements(buildTurnStatements(turns));
+    });
+
+const buildTurnStatements = (turns: readonly Turn[]): string[] =>
+    turns.map(
+        (t) =>
+            `UPSERT turn:\`${turnRecordKey(t.session, t.seq)}\` CONTENT { session: session:\`${t.session}\`, seq: ${t.seq}, ts: d"${t.ts}", role: "${t.role}", text_excerpt: ${
+                t.text_excerpt === null ? "NONE" : JSON.stringify(t.text_excerpt)
+            }, has_tool_use: ${t.has_tool_use}, has_error: ${t.has_error} };`,
+    );
+
+const queryTranscriptStatements = (statements: readonly string[]) =>
+    Effect.gen(function* () {
+        if (statements.length === 0) return;
         const db = yield* SurrealClient;
-        const chunks: string[] = turns.map(
-            (t) =>
-                `UPSERT turn:\`${turnRecordKey(t.session, t.seq)}\` CONTENT { session: session:\`${t.session}\`, seq: ${t.seq}, ts: d"${t.ts}", role: "${t.role}", text_excerpt: ${
-                    t.text_excerpt === null ? "NONE" : JSON.stringify(t.text_excerpt)
-                }, has_tool_use: ${t.has_tool_use}, has_error: ${t.has_error} };`,
-        );
-        for (let i = 0; i < chunks.length; i += 500) {
-            yield* db.query(chunks.slice(i, i + 500).join(""));
+        for (let i = 0; i < statements.length; i += CLAUDE_STATEMENT_CHUNK_SIZE) {
+            yield* db.query(statements.slice(i, i + CLAUDE_STATEMENT_CHUNK_SIZE).join(""));
         }
     });
 
@@ -703,20 +719,21 @@ const upsertEdits = (edits: Edit[]) =>
 const relateToolCallSkills = (relations: ToolCallSkillRelationWrite[]) =>
     Effect.gen(function* () {
         if (relations.length === 0) return;
-        yield* Effect.forEach(relations, relateToolCallSkill, {
-            concurrency: 4,
-            discard: true,
-        });
+        yield* queryTranscriptStatements(relations.flatMap((relation) =>
+            buildRelateToolCallSkillStatements(relation),
+        ));
     });
 
 const writePlanSnapshots = (snapshots: PlanSnapshotWrite[]) =>
     Effect.gen(function* () {
         if (snapshots.length === 0) return;
-        yield* Effect.forEach(snapshots, writePlanSnapshot, {
-            concurrency: 4,
-            discard: true,
-        });
+        yield* queryTranscriptStatements(snapshots.flatMap((snapshot) =>
+            buildPlanSnapshotStatements(snapshot),
+        ));
     });
+
+const writeToolCallStatements = (toolCalls: readonly ToolCallWrite[]) =>
+    queryTranscriptStatements(buildToolCallStatements(toolCalls));
 
 interface IngestOpts {
     sinceDays: number | undefined;
@@ -754,6 +771,8 @@ export const ingestTranscripts = (
         let editCount = 0;
         let toolCallCount = 0;
         let planSnapshotCount = 0;
+        let activeFiles = 0;
+        const concurrency = claudeConcurrency();
 
         for (const projectDir of projectDirs) {
             const fullProject = join(TRANSCRIPTS_DIR, projectDir);
@@ -777,12 +796,14 @@ export const ingestTranscripts = (
 
         if (opts.onProgress) yield* opts.onProgress({ totalFiles: candidates.length });
 
-        for (const [index, candidate] of candidates.entries()) {
+        yield* Effect.forEach(candidates.map((candidate, index) => ({ candidate, index })), ({ candidate, index }) => Effect.gen(function* () {
+            activeFiles += 1;
             if (opts.onProgress && (index < 5 || index % 10 === 0)) {
                 yield* opts.onProgress({
                     currentFile: index + 1,
                     totalFiles: candidates.length,
                     files,
+                    activeFiles,
                     sessions,
                     turns: turnCount,
                     invocations: invCount,
@@ -794,7 +815,10 @@ export const ingestTranscripts = (
             const extracted = yield* Effect.promise(() =>
                 extractFile(candidate.filePath, candidate.projectDir),
             );
-            if (!extracted) continue;
+            if (!extracted) {
+                activeFiles -= 1;
+                return;
+            }
             files += 1;
             const pointer = yield* snapshotTranscript(
                 extracted.session.id,
@@ -805,13 +829,13 @@ export const ingestTranscripts = (
             sessions += 1;
             yield* upsertTurns(extracted.turns);
             turnCount += extracted.turns.length;
-            yield* writeToolCalls(extracted.toolCalls);
+            yield* writeToolCallStatements(extracted.toolCalls);
             toolCallCount += extracted.toolCalls.length;
+            yield* relateInvocations(extracted.invocations);
+            invCount += extracted.invocations.length;
             yield* relateToolCallSkills(extracted.skillRelations);
             yield* writePlanSnapshots(extracted.planSnapshots);
             planSnapshotCount += extracted.planSnapshots.length;
-            yield* relateInvocations(extracted.invocations);
-            invCount += extracted.invocations.length;
             yield* upsertEdits(extracted.edits);
             editCount += extracted.edits.length;
             if (opts.onProgress && (files <= 5 || files % 10 === 0)) {
@@ -819,6 +843,7 @@ export const ingestTranscripts = (
                     currentFile: index + 1,
                     totalFiles: candidates.length,
                     files,
+                    activeFiles,
                     sessions,
                     turns: turnCount,
                     invocations: invCount,
@@ -832,6 +857,7 @@ export const ingestTranscripts = (
                     currentFile: index + 1,
                     totalFiles: candidates.length,
                     files,
+                    activeFiles,
                     sessions,
                     turns: turnCount,
                     invocations: invCount,
@@ -844,7 +870,8 @@ export const ingestTranscripts = (
                     ...counts,
                 });
             }
-        }
+            activeFiles -= 1;
+        }), { concurrency, discard: true });
         yield* Effect.logDebug("transcript ingest complete", {
             files,
             sessions,
