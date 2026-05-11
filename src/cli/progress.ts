@@ -41,7 +41,6 @@ export interface ProgressOptions {
 }
 
 const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-const minPipelineColumns = 100;
 
 export function parseProgressMode(raw: string | undefined): ProgressMode {
     if (raw === undefined || raw === "") return "auto";
@@ -103,8 +102,7 @@ function shouldUsePipeline(mode: ProgressMode, sink: ProgressSink, env: Record<s
     if (mode !== "auto" && mode !== "pipeline") return false;
     if (env.AGENTCTL_PROGRESS_FORCE_PIPELINE === "1") return true;
     if (!sink.isTTY) return false;
-    if (env.CI === "true" || env.NO_COLOR || env.TERM === "dumb") return false;
-    if (typeof sink.columns === "number" && sink.columns < minPipelineColumns) return false;
+    if (env.CI === "true" || env.TERM === "dumb") return false;
     return true;
 }
 
@@ -327,5 +325,6 @@ export function createProgressReporter(options: ProgressOptions): ProgressReport
             intervalMs: options.intervalMs ?? 120,
         }, options.stages);
     }
+    if (options.mode === "auto") return new JsonProgress({ ...base, sink });
     return new PlainProgress(sink, now);
 }

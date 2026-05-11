@@ -1143,18 +1143,17 @@ export const deriveSignals = (
         yield* upsertDiagnosticEvents(diagnosticBatch);
         yield* upsertRecommendations(recommendationBatch);
 
-        console.log(
-            `[derive-signals] DONE sessions=${bundles.length} turns=${turnCount} corrections=${corrections} proposed=${proposed}`,
-        );
-        console.log(
-            `[skill_pairs] DONE sessions=${bundles.length} pairs=${pairsList.length}`,
-        );
-        console.log(
-            `[recovery] DONE sessions=${bundles.length} edges=${recoveries}`,
-        );
-        console.log(
-            `[evidence] DONE friction=${frictionBatch.length} diagnostics=${diagnosticBatch.length} recommendations=${recommendationBatch.length}`,
-        );
+        yield* Effect.logDebug("signals derived", {
+            sessions: bundles.length,
+            turns: turnCount,
+            corrections,
+            proposed,
+            skillPairs: pairsList.length,
+            recoveries,
+            frictionEvents: frictionBatch.length,
+            diagnosticEvents: diagnosticBatch.length,
+            recommendations: recommendationBatch.length,
+        });
         return {
             sessions: bundles.length,
             turns: turnCount,

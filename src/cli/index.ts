@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { Effect, Option } from "effect";
+import { Effect, Option, References } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
 import { AppLayer } from "../lib/layers.ts";
@@ -159,15 +159,6 @@ function progressModeFor(command: string, args: string[]) {
     }
 }
 
-function silenceConsoleLogWhileLive(progress: ProgressReporter): () => void {
-    if (!progress.live) return () => {};
-    const original = console.log;
-    console.log = () => {};
-    return () => {
-        console.log = original;
-    };
-}
-
 const writeIngestEvent = (
     db: SurrealClientShape,
     input: {
@@ -275,6 +266,7 @@ const cmdIngest = (args: string[]) =>
         const db = yield* SurrealClient;
         const runId = runIdFor("ingest");
         const progressMode = progressModeFor("ingest", args);
+        const verbose = args.includes("--verbose");
         const stages = ingestStages(args);
         const skillsOnly = args.includes("--skills-only");
         const transcriptsOnly = args.includes("--transcripts-only");
@@ -309,7 +301,6 @@ const cmdIngest = (args: string[]) =>
             runId,
             stages,
         });
-        const restoreConsole = silenceConsoleLogWhileLive(progress);
         const program = Effect.gen(function* () {
         // Issue #44: --claude-only is the *Claude* side of the world, which
         // includes both `~/.claude/skills` and `~/.claude/projects`
@@ -348,10 +339,8 @@ const cmdIngest = (args: string[]) =>
                     return yield* error;
                 }),
             ),
-            Effect.ensuring(Effect.sync(() => {
-                progress.stop();
-                restoreConsole();
-            })),
+            Effect.provideService(References.MinimumLogLevel, verbose ? "Debug" : "Info"),
+            Effect.ensuring(Effect.sync(() => progress.stop())),
         );
         yield* program;
     });
@@ -361,6 +350,7 @@ const cmdDeriveSignals = (args: string[]) =>
         const db = yield* SurrealClient;
         const runId = runIdFor("derive-signals");
         const progressMode = progressModeFor("derive-signals", args);
+        const verbose = args.includes("--verbose");
         const sinceDays = parseOptionalPositiveIntFlag(
             "derive-signals",
             "since",
@@ -377,7 +367,6 @@ const cmdDeriveSignals = (args: string[]) =>
             runId,
             stages: [{ source: "signals", stage: "derive" }],
         });
-        const restoreConsole = silenceConsoleLogWhileLive(progress);
         yield* telemetryStage(db, runId, "signals", "derive", deriveSignals({ sinceDays }), progress).pipe(
             Effect.tap(() => db.query(buildIngestRunFinishStatement({ runId, status: "ok" })).pipe(Effect.asVoid)),
             Effect.catch((error) =>
@@ -390,10 +379,8 @@ const cmdDeriveSignals = (args: string[]) =>
                     return yield* error;
                 }),
             ),
-            Effect.ensuring(Effect.sync(() => {
-                progress.stop();
-                restoreConsole();
-            })),
+            Effect.provideService(References.MinimumLogLevel, verbose ? "Debug" : "Info"),
+            Effect.ensuring(Effect.sync(() => progress.stop())),
         );
     });
 
@@ -402,6 +389,7 @@ const cmdIngestInsights = (args: string[] = []) =>
         const db = yield* SurrealClient;
         const runId = runIdFor("ingest-insights");
         const progressMode = progressModeFor("ingest-insights", args);
+        const verbose = args.includes("--verbose");
         yield* db.query(buildIngestRunStartStatement({ runId, command: "ingest-insights" }));
         const progress = createProgressReporter({
             command: "ingest-insights",
@@ -409,7 +397,6 @@ const cmdIngestInsights = (args: string[] = []) =>
             runId,
             stages: [{ source: "claude", stage: "insights" }],
         });
-        const restoreConsole = silenceConsoleLogWhileLive(progress);
         yield* telemetryStage(db, runId, "claude", "insights", ingestClaudeInsights(), progress).pipe(
             Effect.tap(() => db.query(buildIngestRunFinishStatement({ runId, status: "ok" })).pipe(Effect.asVoid)),
             Effect.catch((error) =>
@@ -422,10 +409,8 @@ const cmdIngestInsights = (args: string[] = []) =>
                     return yield* error;
                 }),
             ),
-            Effect.ensuring(Effect.sync(() => {
-                progress.stop();
-                restoreConsole();
-            })),
+            Effect.provideService(References.MinimumLogLevel, verbose ? "Debug" : "Info"),
+            Effect.ensuring(Effect.sync(() => progress.stop())),
         );
     }).pipe(Effect.asVoid);
 
@@ -1116,6 +1101,7 @@ const positiveLimit = (fallback: number) =>
 const optionalSince = Flag.integer("since").pipe(Flag.optional);
 const jsonFlag = Flag.boolean("json").pipe(Flag.withDefault(false));
 const checkFlag = Flag.boolean("check").pipe(Flag.withDefault(false));
+const verboseFlag = Flag.boolean("verbose").pipe(Flag.withDefault(false));
 const progressFlag = Flag.choice("progress", ["auto", "pipeline", "plain", "json", "off"] as const).pipe(
     Flag.withDefault("auto"),
 );
@@ -1130,8 +1116,9 @@ const ingestCommand = Command.make(
         claudeOnly: Flag.boolean("claude-only").pipe(Flag.withDefault(false)),
         since: optionalSince,
         progress: progressFlag,
+        verbose: verboseFlag,
     },
-    ({ skillsOnly, transcriptsOnly, codexOnly, gitOnly, claudeOnly, since, progress }) =>
+    ({ skillsOnly, transcriptsOnly, codexOnly, gitOnly, claudeOnly, since, progress, verbose }) =>
         cmdIngest([
             ...boolArg("skills-only", skillsOnly),
             ...boolArg("transcripts-only", transcriptsOnly),
@@ -1140,17 +1127,21 @@ const ingestCommand = Command.make(
             ...boolArg("claude-only", claudeOnly),
             ...intArg("since", optionValue(since)),
             `--progress=${progress}`,
+            ...boolArg("verbose", verbose),
         ]),
 ).pipe(Command.withDescription("Ingest skills, transcripts, Codex sessions, and git history"));
 
-const ingestInsightsCommand = Command.make("ingest-insights", { progress: progressFlag }, ({ progress }) =>
-    cmdIngestInsights([`--progress=${progress}`]),
+const ingestInsightsCommand = Command.make(
+    "ingest-insights",
+    { progress: progressFlag, verbose: verboseFlag },
+    ({ progress, verbose }) => cmdIngestInsights([`--progress=${progress}`, ...boolArg("verbose", verbose)]),
 ).pipe(Command.withDescription("Ingest Claude insight artifacts"));
 
 const deriveSignalsCommand = Command.make(
     "derive-signals",
-    { since: optionalSince, progress: progressFlag },
-    ({ since, progress }) => cmdDeriveSignals([...intArg("since", optionValue(since)), `--progress=${progress}`]),
+    { since: optionalSince, progress: progressFlag, verbose: verboseFlag },
+    ({ since, progress, verbose }) =>
+        cmdDeriveSignals([...intArg("since", optionValue(since)), `--progress=${progress}`, ...boolArg("verbose", verbose)]),
 ).pipe(Command.withDescription("Derive friction, diagnostic, recommendation, and recovery signals"));
 
 const insightView = Argument.choice("view", [
