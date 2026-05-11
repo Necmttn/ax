@@ -103,7 +103,7 @@
 - Modify: `README.md`
 - Modify: code touched by findings
 
-- [ ] Run full pipeline: schema, ingest, ingest-insights, derive-signals, project harness, new insight views, dashboard, tests, typecheck, build.
-- [ ] Save dogfood notes in `docs/insights-cli-reference.md`.
-- [ ] Fix confusing output, slow queries, duplicate edges, or false positives found during dogfood.
-- [ ] Commit: `test: dogfood graph insight backlog`.
+- [x] Run full pipeline: schema, ingest, ingest-insights, derive-signals, project harness, new insight views, dashboard, tests, typecheck, build.
+- [x] Save dogfood notes in `docs/insights-cli-reference.md`.
+- [x] Fix confusing output, slow queries, duplicate edges, or false positives found during dogfood.
+- [x] Commit: `test: dogfood graph insight backlog`.

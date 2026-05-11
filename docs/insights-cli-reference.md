@@ -233,6 +233,55 @@ Verification commands run:
 - `bun src/cli/index.ts insights tools --limit=5`
 - `bun src/cli/index.ts insights sessions --limit=5`
 - `bun src/cli/index.ts dashboard --limit=5`
+
+## 2026-05-11 Dogfood Notes
+
+Full backlog dogfood ran:
+
+- `bun run db:schema`
+- `bun src/cli/index.ts ingest-insights --progress=plain`
+- `bun src/cli/index.ts ingest --since=1 --progress=plain`
+- `bun test`
+- `bun run typecheck`
+- `bun run build`
+- `bun run check:cli-reference`
+- `bun src/cli/index.ts project harness --json`
+- `bun src/cli/index.ts onboarding --json`
+- `bun src/cli/index.ts dashboard --limit=5`
+- `bun src/cli/index.ts insights <new-view> --limit=3` for feedback loops,
+  user language, token/cache/workflow/Codex health, closure, post-feature
+  fixes, skill candidates, and graph health.
+
+Observed outputs:
+
+- Full ingest reached every derived stage: `outcomes/derive`,
+  `session-health/derive`, `closure/derive`, `learning-registry/derive`, and
+  `harness/doctor`.
+- Latest full ingest wrote 3,183 command outcomes, 421 user n-grams, 37 recent
+  session-health rows, 1,321 commit classifications, 1,089 fix-chain edges, 5
+  skill candidates, 5 gotchas/adoptions, and 25 learning matches.
+- `project harness --json` found 12 guidance sources and 1 intervention
+  suggestion.
+- `onboarding --json` reports Claude and shared agent guidance as git-tracked;
+  Codex global guidance is currently a warning because `~/.codex` is not
+  tracked.
+- Dashboard generation reported `tools=69,655`, `plans=244`,
+  `friction=4,434`, and `sessions=3,357`.
+
+Dogfood fixes made during the backlog run:
+
+- `feedback-loops` now filters successful/no-command rows so expected feedback
+  and blockers are visible.
+- `user-language` ranks signal proximity before raw count and regenerates
+  stale n-grams.
+- `verification-gaps` was rewritten from a slow per-session scan to an
+  edit-first aggregate.
+- `codex-health` now ignores empty sessions and ranks by estimated context
+  cost.
+- Closure derivation now runs full-graph during ingest even when transcript
+  ingest is since-scoped, because fix-chain rows are materialized comparisons.
+- `interventions candidates` selects its ordered fields to satisfy SurrealDB
+  ordering rules.
 - `bun test`
 - `bun run typecheck`
 - `bun src/cli/index.ts project verify --json`
