@@ -20,7 +20,13 @@ import {
     toolKindForName,
 } from "./tool-calls.ts";
 import { normalizeClaudeTodoWrite, type PlanStatus } from "./plans.ts";
-import { fileRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
+import {
+    editedRelationRecordKey,
+    fileRecordKey,
+    invokedRelationRecordKey,
+    toolCallRecordKey,
+    turnRecordKey,
+} from "./record-keys.ts";
 
 const MAX_OUTPUT_EXCERPT_CHARS = 1200;
 const DEFAULT_CLAUDE_CONCURRENCY = 4;
@@ -677,10 +683,16 @@ const relateInvocations = (invocations: Invocation[]) =>
             }
         }
 
-        const stmts = invocations.map(
-            (inv) =>
-                `RELATE turn:\`${turnRecordKey(inv.session, inv.seq)}\`->invoked->skill:\`${skillRecordKey(inv.skill)}\` SET ts = d"${inv.ts}", args = ${JSON.stringify(JSON.stringify(inv.args))}, turn_has_error = ${inv.turn_has_error};`,
-        );
+        const stmts = invocations.flatMap((inv) => {
+            const turnKey = turnRecordKey(inv.session, inv.seq);
+            const skillKey = skillRecordKey(inv.skill);
+            const args = JSON.stringify(inv.args);
+            const edgeKey = invokedRelationRecordKey({ turnKey, skillKey, args });
+            return [
+                `DELETE invoked WHERE in = turn:\`${turnKey}\` AND out = skill:\`${skillKey}\` AND args = ${JSON.stringify(args)} AND id != invoked:\`${edgeKey}\`;`,
+                `RELATE turn:\`${turnKey}\`->invoked:\`${edgeKey}\`->skill:\`${skillKey}\` SET ts = d"${inv.ts}", args = ${JSON.stringify(args)}, turn_has_error = ${inv.turn_has_error};`,
+            ];
+        });
         for (let i = 0; i < stmts.length; i += 500) {
             yield* db.query(stmts.slice(i, i + 500).join(""));
         }
@@ -704,8 +716,12 @@ const upsertEdits = (edits: Edit[]) =>
                 );
             }
             const turnKey = turnRecordKey(e.session, e.seq);
+            const edgeKey = editedRelationRecordKey({ turnKey, fileKey, tool: e.tool });
             relStmts.push(
-                `RELATE turn:\`${turnKey}\`->edited->file:\`${fileKey}\` SET tool = "${e.tool}", ts = d"${e.ts}";`,
+                `DELETE edited WHERE in = turn:\`${turnKey}\` AND out = file:\`${fileKey}\` AND tool = ${JSON.stringify(e.tool)} AND id != edited:\`${edgeKey}\`;`,
+            );
+            relStmts.push(
+                `RELATE turn:\`${turnKey}\`->edited:\`${edgeKey}\`->file:\`${fileKey}\` SET tool = "${e.tool}", ts = d"${e.ts}";`,
             );
         }
         for (let i = 0; i < fileStmts.length; i += 500) {

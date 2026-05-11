@@ -13,6 +13,16 @@ export type ToolCallKeyInput = {
     readonly seq: number;
     readonly callId?: string | null;
 };
+export type InvokedRelationKeyInput = {
+    readonly turnKey: string;
+    readonly skillKey: string;
+    readonly args: string;
+};
+export type EditedRelationKeyInput = {
+    readonly turnKey: string;
+    readonly fileKey: string;
+    readonly tool: string;
+};
 
 export function stableDigest(value: string, length = 16): string {
     // Preserve existing Bun.hash behavior - agentctl's 89 baseline tests depend on these exact hashes.
@@ -84,4 +94,12 @@ export function toolCallRecordKey(input: ToolCallKeyInput): string {
         ? identityPart(input.callId, "call")
         : `seq_${input.seq.toString(10).padStart(6, "0")}`;
     return `${identityPart(input.sessionId, "session")}__${callPart}`;
+}
+
+export function invokedRelationRecordKey(input: InvokedRelationKeyInput): string {
+    return stableDigest(`${input.turnKey}|${input.skillKey}|${input.args}`);
+}
+
+export function editedRelationRecordKey(input: EditedRelationKeyInput): string {
+    return stableDigest(`${input.turnKey}|${input.fileKey}|${input.tool}`);
 }

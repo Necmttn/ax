@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
 import {
     checkoutRecordKey,
     commitRecordKey,
+    editedRelationRecordKey,
     fileRecordKey,
+    invokedRelationRecordKey,
     repositoryRecordKey,
     toolCallRecordKey,
     toolRecordKey,
@@ -190,6 +192,41 @@ describe("record keys", () => {
 
     test("turnRecordKey is centralized and deterministic", () => {
         expect(turnRecordKey("session-abc", 7)).toMatch(/^session_abc__[a-f0-9]{16}__seq_000007$/);
+    });
+
+    test("invoked relation key keeps same turn skill with different args distinct", () => {
+        const base = {
+            turnKey: "turn_a",
+            skillKey: "skill_a",
+        };
+
+        expect(invokedRelationRecordKey({ ...base, args: "{\"x\":1}" })).toBe(
+            invokedRelationRecordKey({ ...base, args: "{\"x\":1}" }),
+        );
+        expect(invokedRelationRecordKey({ ...base, args: "{\"x\":1}" })).not.toBe(
+            invokedRelationRecordKey({ ...base, args: "{\"x\":2}" }),
+        );
+    });
+
+    test("edited relation key is stable per turn file tool", () => {
+        expect(editedRelationRecordKey({
+            turnKey: "turn_a",
+            fileKey: "file_a",
+            tool: "Edit",
+        })).toBe(editedRelationRecordKey({
+            turnKey: "turn_a",
+            fileKey: "file_a",
+            tool: "Edit",
+        }));
+        expect(editedRelationRecordKey({
+            turnKey: "turn_a",
+            fileKey: "file_a",
+            tool: "Edit",
+        })).not.toBe(editedRelationRecordKey({
+            turnKey: "turn_a",
+            fileKey: "file_a",
+            tool: "Write",
+        }));
     });
 
     test("toolCallRecordKey keeps call id distinct from seq fallback", () => {
