@@ -21,7 +21,7 @@ import {
     toolKindForName,
 } from "./tool-calls.ts";
 import { normalizeCodexUpdatePlan, type PlanStatus } from "./plans.ts";
-import { toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
+import { invokedRelationRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 
 const CODEX_ROOT = process.env.AGENTCTL_CODEX_DIR ?? join(homedir(), ".codex", "sessions");
 const DEFAULT_CODEX_RAW_MAX_BYTES = 5 * 1024 * 1024;
@@ -709,10 +709,16 @@ const buildSyntheticSkillAndInvocationStatements = (
             `UPSERT skill:\`${skillRecordKey(name)}\` MERGE { name: ${JSON.stringify(name)}, scope: "codex-tool", dir_path: "(synthetic)", content_hash: "codex" };`,
     );
 
-    const invStmts = invocations.map(
-        (inv) =>
-            `RELATE turn:\`${turnRecordKey(inv.session, inv.seq)}\`->invoked->skill:\`${skillRecordKey(inv.skill)}\` SET ts = d"${inv.ts}", args = ${JSON.stringify(JSON.stringify(inv.args))}, turn_has_error = false;`,
-    );
+    const invStmts = invocations.flatMap((inv) => {
+        const turnKey = turnRecordKey(inv.session, inv.seq);
+        const skillKey = skillRecordKey(inv.skill);
+        const args = JSON.stringify(inv.args);
+        const edgeKey = invokedRelationRecordKey({ turnKey, skillKey, args });
+        return [
+            `DELETE invoked WHERE in = turn:\`${turnKey}\` AND out = skill:\`${skillKey}\` AND args = ${JSON.stringify(args)} AND id != invoked:\`${edgeKey}\`;`,
+            `RELATE turn:\`${turnKey}\`->invoked:\`${edgeKey}\`->skill:\`${skillKey}\` SET ts = d"${inv.ts}", args = ${JSON.stringify(args)}, turn_has_error = false;`,
+        ];
+    });
     return [...skillStmts, ...invStmts];
 };
 

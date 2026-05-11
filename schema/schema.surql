@@ -405,6 +405,7 @@ DEFINE FIELD was_corrected  ON invoked TYPE bool DEFAULT false;
 -- `WHERE out = $skill_id AND ts > time::now() - Nd`. Composite index
 -- covers both predicates from one seek.
 DEFINE INDEX IF NOT EXISTS invoked_out_ts ON invoked FIELDS out, ts;
+DEFINE INDEX IF NOT EXISTS invoked_in_out_args ON invoked FIELDS in, out, args;
 
 DEFINE TABLE proposed     TYPE RELATION FROM turn TO skill;     -- assistant text mentioned skill, never invoked
 DEFINE FIELD ts           ON proposed TYPE datetime;
@@ -421,6 +422,7 @@ DEFINE FIELD absolute_path_seen ON edited TYPE option<string>;
 DEFINE FIELD edit_kind    ON edited TYPE option<string>;
 -- `edited` lookups by source turn (e.g., 'which files did this session edit').
 DEFINE INDEX IF NOT EXISTS edited_in ON edited FIELDS in;
+DEFINE INDEX IF NOT EXISTS edited_in_out_tool ON edited FIELDS in, out, tool;
 
 DEFINE TABLE corrected_by TYPE RELATION FROM turn TO turn;      -- assistant turn → next user turn that pushed back
 DEFINE FIELD pattern      ON corrected_by TYPE option<string>;  -- which negation pattern matched
@@ -466,6 +468,7 @@ DEFINE FIELD metrics      ON concerns TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD ts           ON concerns TYPE datetime DEFAULT time::now();
 DEFINE INDEX concerns_in  ON concerns FIELDS in;
 DEFINE INDEX concerns_out ON concerns FIELDS out;
+DEFINE INDEX IF NOT EXISTS concerns_in_out_kind ON concerns FIELDS in, out, kind;
 
 DEFINE TABLE includes     TYPE RELATION FROM changeset TO file_memory SCHEMAFULL;
 DEFINE FIELD kind         ON includes TYPE option<string>;
