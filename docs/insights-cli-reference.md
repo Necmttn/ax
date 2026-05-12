@@ -315,6 +315,18 @@ Legacy self-improve importer behavior:
 - `has_artifact` and `derived_from` edges keep provenance queryable; the
   imported rows are evidence, not authoritative truth.
 
+Install onboarding dogfood:
+
+- `./dist/agentctl onboarding --json` and `bun src/cli/index.ts onboarding
+  --json` returned the same local harness tracking state.
+- Claude global guidance and shared agent skills were already git-tracked.
+- Codex global guidance was the only warning: `/Users/necmttn/.codex`.
+- The install onboarding formatter produced a host-agent checklist scoped to
+  that warning, with guidance to use `agentctl onboarding --json`, track only
+  guidance/hooks/skills/commands/settings, exclude transcripts/caches/logs/
+  secrets/generated artifacts, commit `chore: track agent harness`, and rerun
+  onboarding.
+
 Harness Doctor schema additions are populated by default ingest. If they are
 empty, run `agentctl ingest --since=1` and inspect the `harness/doctor` ingest
 stage.
