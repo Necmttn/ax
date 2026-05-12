@@ -8,15 +8,17 @@ import { SurrealClient } from "../lib/db.ts";
 import { AppLayer } from "../lib/layers.ts";
 import { recordRef } from "../ingest/evidence-writers.ts";
 
-export type DogfoodScenario = "agentctl-setup";
+export type DogfoodScenario = "agentctl-setup" | "interactive";
 export type DogfoodTransport = "auto" | "pty" | "process";
 type EffectiveDogfoodTransport = "pty" | "process";
+type DogfoodStatus = "passed" | "failed" | "completed";
 
 export interface DogfoodTerminalArgs {
     readonly scenario: DogfoodScenario;
     readonly port: number;
     readonly json: boolean;
     readonly transport: DogfoodTransport;
+    readonly command?: string;
 }
 
 export interface DogfoodTerminalServer {
@@ -32,7 +34,7 @@ export interface DogfoodTerminalServer {
 interface DogfoodResult {
     readonly runId: string;
     readonly scenario: DogfoodScenario;
-    readonly status: "passed" | "failed";
+    readonly status: DogfoodStatus;
     readonly transcript: string;
     readonly startedAt: string;
     readonly endedAt: string;
@@ -42,6 +44,14 @@ interface DogfoodResult {
     readonly transport: EffectiveDogfoodTransport;
     readonly requestedTransport: DogfoodTransport;
     readonly transportFallbackReason?: string;
+}
+
+export interface DogfoodTerminalSession {
+    readonly title: string;
+    readonly cwd: string;
+    readonly command: string;
+    readonly env: Record<string, string>;
+    readonly successMarker?: string;
 }
 
 const DEFAULT_PORT = 1742;
@@ -76,10 +86,10 @@ function currentAgentctlPath(root: string): string {
 export function parseDogfoodTerminalArgs(args: readonly string[]): DogfoodTerminalArgs {
     const flag = (name: string): string | undefined => {
         const found = args.find((arg) => arg.startsWith(`--${name}=`));
-        return found?.split("=")[1];
+        return found?.slice(name.length + 3);
     };
     const scenario = flag("scenario") ?? "agentctl-setup";
-    if (scenario !== "agentctl-setup") {
+    if (scenario !== "agentctl-setup" && scenario !== "interactive") {
         throw new Error(`unknown dogfood scenario "${scenario}"`);
     }
     const rawPort = flag("port");
@@ -91,13 +101,17 @@ export function parseDogfoodTerminalArgs(args: readonly string[]): DogfoodTermin
     if (transport !== "auto" && transport !== "pty" && transport !== "process") {
         throw new Error(`unknown dogfood transport "${transport}"`);
     }
-    return { scenario, port, json: args.includes("--json"), transport };
+    const command = flag("command");
+    return {
+        scenario,
+        port,
+        json: args.includes("--json"),
+        transport,
+        ...(command !== undefined ? { command } : {}),
+    };
 }
 
-export async function createAgentctlSetupDemoScript(root = repoRoot()): Promise<{
-    readonly cwd: string;
-    readonly command: string;
-}> {
+export async function createAgentctlSetupDemoScript(root = repoRoot()): Promise<DogfoodTerminalSession> {
     const workRoot = await mkdtemp(join(tmpdir(), "agentctl-wterm-dogfood-"));
     const home = join(workRoot, "home");
     const scratch = join(workRoot, "scratch");
@@ -142,12 +156,49 @@ export async function createAgentctlSetupDemoScript(root = repoRoot()): Promise<
     ];
 
     return {
+        title: "agentctl setup demo",
         cwd: scratch,
         command: lines.join("\n"),
+        env: {
+            HOME: home,
+            CI: "1",
+        },
+        successMarker: SUCCESS_MARKER,
     };
 }
 
-export function dogfoodHtml(transport: DogfoodTransport | EffectiveDogfoodTransport = "auto"): string {
+export async function createInteractiveDogfoodSession(options: {
+    readonly command?: string;
+}): Promise<DogfoodTerminalSession> {
+    const workRoot = await mkdtemp(join(tmpdir(), "agentctl-wterm-dogfood-"));
+    const home = join(workRoot, "home");
+    const scratch = join(workRoot, "scratch");
+    await mkdir(home, { recursive: true });
+    await mkdir(scratch, { recursive: true });
+    for (const dir of [".claude", ".codex", ".agents"]) {
+        await mkdir(join(home, dir), { recursive: true });
+    }
+    return {
+        title: "interactive terminal",
+        cwd: scratch,
+        command: options.command?.trim() || "bash -l",
+        env: {
+            HOME: home,
+        },
+    };
+}
+
+async function createDogfoodSession(args: DogfoodTerminalArgs, root: string): Promise<DogfoodTerminalSession> {
+    if (args.scenario === "interactive") {
+        return createInteractiveDogfoodSession(args.command ? { command: args.command } : {});
+    }
+    return createAgentctlSetupDemoScript(root);
+}
+
+export function dogfoodHtml(
+    transport: DogfoodTransport | EffectiveDogfoodTransport = "auto",
+    title = "agentctl dogfood terminal",
+): string {
     return `<!doctype html>
 <html lang="en">
 <head>
@@ -167,8 +218,8 @@ export function dogfoodHtml(transport: DogfoodTransport | EffectiveDogfoodTransp
   </style>
 </head>
 <body>
-  <header><h1>agentctl wterm dogfood <span id="status">connecting</span></h1></header>
-  <main><div id="terminal" aria-label="agentctl setup terminal"></div></main>
+  <header><h1>${title} <span id="status">connecting</span></h1></header>
+  <main><div id="terminal" aria-label="agentctl dogfood terminal"></div></main>
   <footer>Scenario: fresh setup in a scratch HOME. Transport: ${transport}. No launchd or real global config mutation.</footer>
   <script type="importmap">
     {
@@ -220,13 +271,14 @@ window.__agentctlDogfood = { term, transport };
 }
 
 async function persistDogfoodResult(result: DogfoodResult): Promise<boolean> {
-    const transcriptKey = `dogfood_wterm_setup__${result.runId}__transcript`;
-    const observationKey = `dogfood_wterm_setup__${result.runId}`;
+    const scenarioKey = result.scenario.replaceAll("-", "_");
+    const transcriptKey = `dogfood_wterm_${scenarioKey}__${result.runId}__transcript`;
+    const observationKey = `dogfood_wterm_${scenarioKey}__${result.runId}`;
     const artifactRef = recordRef("artifact", transcriptKey);
     const statements = [
         `UPSERT ${artifactRef} MERGE ${sqlObject([
             ["kind", sqlString("dogfood_wterm_transcript")],
-            ["title", sqlString("wterm agentctl setup dogfood transcript")],
+            ["title", sqlString(`wterm ${result.scenario} dogfood transcript`)],
             ["uri", sqlString(`dogfood://wterm/${result.runId}/transcript`)],
             ["path", "NONE"],
             ["content_hash", sqlString(shortHash(result.transcript))],
@@ -241,7 +293,7 @@ async function persistDogfoodResult(result: DogfoodResult): Promise<boolean> {
         ])};`,
         `UPSERT ${recordRef("intervention_observation", observationKey)} MERGE ${sqlObject([
             ["intervention", "NONE"],
-            ["target", sqlString("agentctl_setup_wterm_dogfood")],
+            ["target", sqlString(`agentctl_${scenarioKey}_wterm_dogfood`)],
             ["status", sqlString(result.status)],
             ["metrics_before", sqlJson({ setup_verified: 0 })],
             ["metrics_after", sqlJson({ setup_verified: result.status === "passed" ? 1 : 0 })],
@@ -256,7 +308,9 @@ async function persistDogfoodResult(result: DogfoodResult): Promise<boolean> {
             })],
             ["notes", sqlJson([
                 `wterm rendered a browser terminal connected to ${result.transport} transport`,
-                "scenario demonstrated agentctl onboarding from a scratch HOME",
+                result.scenario === "interactive"
+                    ? "scenario opened a steerable terminal in a scratch HOME"
+                    : "scenario demonstrated agentctl onboarding from a scratch HOME",
             ])],
             ["observed_at", sqlDate(result.endedAt)],
         ])};`,
@@ -343,9 +397,12 @@ export async function startWtermDogfoodServer(
 ): Promise<DogfoodTerminalServer> {
     const root = repoRoot();
     const effective = await resolveEffectiveTransport(args.transport, root);
+    if (args.scenario === "interactive" && effective.transport !== "pty") {
+        throw new Error("interactive dogfood requires PTY transport; install node-pty/node or use agentctl-setup");
+    }
     const runId = shortHash(`${Date.now()}|${Math.random()}`);
     const startedAt = new Date().toISOString();
-    const scenario = await createAgentctlSetupDemoScript(root);
+    const scenario = await createDogfoodSession(args, root);
     let transcript = "";
     let result: DogfoodResult | null = null;
     let childProcess: ReturnType<typeof Bun.spawn> | null = null;
@@ -354,11 +411,12 @@ export async function startWtermDogfoodServer(
     const finish = async () => {
         if (result !== null) return;
         const endedAt = new Date().toISOString();
-        const markerFound = transcript.includes(SUCCESS_MARKER);
+        const markerFound = scenario.successMarker ? transcript.includes(scenario.successMarker) : false;
+        const status: DogfoodStatus = scenario.successMarker ? (markerFound ? "passed" : "failed") : "completed";
         const base: DogfoodResult = {
             runId,
             scenario: args.scenario,
-            status: markerFound ? "passed" : "failed",
+            status,
             transcript,
             startedAt,
             endedAt,
@@ -384,7 +442,7 @@ export async function startWtermDogfoodServer(
             env: {
                 PATH: process.env.PATH ?? "",
                 TERM: "xterm-256color",
-                CI: "1",
+                ...scenario.env,
             },
             stdout: "pipe",
             stderr: "pipe",
@@ -424,6 +482,7 @@ export async function startWtermDogfoodServer(
                 root,
                 cols: 100,
                 rows: 30,
+                env: scenario.env,
             }),
         ], {
             cwd: scenario.cwd,
@@ -431,6 +490,7 @@ export async function startWtermDogfoodServer(
                 PATH: process.env.PATH ?? "",
                 TERM: "xterm-256color",
                 AGENTCTL_REPO_ROOT: root,
+                ...scenario.env,
             },
             stdin: "pipe",
             stdout: "pipe",
@@ -542,6 +602,7 @@ export async function startWtermDogfoodServer(
                         transcriptBytes: transcript.length,
                         startedAt,
                         cwd: scenario.cwd,
+                        command: scenario.command,
                     });
                 }
                 return Response.json(result);
@@ -555,7 +616,7 @@ export async function startWtermDogfoodServer(
             const vendor = await serveNodeModuleFile(url.pathname);
             if (vendor) return vendor;
             if (url.pathname === "/" || url.pathname === "/index.html") {
-                return new Response(dogfoodHtml(effective.transport), {
+                return new Response(dogfoodHtml(effective.transport, scenario.title), {
                     headers: { "content-type": "text/html; charset=utf-8" },
                 });
             }

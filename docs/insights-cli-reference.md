@@ -348,6 +348,12 @@ wterm terminal dogfood:
   stream PTY output, so the committed PTY path uses a Node sidecar and keeps
   `--transport=process` as a fallback. Free-running Claude-driver automation
   remains the next driver slice.
+- Interactive mode now runs with
+  `./dist/agentctl dogfood terminal --scenario=interactive --transport=pty
+  --command='bash -l' --port=1747 --json`. `agent-browser` drove the terminal
+  by typing `echo AGENT_BROWSER_STEERED_INTERACTIVE`, then `exit`; the latest
+  result was `status=completed`, `transport=pty`, and the transcript contained
+  the typed marker.
 
 Harness Doctor schema additions are populated by default ingest. If they are
 empty, run `agentctl ingest --since=1` and inspect the `harness/doctor` ingest

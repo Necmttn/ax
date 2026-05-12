@@ -13,6 +13,7 @@ const send = (event) => {
 const env = Object.fromEntries(
   Object.entries(process.env).filter(([, value]) => value !== undefined),
 );
+Object.assign(env, options.env ?? {});
 
 const terminal = pty.spawn("bash", ["-lc", options.command], {
   name: "xterm-256color",

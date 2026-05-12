@@ -129,7 +129,7 @@ agentctl derive-signals [--since=DAYS] [--progress=auto|pipeline|plain|json|off]
 agentctl insights [schema|repositories|checkouts|git|friction|tools|sessions|feedback-loops|verification-gaps|user-language|token-impact|cache-health|workflow-impact|codex-health|closure|post-feature-fixes|skill-candidates|graph-health] [--limit=N]
 agentctl dashboard [--limit=N] [--out=PATH]
 agentctl dashboard serve [--port=1738]
-agentctl dogfood terminal [--scenario=agentctl-setup] [--transport=auto|pty|process] [--port=1742] [--json]
+agentctl dogfood terminal [--scenario=agentctl-setup|interactive] [--transport=auto|pty|process] [--command=CMD] [--port=1742] [--json]
 agentctl search <query> [--limit=N]
 agentctl stats <skill>
 agentctl recent [--limit=N]
