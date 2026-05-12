@@ -1241,6 +1241,14 @@ Local note:
 - The local `claude` binary exists.
 - In this shell, `cc` resolves to `/usr/bin/cc`, so dogfooding should call `claude` directly unless a shell alias/function is explicitly loaded.
 
+Implemented tracer bullet:
+
+- `agentctl dogfood terminal --scenario=agentctl-setup` serves a local wterm DOM terminal.
+- The server streams a scripted terminal process to the browser over WebSocket and runs a scratch-HOME setup demo.
+- The scenario demonstrates `agentctl --help`, `agentctl onboarding --json`, host-agent git tracking of `.claude`, `.codex`, and `.agents`, then a second onboarding check.
+- The terminal transcript is persisted as `artifact` and the pass/fail result is persisted as `intervention_observation` when the local DB is reachable.
+- This is intentionally not yet a free-running Claude driver or native PTY transport; it proves the wterm/browser evidence path before recursive agent control.
+
 ## Hosted Taste / Skill Hub Monetization Sketch
 
 Command Code validates the market framing around "coding taste": agents that learn preferences, auto-generate project skills, and share taste across teams. The opportunity for `agentctl` should not be "another coding agent." It can be the evidence layer and registry behind taste:
