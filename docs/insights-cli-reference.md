@@ -327,6 +327,27 @@ Install onboarding dogfood:
   secrets/generated artifacts, commit `chore: track agent harness`, and rerun
   onboarding.
 
+wterm terminal dogfood:
+
+- `./dist/agentctl dogfood terminal --scenario=agentctl-setup --port=1742
+  --json` served a browser-rendered wterm terminal.
+- `agent-browser open http://127.0.0.1:1742/` loaded the wterm DOM frontend and
+  drove the scenario through the browser.
+- The scratch setup scenario demonstrated `agentctl --help`, initial
+  `agentctl onboarding --json` warnings for `.claude`, `.codex`, and
+  `.agents`, host-agent-style git tracking of those harness dirs, and a second
+  onboarding check returning all `ok`.
+- Latest passing run wrote
+  `intervention_observation:dogfood_wterm_setup__060c3fbb346a0c6d` with
+  `target=agentctl_setup_wterm_dogfood`, `status=passed`, and
+  `transport=process`.
+- The transcript was stored as
+  `artifact:dogfood_wterm_setup__060c3fbb346a0c6d__transcript`.
+- Native `node-pty` was tested first, but Bun 1.3.10 crashed on PTY process
+  exit. The committed tracer bullet therefore uses a stable scripted process
+  transport through wterm; true PTY/Claude-driver automation remains the next
+  transport slice.
+
 Harness Doctor schema additions are populated by default ingest. If they are
 empty, run `agentctl ingest --since=1` and inspect the `harness/doctor` ingest
 stage.

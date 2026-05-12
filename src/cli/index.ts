@@ -29,6 +29,7 @@ import {
 import { cmdProject } from "./project.ts";
 import { AGENTCTL_VERSION, liveVersionDeps, printVersion, updateAgentctl } from "./version.ts";
 import { buildOnboardingReport, formatOnboardingReport } from "./onboarding.ts";
+import { cmdDogfoodTerminal } from "../dogfood/wterm.ts";
 import { guidanceNext, parseSelfImproveArgs, selfImproveWeekly, sessionSummary } from "../self-improve/commands.ts";
 import {
     buildIngestEventStatement,
@@ -1321,6 +1322,24 @@ const dashboardCommand = Command.make(
     Command.withSubcommands([dashboardServeCommand]),
 );
 
+const dogfoodTerminalCommand = Command.make(
+    "terminal",
+    {
+        scenario: Flag.choice("scenario", ["agentctl-setup"] as const).pipe(Flag.withDefault("agentctl-setup")),
+        port: Flag.integer("port").pipe(Flag.withDefault(1742)),
+        json: jsonFlag,
+    },
+    ({ scenario, port, json }) =>
+        Effect.promise(() =>
+            cmdDogfoodTerminal([`--scenario=${scenario}`, `--port=${port}`, ...boolArg("json", json)]),
+        ),
+).pipe(Command.withDescription("Serve a wterm browser terminal dogfood scenario"));
+
+const dogfoodCommand = Command.make("dogfood").pipe(
+    Command.withDescription("Run local dogfood harnesses"),
+    Command.withSubcommands([dogfoodTerminalCommand]),
+);
+
 const searchCommand = Command.make(
     "search",
     {
@@ -1523,6 +1542,7 @@ export const rootCommand = Command.make("agentctl").pipe(
         onboardingCommand,
         interventionsCommand,
         dashboardCommand,
+        dogfoodCommand,
         searchCommand,
         statsCommand,
         recentCommand,
