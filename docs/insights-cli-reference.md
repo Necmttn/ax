@@ -354,6 +354,11 @@ wterm terminal dogfood:
   by typing `echo AGENT_BROWSER_STEERED_INTERACTIVE`, then `exit`; the latest
   result was `status=completed`, `transport=pty`, and the transcript contained
   the typed marker.
+- Agent presets now run with `--agent=shell|claude|codex|opencode`. Live smoke
+  `--scenario=interactive --agent=shell --transport=pty --port=1748 --json`
+  produced `intervention_observation:dogfood_wterm_interactive__1ab36f61a56036de`
+  with `agent=shell`, `command=bash -l`, `command_source=preset`,
+  `status=completed`, and a transcript containing `AGENT_PRESET_SHELL_STEERED`.
 
 Harness Doctor schema additions are populated by default ingest. If they are
 empty, run `agentctl ingest --since=1` and inspect the `harness/doctor` ingest

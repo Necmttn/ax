@@ -1250,6 +1250,7 @@ Implemented tracer bullet:
 - The terminal transcript is persisted as `artifact` and the pass/fail result is persisted as `intervention_observation` when the local DB is reachable.
 - This is intentionally not yet a free-running Claude driver; it proves the PTY-backed wterm/browser evidence path before recursive agent control.
 - `--scenario=interactive --command="bash -l"` opens a steerable PTY shell in a scratch HOME. A human or another agent can drive it through the browser; transcript evidence is persisted with `status=completed`.
+- Interactive mode supports `--agent=shell|claude|codex|opencode` presets. `--command=...` overrides the preset command while retaining the selected agent label in run metadata.
 
 ## Hosted Taste / Skill Hub Monetization Sketch
 

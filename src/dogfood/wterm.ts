@@ -10,6 +10,7 @@ import { recordRef } from "../ingest/evidence-writers.ts";
 
 export type DogfoodScenario = "agentctl-setup" | "interactive";
 export type DogfoodTransport = "auto" | "pty" | "process";
+export type DogfoodAgent = "shell" | "claude" | "codex" | "opencode";
 type EffectiveDogfoodTransport = "pty" | "process";
 type DogfoodStatus = "passed" | "failed" | "completed";
 
@@ -18,6 +19,7 @@ export interface DogfoodTerminalArgs {
     readonly port: number;
     readonly json: boolean;
     readonly transport: DogfoodTransport;
+    readonly agent?: DogfoodAgent;
     readonly command?: string;
 }
 
@@ -43,6 +45,9 @@ interface DogfoodResult {
     readonly persisted: boolean;
     readonly transport: EffectiveDogfoodTransport;
     readonly requestedTransport: DogfoodTransport;
+    readonly agent?: DogfoodAgent;
+    readonly command: string;
+    readonly commandSource: "preset" | "override";
     readonly transportFallbackReason?: string;
 }
 
@@ -50,8 +55,16 @@ export interface DogfoodTerminalSession {
     readonly title: string;
     readonly cwd: string;
     readonly command: string;
+    readonly commandSource: "preset" | "override";
+    readonly agent?: DogfoodAgent;
     readonly env: Record<string, string>;
     readonly successMarker?: string;
+}
+
+export interface DogfoodAgentPreset {
+    readonly agent: DogfoodAgent;
+    readonly command: string;
+    readonly title: string;
 }
 
 const DEFAULT_PORT = 1742;
@@ -101,14 +114,38 @@ export function parseDogfoodTerminalArgs(args: readonly string[]): DogfoodTermin
     if (transport !== "auto" && transport !== "pty" && transport !== "process") {
         throw new Error(`unknown dogfood transport "${transport}"`);
     }
+    const agent = flag("agent");
+    if (
+        agent !== undefined
+        && agent !== "shell"
+        && agent !== "claude"
+        && agent !== "codex"
+        && agent !== "opencode"
+    ) {
+        throw new Error(`unknown dogfood agent "${agent}"`);
+    }
     const command = flag("command");
     return {
         scenario,
         port,
         json: args.includes("--json"),
         transport,
+        ...(agent !== undefined ? { agent } : {}),
         ...(command !== undefined ? { command } : {}),
     };
+}
+
+export function resolveDogfoodAgentPreset(agent: DogfoodAgent = "shell"): DogfoodAgentPreset {
+    switch (agent) {
+        case "claude":
+            return { agent, command: "claude", title: "Claude Code dogfood" };
+        case "codex":
+            return { agent, command: "codex", title: "Codex dogfood" };
+        case "opencode":
+            return { agent, command: "opencode", title: "OpenCode dogfood" };
+        case "shell":
+            return { agent, command: "bash -l", title: "interactive terminal" };
+    }
 }
 
 export async function createAgentctlSetupDemoScript(root = repoRoot()): Promise<DogfoodTerminalSession> {
@@ -159,6 +196,8 @@ export async function createAgentctlSetupDemoScript(root = repoRoot()): Promise<
         title: "agentctl setup demo",
         cwd: scratch,
         command: lines.join("\n"),
+        commandSource: "preset",
+        agent: "shell",
         env: {
             HOME: home,
             CI: "1",
@@ -168,6 +207,7 @@ export async function createAgentctlSetupDemoScript(root = repoRoot()): Promise<
 }
 
 export async function createInteractiveDogfoodSession(options: {
+    readonly agent?: DogfoodAgent;
     readonly command?: string;
 }): Promise<DogfoodTerminalSession> {
     const workRoot = await mkdtemp(join(tmpdir(), "agentctl-wterm-dogfood-"));
@@ -178,10 +218,14 @@ export async function createInteractiveDogfoodSession(options: {
     for (const dir of [".claude", ".codex", ".agents"]) {
         await mkdir(join(home, dir), { recursive: true });
     }
+    const preset = resolveDogfoodAgentPreset(options.agent ?? "shell");
+    const command = options.command?.trim();
     return {
-        title: "interactive terminal",
+        title: preset.title,
         cwd: scratch,
-        command: options.command?.trim() || "bash -l",
+        command: command || preset.command,
+        commandSource: command ? "override" : "preset",
+        agent: preset.agent,
         env: {
             HOME: home,
         },
@@ -190,7 +234,10 @@ export async function createInteractiveDogfoodSession(options: {
 
 async function createDogfoodSession(args: DogfoodTerminalArgs, root: string): Promise<DogfoodTerminalSession> {
     if (args.scenario === "interactive") {
-        return createInteractiveDogfoodSession(args.command ? { command: args.command } : {});
+        return createInteractiveDogfoodSession({
+            ...(args.agent ? { agent: args.agent } : {}),
+            ...(args.command ? { command: args.command } : {}),
+        });
     }
     return createAgentctlSetupDemoScript(root);
 }
@@ -288,6 +335,11 @@ async function persistDogfoodResult(result: DogfoodResult): Promise<boolean> {
                 started_at: result.startedAt,
                 ended_at: result.endedAt,
                 cwd: result.cwd,
+                command: result.command,
+                command_source: result.commandSource,
+                agent: result.agent,
+                transport: result.transport,
+                requested_transport: result.requestedTransport,
             })],
             ["updated_at", "time::now()"],
         ])};`,
@@ -300,6 +352,9 @@ async function persistDogfoodResult(result: DogfoodResult): Promise<boolean> {
             ["metrics", sqlJson({
                 scenario: result.scenario,
                 driver: "wterm",
+                agent: result.agent,
+                command: result.command,
+                command_source: result.commandSource,
                 transport: result.transport,
                 requested_transport: result.requestedTransport,
                 transport_fallback_reason: result.transportFallbackReason,
@@ -425,6 +480,9 @@ export async function startWtermDogfoodServer(
             persisted: false,
             transport: effective.transport,
             requestedTransport: args.transport,
+            command: scenario.command,
+            commandSource: scenario.commandSource,
+            ...(scenario.agent ? { agent: scenario.agent } : {}),
             ...(effective.fallbackReason ? { transportFallbackReason: effective.fallbackReason } : {}),
         };
         const persisted = await persistDogfoodResult(base);
@@ -603,6 +661,8 @@ export async function startWtermDogfoodServer(
                         startedAt,
                         cwd: scenario.cwd,
                         command: scenario.command,
+                        agent: scenario.agent,
+                        commandSource: scenario.commandSource,
                     });
                 }
                 return Response.json(result);

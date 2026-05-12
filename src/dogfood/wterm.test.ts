@@ -5,6 +5,7 @@ import {
     dogfoodClientJs,
     dogfoodHtml,
     parseDogfoodTerminalArgs,
+    resolveDogfoodAgentPreset,
 } from "./wterm.ts";
 
 describe("wterm dogfood harness", () => {
@@ -25,9 +26,21 @@ describe("wterm dogfood harness", () => {
             scenario: "interactive",
             command: "claude --dangerously-skip-permissions",
         });
+        expect(parseDogfoodTerminalArgs(["--scenario=interactive", "--agent=claude"])).toMatchObject({
+            scenario: "interactive",
+            agent: "claude",
+        });
         expect(() => parseDogfoodTerminalArgs(["--scenario=unknown"])).toThrow("unknown dogfood scenario");
         expect(() => parseDogfoodTerminalArgs(["--port=0"])).toThrow("--port must be");
         expect(() => parseDogfoodTerminalArgs(["--transport=bad"])).toThrow("unknown dogfood transport");
+        expect(() => parseDogfoodTerminalArgs(["--agent=bad"])).toThrow("unknown dogfood agent");
+    });
+
+    test("resolves interactive agent presets to concrete commands", () => {
+        expect(resolveDogfoodAgentPreset("shell").command).toBe("bash -l");
+        expect(resolveDogfoodAgentPreset("claude").command).toContain("claude");
+        expect(resolveDogfoodAgentPreset("codex").command).toContain("codex");
+        expect(resolveDogfoodAgentPreset("opencode").command).toContain("opencode");
     });
 
     test("setup script demonstrates scratch onboarding and tracking baseline", async () => {
@@ -41,19 +54,22 @@ describe("wterm dogfood harness", () => {
     });
 
     test("interactive session starts a steerable shell in a scratch home", async () => {
-        const session = await createInteractiveDogfoodSession({});
+        const session = await createInteractiveDogfoodSession({ agent: "shell" });
 
         expect(session.command).toBe("bash -l");
         expect(session.title).toBe("interactive terminal");
+        expect(session.agent).toBe("shell");
         expect(session.successMarker).toBeUndefined();
         expect(session.cwd).toContain("agentctl-wterm-dogfood-");
         expect(session.env.HOME).toContain("agentctl-wterm-dogfood-");
     });
 
     test("interactive session accepts a custom agent command", async () => {
-        const session = await createInteractiveDogfoodSession({ command: "claude" });
+        const session = await createInteractiveDogfoodSession({ agent: "claude", command: "claude" });
 
         expect(session.command).toBe("claude");
+        expect(session.agent).toBe("claude");
+        expect(session.commandSource).toBe("override");
     });
 
     test("html and client load wterm through browser imports and websocket transport", () => {
