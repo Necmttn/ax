@@ -12,14 +12,17 @@ describe("wterm dogfood harness", () => {
             scenario: "agentctl-setup",
             port: 1742,
             json: false,
+            transport: "auto",
         });
-        expect(parseDogfoodTerminalArgs(["--scenario=agentctl-setup", "--port=1844", "--json"])).toMatchObject({
+        expect(parseDogfoodTerminalArgs(["--scenario=agentctl-setup", "--port=1844", "--json", "--transport=pty"])).toMatchObject({
             scenario: "agentctl-setup",
             port: 1844,
             json: true,
+            transport: "pty",
         });
         expect(() => parseDogfoodTerminalArgs(["--scenario=unknown"])).toThrow("unknown dogfood scenario");
         expect(() => parseDogfoodTerminalArgs(["--port=0"])).toThrow("--port must be");
+        expect(() => parseDogfoodTerminalArgs(["--transport=bad"])).toThrow("unknown dogfood transport");
     });
 
     test("setup script demonstrates scratch onboarding and tracking baseline", async () => {
@@ -38,5 +41,10 @@ describe("wterm dogfood harness", () => {
         expect(dogfoodClientJs()).toContain("new WTerm");
         expect(dogfoodClientJs()).toContain("WebSocketTransport");
         expect(dogfoodClientJs()).toContain("/api/terminal");
+    });
+
+    test("html exposes selected backend transport", () => {
+        expect(dogfoodHtml("pty")).toContain("Transport: pty");
+        expect(dogfoodHtml("process")).toContain("Transport: process");
     });
 });

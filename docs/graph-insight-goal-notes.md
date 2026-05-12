@@ -1244,10 +1244,11 @@ Local note:
 Implemented tracer bullet:
 
 - `agentctl dogfood terminal --scenario=agentctl-setup` serves a local wterm DOM terminal.
-- The server streams a scripted terminal process to the browser over WebSocket and runs a scratch-HOME setup demo.
+- The server supports `--transport=auto|pty|process`; PTY runs through a Node `node-pty` sidecar because Bun 1.3.10 does not reliably run `node-pty` directly.
+- The server streams the scripted terminal session to the browser over WebSocket and runs a scratch-HOME setup demo.
 - The scenario demonstrates `agentctl --help`, `agentctl onboarding --json`, host-agent git tracking of `.claude`, `.codex`, and `.agents`, then a second onboarding check.
 - The terminal transcript is persisted as `artifact` and the pass/fail result is persisted as `intervention_observation` when the local DB is reachable.
-- This is intentionally not yet a free-running Claude driver or native PTY transport; it proves the wterm/browser evidence path before recursive agent control.
+- This is intentionally not yet a free-running Claude driver; it proves the PTY-backed wterm/browser evidence path before recursive agent control.
 
 ## Hosted Taste / Skill Hub Monetization Sketch
 

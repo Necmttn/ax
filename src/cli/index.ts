@@ -1326,12 +1326,18 @@ const dogfoodTerminalCommand = Command.make(
     "terminal",
     {
         scenario: Flag.choice("scenario", ["agentctl-setup"] as const).pipe(Flag.withDefault("agentctl-setup")),
+        transport: Flag.choice("transport", ["auto", "pty", "process"] as const).pipe(Flag.withDefault("auto")),
         port: Flag.integer("port").pipe(Flag.withDefault(1742)),
         json: jsonFlag,
     },
-    ({ scenario, port, json }) =>
+    ({ scenario, transport, port, json }) =>
         Effect.promise(() =>
-            cmdDogfoodTerminal([`--scenario=${scenario}`, `--port=${port}`, ...boolArg("json", json)]),
+            cmdDogfoodTerminal([
+                `--scenario=${scenario}`,
+                `--transport=${transport}`,
+                `--port=${port}`,
+                ...boolArg("json", json),
+            ]),
         ),
 ).pipe(Command.withDescription("Serve a wterm browser terminal dogfood scenario"));
 

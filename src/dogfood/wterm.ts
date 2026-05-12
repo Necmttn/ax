@@ -1,24 +1,31 @@
-import { mkdir, mkdtemp } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
+import type { ServerWebSocket } from "bun";
 import { SurrealClient } from "../lib/db.ts";
 import { AppLayer } from "../lib/layers.ts";
 import { recordRef } from "../ingest/evidence-writers.ts";
 
 export type DogfoodScenario = "agentctl-setup";
+export type DogfoodTransport = "auto" | "pty" | "process";
+type EffectiveDogfoodTransport = "pty" | "process";
 
 export interface DogfoodTerminalArgs {
     readonly scenario: DogfoodScenario;
     readonly port: number;
     readonly json: boolean;
+    readonly transport: DogfoodTransport;
 }
 
 export interface DogfoodTerminalServer {
     readonly url: string;
     readonly port: number;
     readonly scenario: DogfoodScenario;
+    readonly transport: EffectiveDogfoodTransport;
+    readonly requestedTransport: DogfoodTransport;
+    readonly transportFallbackReason?: string;
     readonly stop: () => void;
 }
 
@@ -32,7 +39,9 @@ interface DogfoodResult {
     readonly cwd: string;
     readonly markerFound: boolean;
     readonly persisted: boolean;
-    readonly transport: "process";
+    readonly transport: EffectiveDogfoodTransport;
+    readonly requestedTransport: DogfoodTransport;
+    readonly transportFallbackReason?: string;
 }
 
 const DEFAULT_PORT = 1742;
@@ -78,7 +87,11 @@ export function parseDogfoodTerminalArgs(args: readonly string[]): DogfoodTermin
     if (!Number.isInteger(port) || port <= 0 || port > 65535) {
         throw new Error(`--port must be a valid TCP port (got "${rawPort}")`);
     }
-    return { scenario, port, json: args.includes("--json") };
+    const transport = flag("transport") ?? "auto";
+    if (transport !== "auto" && transport !== "pty" && transport !== "process") {
+        throw new Error(`unknown dogfood transport "${transport}"`);
+    }
+    return { scenario, port, json: args.includes("--json"), transport };
 }
 
 export async function createAgentctlSetupDemoScript(root = repoRoot()): Promise<{
@@ -134,7 +147,7 @@ export async function createAgentctlSetupDemoScript(root = repoRoot()): Promise<
     };
 }
 
-export function dogfoodHtml(): string {
+export function dogfoodHtml(transport: DogfoodTransport | EffectiveDogfoodTransport = "auto"): string {
     return `<!doctype html>
 <html lang="en">
 <head>
@@ -156,7 +169,7 @@ export function dogfoodHtml(): string {
 <body>
   <header><h1>agentctl wterm dogfood <span id="status">connecting</span></h1></header>
   <main><div id="terminal" aria-label="agentctl setup terminal"></div></main>
-  <footer>Scenario: fresh setup in a scratch HOME. No launchd or real global config mutation.</footer>
+  <footer>Scenario: fresh setup in a scratch HOME. Transport: ${transport}. No launchd or real global config mutation.</footer>
   <script type="importmap">
     {
       "imports": {
@@ -236,11 +249,13 @@ async function persistDogfoodResult(result: DogfoodResult): Promise<boolean> {
                 scenario: result.scenario,
                 driver: "wterm",
                 transport: result.transport,
+                requested_transport: result.requestedTransport,
+                transport_fallback_reason: result.transportFallbackReason,
                 marker_found: result.markerFound,
                 transcript_artifact: transcriptKey,
             })],
             ["notes", sqlJson([
-                "wterm rendered a browser terminal connected to a scripted process transport",
+                `wterm rendered a browser terminal connected to ${result.transport} transport`,
                 "scenario demonstrated agentctl onboarding from a scratch HOME",
             ])],
             ["observed_at", sqlDate(result.endedAt)],
@@ -258,6 +273,47 @@ async function persistDogfoodResult(result: DogfoodResult): Promise<boolean> {
     } catch {
         return false;
     }
+}
+
+async function ensureNodePtySpawnHelperExecutable(root: string): Promise<void> {
+    const arch = process.arch === "arm64" ? "darwin-arm64" : "darwin-x64";
+    const helper = join(root, "node_modules", "node-pty", "prebuilds", arch, "spawn-helper");
+    if (!existsSync(helper)) return;
+    await chmod(helper, 0o755);
+}
+
+function ptySidecarPath(root: string): string {
+    return join(root, "src", "dogfood", "pty-sidecar.mjs");
+}
+
+async function canUsePtyTransport(root: string): Promise<{ readonly ok: boolean; readonly reason?: string }> {
+    if (!existsSync(join(root, "node_modules", "node-pty"))) {
+        return { ok: false, reason: "node-pty is not installed" };
+    }
+    if (!existsSync(ptySidecarPath(root))) {
+        return { ok: false, reason: "PTY sidecar script is missing" };
+    }
+    if (Bun.which("node") === null) {
+        return { ok: false, reason: "node is not on PATH" };
+    }
+    await ensureNodePtySpawnHelperExecutable(root);
+    return { ok: true };
+}
+
+async function resolveEffectiveTransport(
+    requested: DogfoodTransport,
+    root: string,
+): Promise<{
+    readonly transport: EffectiveDogfoodTransport;
+    readonly fallbackReason?: string;
+}> {
+    if (requested === "process") return { transport: "process" };
+    const pty = await canUsePtyTransport(root);
+    if (pty.ok) return { transport: "pty" };
+    if (requested === "pty") {
+        throw new Error(`PTY transport unavailable: ${pty.reason ?? "unknown reason"}`);
+    }
+    return { transport: "process", fallbackReason: pty.reason ?? "PTY transport unavailable" };
 }
 
 async function serveNodeModuleFile(pathname: string): Promise<Response | null> {
@@ -285,9 +341,11 @@ async function serveNodeModuleFile(pathname: string): Promise<Response | null> {
 export async function startWtermDogfoodServer(
     args: DogfoodTerminalArgs,
 ): Promise<DogfoodTerminalServer> {
+    const root = repoRoot();
+    const effective = await resolveEffectiveTransport(args.transport, root);
     const runId = shortHash(`${Date.now()}|${Math.random()}`);
     const startedAt = new Date().toISOString();
-    const scenario = await createAgentctlSetupDemoScript();
+    const scenario = await createAgentctlSetupDemoScript(root);
     let transcript = "";
     let result: DogfoodResult | null = null;
     let childProcess: ReturnType<typeof Bun.spawn> | null = null;
@@ -307,10 +365,114 @@ export async function startWtermDogfoodServer(
             cwd: scenario.cwd,
             markerFound,
             persisted: false,
-            transport: "process",
+            transport: effective.transport,
+            requestedTransport: args.transport,
+            ...(effective.fallbackReason ? { transportFallbackReason: effective.fallbackReason } : {}),
         };
         const persisted = await persistDogfoodResult(base);
         result = { ...base, persisted };
+    };
+
+    const appendOutput = (ws: ServerWebSocket<unknown>, data: string) => {
+        transcript += data;
+        ws.send(data);
+    };
+
+    const spawnProcessTransport = (ws: ServerWebSocket<unknown>) => {
+        childProcess = Bun.spawn(["bash", "-lc", scenario.command], {
+            cwd: scenario.cwd,
+            env: {
+                PATH: process.env.PATH ?? "",
+                TERM: "xterm-256color",
+                CI: "1",
+            },
+            stdout: "pipe",
+            stderr: "pipe",
+        });
+        const pump = async (stream: unknown) => {
+            if (!(stream instanceof ReadableStream)) return;
+            const reader = stream.getReader();
+            const decoder = new TextDecoder();
+            while (true) {
+                const chunk = await reader.read();
+                if (chunk.done) break;
+                appendOutput(ws, decoder.decode(chunk.value));
+            }
+        };
+        Promise.all([pump(childProcess.stdout), pump(childProcess.stderr)])
+            .then(() => childProcess?.exited)
+            .then(() => {
+                childProcess = null;
+                return finish();
+            })
+            .finally(() => ws.close());
+    };
+
+    const writeSidecarMessage = (message: unknown) => {
+        if (!childProcess?.stdin) return;
+        if (typeof childProcess.stdin === "number") return;
+        childProcess.stdin.write(`${JSON.stringify(message)}\n`);
+    };
+
+    const spawnPtyTransport = (ws: ServerWebSocket<unknown>) => {
+        childProcess = Bun.spawn([
+            "node",
+            ptySidecarPath(root),
+            JSON.stringify({
+                command: scenario.command,
+                cwd: scenario.cwd,
+                root,
+                cols: 100,
+                rows: 30,
+            }),
+        ], {
+            cwd: scenario.cwd,
+            env: {
+                PATH: process.env.PATH ?? "",
+                TERM: "xterm-256color",
+                AGENTCTL_REPO_ROOT: root,
+            },
+            stdin: "pipe",
+            stdout: "pipe",
+            stderr: "pipe",
+        });
+        const pumpJsonLines = async (stream: unknown, fallbackPrefix = "") => {
+            if (!(stream instanceof ReadableStream)) return;
+            const reader = stream.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+            while (true) {
+                const chunk = await reader.read();
+                if (chunk.done) break;
+                buffer += decoder.decode(chunk.value);
+                let index = buffer.indexOf("\n");
+                while (index >= 0) {
+                    const line = buffer.slice(0, index);
+                    buffer = buffer.slice(index + 1);
+                    if (line.length > 0) {
+                        try {
+                            const event = JSON.parse(line) as { type?: string; data?: string; message?: string };
+                            if (event.type === "data" && event.data) {
+                                appendOutput(ws, Buffer.from(event.data, "base64").toString("utf8"));
+                            } else if (event.type === "error" && event.message) {
+                                appendOutput(ws, `\r\n${event.message}\r\n`);
+                            }
+                        } catch {
+                            appendOutput(ws, `${fallbackPrefix}${line}\r\n`);
+                        }
+                    }
+                    index = buffer.indexOf("\n");
+                }
+            }
+            if (buffer.length > 0) appendOutput(ws, `${fallbackPrefix}${buffer}\r\n`);
+        };
+        Promise.all([pumpJsonLines(childProcess.stdout), pumpJsonLines(childProcess.stderr, "pty sidecar: ")])
+            .then(() => childProcess?.exited)
+            .then(() => {
+                childProcess = null;
+                return finish();
+            })
+            .finally(() => ws.close());
     };
 
     const server = Bun.serve({
@@ -324,42 +486,32 @@ export async function startWtermDogfoodServer(
                     return;
                 }
                 sessionStarted = true;
-                childProcess = Bun.spawn(["bash", "-lc", scenario.command], {
-                    cwd: scenario.cwd,
-                    env: {
-                        PATH: process.env.PATH ?? "",
-                        TERM: "xterm-256color",
-                        CI: "1",
-                    },
-                    stdout: "pipe",
-                    stderr: "pipe",
-                });
-                const pump = async (stream: unknown) => {
-                    if (!(stream instanceof ReadableStream)) return;
-                    const reader = stream.getReader();
-                    const decoder = new TextDecoder();
-                    while (true) {
-                        const chunk = await reader.read();
-                        if (chunk.done) break;
-                        const data = decoder.decode(chunk.value);
-                        transcript += data;
-                        ws.send(data);
-                    }
-                };
-                Promise.all([pump(childProcess.stdout), pump(childProcess.stderr)])
-                    .then(() => childProcess?.exited)
-                    .then(() => {
-                        childProcess = null;
-                        return finish();
-                    })
-                    .finally(() => ws.close());
+                if (effective.transport === "pty") {
+                    spawnPtyTransport(ws);
+                } else {
+                    spawnProcessTransport(ws);
+                }
             },
             message(_ws, message) {
                 const input = typeof message === "string"
                     ? message
                     : Buffer.from(message).toString("utf8");
                 if (input.startsWith("\x1b[RESIZE:")) {
+                    const match = input.match(/\x1b\[RESIZE:(\d+);(\d+)\]/);
+                    if (effective.transport === "pty" && match) {
+                        writeSidecarMessage({
+                            type: "resize",
+                            cols: Number(match[1]),
+                            rows: Number(match[2]),
+                        });
+                    }
                     return;
+                }
+                if (effective.transport === "pty") {
+                    writeSidecarMessage({
+                        type: "input",
+                        data: Buffer.from(input).toString("base64"),
+                    });
                 }
             },
             close() {
@@ -403,7 +555,9 @@ export async function startWtermDogfoodServer(
             const vendor = await serveNodeModuleFile(url.pathname);
             if (vendor) return vendor;
             if (url.pathname === "/" || url.pathname === "/index.html") {
-                return new Response(dogfoodHtml(), { headers: { "content-type": "text/html; charset=utf-8" } });
+                return new Response(dogfoodHtml(effective.transport), {
+                    headers: { "content-type": "text/html; charset=utf-8" },
+                });
             }
             return new Response("not found", { status: 404 });
         },
@@ -415,6 +569,9 @@ export async function startWtermDogfoodServer(
         url,
         port,
         scenario: args.scenario,
+        transport: effective.transport,
+        requestedTransport: args.transport,
+        ...(effective.fallbackReason ? { transportFallbackReason: effective.fallbackReason } : {}),
         stop: () => server.stop(true),
     };
 }
@@ -426,11 +583,16 @@ export async function cmdDogfoodTerminal(rawArgs: readonly string[]): Promise<vo
         console.log(JSON.stringify({
             kind: "agentctl.dogfood.terminal",
             scenario: server.scenario,
+            transport: server.transport,
+            requestedTransport: server.requestedTransport,
+            transportFallbackReason: server.transportFallbackReason,
             url: server.url,
             port: server.port,
         }, null, 2));
     } else {
         console.log(`agentctl dogfood terminal: ${server.url}`);
+        console.log(`transport: ${server.transport}`);
+        if (server.transportFallbackReason) console.log(`fallback: ${server.transportFallbackReason}`);
         console.log("Open the URL, or drive it with: agent-browser open " + server.url);
     }
 }
