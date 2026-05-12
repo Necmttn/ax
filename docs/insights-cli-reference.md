@@ -359,6 +359,20 @@ wterm terminal dogfood:
   produced `intervention_observation:dogfood_wterm_interactive__1ab36f61a56036de`
   with `agent=shell`, `command=bash -l`, `command_source=preset`,
   `status=completed`, and a transcript containing `AGENT_PRESET_SHELL_STEERED`.
+- Repeatable success criteria via `--success-marker=STR` and `--timeout=SECONDS`.
+  Marker-pass live smoke
+  `--scenario=interactive --agent=shell --transport=pty
+  --success-marker=E2E_MARKER_PASS --timeout=20 --port=1749 --json`
+  with `agent-browser` typing `echo E2E_MARKER_PASS; exit` returned
+  `status=passed`, `markerFound=true`, `timedOut=false`, `persisted=true`.
+  Timeout live smoke
+  `--scenario=interactive --agent=shell --transport=pty
+  --success-marker=NEVER_SEEN --timeout=2 --port=1750 --json`
+  produced
+  `intervention_observation:dogfood_wterm_interactive__a89b0b1b94e86f02`
+  with `status=timed_out`, `metrics.timed_out=true`,
+  `metrics.timeout_seconds=2`, `metrics.success_marker=NEVER_SEEN`, and
+  `metrics.marker_found=false`.
 
 Harness Doctor schema additions are populated by default ingest. If they are
 empty, run `agentctl ingest --since=1` and inspect the `harness/doctor` ingest

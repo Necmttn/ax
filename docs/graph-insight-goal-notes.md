@@ -1251,6 +1251,7 @@ Implemented tracer bullet:
 - This is intentionally not yet a free-running Claude driver; it proves the PTY-backed wterm/browser evidence path before recursive agent control.
 - `--scenario=interactive --command="bash -l"` opens a steerable PTY shell in a scratch HOME. A human or another agent can drive it through the browser; transcript evidence is persisted with `status=completed`.
 - Interactive mode supports `--agent=shell|claude|codex|opencode` presets. `--command=...` overrides the preset command while retaining the selected agent label in run metadata.
+- Repeatable outcome criteria: `--success-marker=STR` classifies a run as `status=passed` when the transcript contains STR (else `failed`); `--timeout=SECONDS` enforces a wall-clock bound that produces `status=timed_out` with `timed_out=true` in persisted metrics. Marker + timeout flags survive in `intervention_observation` so headless agents can assert pass/fail rather than read transcripts.
 
 ## Hosted Taste / Skill Hub Monetization Sketch
 
