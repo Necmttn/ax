@@ -219,6 +219,7 @@ Agent checklist:
 - SurrealDB daemon on `127.0.0.1:8521`
 - watcher for `~/.claude/projects/` and `~/.codex/sessions/`
 - `agentctl ingest --since=1` after recent transcript changes
+- onboarding guidance for git-tracking global Claude/Codex/shared harness dirs
 
 Manual watcher commands for source checkouts:
 

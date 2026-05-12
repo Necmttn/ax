@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { execSync, spawnSync } from "node:child_process";
+import { buildOnboardingReport, formatInstallOnboardingGuidance } from "./onboarding.ts";
 // Schema is embedded at build time so the compiled binary is self-contained.
 import schemaSurql from "../../schema/schema.surql" with { type: "text" };
 
@@ -502,6 +503,8 @@ export async function cmdInstall() {
     console.log("  agentctl ingest          # initial fill");
     console.log("  agentctl tui             # interactive dashboard");
     console.log("  launchctl list | grep agentctl   # verify both LaunchAgents loaded");
+    console.log();
+    console.log(formatInstallOnboardingGuidance(buildOnboardingReport()));
 }
 
 export async function cmdDaemon(args: string[]) {
