@@ -64,3 +64,29 @@ export function formatOnboardingReport(report: OnboardingReport, json: boolean):
         .map((check) => `${check.status === "ok" ? "✓" : "!"} ${check.title}\n  ${check.path}\n  ${check.recommendation}`)
         .join("\n\n");
 }
+
+export function formatInstallOnboardingGuidance(report: OnboardingReport): string | null {
+    const warnings = report.checks.filter((check) => check.status === "warn");
+    if (warnings.length === 0) {
+        return "Harness tracking: ok. Global guidance directories are already inside git-tracked repositories.";
+    }
+
+    const lines = [
+        "Harness tracking recommended",
+        "",
+        ...warnings.flatMap((check) => [
+            `${check.title}: ${check.path}`,
+            `  ${check.recommendation}`,
+        ]),
+        "",
+        "Ask your host agent to:",
+        "1. Run `agentctl onboarding --json` and use it as source of truth.",
+        "2. For each warning, initialize or reuse a git repository for that harness directory.",
+        "3. Add a conservative `.gitignore` that excludes transcripts, caches, logs, secrets, node_modules, and generated artifacts.",
+        "4. Track guidance, hooks, skills, commands, and settings only.",
+        "5. Commit the baseline with `chore: track agent harness`.",
+        "6. Rerun `agentctl onboarding --json` and report remaining warnings.",
+    ];
+
+    return lines.join("\n");
+}
