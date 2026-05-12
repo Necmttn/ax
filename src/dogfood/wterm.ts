@@ -12,7 +12,7 @@ export type DogfoodScenario = "agentctl-setup" | "interactive";
 export type DogfoodTransport = "auto" | "pty" | "process";
 export type DogfoodAgent = "shell" | "claude" | "codex" | "opencode";
 type EffectiveDogfoodTransport = "pty" | "process";
-type DogfoodStatus = "passed" | "failed" | "completed";
+type DogfoodStatus = "passed" | "failed" | "completed" | "timed_out";
 
 export interface DogfoodTerminalArgs {
     readonly scenario: DogfoodScenario;
@@ -21,6 +21,8 @@ export interface DogfoodTerminalArgs {
     readonly transport: DogfoodTransport;
     readonly agent?: DogfoodAgent;
     readonly command?: string;
+    readonly successMarker?: string;
+    readonly timeoutSeconds?: number;
 }
 
 export interface DogfoodTerminalServer {
@@ -48,6 +50,9 @@ interface DogfoodResult {
     readonly agent?: DogfoodAgent;
     readonly command: string;
     readonly commandSource: "preset" | "override";
+    readonly successMarker?: string;
+    readonly timedOut: boolean;
+    readonly timeoutSeconds?: number;
     readonly transportFallbackReason?: string;
 }
 
@@ -59,6 +64,11 @@ export interface DogfoodTerminalSession {
     readonly agent?: DogfoodAgent;
     readonly env: Record<string, string>;
     readonly successMarker?: string;
+}
+
+export interface DogfoodOutcome {
+    readonly status: DogfoodStatus;
+    readonly markerFound: boolean;
 }
 
 export interface DogfoodAgentPreset {
@@ -125,6 +135,12 @@ export function parseDogfoodTerminalArgs(args: readonly string[]): DogfoodTermin
         throw new Error(`unknown dogfood agent "${agent}"`);
     }
     const command = flag("command");
+    const successMarker = flag("success-marker");
+    const rawTimeout = flag("timeout");
+    const timeoutSeconds = rawTimeout === undefined ? undefined : Number(rawTimeout);
+    if (timeoutSeconds !== undefined && (!Number.isInteger(timeoutSeconds) || timeoutSeconds <= 0)) {
+        throw new Error(`--timeout must be a positive integer number of seconds (got "${rawTimeout}")`);
+    }
     return {
         scenario,
         port,
@@ -132,7 +148,20 @@ export function parseDogfoodTerminalArgs(args: readonly string[]): DogfoodTermin
         transport,
         ...(agent !== undefined ? { agent } : {}),
         ...(command !== undefined ? { command } : {}),
+        ...(successMarker !== undefined ? { successMarker } : {}),
+        ...(timeoutSeconds !== undefined ? { timeoutSeconds } : {}),
     };
+}
+
+export function dogfoodStatusForTranscript(input: {
+    readonly transcript: string;
+    readonly successMarker?: string;
+    readonly timedOut: boolean;
+}): DogfoodOutcome {
+    const markerFound = input.successMarker ? input.transcript.includes(input.successMarker) : false;
+    if (input.timedOut) return { status: "timed_out", markerFound };
+    if (input.successMarker) return { status: markerFound ? "passed" : "failed", markerFound };
+    return { status: "completed", markerFound };
 }
 
 export function resolveDogfoodAgentPreset(agent: DogfoodAgent = "shell"): DogfoodAgentPreset {
@@ -209,6 +238,7 @@ export async function createAgentctlSetupDemoScript(root = repoRoot()): Promise<
 export async function createInteractiveDogfoodSession(options: {
     readonly agent?: DogfoodAgent;
     readonly command?: string;
+    readonly successMarker?: string;
 }): Promise<DogfoodTerminalSession> {
     const workRoot = await mkdtemp(join(tmpdir(), "agentctl-wterm-dogfood-"));
     const home = join(workRoot, "home");
@@ -229,6 +259,7 @@ export async function createInteractiveDogfoodSession(options: {
         env: {
             HOME: home,
         },
+        ...(options.successMarker ? { successMarker: options.successMarker } : {}),
     };
 }
 
@@ -237,6 +268,7 @@ async function createDogfoodSession(args: DogfoodTerminalArgs, root: string): Pr
         return createInteractiveDogfoodSession({
             ...(args.agent ? { agent: args.agent } : {}),
             ...(args.command ? { command: args.command } : {}),
+            ...(args.successMarker ? { successMarker: args.successMarker } : {}),
         });
     }
     return createAgentctlSetupDemoScript(root);
@@ -337,6 +369,9 @@ async function persistDogfoodResult(result: DogfoodResult): Promise<boolean> {
                 cwd: result.cwd,
                 command: result.command,
                 command_source: result.commandSource,
+                success_marker: result.successMarker,
+                timed_out: result.timedOut,
+                timeout_seconds: result.timeoutSeconds,
                 agent: result.agent,
                 transport: result.transport,
                 requested_transport: result.requestedTransport,
@@ -355,6 +390,9 @@ async function persistDogfoodResult(result: DogfoodResult): Promise<boolean> {
                 agent: result.agent,
                 command: result.command,
                 command_source: result.commandSource,
+                success_marker: result.successMarker,
+                timed_out: result.timedOut,
+                timeout_seconds: result.timeoutSeconds,
                 transport: result.transport,
                 requested_transport: result.requestedTransport,
                 transport_fallback_reason: result.transportFallbackReason,
@@ -462,26 +500,38 @@ export async function startWtermDogfoodServer(
     let result: DogfoodResult | null = null;
     let childProcess: ReturnType<typeof Bun.spawn> | null = null;
     let sessionStarted = false;
+    let timedOut = false;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
 
     const finish = async () => {
         if (result !== null) return;
+        if (timeout !== null) {
+            clearTimeout(timeout);
+            timeout = null;
+        }
         const endedAt = new Date().toISOString();
-        const markerFound = scenario.successMarker ? transcript.includes(scenario.successMarker) : false;
-        const status: DogfoodStatus = scenario.successMarker ? (markerFound ? "passed" : "failed") : "completed";
+        const outcome = dogfoodStatusForTranscript({
+            transcript,
+            timedOut,
+            ...(scenario.successMarker ? { successMarker: scenario.successMarker } : {}),
+        });
         const base: DogfoodResult = {
             runId,
             scenario: args.scenario,
-            status,
+            status: outcome.status,
             transcript,
             startedAt,
             endedAt,
             cwd: scenario.cwd,
-            markerFound,
+            markerFound: outcome.markerFound,
             persisted: false,
             transport: effective.transport,
             requestedTransport: args.transport,
             command: scenario.command,
             commandSource: scenario.commandSource,
+            timedOut,
+            ...(scenario.successMarker ? { successMarker: scenario.successMarker } : {}),
+            ...(args.timeoutSeconds ? { timeoutSeconds: args.timeoutSeconds } : {}),
             ...(scenario.agent ? { agent: scenario.agent } : {}),
             ...(effective.fallbackReason ? { transportFallbackReason: effective.fallbackReason } : {}),
         };
@@ -492,6 +542,30 @@ export async function startWtermDogfoodServer(
     const appendOutput = (ws: ServerWebSocket<unknown>, data: string) => {
         transcript += data;
         ws.send(data);
+    };
+
+    const killChild = () => {
+        if (childProcess) {
+            const current = childProcess;
+            childProcess = null;
+            try {
+                current.kill();
+            } catch {
+                // Already exited.
+            }
+        }
+    };
+
+    const startTimeout = (ws: ServerWebSocket<unknown>) => {
+        if (!args.timeoutSeconds) return;
+        timeout = setTimeout(() => {
+            timedOut = true;
+            appendOutput(ws, `\r\nagentctl dogfood timed out after ${args.timeoutSeconds}s\r\n`);
+            killChild();
+            finish()
+                .catch(() => undefined)
+                .finally(() => ws.close());
+        }, args.timeoutSeconds * 1000);
     };
 
     const spawnProcessTransport = (ws: ServerWebSocket<unknown>) => {
@@ -604,6 +678,7 @@ export async function startWtermDogfoodServer(
                     return;
                 }
                 sessionStarted = true;
+                startTimeout(ws);
                 if (effective.transport === "pty") {
                     spawnPtyTransport(ws);
                 } else {
@@ -633,15 +708,7 @@ export async function startWtermDogfoodServer(
                 }
             },
             close() {
-                if (childProcess) {
-                    const current = childProcess;
-                    childProcess = null;
-                    try {
-                        current.kill();
-                    } catch {
-                        // Already exited.
-                    }
-                }
+                killChild();
                 finish().catch(() => undefined);
             },
         },
@@ -663,6 +730,8 @@ export async function startWtermDogfoodServer(
                         command: scenario.command,
                         agent: scenario.agent,
                         commandSource: scenario.commandSource,
+                        successMarker: scenario.successMarker,
+                        timeoutSeconds: args.timeoutSeconds,
                     });
                 }
                 return Response.json(result);

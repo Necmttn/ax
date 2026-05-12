@@ -1329,16 +1329,20 @@ const dogfoodTerminalCommand = Command.make(
         transport: Flag.choice("transport", ["auto", "pty", "process"] as const).pipe(Flag.withDefault("auto")),
         agent: Flag.choice("agent", ["shell", "claude", "codex", "opencode"] as const).pipe(Flag.optional),
         command: Flag.string("command").pipe(Flag.optional),
+        successMarker: Flag.string("success-marker").pipe(Flag.optional),
+        timeout: Flag.integer("timeout").pipe(Flag.optional),
         port: Flag.integer("port").pipe(Flag.withDefault(1742)),
         json: jsonFlag,
     },
-    ({ scenario, transport, agent, command, port, json }) =>
+    ({ scenario, transport, agent, command, successMarker, timeout, port, json }) =>
         Effect.promise(() =>
             cmdDogfoodTerminal([
                 `--scenario=${scenario}`,
                 `--transport=${transport}`,
                 ...stringArg("agent", optionValue(agent)),
                 ...stringArg("command", optionValue(command)),
+                ...stringArg("success-marker", optionValue(successMarker)),
+                ...(timeout._tag === "Some" ? [`--timeout=${timeout.value}`] : []),
                 `--port=${port}`,
                 ...boolArg("json", json),
             ]),

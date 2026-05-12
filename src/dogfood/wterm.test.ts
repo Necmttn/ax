@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
     createInteractiveDogfoodSession,
     createAgentctlSetupDemoScript,
+    dogfoodStatusForTranscript,
     dogfoodClientJs,
     dogfoodHtml,
     parseDogfoodTerminalArgs,
@@ -30,10 +31,34 @@ describe("wterm dogfood harness", () => {
             scenario: "interactive",
             agent: "claude",
         });
+        expect(parseDogfoodTerminalArgs(["--scenario=interactive", "--success-marker=READY", "--timeout=15"])).toMatchObject({
+            successMarker: "READY",
+            timeoutSeconds: 15,
+        });
         expect(() => parseDogfoodTerminalArgs(["--scenario=unknown"])).toThrow("unknown dogfood scenario");
         expect(() => parseDogfoodTerminalArgs(["--port=0"])).toThrow("--port must be");
         expect(() => parseDogfoodTerminalArgs(["--transport=bad"])).toThrow("unknown dogfood transport");
         expect(() => parseDogfoodTerminalArgs(["--agent=bad"])).toThrow("unknown dogfood agent");
+        expect(() => parseDogfoodTerminalArgs(["--timeout=0"])).toThrow("--timeout must be");
+    });
+
+    test("classifies transcript outcomes from markers and timeout", () => {
+        expect(dogfoodStatusForTranscript({ transcript: "hello READY", successMarker: "READY", timedOut: false })).toMatchObject({
+            status: "passed",
+            markerFound: true,
+        });
+        expect(dogfoodStatusForTranscript({ transcript: "hello", successMarker: "READY", timedOut: false })).toMatchObject({
+            status: "failed",
+            markerFound: false,
+        });
+        expect(dogfoodStatusForTranscript({ transcript: "hello", timedOut: false })).toMatchObject({
+            status: "completed",
+            markerFound: false,
+        });
+        expect(dogfoodStatusForTranscript({ transcript: "hello READY", successMarker: "READY", timedOut: true })).toMatchObject({
+            status: "timed_out",
+            markerFound: true,
+        });
     });
 
     test("resolves interactive agent presets to concrete commands", () => {
@@ -54,12 +79,12 @@ describe("wterm dogfood harness", () => {
     });
 
     test("interactive session starts a steerable shell in a scratch home", async () => {
-        const session = await createInteractiveDogfoodSession({ agent: "shell" });
+        const session = await createInteractiveDogfoodSession({ agent: "shell", successMarker: "READY" });
 
         expect(session.command).toBe("bash -l");
         expect(session.title).toBe("interactive terminal");
         expect(session.agent).toBe("shell");
-        expect(session.successMarker).toBeUndefined();
+        expect(session.successMarker).toBe("READY");
         expect(session.cwd).toContain("agentctl-wterm-dogfood-");
         expect(session.env.HOME).toContain("agentctl-wterm-dogfood-");
     });
