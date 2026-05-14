@@ -72,7 +72,7 @@ describe("wterm dogfood harness", () => {
         const script = await createAgentctlSetupDemoScript("/repo/ax");
 
         expect(script.command).toContain("axctl wterm dogfood: fresh setup demo");
-        expect(script.command).toContain("axctl onboarding --json");
+        expect(script.command).toContain("axctl doctor --json");
         expect(script.command).toContain("chore: track agent harness");
         expect(script.command).toContain("AXCTL_DOGFOOD_SETUP_OK");
         expect(script.cwd).toContain("axctl-wterm-dogfood-");

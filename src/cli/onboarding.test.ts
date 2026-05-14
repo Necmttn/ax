@@ -50,7 +50,7 @@ describe("onboarding report", () => {
 
             expect(text).toContain("Harness tracking recommended");
             expect(text).toContain("Ask your host agent to:");
-            expect(text).toContain("axctl onboarding --json");
+            expect(text).toContain("axctl doctor");
             expect(text).toContain("chore: track agent harness");
             expect(text).toContain("transcripts, caches, logs, secrets");
         } finally {

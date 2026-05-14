@@ -35,7 +35,6 @@ import {
 } from "./progress.ts";
 import { cmdProject } from "./project.ts";
 import { AGENTCTL_VERSION, liveVersionDeps, printVersion, updateAgentctl } from "./version.ts";
-import { buildOnboardingReport, formatOnboardingReport } from "./onboarding.ts";
 import { cmdDogfoodTerminal } from "../dogfood/wterm.ts";
 import { guidanceNext, parseSelfImproveArgs, selfImproveWeekly, sessionSummary } from "../self-improve/commands.ts";
 import {
@@ -543,12 +542,6 @@ const cmdInsights = (args: string[]) =>
             insightSqlForView(rawView, limit),
         );
         console.log(prettyPrint(result?.[0] ?? []));
-    });
-
-const cmdOnboarding = (args: string[]) =>
-    Effect.sync(() => {
-        const json = args.includes("--json");
-        console.log(formatOnboardingReport(buildOnboardingReport(), json));
     });
 
 const cmdInterventions = (args: string[]) =>
@@ -1486,12 +1479,6 @@ const insightsCommand = Command.make(
     ({ view, limit }) => cmdInsights([view, `--limit=${limit}`]),
 ).pipe(Command.withDescription("Run built-in graph insight queries"));
 
-const onboardingCommand = Command.make(
-    "onboarding",
-    { json: jsonFlag },
-    ({ json }) => cmdOnboarding(boolArg("json", json)),
-).pipe(Command.withDescription("Check guidance tracking setup for learning loops"));
-
 const interventionAction = Argument.choice("action", ["list", "show", "impact", "regressions", "candidates"] as const).pipe(Argument.withDefault("list"));
 
 const interventionsCommand = Command.make(
@@ -1783,7 +1770,6 @@ export const rootCommand = Command.make("axctl").pipe(
         ingestInsightsCommand,
         deriveSignalsCommand,
         insightsCommand,
-        onboardingCommand,
         interventionsCommand,
         dashboardCommand,
         dogfoodCommand,
@@ -1818,7 +1804,7 @@ async function main() {
         await Effect.runPromise(runCli(["update", ...args.slice(1)]) as Effect.Effect<void>);
         return;
     }
-    const noDbCommands = new Set(["install", "daemon", "doctor", "uninstall", "onboarding", "version", "update"]);
+    const noDbCommands = new Set(["install", "daemon", "doctor", "uninstall", "version", "update"]);
     if (noDbCommands.has(args[0] ?? "")) {
         await Effect.runPromise(runCli(args) as Effect.Effect<void>);
         return;
