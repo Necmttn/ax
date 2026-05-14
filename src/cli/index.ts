@@ -1803,6 +1803,8 @@ const uninstallCommand = Command.make("uninstall", {}, () =>
     Effect.promise(() => cmdUninstall()),
 ).pipe(Command.withDescription("Remove launchd plists and the axctl symlink"));
 
+const devOnlyCommands = process.env.AX_DEV === "1" ? [dogfoodCommand] : [];
+
 export const rootCommand = Command.make("axctl").pipe(
     Command.withDescription("ax local memory and telemetry for coding agents"),
     Command.withSubcommands([
@@ -1811,7 +1813,6 @@ export const rootCommand = Command.make("axctl").pipe(
         insightsCommand,
         interventionsCommand,
         dashboardCommand,
-        dogfoodCommand,
         recallCommand,
         skillsCommand,
         projectCommand,
@@ -1823,6 +1824,7 @@ export const rootCommand = Command.make("axctl").pipe(
         daemonCommand,
         doctorCommand,
         uninstallCommand,
+        ...devOnlyCommands,
     ]),
 );
 

@@ -91,3 +91,17 @@ describe("effect cli", () => {
         ]));
     });
 });
+
+describe("AX_DEV flag", () => {
+    test("AX_DEV=1 exposes dogfood at top level", async () => {
+        process.env.AX_DEV = "1";
+        try {
+            // re-import to rebuild rootCommand with env applied
+            const mod = await import(`./index.ts?ax_dev=${Date.now()}`);
+            const names = mod.rootCommand.subcommands.flatMap((g: any) => g.commands.map((c: any) => c.name));
+            expect(names).toContain("dogfood");
+        } finally {
+            delete process.env.AX_DEV;
+        }
+    });
+});
