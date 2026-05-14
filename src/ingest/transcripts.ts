@@ -48,6 +48,8 @@ interface Turn {
     seq: number;
     ts: string;
     role: string;
+    message_kind: string;
+    text: string | null;
     text_excerpt: string | null;
     has_tool_use: boolean;
     has_error: boolean;
@@ -108,6 +110,44 @@ function parseJsonl(line: string): Record<string, unknown> | null {
 
 function asContentBlocks(input: unknown): Record<string, unknown>[] {
     return Array.isArray(input) ? input.filter(isRecord) : [];
+}
+
+function textFromContent(input: unknown): string | null {
+    if (typeof input === "string") {
+        return input;
+    }
+    const text = asContentBlocks(input)
+        .filter((block) => stringField(block, "type") === "text")
+        .map((block) => stringField(block, "text"))
+        .filter((text): text is string => typeof text === "string" && text.length > 0)
+        .join("\n");
+    return text.length > 0 ? text : null;
+}
+
+function messageKind(role: string, content: unknown, textExcerpt: string | null): string {
+    const blocks = asContentBlocks(content);
+    if (blocks.length > 0 && blocks.every((block) => stringField(block, "type") === "tool_result")) {
+        return "tool_result";
+    }
+    if (role === "user") {
+        if (textExcerpt?.startsWith("<command-name>")) {
+            return "control";
+        }
+        if (textExcerpt && (
+            textExcerpt.startsWith("# AGENTS.md instructions") ||
+            textExcerpt.startsWith("# CLAUDE.md") ||
+            textExcerpt.startsWith("<local-command-caveat>") ||
+            textExcerpt.startsWith("Base directory for this skill:") ||
+            textExcerpt.startsWith("Base directory for this plugin:") ||
+            textExcerpt.includes("<environment_context>") ||
+            textExcerpt.includes("<INSTRUCTIONS>")
+        )) {
+            return "context";
+        }
+        return "task";
+    }
+    if (role === "assistant") return "assistant";
+    return role;
 }
 
 function stringField(input: Record<string, unknown>, field: string): string | null {
@@ -483,9 +523,11 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
             seq += 1;
             const role = (type as string) ?? "unknown";
             const message = isRecord(entry.message) ? entry.message : null;
-            const content = asContentBlocks(message?.content);
+            const messageContent = message?.content;
+            const content = asContentBlocks(messageContent);
 
-            let textExcerpt: string | null = null;
+            const text = textFromContent(messageContent);
+            const textExcerpt = text === null ? null : text.slice(0, 500);
             let hasToolUse = false;
             let hasError = false;
             // Track invocation indices added this iteration so we can backfill
@@ -496,10 +538,6 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
 
             for (const block of content) {
                 const blockType = stringField(block, "type");
-                const blockText = stringField(block, "text");
-                if (blockType === "text" && blockText && !textExcerpt) {
-                    textExcerpt = blockText.slice(0, 500);
-                }
                 if (blockType === "tool_use") {
                     hasToolUse = true;
                     processToolUse(block, ts, turnCwd);
@@ -523,6 +561,8 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
                 seq,
                 ts,
                 role,
+                message_kind: messageKind(role, messageContent, textExcerpt),
+                text,
                 text_excerpt: textExcerpt,
                 has_tool_use: hasToolUse,
                 has_error: hasError,
@@ -653,7 +693,9 @@ const upsertTurns = (turns: Turn[]) =>
 const buildTurnStatements = (turns: readonly Turn[]): string[] =>
     turns.map(
         (t) =>
-            `UPSERT turn:\`${turnRecordKey(t.session, t.seq)}\` CONTENT { session: session:\`${t.session}\`, seq: ${t.seq}, ts: d"${t.ts}", role: "${t.role}", text_excerpt: ${
+            `UPSERT turn:\`${turnRecordKey(t.session, t.seq)}\` CONTENT { session: session:\`${t.session}\`, seq: ${t.seq}, ts: d"${t.ts}", role: "${t.role}", message_kind: ${JSON.stringify(t.message_kind)}, text: ${
+                t.text === null ? "NONE" : JSON.stringify(t.text)
+            }, text_excerpt: ${
                 t.text_excerpt === null ? "NONE" : JSON.stringify(t.text_excerpt)
             }, has_tool_use: ${t.has_tool_use}, has_error: ${t.has_error} };`,
     );

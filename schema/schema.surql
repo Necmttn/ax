@@ -61,10 +61,12 @@ DEFINE BUCKET IF NOT EXISTS codex_artifacts
     BACKEND "file:/Users/necmttn/.local/share/ax/buckets/codex_artifacts";
 
 DEFINE TABLE turn SCHEMAFULL;
-DEFINE FIELD session        ON turn TYPE record<session>;
+DEFINE FIELD session        ON turn TYPE record<session> REFERENCE ON DELETE CASCADE;
 DEFINE FIELD seq            ON turn TYPE int;
 DEFINE FIELD ts             ON turn TYPE datetime;
 DEFINE FIELD role           ON turn TYPE string;          -- 'user' | 'assistant' | 'tool_result'
+DEFINE FIELD message_kind   ON turn TYPE option<string>;  -- 'task' | 'context' | 'control' | 'tool_result' | 'system_or_developer' | 'assistant' | 'tool_call'
+DEFINE FIELD text           ON turn TYPE option<string>;  -- full extracted message text for analysis
 DEFINE FIELD text_excerpt   ON turn TYPE option<string>;  -- first ~500 chars
 DEFINE FIELD has_tool_use   ON turn TYPE bool DEFAULT false;
 DEFINE FIELD has_error      ON turn TYPE bool DEFAULT false;

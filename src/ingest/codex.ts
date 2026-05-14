@@ -46,6 +46,8 @@ interface CodexTurn {
     seq: number;
     ts: string;
     role: string;
+    message_kind: string;
+    text: string | null;
     text_excerpt: string | null;
     has_tool_use: boolean;
 }
@@ -89,6 +91,51 @@ function jsonText(input: unknown): string | null {
 
 function outputText(input: unknown): string | null {
     return typeof input === "string" ? input : jsonText(input);
+}
+
+function codexMessageRecord(payload: Record<string, unknown>): Record<string, unknown> | null {
+    if (isRecord(payload.message)) return payload.message;
+    if (stringField(payload, "type") === "message") return payload;
+    return null;
+}
+
+function textFromCodexContent(content: unknown): string | null {
+    if (typeof content === "string") return content;
+    if (!Array.isArray(content)) return null;
+    const text = content
+        .filter(isRecord)
+        .filter((block) => {
+            const type = stringField(block, "type");
+            return type === "text" || type === "input_text" || type === "output_text";
+        })
+        .map((block) => stringField(block, "text"))
+        .filter((text): text is string => typeof text === "string" && text.length > 0)
+        .join("\n");
+    return text.length > 0 ? text : null;
+}
+
+function codexMessageKind(role: string, itemType: string | null, textExcerpt: string | null): string {
+    if (role === "system" || role === "developer") return "system_or_developer";
+    if (role === "user") {
+        if (textExcerpt?.startsWith("<command-name>")) {
+            return "control";
+        }
+        if (textExcerpt && (
+            textExcerpt.startsWith("# AGENTS.md instructions") ||
+            textExcerpt.startsWith("# CLAUDE.md") ||
+            textExcerpt.startsWith("<local-command-caveat>") ||
+            textExcerpt.startsWith("Base directory for this skill:") ||
+            textExcerpt.startsWith("Base directory for this plugin:") ||
+            textExcerpt.includes("<environment_context>") ||
+            textExcerpt.includes("<INSTRUCTIONS>")
+        )) {
+            return "context";
+        }
+        return "task";
+    }
+    if (role === "assistant") return "assistant";
+    if (itemType === "function_call") return "tool_call";
+    return itemType ?? role;
 }
 
 function stableHash(input: string): string {
@@ -582,7 +629,7 @@ function createCodexExtractor(filePath: string) {
             if (type === "response_item" && payload) {
                 seq += 1;
                 const itemType = stringField(payload, "type");
-                const message = isRecord(payload.message) ? payload.message : null;
+                const message = codexMessageRecord(payload);
                 const role =
                     itemType === "function_call"
                         ? "tool_call"
@@ -590,21 +637,8 @@ function createCodexExtractor(filePath: string) {
                           ? (stringField(message ?? {}, "role") ?? "assistant")
                           : (itemType ?? "unknown");
 
-                let textExcerpt: string | null = null;
-                const messageContent = message?.content;
-                if (Array.isArray(messageContent)) {
-                    for (const block of messageContent.filter(isRecord)) {
-                        const blockType = stringField(block, "type");
-                        const blockText = stringField(block, "text");
-                        if (
-                            (blockType === "text" || blockType === "output_text") &&
-                            blockText &&
-                            !textExcerpt
-                        ) {
-                            textExcerpt = blockText.slice(0, 500);
-                        }
-                    }
-                }
+                const text = textFromCodexContent(message?.content);
+                const textExcerpt = text === null ? null : text.slice(0, 500);
 
                 const isToolCall = itemType === "function_call";
                 turns.push({
@@ -612,6 +646,8 @@ function createCodexExtractor(filePath: string) {
                     seq,
                     ts,
                     role,
+                    message_kind: codexMessageKind(role, itemType, textExcerpt),
+                    text,
                     text_excerpt: textExcerpt,
                     has_tool_use: isToolCall,
                 });
@@ -683,7 +719,7 @@ export function __testStreamCodexJsonlLines(lines: Iterable<string>, every: numb
 const buildTurnStatements = (turns: readonly CodexTurn[]): string[] =>
     turns.map(
         (t) =>
-            `UPSERT turn:\`${turnRecordKey(t.session, t.seq)}\` CONTENT { session: session:\`${t.session}\`, seq: ${t.seq}, ts: d"${t.ts}", role: ${JSON.stringify(t.role)}, text_excerpt: ${t.text_excerpt === null ? "NONE" : JSON.stringify(t.text_excerpt)}, has_tool_use: ${t.has_tool_use}, has_error: false };`,
+            `UPSERT turn:\`${turnRecordKey(t.session, t.seq)}\` CONTENT { session: session:\`${t.session}\`, seq: ${t.seq}, ts: d"${t.ts}", role: ${JSON.stringify(t.role)}, message_kind: ${JSON.stringify(t.message_kind)}, text: ${t.text === null ? "NONE" : JSON.stringify(t.text)}, text_excerpt: ${t.text_excerpt === null ? "NONE" : JSON.stringify(t.text_excerpt)}, has_tool_use: ${t.has_tool_use}, has_error: false };`,
     );
 
 const buildSyntheticSkillAndInvocationStatements = (

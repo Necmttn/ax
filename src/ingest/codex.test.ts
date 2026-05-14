@@ -85,6 +85,94 @@ describe("Codex transcript extraction", () => {
         expect(compacted.outputExcerpt).toBe("hello");
     });
 
+    test("extracts input_text messages and classifies user task and context turns", () => {
+        const longTaskText = `Trace the user prompt ingestion path.\n${"y".repeat(620)}`;
+        const extracted = __testExtractCodexJsonlLines([
+            JSON.stringify({
+                type: "session_meta",
+                timestamp: "2026-05-09T10:00:00.000Z",
+                payload: {
+                    id: "codex-user-text",
+                    cwd: "/Users/necmttn/Projects/agentctl",
+                    timestamp: "2026-05-09T10:00:00.000Z",
+                },
+            }),
+            JSON.stringify({
+                type: "response_item",
+                timestamp: "2026-05-09T10:00:01.000Z",
+                payload: {
+                    type: "message",
+                    role: "developer",
+                    content: [
+                        {
+                            type: "input_text",
+                            text: "<permissions instructions>\nFilesystem sandboxing is read-only.",
+                        },
+                    ],
+                },
+            }),
+            JSON.stringify({
+                type: "response_item",
+                timestamp: "2026-05-09T10:00:02.000Z",
+                payload: {
+                    type: "message",
+                    role: "user",
+                    content: [
+                        {
+                            type: "input_text",
+                            text: "# AGENTS.md instructions for /tmp/project\n\n<INSTRUCTIONS>Use Bun.</INSTRUCTIONS>",
+                        },
+                    ],
+                },
+            }),
+            JSON.stringify({
+                type: "response_item",
+                timestamp: "2026-05-09T10:00:03.000Z",
+                payload: {
+                    type: "message",
+                    role: "user",
+                    content: [
+                        {
+                            type: "input_text",
+                            text: longTaskText,
+                        },
+                    ],
+                },
+            }),
+        ]);
+
+        expect(extracted).not.toBeNull();
+        if (!extracted) return;
+
+        expect(
+            extracted.turns.map((turn) => ({
+                role: turn.role,
+                text: turn.text,
+                text_excerpt: turn.text_excerpt,
+                message_kind: turn.message_kind,
+            })),
+        ).toEqual([
+            {
+                role: "developer",
+                text: "<permissions instructions>\nFilesystem sandboxing is read-only.",
+                text_excerpt: "<permissions instructions>\nFilesystem sandboxing is read-only.",
+                message_kind: "system_or_developer",
+            },
+            {
+                role: "user",
+                text: "# AGENTS.md instructions for /tmp/project\n\n<INSTRUCTIONS>Use Bun.</INSTRUCTIONS>",
+                text_excerpt: "# AGENTS.md instructions for /tmp/project\n\n<INSTRUCTIONS>Use Bun.</INSTRUCTIONS>",
+                message_kind: "context",
+            },
+            {
+                role: "user",
+                text: longTaskText,
+                text_excerpt: longTaskText.slice(0, 500),
+                message_kind: "task",
+            },
+        ]);
+    });
+
     test("extracts function calls, matched outputs, synthetic skill relations, and update_plan snapshots", () => {
         const execOutput =
             "Chunk ID: abc\nWall time: 0.2000 seconds\nProcess exited with code 1\nOriginal token count: 30\nOutput:\nfatal: not a git repository\n";
