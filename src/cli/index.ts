@@ -1625,6 +1625,19 @@ const recoveryCommand = Command.make(
     ({ limit }) => cmdRecovery([`--limit=${limit}`]),
 ).pipe(Command.withDescription("Show skills that recovered failed work"));
 
+const skillsCommand = Command.make("skills").pipe(
+    Command.withDescription("Skill-graph queries: search, stats, usage, pairs, recovery"),
+    Command.withSubcommands([
+        searchCommand,
+        statsCommand,
+        recentCommand,
+        unusedCommand,
+        tasteCommand,
+        pairsCommand,
+        recoveryCommand,
+    ]),
+);
+
 const projectContextCommand = Command.make(
     "context",
     { json: jsonFlag },
@@ -1780,14 +1793,8 @@ export const rootCommand = Command.make("axctl").pipe(
         interventionsCommand,
         dashboardCommand,
         dogfoodCommand,
-        searchCommand,
         recallCommand,
-        statsCommand,
-        recentCommand,
-        unusedCommand,
-        tasteCommand,
-        pairsCommand,
-        recoveryCommand,
+        skillsCommand,
         projectCommand,
         guidanceCommand,
         sessionCommand,
