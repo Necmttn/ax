@@ -99,6 +99,12 @@ axctl insights post-feature-fixes
 axctl insights skill-candidates
 ```
 
+Recall past work with full-text search across user and assistant turns:
+
+```bash
+axctl recall "auth middleware" --skill=tdd --json
+```
+
 Skill and command hygiene:
 
 ```bash
@@ -125,7 +131,7 @@ axctl interventions regressions --json
 ## CLI Reference
 
 ```text
-axctl ingest [flags]
+axctl ingest [--since=N] [--insights-only] [--skills-only|--transcripts-only|--codex-only|--git-only|--claude-only] [--progress=auto|pipeline|plain|json|off] [--verbose]
 axctl derive-signals [--since=N] [--progress=...] [--verbose]
 axctl insights <view> [--limit=N]
 axctl interventions <action> [--limit=N] [--json]
@@ -144,11 +150,10 @@ axctl doctor [--json]
 axctl uninstall
 ```
 
-Set `AX_DEV=1` to expose dogfood scenario commands during development.
-
 ### Development (AX_DEV=1)
 
 These subcommands are only exposed when `AX_DEV=1` is set in the environment.
+Run `AX_DEV=1 axctl dogfood terminal --help` for the full flag list.
 
 ```text
 axctl dogfood terminal [--scenario=...] [--agent=...] [--transport=...] [--command=...] [--success-marker=...] [--timeout=...] [--port=...] [--json]
@@ -306,7 +311,6 @@ Working today:
 Tracked next:
 
 - project memory: `changeset` and `file_memory`
-- `axctl recall`
 - concept/entity resolution
 - guidance lifecycle and outcome tracking
 - richer live dashboard views
