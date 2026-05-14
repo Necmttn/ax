@@ -1673,37 +1673,31 @@ const jsonSelfImprove = (cmd: "guidance" | "session" | "self-improve", rest: str
     });
 };
 
-const guidanceNextCommand = Command.make(
-    "next",
+const evidenceGuidanceNextCommand = Command.make(
+    "guidance-next",
     { json: jsonFlag },
     ({ json }) => jsonSelfImprove("guidance", ["next", ...boolArg("json", json)]),
 ).pipe(Command.withDescription("Return the next self-improvement guidance"));
 
-const guidanceCommand = Command.make("guidance").pipe(
-    Command.withDescription("Self-improvement guidance queries"),
-    Command.withSubcommands([guidanceNextCommand]),
-);
-
-const sessionSummaryCommand = Command.make(
-    "summary",
+const evidenceSessionSummaryCommand = Command.make(
+    "session-summary",
     { json: jsonFlag },
     ({ json }) => jsonSelfImprove("session", ["summary", ...boolArg("json", json)]),
 ).pipe(Command.withDescription("Summarize recent session evidence"));
 
-const sessionCommand = Command.make("session").pipe(
-    Command.withDescription("Session evidence queries"),
-    Command.withSubcommands([sessionSummaryCommand]),
-);
-
-const selfImproveWeeklyCommand = Command.make(
+const evidenceWeeklyCommand = Command.make(
     "weekly",
     { json: jsonFlag },
     ({ json }) => jsonSelfImprove("self-improve", ["weekly", ...boolArg("json", json)]),
 ).pipe(Command.withDescription("Run weekly self-improvement evidence query"));
 
-const selfImproveCommand = Command.make("self-improve").pipe(
-    Command.withDescription("Self-improvement evidence queries"),
-    Command.withSubcommands([selfImproveWeeklyCommand]),
+const evidenceCommand = Command.make("evidence").pipe(
+    Command.withDescription("Self-improvement evidence queries (guidance, session, weekly)"),
+    Command.withSubcommands([
+        evidenceGuidanceNextCommand,
+        evidenceSessionSummaryCommand,
+        evidenceWeeklyCommand,
+    ]),
 );
 
 const versionCommand = Command.make(
@@ -1796,9 +1790,7 @@ export const rootCommand = Command.make("axctl").pipe(
         recallCommand,
         skillsCommand,
         projectCommand,
-        guidanceCommand,
-        sessionCommand,
-        selfImproveCommand,
+        evidenceCommand,
         versionCommand,
         updateCommand,
         tuiCommand,
