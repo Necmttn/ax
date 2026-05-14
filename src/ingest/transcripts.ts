@@ -21,6 +21,7 @@ import {
     normalizeCommand,
     toolKindForName,
 } from "./tool-calls.ts";
+import { classifyTurnIntent } from "./intent-kind.ts";
 import { normalizeClaudeTodoWrite, type PlanStatus } from "./plans.ts";
 import {
     editedRelationRecordKey,
@@ -49,6 +50,7 @@ interface Turn {
     ts: string;
     role: string;
     message_kind: string;
+    intent_kind: string;
     text: string | null;
     text_excerpt: string | null;
     has_tool_use: boolean;
@@ -556,12 +558,14 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
                 }
             }
 
+            const kind = messageKind(role, messageContent, textExcerpt);
             turns.push({
                 session: sessionId,
                 seq,
                 ts,
                 role,
-                message_kind: messageKind(role, messageContent, textExcerpt),
+                message_kind: kind,
+                intent_kind: classifyTurnIntent({ role, messageKind: kind, source: "claude", text }),
                 text,
                 text_excerpt: textExcerpt,
                 has_tool_use: hasToolUse,
@@ -693,7 +697,7 @@ const upsertTurns = (turns: Turn[]) =>
 const buildTurnStatements = (turns: readonly Turn[]): string[] =>
     turns.map(
         (t) =>
-            `UPSERT turn:\`${turnRecordKey(t.session, t.seq)}\` CONTENT { session: session:\`${t.session}\`, seq: ${t.seq}, ts: d"${t.ts}", role: "${t.role}", message_kind: ${JSON.stringify(t.message_kind)}, text: ${
+            `UPSERT turn:\`${turnRecordKey(t.session, t.seq)}\` CONTENT { session: session:\`${t.session}\`, seq: ${t.seq}, ts: d"${t.ts}", role: "${t.role}", message_kind: ${JSON.stringify(t.message_kind)}, intent_kind: ${JSON.stringify(t.intent_kind)}, text: ${
                 t.text === null ? "NONE" : JSON.stringify(t.text)
             }, text_excerpt: ${
                 t.text_excerpt === null ? "NONE" : JSON.stringify(t.text_excerpt)

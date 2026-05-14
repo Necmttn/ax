@@ -21,6 +21,7 @@ import {
     parseCodexFunctionOutput,
     toolKindForName,
 } from "./tool-calls.ts";
+import { classifyTurnIntent } from "./intent-kind.ts";
 import { normalizeCodexUpdatePlan, type PlanStatus } from "./plans.ts";
 import { invokedRelationRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 
@@ -47,6 +48,7 @@ interface CodexTurn {
     ts: string;
     role: string;
     message_kind: string;
+    intent_kind: string;
     text: string | null;
     text_excerpt: string | null;
     has_tool_use: boolean;
@@ -641,12 +643,14 @@ function createCodexExtractor(filePath: string) {
                 const textExcerpt = text === null ? null : text.slice(0, 500);
 
                 const isToolCall = itemType === "function_call";
+                const kind = codexMessageKind(role, itemType, textExcerpt);
                 turns.push({
                     session: session.id,
                     seq,
                     ts,
                     role,
-                    message_kind: codexMessageKind(role, itemType, textExcerpt),
+                    message_kind: kind,
+                    intent_kind: classifyTurnIntent({ role, messageKind: kind, source: "codex", text }),
                     text,
                     text_excerpt: textExcerpt,
                     has_tool_use: isToolCall,
@@ -719,7 +723,7 @@ export function __testStreamCodexJsonlLines(lines: Iterable<string>, every: numb
 const buildTurnStatements = (turns: readonly CodexTurn[]): string[] =>
     turns.map(
         (t) =>
-            `UPSERT turn:\`${turnRecordKey(t.session, t.seq)}\` CONTENT { session: session:\`${t.session}\`, seq: ${t.seq}, ts: d"${t.ts}", role: ${JSON.stringify(t.role)}, message_kind: ${JSON.stringify(t.message_kind)}, text: ${t.text === null ? "NONE" : JSON.stringify(t.text)}, text_excerpt: ${t.text_excerpt === null ? "NONE" : JSON.stringify(t.text_excerpt)}, has_tool_use: ${t.has_tool_use}, has_error: false };`,
+            `UPSERT turn:\`${turnRecordKey(t.session, t.seq)}\` CONTENT { session: session:\`${t.session}\`, seq: ${t.seq}, ts: d"${t.ts}", role: ${JSON.stringify(t.role)}, message_kind: ${JSON.stringify(t.message_kind)}, intent_kind: ${JSON.stringify(t.intent_kind)}, text: ${t.text === null ? "NONE" : JSON.stringify(t.text)}, text_excerpt: ${t.text_excerpt === null ? "NONE" : JSON.stringify(t.text_excerpt)}, has_tool_use: ${t.has_tool_use}, has_error: false };`,
     );
 
 const buildSyntheticSkillAndInvocationStatements = (

@@ -150,6 +150,7 @@ describe("Codex transcript extraction", () => {
                 text: turn.text,
                 text_excerpt: turn.text_excerpt,
                 message_kind: turn.message_kind,
+                intent_kind: turn.intent_kind,
             })),
         ).toEqual([
             {
@@ -157,18 +158,21 @@ describe("Codex transcript extraction", () => {
                 text: "<permissions instructions>\nFilesystem sandboxing is read-only.",
                 text_excerpt: "<permissions instructions>\nFilesystem sandboxing is read-only.",
                 message_kind: "system_or_developer",
+                intent_kind: "system_context",
             },
             {
                 role: "user",
                 text: "# AGENTS.md instructions for /tmp/project\n\n<INSTRUCTIONS>Use Bun.</INSTRUCTIONS>",
                 text_excerpt: "# AGENTS.md instructions for /tmp/project\n\n<INSTRUCTIONS>Use Bun.</INSTRUCTIONS>",
                 message_kind: "context",
+                intent_kind: "system_context",
             },
             {
                 role: "user",
                 text: longTaskText,
                 text_excerpt: longTaskText.slice(0, 500),
                 message_kind: "task",
+                intent_kind: "organic_task",
             },
         ]);
     });

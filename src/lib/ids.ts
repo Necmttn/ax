@@ -23,6 +23,11 @@ export type EditedRelationKeyInput = {
     readonly fileKey: string;
     readonly tool: string;
 };
+export type MentionedRelationKeyInput = {
+    readonly turnKey: string;
+    readonly targetKey: string;
+    readonly source: string;
+};
 
 export function stableDigest(value: string, length = 16): string {
     // Preserve existing Bun.hash behavior - agentctl's 89 baseline tests depend on these exact hashes.
@@ -73,6 +78,14 @@ export function skillRecordKeyV2(name: string): string {
     return `v2__${identityPart(name, "skill")}`;
 }
 
+export function symbolRecordKey(name: string): string {
+    return identityPart(name, "symbol");
+}
+
+export function errorSignatureRecordKey(normalized: string): string {
+    return identityPart(normalized, "error");
+}
+
 export function legacySkillRecordKey(name: string): string {
     return name.replace(/:/g, "__");
 }
@@ -102,4 +115,8 @@ export function invokedRelationRecordKey(input: InvokedRelationKeyInput): string
 
 export function editedRelationRecordKey(input: EditedRelationKeyInput): string {
     return stableDigest(`${input.turnKey}|${input.fileKey}|${input.tool}`);
+}
+
+export function mentionedRelationRecordKey(input: MentionedRelationKeyInput): string {
+    return stableDigest(`${input.turnKey}|${input.targetKey}|${input.source}`);
 }

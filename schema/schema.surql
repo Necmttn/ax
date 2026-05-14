@@ -66,6 +66,7 @@ DEFINE FIELD seq            ON turn TYPE int;
 DEFINE FIELD ts             ON turn TYPE datetime;
 DEFINE FIELD role           ON turn TYPE string;          -- 'user' | 'assistant' | 'tool_result'
 DEFINE FIELD message_kind   ON turn TYPE option<string>;  -- 'task' | 'context' | 'control' | 'tool_result' | 'system_or_developer' | 'assistant' | 'tool_call'
+DEFINE FIELD intent_kind    ON turn TYPE option<string>;  -- 'organic_task' | 'correction' | 'preference' | 'wrapper_instruction' | ...
 DEFINE FIELD text           ON turn TYPE option<string>;  -- full extracted message text for analysis
 DEFINE FIELD text_excerpt   ON turn TYPE option<string>;  -- first ~500 chars
 DEFINE FIELD has_tool_use   ON turn TYPE bool DEFAULT false;
@@ -96,6 +97,18 @@ DEFINE INDEX file_path_uq   ON file FIELDS repo, path UNIQUE;
 DEFINE INDEX file_repository_path ON file FIELDS repository, path;
 REMOVE INDEX IF EXISTS file_checkout_path ON file;
 DEFINE INDEX file_workspace_path ON file FIELDS workspace, path;
+
+DEFINE TABLE symbol SCHEMAFULL;
+DEFINE FIELD name           ON symbol TYPE string;
+DEFINE FIELD kind           ON symbol TYPE option<string>;      -- 'camel' | 'snake' | 'function' | ...
+DEFINE FIELD created_at     ON symbol TYPE datetime DEFAULT time::now();
+DEFINE INDEX symbol_name_uq ON symbol FIELDS name UNIQUE;
+
+DEFINE TABLE error_signature SCHEMAFULL;
+DEFINE FIELD text           ON error_signature TYPE string;
+DEFINE FIELD normalized     ON error_signature TYPE string;
+DEFINE FIELD created_at     ON error_signature TYPE datetime DEFAULT time::now();
+DEFINE INDEX error_signature_norm_uq ON error_signature FIELDS normalized UNIQUE;
 
 DEFINE TABLE commit SCHEMAFULL;
 DEFINE FIELD sha            ON commit TYPE string;
@@ -688,6 +701,31 @@ DEFINE FIELD edit_kind    ON edited TYPE option<string>;
 -- `edited` lookups by source turn (e.g., 'which files did this session edit').
 DEFINE INDEX IF NOT EXISTS edited_in ON edited FIELDS in;
 DEFINE INDEX IF NOT EXISTS edited_in_out_tool ON edited FIELDS in, out, tool;
+
+DEFINE TABLE mentioned_file TYPE RELATION FROM turn TO file;
+DEFINE FIELD source       ON mentioned_file TYPE string DEFAULT "text"; -- 'text' | 'tool_input' | 'tool_output'
+DEFINE FIELD confidence   ON mentioned_file TYPE option<float>;
+DEFINE FIELD excerpt      ON mentioned_file TYPE option<string>;
+DEFINE FIELD ts           ON mentioned_file TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS mentioned_file_in ON mentioned_file FIELDS in;
+DEFINE INDEX IF NOT EXISTS mentioned_file_out ON mentioned_file FIELDS out;
+DEFINE INDEX IF NOT EXISTS mentioned_file_in_out_source ON mentioned_file FIELDS in, out, source;
+
+DEFINE TABLE mentioned_symbol TYPE RELATION FROM turn TO symbol;
+DEFINE FIELD source       ON mentioned_symbol TYPE string DEFAULT "text";
+DEFINE FIELD confidence   ON mentioned_symbol TYPE option<float>;
+DEFINE FIELD excerpt      ON mentioned_symbol TYPE option<string>;
+DEFINE FIELD ts           ON mentioned_symbol TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS mentioned_symbol_in ON mentioned_symbol FIELDS in;
+DEFINE INDEX IF NOT EXISTS mentioned_symbol_out ON mentioned_symbol FIELDS out;
+
+DEFINE TABLE mentioned_error TYPE RELATION FROM turn TO error_signature;
+DEFINE FIELD source       ON mentioned_error TYPE string DEFAULT "text";
+DEFINE FIELD confidence   ON mentioned_error TYPE option<float>;
+DEFINE FIELD excerpt      ON mentioned_error TYPE option<string>;
+DEFINE FIELD ts           ON mentioned_error TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS mentioned_error_in ON mentioned_error FIELDS in;
+DEFINE INDEX IF NOT EXISTS mentioned_error_out ON mentioned_error FIELDS out;
 
 DEFINE TABLE corrected_by TYPE RELATION FROM turn TO turn;      -- assistant turn → next user turn that pushed back
 DEFINE FIELD pattern      ON corrected_by TYPE option<string>;  -- which negation pattern matched
