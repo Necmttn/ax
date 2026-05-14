@@ -778,7 +778,7 @@ const cmdSearch = (args: string[]) =>
             .join(" ");
         const limit = parsePositiveIntFlag("search", "limit", args, 10);
         if (!query) {
-            console.error("axctl search: missing query");
+            console.error("axctl skills search: missing query");
             process.exit(1);
         }
         const db = yield* SurrealClient;
@@ -908,7 +908,7 @@ const cmdStats = (args: string[]) =>
     Effect.gen(function* () {
         const name = args.filter((a) => !a.startsWith("--"))[0];
         if (!name) {
-            console.error("axctl stats: missing skill name");
+            console.error("axctl skills stats: missing skill name");
             process.exit(1);
         }
         const db = yield* SurrealClient;
@@ -916,7 +916,7 @@ const cmdStats = (args: string[]) =>
         if (!exists) {
             const hint = name.length > 20 ? name.slice(0, 20) : name;
             console.error(
-                `axctl: no skill named "${name}". try: axctl search "${hint}"`,
+                `axctl: no skill named "${name}". try: axctl skills search "${hint}"`,
             );
             process.exit(2);
         }
@@ -1352,7 +1352,7 @@ const cmdPairs = (args: string[]) =>
     Effect.gen(function* () {
         const name = args.filter((a) => !a.startsWith("--"))[0];
         if (!name) {
-            console.error("axctl pairs: missing skill name");
+            console.error("axctl skills pairs: missing skill name");
             process.exit(1);
         }
         const limit = parsePositiveIntFlag("pairs", "limit", args, 20);
@@ -1361,7 +1361,7 @@ const cmdPairs = (args: string[]) =>
         if (!exists) {
             const hint = name.length > 20 ? name.slice(0, 20) : name;
             console.error(
-                `axctl: no skill named "${name}". try: axctl search "${hint}"`,
+                `axctl: no skill named "${name}". try: axctl skills search "${hint}"`,
             );
             process.exit(2);
         }
