@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { rootCommand } from "./index.ts";
+import { insightsOnlyConflicts, rootCommand } from "./index.ts";
 
 const topLevelNames = (): string[] =>
     rootCommand.subcommands.flatMap((group) =>
@@ -52,6 +52,32 @@ describe("effect cli", () => {
         expect(subNames).toEqual(expect.arrayContaining([
             "search", "stats", "recent", "unused", "taste", "pairs", "recovery",
         ]));
+    });
+
+    test("--insights-only rejects other --*-only flags and --since", () => {
+        const base = {
+            skillsOnly: false,
+            transcriptsOnly: false,
+            codexOnly: false,
+            gitOnly: false,
+            claudeOnly: false,
+            hasSince: false,
+        };
+        // No conflicts when --insights-only stands alone.
+        expect(insightsOnlyConflicts(base)).toEqual([]);
+        // Each other --*-only flag is flagged as a conflict.
+        expect(insightsOnlyConflicts({ ...base, codexOnly: true })).toEqual(["--codex-only"]);
+        expect(insightsOnlyConflicts({ ...base, skillsOnly: true })).toEqual(["--skills-only"]);
+        expect(insightsOnlyConflicts({ ...base, transcriptsOnly: true })).toEqual(["--transcripts-only"]);
+        expect(insightsOnlyConflicts({ ...base, gitOnly: true })).toEqual(["--git-only"]);
+        expect(insightsOnlyConflicts({ ...base, claudeOnly: true })).toEqual(["--claude-only"]);
+        // --since does not honour --insights-only, so combining is user-error.
+        expect(insightsOnlyConflicts({ ...base, hasSince: true })).toEqual(["--since"]);
+        // Multiple conflicts list every offender, in stable order.
+        expect(insightsOnlyConflicts({ ...base, codexOnly: true, hasSince: true })).toEqual([
+            "--codex-only",
+            "--since",
+        ]);
     });
 
     test("evidence group exposes guidance/session/weekly", () => {

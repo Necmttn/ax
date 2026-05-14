@@ -1430,6 +1430,30 @@ const progressFlag = Flag.choice("progress", ["auto", "pipeline", "plain", "json
     Flag.withDefault("auto"),
 );
 
+/**
+ * `--insights-only` short-circuits to `cmdIngestInsights`, bypassing
+ * `cmdIngest`'s `--*-only` mutual-exclusion check. Without this helper,
+ * `axctl ingest --insights-only --codex-only --since=7` silently ignores
+ * `--codex-only` and `--since`. Exported for unit testing.
+ */
+export const insightsOnlyConflicts = (opts: {
+    skillsOnly: boolean;
+    transcriptsOnly: boolean;
+    codexOnly: boolean;
+    gitOnly: boolean;
+    claudeOnly: boolean;
+    hasSince: boolean;
+}): string[] => {
+    const conflicts: string[] = [];
+    if (opts.skillsOnly) conflicts.push("--skills-only");
+    if (opts.transcriptsOnly) conflicts.push("--transcripts-only");
+    if (opts.codexOnly) conflicts.push("--codex-only");
+    if (opts.gitOnly) conflicts.push("--git-only");
+    if (opts.claudeOnly) conflicts.push("--claude-only");
+    if (opts.hasSince) conflicts.push("--since");
+    return conflicts;
+};
+
 const ingestCommand = Command.make(
     "ingest",
     {
@@ -1445,6 +1469,20 @@ const ingestCommand = Command.make(
     },
     ({ skillsOnly, transcriptsOnly, codexOnly, gitOnly, claudeOnly, insightsOnly, since, progress, verbose }) => {
         if (insightsOnly) {
+            const conflicts = insightsOnlyConflicts({
+                skillsOnly,
+                transcriptsOnly,
+                codexOnly,
+                gitOnly,
+                claudeOnly,
+                hasSince: Option.isSome(since),
+            });
+            if (conflicts.length > 0) {
+                console.error(
+                    `axctl ingest: --insights-only is mutually exclusive with ${conflicts.join(", ")}`,
+                );
+                process.exit(2);
+            }
             return cmdIngestInsights([
                 `--progress=${progress}`,
                 ...boolArg("verbose", verbose),
