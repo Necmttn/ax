@@ -1438,12 +1438,19 @@ const ingestCommand = Command.make(
         codexOnly: Flag.boolean("codex-only").pipe(Flag.withDefault(false)),
         gitOnly: Flag.boolean("git-only").pipe(Flag.withDefault(false)),
         claudeOnly: Flag.boolean("claude-only").pipe(Flag.withDefault(false)),
+        insightsOnly: Flag.boolean("insights-only").pipe(Flag.withDefault(false)),
         since: optionalSince,
         progress: progressFlag,
         verbose: verboseFlag,
     },
-    ({ skillsOnly, transcriptsOnly, codexOnly, gitOnly, claudeOnly, since, progress, verbose }) =>
-        cmdIngest([
+    ({ skillsOnly, transcriptsOnly, codexOnly, gitOnly, claudeOnly, insightsOnly, since, progress, verbose }) => {
+        if (insightsOnly) {
+            return cmdIngestInsights([
+                `--progress=${progress}`,
+                ...boolArg("verbose", verbose),
+            ]);
+        }
+        return cmdIngest([
             ...boolArg("skills-only", skillsOnly),
             ...boolArg("transcripts-only", transcriptsOnly),
             ...boolArg("codex-only", codexOnly),
@@ -1452,14 +1459,9 @@ const ingestCommand = Command.make(
             ...intArg("since", optionValue(since)),
             `--progress=${progress}`,
             ...boolArg("verbose", verbose),
-        ]),
-).pipe(Command.withDescription("Ingest skills, transcripts, Codex sessions, and git history"));
-
-const ingestInsightsCommand = Command.make(
-    "ingest-insights",
-    { progress: progressFlag, verbose: verboseFlag },
-    ({ progress, verbose }) => cmdIngestInsights([`--progress=${progress}`, ...boolArg("verbose", verbose)]),
-).pipe(Command.withDescription("Ingest Claude insight artifacts"));
+        ]);
+    },
+).pipe(Command.withDescription("Ingest skills, transcripts, Codex sessions, git history, and insight artifacts"));
 
 const deriveSignalsCommand = Command.make(
     "derive-signals",
@@ -1767,7 +1769,6 @@ export const rootCommand = Command.make("axctl").pipe(
     Command.withDescription("ax local memory and telemetry for coding agents"),
     Command.withSubcommands([
         ingestCommand,
-        ingestInsightsCommand,
         deriveSignalsCommand,
         insightsCommand,
         interventionsCommand,
