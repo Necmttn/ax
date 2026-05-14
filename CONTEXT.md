@@ -1,6 +1,6 @@
-# agentctl Context
+# axctl Context
 
-`agentctl` is a local agent telemetry and project-memory graph. It connects
+`axctl` is a local agent telemetry and project-memory graph. It connects
 agent sessions, tool use, files, repositories, commits, and derived knowledge so
 agents can answer what happened before and why it matters now.
 
@@ -56,7 +56,7 @@ Code-structure context extracted lazily around changed or queried **Files**.
 _Avoid_: full-repo static index
 
 **Storage Backend**:
-The SurrealDB persistence engine used by `agentctl`, separate from product semantics.
+The SurrealDB persistence engine used by `axctl`, separate from product semantics.
 _Avoid_: memory versioning model
 
 **Current View**:
@@ -125,7 +125,7 @@ location.
 _Avoid_: config path
 
 **Onboarding Checklist**:
-A setup validation flow that makes `agentctl` evidence reliable before deeper
+A setup validation flow that makes `axctl` evidence reliable before deeper
 insight or optimization workflows run.
 _Avoid_: install steps
 
@@ -226,7 +226,7 @@ _Avoid_: task
 - A session should point directly to its **Repository** and **Checkout** when they are known; raw cwd remains observed metadata.
 - A commit belongs to a **Repository** and may record the **Checkout** where it was observed during ingest.
 - A **Repository Identity** is chosen from normalized remote, then initial commit SHA, then checkout-root hash as a machine-local fallback.
-- `agentctl` should encourage Git tracking because commits are a primary signal for connecting agent work to durable outcomes.
+- `axctl` should encourage Git tracking because commits are a primary signal for connecting agent work to durable outcomes.
 - A **Workspace** can have sessions, turns, and edits, but not commits or touched files until it becomes a **Repository**.
 - A **File** is the shared join point for agent edits, commit touches, code IR, imports, and change knowledge.
 - A **Change Set** includes one or more **File Memories**.
@@ -242,8 +242,8 @@ _Avoid_: task
 - Superseded **Change Sets** are preserved for auditability rather than deleted.
 - `produced` remains the direct session-to-commit outcome relation; **Change Set** relations are added alongside it for memory and grouping.
 - Commit evidence is the preferred durable outcome signal; session-only **Change Sets** are provisional until connected to commits.
-- `agentctl` should coach **Commit Signal** quality through non-blocking diagnostics, not enforce commit workflow policy.
-- The **Derivation Engine** belongs to `agentctl`; Codex-specific code can feed it through adapters but should not define its domain model.
+- `axctl` should coach **Commit Signal** quality through non-blocking diagnostics, not enforce commit workflow policy.
+- The **Derivation Engine** belongs to `axctl`; Codex-specific code can feed it through adapters but should not define its domain model.
 - **Tracer Context** is activity-first and lazy: extract around touched, edited, or queried Files before considering full-repo indexing.
 - **Storage Backend** versioning must stay invisible to product semantics, user-facing queries, and tests.
 - Node tables store durable identity; edge tables store relationship-specific evidence.
@@ -253,15 +253,15 @@ _Avoid_: task
 - The **Insights Surface** should make the graph legible to humans first, then let agents reuse the same queries for automated context.
 - **Tool Calls** are canonical execution evidence; edit, skill, command, MCP, and diagnostic signals should attach to Tool Calls when possible.
 - **Friction Events**, **Feedback Events**, and **Diagnostic Events** are evidence/events, while **Insights**, **Recommendations**, **Change Sets**, and **File Memories** are derived memory/product layer records.
-- **Guidance** must be versioned so `agentctl` can compare agent behavior before and after CLAUDE.md, AGENTS.md, hook, settings, or instruction changes.
+- **Guidance** must be versioned so `axctl` can compare agent behavior before and after CLAUDE.md, AGENTS.md, hook, settings, or instruction changes.
 - **Guidance** can be repo-local or global; **Guidance Scope** distinguishes where it applies rather than creating separate concepts for repo instructions, global skills, hooks, or commands.
 - A **Guidance Source** can be local to a project or global to the user; global guidance should be tracked through a dotfiles Repository when possible.
 - An **Intervention** materializes a recommendation into one or more **Guidance** changes, and should have scope, expected effect, review criteria, and cleanup rules.
 - An **Intervention Observation** evaluates whether an **Intervention** changed targeted signals without introducing unacceptable side effects.
 - **Intervention Observation** is local measured impact; **Learning Feedback** is structured feedback on a Harness Learning for possible revision or sharing.
-- **Intervention Strength** lets `agentctl` recommend the least forceful Harness change likely to work, then escalate only when observations show the behavior persists.
+- **Intervention Strength** lets `axctl` recommend the least forceful Harness change likely to work, then escalate only when observations show the behavior persists.
 - Intervention Strength levels are advisory, workflow, automation, guardrail, and hard boundary.
-- If advisory Guidance repeatedly fails for a high-value behavior, `agentctl` can recommend a stronger Intervention such as a skill, command, preflight script, hook, policy, or branch protection.
+- If advisory Guidance repeatedly fails for a high-value behavior, `axctl` can recommend a stronger Intervention such as a skill, command, preflight script, hook, policy, or branch protection.
 - Stronger Interventions should track side effects such as false positives, latency, blocked legitimate work, or user bypasses.
 - Escalation is a recommendation kind, not a separate domain concept: it proposes moving from a weaker Intervention Strength to a stronger one because observed behavior persisted.
 - Escalation recommendations should be agent-actionable and approval-gated, so an agent can ask the user to apply the stronger control and then monitor the result.
@@ -274,8 +274,8 @@ _Avoid_: task
 - A **Guidance Revision** may be part of an **Intervention**, but not every Guidance Revision is an intentional Intervention.
 - A session can be compared against nearby **Guidance Revisions** by time, Checkout, Repository, provider, and scope even when the exact runtime Guidance Revision is uncertain.
 - Project-local and global **Guidance** should both be scanned; when global guidance is Git-tracked, its commits become durable evidence for Guidance Revisions.
-- Untracked global **Guidance** should still be ingested because it affects agent behavior, but `agentctl` should mark its evidence quality as weak and recommend Git tracking.
-- `agentctl` should treat Git-tracked global guidance as a prerequisite for reliable proactive harness optimization, not as a hard requirement for ingestion.
+- Untracked global **Guidance** should still be ingested because it affects agent behavior, but `axctl` should mark its evidence quality as weak and recommend Git tracking.
+- `axctl` should treat Git-tracked global guidance as a prerequisite for reliable proactive harness optimization, not as a hard requirement for ingestion.
 - The **Onboarding Checklist** should validate project-local and global Guidance Sources, report untracked guidance, and recommend moving global guidance into a Git-tracked dotfiles Repository.
 - The **Onboarding Checklist** should distinguish blocking setup issues from weak-evidence warnings so users can ingest immediately while improving evidence quality over time.
 - A **Harness** includes **Guidance** but is broader than Guidance; linting, typechecking, tests, MCPs, CI, review tooling, browser QA tooling, and shipping tooling can all shape agent behavior.
@@ -305,7 +305,7 @@ _Avoid_: task
 - The **Shared Learning Hub** should distribute curated Harness Learnings, not raw telemetry or unreviewed event dumps.
 - A **Harness Learning** should describe the problem, reusable pattern, Harness Layer, applicability, counterconditions, evidence summary, observed effect, side effects, confidence, source count, privacy level, and suggested Intervention.
 - Local, share-candidate, and shared **Harness Learnings** use the same domain type; visibility and status distinguish where they are in the sharing flow.
-- Sharing a **Harness Learning** is agent-proposed and user-approved; `agentctl` should not auto-share Local Evidence or Harness Learnings.
+- Sharing a **Harness Learning** is agent-proposed and user-approved; `axctl` should not auto-share Local Evidence or Harness Learnings.
 - Agents may automatically create draft issues or pull requests containing **Learning Feedback**, but publishing, merging, or promoting shared Harness Learnings remains approval-gated.
 - **Learning Feedback** is part of the compounding improvement loop for the Shared Learning Hub, while human review preserves taste and trust.
 - **Learning Feedback** should be stored in the local graph first; GitHub issues or pull requests are collaboration surfaces for shareable feedback.
@@ -331,7 +331,7 @@ _Avoid_: task
 
 ## Example dialogue
 
-> **Dev:** "This file was edited in `/Users/necmttn/Projects/agentctl` and again inside a Claude worktree. Are those two repositories?"
+> **Dev:** "This file was edited in `/Users/necmttn/Projects/axctl` and again inside a Claude worktree. Are those two repositories?"
 > **Domain expert:** "No — they are two **Checkouts** of the same **Repository**."
 
 > **Dev:** "I'm adding a new integration. What else usually changes with the registry file?"

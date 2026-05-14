@@ -1,10 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Effect } from "effect";
 import { flushSync } from "@opentui/react";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { SurrealClientShape } from "../../lib/db.ts";
 import { SKILL_DETAIL_SQL } from "../queries.ts";
+
+/**
+ * Debounce window before firing the detail query. Holding j/k spams selection
+ * changes; without this we'd kick off a SKILL_DETAIL_SQL + readFile per row.
+ * 150ms is short enough to feel instant when the user actually stops, long
+ * enough to coalesce continuous keypress streams.
+ */
+const DETAIL_DEBOUNCE_MS = 150;
 
 export interface SkillDetailRecord {
     readonly skill: {
@@ -47,6 +55,9 @@ export function useSkillDetail(
     const [data, setData] = useState<SkillDetailRecord | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    // Memoise the last successful payload per skill name. Bouncing j/k off
+    // and back to the same row should reuse instead of refetching.
+    const cacheRef = useRef<Map<string, SkillDetailRecord>>(new Map());
 
     useEffect(() => {
         if (!name) {
@@ -55,65 +66,70 @@ export function useSkillDetail(
             setError(null);
             return;
         }
+
+        // refreshTick > 0 means the live-invocation hook fired - cache is
+        // stale. On selection changes we keep the cache.
+        const cached = refreshTick === 0 ? cacheRef.current.get(name) ?? null : null;
+        if (cached) {
+            setData(cached);
+            setLoading(false);
+            setError(null);
+            return;
+        }
+
         let cancelled = false;
         setLoading(true);
-        const debug = (msg: string) => {
-            try {
-                require("node:fs").appendFileSync(
-                    "/tmp/agentctl-tui-debug.log",
-                    `${new Date().toISOString()} useSkillDetail name=${JSON.stringify(name)} ${msg}\n`,
-                );
-            } catch {
-                /* swallow */
-            }
-        };
-        debug(`fetch start`);
-        Effect.runPromise(
-            client.query<unknown[]>(SKILL_DETAIL_SQL, { name }),
-        )
-            .then(async (result) => {
-                if (cancelled) return;
-                debug(`raw result type=${typeof result} isArr=${Array.isArray(result)} len=${Array.isArray(result) ? result.length : "n/a"} sample=${JSON.stringify(result).slice(0,200)}`);
-                const payload = Array.isArray(result)
-                    ? ([...result].reverse().find((r) => r != null) as
-                          | SkillDetailRecord
-                          | undefined)
-                    : (result as SkillDetailRecord | undefined);
 
-                // Read body lazily from disk via dir_path. DB no longer stores
-                // body - multi-file skills + cache-staleness make on-disk
-                // canonical.
-                let withBody = payload ?? null;
-                const dirPath = withBody?.skill?.dir_path;
-                if (typeof dirPath === "string" && dirPath.length > 0) {
-                    try {
-                        const raw = await readFile(join(dirPath, "SKILL.md"), "utf8");
-                        const m = raw.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/);
-                        const body = (m?.[1] ?? raw).trim();
-                        withBody = {
-                            ...withBody!,
-                            skill: { ...withBody!.skill!, body },
-                        };
-                    } catch {
-                        // Skill file unreadable - leave body undefined.
+        const timer = setTimeout(() => {
+            if (cancelled) return;
+            Effect.runPromise(
+                client.query<unknown[]>(SKILL_DETAIL_SQL, { name }),
+            )
+                .then(async (result) => {
+                    if (cancelled) return;
+                    const payload = Array.isArray(result)
+                        ? ([...result].reverse().find((r) => r != null) as
+                              | SkillDetailRecord
+                              | undefined)
+                        : (result as SkillDetailRecord | undefined);
+
+                    // Body lives on disk (dir_path/SKILL.md), not in DB - multi-file
+                    // skills + cache staleness make the file canonical.
+                    let withBody = payload ?? null;
+                    const dirPath = withBody?.skill?.dir_path;
+                    if (typeof dirPath === "string" && dirPath.length > 0) {
+                        try {
+                            const raw = await readFile(join(dirPath, "SKILL.md"), "utf8");
+                            const m = raw.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/);
+                            const body = (m?.[1] ?? raw).trim();
+                            withBody = {
+                                ...withBody!,
+                                skill: { ...withBody!.skill!, body },
+                            };
+                        } catch {
+                            // Skill file unreadable - leave body undefined.
+                        }
                     }
-                }
+                    if (cancelled) return;
+                    if (withBody) cacheRef.current.set(name, withBody);
+                    flushSync(() => {
+                        setData(withBody);
+                        setError(null);
+                        setLoading(false);
+                    });
+                })
+                .catch((err: unknown) => {
+                    if (cancelled) return;
+                    flushSync(() => {
+                        setError(err instanceof Error ? err.message : String(err));
+                        setLoading(false);
+                    });
+                });
+        }, DETAIL_DEBOUNCE_MS);
 
-                flushSync(() => {
-                    setData(withBody);
-                    setError(null);
-                    setLoading(false);
-                });
-            })
-            .catch((err: unknown) => {
-                if (cancelled) return;
-                flushSync(() => {
-                    setError(err instanceof Error ? err.message : String(err));
-                    setLoading(false);
-                });
-            });
         return () => {
             cancelled = true;
+            clearTimeout(timer);
         };
     }, [client, name, refreshTick]);
 

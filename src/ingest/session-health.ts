@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { SurrealClient } from "../lib/db.ts";
 import { AppLayer } from "../lib/layers.ts";
+import { decodeJsonOrNull } from "../lib/decode.ts";
 import type { DbError } from "../lib/errors.ts";
 import { recordRef } from "./evidence-writers.ts";
 
@@ -135,14 +136,10 @@ const recordKeyPart = (value: unknown, expectedTable?: string): string | null =>
 
 function parseMetrics(input: string | null | undefined): JsonRecord {
     if (!input) return {};
-    try {
-        const parsed = JSON.parse(input) as unknown;
-        return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-            ? parsed as JsonRecord
-            : {};
-    } catch {
-        return {};
-    }
+    const parsed = decodeJsonOrNull(input);
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+        ? parsed as JsonRecord
+        : {};
 }
 
 function numberMetric(metrics: JsonRecord, keys: readonly string[]): number | null {

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
+import { ProcessServiceLive } from "../lib/process.ts";
 import {
     buildGuidanceRevisions,
     buildHarnessDoctor,
@@ -18,13 +19,13 @@ describe("scanGuidanceSources", () => {
             await writeFile(join(root, "AGENTS.md"), "Never edit main without approval.\n", "utf8");
             await mkdir(join(root, ".agents"), { recursive: true });
 
-            const sources = await Effect.runPromise(scanGuidanceSources(root));
+            const sources = await Effect.runPromise(scanGuidanceSources(root).pipe(Effect.provide(ProcessServiceLive)));
             const repoSources = sources.filter((source) => source.scope === "repository");
 
             expect(repoSources.map((source) => source.path)).toContain(join(root, "AGENTS.md"));
             expect(repoSources.some((source) => source.provider === "agents")).toBe(true);
 
-            const revisions = await Effect.runPromise(buildGuidanceRevisions(repoSources));
+            const revisions = await Effect.runPromise(buildGuidanceRevisions(repoSources).pipe(Effect.provide(ProcessServiceLive)));
             expect(revisions).toEqual(
                 expect.arrayContaining([
                     expect.objectContaining({

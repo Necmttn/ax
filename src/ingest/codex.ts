@@ -1,8 +1,9 @@
 import { readdir, stat, open } from "node:fs/promises";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import { Effect } from "effect";
 import { RecordId, SurrealClient, filePointer } from "../lib/db.ts";
+import { AgentctlConfig } from "../lib/config.ts";
+import { decodeJsonOrNull } from "../lib/decode.ts";
 import { skillRecordKey } from "../lib/skill-id.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
@@ -23,7 +24,6 @@ import {
 import { normalizeCodexUpdatePlan, type PlanStatus } from "./plans.ts";
 import { invokedRelationRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 
-const CODEX_ROOT = process.env.AGENTCTL_CODEX_DIR ?? join(homedir(), ".codex", "sessions");
 const DEFAULT_CODEX_RAW_MAX_BYTES = 5 * 1024 * 1024;
 const DEFAULT_CODEX_PROGRESS_EVERY = 10;
 const DEFAULT_CODEX_FLUSH_EVERY = 500;
@@ -59,11 +59,8 @@ interface CodexInvocation {
 }
 
 function parseJsonl(line: string): Record<string, unknown> | null {
-    try {
-        return JSON.parse(line);
-    } catch {
-        return null;
-    }
+    const decoded = decodeJsonOrNull(line);
+    return isRecord(decoded) ? decoded : null;
 }
 
 function isRecord(input: unknown): input is Record<string, unknown> {
@@ -77,12 +74,8 @@ function stringField(input: Record<string, unknown>, field: string): string | nu
 
 function parseCodexArguments(input: unknown): unknown {
     if (typeof input !== "string") return input ?? null;
-
-    try {
-        return JSON.parse(input);
-    } catch {
-        return input;
-    }
+    const decoded = decodeJsonOrNull(input);
+    return decoded ?? input;
 }
 
 function jsonText(input: unknown): string | null {
@@ -125,12 +118,6 @@ export function codexConcurrency(raw: string | undefined): number {
     if (!raw) return DEFAULT_CODEX_CONCURRENCY;
     const parsed = Number.parseInt(raw, 10);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CODEX_CONCURRENCY;
-}
-
-function codexRawMaxBytes(raw = process.env.AGENTCTL_CODEX_RAW_MAX_BYTES): number {
-    if (!raw) return DEFAULT_CODEX_RAW_MAX_BYTES;
-    const parsed = Number.parseInt(raw, 10);
-    return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_CODEX_RAW_MAX_BYTES;
 }
 
 export function codexPayloadMaxBytes(raw = process.env.AGENTCTL_CODEX_PAYLOAD_MAX_BYTES): number {
@@ -766,18 +753,19 @@ export interface CodexStats {
 
 export const ingestCodex = (
     opts: Partial<CodexIngestOpts> = {},
-): Effect.Effect<CodexStats, DbError, SurrealClient> =>
+): Effect.Effect<CodexStats, DbError, SurrealClient | AgentctlConfig> =>
     Effect.gen(function* () {
+        const cfg = yield* AgentctlConfig;
         const db = yield* SurrealClient;
         const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
-        const files = yield* Effect.promise(() => walkJsonlFiles(CODEX_ROOT, cutoff));
+        const files = yield* Effect.promise(() => walkJsonlFiles(cfg.paths.codexDir, cutoff));
         const totalBytes = files.reduce((sum, file) => sum + file.sizeBytes, 0);
         if (opts.onProgress) yield* opts.onProgress({ totalFiles: files.length, totalBytes });
-        const rawMaxBytes = codexRawMaxBytes();
-        const progressEvery = codexProgressEvery(process.env.AGENTCTL_CODEX_PROGRESS_EVERY);
-        const flushEvery = codexFlushEvery(process.env.AGENTCTL_CODEX_FLUSH_EVERY);
-        const concurrency = codexConcurrency(process.env.AGENTCTL_CODEX_CONCURRENCY);
-        const payloadMaxBytes = codexPayloadMaxBytes();
+        const rawMaxBytes = cfg.knobs.codexRawMaxBytes;
+        const progressEvery = cfg.knobs.codexProgressEvery;
+        const flushEvery = cfg.knobs.codexFlushEvery;
+        const concurrency = cfg.knobs.codexConcurrency;
+        const payloadMaxBytes = cfg.knobs.codexPayloadMaxBytes;
 
         let fileCount = 0;
         let byteCount = 0;

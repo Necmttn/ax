@@ -3,10 +3,9 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import { homedir } from "node:os";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { Effect } from "effect";
 import { SurrealClient } from "../lib/db.ts";
+import { ProcessService } from "../lib/process.ts";
 import type { DbError } from "../lib/errors.ts";
 import { getGitState } from "./git.ts";
 import { loadProjectStack } from "./stack.ts";
@@ -25,8 +24,6 @@ import type {
     ProjectHarnessReport,
     ProjectStack,
 } from "./types.ts";
-
-const execFileP = promisify(execFile);
 
 const REPO_GUIDANCE = ["AGENTS.md", "CLAUDE.md", ".agents", ".claude", ".codex"] as const;
 const GLOBAL_GUIDANCE = [
@@ -60,26 +57,20 @@ function isInside(child: string, parent: string): boolean {
     return rel === "" || (!rel.startsWith("..") && !rel.startsWith("/"));
 }
 
-const runGit = (cwd: string, args: readonly string[]): Effect.Effect<string | null> =>
-    Effect.promise(async () => {
-        try {
-            const { stdout } = await execFileP("git", ["-C", cwd, ...args], { timeout: 2000 });
-            return stdout.trim();
-        } catch {
-            return null;
-        }
+const runGit = (cwd: string, args: readonly string[]): Effect.Effect<string | null, never, ProcessService> =>
+    Effect.gen(function* () {
+        const proc = yield* ProcessService;
+        const result = yield* proc
+            .exec("git", ["-C", cwd, ...args], { timeoutMs: 2000 })
+            .pipe(Effect.orElseSucceed(() => null));
+        if (!result || result.code !== 0) return null;
+        return result.stdout.trim();
     });
 
-const shellQuote = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
-
-const commandExists = (name: string): Effect.Effect<boolean> =>
-    Effect.promise(async () => {
-        try {
-            await execFileP("/bin/sh", ["-lc", `command -v ${shellQuote(name)}`], { timeout: 1000 });
-            return true;
-        } catch {
-            return false;
-        }
+const commandExists = (name: string): Effect.Effect<boolean, never, ProcessService> =>
+    Effect.gen(function* () {
+        const proc = yield* ProcessService;
+        return yield* proc.commandExists(name);
     });
 
 function providerFor(path: string): GuidanceSource["provider"] {
@@ -98,10 +89,10 @@ function evidenceStrength(path: string, tracked: boolean): GuidanceEvidenceStren
     return "untracked";
 }
 
-const gitRootFor = (path: string): Effect.Effect<string | null> =>
+const gitRootFor = (path: string): Effect.Effect<string | null, never, ProcessService> =>
     runGit(statSync(path).isDirectory() ? path : dirname(path), ["rev-parse", "--show-toplevel"]);
 
-const isTracked = (path: string, gitRoot: string | null): Effect.Effect<boolean> =>
+const isTracked = (path: string, gitRoot: string | null): Effect.Effect<boolean, never, ProcessService> =>
     Effect.gen(function* () {
         if (!gitRoot || !isInside(path, gitRoot)) return false;
         const rel = relative(gitRoot, path);
@@ -125,7 +116,7 @@ function candidateGuidancePaths(root: string | null): string[] {
     return [...new Set(paths)];
 }
 
-export const scanGuidanceSources = (root: string | null): Effect.Effect<ReadonlyArray<GuidanceSource>> =>
+export const scanGuidanceSources = (root: string | null): Effect.Effect<ReadonlyArray<GuidanceSource>, never, ProcessService> =>
     Effect.gen(function* () {
         const out: GuidanceSource[] = [];
         for (const path of candidateGuidancePaths(root)) {
@@ -154,7 +145,7 @@ async function contentForRevision(path: string): Promise<string> {
 
 export const buildGuidanceRevisions = (
     sources: ReadonlyArray<GuidanceSource>,
-): Effect.Effect<ReadonlyArray<GuidanceRevision>> =>
+): Effect.Effect<ReadonlyArray<GuidanceRevision>, never, ProcessService> =>
     Effect.gen(function* () {
         const observedAt = new Date().toISOString();
         const revisions: GuidanceRevision[] = [];
@@ -186,7 +177,7 @@ function packageTooling(pkg: PackageInfo): AgentToolingSignal[] {
     return out;
 }
 
-export const detectAgentTooling = (git: GitState, stack: ProjectStack): Effect.Effect<ReadonlyArray<AgentToolingSignal>> =>
+export const detectAgentTooling = (git: GitState, stack: ProjectStack): Effect.Effect<ReadonlyArray<AgentToolingSignal>, never, ProcessService> =>
     Effect.gen(function* () {
         const out = packageTooling(stack.package);
         for (const name of ["rg", "fd", "fzf", "jq", "bat", "delta"]) {
@@ -367,7 +358,7 @@ RETURN {
         };
     });
 
-export const buildProjectHarnessReport = (cwd = process.cwd()): Effect.Effect<ProjectHarnessReport, DbError, SurrealClient> =>
+export const buildProjectHarnessReport = (cwd = process.cwd()): Effect.Effect<ProjectHarnessReport, DbError, SurrealClient | ProcessService> =>
     Effect.gen(function* () {
         const git = yield* getGitState(cwd);
         const stack = yield* loadProjectStack(git.root);
@@ -380,7 +371,7 @@ export const buildProjectHarnessReport = (cwd = process.cwd()): Effect.Effect<Pr
         const agentTooling = [...staticTooling, ...observedTooling];
         const candidate = mainBranchLearning(git, guidanceSources);
         return {
-            kind: "agentctl.project.harness",
+            kind: "ax.project.harness",
             generatedAt: new Date().toISOString(),
             git,
             guidanceSources,

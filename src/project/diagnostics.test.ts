@@ -11,7 +11,7 @@ import {
 } from "./diagnostics.ts";
 
 async function withTempRoot<T>(fn: (root: string) => Promise<T>): Promise<T> {
-    const root = await mkdtemp(join(tmpdir(), "agentctl-diagnostics-"));
+    const root = await mkdtemp(join(tmpdir(), "axctl-diagnostics-"));
     try {
         return await fn(root);
     } finally {
@@ -28,19 +28,19 @@ async function writeDiagnosticConfig(
         readonly timeoutMs?: number;
     },
 ): Promise<void> {
-    const dir = join(root, ".agentctl");
+    const dir = join(root, ".axctl");
     await mkdir(dir, { recursive: true });
     await writeFile(join(dir, "config.json"), JSON.stringify({ diagnostics }), "utf8");
 }
 
 async function writeRawDiagnosticConfig(root: string, raw: string): Promise<void> {
-    const dir = join(root, ".agentctl");
+    const dir = join(root, ".axctl");
     await mkdir(dir, { recursive: true });
     await writeFile(join(dir, "config.json"), raw, "utf8");
 }
 
 describe("parseDiagnosticConfig", () => {
-    test("reads URLs from .agentctl config JSON", () => {
+    test("reads URLs from .axctl config JSON", () => {
         const parsed = parseDiagnosticConfig(
             JSON.stringify({
                 diagnostics: {
@@ -71,7 +71,7 @@ describe("parseDiagnosticConfig", () => {
 });
 
 describe("loadDiagnosticConfig", () => {
-    test("returns null when .agentctl/config.json is absent", async () => {
+    test("returns null when .axctl/config.json is absent", async () => {
         await withTempRoot(async (root) => {
             const config = await Effect.runPromise(loadDiagnosticConfig(root));
 
@@ -79,7 +79,7 @@ describe("loadDiagnosticConfig", () => {
         });
     });
 
-    test("loads .agentctl/config.json when present", async () => {
+    test("loads .axctl/config.json when present", async () => {
         await withTempRoot(async (root) => {
             await writeDiagnosticConfig(root, {
                 healthUrl: "http://localhost:4319/internal/health",

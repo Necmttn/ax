@@ -2,6 +2,10 @@
 import { Effect, Option, References } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
+import { AgentctlConfig } from "../lib/config.ts";
+import { ProcessService } from "../lib/process.ts";
+import { prettyPrint, surrealLiteral } from "../lib/json.ts";
+import { prettifyProjectSlug } from "../lib/shared/project-slug.ts";
 import { AppLayer } from "../lib/layers.ts";
 import { ingestSkills } from "../ingest/skills.ts";
 import { ingestCommands } from "../ingest/commands.ts";
@@ -16,9 +20,12 @@ import { deriveLearningRegistry } from "../ingest/learning-registry.ts";
 import { ingestClaudeInsights } from "../ingest/claude-insights.ts";
 import { ingestLegacySelfImprove } from "../ingest/legacy-self-improve.ts";
 import { deriveSignals } from "../ingest/derive-signals.ts";
+import { deriveSpawned } from "../ingest/derive-spawned.ts";
+import { deriveClaudeSubagents } from "../ingest/derive-claude-subagents.ts";
 import { INSIGHT_VIEWS, insightSqlForView, isInsightView } from "../queries/insights.ts";
 import { writeDashboard } from "../dashboard/report.ts";
 import { serveDashboard } from "../dashboard/server.ts";
+import { fetchRecall } from "../dashboard/recall.ts";
 import { cmdDaemon, cmdDoctor, cmdInstall, cmdUninstall } from "./install.ts";
 import {
     createProgressReporter,
@@ -75,14 +82,14 @@ function parsePositiveIntFlag(
     if (raw === undefined) {
         if (fallback !== undefined) return fallback;
         console.error(
-            `agentctl ${cmd}: --${flagName} is required (must be a positive integer)`,
+            `axctl ${cmd}: --${flagName} is required (must be a positive integer)`,
         );
         process.exit(2);
     }
     const n = Number(raw);
     if (!Number.isInteger(n) || n <= 0) {
         console.error(
-            `agentctl ${cmd}: --${flagName} must be a positive integer (got "${raw}")`,
+            `axctl ${cmd}: --${flagName} must be a positive integer (got "${raw}")`,
         );
         process.exit(2);
     }
@@ -103,31 +110,11 @@ function parseOptionalPositiveIntFlag(
     const n = Number(raw);
     if (!Number.isInteger(n) || n <= 0) {
         console.error(
-            `agentctl ${cmd}: --${flagName} must be a positive integer (got "${raw}")`,
+            `axctl ${cmd}: --${flagName} must be a positive integer (got "${raw}")`,
         );
         process.exit(2);
     }
     return n;
-}
-
-/**
- * Cheap human-friendly project label from either a Claude-style cwd-slug like
- * `-Users-necmttn-Projects-quera` or a real path like `/Users/necmttn/quera`.
- * Falls back to the raw value when nothing else produces something useful.
- */
-function prettifyProjectSlug(raw: unknown): string {
-    if (raw == null) return "?";
-    const s = String(raw);
-    if (!s) return "?";
-    // Real filesystem path: just take the last segment.
-    if (s.includes("/")) {
-        const parts = s.split("/").filter((p) => p.length > 0);
-        if (parts.length > 0) return parts[parts.length - 1];
-    }
-    // Claude slug form: leading dash, segments joined by dashes.
-    const trimmed = s.startsWith("-") ? s.slice(1) : s;
-    const parts = trimmed.split("-").filter((p) => p.length > 0);
-    return parts.length > 0 ? parts[parts.length - 1] : s;
 }
 
 /**
@@ -162,7 +149,7 @@ function progressModeFor(command: string, args: string[]) {
     try {
         return parseProgressMode(flag("progress", args));
     } catch (err) {
-        console.error(`agentctl ${command}: ${(err as Error).message}`);
+        console.error(`axctl ${command}: ${(err as Error).message}`);
         process.exit(2);
     }
 }
@@ -189,9 +176,9 @@ const telemetryStage = <A>(
     runId: string,
     source: string,
     stage: string,
-    program: Effect.Effect<A, DbError, SurrealClient>,
+    program: Effect.Effect<A, DbError, SurrealClient | AgentctlConfig | ProcessService>,
     progress?: ProgressReporter,
-): Effect.Effect<A, DbError, SurrealClient> =>
+): Effect.Effect<A, DbError, SurrealClient | AgentctlConfig | ProcessService> =>
     Effect.gen(function* () {
         progress?.start({ source, stage });
         yield* db.query(buildIngestStageStartStatement({ runId, source, stage }));
@@ -308,7 +295,7 @@ const cmdIngest = (args: string[]) =>
         const setOnly = onlyFlags.filter(([, v]) => v).map(([k]) => k);
         if (setOnly.length > 1) {
             console.error(
-                `agentctl ingest: ${setOnly.join(", ")} are mutually exclusive (each is a complete-source filter)`,
+                `axctl ingest: ${setOnly.join(", ")} are mutually exclusive (each is a complete-source filter)`,
             );
             process.exit(2);
         }
@@ -341,7 +328,7 @@ const cmdIngest = (args: string[]) =>
                 yield* telemetryStage(db, runId, "commands", "upsert", ingestCommands(), progress);
             }
 
-            const transcriptStages: Array<Effect.Effect<unknown, DbError, SurrealClient>> = [];
+            const transcriptStages: Array<Effect.Effect<unknown, DbError, SurrealClient | AgentctlConfig | ProcessService>> = [];
             if (!skillsOnly && !codexOnly && !gitOnly) {
                 transcriptStages.push(telemetryStage(
                     db,
@@ -363,6 +350,30 @@ const cmdIngest = (args: string[]) =>
                 ));
             }
             yield* Effect.all(transcriptStages, { concurrency: 2, discard: true });
+
+            // Subagent stages run AFTER the parent transcript stages so the
+            // parent sessions are already in the DB. Without this ordering
+            // every spawn-derived edge would skip via missingParent.
+            if (!skillsOnly && !codexOnly && !gitOnly) {
+                yield* telemetryStage(
+                    db,
+                    runId,
+                    "claude",
+                    "subagents",
+                    deriveClaudeSubagents(),
+                    progress,
+                );
+            }
+            if (!skillsOnly && !gitOnly) {
+                yield* telemetryStage(
+                    db,
+                    runId,
+                    "signals",
+                    "spawned",
+                    deriveSpawned(),
+                    progress,
+                );
+            }
 
             if (!skillsOnly && !transcriptsOnly && !codexOnly && !claudeOnly) {
                 yield* telemetryStage(db, runId, "git", "history", ingestGit({ sinceDays }), progress);
@@ -522,7 +533,7 @@ const cmdInsights = (args: string[]) =>
             args.filter((a) => !a.startsWith("--"))[0] ?? "repositories";
         if (!isInsightView(rawView)) {
             console.error(
-                `agentctl insights: unknown view "${rawView}" (expected ${INSIGHT_VIEWS.join(", ")})`,
+                `axctl insights: unknown view "${rawView}" (expected ${INSIGHT_VIEWS.join(", ")})`,
             );
             process.exit(2);
         }
@@ -531,7 +542,7 @@ const cmdInsights = (args: string[]) =>
         const result = yield* db.query<[Array<Record<string, unknown>>]>(
             insightSqlForView(rawView, limit),
         );
-        console.log(JSON.stringify(result?.[0] ?? [], null, 2));
+        console.log(prettyPrint(result?.[0] ?? []));
     });
 
 const cmdOnboarding = (args: string[]) =>
@@ -552,10 +563,10 @@ const cmdInterventions = (args: string[]) =>
             subcommand === "regressions" ? `SELECT session, source, tool_errors, interruptions, context_pressure, estimated_tokens, ts FROM session_health WHERE context_pressure = "high" OR tool_errors >= 5 OR interruptions > 0 ORDER BY estimated_tokens DESC, tool_errors DESC LIMIT ${limit};` :
             subcommand === "show" ? `SELECT id, name, kind, status, expected_effect, target_metrics, owner_notes, created_at FROM intervention ORDER BY created_at DESC LIMIT ${limit};` :
             subcommand === "list" ? `SELECT id, name, kind, status, expected_effect, target_metrics, created_at FROM intervention ORDER BY created_at DESC LIMIT ${limit};` :
-            `SELECT id, name, kind, status, expected_effect, target_metrics, owner_notes, created_at FROM intervention WHERE string::lowercase(name ?? "") CONTAINS ${JSON.stringify(subcommand.toLowerCase())} LIMIT ${limit};`;
+            `SELECT id, name, kind, status, expected_effect, target_metrics, owner_notes, created_at FROM intervention WHERE string::lowercase(name ?? "") CONTAINS ${surrealLiteral(subcommand.toLowerCase())} LIMIT ${limit};`;
         const result = yield* db.query<[Array<Record<string, unknown>>]>(sql);
         if (json) {
-            console.log(JSON.stringify(result?.[0] ?? [], null, 2));
+            console.log(prettyPrint(result?.[0] ?? []));
             return;
         }
         for (const row of result?.[0] ?? []) {
@@ -578,6 +589,195 @@ const cmdDashboard = (args: string[]) =>
         );
     });
 
+interface RecallCliOpts {
+    readonly query: string;
+    readonly project: string | null;
+    readonly skill: string | null;
+    readonly since: string | null;
+    readonly json: boolean;
+}
+
+/**
+ * Resolve a user-supplied filter (project slug, skill name) into the
+ * canonical value stored in the DB. Three behaviours:
+ *  - exact match → return immediately
+ *  - "?" or empty value with TTY → interactive picker (numbered list)
+ *  - substring → match against pretty + raw forms; on 0/many, list & exit
+ */
+async function pickFromList(
+    label: string,
+    candidates: ReadonlyArray<{ readonly value: string; readonly hint: string }>,
+): Promise<string | null> {
+    if (!process.stdin.isTTY) {
+        console.error(
+            `axctl recall: --${label} requires a value (stdin is not a TTY)`,
+        );
+        process.exit(2);
+    }
+    if (candidates.length === 0) {
+        console.error(`no ${label}s found`);
+        process.exit(2);
+    }
+    process.stderr.write(`\nPick a ${label}:\n`);
+    candidates.forEach((c, i) => {
+        const idx = String(i + 1).padStart(2);
+        process.stderr.write(`  ${idx}. ${c.value}  \x1b[2m${c.hint}\x1b[0m\n`);
+    });
+    process.stderr.write(`\nNumber (or empty to skip): `);
+    const readline = await import("node:readline/promises");
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stderr,
+    });
+    const answer = (await rl.question("")).trim();
+    rl.close();
+    if (!answer) return null;
+    const n = Number(answer);
+    if (!Number.isInteger(n) || n < 1 || n > candidates.length) {
+        console.error(`invalid selection: ${answer}`);
+        process.exit(2);
+    }
+    return candidates[n - 1]!.value;
+}
+
+const resolveProject = (input: string | null) =>
+    Effect.gen(function* () {
+        if (input === null) return null;
+        const db = yield* SurrealClient;
+        const rows = yield* db.query<[Array<Record<string, unknown>>]>(
+            `SELECT project, count() AS c FROM session
+             WHERE project IS NOT NONE
+             GROUP BY project ORDER BY c DESC LIMIT 200;`,
+        );
+        const all = (rows?.[0] ?? [])
+            .map((r) => ({
+                slug: String(r.project ?? ""),
+                count: Number(r.c ?? 0),
+            }))
+            .filter((r) => r.slug.length > 0);
+        const trimmed = input.trim();
+        if (trimmed === "" || trimmed === "?") {
+            return yield* Effect.promise(() =>
+                pickFromList(
+                    "project",
+                    all.slice(0, 30).map((r) => ({
+                        value: r.slug,
+                        hint: `${prettifyProjectSlug(r.slug)} · ${r.count} sessions`,
+                    })),
+                ),
+            );
+        }
+        const exact = all.find((r) => r.slug === trimmed);
+        if (exact) return exact.slug;
+        const lower = trimmed.toLowerCase();
+        const matches = all.filter(
+            (r) =>
+                r.slug.toLowerCase().includes(lower) ||
+                prettifyProjectSlug(r.slug).toLowerCase().includes(lower),
+        );
+        if (matches.length === 1) return matches[0]!.slug;
+        if (matches.length === 0) {
+            console.error(
+                `axctl recall: no project matches "${trimmed}". Try: axctl recall ... --project=?`,
+            );
+            process.exit(2);
+        }
+        return yield* Effect.promise(() =>
+            pickFromList(
+                "project",
+                matches.slice(0, 30).map((r) => ({
+                    value: r.slug,
+                    hint: `${prettifyProjectSlug(r.slug)} · ${r.count} sessions`,
+                })),
+            ),
+        );
+    });
+
+const resolveSkill = (input: string | null) =>
+    Effect.gen(function* () {
+        if (input === null) return null;
+        const db = yield* SurrealClient;
+        const rows = yield* db.query<[Array<Record<string, unknown>>]>(
+            `SELECT out.name AS name, count() AS c FROM invoked
+             WHERE out.name IS NOT NONE
+             GROUP BY name ORDER BY c DESC LIMIT 500;`,
+        );
+        const all = (rows?.[0] ?? [])
+            .map((r) => ({ name: String(r.name ?? ""), count: Number(r.c ?? 0) }))
+            .filter((r) => r.name.length > 0);
+        const trimmed = input.trim();
+        if (trimmed === "" || trimmed === "?") {
+            return yield* Effect.promise(() =>
+                pickFromList(
+                    "skill",
+                    all.slice(0, 30).map((r) => ({
+                        value: r.name,
+                        hint: `${r.count} invocations`,
+                    })),
+                ),
+            );
+        }
+        const exact = all.find((r) => r.name === trimmed);
+        if (exact) return exact.name;
+        const lower = trimmed.toLowerCase();
+        const matches = all.filter((r) => r.name.toLowerCase().includes(lower));
+        if (matches.length === 1) return matches[0]!.name;
+        if (matches.length === 0) {
+            console.error(
+                `axctl recall: no skill matches "${trimmed}". Try: axctl recall ... --skill=?`,
+            );
+            process.exit(2);
+        }
+        return yield* Effect.promise(() =>
+            pickFromList(
+                "skill",
+                matches.slice(0, 30).map((r) => ({
+                    value: r.name,
+                    hint: `${r.count} invocations`,
+                })),
+            ),
+        );
+    });
+
+const cmdRecall = (opts: RecallCliOpts) =>
+    Effect.gen(function* () {
+        if (!opts.query.trim()) {
+            console.error("axctl recall: missing query");
+            process.exit(1);
+        }
+        const project = yield* resolveProject(opts.project);
+        const skill = yield* resolveSkill(opts.skill);
+        const result = yield* fetchRecall({
+            q: opts.query,
+            project,
+            skill,
+            since: opts.since,
+        });
+        if (opts.json) {
+            console.log(JSON.stringify(result, null, 2));
+            return;
+        }
+        if (result.hits.length === 0) {
+            console.log(`no matches for "${opts.query}"`);
+            return;
+        }
+        const cap = result.truncated ? " (capped at 50)" : "";
+        console.log(`${result.hits.length} match${result.hits.length === 1 ? "" : "es"}${cap}`);
+        for (const hit of result.hits) {
+            const ts = hit.ts ?? "?";
+            const project = hit.project ? prettifyProjectSlug(hit.project) : "?";
+            const sid = hit.session_id
+                .replace(/^session:⟨/, "")
+                .replace(/⟩$/, "")
+                .slice(0, 12);
+            const role = (hit.role ?? "?").padEnd(9);
+            const src = (hit.source ?? "?").padEnd(15);
+            console.log(`\n[2m${ts}  ${src} ${role} ${project}  ${sid}[0m`);
+            const snippet = hit.snippet.replace(/\s+/g, " ").trim();
+            console.log(`  ${snippet}`);
+        }
+    });
+
 const cmdSearch = (args: string[]) =>
     Effect.gen(function* () {
         const query = args
@@ -585,7 +785,7 @@ const cmdSearch = (args: string[]) =>
             .join(" ");
         const limit = parsePositiveIntFlag("search", "limit", args, 10);
         if (!query) {
-            console.error("agentctl search: missing query");
+            console.error("axctl search: missing query");
             process.exit(1);
         }
         const db = yield* SurrealClient;
@@ -715,7 +915,7 @@ const cmdStats = (args: string[]) =>
     Effect.gen(function* () {
         const name = args.filter((a) => !a.startsWith("--"))[0];
         if (!name) {
-            console.error("agentctl stats: missing skill name");
+            console.error("axctl stats: missing skill name");
             process.exit(1);
         }
         const db = yield* SurrealClient;
@@ -723,7 +923,7 @@ const cmdStats = (args: string[]) =>
         if (!exists) {
             const hint = name.length > 20 ? name.slice(0, 20) : name;
             console.error(
-                `agentctl: no skill named "${name}". try: agentctl search "${hint}"`,
+                `axctl: no skill named "${name}". try: axctl search "${hint}"`,
             );
             process.exit(2);
         }
@@ -834,7 +1034,7 @@ RETURN {
                 }
             }
         }
-        console.log(JSON.stringify(payload, null, 2));
+        console.log(prettyPrint(payload));
     });
 
 const cmdRecent = (args: string[]) =>
@@ -1159,7 +1359,7 @@ const cmdPairs = (args: string[]) =>
     Effect.gen(function* () {
         const name = args.filter((a) => !a.startsWith("--"))[0];
         if (!name) {
-            console.error("agentctl pairs: missing skill name");
+            console.error("axctl pairs: missing skill name");
             process.exit(1);
         }
         const limit = parsePositiveIntFlag("pairs", "limit", args, 20);
@@ -1168,7 +1368,7 @@ const cmdPairs = (args: string[]) =>
         if (!exists) {
             const hint = name.length > 20 ? name.slice(0, 20) : name;
             console.error(
-                `agentctl: no skill named "${name}". try: agentctl search "${hint}"`,
+                `axctl: no skill named "${name}". try: axctl search "${hint}"`,
             );
             process.exit(2);
         }
@@ -1325,7 +1525,7 @@ const dashboardCommand = Command.make(
 const dogfoodTerminalCommand = Command.make(
     "terminal",
     {
-        scenario: Flag.choice("scenario", ["agentctl-setup", "interactive"] as const).pipe(Flag.withDefault("agentctl-setup")),
+        scenario: Flag.choice("scenario", ["axctl-setup", "interactive"] as const).pipe(Flag.withDefault("axctl-setup")),
         transport: Flag.choice("transport", ["auto", "pty", "process"] as const).pipe(Flag.withDefault("auto")),
         agent: Flag.choice("agent", ["shell", "claude", "codex", "opencode"] as const).pipe(Flag.optional),
         command: Flag.string("command").pipe(Flag.optional),
@@ -1362,6 +1562,29 @@ const searchCommand = Command.make(
     },
     ({ query, limit }) => cmdSearch([...query, `--limit=${limit}`]),
 ).pipe(Command.withDescription("Search skills by name or description"));
+
+const recallCommand = Command.make(
+    "recall",
+    {
+        query: Argument.string("query").pipe(Argument.variadic({ min: 1 })),
+        project: Flag.string("project").pipe(Flag.optional),
+        skill: Flag.string("skill").pipe(Flag.optional),
+        since: Flag.string("since").pipe(Flag.optional),
+        json: jsonFlag,
+    },
+    ({ query, project, skill, since, json }) =>
+        cmdRecall({
+            query: query.join(" "),
+            project: Option.getOrNull(project),
+            skill: Option.getOrNull(skill),
+            since: Option.getOrNull(since),
+            json,
+        }),
+).pipe(
+    Command.withDescription(
+        "Cross-session text search over user/assistant turns (BM25 FTS)",
+    ),
+);
 
 const statsCommand = Command.make(
     "stats",
@@ -1433,7 +1656,7 @@ const jsonSelfImprove = (cmd: "guidance" | "session" | "self-improve", rest: str
         selfImproveWeekly();
     return Effect.gen(function* () {
         const result = yield* effect;
-        console.log(JSON.stringify(result, null, 2));
+        console.log(prettyPrint(result));
     });
 };
 
@@ -1492,7 +1715,7 @@ const updateCommand = Command.make(
         Effect.promise(() =>
             updateAgentctl([...boolArg("check", check), ...boolArg("json", json)], liveVersionDeps),
         ),
-).pipe(Command.withDescription("Update agentctl from the latest GitHub release"));
+).pipe(Command.withDescription("Update axctl from the latest GitHub release"));
 
 const tuiCommand = Command.make("tui", {}, () =>
     Effect.promise(async () => {
@@ -1544,10 +1767,10 @@ const doctorCommand = Command.make(
 
 const uninstallCommand = Command.make("uninstall", {}, () =>
     Effect.promise(() => cmdUninstall()),
-).pipe(Command.withDescription("Remove launchd plists and the agentctl symlink"));
+).pipe(Command.withDescription("Remove launchd plists and the axctl symlink"));
 
-export const rootCommand = Command.make("agentctl").pipe(
-    Command.withDescription("agent telemetry & taste graph"),
+export const rootCommand = Command.make("axctl").pipe(
+    Command.withDescription("ax local memory and telemetry for coding agents"),
     Command.withSubcommands([
         ingestCommand,
         ingestInsightsCommand,
@@ -1558,6 +1781,7 @@ export const rootCommand = Command.make("agentctl").pipe(
         dashboardCommand,
         dogfoodCommand,
         searchCommand,
+        recallCommand,
         statsCommand,
         recentCommand,
         unusedCommand,
@@ -1583,8 +1807,8 @@ export const runCli = (args: ReadonlyArray<string>): Effect.Effect<void, unknown
 
 async function main() {
     const [, , ...args] = process.argv;
-    if (args[0] === undefined || args[0] === "help") {
-        await Effect.runPromise(runCli(["--help"]).pipe(Effect.provide(AppLayer), Effect.scoped) as Effect.Effect<void>);
+    if (args[0] === undefined || args[0] === "help" || args[0] === "--help" || args[0] === "-h") {
+        await Effect.runPromise(runCli(["--help"]) as Effect.Effect<void>);
         return;
     }
     if (args[0] === "-V") {
@@ -1592,7 +1816,12 @@ async function main() {
         return;
     }
     if (args[0] === "upgrade") {
-        await Effect.runPromise(runCli(["update", ...args.slice(1)]).pipe(Effect.provide(AppLayer), Effect.scoped) as Effect.Effect<void>);
+        await Effect.runPromise(runCli(["update", ...args.slice(1)]) as Effect.Effect<void>);
+        return;
+    }
+    const noDbCommands = new Set(["install", "daemon", "doctor", "uninstall", "onboarding", "version", "update"]);
+    if (noDbCommands.has(args[0] ?? "")) {
+        await Effect.runPromise(runCli(args) as Effect.Effect<void>);
         return;
     }
     await Effect.runPromise(
@@ -1605,7 +1834,7 @@ if (import.meta.main) {
         if (err && typeof err === "object" && "_tag" in err && err._tag === "ShowHelp") {
             process.exit(1);
         }
-        console.error("agentctl error:", err);
+        console.error("axctl error:", err);
         process.exit(1);
     });
 }

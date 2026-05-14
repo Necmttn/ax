@@ -52,7 +52,7 @@ export function buildOnboardingReport(home = homedir()): OnboardingReport {
             "agents-shared",
             "Shared agent skills",
             join(home, ".agents"),
-            "Track shared skills and hooks in git; agentctl can then link global/local skill changes to later outcomes.",
+            "Track shared skills and hooks in git; axctl can then link global/local skill changes to later outcomes.",
         ),
     ];
     return { checks };
@@ -80,12 +80,12 @@ export function formatInstallOnboardingGuidance(report: OnboardingReport): strin
         ]),
         "",
         "Ask your host agent to:",
-        "1. Run `agentctl onboarding --json` and use it as source of truth.",
+        "1. Run `axctl onboarding --json` and use it as source of truth.",
         "2. For each warning, initialize or reuse a git repository for that harness directory.",
         "3. Add a conservative `.gitignore` that excludes transcripts, caches, logs, secrets, node_modules, and generated artifacts.",
         "4. Track guidance, hooks, skills, commands, and settings only.",
         "5. Commit the baseline with `chore: track agent harness`.",
-        "6. Rerun `agentctl onboarding --json` and report remaining warnings.",
+        "6. Rerun `axctl onboarding --json` and report remaining warnings.",
     ];
 
     return lines.join("\n");

@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 
 export const AGENTCTL_VERSION = "0.1.1";
-export const DEFAULT_REPO = "Necmttn/agentctl";
+export const DEFAULT_REPO = "Necmttn/ax";
 
 export interface LatestRelease {
     readonly tagName: string;
@@ -73,7 +73,7 @@ async function githubFetch(path: string, accept: string): Promise<Response> {
     const token = githubToken();
     const headers: Record<string, string> = {
         accept,
-        "user-agent": `agentctl/${AGENTCTL_VERSION}`,
+        "user-agent": `axctl/${AGENTCTL_VERSION}`,
     };
     if (token) headers.authorization = `Bearer ${token}`;
     return fetch(`https://api.github.com/${path}`, { headers });
@@ -121,7 +121,7 @@ export async function runInstallScript(
 }
 
 export function formatVersionStatus(status: VersionStatus): string {
-    const lines = [`agentctl ${status.current}`];
+    const lines = [`axctl ${status.current}`];
     if (status.latest === null) {
         lines.push("latest: unknown");
         return lines.join("\n");
@@ -159,15 +159,15 @@ export async function updateAgentctl(args: string[], deps: VersionDeps): Promise
         return;
     }
 
-    console.log(`updating agentctl ${AGENTCTL_VERSION} -> ${latest.tagName}`);
+    console.log(`updating axctl ${AGENTCTL_VERSION} -> ${latest.tagName}`);
     const script = await deps.fetchInstallScript(DEFAULT_REPO);
     const env = {
         ...(deps.env ?? process.env),
-        AGENTCTL_VERSION: "latest",
+        AXCTL_VERSION: "latest",
     };
     const code = await deps.runInstallScript(script, env);
     if (code !== 0) {
-        throw new Error(`agentctl update failed with exit code ${code}`);
+        throw new Error(`axctl update failed with exit code ${code}`);
     }
 }
 

@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { Effect } from "effect";
 import { SurrealClient } from "../lib/db.ts";
+import { decodeJsonOrNull } from "../lib/decode.ts";
 import type { DbError } from "../lib/errors.ts";
 import { AppLayer } from "../lib/layers.ts";
 import { recordRef } from "./evidence-writers.ts";
@@ -256,22 +257,20 @@ export async function readLegacySelfImproveRuns(
         for (const line of eventsText?.split(/\r?\n/) ?? []) {
             const trimmed = line.trim();
             if (trimmed.length === 0) continue;
-            try {
-                const parsed = parseEvent(JSON.parse(trimmed) as unknown);
-                if (parsed) events.push(parsed);
-                else malformedEvents += 1;
-            } catch {
+            const decoded = decodeJsonOrNull(trimmed);
+            if (decoded === null) {
                 malformedEvents += 1;
+                continue;
             }
+            const parsed = parseEvent(decoded);
+            if (parsed) events.push(parsed);
+            else malformedEvents += 1;
         }
 
         let clusters: LegacySelfImproveClusterShape[] = [];
         if (clustersText !== null) {
-            try {
-                clusters = parseClusters(JSON.parse(clustersText) as unknown);
-            } catch {
-                clusters = [];
-            }
+            const decoded = decodeJsonOrNull(clustersText);
+            if (decoded !== null) clusters = parseClusters(decoded);
         }
 
         runs.push({

@@ -6,23 +6,19 @@ import {
     type Table,
 } from "surrealdb";
 import { Context, Effect, Layer, Schedule } from "effect";
+import { AgentctlConfig, type AgentctlConfigShape } from "./config.ts";
 import { DbError } from "./errors.ts";
 
-export interface DbConfig {
-    url: string;
-    ns: string;
-    db: string;
-    user: string;
-    pass: string;
-}
+export type DbConfig = AgentctlConfigShape["db"];
 
+/** Back-compat: read DB knobs straight from env. Prefer the AgentctlConfig service. */
 export function envConfig(): DbConfig {
     return {
-        url: process.env.AGENTCTL_DB_URL ?? "ws://127.0.0.1:8521",
-        ns: process.env.AGENTCTL_DB_NS ?? "agentctl",
-        db: process.env.AGENTCTL_DB_DB ?? "main",
-        user: process.env.AGENTCTL_DB_USER ?? "root",
-        pass: process.env.AGENTCTL_DB_PASS ?? "root",
+        url: process.env.AX_DB_URL ?? process.env.AGENTCTL_DB_URL ?? "ws://127.0.0.1:8521",
+        ns: process.env.AX_DB_NS ?? process.env.AGENTCTL_DB_NS ?? "ax",
+        db: process.env.AX_DB_DB ?? process.env.AGENTCTL_DB_DB ?? "main",
+        user: process.env.AX_DB_USER ?? process.env.AGENTCTL_DB_USER ?? "root",
+        pass: process.env.AX_DB_PASS ?? process.env.AGENTCTL_DB_PASS ?? "root",
     };
 }
 
@@ -40,7 +36,7 @@ const CONNECT_TIMEOUT_MS = 5000;
 
 /**
  * Detects "Transaction conflict" errors from SurrealDB's optimistic-locking
- * layer. Concurrent writers (e.g. two `agentctl ingest` runs hitting the same
+ * layer. Concurrent writers (e.g. two `axctl ingest` runs hitting the same
  * rocksdb keys) hit this and SurrealDB explicitly tells us we can retry.
  *
  * Examples of matching messages:
@@ -133,7 +129,7 @@ export class SurrealClient extends Context.Service<
 const connectError = (url: string, reason: string): DbError =>
     new DbError({
         operation: "connect",
-        message: `daemon not reachable at ${url} (${reason}); run 'agentctl install' to start it`,
+        message: `daemon not reachable at ${url} (${reason}); run 'axctl install' to start it`,
     });
 
 const acquire = (cfg: DbConfig): Effect.Effect<Surreal, DbError> =>
@@ -256,11 +252,11 @@ const wrap = (db: Surreal): SurrealClientShape => ({
  * Layer that connects to SurrealDB on acquisition, exposes a `SurrealClient`
  * service, and closes the underlying connection on scope close.
  */
-export const SurrealClientLive: Layer.Layer<SurrealClient, DbError> =
+export const SurrealClientLive: Layer.Layer<SurrealClient, DbError, AgentctlConfig> =
     Layer.effect(SurrealClient)(
         Effect.gen(function* () {
-            const cfg = envConfig();
-            const db = yield* Effect.acquireRelease(acquire(cfg), release);
+            const cfg = yield* AgentctlConfig;
+            const db = yield* Effect.acquireRelease(acquire(cfg.db), release);
             return wrap(db);
         }),
     );

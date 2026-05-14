@@ -38,9 +38,9 @@ jobs:
       matrix:
         include:
           - runner: macos-14
-            artifact: agentctl-darwin-arm64
+            artifact: axctl-darwin-arm64
           - runner: ubuntu-24.04
-            artifact: agentctl-linux-x64
+            artifact: axctl-linux-x64
     steps:
       - uses: actions/checkout@v4
 
@@ -58,22 +58,22 @@ jobs:
 
       - run: bun run check:cli-reference
 
-      - run: bun build --compile --outfile=dist/agentctl src/cli/index.ts
+      - run: bun build --compile --outfile=dist/axctl src/cli/index.ts
 
       - name: Smoke compiled CLI
         run: |
           set -euo pipefail
-          ./dist/agentctl --version
-          ./dist/agentctl help
+          ./dist/axctl --version
+          ./dist/axctl help
 
       - name: Package binary
         run: |
           set -euo pipefail
-          file dist/agentctl
+          file dist/axctl
           mkdir -p package
-          cp dist/agentctl package/agentctl
-          chmod 755 package/agentctl
-          tar -czf "${{ matrix.artifact }}.tar.gz" -C package agentctl
+          cp dist/axctl package/axctl
+          chmod 755 package/axctl
+          tar -czf "${{ matrix.artifact }}.tar.gz" -C package axctl
 
       - uses: actions/upload-artifact@v4
         with:

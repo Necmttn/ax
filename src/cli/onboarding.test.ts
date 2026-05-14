@@ -11,7 +11,7 @@ import {
 
 describe("onboarding report", () => {
     test("warns when global guidance directories are not git tracked", async () => {
-        const root = await mkdtemp(join(tmpdir(), "agentctl-onboarding-"));
+        const root = await mkdtemp(join(tmpdir(), "axctl-onboarding-"));
         try {
             await mkdir(join(root, ".claude"));
             await mkdir(join(root, ".codex"));
@@ -26,7 +26,7 @@ describe("onboarding report", () => {
     });
 
     test("passes when guidance directories are inside a git repository", async () => {
-        const root = await mkdtemp(join(tmpdir(), "agentctl-onboarding-"));
+        const root = await mkdtemp(join(tmpdir(), "axctl-onboarding-"));
         try {
             spawnSync("git", ["init"], { cwd: root, stdio: "ignore" });
             await mkdir(join(root, ".claude"));
@@ -41,7 +41,7 @@ describe("onboarding report", () => {
     });
 
     test("formats install guidance for host-agent setup", async () => {
-        const root = await mkdtemp(join(tmpdir(), "agentctl-onboarding-"));
+        const root = await mkdtemp(join(tmpdir(), "axctl-onboarding-"));
         try {
             await mkdir(join(root, ".claude"));
             await mkdir(join(root, ".codex"));
@@ -50,7 +50,7 @@ describe("onboarding report", () => {
 
             expect(text).toContain("Harness tracking recommended");
             expect(text).toContain("Ask your host agent to:");
-            expect(text).toContain("agentctl onboarding --json");
+            expect(text).toContain("axctl onboarding --json");
             expect(text).toContain("chore: track agent harness");
             expect(text).toContain("transcripts, caches, logs, secrets");
         } finally {
@@ -59,7 +59,7 @@ describe("onboarding report", () => {
     });
 
     test("formats install success when all harness dirs are tracked", async () => {
-        const root = await mkdtemp(join(tmpdir(), "agentctl-onboarding-"));
+        const root = await mkdtemp(join(tmpdir(), "axctl-onboarding-"));
         try {
             spawnSync("git", ["init"], { cwd: root, stdio: "ignore" });
             await mkdir(join(root, ".claude"));

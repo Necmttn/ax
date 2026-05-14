@@ -5,6 +5,7 @@ import { loadProjectStack } from "./stack.ts";
 import { deriveVerificationChecks } from "./verify.ts";
 import { buildProjectHarnessReport } from "./harness.ts";
 import { SurrealClient } from "../lib/db.ts";
+import { ProcessService } from "../lib/process.ts";
 import type { DbError } from "../lib/errors.ts";
 import type { ProjectContext, ProjectHarnessReport, ProjectVerification } from "./types.ts";
 
@@ -16,7 +17,7 @@ interface ProjectGrounding {
     readonly diagnostics: ProjectContext["diagnostics"];
 }
 
-const buildProjectGrounding = (cwd = process.cwd()): Effect.Effect<ProjectGrounding> =>
+const buildProjectGrounding = (cwd = process.cwd()): Effect.Effect<ProjectGrounding, never, ProcessService> =>
     Effect.gen(function* () {
         const git = yield* getGitState(cwd);
         const stack = yield* loadProjectStack(git.root);
@@ -31,11 +32,11 @@ const buildProjectGrounding = (cwd = process.cwd()): Effect.Effect<ProjectGround
         };
     });
 
-export const buildProjectContext = (cwd = process.cwd()): Effect.Effect<ProjectContext> =>
+export const buildProjectContext = (cwd = process.cwd()): Effect.Effect<ProjectContext, never, ProcessService> =>
     Effect.gen(function* () {
         const grounding = yield* buildProjectGrounding(cwd);
         return {
-            kind: "agentctl.project.context",
+            kind: "ax.project.context",
             generatedAt: grounding.generatedAt,
             git: grounding.git,
             stack: grounding.stack,
@@ -44,11 +45,11 @@ export const buildProjectContext = (cwd = process.cwd()): Effect.Effect<ProjectC
         };
     });
 
-export const buildProjectVerification = (cwd = process.cwd()): Effect.Effect<ProjectVerification> =>
+export const buildProjectVerification = (cwd = process.cwd()): Effect.Effect<ProjectVerification, never, ProcessService> =>
     Effect.gen(function* () {
         const grounding = yield* buildProjectGrounding(cwd);
         return {
-            kind: "agentctl.project.verify",
+            kind: "ax.project.verify",
             generatedAt: grounding.generatedAt,
             git: grounding.git,
             checks: grounding.checks,
@@ -56,5 +57,7 @@ export const buildProjectVerification = (cwd = process.cwd()): Effect.Effect<Pro
         };
     });
 
-export const buildProjectHarness = (cwd = process.cwd()): Effect.Effect<ProjectHarnessReport, DbError, SurrealClient> =>
+export const buildProjectHarness = (
+    cwd = process.cwd(),
+): Effect.Effect<ProjectHarnessReport, DbError, SurrealClient | ProcessService> =>
     buildProjectHarnessReport(cwd);

@@ -1,15 +1,16 @@
 import { Effect } from "effect";
 import { SurrealClient } from "../lib/db.ts";
+import { ProcessService } from "../lib/process.ts";
 import type { DbError } from "../lib/errors.ts";
 import { buildProjectContext, buildProjectHarness, buildProjectVerification } from "../project/context.ts";
 import type { HarnessDoctorFinding, ProjectContext, ProjectHarnessReport, ProjectVerification, VerificationCheck } from "../project/types.ts";
 
-const PROJECT_HELP = `agentctl project - project-local agent grounding
+const PROJECT_HELP = `axctl project - project-local agent grounding
 
 Usage:
-  agentctl project context [--json]
-  agentctl project verify [--json]
-  agentctl project harness [--json]
+  axctl project context [--json]
+  axctl project verify [--json]
+  axctl project harness [--json]
 `;
 
 function wantsJson(args: ReadonlyArray<string>): boolean {
@@ -79,7 +80,7 @@ function printHarness(payload: ProjectHarnessReport): void {
     }
 }
 
-export const cmdProject = (args: string[]): Effect.Effect<void, DbError, SurrealClient> =>
+export const cmdProject = (args: string[]): Effect.Effect<void, DbError, SurrealClient | ProcessService> =>
     Effect.gen(function* () {
         const [subcommand, ...rest] = args;
         if (!subcommand || subcommand === "help" || subcommand === "--help" || subcommand === "-h") {
@@ -108,7 +109,7 @@ export const cmdProject = (args: string[]): Effect.Effect<void, DbError, Surreal
             return;
         }
 
-        console.error(`agentctl project: unknown subcommand "${subcommand}"`);
+        console.error(`axctl project: unknown subcommand "${subcommand}"`);
         console.error(PROJECT_HELP);
         process.exit(1);
     });

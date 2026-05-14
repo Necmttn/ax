@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Uninstall the agentctl launchd WatchPaths agent.
+# Uninstall the axctl launchd WatchPaths agent.
 
 set -euo pipefail
 
@@ -8,7 +8,7 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
-LABEL="com.necmttn.agentctl-watch"
+LABEL="com.necmttn.ax-watch"
 TARGET="$HOME/Library/LaunchAgents/$LABEL.plist"
 
 if launchctl list | grep -q "$LABEL"; then

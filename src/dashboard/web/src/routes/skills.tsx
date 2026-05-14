@@ -1,0 +1,868 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useSearch } from "@tanstack/react-router";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { api } from "../api.ts";
+import type {
+    SkillDetailPayload,
+    SkillTriageEntry,
+    SkillTriageNote,
+    SkillTriageResponse,
+    TriageDecision,
+} from "@shared/dashboard-types.ts";
+import { fmtCount, fmtLastUsed, fmtScore, fmtTs } from "@shared/formatters.ts";
+import { prettifyProjectSlug } from "@shared/project-slug.ts";
+
+type Filter = "all" | "actionable" | "keep" | "archive" | "review";
+
+type SortKey = "score" | "30d" | "7d" | "total" | "last" | "name";
+type SortDir = "asc" | "desc";
+
+const FILTERS: ReadonlyArray<{ key: Filter; label: string }> = [
+    { key: "actionable", label: "Actionable" },
+    { key: "review", label: "Review" },
+    { key: "archive", label: "Archive" },
+    { key: "keep", label: "Keep" },
+    { key: "all", label: "All" },
+];
+
+const DEFAULT_DIR: Record<SortKey, SortDir> = {
+    score: "desc",
+    "30d": "desc",
+    "7d": "desc",
+    total: "desc",
+    last: "desc",
+    name: "asc",
+};
+
+const filterByRecommendation = (
+    rows: ReadonlyArray<SkillTriageEntry>,
+    filter: Filter,
+): ReadonlyArray<SkillTriageEntry> => {
+    if (filter === "all") return rows;
+    if (filter === "actionable") {
+        return rows.filter(
+            (r) => r.recommendation !== "keep" && r.decision === null,
+        );
+    }
+    return rows.filter((r) => r.recommendation === filter);
+};
+
+const filterByScope = (
+    rows: ReadonlyArray<SkillTriageEntry>,
+    scope: string | null,
+): ReadonlyArray<SkillTriageEntry> => {
+    if (!scope || scope === "all") return rows;
+    return rows.filter((r) => r.scope === scope);
+};
+
+const filterBySearch = (
+    rows: ReadonlyArray<SkillTriageEntry>,
+    query: string,
+): ReadonlyArray<SkillTriageEntry> => {
+    const q = query.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((r) => {
+        if (r.name.toLowerCase().includes(q)) return true;
+        if (r.scope.toLowerCase().includes(q)) return true;
+        if ((r.description ?? "").toLowerCase().includes(q)) return true;
+        return false;
+    });
+};
+
+const sortRows = (
+    rows: ReadonlyArray<SkillTriageEntry>,
+    key: SortKey,
+    dir: SortDir,
+): SkillTriageEntry[] => {
+    const out = rows.slice();
+    out.sort((a, b) => {
+        let cmp = 0;
+        switch (key) {
+            case "score":
+                cmp = a.taste_score - b.taste_score;
+                break;
+            case "30d":
+                cmp = a.inv_30d - b.inv_30d;
+                break;
+            case "7d":
+                cmp = a.inv_7d - b.inv_7d;
+                break;
+            case "total":
+                cmp = a.total_inv - b.total_inv;
+                break;
+            case "last": {
+                const ta = a.last_used ? Date.parse(a.last_used) : 0;
+                const tb = b.last_used ? Date.parse(b.last_used) : 0;
+                cmp = ta - tb;
+                break;
+            }
+            case "name":
+                cmp = a.name.localeCompare(b.name);
+                break;
+        }
+        return dir === "desc" ? -cmp : cmp;
+    });
+    return out;
+};
+
+export function SkillsRoute() {
+    const search0 = useSearch({ strict: false }) as { q?: string };
+    const queryClient = useQueryClient();
+    const skillsQuery = useQuery({
+        queryKey: ["skills"],
+        queryFn: () => api.skills(),
+    });
+    const data = skillsQuery.data ?? null;
+    const [actionError, setError] = useState<string | null>(null);
+    const error =
+        actionError ?? (skillsQuery.error ? String(skillsQuery.error) : null);
+    const loading = skillsQuery.isLoading;
+    const refreshing = skillsQuery.isFetching && !skillsQuery.isLoading;
+    const setData = (
+        updater: (curr: SkillTriageResponse | null) => SkillTriageResponse | null,
+    ) => {
+        queryClient.setQueryData<SkillTriageResponse>(["skills"], (curr) => {
+            const next = updater(curr ?? null);
+            return next ?? curr;
+        });
+    };
+    const [filter, setFilter] = useState<Filter>(search0.q ? "all" : "actionable");
+    const [search, setSearch] = useState(search0.q ?? "");
+    const [scope, setScope] = useState<string>("all");
+    const [sortKey, setSortKey] = useState<SortKey>("score");
+    const [sortDir, setSortDir] = useState<SortDir>("desc");
+    const [lastSaved, setLastSaved] = useState<string | null>(null);
+    const [pending, setPending] = useState<string | null>(null);
+    const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+    const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+    const [details, setDetails] = useState<Record<string, SkillDetailPayload>>({});
+    const [detailLoading, setDetailLoading] = useState<ReadonlySet<string>>(new Set());
+    // Start at -1 so no row reads as "pre-selected for keyboard nav". First
+    // j/k press promotes to 0.
+    const [highlight, setHighlight] = useState(-1);
+    const [showHelp, setShowHelp] = useState(false);
+    const searchRef = useRef<HTMLInputElement | null>(null);
+    const tbodyRef = useRef<HTMLTableSectionElement | null>(null);
+
+    const load = async (_mode: "initial" | "refresh" = "refresh") => {
+        await skillsQuery.refetch();
+    };
+
+    const scopes = useMemo(() => {
+        if (!data) return [] as string[];
+        return Array.from(new Set(data.skills.map((s) => s.scope))).sort();
+    }, [data]);
+
+    const visible = useMemo(() => {
+        if (!data) return [];
+        return sortRows(
+            filterBySearch(
+                filterByScope(
+                    filterByRecommendation(data.skills, filter),
+                    scope,
+                ),
+                search,
+            ),
+            sortKey,
+            sortDir,
+        );
+    }, [data, filter, scope, search, sortKey, sortDir]);
+
+    const visibleNames = useMemo(() => new Set(visible.map((v) => v.name)), [visible]);
+    const selectedVisible = useMemo(
+        () => Array.from(selected).filter((name) => visibleNames.has(name)),
+        [selected, visibleNames],
+    );
+
+    const applyNote = (note: SkillTriageNote): void => {
+        setData((curr) =>
+            curr === null
+                ? curr
+                : {
+                      ...curr,
+                      skills: curr.skills.map((row) =>
+                          row.name === note.skill_name ? { ...row, decision: note } : row,
+                      ),
+                  },
+        );
+    };
+
+    const clearLocally = (name: string): void => {
+        setData((curr) =>
+            curr === null
+                ? curr
+                : {
+                      ...curr,
+                      skills: curr.skills.map((row) =>
+                          row.name === name ? { ...row, decision: null } : row,
+                      ),
+                  },
+        );
+    };
+
+    const flashSaved = (name: string) => {
+        setLastSaved(name);
+        window.setTimeout(() => {
+            setLastSaved((curr) => (curr === name ? null : curr));
+        }, 1200);
+    };
+
+    const decide = async (row: SkillTriageEntry, decision: TriageDecision) => {
+        const alreadyActive = row.decision?.decision === decision;
+        setPending(row.name);
+        try {
+            if (alreadyActive) {
+                await api.clearDecision(row.name);
+                clearLocally(row.name);
+            } else {
+                const note = await api.decide(row.name, decision);
+                applyNote(note);
+            }
+            flashSaved(row.name);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : String(err));
+        } finally {
+            setPending(null);
+        }
+    };
+
+    const bulkDecide = async (decision: TriageDecision) => {
+        if (selectedVisible.length === 0) return;
+        setPending("__bulk__");
+        try {
+            const { notes } = await api.decideBulk(selectedVisible, decision);
+            for (const note of notes) applyNote(note);
+            setSelected(new Set());
+        } catch (err) {
+            setError(err instanceof Error ? err.message : String(err));
+        } finally {
+            setPending(null);
+        }
+    };
+
+    const toggleSelected = (name: string) => {
+        setSelected((curr) => {
+            const next = new Set(curr);
+            if (next.has(name)) next.delete(name);
+            else next.add(name);
+            return next;
+        });
+    };
+
+    const selectAllVisible = () => {
+        setSelected(new Set(visible.map((r) => r.name)));
+    };
+
+    const clearSelection = () => setSelected(new Set());
+
+    const toggleExpanded = async (row: SkillTriageEntry) => {
+        const isOpen = expanded.has(row.name);
+        setExpanded((curr) => {
+            const next = new Set(curr);
+            if (isOpen) next.delete(row.name);
+            else next.add(row.name);
+            return next;
+        });
+        if (!isOpen && !details[row.name]) {
+            setDetailLoading((curr) => new Set(curr).add(row.name));
+            try {
+                const d = await api.detail(row.name);
+                setDetails((curr) => ({ ...curr, [row.name]: d }));
+            } catch (err) {
+                setError(err instanceof Error ? err.message : String(err));
+            } finally {
+                setDetailLoading((curr) => {
+                    const next = new Set(curr);
+                    next.delete(row.name);
+                    return next;
+                });
+            }
+        }
+    };
+
+    const onSortClick = (key: SortKey) => {
+        if (key === sortKey) {
+            setSortDir((d) => (d === "desc" ? "asc" : "desc"));
+        } else {
+            setSortKey(key);
+            setSortDir(DEFAULT_DIR[key]);
+        }
+    };
+
+    // Clamp highlight when the visible set changes (filter/search/sort).
+    useEffect(() => {
+        if (visible.length === 0) {
+            if (highlight !== -1) setHighlight(-1);
+            return;
+        }
+        if (highlight >= visible.length) setHighlight(visible.length - 1);
+    }, [visible, highlight]);
+
+    // Scroll the highlighted row into view when keyboard navigation moves it.
+    useEffect(() => {
+        if (highlight < 0) return;
+        const tbody = tbodyRef.current;
+        if (!tbody) return;
+        const row = tbody.children[highlight] as HTMLElement | undefined;
+        row?.scrollIntoView({ block: "nearest" });
+    }, [highlight]);
+
+    // Global keybindings. Skip when the user is typing into a form field so
+    // `/` doesn't double-fire and `j` doesn't move the row while filtering.
+    useEffect(() => {
+        const handler = (e: KeyboardEvent) => {
+            const target = e.target as HTMLElement | null;
+            const tag = target?.tagName ?? "";
+            if (tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable) {
+                if (e.key === "Escape" && target instanceof HTMLInputElement) {
+                    target.blur();
+                }
+                return;
+            }
+            if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+            switch (e.key) {
+                case "/":
+                    e.preventDefault();
+                    searchRef.current?.focus();
+                    return;
+                case "?":
+                    e.preventDefault();
+                    setShowHelp((v) => !v);
+                    return;
+                case "j":
+                    setHighlight((h) => Math.min(visible.length - 1, h < 0 ? 0 : h + 1));
+                    return;
+                case "k":
+                    setHighlight((h) => Math.max(0, h - 1));
+                    return;
+                case "g":
+                    setHighlight(0);
+                    return;
+                case "G":
+                    setHighlight(Math.max(0, visible.length - 1));
+                    return;
+                case "r":
+                    void load("refresh");
+                    return;
+                case "x": {
+                    const row = visible[highlight];
+                    if (row) toggleSelected(row.name);
+                    return;
+                }
+                case "1":
+                case "2":
+                case "3": {
+                    const row = visible[highlight];
+                    if (!row) return;
+                    const decision: TriageDecision =
+                        e.key === "1" ? "keep" : e.key === "2" ? "review" : "archive";
+                    void decide(row, decision);
+                    return;
+                }
+                case "Enter": {
+                    const row = visible[highlight];
+                    if (row) void toggleExpanded(row);
+                    return;
+                }
+                default:
+                    return;
+            }
+        };
+        document.addEventListener("keydown", handler);
+        return () => document.removeEventListener("keydown", handler);
+        // load/decide/toggleExpanded/toggleSelected are stable enough; visible
+        // and highlight are the meaningful deps.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [visible, highlight]);
+
+    const allVisibleSelected =
+        visible.length > 0 && visible.every((r) => selected.has(r.name));
+
+    const computeStats = (rows: ReadonlyArray<SkillTriageEntry>) => {
+        let decided = 0;
+        let keep = 0;
+        let archive = 0;
+        let review = 0;
+        let actionable = 0;
+        for (const row of rows) {
+            if (row.decision) decided += 1;
+            if (row.recommendation !== "keep" && row.decision === null) actionable += 1;
+            switch (row.decision?.decision ?? row.recommendation) {
+                case "keep":
+                    keep += 1;
+                    break;
+                case "archive":
+                    archive += 1;
+                    break;
+                case "review":
+                    review += 1;
+                    break;
+            }
+        }
+        return { total: rows.length, decided, keep, archive, review, actionable };
+    };
+
+    // Global stats = progress meter across the full dataset. View stats =
+    // breakdown for what's currently shown.
+    const globalStats = useMemo(
+        () => (data ? computeStats(data.skills) : null),
+        [data],
+    );
+    const viewStats = useMemo(() => computeStats(visible), [visible]);
+
+    return (
+        <section className="panel">
+            <header>
+                <h2>Skill Triage</h2>
+                <span className="meta">
+                    {globalStats
+                        ? `${globalStats.total} total · ${globalStats.decided} decided · ${globalStats.actionable} actionable`
+                        : ""}
+                    {data ? ` · generated ${fmtTs(data.generatedAt)}` : ""}
+                </span>
+            </header>
+            {data ? (
+                <div className="view-stats">
+                    <span>
+                        <strong>{visible.length}</strong> visible
+                    </span>
+                    <span>· keep {viewStats.keep}</span>
+                    <span>· review {viewStats.review}</span>
+                    <span>· archive {viewStats.archive}</span>
+                    {viewStats.decided > 0 ? (
+                        <span>· {viewStats.decided} decided</span>
+                    ) : null}
+                </div>
+            ) : null}
+
+            <div className="actions toolbar">
+                {FILTERS.map((f) => (
+                    <button
+                        key={f.key}
+                        className={filter === f.key ? "is-active" : undefined}
+                        onClick={() => setFilter(f.key)}
+                        type="button"
+                    >
+                        {f.label}
+                    </button>
+                ))}
+                <input
+                    type="search"
+                    placeholder="search name / scope / description  ( / focus · esc leave )"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="search"
+                    aria-label="Search skills"
+                    ref={searchRef}
+                />
+                <button
+                    type="button"
+                    onClick={() => setShowHelp((v) => !v)}
+                    title="keyboard shortcuts (?)"
+                    aria-label="keyboard shortcuts"
+                    className="help-button"
+                >
+                    ? help
+                </button>
+                <button
+                    onClick={() => load("refresh")}
+                    type="button"
+                    style={{ marginLeft: "auto" }}
+                    disabled={refreshing}
+                >
+                    {refreshing ? "Refreshing…" : "Refresh"}
+                </button>
+            </div>
+
+            {scopes.length > 1 ? (
+                <div className="actions scope-bar">
+                    <span className="scope-label">scope:</span>
+                    <button
+                        type="button"
+                        className={scope === "all" ? "is-active" : undefined}
+                        onClick={() => setScope("all")}
+                    >
+                        all
+                    </button>
+                    {scopes.map((s) => (
+                        <button
+                            key={s}
+                            type="button"
+                            className={scope === s ? "is-active" : undefined}
+                            onClick={() => setScope(s)}
+                        >
+                            {s}
+                        </button>
+                    ))}
+                </div>
+            ) : null}
+
+            {selectedVisible.length > 0 ? (
+                <div className="bulk-bar">
+                    <span>
+                        <strong>{selectedVisible.length}</strong> selected
+                    </span>
+                    <div className="actions">
+                        <button
+                            type="button"
+                            onClick={() => bulkDecide("keep")}
+                            disabled={pending === "__bulk__"}
+                        >
+                            keep all
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => bulkDecide("review")}
+                            disabled={pending === "__bulk__"}
+                        >
+                            review all
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => bulkDecide("archive")}
+                            disabled={pending === "__bulk__"}
+                        >
+                            archive all
+                        </button>
+                        <button type="button" onClick={clearSelection}>
+                            clear selection
+                        </button>
+                    </div>
+                </div>
+            ) : null}
+
+            {error ? <div className="error">Error: {error}</div> : null}
+            {loading && !data ? <div className="loading">Loading…</div> : null}
+
+            {data && visible.length === 0 && !loading ? (
+                <div className="empty">No skills match.</div>
+            ) : null}
+
+            {showHelp ? <HelpOverlay onClose={() => setShowHelp(false)} /> : null}
+
+            {data && visible.length > 0 ? (
+                <table
+                    className="skills"
+                    style={{ opacity: refreshing ? 0.6 : 1 }}
+                >
+                    <thead>
+                        <tr>
+                            <th style={{ width: 32 }}>
+                                <input
+                                    type="checkbox"
+                                    aria-label="select all visible"
+                                    checked={allVisibleSelected}
+                                    onChange={() =>
+                                        allVisibleSelected
+                                            ? clearSelection()
+                                            : selectAllVisible()
+                                    }
+                                />
+                            </th>
+                            <SortHeader k="name" current={sortKey} dir={sortDir} onClick={onSortClick}>
+                                Skill
+                            </SortHeader>
+                            <th>Recommendation</th>
+                            <SortHeader k="score" current={sortKey} dir={sortDir} onClick={onSortClick} className="num">
+                                Score
+                            </SortHeader>
+                            <SortHeader k="30d" current={sortKey} dir={sortDir} onClick={onSortClick} className="num">
+                                30d
+                            </SortHeader>
+                            <SortHeader k="7d" current={sortKey} dir={sortDir} onClick={onSortClick} className="num">
+                                7d
+                            </SortHeader>
+                            <SortHeader k="total" current={sortKey} dir={sortDir} onClick={onSortClick} className="num">
+                                total
+                            </SortHeader>
+                            <SortHeader k="last" current={sortKey} dir={sortDir} onClick={onSortClick} className="num">
+                                last
+                            </SortHeader>
+                            <th>Decision</th>
+                        </tr>
+                    </thead>
+                    <tbody ref={tbodyRef}>
+                        {visible.map((row, idx) => (
+                            <SkillRowView
+                                key={row.name}
+                                row={row}
+                                highlighted={idx === highlight}
+                                justSaved={lastSaved === row.name}
+                                pending={pending === row.name || pending === "__bulk__"}
+                                selected={selected.has(row.name)}
+                                expanded={expanded.has(row.name)}
+                                detail={details[row.name] ?? null}
+                                detailLoading={detailLoading.has(row.name)}
+                                onDecide={(d) => decide(row, d)}
+                                onToggleSelect={() => toggleSelected(row.name)}
+                                onToggleExpand={() => toggleExpanded(row)}
+                            />
+                        ))}
+                    </tbody>
+                </table>
+            ) : null}
+        </section>
+    );
+}
+
+function SortHeader({
+    k,
+    current,
+    dir,
+    onClick,
+    className,
+    children,
+}: {
+    k: SortKey;
+    current: SortKey;
+    dir: SortDir;
+    onClick: (k: SortKey) => void;
+    className?: string;
+    children: React.ReactNode;
+}) {
+    const active = k === current;
+    const caret = active ? (dir === "desc" ? " ▾" : " ▴") : "";
+    return (
+        <th className={className}>
+            <button
+                type="button"
+                onClick={() => onClick(k)}
+                className={active ? "sort-header is-active" : "sort-header"}
+            >
+                {children}
+                {caret}
+            </button>
+        </th>
+    );
+}
+
+function SkillRowView({
+    row,
+    highlighted,
+    justSaved,
+    pending,
+    selected,
+    expanded,
+    detail,
+    detailLoading,
+    onDecide,
+    onToggleSelect,
+    onToggleExpand,
+}: {
+    row: SkillTriageEntry;
+    highlighted: boolean;
+    justSaved: boolean;
+    pending: boolean;
+    selected: boolean;
+    expanded: boolean;
+    detail: SkillDetailPayload | null;
+    detailLoading: boolean;
+    onDecide: (decision: TriageDecision) => void;
+    onToggleSelect: () => void;
+    onToggleExpand: () => void;
+}) {
+    const decisionLabel = row.decision ? row.decision.decision : null;
+    const trClasses = [
+        highlighted ? "row-highlighted" : "",
+        decisionLabel ? `row-decided row-decision-${decisionLabel}` : "",
+        justSaved ? "row-just-saved" : "",
+    ]
+        .filter(Boolean)
+        .join(" ");
+    return (
+        <>
+            <tr className={trClasses || undefined}>
+                <td>
+                    <input
+                        type="checkbox"
+                        aria-label={`select ${row.name}`}
+                        checked={selected}
+                        onChange={onToggleSelect}
+                    />
+                </td>
+                <td className="skill-cell">
+                    <strong>{row.name}</strong>
+                    <small>
+                        <span className="chip">{row.scope}</span>
+                        {row.description ? (
+                            <span className="description" title={row.description}>
+                                {row.description}
+                            </span>
+                        ) : null}
+                    </small>
+                </td>
+                <td>
+                    <button
+                        type="button"
+                        className="reason-button"
+                        onClick={onToggleExpand}
+                        title={expanded ? "hide evidence" : "show evidence"}
+                    >
+                        <span className={`badge ${row.recommendation}`}>
+                            {row.recommendation}
+                        </span>
+                        <small>
+                            {row.recommendation_reason} {expanded ? "▴" : "▾"}
+                        </small>
+                    </button>
+                </td>
+                <td className="num">{fmtScore(row.taste_score)}</td>
+                <td className="num">{fmtCount(row.inv_30d)}</td>
+                <td className="num">{fmtCount(row.inv_7d)}</td>
+                <td className="num">{fmtCount(row.total_inv)}</td>
+                <td className="num">{fmtLastUsed(row.last_used)}</td>
+                <td>
+                    <div className="actions">
+                        {(["keep", "review", "archive"] as TriageDecision[]).map((d) => (
+                            <button
+                                key={d}
+                                type="button"
+                                disabled={pending}
+                                className={decisionLabel === d ? "is-active" : undefined}
+                                onClick={() => onDecide(d)}
+                                title={
+                                    decisionLabel === d
+                                        ? "click to clear decision"
+                                        : `mark as ${d}`
+                                }
+                            >
+                                {d}
+                            </button>
+                        ))}
+                    </div>
+                    {row.decision ? (
+                        <small>decided {fmtTs(row.decision.decided_at)}</small>
+                    ) : null}
+                </td>
+            </tr>
+            {expanded ? (
+                <tr className="detail-row">
+                    <td />
+                    <td colSpan={8}>
+                        <DetailPanel detail={detail} loading={detailLoading} />
+                    </td>
+                </tr>
+            ) : null}
+        </>
+    );
+}
+
+function DetailPanel({
+    detail,
+    loading,
+}: {
+    detail: SkillDetailPayload | null;
+    loading: boolean;
+}) {
+    if (loading && !detail) return <div className="loading">Loading evidence…</div>;
+    if (!detail) return <div className="empty">No evidence yet.</div>;
+    return (
+        <div className="detail-grid">
+            <div>
+                <h3>Recent invocations</h3>
+                {detail.recent.length === 0 ? (
+                    <p className="empty">none</p>
+                ) : (
+                    <ul>
+                        {detail.recent.map((r, i) => (
+                            <li key={`${r.ts}-${i}`}>
+                                <code>{fmtTs(r.ts)}</code>{" "}
+                                <span>{prettifyProjectSlug(r.project)}</span>
+                                {r.turn_has_error ? <span className="badge review">error</span> : null}
+                            </li>
+                        ))}
+                    </ul>
+                )}
+            </div>
+            <div>
+                <h3>Corrections ({detail.corrections.length})</h3>
+                {detail.corrections.length === 0 ? (
+                    <p className="empty">none - clean usage</p>
+                ) : (
+                    <ul>
+                        {detail.corrections.map((r, i) => (
+                            <li key={`${r.ts}-${i}`}>
+                                <code>{fmtTs(r.ts)}</code>{" "}
+                                <span>{prettifyProjectSlug(r.project)}</span>
+                            </li>
+                        ))}
+                    </ul>
+                )}
+            </div>
+            <div>
+                <h3>Proposals ({detail.proposals.length})</h3>
+                {detail.proposals.length === 0 ? (
+                    <p className="empty">none</p>
+                ) : (
+                    <ul>
+                        {detail.proposals.map((p, i) => (
+                            <li key={`${p.ts}-${i}`}>
+                                <code>{fmtTs(p.ts)}</code>{" "}
+                                <span>{prettifyProjectSlug(p.project)}</span>
+                                {p.context_excerpt ? (
+                                    <small>{p.context_excerpt}</small>
+                                ) : null}
+                            </li>
+                        ))}
+                    </ul>
+                )}
+            </div>
+            <div style={{ gridColumn: "1 / -1" }}>
+                <h3>Frequently paired with ({detail.paired.length})</h3>
+                {detail.paired.length === 0 ? (
+                    <p className="empty">no co-occurring skills</p>
+                ) : (
+                    <ul className="paired-list">
+                        {detail.paired.map((p) => (
+                            <li key={p.partner}>
+                                <Link to="/skills" search={{ q: p.partner }}>
+                                    <strong>{p.partner}</strong>
+                                </Link>
+                                <span className="chip">{p.count}x</span>
+                                <small>last {fmtLastUsed(p.last_seen)}</small>
+                            </li>
+                        ))}
+                    </ul>
+                )}
+            </div>
+        </div>
+    );
+}
+
+const SHORTCUTS: ReadonlyArray<{ keys: string; what: string }> = [
+    { keys: "/", what: "focus search" },
+    { keys: "esc", what: "leave search" },
+    { keys: "j / k", what: "move row down / up" },
+    { keys: "g / G", what: "jump top / bottom" },
+    { keys: "Enter", what: "expand evidence" },
+    { keys: "x", what: "toggle row selection" },
+    { keys: "1 / 2 / 3", what: "keep / review / archive" },
+    { keys: "r", what: "refresh" },
+    { keys: "?", what: "toggle this help" },
+];
+
+function HelpOverlay({ onClose }: { onClose: () => void }) {
+    return (
+        <div className="help-overlay" onClick={onClose}>
+            <div className="help-card" onClick={(e) => e.stopPropagation()}>
+                <header>
+                    <h3>Keyboard shortcuts</h3>
+                    <button type="button" onClick={onClose} aria-label="close help">
+                        ×
+                    </button>
+                </header>
+                <dl>
+                    {SHORTCUTS.map((s) => (
+                        <div key={s.keys}>
+                            <dt>
+                                <kbd>{s.keys}</kbd>
+                            </dt>
+                            <dd>{s.what}</dd>
+                        </div>
+                    ))}
+                </dl>
+            </div>
+        </div>
+    );
+}

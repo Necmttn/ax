@@ -1,17 +1,17 @@
 ---
-name: agentctl
-description: Use the local agentctl CLI for AI-agent grounding. Query the user's skill+transcript graph before assuming a skill exists, and run project context/verify before or after repo work. Use when the user asks "is there a skill for X", "what skills do I use most", "find a skill that does Y", "show recent skill invocations", "which skills are unused", or when project-local git, stack, instruction, verification, or diagnostics context would help.
+name: axctl
+description: Use the local axctl CLI for AI-agent grounding. Query the user's skill+transcript graph before assuming a skill exists, and run project context/verify before or after repo work. Use when the user asks "is there a skill for X", "what skills do I use most", "find a skill that does Y", "show recent skill invocations", "which skills are unused", or when project-local git, stack, instruction, verification, or diagnostics context would help.
 ---
 
-# agentctl
+# ax
 
-`agentctl` is the user's local taste+telemetry graph and project-grounding CLI. It indexes:
+`axctl` is the user's local taste+telemetry graph and project-grounding CLI. It indexes:
 - All installed skills (name, scope, description, body)
 - Every `Skill` tool invocation across all Claude Code transcripts
 - Every Edit/Write tool invocation + which file it touched
 - Sessions, turns, projects
 
-Stored in a dedicated SurrealDB on `127.0.0.1:8521` (ns=`agentctl`, db=`main`).
+Stored in a dedicated SurrealDB on `127.0.0.1:8521` (ns=`ax`, db=`main`).
 
 ## When to use
 
@@ -26,28 +26,28 @@ ALWAYS before:
 ## Commands
 
 ```bash
-agentctl search "<keywords>"        # lexical match on name+description, ranked by 30d usage
-agentctl stats <skill-name>         # full drill-down: 7d/30d/90d/total + recent sessions
-agentctl recent [--limit=N]         # last N invocations across all sessions
-agentctl unused [--days=N]          # skills with zero invocations in N days
-agentctl taste [--limit=N]          # composite taste score: invocations × clean-runs
-agentctl ingest [--since=DAYS]      # refresh index (skills + transcripts)
-agentctl project context --json     # read-only repo grounding: git, stack, instructions, checks
-agentctl project verify --json      # diff-aware checks + optional live diagnostics
+axctl search "<keywords>"        # lexical match on name+description, ranked by 30d usage
+axctl stats <skill-name>         # full drill-down: 7d/30d/90d/total + recent sessions
+axctl recent [--limit=N]         # last N invocations across all sessions
+axctl unused [--days=N]          # skills with zero invocations in N days
+axctl taste [--limit=N]          # composite taste score: invocations × clean-runs
+axctl ingest [--since=DAYS]      # refresh index (skills + transcripts)
+axctl project context --json     # read-only repo grounding: git, stack, instructions, checks
+axctl project verify --json      # diff-aware checks + optional live diagnostics
 ```
 
 ## Setup checklist
 
-If `agentctl` is not on PATH, tell the user the CLI must be installed first:
+If `axctl` is not on PATH, tell the user the CLI must be installed first:
 
 ```bash
-GH_TOKEN="$(gh auth token)" bash -c 'curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github.raw" https://api.github.com/repos/Necmttn/agentctl/contents/install.sh | bash && PATH="$HOME/.local/bin:$PATH" agentctl ingest --since=7'
+GH_TOKEN="$(gh auth token)" bash -c 'curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github.raw" https://api.github.com/repos/Necmttn/ax/contents/install.sh | bash && PATH="$HOME/.local/bin:$PATH" axctl ingest --since=7'
 ```
 
 If this skill itself is missing in a new agent environment, install it with:
 
 ```bash
-npx skills add git@github.com:Necmttn/agentctl.git --skill agentctl -g -a claude-code -a codex -y
+npx skills add git@github.com:Necmttn/ax.git --skill axctl -g -a claude-code -a codex -y
 ```
 
 ## Project workflow
@@ -55,7 +55,7 @@ npx skills add git@github.com:Necmttn/agentctl.git --skill agentctl -g -a claude
 At the start of repo work, run:
 
 ```bash
-agentctl project context --json
+axctl project context --json
 ```
 
 Use `git.changes` to understand the user's current worktree, `stack.signals` for detected frameworks, `stack.instructions` for relevant AGENTS/CLAUDE rules, and `verification` for likely checks.
@@ -63,10 +63,10 @@ Use `git.changes` to understand the user's current worktree, `stack.signals` for
 Before reporting completion or when debugging a changed project, run:
 
 ```bash
-agentctl project verify --json
+axctl project verify --json
 ```
 
-Run the returned `checks[].command` values that match the scope of the change unless the user only asked for analysis. Treat `diagnostics.issues` as live project feedback when `.agentctl/config.json` is configured.
+Run the returned `checks[].command` values that match the scope of the change unless the user only asked for analysis. Treat `diagnostics.issues` as live project feedback when `.axctl/config.json` is configured.
 
 ## How to read results
 
@@ -84,22 +84,22 @@ A skill that returns `0×7d / 0×30d / 0×total` exists on disk but has never be
 
 ```bash
 # User: "is there a skill that helps with reviewing PRs?"
-agentctl search "review pull request"
+axctl search "review pull request"
 
 # Starting work in a repo
-agentctl project context --json
+axctl project context --json
 
 # Before claiming a repo change is complete
-agentctl project verify --json
+axctl project verify --json
 
 # User: "what skills did I use this week?"
-agentctl recent --limit=50
+axctl recent --limit=50
 
 # User: "this skill seems redundant, anyone using it?"
-agentctl stats <skill-name>
+axctl stats <skill-name>
 
 # Before deprecating: which skills have I never touched?
-agentctl unused --days=90
+axctl unused --days=90
 ```
 
 ## When NOT to use

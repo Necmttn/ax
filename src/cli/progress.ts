@@ -160,7 +160,7 @@ function summarizeCounts(counts: Record<string, number>): string {
 
 function shouldUsePipeline(mode: ProgressMode, sink: ProgressSink, env: Record<string, string | undefined>): boolean {
     if (mode !== "auto" && mode !== "pipeline") return false;
-    if (env.AGENTCTL_PROGRESS_FORCE_PIPELINE === "1") return true;
+    if (env.AXCTL_PROGRESS_FORCE_PIPELINE === "1" || env.AGENTCTL_PROGRESS_FORCE_PIPELINE === "1") return true;
     if (!sink.isTTY) return false;
     if (env.CI === "true" || env.TERM === "dumb") return false;
     return true;
@@ -202,7 +202,7 @@ class JsonProgress implements ProgressReporter {
 
     private write(event: string, stage: ProgressStage, extra: Record<string, unknown>): void {
         this.options.sink.write(JSON.stringify({
-            kind: "agentctl.progress",
+            kind: "axctl.progress",
             command: this.options.command,
             runId: this.options.runId,
             event,
@@ -220,18 +220,18 @@ class PlainProgress implements ProgressReporter {
     constructor(private readonly sink: ProgressSink, private readonly now: () => number) {}
 
     start(stage: ProgressStage): void {
-        this.sink.write(`[agentctl] ${stageKey(stage)} started\n`);
+        this.sink.write(`[axctl] ${stageKey(stage)} started\n`);
     }
 
     update(): void {}
 
     finish(stage: ProgressStage, counts: Record<string, number>): void {
         const summary = summarizeCounts(counts);
-        this.sink.write(`[agentctl] ${stageKey(stage)} done${summary ? ` ${summary}` : ""}\n`);
+        this.sink.write(`[axctl] ${stageKey(stage)} done${summary ? ` ${summary}` : ""}\n`);
     }
 
     fail(stage: ProgressStage, message: string): void {
-        this.sink.write(`[agentctl] ${stageKey(stage)} failed ${message}\n`);
+        this.sink.write(`[axctl] ${stageKey(stage)} failed ${message}\n`);
     }
 
     stop(): void {
@@ -336,7 +336,7 @@ class PipelineProgress implements ProgressReporter {
         const speed = elapsed > 0 ? observedRows / (elapsed / 1000) : 0;
         const eta = done > 0 && done < total ? formatDuration((elapsed / done) * (total - done)) : "--";
         const rows = [
-            `agentctl ${this.options.command}  run=${this.options.runId.slice(0, 8)}  elapsed=${formatDuration(elapsed)}  eta=${eta}`,
+            `axctl ${this.options.command}  run=${this.options.runId.slice(0, 8)}  elapsed=${formatDuration(elapsed)}  eta=${eta}`,
             `speed ${speed > 0 ? `${formatCount(speed)}/s` : "--"}  current=${currentLabel}`,
             "",
             "stage       progress              rows       speed       time",

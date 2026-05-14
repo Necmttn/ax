@@ -1,4 +1,5 @@
 import type { SkillDetailRecord } from "./hooks/useSkillDetail.ts";
+import { prettifyProjectSlug } from "../lib/shared/project-slug.ts";
 
 interface Props {
     readonly data: SkillDetailRecord | null;
@@ -120,8 +121,9 @@ export function DetailPane({ data, loading, error, empty }: Props) {
 
             <text fg="#7aa2f7">
                 invocations · 7d {invocations.d7} · 30d {invocations.d30} · total{" "}
-                {invocations.total} · last {formatTs(invocations.last)}
+                {invocations.total}
             </text>
+            <text fg="#7aa2f7">last · {formatTs(invocations.last)}</text>
             <text fg="#9ece6a">{sparkLine}</text>
             <text fg="#414868">└ 30 days (oldest→newest) ─ peak {Math.max(...buckets, 0)}</text>
             <text> </text>
@@ -132,7 +134,7 @@ export function DetailPane({ data, loading, error, empty }: Props) {
             ) : (
                 recent.map((r, i) => (
                     <text key={`${r.ts}-${i}`} fg="#c0caf5">
-                        {`  ${formatTs(r.ts)}  ${r.project ?? "-"}`}
+                        {`  ${formatTs(r.ts)}  ${prettifyProjectSlug(r.project)}`}
                     </text>
                 ))
             )}

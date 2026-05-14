@@ -1,9 +1,10 @@
 {
-  "name": "agentctl",
+  "name": "axctl",
   "version": "0.1.1",
-  "description": "Agent telemetry & taste graph for Claude Code. Ingests transcripts, skills, and git history into SurrealDB; surfaces 'what skills are worth keeping' and 'what does this user actually do' on demand.",
+  "description": "ax is local memory and telemetry for coding agents. axctl ingests transcripts, skills, and git history into SurrealDB; surfaces what skills are worth keeping and what the user actually does on demand.",
   "type": "module",
   "bin": {
+    "axctl": "./bin/axctl",
     "agentctl": "./bin/agentctl"
   },
   "scripts": {
@@ -19,12 +20,16 @@
     "watcher:uninstall": "bash scripts/uninstall-watcher.sh",
     "daemon:install": "bash scripts/install-daemon.sh",
     "daemon:uninstall": "bash scripts/uninstall-daemon.sh",
-    "build": "bun build --compile --outfile=dist/agentctl src/cli/index.ts",
-    "check:cli-reference": "bun scripts/check-cli-reference.ts"
+    "build": "bun build --compile --outfile=dist/axctl src/cli/index.ts",
+    "check:cli-reference": "bun scripts/check-cli-reference.ts",
+    "dashboard:dev": "vite --config src/dashboard/web/vite.config.ts",
+    "dashboard:build": "vite build --config src/dashboard/web/vite.config.ts",
+    "dashboard:serve": "bun src/cli/index.ts dashboard serve"
   },
   "dependencies": {
     "@opentui/core": "^0.2.5",
     "@opentui/react": "^0.2.5",
+    "@tanstack/react-query": "^5",
     "@wterm/core": "0.3.0",
     "@wterm/dom": "0.3.0",
     "effect": "^4.0.0-beta.64",
@@ -36,9 +41,13 @@
   },
   "devDependencies": {
     "@effect/language-service": "^0.85.1",
+    "@tanstack/react-router": "^1.169",
+    "@tanstack/router-plugin": "^1.167",
     "@types/bun": "latest",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
-    "typescript": "^5.5.0"
+    "@vitejs/plugin-react": "^6",
+    "typescript": "^5.5.0",
+    "vite": "^8"
   }
 }

@@ -92,7 +92,7 @@ export interface LiveDiagnostics {
 }
 
 export interface ProjectContext {
-    readonly kind: "agentctl.project.context";
+    readonly kind: "ax.project.context";
     readonly generatedAt: string;
     readonly git: GitState;
     readonly stack: ProjectStack;
@@ -101,7 +101,7 @@ export interface ProjectContext {
 }
 
 export interface ProjectVerification {
-    readonly kind: "agentctl.project.verify";
+    readonly kind: "ax.project.verify";
     readonly generatedAt: string;
     readonly git: GitState;
     readonly checks: ReadonlyArray<VerificationCheck>;
@@ -181,7 +181,7 @@ export interface InterventionObservation {
 }
 
 export interface ProjectHarnessReport {
-    readonly kind: "agentctl.project.harness";
+    readonly kind: "ax.project.harness";
     readonly generatedAt: string;
     readonly git: GitState;
     readonly guidanceSources: ReadonlyArray<GuidanceSource>;

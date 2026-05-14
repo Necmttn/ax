@@ -36,7 +36,7 @@ describe("cli progress", () => {
         progress.finish({ source: "skills", stage: "upsert" }, { skills: 205 });
         progress.stop();
 
-        expect(sink.chunks.join("")).toContain("[agentctl] skills/upsert started");
+        expect(sink.chunks.join("")).toContain("[axctl] skills/upsert started");
         expect(sink.chunks.join("")).toContain("skills=205");
     });
 
@@ -57,7 +57,7 @@ describe("cli progress", () => {
 
         const events = sink.chunks.join("").trim().split("\n").map((line) => JSON.parse(line));
         expect(events[0]).toMatchObject({
-            kind: "agentctl.progress",
+            kind: "axctl.progress",
             command: "ingest",
             event: "started",
             source: "codex",
@@ -87,7 +87,7 @@ describe("cli progress", () => {
 
         const event = JSON.parse(sink.chunks.join("").trim());
         expect(event).toMatchObject({
-            kind: "agentctl.progress",
+            kind: "axctl.progress",
             command: "ingest",
             event: "started",
             source: "git",
@@ -109,7 +109,7 @@ describe("cli progress", () => {
         progress.start({ source: "git", stage: "history" });
         progress.stop();
 
-        expect(nonTty.chunks.join("")).toContain("[agentctl] git/history started");
+        expect(nonTty.chunks.join("")).toContain("[axctl] git/history started");
     });
 
     test("pipeline mode renders a live board for tty sinks", () => {
@@ -136,7 +136,7 @@ describe("cli progress", () => {
         progress.stop();
 
         const output = sink.chunks.join("");
-        expect(output).toContain("agentctl ingest");
+        expect(output).toContain("axctl ingest");
         expect(output).toContain("stage       progress");
         expect(output).toContain("skills");
         expect(output).toContain("files=50 sessions=49 turns=500");

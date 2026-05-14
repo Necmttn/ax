@@ -2,7 +2,9 @@ import { readdir, stat, open } from "node:fs/promises";
 import { join, basename, isAbsolute, resolve } from "node:path";
 import { Effect } from "effect";
 import { RecordId, SurrealClient, filePointer } from "../lib/db.ts";
-import { TRANSCRIPTS_DIR } from "../lib/paths.ts";
+import { AgentctlConfig } from "../lib/config.ts";
+import { surrealLiteral } from "../lib/json.ts";
+import { decodeJsonOrNull } from "../lib/decode.ts";
 import { skillRecordKey } from "../lib/skill-id.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
@@ -95,16 +97,13 @@ export function transcriptEditFileRecordKey(path: string): string {
     return fileRecordKey("_", path);
 }
 
-function parseJsonl(line: string): Record<string, unknown> | null {
-    try {
-        return JSON.parse(line);
-    } catch {
-        return null;
-    }
-}
-
 function isRecord(input: unknown): input is Record<string, unknown> {
     return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
+function parseJsonl(line: string): Record<string, unknown> | null {
+    const decoded = decodeJsonOrNull(line);
+    return isRecord(decoded) ? decoded : null;
 }
 
 function asContentBlocks(input: unknown): Record<string, unknown>[] {
@@ -558,9 +557,22 @@ export function __testExtractClaudeJsonlLines(
 
 async function extractFile(filePath: string, projectDir: string): Promise<FileExtract | null> {
     const sessionId = basename(filePath, ".jsonl");
+    return extractFileWithSessionId(filePath, projectDir, sessionId);
+}
+
+/**
+ * Run the Claude extractor against an arbitrary file with a caller-supplied
+ * session id. Used by the subagent ingest path so it can produce synthetic
+ * `claude-subagent-<agentId>` session records rather than the
+ * filename-derived id.
+ */
+export async function extractFileWithSessionId(
+    filePath: string,
+    projectDir: string,
+    sessionId: string,
+): Promise<FileExtract | null> {
     const fh = await open(filePath, "r");
     const extractor = createClaudeExtractor(projectDir, sessionId);
-
     try {
         for await (const line of fh.readLines()) {
             extractor.processLine(line);
@@ -568,9 +580,18 @@ async function extractFile(filePath: string, projectDir: string): Promise<FileEx
     } finally {
         await fh.close();
     }
-
     return extractor.finish();
 }
+
+export {
+    upsertSessions as upsertSessionsForSubagents,
+    upsertTurns as upsertTurnsForSubagents,
+    writeToolCallStatements as writeToolCallStatementsForSubagents,
+    relateInvocations as relateInvocationsForSubagents,
+    relateToolCallSkills as relateToolCallSkillsForSubagents,
+    writePlanSnapshots as writePlanSnapshotsForSubagents,
+    upsertEdits as upsertEditsForSubagents,
+};
 
 const upsertSessions = (sessions: Session[]) =>
     Effect.gen(function* () {
@@ -718,7 +739,7 @@ const upsertEdits = (edits: Edit[]) =>
             if (!seenFiles.has(fileKey)) {
                 seenFiles.add(fileKey);
                 fileStmts.push(
-                    `UPSERT file:\`${fileKey}\` CONTENT { repo: NONE, path: ${JSON.stringify(e.path)}, identity_scope: "local_path" };`,
+                    `UPSERT file:\`${fileKey}\` CONTENT { repo: NONE, path: ${surrealLiteral(e.path)}, identity_scope: "local_path" };`,
                 );
             }
             const turnKey = turnRecordKey(e.session, e.seq);
@@ -773,12 +794,14 @@ export interface TranscriptStats {
 
 export const ingestTranscripts = (
     opts: Partial<IngestOpts> = {},
-): Effect.Effect<TranscriptStats, DbError, SurrealClient> =>
+): Effect.Effect<TranscriptStats, DbError, SurrealClient | AgentctlConfig> =>
     Effect.gen(function* () {
+        const cfg = yield* AgentctlConfig;
+        const transcriptsDir = cfg.paths.transcriptsDir;
         const cutoff = opts.sinceDays
             ? Date.now() - opts.sinceDays * 86400 * 1000
             : 0;
-        const projectDirs = (yield* Effect.promise(() => readdir(TRANSCRIPTS_DIR))).filter(
+        const projectDirs = (yield* Effect.promise(() => readdir(transcriptsDir))).filter(
             (d) => !opts.project || d === opts.project,
         );
         if (opts.onProgress) yield* opts.onProgress({ projectDirs: projectDirs.length });
@@ -792,11 +815,11 @@ export const ingestTranscripts = (
         let toolCallCount = 0;
         let planSnapshotCount = 0;
         let activeFiles = 0;
-        const concurrency = claudeConcurrency();
+        const concurrency = cfg.knobs.claudeConcurrency;
         const recordCount = () => turnCount + invCount + editCount + toolCallCount + planSnapshotCount;
 
         for (const projectDir of projectDirs) {
-            const fullProject = join(TRANSCRIPTS_DIR, projectDir);
+            const fullProject = join(transcriptsDir, projectDir);
             const entries = yield* Effect.promise(async () => {
                 try {
                     return await readdir(fullProject);

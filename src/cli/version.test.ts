@@ -23,7 +23,7 @@ describe("cli version", () => {
     test("reports update availability against latest release", () => {
         expect(versionStatus("0.1.1", {
             tagName: "v0.1.2",
-            url: "https://github.com/Necmttn/agentctl/releases/tag/v0.1.2",
+            url: "https://github.com/Necmttn/ax/releases/tag/v0.1.2",
         })).toMatchObject({
             current: "0.1.1",
             latest: "v0.1.2",
@@ -56,7 +56,7 @@ describe("cli version", () => {
             fetchLatestRelease: async () => ({ tagName: "v9.0.0", url: null }),
             fetchInstallScript: async () => "install script",
             runInstallScript: async (_script, env) => {
-                envVersion = env.AGENTCTL_VERSION;
+                envVersion = env.AXCTL_VERSION;
                 return 0;
             },
             env: {},

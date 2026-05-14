@@ -17,14 +17,17 @@ interface Props {
     readonly emptyMessage: string;
 }
 
+// Total widths sum to 68; with 6 single-space separators between 7 columns
+// the row is exactly 74 chars. App.tsx sizes the left box to 78 (74 content
+// + 1 border each side + 1 padding each side) so no row ever wraps.
 const COL_WIDTHS = {
-    name: 28,
-    scope: 10,
-    score: 6,
-    n7: 4,
+    name: 30,
+    scope: 9,
+    score: 7,
+    n7: 5,
     n30: 5,
-    total: 6,
-    last: 7,
+    total: 7,
+    last: 5,
 } as const;
 
 const pad = (s: string, n: number): string =>

@@ -4,13 +4,13 @@ Guidance for Claude Code and other AI assistants working in this repo.
 
 ## What this is
 
-`agentctl` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces "what skills/tools you actually use" on demand.
+`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces "what skills/tools you actually use" on demand.
 
 ## Stack
 
 - **Runtime**: bun ≥ 1.3
 - **Language**: TypeScript (strict, `module: preserve`, `moduleResolution: bundler`)
-- **DB**: SurrealDB 3.0+ on `127.0.0.1:8521`, ns=`agentctl`, db=`main`
+- **DB**: SurrealDB 3.0+ on `127.0.0.1:8521`, ns=`ax`, db=`main`
 - **Effect**: `effect@beta` (4.0.0-beta.x) for ingest pipelines + service layer (v0.1)
 - **TUI** (planned): `@opentui/react` + react@19.2
 
@@ -60,9 +60,9 @@ Run `bun refs:setup` after fresh clone to populate `.references/`.
 
 ## Reactivity
 
-- Stop hook in `~/.claude/settings.json` fires `agentctl ingest --since=1` after every Claude session
+- LaunchAgent watcher (`com.necmttn.ax-watch`, installed by `axctl install`) tails `~/.claude/projects/` + `~/.codex/sessions/` and runs `axctl ingest --since=1` in the background on new transcripts. Do NOT add a Stop hook - Stop fires per turn and blocks Claude until ingest returns.
 - Weekly self-improve cron (`~/.claude/self-improve/run.sh`) does deep-scan backfill (planned wire-up)
 
 ## Open issues
 
-See https://github.com/Necmttn/agentctl/issues - v0.1 roadmap is 7 issues covering Effect refactor, schema/storage extensions, OpenTUI dashboard, signal derivation, reactivity, and self-improve integration.
+See https://github.com/Necmttn/ax/issues - v0.1 roadmap is 7 issues covering Effect refactor, schema/storage extensions, OpenTUI dashboard, signal derivation, reactivity, and self-improve integration.

@@ -1,6 +1,6 @@
 OPTION IMPORT;
 
--- agentctl schema v0.0.1
+-- ax schema v0.0.1
 -- Graph: skill ← invoked ← turn → edited → file
 --                        turn → corrected_by → turn (next-user-turn)
 --                        session → produced → commit → touched → file
@@ -18,7 +18,7 @@ DEFINE FIELD ingested_at    ON skill TYPE datetime VALUE time::now();
 DEFINE INDEX skill_name_uq  ON skill FIELDS name UNIQUE;
 DEFINE INDEX skill_scope    ON skill FIELDS scope;
 
--- Full-text search (BM25 + ngram tokenization) for `agentctl search`.
+-- Full-text search (BM25 + ngram tokenization) for `axctl search`.
 -- ngram(2, 8) generates 2-8 char substrings so partial-word queries hit
 -- ("test" matches "test-driven") and multi-word queries rank by combined
 -- term presence. SurrealDB v3 FTS indexes are single-field; we score
@@ -51,14 +51,14 @@ DEFINE INDEX session_workspace_started ON session FIELDS workspace, started_at;
 
 -- ==== File buckets (SurrealDB 3.0 experimental) ====
 -- Requires: surreal start --allow-experimental files
---           SURREAL_BUCKET_FOLDER_ALLOWLIST=$AGENTCTL_DATA_DIR/buckets
+--           SURREAL_BUCKET_FOLDER_ALLOWLIST=$AX_DATA_DIR/buckets
 -- Bucket paths are hardcoded because SurrealQL does not interpolate env vars.
--- apply-schema.sh warns if $AGENTCTL_DATA_DIR differs from the default.
+-- apply-schema.sh warns if $AX_DATA_DIR differs from the default.
 
 DEFINE BUCKET IF NOT EXISTS transcripts
-    BACKEND "file:/Users/necmttn/.local/share/agentctl/buckets/transcripts";
+    BACKEND "file:/Users/necmttn/.local/share/ax/buckets/transcripts";
 DEFINE BUCKET IF NOT EXISTS codex_artifacts
-    BACKEND "file:/Users/necmttn/.local/share/agentctl/buckets/codex_artifacts";
+    BACKEND "file:/Users/necmttn/.local/share/ax/buckets/codex_artifacts";
 
 DEFINE TABLE turn SCHEMAFULL;
 DEFINE FIELD session        ON turn TYPE record<session>;
@@ -70,6 +70,16 @@ DEFINE FIELD has_tool_use   ON turn TYPE bool DEFAULT false;
 DEFINE FIELD has_error      ON turn TYPE bool DEFAULT false;
 DEFINE INDEX turn_session_seq ON turn FIELDS session, seq UNIQUE;
 DEFINE INDEX turn_ts        ON turn FIELDS ts;
+
+-- Recall (cross-session text search). `class` tokenizer + lowercase filter
+-- gives word-level matches; ascii folds accents. BM25 ranks hits so common
+-- terms like "test" rank below the user's actual context.
+DEFINE ANALYZER IF NOT EXISTS turn_text
+    TOKENIZERS class
+    FILTERS lowercase, ascii;
+DEFINE INDEX IF NOT EXISTS turn_text_fts
+    ON turn FIELDS text_excerpt
+    FULLTEXT ANALYZER turn_text BM25 HIGHLIGHTS;
 
 DEFINE TABLE file SCHEMAFULL;
 DEFINE FIELD repo           ON file TYPE option<string>;
@@ -794,6 +804,22 @@ DEFINE TABLE recovered_by TYPE RELATION FROM turn TO skill;   -- skill invoked a
 DEFINE FIELD ts            ON recovered_by TYPE datetime;
 DEFINE FIELD error_excerpt ON recovered_by TYPE option<string>;
 
+-- ---------------------------------------------------------------------------
+-- Parent session -> spawned child session. Lets us reconstruct work episodes
+-- (one user-driven workflow that fans out across many subagent sessions) from
+-- the flat session table. Derived from `tool_call` rows where
+-- name='spawn_agent' or name='Task': output payload carries the child's
+-- session id (codex uses `agent_id`, Claude Task uses the subagent transcript
+-- id), and we RELATE the row's session to that target.
+-- ---------------------------------------------------------------------------
+DEFINE TABLE spawned TYPE RELATION FROM session TO session;
+DEFINE FIELD ts           ON spawned TYPE datetime DEFAULT time::now();
+DEFINE FIELD tool         ON spawned TYPE option<string>;       -- e.g. "spawn_agent" | "Task"
+DEFINE FIELD tool_call    ON spawned TYPE option<record<tool_call>>;
+DEFINE FIELD nickname     ON spawned TYPE option<string>;       -- codex assigns "Turing", "Babbage", etc.
+DEFINE INDEX spawned_in   ON spawned FIELDS in;
+DEFINE INDEX spawned_out  ON spawned FIELDS out;
+
 -- ==== Materialized views (computed at query time) ====
 
 -- Per-skill counts, recent boost
@@ -802,3 +828,15 @@ DEFINE FIELD error_excerpt ON recovered_by TYPE option<string>;
 -- where taste joins counts of (invoked) - (corrected_after_invoked) + commits-after.
 -- View intentionally not DEFINE'd here; CLI computes via parameterized SurrealQL
 -- to keep this schema migration-cheap.
+
+-- ---------------------------------------------------------------------------
+-- User-facing triage decisions on skills. The dashboard "Skill Triage" view
+-- writes here; downstream queries can filter `archived` skills out of the
+-- leaderboard. We never delete: keep history of decision flips with `decided_at`.
+-- ---------------------------------------------------------------------------
+DEFINE TABLE skill_triage_decision SCHEMAFULL;
+DEFINE FIELD skill_name ON skill_triage_decision TYPE string;
+DEFINE FIELD decision   ON skill_triage_decision TYPE string;  -- keep | archive | review
+DEFINE FIELD reason     ON skill_triage_decision TYPE option<string>;
+DEFINE FIELD decided_at ON skill_triage_decision TYPE datetime DEFAULT time::now();
+DEFINE INDEX skill_triage_decision_name ON skill_triage_decision FIELDS skill_name UNIQUE;

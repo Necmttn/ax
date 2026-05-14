@@ -11,7 +11,7 @@ import {
 import type { ProjectHarnessReport } from "../project/types.ts";
 
 const report: ProjectHarnessReport = {
-    kind: "agentctl.project.harness",
+    kind: "ax.project.harness",
     generatedAt: "2026-05-11T12:00:00.000Z",
     git: {
         root: "/repo",

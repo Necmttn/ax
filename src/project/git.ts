@@ -1,13 +1,8 @@
 import { dirname, extname } from "node:path";
 import { stat } from "node:fs/promises";
 import { Effect } from "effect";
+import { ProcessService, type ProcessResult } from "../lib/process.ts";
 import type { GitState, ProjectFileChange } from "./types.ts";
-
-interface RunResult {
-    readonly stdout: string;
-    readonly stderr: string;
-    readonly code: number;
-}
 
 const exists = (path: string): Promise<boolean> =>
     stat(path)
@@ -25,18 +20,14 @@ export async function findGitRoot(cwd: string): Promise<string | null> {
     return null;
 }
 
-const runGit = (cwd: string, args: ReadonlyArray<string>): Effect.Effect<RunResult> =>
-    Effect.promise(async () => {
-        const proc = Bun.spawn(["git", "-C", cwd, ...args], {
-            stdout: "pipe",
-            stderr: "pipe",
-        });
-        const [stdout, stderr] = await Promise.all([
-            new Response(proc.stdout).text(),
-            new Response(proc.stderr).text(),
-        ]);
-        await proc.exited;
-        return { stdout, stderr, code: proc.exitCode ?? 0 };
+const runGit = (cwd: string, args: ReadonlyArray<string>): Effect.Effect<ProcessResult, never, ProcessService> =>
+    Effect.gen(function* () {
+        const proc = yield* ProcessService;
+        return yield* proc.exec("git", ["-C", cwd, ...args]).pipe(
+            // exec errors (e.g. binary missing) bubble up as success with
+            // code:1-like behavior - we only care about exit code here.
+            Effect.orElseSucceed(() => ({ stdout: "", stderr: "", code: 1 })),
+        );
     });
 
 export function detectLang(path: string): string | null {
@@ -97,7 +88,7 @@ function parseBranch(line: string): string | null {
     return withoutPrefix.split("...")[0]?.trim() || null;
 }
 
-export const getGitState = (cwd = process.cwd()): Effect.Effect<GitState> =>
+export const getGitState = (cwd = process.cwd()): Effect.Effect<GitState, never, ProcessService> =>
     Effect.gen(function* () {
         const root = yield* Effect.promise(() => findGitRoot(cwd));
         if (!root) {

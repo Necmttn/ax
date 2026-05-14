@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the launchd WatchPaths agent that runs `agentctl ingest --since=1`
+# Install the launchd WatchPaths agent that runs `axctl ingest --since=1`
 # whenever ~/.claude/projects/ or ~/.codex/sessions/ change. macOS only.
 #
 # Idempotent: unloads any existing agent before reloading.
@@ -11,13 +11,13 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
-LABEL="com.necmttn.agentctl-watch"
+LABEL="com.necmttn.ax-watch"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 TEMPLATE="$SCRIPT_DIR/$LABEL.plist"
 LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
 TARGET="$LAUNCH_AGENTS_DIR/$LABEL.plist"
-LOG_DIR="$HOME/.local/share/agentctl/logs"
+LOG_DIR="$HOME/.local/share/ax/logs"
 
 if [[ ! -f "$TEMPLATE" ]]; then
   echo "install-watcher.sh: template not found: $TEMPLATE" >&2
@@ -26,10 +26,10 @@ fi
 
 mkdir -p "$LAUNCH_AGENTS_DIR" "$LOG_DIR"
 
-# Render template (substitute __HOME__, __AGENTCTL_DIR__, __LOG_DIR__).
+# Render template (substitute __HOME__, __AX_DIR__, __LOG_DIR__).
 sed \
   -e "s|__HOME__|$HOME|g" \
-  -e "s|__AGENTCTL_DIR__|$REPO_DIR|g" \
+  -e "s|__AX_DIR__|$REPO_DIR|g" \
   -e "s|__LOG_DIR__|$LOG_DIR|g" \
   "$TEMPLATE" > "$TARGET"
 

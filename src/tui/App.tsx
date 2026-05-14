@@ -157,7 +157,7 @@ export function App({ client, onQuit }: AppProps) {
     const dbError = skills.error;
     const errorMessage = dbError
         ? dbError.includes("ECONNREFUSED") || dbError.includes("connect")
-            ? "DB not running - run `agentctl install` to start it"
+            ? "DB not running - run `axctl install` to start it"
             : `DB error: ${dbError}`
         : null;
 
@@ -169,7 +169,7 @@ export function App({ client, onQuit }: AppProps) {
                 focused={mode === "search"}
             />
             <box style={{ flexDirection: "row", flexGrow: 1, gap: 1 }}>
-                <box style={{ width: 70, flexShrink: 0, flexGrow: 0 }}>
+                <box style={{ width: 78, flexShrink: 0, flexGrow: 0 }}>
                     <SkillList
                         rows={visibleRows}
                         selectedIndex={selectedIndex}
@@ -181,7 +181,7 @@ export function App({ client, onQuit }: AppProps) {
                                 ? errorMessage
                                 : query
                                   ? "No skills match"
-                                  : "No skills indexed yet - run `agentctl ingest`"
+                                  : "No skills indexed yet - run `axctl ingest`"
                         }
                     />
                 </box>

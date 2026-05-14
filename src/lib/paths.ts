@@ -3,9 +3,9 @@ import { join } from "node:path";
 
 export const HOME = homedir();
 export const TRANSCRIPTS_DIR =
-    process.env.AGENTCTL_TRANSCRIPTS_DIR ?? join(HOME, ".claude", "projects");
+    process.env.AX_TRANSCRIPTS_DIR ?? process.env.AGENTCTL_TRANSCRIPTS_DIR ?? join(HOME, ".claude", "projects");
 
-export const SKILL_DIRS = (process.env.AGENTCTL_SKILLS_DIRS ?? "")
+export const SKILL_DIRS = (process.env.AX_SKILLS_DIRS ?? process.env.AGENTCTL_SKILLS_DIRS ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);

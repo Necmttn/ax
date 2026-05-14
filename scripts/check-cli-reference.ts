@@ -20,7 +20,7 @@ const subcommands = lines
     .map((line) => line.split(/\s+/)[0])
     .filter((name) => !["DESCRIPTION", "USAGE", "GLOBAL", "SUBCOMMANDS"].includes(name));
 
-const missing = subcommands.filter((command) => !readme.includes(`agentctl ${command}`));
+const missing = subcommands.filter((command) => !readme.includes(`axctl ${command}`));
 
 if (missing.length > 0) {
     console.error("README.md is missing CLI subcommands:");

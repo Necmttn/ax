@@ -1,8 +1,8 @@
-# agentctl
+# ax
 
 Local evidence graph for AI coding agents.
 
-`agentctl` turns Claude Code and Codex history into a queryable SurrealDB graph:
+`ax` turns Claude Code and Codex history into a queryable SurrealDB graph:
 sessions, turns, tool calls, plans, skills, repositories, checkouts, commits,
 files, friction, diagnostics, and derived signals.
 
@@ -19,24 +19,24 @@ Use it when you want the next agent to know what happened before:
 Current private-repo install:
 
 ```bash
-GH_TOKEN="$(gh auth token)" bash -c 'curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github.raw" https://api.github.com/repos/Necmttn/agentctl/contents/install.sh | bash && PATH="$HOME/.local/bin:$PATH" agentctl ingest --since=7'
+GH_TOKEN="$(gh auth token)" bash -c 'curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github.raw" https://api.github.com/repos/Necmttn/ax/contents/install.sh | bash && PATH="$HOME/.local/bin:$PATH" axctl ingest --since=7'
 ```
 
 Public-repo form, if the repo is public:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Necmttn/agentctl/main/install.sh | bash && PATH="$HOME/.local/bin:$PATH" agentctl ingest --since=7
+curl -fsSL https://raw.githubusercontent.com/Necmttn/ax/main/install.sh | bash && PATH="$HOME/.local/bin:$PATH" axctl ingest --since=7
 ```
 
 From source:
 
 ```bash
-git clone https://github.com/Necmttn/agentctl ~/Projects/agentctl
-cd ~/Projects/agentctl
+git clone https://github.com/Necmttn/ax ~/Projects/ax
+cd ~/Projects/ax
 bun install
 bun run build
-./dist/agentctl install
-agentctl ingest --since=7
+./dist/axctl install
+axctl ingest --since=7
 ```
 
 Requirements for source/dev use: Bun >= 1.3 and SurrealDB >= 3.0.
@@ -46,114 +46,116 @@ Requirements for source/dev use: Bun >= 1.3 and SurrealDB >= 3.0.
 Refresh the local graph and open the dashboard:
 
 ```bash
-agentctl ingest --since=7
-agentctl ingest-insights
-agentctl dashboard
+axctl ingest --since=7
+axctl ingest-insights
+axctl dashboard
 ```
 
 Check or update the installed release:
 
 ```bash
-agentctl version --check
-agentctl update --check
-agentctl update
+axctl version --check
+axctl update --check
+axctl update
 ```
 
 Check local services:
 
 ```bash
-agentctl daemon status --json
-agentctl doctor --json
+axctl daemon status --json
+axctl doctor --json
 ```
+
+`axctl install` also creates an `ax` convenience alias that points at the same binary.
 
 Ground an agent before and after repo work:
 
 ```bash
-agentctl project context --json
-agentctl project verify --json
-agentctl project harness --json
-agentctl onboarding --json
+axctl project context --json
+axctl project verify --json
+axctl project harness --json
+axctl onboarding --json
 ```
 
 Inspect the graph:
 
 ```bash
-agentctl insights schema
-agentctl insights repositories
-agentctl insights checkouts
-agentctl insights git
-agentctl insights friction
-agentctl insights tools
-agentctl insights sessions
-agentctl insights feedback-loops
-agentctl insights verification-gaps
-agentctl insights user-language
-agentctl insights token-impact
-agentctl insights cache-health
-agentctl insights workflow-impact
-agentctl insights codex-health
-agentctl insights closure
-agentctl insights post-feature-fixes
-agentctl insights skill-candidates
+axctl insights schema
+axctl insights repositories
+axctl insights checkouts
+axctl insights git
+axctl insights friction
+axctl insights tools
+axctl insights sessions
+axctl insights feedback-loops
+axctl insights verification-gaps
+axctl insights user-language
+axctl insights token-impact
+axctl insights cache-health
+axctl insights workflow-impact
+axctl insights codex-health
+axctl insights closure
+axctl insights post-feature-fixes
+axctl insights skill-candidates
 ```
 
 Skill and command hygiene:
 
 ```bash
-agentctl search "<keywords>"
-agentctl stats <skill>
-agentctl recent --limit=25
-agentctl unused --days=90
-agentctl taste --limit=50
-agentctl pairs <skill>
-agentctl recovery
+axctl search "<keywords>"
+axctl stats <skill>
+axctl recent --limit=25
+axctl unused --days=90
+axctl taste --limit=50
+axctl pairs <skill>
+axctl recovery
 ```
 
 Self-improve queries:
 
 ```bash
-agentctl guidance next --json
-agentctl session summary --json
-agentctl self-improve weekly --json
-agentctl interventions list --json
-agentctl interventions candidates --json
-agentctl interventions regressions --json
+axctl guidance next --json
+axctl session summary --json
+axctl self-improve weekly --json
+axctl interventions list --json
+axctl interventions candidates --json
+axctl interventions regressions --json
 ```
 
 ## CLI Reference
 
 ```text
-agentctl ingest [filters] [--since=DAYS] [--progress=auto|pipeline|plain|json|off]
-agentctl ingest-insights [--progress=auto|pipeline|plain|json|off]
-agentctl derive-signals [--since=DAYS] [--progress=auto|pipeline|plain|json|off]
-agentctl insights [schema|repositories|checkouts|git|friction|tools|sessions|feedback-loops|verification-gaps|user-language|token-impact|cache-health|workflow-impact|codex-health|closure|post-feature-fixes|skill-candidates|graph-health] [--limit=N]
-agentctl dashboard [--limit=N] [--out=PATH]
-agentctl dashboard serve [--port=1738]
-agentctl dogfood terminal [--scenario=agentctl-setup|interactive] [--agent=shell|claude|codex|opencode] [--transport=auto|pty|process] [--command=CMD] [--success-marker=STR] [--timeout=SECONDS] [--port=1742] [--json]
-agentctl search <query> [--limit=N]
-agentctl stats <skill>
-agentctl recent [--limit=N]
-agentctl unused [--days=N]
-agentctl taste [--limit=N]
-agentctl pairs <skill> [--limit=N]
-agentctl recovery [--limit=N]
-agentctl project context [--json]
-agentctl onboarding [--json]
-agentctl interventions [list|show|impact|regressions|candidates] [--limit=N] [--json]
-agentctl project verify [--json]
-agentctl project harness [--json]
-agentctl guidance next --json
-agentctl session summary --json
-agentctl self-improve weekly --json
-agentctl version [--check] [--json]
-agentctl update [--check] [--json]
-agentctl tui
-agentctl install
-agentctl daemon status [--json]
-agentctl daemon start|stop|restart
-agentctl doctor [--json]
-agentctl uninstall
-agentctl help
+axctl ingest [filters] [--since=DAYS] [--progress=auto|pipeline|plain|json|off]
+axctl ingest-insights [--progress=auto|pipeline|plain|json|off]
+axctl derive-signals [--since=DAYS] [--progress=auto|pipeline|plain|json|off]
+axctl insights [schema|repositories|checkouts|git|friction|tools|sessions|feedback-loops|verification-gaps|user-language|token-impact|cache-health|workflow-impact|codex-health|closure|post-feature-fixes|skill-candidates|graph-health] [--limit=N]
+axctl dashboard [--limit=N] [--out=PATH]
+axctl dashboard serve [--port=1738]
+axctl dogfood terminal [--scenario=axctl-setup|interactive] [--agent=shell|claude|codex|opencode] [--transport=auto|pty|process] [--command=CMD] [--success-marker=STR] [--timeout=SECONDS] [--port=1742] [--json]
+axctl search <query> [--limit=N]
+axctl stats <skill>
+axctl recent [--limit=N]
+axctl unused [--days=N]
+axctl taste [--limit=N]
+axctl pairs <skill> [--limit=N]
+axctl recovery [--limit=N]
+axctl project context [--json]
+axctl onboarding [--json]
+axctl interventions [list|show|impact|regressions|candidates] [--limit=N] [--json]
+axctl project verify [--json]
+axctl project harness [--json]
+axctl guidance next --json
+axctl session summary --json
+axctl self-improve weekly --json
+axctl version [--check] [--json]
+axctl update [--check] [--json]
+axctl tui
+axctl install
+axctl daemon status [--json]
+axctl daemon start|stop|restart
+axctl doctor [--json]
+axctl uninstall
+axctl help
 ```
 
 ## What Gets Stored
@@ -182,8 +184,8 @@ insight    -> concerns      -> session
 Files are canonicalized by repository-relative path when possible, so worktrees
 and machine-specific checkout paths do not split the same file history.
 
-`agentctl project harness --json` computes the Harness Doctor report at read
-time. Default `agentctl ingest` also persists the report into the staged Harness
+`axctl project harness --json` computes the Harness Doctor report at read
+time. Default `axctl ingest` also persists the report into the staged Harness
 Doctor tables through the `harness/doctor` ingest stage.
 
 ## Agent Integration
@@ -193,33 +195,33 @@ This repo ships an installable skill at `skill/SKILL.md`.
 Install it for Claude Code and Codex:
 
 ```bash
-npx skills add git@github.com:Necmttn/agentctl.git --skill agentctl -g -a claude-code -a codex -y
+npx skills add git@github.com:Necmttn/ax.git --skill axctl -g -a claude-code -a codex -y
 ```
 
 Local development symlink:
 
 ```bash
 mkdir -p ~/.claude/skills ~/.agents/skills
-ln -sfn "$PWD/skill" ~/.claude/skills/agentctl
-ln -sfn "$PWD/skill" ~/.agents/skills/agentctl
+ln -sfn "$PWD/skill" ~/.claude/skills/axctl
+ln -sfn "$PWD/skill" ~/.agents/skills/axctl
 ```
 
 Agent checklist:
 
-1. Run `agentctl project context --json` before work.
+1. Run `axctl project context --json` before work.
 2. Use the returned stack, instructions, git state, and checks.
-3. Run `agentctl project verify --json` before reporting completion.
+3. Run `axctl project verify --json` before reporting completion.
 4. Run the recommended verification commands.
-5. Use `agentctl project harness --json` when changing agent guidance,
+5. Use `axctl project harness --json` when changing agent guidance,
    verification tooling, branch/worktree policy, or local harness setup.
 
 ## Reactivity
 
-`agentctl install` sets up local automation on macOS:
+`axctl install` sets up local automation on macOS:
 
 - SurrealDB daemon on `127.0.0.1:8521`
 - watcher for `~/.claude/projects/` and `~/.codex/sessions/`
-- `agentctl ingest --since=1` after recent transcript changes
+- `axctl ingest --since=1` after recent transcript changes
 - onboarding guidance for git-tracking global Claude/Codex/shared harness dirs
 
 Manual watcher commands for source checkouts:
@@ -229,7 +231,7 @@ bun run watcher:install
 bun run watcher:uninstall
 ```
 
-Logs are written to `~/.local/share/agentctl/logs/`.
+Logs are written to `~/.local/share/ax/logs/`.
 
 ## Dev
 
@@ -249,7 +251,7 @@ bun test
 bun run typecheck
 ```
 
-Benchmark a clean DB without touching `agentctl/main`:
+Benchmark a clean DB without touching `ax/main`:
 
 ```bash
 scripts/bench-empty-db.sh --since=90
@@ -258,7 +260,7 @@ scripts/bench-empty-db.sh --since=90
 The benchmark writes artifacts under:
 
 ```text
-~/.local/share/agentctl/benchmarks/<db>/
+~/.local/share/ax/benchmarks/<db>/
 ```
 
 ## SurrealDB
@@ -266,7 +268,7 @@ The benchmark writes artifacts under:
 Local connection:
 
 - endpoint: `ws://127.0.0.1:8521`
-- namespace: `agentctl`
+- namespace: `ax`
 - database: `main`
 - user/password: `root` / `root`
 
@@ -308,7 +310,7 @@ Working today:
 Tracked next:
 
 - project memory: `changeset` and `file_memory`
-- `agentctl recall`
+- `axctl recall`
 - concept/entity resolution
 - guidance lifecycle and outcome tracking
 - richer live dashboard views

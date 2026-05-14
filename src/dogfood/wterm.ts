@@ -8,7 +8,7 @@ import { SurrealClient } from "../lib/db.ts";
 import { AppLayer } from "../lib/layers.ts";
 import { recordRef } from "../ingest/evidence-writers.ts";
 
-export type DogfoodScenario = "agentctl-setup" | "interactive";
+export type DogfoodScenario = "axctl-setup" | "interactive";
 export type DogfoodTransport = "auto" | "pty" | "process";
 export type DogfoodAgent = "shell" | "claude" | "codex" | "opencode";
 type EffectiveDogfoodTransport = "pty" | "process";
@@ -78,7 +78,7 @@ export interface DogfoodAgentPreset {
 }
 
 const DEFAULT_PORT = 1742;
-const SUCCESS_MARKER = "AGENTCTL_DOGFOOD_SETUP_OK";
+const SUCCESS_MARKER = "AXCTL_DOGFOOD_SETUP_OK";
 
 const sqlString = (value: string): string => JSON.stringify(value);
 const sqlJson = (value: unknown): string => sqlString(JSON.stringify(value) ?? "null");
@@ -91,19 +91,19 @@ function shortHash(value: string): string {
 }
 
 function repoRoot(): string {
-    if (process.env.AGENTCTL_REPO_ROOT) return process.env.AGENTCTL_REPO_ROOT;
+    if (process.env.AX_REPO_ROOT) return process.env.AX_REPO_ROOT;
     if (existsSync(join(process.cwd(), "package.json")) && existsSync(join(process.cwd(), "node_modules"))) {
         return process.cwd();
     }
     return join(import.meta.dir, "..", "..");
 }
 
-function currentAgentctlPath(root: string): string {
+function currentAxctlPath(root: string): string {
     if (!process.argv[1]?.endsWith(".ts") && existsSync(process.execPath)) {
         return process.execPath;
     }
-    if (existsSync(join(root, "dist", "agentctl"))) return join(root, "dist", "agentctl");
-    return join(root, "bin", "agentctl");
+    if (existsSync(join(root, "dist", "axctl"))) return join(root, "dist", "axctl");
+    return join(root, "bin", "axctl");
 }
 
 export function parseDogfoodTerminalArgs(args: readonly string[]): DogfoodTerminalArgs {
@@ -111,8 +111,8 @@ export function parseDogfoodTerminalArgs(args: readonly string[]): DogfoodTermin
         const found = args.find((arg) => arg.startsWith(`--${name}=`));
         return found?.slice(name.length + 3);
     };
-    const scenario = flag("scenario") ?? "agentctl-setup";
-    if (scenario !== "agentctl-setup" && scenario !== "interactive") {
+    const scenario = flag("scenario") ?? "axctl-setup";
+    if (scenario !== "axctl-setup" && scenario !== "interactive") {
         throw new Error(`unknown dogfood scenario "${scenario}"`);
     }
     const rawPort = flag("port");
@@ -178,7 +178,7 @@ export function resolveDogfoodAgentPreset(agent: DogfoodAgent = "shell"): Dogfoo
 }
 
 export async function createAgentctlSetupDemoScript(root = repoRoot()): Promise<DogfoodTerminalSession> {
-    const workRoot = await mkdtemp(join(tmpdir(), "agentctl-wterm-dogfood-"));
+    const workRoot = await mkdtemp(join(tmpdir(), "axctl-wterm-dogfood-"));
     const home = join(workRoot, "home");
     const scratch = join(workRoot, "scratch");
     await mkdir(home, { recursive: true });
@@ -187,18 +187,18 @@ export async function createAgentctlSetupDemoScript(root = repoRoot()): Promise<
         await mkdir(join(home, dir), { recursive: true });
     }
 
-    const agentctl = currentAgentctlPath(root);
+    const axctl = currentAxctlPath(root);
 
     const lines = [
         "set -euo pipefail",
         "clear",
-        "printf '\\033[1;36magentctl wterm dogfood: fresh setup demo\\033[0m\\r\\n'",
+        "printf '\\033[1;36maxctl wterm dogfood: fresh setup demo\\033[0m\\r\\n'",
         `printf 'repo: %s\\r\\n' ${JSON.stringify(root)}`,
         `printf 'scratch home: %s\\r\\n\\r\\n' ${JSON.stringify(home)}`,
-        "printf '$ agentctl --help\\r\\n'",
-        `${JSON.stringify(agentctl)} --help | sed -n '1,18p'`,
-        "printf '\\r\\n$ HOME=<scratch> agentctl onboarding --json\\r\\n'",
-        `HOME=${JSON.stringify(home)} ${JSON.stringify(agentctl)} onboarding --json`,
+        "printf '$ axctl --help\\r\\n'",
+        `${JSON.stringify(axctl)} --help | sed -n '1,18p'`,
+        "printf '\\r\\n$ HOME=<scratch> axctl onboarding --json\\r\\n'",
+        `HOME=${JSON.stringify(home)} ${JSON.stringify(axctl)} onboarding --json`,
         "printf '\\r\\n$ host agent tracks harness dirs in git\\r\\n'",
         `for d in ${JSON.stringify(join(home, ".claude"))} ${JSON.stringify(join(home, ".codex"))} ${JSON.stringify(join(home, ".agents"))}; do`,
         "  git -C \"$d\" init -q",
@@ -213,16 +213,16 @@ export async function createAgentctlSetupDemoScript(root = repoRoot()): Promise<
         "EOF",
         "  printf '# tracked harness baseline\\n' >\"$d/README.md\"",
         "  git -C \"$d\" add .gitignore README.md",
-        "  git -C \"$d\" -c user.name='agentctl dogfood' -c user.email='dogfood@example.invalid' commit -qm 'chore: track agent harness'",
+        "  git -C \"$d\" -c user.name='axctl dogfood' -c user.email='dogfood@example.invalid' commit -qm 'chore: track agent harness'",
         "done",
-        "printf '\\r\\n$ HOME=<scratch> agentctl onboarding --json\\r\\n'",
-        `HOME=${JSON.stringify(home)} ${JSON.stringify(agentctl)} onboarding --json`,
+        "printf '\\r\\n$ HOME=<scratch> axctl onboarding --json\\r\\n'",
+        `HOME=${JSON.stringify(home)} ${JSON.stringify(axctl)} onboarding --json`,
         `printf '\\r\\n%s\\r\\n' ${JSON.stringify(SUCCESS_MARKER)}`,
-        "printf '\\r\\nDogfood complete. Transcript will be saved as evidence if the agentctl DB is reachable.\\r\\n'",
+        "printf '\\r\\nDogfood complete. Transcript will be saved as evidence if the ax DB is reachable.\\r\\n'",
     ];
 
     return {
-        title: "agentctl setup demo",
+        title: "axctl setup demo",
         cwd: scratch,
         command: lines.join("\n"),
         commandSource: "preset",
@@ -240,7 +240,7 @@ export async function createInteractiveDogfoodSession(options: {
     readonly command?: string;
     readonly successMarker?: string;
 }): Promise<DogfoodTerminalSession> {
-    const workRoot = await mkdtemp(join(tmpdir(), "agentctl-wterm-dogfood-"));
+    const workRoot = await mkdtemp(join(tmpdir(), "axctl-wterm-dogfood-"));
     const home = join(workRoot, "home");
     const scratch = join(workRoot, "scratch");
     await mkdir(home, { recursive: true });
@@ -276,14 +276,14 @@ async function createDogfoodSession(args: DogfoodTerminalArgs, root: string): Pr
 
 export function dogfoodHtml(
     transport: DogfoodTransport | EffectiveDogfoodTransport = "auto",
-    title = "agentctl dogfood terminal",
+    title = "axctl dogfood terminal",
 ): string {
     return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>agentctl wterm dogfood</title>
+  <title>axctl wterm dogfood</title>
   <link rel="stylesheet" href="/vendor/wterm.css" />
   <style>
     html, body { height: 100%; margin: 0; background: #0b0d12; color: #d8dee9; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
@@ -298,7 +298,7 @@ export function dogfoodHtml(
 </head>
 <body>
   <header><h1>${title} <span id="status">connecting</span></h1></header>
-  <main><div id="terminal" aria-label="agentctl dogfood terminal"></div></main>
+  <main><div id="terminal" aria-label="axctl dogfood terminal"></div></main>
   <footer>Scenario: fresh setup in a scratch HOME. Transport: ${transport}. No launchd or real global config mutation.</footer>
   <script type="importmap">
     {
@@ -333,8 +333,8 @@ const transport = new WebSocketTransport({
   onClose: () => {
     statusEl.textContent = "complete";
     fetch("/api/result").then((res) => res.json()).then((result) => {
-      window.__agentctlDogfoodResult = result;
-      window.dispatchEvent(new CustomEvent("agentctl-dogfood-complete", { detail: result }));
+      window.__axctlDogfoodResult = result;
+      window.dispatchEvent(new CustomEvent("axctl-dogfood-complete", { detail: result }));
     }).catch(() => undefined);
   },
   onError: () => {
@@ -345,7 +345,7 @@ const transport = new WebSocketTransport({
 term.onData = (data) => transport.send(data);
 transport.connect();
 window.__wterm = term;
-window.__agentctlDogfood = { term, transport };
+window.__axctlDogfood = { term, transport };
 `;
 }
 
@@ -380,7 +380,7 @@ async function persistDogfoodResult(result: DogfoodResult): Promise<boolean> {
         ])};`,
         `UPSERT ${recordRef("intervention_observation", observationKey)} MERGE ${sqlObject([
             ["intervention", "NONE"],
-            ["target", sqlString(`agentctl_${scenarioKey}_wterm_dogfood`)],
+            ["target", sqlString(`axctl_${scenarioKey}_wterm_dogfood`)],
             ["status", sqlString(result.status)],
             ["metrics_before", sqlJson({ setup_verified: 0 })],
             ["metrics_after", sqlJson({ setup_verified: result.status === "passed" ? 1 : 0 })],
@@ -403,7 +403,7 @@ async function persistDogfoodResult(result: DogfoodResult): Promise<boolean> {
                 `wterm rendered a browser terminal connected to ${result.transport} transport`,
                 result.scenario === "interactive"
                     ? "scenario opened a steerable terminal in a scratch HOME"
-                    : "scenario demonstrated agentctl onboarding from a scratch HOME",
+                    : "scenario demonstrated axctl onboarding from a scratch HOME",
             ])],
             ["observed_at", sqlDate(result.endedAt)],
         ])};`,
@@ -491,7 +491,7 @@ export async function startWtermDogfoodServer(
     const root = repoRoot();
     const effective = await resolveEffectiveTransport(args.transport, root);
     if (args.scenario === "interactive" && effective.transport !== "pty") {
-        throw new Error("interactive dogfood requires PTY transport; install node-pty/node or use agentctl-setup");
+        throw new Error("interactive dogfood requires PTY transport; install node-pty/node or use axctl-setup");
     }
     const runId = shortHash(`${Date.now()}|${Math.random()}`);
     const startedAt = new Date().toISOString();
@@ -560,7 +560,7 @@ export async function startWtermDogfoodServer(
         if (!args.timeoutSeconds) return;
         timeout = setTimeout(() => {
             timedOut = true;
-            appendOutput(ws, `\r\nagentctl dogfood timed out after ${args.timeoutSeconds}s\r\n`);
+            appendOutput(ws, `\r\naxctl dogfood timed out after ${args.timeoutSeconds}s\r\n`);
             killChild();
             finish()
                 .catch(() => undefined)
@@ -621,7 +621,7 @@ export async function startWtermDogfoodServer(
             env: {
                 PATH: process.env.PATH ?? "",
                 TERM: "xterm-256color",
-                AGENTCTL_REPO_ROOT: root,
+                AX_REPO_ROOT: root,
                 ...scenario.env,
             },
             stdin: "pipe",
@@ -771,7 +771,7 @@ export async function cmdDogfoodTerminal(rawArgs: readonly string[]): Promise<vo
     const server = await startWtermDogfoodServer(args);
     if (args.json) {
         console.log(JSON.stringify({
-            kind: "agentctl.dogfood.terminal",
+            kind: "axctl.dogfood.terminal",
             scenario: server.scenario,
             transport: server.transport,
             requestedTransport: server.requestedTransport,
@@ -780,7 +780,7 @@ export async function cmdDogfoodTerminal(rawArgs: readonly string[]): Promise<vo
             port: server.port,
         }, null, 2));
     } else {
-        console.log(`agentctl dogfood terminal: ${server.url}`);
+        console.log(`axctl dogfood terminal: ${server.url}`);
         console.log(`transport: ${server.transport}`);
         if (server.transportFallbackReason) console.log(`fallback: ${server.transportFallbackReason}`);
         console.log("Open the URL, or drive it with: agent-browser open " + server.url);

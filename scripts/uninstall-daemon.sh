@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
-TARGET="$HOME/Library/LaunchAgents/com.necmttn.agentctl-db.plist"
+TARGET="$HOME/Library/LaunchAgents/com.necmttn.ax-db.plist"
 if [ -f "$TARGET" ]; then
   launchctl unload "$TARGET" 2>/dev/null || true
   rm -f "$TARGET"
-  echo "[agentctl] daemon uninstalled"
+  echo "[axctl] daemon uninstalled"
 else
-  echo "[agentctl] daemon not installed"
+  echo "[axctl] daemon not installed"
 fi

@@ -3,12 +3,12 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.necmttn.agentctl-watch</string>
+  <string>com.necmttn.ax-watch</string>
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>cd __AGENTCTL_DIR__ &amp;&amp; bun src/cli/index.ts ingest --since=1 &gt;&gt;__LOG_DIR__/watcher.log 2&gt;&amp;1</string>
+    <string>cd __AX_DIR__ &amp;&amp; bun src/cli/index.ts ingest --since=1 &gt;&gt;__LOG_DIR__/watcher.log 2&gt;&amp;1</string>
   </array>
   <key>WatchPaths</key>
   <array>

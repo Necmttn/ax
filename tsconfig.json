@@ -23,5 +23,6 @@
       { "name": "@effect/language-service" }
     ]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts"],
+  "exclude": ["src/dashboard/web/**"]
 }

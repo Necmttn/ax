@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Start dedicated agentctl SurrealDB instance.
+# Start dedicated axctl SurrealDB instance.
 set -euo pipefail
 
-DATA_DIR="${AGENTCTL_DATA_DIR:-$HOME/.local/share/agentctl}"
+DATA_DIR="${AX_DATA_DIR:-$HOME/.local/share/ax}"
 LOG_DIR="$DATA_DIR/logs"
 BUCKETS_DIR="$DATA_DIR/buckets"
-PORT="${AGENTCTL_DB_PORT:-8521}"
-USER="${AGENTCTL_DB_USER:-root}"
-PASS="${AGENTCTL_DB_PASS:-root}"
+PORT="${AX_DB_PORT:-${AGENTCTL_DB_PORT:-8521}}"
+USER="${AX_DB_USER:-${AGENTCTL_DB_USER:-root}}"
+PASS="${AX_DB_PASS:-${AGENTCTL_DB_PASS:-root}}"
 
 mkdir -p "$DATA_DIR" "$LOG_DIR" "$BUCKETS_DIR/transcripts" "$BUCKETS_DIR/codex_artifacts"
 
 if lsof -iTCP:"$PORT" -sTCP:LISTEN -nP >/dev/null 2>&1; then
-  echo "[agentctl] SurrealDB already on port $PORT" >&2
+  echo "[axctl] SurrealDB already on port $PORT" >&2
   exit 0
 fi
 
@@ -30,4 +30,4 @@ nohup surreal start \
 
 echo $! > "$DATA_DIR/surreal.pid"
 sleep 1
-echo "[agentctl] SurrealDB pid=$(cat "$DATA_DIR/surreal.pid") port=$PORT data=$DATA_DIR/db buckets=$BUCKETS_DIR"
+echo "[axctl] SurrealDB pid=$(cat "$DATA_DIR/surreal.pid") port=$PORT data=$DATA_DIR/db buckets=$BUCKETS_DIR"

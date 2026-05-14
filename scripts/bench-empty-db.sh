@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Benchmark a fresh SurrealDB database without touching agentctl/main.
+# Benchmark a fresh SurrealDB database without touching axctl/main.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -26,7 +26,7 @@ for arg in "$@"; do
   esac
 done
 
-OUT_DIR="${AGENTCTL_BENCH_DIR:-$HOME/.local/share/agentctl/benchmarks/$DB}"
+OUT_DIR="${AGENTCTL_BENCH_DIR:-$HOME/.local/share/ax/benchmarks/$DB}"
 mkdir -p "$OUT_DIR"
 
 run_step() {
@@ -43,11 +43,11 @@ run_step() {
   echo "[bench] DONE  $name ${seconds}s" | tee -a "$OUT_DIR/timings.txt"
 }
 
-export AGENTCTL_DB_DB="$DB"
+export AX_DB_DB="$DB"
 
-echo "[bench] db=$AGENTCTL_DB_DB"
+echo "[bench] db=$AX_DB_DB"
 echo "[bench] output=$OUT_DIR"
-echo "[bench] agentctl/main is not modified; this run uses AGENTCTL_DB_DB=$AGENTCTL_DB_DB"
+echo "[bench] axctl/main is not modified; this run uses AX_DB_DB=$AX_DB_DB"
 : >"$OUT_DIR/timings.txt"
 
 run_step "schema" bash "$ROOT/scripts/apply-schema.sh"

@@ -1,3 +1,5 @@
+import { decodeJsonOrNull } from "../lib/decode.ts";
+
 export type PlanStatus = "pending" | "in_progress" | "completed" | "abandoned";
 
 export type PlanSource = "claude_todowrite" | "claude_task" | "codex_update_plan";
@@ -66,14 +68,9 @@ function nonEmptyString(value: string | null | undefined): string | null {
 
 function parseMaybeJsonObject(input: unknown): Record<string, unknown> {
     if (typeof input === "string") {
-        try {
-            const parsed = JSON.parse(input);
-            return isRecord(parsed) ? parsed : {};
-        } catch {
-            return {};
-        }
+        const parsed = decodeJsonOrNull(input);
+        return isRecord(parsed) ? parsed : {};
     }
-
     return isRecord(input) ? input : {};
 }
 

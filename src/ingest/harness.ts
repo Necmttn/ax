@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { SurrealClient } from "../lib/db.ts";
+import { ProcessService } from "../lib/process.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
 import { buildProjectHarnessReport } from "../project/harness.ts";
@@ -184,7 +185,7 @@ export function buildHarnessIngestStatements(report: ProjectHarnessReport, obser
     ];
 }
 
-export const ingestHarness = (): Effect.Effect<HarnessIngestStats, DbError, SurrealClient> =>
+export const ingestHarness = (): Effect.Effect<HarnessIngestStats, DbError, SurrealClient | ProcessService> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         const report = yield* buildProjectHarnessReport();

@@ -96,7 +96,7 @@ describe("dashboard report renderer", () => {
     test("renders evidence counts and query sections", () => {
         const html = renderDashboardHtml(sampleData);
 
-        expect(html).toContain("agentctl Evidence Dashboard");
+        expect(html).toContain("axctl Evidence Dashboard");
         expect(html).toContain("8,870");
         expect(html).toContain("Repository Coverage");
         expect(html).toContain("Schema Coverage");

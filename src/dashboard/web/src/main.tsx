@@ -1,0 +1,29 @@
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import { RouterProvider } from "@tanstack/react-router";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { router } from "./router.tsx";
+
+// staleTime keeps cached data "fresh" so a tab switch doesn't re-trigger the
+// loading state. We re-fetch on focus so live ingest events are picked up
+// without manual refresh.
+const queryClient = new QueryClient({
+    defaultOptions: {
+        queries: {
+            staleTime: 30_000,
+            gcTime: 5 * 60_000,
+            refetchOnWindowFocus: true,
+            retry: 1,
+        },
+    },
+});
+
+const container = document.getElementById("root");
+if (!container) throw new Error("missing #root");
+createRoot(container).render(
+    <StrictMode>
+        <QueryClientProvider client={queryClient}>
+            <RouterProvider router={router} />
+        </QueryClientProvider>
+    </StrictMode>,
+);

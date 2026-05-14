@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="${AGENTCTL_REPO:-Necmttn/agentctl}"
-VERSION="${AGENTCTL_VERSION:-latest}"
-INSTALL_ROOT="${AGENTCTL_INSTALL_ROOT:-$HOME/.local/share/agentctl}"
-BIN_DIR="${AGENTCTL_BIN_DIR:-$HOME/.local/bin}"
-RUN_INSTALL="${AGENTCTL_RUN_INSTALL:-1}"
+REPO="${AXCTL_REPO:-${AGENTCTL_REPO:-Necmttn/ax}}"
+VERSION="${AXCTL_VERSION:-${AGENTCTL_VERSION:-latest}}"
+INSTALL_ROOT="${AXCTL_INSTALL_ROOT:-${AGENTCTL_INSTALL_ROOT:-$HOME/.local/share/ax}}"
+BIN_DIR="${AXCTL_BIN_DIR:-${AGENTCTL_BIN_DIR:-$HOME/.local/bin}}"
+RUN_INSTALL="${AXCTL_RUN_INSTALL:-${AGENTCTL_RUN_INSTALL:-1}}"
 BINARY_PATH=""
 MODIFY_PATH=1
 
 usage() {
   cat <<'EOF'
-Install agentctl from a GitHub Release artifact.
+Install axctl from a GitHub Release artifact.
 
 Usage: install.sh [options]
 
@@ -19,15 +19,15 @@ Options:
   -h, --help                Display this help message
   -v, --version VERSION     Install a specific release tag/version (for example v0.2.0)
   -b, --binary PATH         Install from a local binary instead of downloading
-      --no-run-install      Only install the binary; skip `agentctl install`
+      --no-run-install      Only install the binary; skip `axctl install`
       --no-modify-path      Do not append PATH instructions to shell config files
 
 Environment:
-  AGENTCTL_REPO=owner/repo       GitHub repo to download from (default: Necmttn/agentctl)
-  AGENTCTL_VERSION=v0.1.0        Release tag to install (default: latest)
-  AGENTCTL_INSTALL_ROOT=path     Install root (default: ~/.local/share/agentctl)
-  AGENTCTL_BIN_DIR=path          Symlink dir (default: ~/.local/bin)
-  AGENTCTL_RUN_INSTALL=0         Only install the binary; skip `agentctl install`
+  AXCTL_REPO=owner/repo          GitHub repo to download from (default: Necmttn/ax)
+  AXCTL_VERSION=v0.1.0           Release tag to install (default: latest)
+  AXCTL_INSTALL_ROOT=path        Install root (default: ~/.local/share/ax)
+  AXCTL_BIN_DIR=path             Symlink dir (default: ~/.local/bin)
+  AXCTL_RUN_INSTALL=0            Only install the binary; skip `axctl install`
   GH_TOKEN/GITHUB_TOKEN=token    Token for private repo downloads when gh is unavailable
 EOF
 }
@@ -40,7 +40,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     -v|--version)
       if [[ -z "${2:-}" ]]; then
-        echo "agentctl install: --version requires a value" >&2
+        echo "axctl install: --version requires a value" >&2
         exit 2
       fi
       VERSION="$2"
@@ -48,7 +48,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     -b|--binary)
       if [[ -z "${2:-}" ]]; then
-        echo "agentctl install: --binary requires a path" >&2
+        echo "axctl install: --binary requires a path" >&2
         exit 2
       fi
       BINARY_PATH="$2"
@@ -63,7 +63,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     *)
-      echo "agentctl install: unknown option: $1" >&2
+      echo "axctl install: unknown option: $1" >&2
       usage >&2
       exit 2
       ;;
@@ -72,7 +72,7 @@ done
 
 need() {
   if ! command -v "$1" >/dev/null 2>&1; then
-    echo "agentctl install: missing required command: $1" >&2
+    echo "axctl install: missing required command: $1" >&2
     exit 1
   fi
 }
@@ -83,7 +83,7 @@ detect_platform() {
     Darwin) os="darwin" ;;
     Linux) os="linux" ;;
     *)
-      echo "agentctl install: unsupported OS $(uname -s)" >&2
+      echo "axctl install: unsupported OS $(uname -s)" >&2
       exit 1
       ;;
   esac
@@ -92,7 +92,7 @@ detect_platform() {
     arm64|aarch64) arch="arm64" ;;
     x86_64|amd64) arch="x64" ;;
     *)
-      echo "agentctl install: unsupported architecture $(uname -m)" >&2
+      echo "axctl install: unsupported architecture $(uname -m)" >&2
       exit 1
       ;;
   esac
@@ -138,12 +138,12 @@ download_with_curl() {
 }
 
 platform="$(detect_platform)"
-artifact="agentctl-${platform}.tar.gz"
+artifact="axctl-${platform}.tar.gz"
 
-if [[ -z "$BINARY_PATH" && "$VERSION" != "latest" && "$(command -v agentctl || true)" != "" ]]; then
-  installed="$(agentctl --version 2>/dev/null || true)"
-  if [[ "$installed" == "${VERSION#v}" || "$installed" == *"agentctl ${VERSION#v}"* || "$installed" == *"agentctl v${VERSION#v}"* ]]; then
-    echo "[agentctl] version ${VERSION#v} already installed"
+if [[ -z "$BINARY_PATH" && "$VERSION" != "latest" && "$(command -v axctl || command -v agentctl || true)" != "" ]]; then
+  installed="$({ axctl --version || agentctl --version; } 2>/dev/null || true)"
+  if [[ "$installed" == "${VERSION#v}" || "$installed" == *"axctl ${VERSION#v}"* || "$installed" == *"agentctl ${VERSION#v}"* || "$installed" == *"axctl v${VERSION#v}"* || "$installed" == *"agentctl v${VERSION#v}"* ]]; then
+    echo "[axctl] version ${VERSION#v} already installed"
     exit 0
   fi
 fi
@@ -153,17 +153,17 @@ trap 'rm -rf "$tmp_dir"' EXIT
 
 if [[ -n "$BINARY_PATH" ]]; then
   if [[ ! -f "$BINARY_PATH" ]]; then
-    echo "agentctl install: local binary not found: $BINARY_PATH" >&2
+    echo "axctl install: local binary not found: $BINARY_PATH" >&2
     exit 1
   fi
-  echo "[agentctl] installing local binary: $BINARY_PATH"
+  echo "[axctl] installing local binary: $BINARY_PATH"
 else
-  echo "[agentctl] downloading ${artifact} from ${REPO} (${VERSION})"
+  echo "[axctl] downloading ${artifact} from ${REPO} (${VERSION})"
 
   if ! download_with_gh "$artifact" "$tmp_dir"; then
     if ! download_with_curl "$artifact" "$tmp_dir/$artifact"; then
       cat >&2 <<EOF
-agentctl install: failed to download ${artifact}
+axctl install: failed to download ${artifact}
 
 For private repos, either:
   1. run 'gh auth login', or
@@ -180,7 +180,7 @@ EOF
       cd "$tmp_dir"
       awk -v f="$artifact" '$2 == f || $2 == "./" f { print; found = 1; exit } END { if (!found) exit 1 }' checksums.txt
     )" || {
-      echo "[agentctl] checksums.txt did not include ${artifact}" >&2
+      echo "[axctl] checksums.txt did not include ${artifact}" >&2
       exit 1
     }
     if command -v shasum >/dev/null 2>&1; then
@@ -188,36 +188,40 @@ EOF
     elif command -v sha256sum >/dev/null 2>&1; then
       (cd "$tmp_dir" && printf '%s\n' "$checksum_line" | sha256sum -c -)
     else
-      echo "[agentctl] checksum file downloaded; no sha256 checker found, skipping verification"
+      echo "[axctl] checksum file downloaded; no sha256 checker found, skipping verification"
     fi
   else
-    echo "[agentctl] checksums.txt not found; skipping checksum verification"
+    echo "[axctl] checksums.txt not found; skipping checksum verification"
   fi
 
   need tar
   tar -xzf "$tmp_dir/$artifact" -C "$tmp_dir"
 fi
 
-install_bin="$INSTALL_ROOT/bin/agentctl"
+install_bin="$INSTALL_ROOT/bin/axctl"
 mkdir -p "$INSTALL_ROOT/bin" "$BIN_DIR"
 if [[ -n "$BINARY_PATH" ]]; then
   install -m 755 "$BINARY_PATH" "$install_bin"
 else
-  install -m 755 "$tmp_dir/agentctl" "$install_bin"
+  install -m 755 "$tmp_dir/axctl" "$install_bin"
 fi
+ln -sfn "$install_bin" "$BIN_DIR/axctl"
+ln -sfn "$install_bin" "$BIN_DIR/ax"
 ln -sfn "$install_bin" "$BIN_DIR/agentctl"
 
-echo "[agentctl] installed binary: $install_bin"
-echo "[agentctl] symlink: $BIN_DIR/agentctl -> $install_bin"
+echo "[axctl] installed binary: $install_bin"
+echo "[axctl] symlink: $BIN_DIR/axctl -> $install_bin"
+echo "[axctl] alias symlink: $BIN_DIR/ax -> $install_bin"
+echo "[axctl] legacy symlink: $BIN_DIR/agentctl -> $install_bin"
 
 if [[ "$MODIFY_PATH" == "1" && ":$PATH:" != *":$BIN_DIR:"* ]]; then
-  echo "[agentctl] add this to PATH if needed: export PATH=\"$BIN_DIR:\$PATH\""
+  echo "[axctl] add this to PATH if needed: export PATH=\"$BIN_DIR:\$PATH\""
 fi
 
 if [[ "$RUN_INSTALL" == "1" ]]; then
   if [[ "$(uname -s)" == "Darwin" ]]; then
     "$install_bin" install
   else
-    echo "[agentctl] binary installed. Full daemon install is currently macOS-only; skipping agentctl install."
+    echo "[axctl] binary installed. Full daemon install is currently macOS-only; skipping axctl install."
   fi
 fi

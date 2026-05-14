@@ -52,7 +52,7 @@ interface DashboardOpts {
 }
 
 const DEFAULT_DASHBOARD_PATH = join(
-    process.env.AGENTCTL_DATA_DIR ?? join(homedir(), ".local", "share", "agentctl"),
+    process.env.AX_DATA_DIR ?? process.env.AGENTCTL_DATA_DIR ?? join(homedir(), ".local", "share", "ax"),
     "dashboard.html",
 );
 
@@ -358,7 +358,7 @@ export function renderDashboardHtml(data: DashboardData): string {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>agentctl Evidence Dashboard</title>
+  <title>axctl Evidence Dashboard</title>
   <style>
     :root {
       --ink: #141615;
@@ -440,7 +440,7 @@ export function renderDashboardHtml(data: DashboardData): string {
   <main>
     <section class="masthead">
       <div>
-        <h1>agentctl Evidence Dashboard</h1>
+        <h1>axctl Evidence Dashboard</h1>
         <p>Local Claude and Codex transcripts turned into operational evidence: repositories, sessions, tool failures, plans, imported insights, and friction signals.</p>
       </div>
       <div class="stamp">generated<br>${htmlEscape(data.generatedAt)}</div>

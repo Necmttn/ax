@@ -12,13 +12,13 @@ import {
 describe("wterm dogfood harness", () => {
     test("parses terminal dogfood args", () => {
         expect(parseDogfoodTerminalArgs([])).toMatchObject({
-            scenario: "agentctl-setup",
+            scenario: "axctl-setup",
             port: 1742,
             json: false,
             transport: "auto",
         });
-        expect(parseDogfoodTerminalArgs(["--scenario=agentctl-setup", "--port=1844", "--json", "--transport=pty"])).toMatchObject({
-            scenario: "agentctl-setup",
+        expect(parseDogfoodTerminalArgs(["--scenario=axctl-setup", "--port=1844", "--json", "--transport=pty"])).toMatchObject({
+            scenario: "axctl-setup",
             port: 1844,
             json: true,
             transport: "pty",
@@ -69,13 +69,13 @@ describe("wterm dogfood harness", () => {
     });
 
     test("setup script demonstrates scratch onboarding and tracking baseline", async () => {
-        const script = await createAgentctlSetupDemoScript("/repo/agentctl");
+        const script = await createAgentctlSetupDemoScript("/repo/ax");
 
-        expect(script.command).toContain("agentctl wterm dogfood: fresh setup demo");
-        expect(script.command).toContain("agentctl onboarding --json");
+        expect(script.command).toContain("axctl wterm dogfood: fresh setup demo");
+        expect(script.command).toContain("axctl onboarding --json");
         expect(script.command).toContain("chore: track agent harness");
-        expect(script.command).toContain("AGENTCTL_DOGFOOD_SETUP_OK");
-        expect(script.cwd).toContain("agentctl-wterm-dogfood-");
+        expect(script.command).toContain("AXCTL_DOGFOOD_SETUP_OK");
+        expect(script.cwd).toContain("axctl-wterm-dogfood-");
     });
 
     test("interactive session starts a steerable shell in a scratch home", async () => {
@@ -85,8 +85,8 @@ describe("wterm dogfood harness", () => {
         expect(session.title).toBe("interactive terminal");
         expect(session.agent).toBe("shell");
         expect(session.successMarker).toBe("READY");
-        expect(session.cwd).toContain("agentctl-wterm-dogfood-");
-        expect(session.env.HOME).toContain("agentctl-wterm-dogfood-");
+        expect(session.cwd).toContain("axctl-wterm-dogfood-");
+        expect(session.env.HOME).toContain("axctl-wterm-dogfood-");
     });
 
     test("interactive session accepts a custom agent command", async () => {
@@ -99,7 +99,7 @@ describe("wterm dogfood harness", () => {
 
     test("html and client load wterm through browser imports and websocket transport", () => {
         expect(dogfoodHtml()).toContain("@wterm/dom");
-        expect(dogfoodHtml()).toContain("agentctl dogfood terminal");
+        expect(dogfoodHtml()).toContain("axctl dogfood terminal");
         expect(dogfoodClientJs()).toContain("new WTerm");
         expect(dogfoodClientJs()).toContain("WebSocketTransport");
         expect(dogfoodClientJs()).toContain("/api/terminal");

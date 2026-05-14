@@ -1,4 +1,4 @@
-# Releasing agentctl
+# Releasing axctl
 
 Releases are managed by Release Please and GitHub Release artifacts.
 
@@ -14,16 +14,16 @@ Releases are managed by Release Please and GitHub Release artifacts.
    - compiled CLI smoke checks
 4. Merge the Release Please PR.
 5. Confirm the release workflow uploads:
-   - `agentctl-darwin-arm64.tar.gz`
-   - `agentctl-linux-x64.tar.gz`
+   - `axctl-darwin-arm64.tar.gz`
+   - `axctl-linux-x64.tar.gz`
    - `checksums.txt`
 6. Verify install/update from the published release:
 
 ```bash
-agentctl update --check
-agentctl update
-agentctl --version
-agentctl doctor
+axctl update --check
+axctl update
+axctl --version
+axctl doctor
 ```
 
 ## Manual artifact rebuild

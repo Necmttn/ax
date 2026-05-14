@@ -33,7 +33,7 @@ jobs:
       - name: Smoke compiled CLI
         run: |
           set -euo pipefail
-          ./dist/agentctl --version
-          ./dist/agentctl help
-          ./dist/agentctl daemon status --json
-          ./dist/agentctl doctor --json
+          ./dist/axctl --version
+          ./dist/axctl help
+          ./dist/axctl daemon status --json
+          ./dist/axctl doctor --json

@@ -5,8 +5,8 @@
   "packages": {
     ".": {
       "release-type": "node",
-      "component": "agentctl",
-      "package-name": "agentctl",
+      "component": "axctl",
+      "package-name": "axctl",
       "extra-files": [
         {
           "type": "generic",

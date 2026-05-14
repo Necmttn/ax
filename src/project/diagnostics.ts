@@ -42,7 +42,9 @@ export function parseDiagnosticConfig(raw: string): DiagnosticConfig {
 export const loadDiagnosticConfig = (root: string | null): Effect.Effect<DiagnosticConfig | null, string> =>
     Effect.gen(function* () {
         if (!root) return null;
-        const path = join(root, ".agentctl", "config.json");
+        const path = existsSync(join(root, ".axctl", "config.json"))
+            ? join(root, ".axctl", "config.json")
+            : join(root, ".agentctl", "config.json");
         if (!existsSync(path)) return null;
         const raw = yield* Effect.tryPromise({
             try: () => readFile(path, "utf8"),

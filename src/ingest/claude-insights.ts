@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { Effect } from "effect";
 import { SurrealClient } from "../lib/db.ts";
+import { decodeJsonOrNull } from "../lib/decode.ts";
 import type { DbError } from "../lib/errors.ts";
 import { AppLayer } from "../lib/layers.ts";
 import { recordRef } from "./evidence-writers.ts";
@@ -491,19 +492,24 @@ async function jsonFiles(dir: string): Promise<string[]> {
 async function readJsonRecord(
     filePath: string,
 ): Promise<{ record: JsonRecord | null; malformed: boolean }> {
+    let text: string;
     try {
-        const text = await readFile(filePath, "utf8");
-        const parsed = JSON.parse(text) as unknown;
-        if (!isRecord(parsed)) {
-            console.warn(`[claude-insights] skipping non-object JSON ${filePath}`);
-            return { record: null, malformed: true };
-        }
-        return { record: parsed, malformed: false };
+        text = await readFile(filePath, "utf8");
     } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        console.warn(`[claude-insights] skipping malformed JSON ${filePath}: ${message}`);
+        console.warn(`[claude-insights] skipping unreadable JSON ${filePath}: ${message}`);
         return { record: null, malformed: true };
     }
+    const parsed = decodeJsonOrNull(text);
+    if (parsed === null) {
+        console.warn(`[claude-insights] skipping malformed JSON ${filePath}`);
+        return { record: null, malformed: true };
+    }
+    if (!isRecord(parsed)) {
+        console.warn(`[claude-insights] skipping non-object JSON ${filePath}`);
+        return { record: null, malformed: true };
+    }
+    return { record: parsed, malformed: false };
 }
 
 function sessionIdForFile(filePath: string, record: JsonRecord): string {

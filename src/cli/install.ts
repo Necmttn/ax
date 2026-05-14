@@ -4,11 +4,27 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { execSync, spawnSync } from "node:child_process";
 import { buildOnboardingReport, formatInstallOnboardingGuidance } from "./onboarding.ts";
+import {
+    candidatePorts,
+    pickFreePort,
+    probePort,
+    type PortHolder,
+    type PortProbeResult,
+} from "../lib/port.ts";
+import {
+    DEFAULT_DB_HOST,
+    DEFAULT_DB_PORT,
+    dbUrlFromState,
+    readRuntimeState,
+    runtimeStatePath,
+    writeRuntimeState,
+} from "../lib/runtime-state.ts";
+import { prettyPrint } from "../lib/json.ts";
 // Schema is embedded at build time so the compiled binary is self-contained.
 import schemaSurql from "../../schema/schema.surql" with { type: "text" };
 
 const HOME = homedir();
-const DATA_DIR = process.env.AGENTCTL_DATA_DIR ?? join(HOME, ".local", "share", "agentctl");
+const DATA_DIR = process.env.AX_DATA_DIR ?? process.env.AGENTCTL_DATA_DIR ?? join(HOME, ".local", "share", "ax");
 const LOG_DIR = join(DATA_DIR, "logs");
 const BUCKETS_DIR = join(DATA_DIR, "buckets");
 const LAUNCH_AGENTS_DIR = join(HOME, "Library", "LaunchAgents");
@@ -16,14 +32,18 @@ const BIN_DIR = join(HOME, ".local", "bin");
 const VENDOR_BIN_DIR = join(DATA_DIR, "bin");
 
 // Pin to a known-good SurrealDB. Override via env to test newer versions.
-const SURREAL_VERSION = process.env.AGENTCTL_SURREAL_VERSION ?? "3.0.5";
+const SURREAL_VERSION = process.env.AXCTL_SURREAL_VERSION ?? process.env.AGENTCTL_SURREAL_VERSION ?? "3.0.5";
 
-const DB_LABEL = "com.necmttn.agentctl-db";
-const WATCH_LABEL = "com.necmttn.agentctl-watch";
+const DB_LABEL = "com.necmttn.ax-db";
+const WATCH_LABEL = "com.necmttn.ax-watch";
 const DB_PLIST = join(LAUNCH_AGENTS_DIR, `${DB_LABEL}.plist`);
 const WATCH_PLIST = join(LAUNCH_AGENTS_DIR, `${WATCH_LABEL}.plist`);
 
-const dbPlist = (_binPath: string, surrealPath: string): string => `<?xml version="1.0" encoding="UTF-8"?>
+const dbPlist = (
+    _binPath: string,
+    surrealPath: string,
+    bind: { host: string; port: number },
+): string => `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -33,7 +53,7 @@ const dbPlist = (_binPath: string, surrealPath: string): string => `<?xml versio
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>exec "${surrealPath}" start --user root --pass root --bind 127.0.0.1:8521 --log info --allow-experimental=files "rocksdb://${DATA_DIR}/db"</string>
+    <string>exec "${surrealPath}" start --user root --pass root --bind ${bind.host}:${bind.port} --log info --allow-experimental=files "rocksdb://${DATA_DIR}/db"</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
@@ -129,15 +149,16 @@ function isSupportedVersion(v: string | null): boolean {
 
 /**
  * Resolve the surreal CLI to use. Prefers a system install with version >= 3.0,
- * falls back to a pinned download into ~/.local/share/agentctl/bin/surreal.
- * Override via env: AGENTCTL_SURREAL_PATH (explicit path), AGENTCTL_FORCE_DOWNLOAD=1.
+ * falls back to a pinned download into ~/.local/share/ax/bin/surreal.
+ * Override via env: AXCTL_SURREAL_PATH (explicit path), AXCTL_FORCE_DOWNLOAD=1.
  */
 async function ensureSurreal(): Promise<string> {
-    if (process.env.AGENTCTL_SURREAL_PATH) {
-        const v = surrealVersionString(process.env.AGENTCTL_SURREAL_PATH);
-        if (!v) throw new Error(`AGENTCTL_SURREAL_PATH is not executable`);
-        console.log(`  surreal: pinned ${process.env.AGENTCTL_SURREAL_PATH} (${v})`);
-        return process.env.AGENTCTL_SURREAL_PATH;
+    const pinnedSurreal = process.env.AXCTL_SURREAL_PATH ?? process.env.AGENTCTL_SURREAL_PATH;
+    if (pinnedSurreal) {
+        const v = surrealVersionString(pinnedSurreal);
+        if (!v) throw new Error(`AXCTL_SURREAL_PATH is not executable`);
+        console.log(`  surreal: pinned ${pinnedSurreal} (${v})`);
+        return pinnedSurreal;
     }
 
     const localBin = join(VENDOR_BIN_DIR, "surreal");
@@ -152,7 +173,7 @@ async function ensureSurreal(): Promise<string> {
     }
 
     // Prefer system install when present and version-compatible (any 3.x).
-    if (!process.env.AGENTCTL_FORCE_DOWNLOAD) {
+    if (!process.env.AXCTL_FORCE_DOWNLOAD && !process.env.AGENTCTL_FORCE_DOWNLOAD) {
         const sys = which("surreal");
         if (sys) {
             const v = surrealVersionString(sys);
@@ -268,7 +289,7 @@ function resolveBinaryPath(): string {
     const arg = process.argv[1] ?? "";
     if (arg.endsWith(".ts")) {
         // Dev mode: point at the bin wrapper
-        return join(import.meta.dir, "..", "..", "bin", "agentctl");
+        return join(import.meta.dir, "..", "..", "bin", "axctl");
     }
     return process.execPath;
 }
@@ -288,12 +309,22 @@ export interface AgentRuntimeStatus {
     readonly pid: number | null;
 }
 
+export interface DaemonEndpoint {
+    readonly host: string;
+    readonly port: number;
+    readonly url: string;
+    readonly listening: boolean;
+    readonly conflict: PortHolder | null;
+    readonly runtimeStatePath: string;
+}
+
 export interface DaemonStatus {
     readonly platform: NodeJS.Platform;
     readonly macosLaunchd: boolean;
     readonly dataDir: string;
     readonly logDir: string;
     readonly dbListening: boolean;
+    readonly endpoint: DaemonEndpoint;
     readonly agents: readonly AgentRuntimeStatus[];
 }
 
@@ -314,7 +345,7 @@ export function parseDaemonCommand(args: string[]): ParsedDaemonCommand {
     const command = positional[0] ?? "status";
     if (!["status", "start", "stop", "restart"].includes(command)) {
         throw new Error(
-            `agentctl daemon: unknown command "${command}" (expected status, start, stop, or restart)`,
+            `axctl daemon: unknown command "${command}" (expected status, start, stop, or restart)`,
         );
     }
     return { command: command as DaemonCommand, json };
@@ -324,9 +355,38 @@ function isMacos(): boolean {
     return process.platform === "darwin";
 }
 
-function isDbListening(): boolean {
-    const r = spawnSync("lsof", ["-iTCP:8521", "-sTCP:LISTEN", "-nP"], { stdio: "ignore" });
-    return r.status === 0;
+/**
+ * Decide which port the daemon should bind. Reuses 8521 if it's free *or* if
+ * the existing listener is our own launchd-managed surreal process. Otherwise
+ * scans the next 20 ports and returns the first free one.
+ */
+function chooseBindPort(): { chosen: number; attempted: ReadonlyArray<PortProbeResult> } {
+    const probe = probePort(DEFAULT_DB_PORT);
+    if (!probe.listening) {
+        return { chosen: DEFAULT_DB_PORT, attempted: [probe] };
+    }
+    const loadedPid = loadedDbPid();
+    if (probe.holder && loadedPid !== null && probe.holder.pid === loadedPid) {
+        return { chosen: DEFAULT_DB_PORT, attempted: [probe] };
+    }
+    const pick = pickFreePort(candidatePorts(DEFAULT_DB_PORT + 1, 20));
+    return { chosen: pick.chosen, attempted: [probe, ...pick.attempted] };
+}
+
+/**
+ * launchctl reports the DB plist's current PID. Used to decide whether the
+ * listener on the configured port is "our" daemon - if so, port conflict is a
+ * non-issue.
+ */
+function loadedDbPid(): number | null {
+    if (!isMacos()) return null;
+    const r = spawnSync("launchctl", ["list", DB_LABEL], { encoding: "utf8" });
+    if (r.status !== 0) return null;
+    const output = `${r.stdout ?? ""}${r.stderr ?? ""}`;
+    const m = output.match(/"PID"\s*=\s*(\d+);/);
+    if (!m) return null;
+    const pid = Number.parseInt(m[1] ?? "", 10);
+    return Number.isFinite(pid) ? pid : null;
 }
 
 function launchdStatus(label: string, plist: string): AgentRuntimeStatus {
@@ -345,13 +405,35 @@ function launchdStatus(label: string, plist: string): AgentRuntimeStatus {
     };
 }
 
+function collectDaemonEndpoint(): DaemonEndpoint {
+    const state = readRuntimeState();
+    const probe = probePort(state.db.port);
+    const loadedPid = loadedDbPid();
+    // Treat conflict as "another process is listening", not us. When launchd
+    // says our DB agent owns this PID, suppress the conflict in the report.
+    const conflict =
+        probe.holder && loadedPid !== null && probe.holder.pid === loadedPid
+            ? null
+            : probe.holder;
+    return {
+        host: state.db.host,
+        port: state.db.port,
+        url: dbUrlFromState(state),
+        listening: probe.listening,
+        conflict,
+        runtimeStatePath: runtimeStatePath(),
+    };
+}
+
 function collectDaemonStatus(): DaemonStatus {
+    const endpoint = collectDaemonEndpoint();
     return {
         platform: process.platform,
         macosLaunchd: isMacos(),
         dataDir: DATA_DIR,
         logDir: LOG_DIR,
-        dbListening: isDbListening(),
+        dbListening: endpoint.listening,
+        endpoint,
         agents: [
             launchdStatus(DB_LABEL, DB_PLIST),
             launchdStatus(WATCH_LABEL, WATCH_PLIST),
@@ -360,14 +442,26 @@ function collectDaemonStatus(): DaemonStatus {
 }
 
 export function formatDaemonStatus(status: DaemonStatus, json = false): string {
-    if (json) return JSON.stringify(status, null, 2);
+    if (json) return prettyPrint(status);
+    const ep = status.endpoint;
+    const endpointDesc = `${ep.host}:${ep.port}`;
+    const dbLine = status.dbListening
+        ? `listening on ${endpointDesc}`
+        : `not listening on ${endpointDesc}`;
     const lines = [
-        "agentctl daemon",
+        "axctl daemon",
         `  platform: ${status.platform}${status.macosLaunchd ? "" : " (launchd unavailable)"}`,
-        `  database: ${status.dbListening ? "listening on 127.0.0.1:8521" : "not listening on 127.0.0.1:8521"}`,
+        `  endpoint: ${ep.url}`,
+        `  database: ${dbLine}`,
         `  data: ${status.dataDir}`,
         `  logs: ${status.logDir}`,
+        `  runtime-state: ${ep.runtimeStatePath}`,
     ];
+    if (ep.conflict) {
+        lines.push(
+            `  conflict: port ${ep.port} held by pid=${ep.conflict.pid} (${ep.conflict.command}); rerun 'axctl install' to pick a free port`,
+        );
+    }
     for (const agent of status.agents) {
         const runtime = agent.loaded
             ? `loaded${agent.pid === null ? "" : ` pid=${agent.pid}`}`
@@ -378,8 +472,8 @@ export function formatDaemonStatus(status: DaemonStatus, json = false): string {
 }
 
 function collectDoctorReport(): DoctorReport {
-    const binLink = join(BIN_DIR, "agentctl");
-    const surrealPath = process.env.AGENTCTL_SURREAL_PATH ?? which("surreal") ?? join(VENDOR_BIN_DIR, "surreal");
+    const binLink = join(BIN_DIR, "axctl");
+    const surrealPath = process.env.AXCTL_SURREAL_PATH ?? process.env.AGENTCTL_SURREAL_PATH ?? which("surreal") ?? join(VENDOR_BIN_DIR, "surreal");
     const surrealVersion = existsSync(surrealPath) ? surrealVersionString(surrealPath) : null;
     const daemon = collectDaemonStatus();
     const checks: DoctorCheck[] = [
@@ -391,7 +485,7 @@ function collectDoctorReport(): DoctorReport {
         {
             name: "binary",
             ok: existsSync(binLink),
-            detail: existsSync(binLink) ? binLink : `${binLink} missing; run agentctl install`,
+            detail: existsSync(binLink) ? binLink : `${binLink} missing; run axctl install`,
         },
         {
             name: "data-dir",
@@ -410,8 +504,17 @@ function collectDoctorReport(): DoctorReport {
         },
         {
             name: "db-listener",
-            ok: daemon.dbListening,
-            detail: daemon.dbListening ? "127.0.0.1:8521 is listening" : "127.0.0.1:8521 is not listening",
+            ok: daemon.dbListening && daemon.endpoint.conflict === null,
+            detail: daemon.dbListening
+                ? daemon.endpoint.conflict === null
+                    ? `${daemon.endpoint.host}:${daemon.endpoint.port} is listening`
+                    : `${daemon.endpoint.host}:${daemon.endpoint.port} held by pid=${daemon.endpoint.conflict.pid} (${daemon.endpoint.conflict.command}); rerun 'axctl install' to pick a free port`
+                : `${daemon.endpoint.host}:${daemon.endpoint.port} is not listening`,
+        },
+        {
+            name: "runtime-state",
+            ok: existsSync(daemon.endpoint.runtimeStatePath),
+            detail: daemon.endpoint.runtimeStatePath,
         },
         ...daemon.agents.map((agent): DoctorCheck => ({
             name: agent.label,
@@ -424,7 +527,7 @@ function collectDoctorReport(): DoctorReport {
 
 export function formatDoctorReport(report: DoctorReport, json = false): string {
     if (json) return JSON.stringify(report, null, 2);
-    const lines = ["agentctl doctor"];
+    const lines = ["axctl doctor"];
     for (const check of report.checks) {
         lines.push(`  ${check.ok ? "ok  " : "warn"} ${check.name}: ${check.detail}`);
     }
@@ -432,27 +535,55 @@ export function formatDoctorReport(report: DoctorReport, json = false): string {
 }
 
 export async function cmdInstall() {
-    console.log("[agentctl] install");
+    console.log("[axctl] install");
     await ensureDirs();
 
     const surrealPath = await ensureSurreal();
 
     const binSource = resolveBinaryPath();
-    const binLink = join(BIN_DIR, "agentctl");
+    const binLink = join(BIN_DIR, "axctl");
+    const aliasBinLink = join(BIN_DIR, "ax");
+    const legacyBinLink = join(BIN_DIR, "agentctl");
     if (binSource !== binLink) {
         await ensureSymlink(binSource, binLink);
         console.log(`  symlink: ${binLink} → ${binSource}`);
     }
+    if (binSource !== aliasBinLink) {
+        await ensureSymlink(binSource, aliasBinLink);
+        console.log(`  alias symlink: ${aliasBinLink} → ${binSource}`);
+    }
+    if (binSource !== legacyBinLink) {
+        await ensureSymlink(binSource, legacyBinLink);
+        console.log(`  legacy symlink: ${legacyBinLink} → ${binSource}`);
+    }
 
-    await writeFile(DB_PLIST, dbPlist(binSource, surrealPath));
+    const bind = chooseBindPort();
+    if (bind.chosen !== DEFAULT_DB_PORT) {
+        const conflict = bind.attempted.find(
+            (probe) => probe.port === DEFAULT_DB_PORT && probe.listening,
+        )?.holder;
+        if (conflict) {
+            console.log(
+                `  port ${DEFAULT_DB_PORT} held by pid=${conflict.pid} (${conflict.command}); falling back to ${bind.chosen}`,
+            );
+        } else {
+            console.log(`  port ${DEFAULT_DB_PORT} unavailable; using ${bind.chosen}`);
+        }
+    }
+    writeRuntimeState({ db: { host: DEFAULT_DB_HOST, port: bind.chosen } });
+    console.log(`  runtime-state: ${runtimeStatePath()} (db @ ${DEFAULT_DB_HOST}:${bind.chosen})`);
+
+    await writeFile(
+        DB_PLIST,
+        dbPlist(binSource, surrealPath, { host: DEFAULT_DB_HOST, port: bind.chosen }),
+    );
     console.log(`  wrote:  ${DB_PLIST}`);
     await loadAgent(DB_PLIST);
 
     // Wait for daemon to bind
     for (let i = 0; i < 8; i++) {
-        const r = spawnSync("lsof", ["-iTCP:8521", "-sTCP:LISTEN", "-nP"], { stdio: "ignore" });
-        if (r.status === 0) {
-            console.log("  daemon: listening on 127.0.0.1:8521");
+        if (probePort(bind.chosen).listening) {
+            console.log(`  daemon: listening on ${DEFAULT_DB_HOST}:${bind.chosen}`);
             break;
         }
         await new Promise((res) => setTimeout(res, 500));
@@ -470,13 +601,13 @@ export async function cmdInstall() {
         [
             "import",
             "--endpoint",
-            "http://127.0.0.1:8521",
+            `http://${DEFAULT_DB_HOST}:${bind.chosen}`,
             "--user",
             "root",
             "--pass",
             "root",
             "--ns",
-            "agentctl",
+            "ax",
             "--db",
             "main",
             schemaPath,
@@ -489,7 +620,7 @@ export async function cmdInstall() {
         // Capture stdio so the surreal CLI doesn't paint raw ANSI escapes to the
         // user's terminal; surface only the relevant lines on failure.
         const out = stripAnsi(`${r.stdout ?? ""}${r.stderr ?? ""}`).trim();
-        console.warn("  schema: apply failed (daemon may not be ready); re-run 'agentctl install'");
+        console.warn("  schema: apply failed (daemon may not be ready); re-run 'axctl install'");
         if (out) {
             for (const line of out.split("\n")) {
                 if (line.trim()) console.warn(`    ${line}`);
@@ -500,9 +631,9 @@ export async function cmdInstall() {
 
     console.log();
     console.log("Installed. Try:");
-    console.log("  agentctl ingest          # initial fill");
-    console.log("  agentctl tui             # interactive dashboard");
-    console.log("  launchctl list | grep agentctl   # verify both LaunchAgents loaded");
+    console.log("  axctl ingest          # initial fill");
+    console.log("  axctl tui             # interactive dashboard");
+    console.log("  launchctl list | grep 'com.necmttn.ax'   # verify both LaunchAgents loaded");
     console.log();
     console.log(formatInstallOnboardingGuidance(buildOnboardingReport()));
 }
@@ -512,7 +643,7 @@ export async function cmdDaemon(args: string[]) {
     if (!isMacos()) {
         console.log(formatDaemonStatus(collectDaemonStatus(), parsed.json));
         if (parsed.command !== "status") {
-            console.error("agentctl daemon: start/stop/restart use launchd and are macOS-only");
+            console.error("axctl daemon: start/stop/restart use launchd and are macOS-only");
             process.exit(2);
         }
         return;
@@ -548,31 +679,32 @@ export async function cmdDoctor(args: string[]) {
 }
 
 export async function cmdUninstall() {
-    console.log("[agentctl] uninstall");
+    console.log("[axctl] uninstall");
     for (const plist of [WATCH_PLIST, DB_PLIST]) {
         const removed = await unloadAgent(plist);
         console.log(`  ${removed ? "removed" : "absent "}: ${plist}`);
     }
 
-    const binLink = join(BIN_DIR, "agentctl");
-    let symlinkStatus: "removed" | "absent" | "skipped" = "absent";
-    try {
-        const st = await lstat(binLink);
-        if (st.isSymbolicLink()) {
-            await unlink(binLink);
-            symlinkStatus = "removed";
-        } else {
-            symlinkStatus = "skipped";
+    for (const binLink of [join(BIN_DIR, "axctl"), join(BIN_DIR, "ax"), join(BIN_DIR, "agentctl")]) {
+        let symlinkStatus: "removed" | "absent" | "skipped" = "absent";
+        try {
+            const st = await lstat(binLink);
+            if (st.isSymbolicLink()) {
+                await unlink(binLink);
+                symlinkStatus = "removed";
+            } else {
+                symlinkStatus = "skipped";
+            }
+        } catch (err) {
+            if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
         }
-    } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-    }
-    if (symlinkStatus === "removed") {
-        console.log(`  removed symlink: ${binLink}`);
-    } else if (symlinkStatus === "absent") {
-        console.log(`  absent  symlink: ${binLink}`);
-    } else {
-        console.log(`  skipped symlink: ${binLink} (not a symlink)`);
+        if (symlinkStatus === "removed") {
+            console.log(`  removed symlink: ${binLink}`);
+        } else if (symlinkStatus === "absent") {
+            console.log(`  absent  symlink: ${binLink}`);
+        } else {
+            console.log(`  skipped symlink: ${binLink} (not a symlink)`);
+        }
     }
 
     console.log();
