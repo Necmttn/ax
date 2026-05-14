@@ -26,11 +26,11 @@ ALWAYS before:
 ## Commands
 
 ```bash
-axctl search "<keywords>"        # lexical match on name+description, ranked by 30d usage
-axctl stats <skill-name>         # full drill-down: 7d/30d/90d/total + recent sessions
-axctl recent [--limit=N]         # last N invocations across all sessions
-axctl unused [--days=N]          # skills with zero invocations in N days
-axctl taste [--limit=N]          # composite taste score: invocations × clean-runs
+axctl skills search "<keywords>" # lexical match on name+description, ranked by 30d usage
+axctl skills stats <skill-name>  # full drill-down: 7d/30d/90d/total + recent sessions
+axctl skills recent [--limit=N]  # last N invocations across all sessions
+axctl skills unused [--days=N]   # skills with zero invocations in N days
+axctl skills taste [--limit=N]   # composite taste score: invocations × clean-runs
 axctl ingest [--since=DAYS]      # refresh index (skills + transcripts)
 axctl project context --json     # read-only repo grounding: git, stack, instructions, checks
 axctl project verify --json      # diff-aware checks + optional live diagnostics
@@ -84,7 +84,7 @@ A skill that returns `0×7d / 0×30d / 0×total` exists on disk but has never be
 
 ```bash
 # User: "is there a skill that helps with reviewing PRs?"
-axctl search "review pull request"
+axctl skills search "review pull request"
 
 # Starting work in a repo
 axctl project context --json
@@ -93,13 +93,13 @@ axctl project context --json
 axctl project verify --json
 
 # User: "what skills did I use this week?"
-axctl recent --limit=50
+axctl skills recent --limit=50
 
 # User: "this skill seems redundant, anyone using it?"
-axctl stats <skill-name>
+axctl skills stats <skill-name>
 
 # Before deprecating: which skills have I never touched?
-axctl unused --days=90
+axctl skills unused --days=90
 ```
 
 ## When NOT to use
