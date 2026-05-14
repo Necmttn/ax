@@ -36,8 +36,10 @@ const SURREAL_VERSION = process.env.AXCTL_SURREAL_VERSION ?? process.env.AGENTCT
 
 const DB_LABEL = "com.necmttn.ax-db";
 const WATCH_LABEL = "com.necmttn.ax-watch";
+const DERIVE_LABEL = "com.necmttn.ax-derive-daily";
 const DB_PLIST = join(LAUNCH_AGENTS_DIR, `${DB_LABEL}.plist`);
 const WATCH_PLIST = join(LAUNCH_AGENTS_DIR, `${WATCH_LABEL}.plist`);
+const DERIVE_PLIST = join(LAUNCH_AGENTS_DIR, `${DERIVE_LABEL}.plist`);
 
 const dbPlist = (
     _binPath: string,
@@ -89,7 +91,7 @@ const watchPlist = (binPath: string): string => `<?xml version="1.0" encoding="U
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>${binPath} ingest --since=1 >>${LOG_DIR}/watcher.log 2>&amp;1</string>
+    <string>${binPath} ingest --since=1 >>${LOG_DIR}/watcher.log 2>&amp;1 &amp;&amp; ${binPath} derive-signals --since=1 >>${LOG_DIR}/watcher.log 2>&amp;1</string>
   </array>
   <key>WatchPaths</key>
   <array>
@@ -104,6 +106,41 @@ const watchPlist = (binPath: string): string => `<?xml version="1.0" encoding="U
   <string>${LOG_DIR}/watcher.out</string>
   <key>StandardErrorPath</key>
   <string>${LOG_DIR}/watcher.err</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>${HOME}/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+</dict>
+</plist>
+`;
+
+// Daily full ETL: runs once a day at 04:00 local time. Full ingest (no
+// --since) repulls every transcript file mtime cutoff = 0, then derives all
+// signals. Idempotent thanks to UPSERTs; safe to overlap with the watcher.
+const derivePlist = (binPath: string): string => `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${DERIVE_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>${binPath} ingest >>${LOG_DIR}/derive-daily.log 2>&amp;1 &amp;&amp; ${binPath} derive-signals >>${LOG_DIR}/derive-daily.log 2>&amp;1</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>4</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>StandardOutPath</key>
+  <string>${LOG_DIR}/derive-daily.out</string>
+  <key>StandardErrorPath</key>
+  <string>${LOG_DIR}/derive-daily.err</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
@@ -437,6 +474,7 @@ function collectDaemonStatus(): DaemonStatus {
         agents: [
             launchdStatus(DB_LABEL, DB_PLIST),
             launchdStatus(WATCH_LABEL, WATCH_PLIST),
+            launchdStatus(DERIVE_LABEL, DERIVE_PLIST),
         ],
     };
 }
@@ -599,6 +637,10 @@ export async function cmdInstall() {
     console.log(`  wrote:  ${WATCH_PLIST}`);
     await loadAgent(WATCH_PLIST);
 
+    await writeFile(DERIVE_PLIST, derivePlist(binSource));
+    console.log(`  wrote:  ${DERIVE_PLIST}`);
+    await loadAgent(DERIVE_PLIST);
+
     // Apply schema from embedded resource via surreal import.
     const schemaPath = join(DATA_DIR, ".schema-cache.surql");
     await writeFile(schemaPath, schemaSurql);
@@ -656,23 +698,27 @@ export async function cmdDaemon(args: string[]) {
     }
 
     if (parsed.command === "start") {
-        if (!existsSync(DB_PLIST) || !existsSync(WATCH_PLIST)) {
+        if (!existsSync(DB_PLIST) || !existsSync(WATCH_PLIST) || !existsSync(DERIVE_PLIST)) {
             await cmdInstall();
         } else {
             await loadAgent(DB_PLIST);
             await loadAgent(WATCH_PLIST);
+            await loadAgent(DERIVE_PLIST);
         }
     } else if (parsed.command === "stop") {
+        await unloadAgentKeepPlist(DERIVE_PLIST);
         await unloadAgentKeepPlist(WATCH_PLIST);
         await unloadAgentKeepPlist(DB_PLIST);
     } else if (parsed.command === "restart") {
+        await unloadAgentKeepPlist(DERIVE_PLIST);
         await unloadAgentKeepPlist(WATCH_PLIST);
         await unloadAgentKeepPlist(DB_PLIST);
-        if (!existsSync(DB_PLIST) || !existsSync(WATCH_PLIST)) {
+        if (!existsSync(DB_PLIST) || !existsSync(WATCH_PLIST) || !existsSync(DERIVE_PLIST)) {
             await cmdInstall();
         } else {
             await loadAgent(DB_PLIST);
             await loadAgent(WATCH_PLIST);
+            await loadAgent(DERIVE_PLIST);
         }
     }
 
@@ -686,7 +732,7 @@ export async function cmdDoctor(args: string[]) {
 
 export async function cmdUninstall() {
     console.log("[axctl] uninstall");
-    for (const plist of [WATCH_PLIST, DB_PLIST]) {
+    for (const plist of [DERIVE_PLIST, WATCH_PLIST, DB_PLIST]) {
         const removed = await unloadAgent(plist);
         console.log(`  ${removed ? "removed" : "absent "}: ${plist}`);
     }
