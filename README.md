@@ -47,7 +47,7 @@ Refresh the local graph and open the dashboard:
 
 ```bash
 axctl ingest --since=7
-axctl ingest-insights
+axctl ingest --insights-only
 axctl dashboard
 ```
 
@@ -74,7 +74,7 @@ Ground an agent before and after repo work:
 axctl project context --json
 axctl project verify --json
 axctl project harness --json
-axctl onboarding --json
+axctl doctor --json
 ```
 
 Inspect the graph:
@@ -99,24 +99,30 @@ axctl insights post-feature-fixes
 axctl insights skill-candidates
 ```
 
+Recall past work with full-text search across user and assistant turns:
+
+```bash
+axctl recall "auth middleware" --skill=tdd --json
+```
+
 Skill and command hygiene:
 
 ```bash
-axctl search "<keywords>"
-axctl stats <skill>
-axctl recent --limit=25
-axctl unused --days=90
-axctl taste --limit=50
-axctl pairs <skill>
-axctl recovery
+axctl skills search "<keywords>"
+axctl skills stats <skill>
+axctl skills recent --limit=25
+axctl skills unused --days=90
+axctl skills taste --limit=50
+axctl skills pairs <skill>
+axctl skills recovery
 ```
 
 Self-improve queries:
 
 ```bash
-axctl guidance next --json
-axctl session summary --json
-axctl self-improve weekly --json
+axctl evidence guidance-next --json
+axctl evidence session-summary --json
+axctl evidence weekly --json
 axctl interventions list --json
 axctl interventions candidates --json
 axctl interventions regressions --json
@@ -125,37 +131,32 @@ axctl interventions regressions --json
 ## CLI Reference
 
 ```text
-axctl ingest [filters] [--since=DAYS] [--progress=auto|pipeline|plain|json|off]
-axctl ingest-insights [--progress=auto|pipeline|plain|json|off]
-axctl derive-signals [--since=DAYS] [--progress=auto|pipeline|plain|json|off]
-axctl insights [schema|repositories|checkouts|git|friction|tools|sessions|feedback-loops|verification-gaps|user-language|token-impact|cache-health|workflow-impact|codex-health|closure|post-feature-fixes|skill-candidates|graph-health] [--limit=N]
-axctl dashboard [--limit=N] [--out=PATH]
-axctl dashboard serve [--port=1738]
-axctl dogfood terminal [--scenario=axctl-setup|interactive] [--agent=shell|claude|codex|opencode] [--transport=auto|pty|process] [--command=CMD] [--success-marker=STR] [--timeout=SECONDS] [--port=1742] [--json]
-axctl search <query> [--limit=N]
-axctl stats <skill>
-axctl recent [--limit=N]
-axctl unused [--days=N]
-axctl taste [--limit=N]
-axctl pairs <skill> [--limit=N]
-axctl recovery [--limit=N]
-axctl project context [--json]
-axctl onboarding [--json]
-axctl interventions [list|show|impact|regressions|candidates] [--limit=N] [--json]
-axctl project verify [--json]
-axctl project harness [--json]
-axctl guidance next --json
-axctl session summary --json
-axctl self-improve weekly --json
+axctl ingest [--since=N] [--insights-only] [--skills-only|--transcripts-only|--codex-only|--git-only|--claude-only] [--progress=auto|pipeline|plain|json|off] [--verbose]
+axctl derive-signals [--since=N] [--progress=...] [--verbose]
+axctl insights <view> [--limit=N]
+axctl interventions <action> [--limit=N] [--json]
+axctl dashboard [--limit=N] [--out=path]
+axctl dashboard serve [--port=N]
+axctl recall <query> [--project=...] [--skill=...] [--since=...] [--json]
+axctl skills <search|stats|recent|unused|taste|pairs|recovery>
+axctl project <context|verify|harness> [--json]
+axctl evidence <guidance-next|session-summary|weekly> [--json]
 axctl version [--check] [--json]
 axctl update [--check] [--json]
 axctl tui
 axctl install
-axctl daemon status [--json]
-axctl daemon start|stop|restart
+axctl daemon <status|start|stop|restart>
 axctl doctor [--json]
 axctl uninstall
-axctl help
+```
+
+### Development (AX_DEV=1)
+
+These subcommands are only exposed when `AX_DEV=1` is set in the environment.
+Run `AX_DEV=1 axctl dogfood terminal --help` for the full flag list.
+
+```text
+axctl dogfood terminal [--scenario=...] [--agent=...] [--transport=...] [--command=...] [--success-marker=...] [--timeout=...] [--port=...] [--json]
 ```
 
 ## What Gets Stored
@@ -310,7 +311,6 @@ Working today:
 Tracked next:
 
 - project memory: `changeset` and `file_memory`
-- `axctl recall`
 - concept/entity resolution
 - guidance lifecycle and outcome tracking
 - richer live dashboard views

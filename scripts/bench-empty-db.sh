@@ -58,7 +58,7 @@ if [[ -n "$SINCE" ]]; then
 fi
 
 run_step "ingest${SINCE:+ --since=$SINCE}" bun "$ROOT/src/cli/index.ts" ingest "${INGEST_ARGS[@]}"
-run_step "ingest-insights" bun "$ROOT/src/cli/index.ts" ingest-insights
+run_step "ingest-insights" bun "$ROOT/src/cli/index.ts" ingest --insights-only
 run_step "schema-counts" bash -lc "bun '$ROOT/src/cli/index.ts' insights schema > '$OUT_DIR/schema.json'"
 run_step "checkout-activity" bash -lc "bun '$ROOT/src/cli/index.ts' insights checkouts --limit=100 > '$OUT_DIR/checkouts.json'"
 run_step "git-correlation" bash -lc "bun '$ROOT/src/cli/index.ts' insights git --limit=100 > '$OUT_DIR/git.json'"

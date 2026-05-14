@@ -35,7 +35,6 @@ import {
 } from "./progress.ts";
 import { cmdProject } from "./project.ts";
 import { AGENTCTL_VERSION, liveVersionDeps, printVersion, updateAgentctl } from "./version.ts";
-import { buildOnboardingReport, formatOnboardingReport } from "./onboarding.ts";
 import { cmdDogfoodTerminal } from "../dogfood/wterm.ts";
 import { guidanceNext, parseSelfImproveArgs, selfImproveWeekly, sessionSummary } from "../self-improve/commands.ts";
 import {
@@ -545,12 +544,6 @@ const cmdInsights = (args: string[]) =>
         console.log(prettyPrint(result?.[0] ?? []));
     });
 
-const cmdOnboarding = (args: string[]) =>
-    Effect.sync(() => {
-        const json = args.includes("--json");
-        console.log(formatOnboardingReport(buildOnboardingReport(), json));
-    });
-
 const cmdInterventions = (args: string[]) =>
     Effect.gen(function* () {
         const subcommand = args.filter((a) => !a.startsWith("--"))[0] ?? "list";
@@ -785,7 +778,7 @@ const cmdSearch = (args: string[]) =>
             .join(" ");
         const limit = parsePositiveIntFlag("search", "limit", args, 10);
         if (!query) {
-            console.error("axctl search: missing query");
+            console.error("axctl skills search: missing query");
             process.exit(1);
         }
         const db = yield* SurrealClient;
@@ -915,7 +908,7 @@ const cmdStats = (args: string[]) =>
     Effect.gen(function* () {
         const name = args.filter((a) => !a.startsWith("--"))[0];
         if (!name) {
-            console.error("axctl stats: missing skill name");
+            console.error("axctl skills stats: missing skill name");
             process.exit(1);
         }
         const db = yield* SurrealClient;
@@ -923,7 +916,7 @@ const cmdStats = (args: string[]) =>
         if (!exists) {
             const hint = name.length > 20 ? name.slice(0, 20) : name;
             console.error(
-                `axctl: no skill named "${name}". try: axctl search "${hint}"`,
+                `axctl: no skill named "${name}". try: axctl skills search "${hint}"`,
             );
             process.exit(2);
         }
@@ -1359,7 +1352,7 @@ const cmdPairs = (args: string[]) =>
     Effect.gen(function* () {
         const name = args.filter((a) => !a.startsWith("--"))[0];
         if (!name) {
-            console.error("axctl pairs: missing skill name");
+            console.error("axctl skills pairs: missing skill name");
             process.exit(1);
         }
         const limit = parsePositiveIntFlag("pairs", "limit", args, 20);
@@ -1368,7 +1361,7 @@ const cmdPairs = (args: string[]) =>
         if (!exists) {
             const hint = name.length > 20 ? name.slice(0, 20) : name;
             console.error(
-                `axctl: no skill named "${name}". try: axctl search "${hint}"`,
+                `axctl: no skill named "${name}". try: axctl skills search "${hint}"`,
             );
             process.exit(2);
         }
@@ -1437,6 +1430,30 @@ const progressFlag = Flag.choice("progress", ["auto", "pipeline", "plain", "json
     Flag.withDefault("auto"),
 );
 
+/**
+ * `--insights-only` short-circuits to `cmdIngestInsights`, bypassing
+ * `cmdIngest`'s `--*-only` mutual-exclusion check. Without this helper,
+ * `axctl ingest --insights-only --codex-only --since=7` silently ignores
+ * `--codex-only` and `--since`. Exported for unit testing.
+ */
+export const insightsOnlyConflicts = (opts: {
+    skillsOnly: boolean;
+    transcriptsOnly: boolean;
+    codexOnly: boolean;
+    gitOnly: boolean;
+    claudeOnly: boolean;
+    hasSince: boolean;
+}): string[] => {
+    const conflicts: string[] = [];
+    if (opts.skillsOnly) conflicts.push("--skills-only");
+    if (opts.transcriptsOnly) conflicts.push("--transcripts-only");
+    if (opts.codexOnly) conflicts.push("--codex-only");
+    if (opts.gitOnly) conflicts.push("--git-only");
+    if (opts.claudeOnly) conflicts.push("--claude-only");
+    if (opts.hasSince) conflicts.push("--since");
+    return conflicts;
+};
+
 const ingestCommand = Command.make(
     "ingest",
     {
@@ -1445,12 +1462,33 @@ const ingestCommand = Command.make(
         codexOnly: Flag.boolean("codex-only").pipe(Flag.withDefault(false)),
         gitOnly: Flag.boolean("git-only").pipe(Flag.withDefault(false)),
         claudeOnly: Flag.boolean("claude-only").pipe(Flag.withDefault(false)),
+        insightsOnly: Flag.boolean("insights-only").pipe(Flag.withDefault(false)),
         since: optionalSince,
         progress: progressFlag,
         verbose: verboseFlag,
     },
-    ({ skillsOnly, transcriptsOnly, codexOnly, gitOnly, claudeOnly, since, progress, verbose }) =>
-        cmdIngest([
+    ({ skillsOnly, transcriptsOnly, codexOnly, gitOnly, claudeOnly, insightsOnly, since, progress, verbose }) => {
+        if (insightsOnly) {
+            const conflicts = insightsOnlyConflicts({
+                skillsOnly,
+                transcriptsOnly,
+                codexOnly,
+                gitOnly,
+                claudeOnly,
+                hasSince: Option.isSome(since),
+            });
+            if (conflicts.length > 0) {
+                console.error(
+                    `axctl ingest: --insights-only is mutually exclusive with ${conflicts.join(", ")}`,
+                );
+                process.exit(2);
+            }
+            return cmdIngestInsights([
+                `--progress=${progress}`,
+                ...boolArg("verbose", verbose),
+            ]);
+        }
+        return cmdIngest([
             ...boolArg("skills-only", skillsOnly),
             ...boolArg("transcripts-only", transcriptsOnly),
             ...boolArg("codex-only", codexOnly),
@@ -1459,14 +1497,9 @@ const ingestCommand = Command.make(
             ...intArg("since", optionValue(since)),
             `--progress=${progress}`,
             ...boolArg("verbose", verbose),
-        ]),
-).pipe(Command.withDescription("Ingest skills, transcripts, Codex sessions, and git history"));
-
-const ingestInsightsCommand = Command.make(
-    "ingest-insights",
-    { progress: progressFlag, verbose: verboseFlag },
-    ({ progress, verbose }) => cmdIngestInsights([`--progress=${progress}`, ...boolArg("verbose", verbose)]),
-).pipe(Command.withDescription("Ingest Claude insight artifacts"));
+        ]);
+    },
+).pipe(Command.withDescription("Ingest skills, transcripts, Codex sessions, git history, and insight artifacts"));
 
 const deriveSignalsCommand = Command.make(
     "derive-signals",
@@ -1485,12 +1518,6 @@ const insightsCommand = Command.make(
     },
     ({ view, limit }) => cmdInsights([view, `--limit=${limit}`]),
 ).pipe(Command.withDescription("Run built-in graph insight queries"));
-
-const onboardingCommand = Command.make(
-    "onboarding",
-    { json: jsonFlag },
-    ({ json }) => cmdOnboarding(boolArg("json", json)),
-).pipe(Command.withDescription("Check guidance tracking setup for learning loops"));
 
 const interventionAction = Argument.choice("action", ["list", "show", "impact", "regressions", "candidates"] as const).pipe(Argument.withDefault("list"));
 
@@ -1625,6 +1652,19 @@ const recoveryCommand = Command.make(
     ({ limit }) => cmdRecovery([`--limit=${limit}`]),
 ).pipe(Command.withDescription("Show skills that recovered failed work"));
 
+const skillsCommand = Command.make("skills").pipe(
+    Command.withDescription("Skill-graph queries: search, stats, usage, pairs, recovery"),
+    Command.withSubcommands([
+        searchCommand,
+        statsCommand,
+        recentCommand,
+        unusedCommand,
+        tasteCommand,
+        pairsCommand,
+        recoveryCommand,
+    ]),
+);
+
 const projectContextCommand = Command.make(
     "context",
     { json: jsonFlag },
@@ -1660,37 +1700,31 @@ const jsonSelfImprove = (cmd: "guidance" | "session" | "self-improve", rest: str
     });
 };
 
-const guidanceNextCommand = Command.make(
-    "next",
+const evidenceGuidanceNextCommand = Command.make(
+    "guidance-next",
     { json: jsonFlag },
     ({ json }) => jsonSelfImprove("guidance", ["next", ...boolArg("json", json)]),
 ).pipe(Command.withDescription("Return the next self-improvement guidance"));
 
-const guidanceCommand = Command.make("guidance").pipe(
-    Command.withDescription("Self-improvement guidance queries"),
-    Command.withSubcommands([guidanceNextCommand]),
-);
-
-const sessionSummaryCommand = Command.make(
-    "summary",
+const evidenceSessionSummaryCommand = Command.make(
+    "session-summary",
     { json: jsonFlag },
     ({ json }) => jsonSelfImprove("session", ["summary", ...boolArg("json", json)]),
 ).pipe(Command.withDescription("Summarize recent session evidence"));
 
-const sessionCommand = Command.make("session").pipe(
-    Command.withDescription("Session evidence queries"),
-    Command.withSubcommands([sessionSummaryCommand]),
-);
-
-const selfImproveWeeklyCommand = Command.make(
+const evidenceWeeklyCommand = Command.make(
     "weekly",
     { json: jsonFlag },
     ({ json }) => jsonSelfImprove("self-improve", ["weekly", ...boolArg("json", json)]),
 ).pipe(Command.withDescription("Run weekly self-improvement evidence query"));
 
-const selfImproveCommand = Command.make("self-improve").pipe(
-    Command.withDescription("Self-improvement evidence queries"),
-    Command.withSubcommands([selfImproveWeeklyCommand]),
+const evidenceCommand = Command.make("evidence").pipe(
+    Command.withDescription("Self-improvement evidence queries (guidance, session, weekly)"),
+    Command.withSubcommands([
+        evidenceGuidanceNextCommand,
+        evidenceSessionSummaryCommand,
+        evidenceWeeklyCommand,
+    ]),
 );
 
 const versionCommand = Command.make(
@@ -1769,29 +1803,20 @@ const uninstallCommand = Command.make("uninstall", {}, () =>
     Effect.promise(() => cmdUninstall()),
 ).pipe(Command.withDescription("Remove launchd plists and the axctl symlink"));
 
+const devOnlyCommands = process.env.AX_DEV === "1" ? [dogfoodCommand] : [];
+
 export const rootCommand = Command.make("axctl").pipe(
     Command.withDescription("ax local memory and telemetry for coding agents"),
     Command.withSubcommands([
         ingestCommand,
-        ingestInsightsCommand,
         deriveSignalsCommand,
         insightsCommand,
-        onboardingCommand,
         interventionsCommand,
         dashboardCommand,
-        dogfoodCommand,
-        searchCommand,
         recallCommand,
-        statsCommand,
-        recentCommand,
-        unusedCommand,
-        tasteCommand,
-        pairsCommand,
-        recoveryCommand,
+        skillsCommand,
         projectCommand,
-        guidanceCommand,
-        sessionCommand,
-        selfImproveCommand,
+        evidenceCommand,
         versionCommand,
         updateCommand,
         tuiCommand,
@@ -1799,6 +1824,7 @@ export const rootCommand = Command.make("axctl").pipe(
         daemonCommand,
         doctorCommand,
         uninstallCommand,
+        ...devOnlyCommands,
     ]),
 );
 
@@ -1819,7 +1845,7 @@ async function main() {
         await Effect.runPromise(runCli(["update", ...args.slice(1)]) as Effect.Effect<void>);
         return;
     }
-    const noDbCommands = new Set(["install", "daemon", "doctor", "uninstall", "onboarding", "version", "update"]);
+    const noDbCommands = new Set(["install", "daemon", "doctor", "uninstall", "version", "update"]);
     if (noDbCommands.has(args[0] ?? "")) {
         await Effect.runPromise(runCli(args) as Effect.Effect<void>);
         return;

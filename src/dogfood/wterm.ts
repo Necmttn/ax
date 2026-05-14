@@ -197,8 +197,8 @@ export async function createAgentctlSetupDemoScript(root = repoRoot()): Promise<
         `printf 'scratch home: %s\\r\\n\\r\\n' ${JSON.stringify(home)}`,
         "printf '$ axctl --help\\r\\n'",
         `${JSON.stringify(axctl)} --help | sed -n '1,18p'`,
-        "printf '\\r\\n$ HOME=<scratch> axctl onboarding --json\\r\\n'",
-        `HOME=${JSON.stringify(home)} ${JSON.stringify(axctl)} onboarding --json`,
+        "printf '\\r\\n$ HOME=<scratch> axctl doctor --json\\r\\n'",
+        `HOME=${JSON.stringify(home)} ${JSON.stringify(axctl)} doctor --json`,
         "printf '\\r\\n$ host agent tracks harness dirs in git\\r\\n'",
         `for d in ${JSON.stringify(join(home, ".claude"))} ${JSON.stringify(join(home, ".codex"))} ${JSON.stringify(join(home, ".agents"))}; do`,
         "  git -C \"$d\" init -q",
@@ -215,8 +215,8 @@ export async function createAgentctlSetupDemoScript(root = repoRoot()): Promise<
         "  git -C \"$d\" add .gitignore README.md",
         "  git -C \"$d\" -c user.name='axctl dogfood' -c user.email='dogfood@example.invalid' commit -qm 'chore: track agent harness'",
         "done",
-        "printf '\\r\\n$ HOME=<scratch> axctl onboarding --json\\r\\n'",
-        `HOME=${JSON.stringify(home)} ${JSON.stringify(axctl)} onboarding --json`,
+        "printf '\\r\\n$ HOME=<scratch> axctl doctor --json\\r\\n'",
+        `HOME=${JSON.stringify(home)} ${JSON.stringify(axctl)} doctor --json`,
         `printf '\\r\\n%s\\r\\n' ${JSON.stringify(SUCCESS_MARKER)}`,
         "printf '\\r\\nDogfood complete. Transcript will be saved as evidence if the ax DB is reachable.\\r\\n'",
     ];
@@ -403,7 +403,7 @@ async function persistDogfoodResult(result: DogfoodResult): Promise<boolean> {
                 `wterm rendered a browser terminal connected to ${result.transport} transport`,
                 result.scenario === "interactive"
                     ? "scenario opened a steerable terminal in a scratch HOME"
-                    : "scenario demonstrated axctl onboarding from a scratch HOME",
+                    : "scenario demonstrated axctl doctor from a scratch HOME",
             ])],
             ["observed_at", sqlDate(result.endedAt)],
         ])};`,

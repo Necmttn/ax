@@ -471,7 +471,7 @@ export function formatDaemonStatus(status: DaemonStatus, json = false): string {
     return lines.join("\n");
 }
 
-function collectDoctorReport(): DoctorReport {
+export function collectDoctorReport(): DoctorReport {
     const binLink = join(BIN_DIR, "axctl");
     const surrealPath = process.env.AXCTL_SURREAL_PATH ?? process.env.AGENTCTL_SURREAL_PATH ?? which("surreal") ?? join(VENDOR_BIN_DIR, "surreal");
     const surrealVersion = existsSync(surrealPath) ? surrealVersionString(surrealPath) : null;
@@ -522,7 +522,13 @@ function collectDoctorReport(): DoctorReport {
             detail: `${agent.loaded ? "loaded" : "not loaded"}; plist=${agent.plistExists ? "present" : "absent"}`,
         })),
     ];
-    return { platform: process.platform, checks };
+    const onboarding = buildOnboardingReport();
+    const onboardingChecks: DoctorCheck[] = onboarding.checks.map((c) => ({
+        name: `onboarding:${c.id}`,
+        ok: c.status === "ok",
+        detail: c.recommendation,
+    }));
+    return { platform: process.platform, checks: [...checks, ...onboardingChecks] };
 }
 
 export function formatDoctorReport(report: DoctorReport, json = false): string {
