@@ -1,5 +1,6 @@
+import { realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { Effect } from "effect";
 import { SurrealClient } from "../lib/db.ts";
 import { AppLayer } from "../lib/layers.ts";
@@ -33,6 +34,20 @@ import { fetchWrapped, sanitizeWrappedProfile } from "./wrapped.ts";
  */
 const SPA_DIST_DIR = join(import.meta.dir, "web", "dist");
 const LEGACY_STATIC_DIR = join(import.meta.dir, "static");
+const executableDir = (): string => {
+    for (const candidate of [process.argv[1], process.execPath]) {
+        if (!candidate) continue;
+        try {
+            return dirname(realpathSync(candidate));
+        } catch {
+            // Bun compiled binaries may report /$bunfs/root/... for argv[1].
+        }
+    }
+    return process.cwd();
+};
+const EXECUTABLE_DIR = executableDir();
+const SOURCE_SPA_DIST_DIR = join(EXECUTABLE_DIR, "..", "src", "dashboard", "web", "dist");
+const SOURCE_LEGACY_STATIC_DIR = join(EXECUTABLE_DIR, "..", "src", "dashboard", "static");
 
 const CONTENT_TYPES: Record<string, string> = {
     ".html": "text/html; charset=utf-8",
@@ -83,6 +98,37 @@ export function routeStaticAsset(url: URL): { path: string; contentType: string 
         };
     }
     return null;
+}
+
+async function readFirstAvailable(paths: ReadonlyArray<string>): Promise<Uint8Array> {
+    let lastError: unknown;
+    for (const path of paths) {
+        try {
+            return await readFile(path);
+        } catch (err) {
+            lastError = err;
+        }
+    }
+    throw lastError;
+}
+
+function staticPathCandidates(path: string): ReadonlyArray<string> {
+    if (path.startsWith(SPA_DIST_DIR)) {
+        const rel = path.slice(SPA_DIST_DIR.length + 1);
+        return [path, join(SOURCE_SPA_DIST_DIR, rel)];
+    }
+    if (path.startsWith(LEGACY_STATIC_DIR)) {
+        const rel = path.slice(LEGACY_STATIC_DIR.length + 1);
+        return [path, join(SOURCE_LEGACY_STATIC_DIR, rel)];
+    }
+    return [path];
+}
+
+function spaIndexCandidates(): ReadonlyArray<string> {
+    return [
+        join(SPA_DIST_DIR, "index.html"),
+        join(SOURCE_SPA_DIST_DIR, "index.html"),
+    ];
 }
 
 export async function parseQueryRequest(req: Request): Promise<{ sql: string }> {
@@ -593,7 +639,7 @@ export async function handleDashboardRequest(req: Request): Promise<Response> {
     const asset = routeStaticAsset(url);
     if (asset) {
         try {
-            return new Response(await readFile(asset.path), {
+            return new Response(await readFirstAvailable(staticPathCandidates(asset.path)), {
                 headers: { "content-type": asset.contentType },
             });
         } catch {
@@ -604,7 +650,7 @@ export async function handleDashboardRequest(req: Request): Promise<Response> {
     // TanStack Router can take over client-side. 404 only if dist is missing.
     if (req.method === "GET" && !url.pathname.startsWith("/api/")) {
         try {
-            return new Response(await readFile(join(SPA_DIST_DIR, "index.html")), {
+            return new Response(await readFirstAvailable(spaIndexCandidates()), {
                 headers: { "content-type": "text/html; charset=utf-8" },
             });
         } catch {
