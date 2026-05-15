@@ -40,6 +40,9 @@ const DERIVE_LABEL = "com.necmttn.ax-derive-daily";
 const DB_PLIST = join(LAUNCH_AGENTS_DIR, `${DB_LABEL}.plist`);
 const WATCH_PLIST = join(LAUNCH_AGENTS_DIR, `${WATCH_LABEL}.plist`);
 const DERIVE_PLIST = join(LAUNCH_AGENTS_DIR, `${DERIVE_LABEL}.plist`);
+const ROCKSDB_BLOCK_CACHE_SIZE = process.env.AX_DB_ROCKSDB_BLOCK_CACHE_SIZE ?? "268435456";
+const ROCKSDB_WRITE_BUFFER_SIZE = process.env.AX_DB_ROCKSDB_WRITE_BUFFER_SIZE ?? "33554432";
+const ROCKSDB_MAX_WRITE_BUFFER_NUMBER = process.env.AX_DB_ROCKSDB_MAX_WRITE_BUFFER_NUMBER ?? "4";
 
 const dbPlist = (
     _binPath: string,
@@ -74,6 +77,12 @@ const dbPlist = (
     <string>${HOME}/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     <key>SURREAL_BUCKET_FOLDER_ALLOWLIST</key>
     <string>${BUCKETS_DIR}</string>
+    <key>SURREAL_ROCKSDB_BLOCK_CACHE_SIZE</key>
+    <string>${ROCKSDB_BLOCK_CACHE_SIZE}</string>
+    <key>SURREAL_ROCKSDB_WRITE_BUFFER_SIZE</key>
+    <string>${ROCKSDB_WRITE_BUFFER_SIZE}</string>
+    <key>SURREAL_ROCKSDB_MAX_WRITE_BUFFER_NUMBER</key>
+    <string>${ROCKSDB_MAX_WRITE_BUFFER_NUMBER}</string>
   </dict>
   <key>ThrottleInterval</key>
   <integer>5</integer>

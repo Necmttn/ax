@@ -29,6 +29,12 @@
     <string>__HOME__/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     <key>SURREAL_BUCKET_FOLDER_ALLOWLIST</key>
     <string>__DATA_DIR__/buckets</string>
+    <key>SURREAL_ROCKSDB_BLOCK_CACHE_SIZE</key>
+    <string>268435456</string>
+    <key>SURREAL_ROCKSDB_WRITE_BUFFER_SIZE</key>
+    <string>33554432</string>
+    <key>SURREAL_ROCKSDB_MAX_WRITE_BUFFER_NUMBER</key>
+    <string>4</string>
   </dict>
   <key>ThrottleInterval</key>
   <integer>5</integer>
