@@ -3,20 +3,21 @@ export const WRAPPED_DAYS_LOOKBACK = DAYS;
 
 export const WRAPPED_USAGE_SQL = `
 SELECT
-    count() AS sessions,
-    math::sum(array::len((SELECT id FROM turn WHERE session = $parent.id))) AS messages,
-    array::len(array::distinct(time::format(started_at, "%Y-%m-%d"))) AS active_days
-FROM session
-WHERE started_at > time::now() - ${DAYS}d;`;
+    array::len(array::distinct(session)) AS sessions,
+    count() AS messages,
+    array::len(array::distinct(time::format(ts, "%Y-%m-%d"))) AS active_days
+FROM turn
+WHERE ts > time::now() - ${DAYS}d
+GROUP ALL;`;
 
 export const WRAPPED_DAILY_ACTIVITY_SQL = `
 SELECT
-    time::format(started_at, "%Y-%m-%d") AS date,
-    count() AS sessions,
-    math::sum(array::len((SELECT id FROM turn WHERE session = $parent.id))) AS turns
-FROM session
-WHERE started_at > time::now() - ${DAYS}d
-  AND started_at IS NOT NONE
+    time::format(ts, "%Y-%m-%d") AS date,
+    array::len(array::distinct(session)) AS sessions,
+    count() AS turns
+FROM turn
+WHERE ts > time::now() - ${DAYS}d
+  AND ts IS NOT NONE
 GROUP BY date
 ORDER BY date ASC;`;
 
@@ -73,4 +74,5 @@ LIMIT 50;`;
 export const WRAPPED_SPAWNED_SQL = `
 SELECT count() AS count
 FROM spawned
-WHERE ts > time::now() - ${DAYS}d;`;
+WHERE ts > time::now() - ${DAYS}d
+GROUP ALL;`;

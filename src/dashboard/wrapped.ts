@@ -149,17 +149,19 @@ export function choosePrimaryArchetype(signals: ArchetypeSignals): {
             [{ kind: "project", label: "repositories", count: signals.repositories }],
         ),
     ].sort((a, b) => b.score - a.score || a.label.localeCompare(b.label));
+    const scored = candidates.filter((candidate) => candidate.score > 0);
+    const fallback = archetype(
+        "observer",
+        "The Observer",
+        0,
+        "Your graph is still warming up.",
+        "Not enough activity has been ingested yet.",
+        [],
+    );
 
     return {
-        primary: candidates[0] ?? archetype(
-            "observer",
-            "The Observer",
-            0,
-            "Your graph is still warming up.",
-            "Not enough activity has been ingested yet.",
-            [],
-        ),
-        secondary: candidates.slice(1, 4),
+        primary: scored[0] ?? fallback,
+        secondary: scored.slice(1, 4),
     };
 }
 

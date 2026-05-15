@@ -33,6 +33,23 @@ describe("choosePrimaryArchetype", () => {
         expect(result.primary.id).toBe("verifier");
         expect(result.primary.confidence).toBe("high");
     });
+
+    test("uses Observer when no archetype has evidence", () => {
+        const result = choosePrimaryArchetype({
+            verificationCalls: 0,
+            toolFailures: 0,
+            recoveredFailures: 0,
+            distinctSkills: 0,
+            distinctTools: 0,
+            repositories: 0,
+            spawnedAgents: 0,
+            contextCalls: 0,
+            refactorSignals: 0,
+        });
+        expect(result.primary.id).toBe("observer");
+        expect(result.primary.evidence).toEqual([]);
+        expect(result.secondary).toEqual([]);
+    });
 });
 
 describe("makeInterestingFacts", () => {
