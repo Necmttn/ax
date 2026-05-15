@@ -638,6 +638,7 @@ tr.detail-row td {
 
 .graph-rail-title,
 .graph-query label,
+.graph-display-options > label,
 .graph-inspector h3 {
     display: block;
     margin: 0 0 8px;
@@ -714,7 +715,8 @@ tr.detail-row td {
     gap: 8px;
 }
 
-.graph-query input {
+.graph-query input,
+.graph-display-options select {
     width: 100%;
     border: 1px solid var(--line);
     background: var(--panel);
@@ -724,9 +726,42 @@ tr.detail-row td {
     padding: 7px 9px;
 }
 
-.graph-query input:focus {
+.graph-query input:focus,
+.graph-display-options select:focus {
     outline: none;
     border-color: var(--ink);
+}
+
+.graph-display-options {
+    border-top: 1px solid var(--line);
+    margin-top: 18px;
+    padding-top: 14px;
+}
+
+.graph-display-options select {
+    margin-bottom: 10px;
+}
+
+.graph-check {
+    align-items: center;
+    display: flex;
+    gap: 7px;
+    margin: 0 0 8px;
+    color: var(--ink);
+    font-size: 12px;
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+.graph-check input {
+    margin: 0;
+}
+
+.graph-display-options p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.35;
 }
 
 .graph-stage {

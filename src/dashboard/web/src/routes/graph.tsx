@@ -129,6 +129,8 @@ const radiusFor = (weight: number, maxWeight: number): number =>
 const LABEL_GAP = 7;
 const LABEL_EDGE_PADDING = 12;
 const LABEL_CHAR_WIDTH = 6.4;
+const DEFAULT_LIMIT = 80;
+const DEFAULT_PROMINENT_LABELS = 8;
 
 const truncateLabel = (label: string, availableWidth: number): string => {
     const maxChars = Math.floor(Math.max(0, availableWidth) / LABEL_CHAR_WIDTH);
@@ -162,8 +164,9 @@ export function GraphRoute() {
     const activeMode = MODES.find((item) => item.mode === mode) ?? MODES[0]!;
     const stagedMode = !activeMode.implemented;
     const activeQ = (search.q ?? "").trim();
-    const limit = search.limit ?? 160;
+    const limit = search.limit ?? DEFAULT_LIMIT;
     const [q, setQ] = useState(activeQ);
+    const [showAllLabels, setShowAllLabels] = useState(false);
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [hoveredId, setHoveredId] = useState<string | null>(null);
     const ref = useRef<HTMLDivElement | null>(null);
@@ -222,6 +225,15 @@ export function GraphRoute() {
         }
         return ids;
     }, [data, selectedId]);
+    const prominentLabelIds = useMemo(() => {
+        return new Set(
+            laidOut
+                .slice()
+                .sort((a, b) => b.weight - a.weight)
+                .slice(0, DEFAULT_PROMINENT_LABELS)
+                .map((node) => node.id),
+        );
+    }, [laidOut]);
 
     const submit = (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
@@ -241,6 +253,16 @@ export function GraphRoute() {
                 mode: nextMode,
                 q: activeQ || undefined,
                 limit,
+            },
+        });
+    };
+
+    const selectLimit = (nextLimit: number) => {
+        void navigate({
+            search: {
+                mode,
+                q: activeQ || undefined,
+                limit: nextLimit === DEFAULT_LIMIT ? undefined : nextLimit,
             },
         });
     };
@@ -289,6 +311,30 @@ export function GraphRoute() {
                         />
                         <button type="submit" disabled={stagedMode}>Apply</button>
                     </form>
+                    <div className="graph-display-options">
+                        <label htmlFor="graph-limit">Result limit</label>
+                        <select
+                            id="graph-limit"
+                            value={limit}
+                            disabled={stagedMode}
+                            onChange={(event) => selectLimit(Number(event.target.value))}
+                        >
+                            <option value={40}>40 edges</option>
+                            <option value={80}>80 edges</option>
+                            <option value={160}>160 edges</option>
+                            <option value={320}>320 edges</option>
+                        </select>
+                        <label className="graph-check">
+                            <input
+                                type="checkbox"
+                                checked={showAllLabels}
+                                disabled={stagedMode}
+                                onChange={(event) => setShowAllLabels(event.target.checked)}
+                            />
+                            Show all labels
+                        </label>
+                        <p>Default view labels the selected, hovered, and highest-weight nodes only.</p>
+                    </div>
                 </aside>
 
                 <div className="graph-stage" ref={ref}>
@@ -346,6 +392,12 @@ export function GraphRoute() {
                                 const radius = radiusFor(node.weight, maxNodeWeight);
                                 const label = labelPlacement(node, radius, box.w);
                                 const selectedNode = node.id === selectedId;
+                                const hoveredNode = node.id === hoveredId;
+                                const showLabel =
+                                    showAllLabels ||
+                                    selectedNode ||
+                                    hoveredNode ||
+                                    prominentLabelIds.has(node.id);
                                 const related = connectedIds.size === 0 || connectedIds.has(node.id);
                                 return (
                                     <g
@@ -362,9 +414,11 @@ export function GraphRoute() {
                                             r={radius}
                                             className={`tone-${toneClass(node.tone)} kind-${node.kind}`}
                                         />
-                                        <text x={label.x} y={4} textAnchor={label.textAnchor}>
-                                            {label.displayLabel}
-                                        </text>
+                                        {showLabel ? (
+                                            <text x={label.x} y={4} textAnchor={label.textAnchor}>
+                                                {label.displayLabel}
+                                            </text>
+                                        ) : null}
                                     </g>
                                 );
                             })}
