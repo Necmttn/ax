@@ -55,15 +55,29 @@ describe("choosePrimaryArchetype", () => {
 describe("makeInterestingFacts", () => {
     test("emits Token Maxxing for high token totals", () => {
         const facts = makeInterestingFacts({
+            sessions: 100,
+            messages: 200_000,
             totalTokens: 2_000_000,
+            activeDays: 12,
+            currentStreakDays: 8,
+            longestStreakDays: 10,
             peakHour: 19,
             favoriteModel: "Opus 4.7",
+            toolCalls: 50_000,
+            toolFailures: 1_000,
+            contextCalls: 2_000,
             verificationCalls: 10,
             distinctSkills: 12,
+            distinctTools: 20,
             spawnedAgents: 0,
             repositories: 2,
+            topTool: { label: "exec_command", count: 12_345 },
+            topSkill: { label: "systematic-debugging", count: 42 },
         });
         expect(facts.map((f) => f.id)).toContain("token-maxxing");
+        expect(facts.map((f) => f.id)).toContain("context-maxxing");
+        expect(facts.map((f) => f.id)).toContain("tool-call-maxxing");
+        expect(facts.map((f) => f.id)).toContain("main-skill-energy");
     });
 });
 

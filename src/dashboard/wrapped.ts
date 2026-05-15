@@ -17,6 +17,7 @@ import {
     WRAPPED_REPOSITORY_SQL,
     WRAPPED_SKILLS_SQL,
     WRAPPED_SPAWNED_SQL,
+    WRAPPED_TOKEN_USAGE_SQL,
     WRAPPED_TOOLS_SQL,
     WRAPPED_USAGE_SQL,
 } from "../queries/wrapped.ts";
@@ -166,13 +167,24 @@ export function choosePrimaryArchetype(signals: ArchetypeSignals): {
 }
 
 export function makeInterestingFacts(input: {
+    readonly sessions: number;
+    readonly messages: number;
     readonly totalTokens: number | null;
+    readonly activeDays: number;
+    readonly currentStreakDays: number;
+    readonly longestStreakDays: number;
     readonly peakHour: number | null;
     readonly favoriteModel: string | null;
+    readonly toolCalls: number;
+    readonly toolFailures: number;
+    readonly contextCalls: number;
     readonly verificationCalls: number;
     readonly distinctSkills: number;
+    readonly distinctTools: number;
     readonly spawnedAgents: number;
     readonly repositories: number;
+    readonly topTool: { readonly label: string; readonly count: number } | null;
+    readonly topSkill: { readonly label: string; readonly count: number } | null;
 }): WrappedFact[] {
     const facts: WrappedFact[] = [];
 
@@ -180,10 +192,66 @@ export function makeInterestingFacts(input: {
         facts.push({
             id: "token-maxxing",
             title: "Token Maxxing",
-            publicText: "You crossed the million-token mark.",
-            internalText: `Total token estimate: ${input.totalTokens}.`,
+            publicText: `You burned through about ${fmtFactCount(input.totalTokens ?? 0)} estimated tokens.`,
+            internalText: `Estimated token total across session_token_usage: ${input.totalTokens}.`,
             sensitivity: "aggregate",
             evidence: [{ kind: "query", label: "token total", count: input.totalTokens ?? 0 }],
+        });
+    }
+
+    if (input.messages >= 100_000) {
+        facts.push({
+            id: "message-maxxing",
+            title: "Message Maxxing",
+            publicText: `${fmtFactCount(input.messages)} transcript turns landed in your graph.`,
+            internalText: `${input.messages} turn records appeared in the wrapped period.`,
+            sensitivity: "aggregate",
+            evidence: [{ kind: "query", label: "turn records", count: input.messages }],
+        });
+    }
+
+    if (input.contextCalls >= 1_000) {
+        facts.push({
+            id: "context-maxxing",
+            title: "Context Maxxing",
+            publicText: `You made ${fmtFactCount(input.contextCalls)} context/search/read moves before acting.`,
+            internalText: `${input.contextCalls} tool calls matched recall/context/read/search commands.`,
+            sensitivity: "aggregate",
+            evidence: [{ kind: "query", label: "context calls", count: input.contextCalls }],
+        });
+    }
+
+    if (input.toolCalls >= 10_000) {
+        facts.push({
+            id: "tool-call-maxxing",
+            title: "Tool Call Maxxing",
+            publicText: `${fmtFactCount(input.toolCalls)} tool calls. The harness got a workout.`,
+            internalText: `${input.toolCalls} tool_call records appeared in the wrapped period.`,
+            sensitivity: "aggregate",
+            evidence: [{ kind: "tool", label: "tool calls", count: input.toolCalls }],
+        });
+    }
+
+    if (input.toolFailures > 0 && input.toolCalls > 0) {
+        const rate = Math.round((input.toolFailures / input.toolCalls) * 100);
+        facts.push({
+            id: "friction-farmer",
+            title: "Friction Farmer",
+            publicText: `${fmtFactCount(input.toolFailures)} failed tool calls, about ${rate}% of the run. You kept going.`,
+            internalText: `${input.toolFailures} failed tool calls out of ${input.toolCalls} total.`,
+            sensitivity: "aggregate",
+            evidence: [{ kind: "tool", label: "tool failures", count: input.toolFailures }],
+        });
+    }
+
+    if (input.longestStreakDays >= 7) {
+        facts.push({
+            id: "streak-mode",
+            title: "Streak Mode",
+            publicText: `Your longest active streak was ${input.longestStreakDays} days.`,
+            internalText: `Daily activity records produced a ${input.longestStreakDays}-day longest streak and ${input.currentStreakDays}-day current streak.`,
+            sensitivity: "aggregate",
+            evidence: [{ kind: "query", label: "longest streak days", count: input.longestStreakDays }],
         });
     }
 
@@ -191,7 +259,7 @@ export function makeInterestingFacts(input: {
         facts.push({
             id: "peak-hour-agent",
             title: "Peak Hour Agent",
-            publicText: `Your strongest agent hour was ${input.peakHour}:00.`,
+            publicText: `Your strongest agent hour was ${hourFactLabel(input.peakHour)}.`,
             internalText: `Most sessions started during hour ${input.peakHour}.`,
             sensitivity: "aggregate",
             evidence: [{ kind: "query", label: "peak hour", count: input.peakHour }],
@@ -213,7 +281,7 @@ export function makeInterestingFacts(input: {
         facts.push({
             id: "verifycel",
             title: "Verifycel",
-            publicText: "You kept asking the machine to prove it.",
+            publicText: `${fmtFactCount(input.verificationCalls)} verification-like commands. You kept asking the machine to prove it.`,
             internalText: `${input.verificationCalls} verification-like commands were detected.`,
             sensitivity: "aggregate",
             evidence: [{ kind: "tool", label: "verification calls", count: input.verificationCalls }],
@@ -224,18 +292,40 @@ export function makeInterestingFacts(input: {
         facts.push({
             id: "skill-stacker",
             title: "Skill Stacker",
-            publicText: "You built with a wide skill stack.",
+            publicText: `${input.distinctSkills} distinct skills showed up in your workflow.`,
             internalText: `${input.distinctSkills} distinct skills were invoked.`,
             sensitivity: "aggregate",
             evidence: [{ kind: "skill", label: "distinct skills", count: input.distinctSkills }],
         });
     }
 
+    if (input.topSkill !== null) {
+        facts.push({
+            id: "main-skill-energy",
+            title: "Main Skill Energy",
+            publicText: `${input.topSkill.label} was your most repeated skill signal.`,
+            internalText: `${input.topSkill.label} appeared ${input.topSkill.count} times in invoked edges.`,
+            sensitivity: "aggregate",
+            evidence: [{ kind: "skill", label: input.topSkill.label, count: input.topSkill.count }],
+        });
+    }
+
+    if (input.topTool !== null) {
+        facts.push({
+            id: "favorite-button",
+            title: "Favorite Button",
+            publicText: `${input.topTool.label} was your most-used tool path.`,
+            internalText: `${input.topTool.label} appeared ${input.topTool.count} times in tool_call rows.`,
+            sensitivity: "aggregate",
+            evidence: [{ kind: "tool", label: input.topTool.label, count: input.topTool.count }],
+        });
+    }
+
     if (input.spawnedAgents > 0) {
         facts.push({
-            id: "agent-delegator",
-            title: "Agent Delegator",
-            publicText: "You split work across agent runs.",
+            id: "subagent-summoner",
+            title: "Subagent Summoner",
+            publicText: `${fmtFactCount(input.spawnedAgents)} spawned-agent links. You delegated aggressively.`,
             internalText: `${input.spawnedAgents} spawned-agent records were detected.`,
             sensitivity: "aggregate",
             evidence: [{ kind: "query", label: "spawned agents", count: input.spawnedAgents }],
@@ -246,7 +336,7 @@ export function makeInterestingFacts(input: {
         facts.push({
             id: "repo-hopper",
             title: "Repo Hopper",
-            publicText: "Your agent graph spans several codebases.",
+            publicText: `Your agent graph spread across ${input.repositories} repositories.`,
             internalText: `${input.repositories} repositories appeared in the wrapped period.`,
             sensitivity: "aggregate",
             evidence: [{ kind: "project", label: "repository count", count: input.repositories }],
@@ -255,6 +345,18 @@ export function makeInterestingFacts(input: {
 
     return facts;
 }
+
+const fmtFactCount = (value: number): string =>
+    new Intl.NumberFormat("en", {
+        notation: value >= 10_000 ? "compact" : "standard",
+        maximumFractionDigits: 1,
+    }).format(value);
+
+const hourFactLabel = (hour: number): string => {
+    const suffix = hour < 12 ? "AM" : "PM";
+    const display = hour % 12 === 0 ? 12 : hour % 12;
+    return `${display} ${suffix}`;
+};
 
 export function sanitizeWrappedProfile(profile: WrappedProfile): WrappedProfile {
     const cleanEvidence = (evidence: ReadonlyArray<WrappedEvidence>): WrappedEvidence[] =>
@@ -312,11 +414,13 @@ export function fetchWrapped(): Effect.Effect<WrappedProfile, DbError, SurrealCl
             dailyRows,
             peakHourRows,
             modelRows,
+            tokenRows,
             skillRows,
             toolRows,
             repositoryRows,
             spawnedRows,
         ] = yield* db.query<[
+            Row[],
             Row[],
             Row[],
             Row[],
@@ -331,6 +435,7 @@ export function fetchWrapped(): Effect.Effect<WrappedProfile, DbError, SurrealCl
                 WRAPPED_DAILY_ACTIVITY_SQL,
                 WRAPPED_PEAK_HOUR_SQL,
                 WRAPPED_MODEL_SQL,
+                WRAPPED_TOKEN_USAGE_SQL,
                 WRAPPED_SKILLS_SQL,
                 WRAPPED_TOOLS_SQL,
                 WRAPPED_REPOSITORY_SQL,
@@ -350,23 +455,34 @@ export function fetchWrapped(): Effect.Effect<WrappedProfile, DbError, SurrealCl
         const streaks = computeStreaks(days.map((day) => day.date));
         const peakHour = parsePeakHour(peakHourRows[0]);
         const favoriteModel = toString(modelRows[0]?.model);
+        const totalTokensRaw = toNumber(tokenRows[0]?.estimated_tokens);
+        const totalTokens = totalTokensRaw > 0 ? totalTokensRaw : null;
         const tools = queryRows(toolRows);
+        const skills = queryRows(skillRows);
         const toolCount = (pattern: RegExp): number =>
             tools
                 .filter((row) => pattern.test(toString(row.tool) ?? ""))
                 .reduce((sum, row) => sum + toNumber(row.count), 0);
         const verificationCalls = toolCount(verificationToolPattern);
+        const contextCalls = toolCount(contextToolPattern);
+        const topToolRow = tools[0];
+        const topSkillRow = skills[0];
+        const topTool = topToolRow && toString(topToolRow.tool)
+            ? { label: toString(topToolRow.tool)!, count: toNumber(topToolRow.count) }
+            : null;
+        const topSkill = topSkillRow && toString(topSkillRow.skill)
+            ? { label: toString(topSkillRow.skill)!, count: toNumber(topSkillRow.count) }
+            : null;
 
         const metrics = {
             toolCalls: tools.reduce((sum, row) => sum + toNumber(row.count), 0),
             toolFailures: tools.reduce((sum, row) => sum + toNumber(row.failures), 0),
             distinctTools: tools.length,
-            distinctSkills: queryRows(skillRows).length,
+            distinctSkills: skills.length,
             repositories: queryRows(repositoryRows).length,
             verificationCalls,
             spawnedAgents: toNumber(spawnedRows[0]?.count),
         };
-        const totalTokens = null;
         const archetypes = choosePrimaryArchetype({
             verificationCalls,
             toolFailures: metrics.toolFailures,
@@ -375,7 +491,7 @@ export function fetchWrapped(): Effect.Effect<WrappedProfile, DbError, SurrealCl
             distinctTools: metrics.distinctTools,
             repositories: metrics.repositories,
             spawnedAgents: metrics.spawnedAgents,
-            contextCalls: toolCount(contextToolPattern),
+            contextCalls,
             refactorSignals: toolCount(/refactor|rewrite|format/i),
         });
         const now = new Date();
@@ -401,13 +517,24 @@ export function fetchWrapped(): Effect.Effect<WrappedProfile, DbError, SurrealCl
             primaryArchetype: archetypes.primary,
             secondaryArchetypes: archetypes.secondary,
             facts: makeInterestingFacts({
+                sessions: toNumber(usage.sessions),
+                messages: toNumber(usage.messages),
                 totalTokens,
+                activeDays: toNumber(usage.active_days),
+                currentStreakDays: streaks.currentStreakDays,
+                longestStreakDays: streaks.longestStreakDays,
                 peakHour,
                 favoriteModel,
+                toolCalls: metrics.toolCalls,
+                toolFailures: metrics.toolFailures,
+                contextCalls,
                 verificationCalls,
                 distinctSkills: metrics.distinctSkills,
+                distinctTools: metrics.distinctTools,
                 spawnedAgents: metrics.spawnedAgents,
                 repositories: metrics.repositories,
+                topTool,
+                topSkill,
             }),
             metrics,
             privacy: { publicSafe: false, redactedFields: [] },

@@ -41,6 +41,16 @@ GROUP BY model
 ORDER BY count DESC
 LIMIT 1;`;
 
+export const WRAPPED_TOKEN_USAGE_SQL = `
+SELECT
+    math::sum(estimated_tokens) AS estimated_tokens,
+    math::sum(prompt_tokens ?? 0) AS prompt_tokens,
+    math::sum(completion_tokens ?? 0) AS completion_tokens,
+    count() AS sessions
+FROM session_token_usage
+WHERE ts > time::now() - ${DAYS}d
+GROUP ALL;`;
+
 export const WRAPPED_SKILLS_SQL = `
 SELECT out.name AS skill, count() AS count
 FROM invoked
