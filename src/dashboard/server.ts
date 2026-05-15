@@ -22,6 +22,7 @@ import { fetchEpisodeTimeline } from "./episode-timeline.ts";
 import { fetchProject } from "./project.ts";
 import { fetchRecall } from "./recall.ts";
 import { fetchSkillGraph } from "./skill-graph.ts";
+import { fetchWrapped, sanitizeWrappedProfile } from "./wrapped.ts";
 
 /**
  * Prefer the Vite-built SPA in `web/dist` (`bun run dashboard:build`). Fall
@@ -416,6 +417,39 @@ export async function handleDashboardRequest(req: Request): Promise<Response> {
         try {
             const payload = await Effect.runPromise(
                 fetchSessionDetail(sessionId).pipe(
+                    Effect.provide(AppLayer),
+                    Effect.scoped,
+                ) as Effect.Effect<unknown>,
+            );
+            return jsonResponse(payload);
+        } catch (err) {
+            return jsonResponse(
+                { error: err instanceof Error ? err.message : String(err) },
+                500,
+            );
+        }
+    }
+    if (url.pathname === "/api/wrapped" && req.method === "GET") {
+        try {
+            const payload = await Effect.runPromise(
+                fetchWrapped().pipe(
+                    Effect.provide(AppLayer),
+                    Effect.scoped,
+                ) as Effect.Effect<unknown>,
+            );
+            return jsonResponse(payload);
+        } catch (err) {
+            return jsonResponse(
+                { error: err instanceof Error ? err.message : String(err) },
+                500,
+            );
+        }
+    }
+    if (url.pathname === "/api/wrapped/public-preview" && req.method === "GET") {
+        try {
+            const payload = await Effect.runPromise(
+                fetchWrapped().pipe(
+                    Effect.map(sanitizeWrappedProfile),
                     Effect.provide(AppLayer),
                     Effect.scoped,
                 ) as Effect.Effect<unknown>,
