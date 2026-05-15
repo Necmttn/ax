@@ -36,6 +36,7 @@ import {
 import { cmdProject } from "./project.ts";
 import { AGENTCTL_VERSION, liveVersionDeps, printVersion, updateAgentctl } from "./version.ts";
 import { cmdDogfoodTerminal } from "../dogfood/wterm.ts";
+import { buildFileContextPack } from "../context/file-context.ts";
 import { guidanceNext, parseSelfImproveArgs, selfImproveWeekly, sessionSummary } from "../self-improve/commands.ts";
 import {
     buildIngestEventStatement,
@@ -1688,6 +1689,41 @@ const projectCommand = Command.make("project").pipe(
     Command.withSubcommands([projectContextCommand, projectVerifyCommand, projectHarnessCommand]),
 );
 
+const parseFileHints = (value: Option.Option<string>): readonly string[] =>
+    (Option.getOrUndefined(value) ?? "")
+        .split(",")
+        .map((file) => file.trim())
+        .filter((file) => file.length > 0);
+
+const contextFileCommand = Command.make(
+    "file",
+    {
+        query: Argument.string("query").pipe(Argument.variadic({ min: 1 })),
+        files: Flag.string("files").pipe(Flag.optional),
+        json: jsonFlag,
+    },
+    ({ query, files, json }) =>
+        Effect.gen(function* () {
+            const pack = yield* buildFileContextPack({
+                q: query.join(" "),
+                files: parseFileHints(files),
+            });
+            if (json) {
+                console.log(prettyPrint(pack));
+                return;
+            }
+            console.log(pack.ai_context);
+            console.log("");
+            console.log("Graph inspection query:");
+            console.log(pack.graph_inspection_query);
+        }),
+).pipe(Command.withDescription("Build graph-derived file context for an agent task"));
+
+const contextCommand = Command.make("context").pipe(
+    Command.withDescription("Build just-in-time context packs for agents"),
+    Command.withSubcommands([contextFileCommand]),
+);
+
 const jsonSelfImprove = (cmd: "guidance" | "session" | "self-improve", rest: string[]) => {
     const parsed = parseSelfImproveArgs(cmd, rest);
     const effect =
@@ -1815,6 +1851,7 @@ export const rootCommand = Command.make("axctl").pipe(
         dashboardCommand,
         recallCommand,
         skillsCommand,
+        contextCommand,
         projectCommand,
         evidenceCommand,
         versionCommand,
@@ -1845,14 +1882,31 @@ async function main() {
         await Effect.runPromise(runCli(["update", ...args.slice(1)]) as Effect.Effect<void>);
         return;
     }
-    const noDbCommands = new Set(["install", "daemon", "doctor", "uninstall", "version", "update"]);
-    if (noDbCommands.has(args[0] ?? "")) {
-        await Effect.runPromise(runCli(args) as Effect.Effect<void>);
+    // Only known DB-requiring commands route through AppLayer (which connects
+    // SurrealDB). Lifecycle commands (install/daemon/doctor/uninstall/version/
+    // update) and unknown commands / typos skip the connect attempt so the
+    // user sees Effect CLI's "unknown command" error instead of a 5s DB
+    // connect timeout dump.
+    const dbCommands = new Set([
+        "ingest",
+        "derive-signals",
+        "insights",
+        "interventions",
+        "dashboard",
+        "recall",
+        "skills",
+        "project",
+        "evidence",
+        "tui",
+        "dogfood",
+    ]);
+    if (dbCommands.has(args[0] ?? "")) {
+        await Effect.runPromise(
+            runCli(args).pipe(Effect.provide(AppLayer), Effect.scoped) as Effect.Effect<void>,
+        );
         return;
     }
-    await Effect.runPromise(
-        runCli(args).pipe(Effect.provide(AppLayer), Effect.scoped) as Effect.Effect<void>,
-    );
+    await Effect.runPromise(runCli(args) as Effect.Effect<void>);
 }
 
 if (import.meta.main) {

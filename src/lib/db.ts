@@ -129,7 +129,7 @@ export class SurrealClient extends Context.Service<
 const connectError = (url: string, reason: string): DbError =>
     new DbError({
         operation: "connect",
-        message: `daemon not reachable at ${url} (${reason}); run 'axctl install' to start it`,
+        message: `daemon not reachable at ${url} (${reason}); recover with 'axctl daemon start' (or 'axctl daemon restart'); 'axctl doctor' shows where it stalled`,
     });
 
 const acquire = (cfg: DbConfig): Effect.Effect<Surreal, DbError> =>
