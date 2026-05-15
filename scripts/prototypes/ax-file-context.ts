@@ -22,6 +22,9 @@ interface Args {
     readonly q: string;
     readonly files: readonly string[];
     readonly html: string;
+    readonly scanTurns: boolean;
+    readonly timings: boolean;
+    readonly json: boolean;
 }
 
 interface FileRow {
@@ -110,6 +113,55 @@ interface MentionTurn {
     readonly why: readonly string[];
 }
 
+interface FileEvidenceRow {
+    readonly kind: "read_file" | "searched_file";
+    readonly evidence?: string | null;
+    readonly path_seen?: string | null;
+    readonly excerpt?: string | null;
+    readonly ts?: string | null;
+    readonly path?: string | null;
+    readonly tool_name?: string | null;
+    readonly command_norm?: string | null;
+    readonly turn?: {
+        readonly id?: string;
+        readonly session?: {
+            readonly id?: string;
+            readonly source?: string | null;
+        } | null;
+        readonly seq?: number | null;
+        readonly intent_kind?: string | null;
+        readonly text?: string | null;
+        readonly text_excerpt?: string | null;
+    } | null;
+}
+
+interface RankedFileEvidenceRow extends FileEvidenceRow {
+    readonly observations: number;
+    readonly score: number;
+}
+
+interface ContextPack {
+    readonly kind: "ax.file_context_pack";
+    readonly task: string;
+    readonly generated_at: string;
+    readonly html_path: string;
+    readonly options: {
+        readonly scan_turns: boolean;
+    };
+    readonly signals: MentionSignals;
+    readonly files: readonly FileRow[];
+    readonly ai_context: string;
+    readonly graph_inspection_query: string;
+    readonly evidence: {
+        readonly tool_file: readonly FileEvidenceRow[];
+        readonly edits: readonly EditRow[];
+        readonly touches: readonly TouchRow[];
+        readonly produced_session_turns: readonly SessionTurn[];
+        readonly mention_turns: readonly MentionTurn[];
+        readonly neighbor_files: readonly NeighborFile[];
+    };
+}
+
 const argValue = (name: string): string | null => {
     const eq = process.argv.find((arg) => arg.startsWith(`${name}=`));
     if (eq) return eq.slice(name.length + 1);
@@ -131,7 +183,10 @@ function parseArgs(): Args {
     const q = argValue("--q") ?? "Working memory not initialized from update_working_memory";
     const files = argValues("--file");
     const html = argValue("--html") ?? "scripts/prototypes/ax-file-context-preview.html";
-    return { q, files, html };
+    const scanTurns = process.argv.includes("--scan-turns");
+    const timings = process.argv.includes("--timings");
+    const json = process.argv.includes("--json");
+    return { q, files, html, scanTurns, timings, json };
 }
 
 const sqlString = (value: string): string => JSON.stringify(value);
@@ -139,6 +194,94 @@ const textOf = (value: unknown): string => (value === null || value === undefine
 const escapeHtml = (s: unknown): string =>
     textOf(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const clip = (s: string, n: number): string => (s.length <= n ? s : `${s.slice(0, n - 1)}...`);
+const GENERIC_BASENAMES = new Set(["index.ts", "index.tsx", "index.js", "README.md", "package.json", "tsconfig.json"]);
+
+async function timed<T>(args: Args, label: string, f: () => Promise<T>): Promise<T> {
+    const started = performance.now();
+    try {
+        return await f();
+    } finally {
+        if (args.timings) {
+            const ms = Math.round(performance.now() - started);
+            console.error(`[timing] ${label}: ${ms}ms`);
+        }
+    }
+}
+
+function rankFileEvidence(row: FileEvidenceRow): number {
+    let score = row.kind === "searched_file" ? 12 : 10;
+    if (row.command_norm === "rg" || row.command_norm === "grep") score += 3;
+    if (row.tool_name === "Read") score += 2;
+    if (row.turn?.intent_kind === "correction" || row.turn?.intent_kind === "preference") score += 2;
+    return score;
+}
+
+function compactFileEvidence(rows: readonly FileEvidenceRow[]): RankedFileEvidenceRow[] {
+    const best = new Map<string, RankedFileEvidenceRow>();
+    for (const row of rows) {
+        const key = [row.kind, row.path ?? row.path_seen ?? "?", row.tool_name ?? "", row.command_norm ?? ""].join("|");
+        const score = rankFileEvidence(row);
+        const existing = best.get(key);
+        if (!existing) {
+            best.set(key, { ...row, observations: 1, score });
+            continue;
+        }
+        const next: RankedFileEvidenceRow = {
+            ...(score > existing.score ? row : existing),
+            observations: existing.observations + 1,
+            score: Math.max(existing.score, score),
+        };
+        best.set(key, next);
+    }
+    return Array.from(best.values())
+        .sort((a, b) => b.score - a.score || b.observations - a.observations || (b.ts ?? "").localeCompare(a.ts ?? ""));
+}
+
+function evidenceObservationCount(row: FileEvidenceRow): number {
+    return "observations" in row && typeof row.observations === "number" ? row.observations : 1;
+}
+
+function renderGraphInspectionQuery(files: readonly FileRow[]): string {
+    if (files.length === 0) return "-- No matched file records to inspect.";
+    const fileRefs = files.map((file) => file.id).join(", ");
+    return [
+        `LET $files = [${fileRefs}];`,
+        "",
+        "SELECT id, path, repo, repository FROM file WHERE id IN $files;",
+        "",
+        "SELECT",
+        "  id, evidence, path_seen, ts, out.{ id, path } AS file,",
+        "  in.{ id, name, command_norm, turn, session } AS tool_call",
+        "FROM read_file",
+        "WHERE out IN $files",
+        "ORDER BY ts DESC",
+        "LIMIT 40;",
+        "",
+        "SELECT",
+        "  id, evidence, path_seen, ts, out.{ id, path } AS file,",
+        "  in.{ id, name, command_norm, turn, session } AS tool_call",
+        "FROM searched_file",
+        "WHERE out IN $files",
+        "ORDER BY ts DESC",
+        "LIMIT 40;",
+        "",
+        "SELECT",
+        "  id, source, confidence, ts, out.{ id, path } AS file,",
+        "  in.{ id, session, seq, intent_kind, text_excerpt } AS turn",
+        "FROM mentioned_file",
+        "WHERE out IN $files",
+        "ORDER BY ts DESC",
+        "LIMIT 40;",
+        "",
+        "SELECT",
+        "  id, additions, deletions, ts, out.{ id, path } AS file,",
+        "  in.{ sha, message, author, ts, sessions: <-produced.in.{ id, source, cwd } } AS commit",
+        "FROM touched",
+        "WHERE out IN $files",
+        "ORDER BY ts DESC",
+        "LIMIT 40;",
+    ].join("\n");
+}
 
 function extractPathHints(q: string): string[] {
     const paths = q.match(/[A-Za-z0-9_./-]+\.(?:ts|tsx|js|jsx|mjs|cjs|surql|sql|md|json)/g) ?? [];
@@ -177,13 +320,24 @@ async function connect(): Promise<Surreal> {
 async function findFiles(db: Surreal, paths: readonly string[]): Promise<FileRow[]> {
     const clean = Array.from(new Set(paths.map((p) => p.trim()).filter(Boolean)));
     if (clean.length === 0) return [];
+    const exactList = clean.map(sqlString).join(", ");
+    const [exactRows] = await db.query<[FileRow[]]>(`
+        SELECT <string>id AS id, path, repo, <string>repository AS repository
+        FROM file
+        WHERE path IN [${exactList}]
+        LIMIT 20;
+    `);
+    if (exactRows.length > 0) return exactRows.slice(0, 8);
+
     const clauses = clean.flatMap((path) => {
         const base = path.split("/").at(-1) ?? path;
-        return [
-            `path = ${sqlString(path)}`,
+        const pathClauses = [
             `string::ends_with(path, ${sqlString(path)})`,
-            `string::ends_with(path, ${sqlString(base)})`,
         ];
+        if (path.includes("/") && !GENERIC_BASENAMES.has(base)) {
+            pathClauses.push(`string::ends_with(path, ${sqlString(base)})`);
+        }
+        return pathClauses;
     });
     const [rows] = await db.query<[FileRow[]]>(`
         SELECT <string>id AS id, path, repo, <string>repository AS repository
@@ -209,7 +363,6 @@ async function loadEdits(db: Surreal, fileIds: readonly string[]): Promise<EditR
                 seq,
                 ts,
                 intent_kind,
-                text,
                 text_excerpt,
                 session: session.{ id, source, cwd, started_at }
             } AS turn
@@ -245,6 +398,46 @@ async function loadTouches(db: Surreal, fileIds: readonly string[]): Promise<Tou
         LIMIT 40;
     `);
     return rows;
+}
+
+async function loadFileEvidenceTable(
+    db: Surreal,
+    table: "read_file" | "searched_file",
+    fileIds: readonly string[],
+): Promise<FileEvidenceRow[]> {
+    if (fileIds.length === 0) return [];
+    const [rows] = await db.query<[Array<Omit<FileEvidenceRow, "kind">>]>(`
+        SELECT
+            evidence,
+            path_seen,
+            excerpt,
+            <string>ts AS ts,
+            out.path AS path,
+            in.name AS tool_name,
+            in.command_norm AS command_norm,
+            in.turn.{
+                id,
+                seq,
+                intent_kind,
+                text_excerpt,
+                session: session.{ id, source }
+            } AS turn
+        FROM ${table}
+        WHERE out IN [${fileIds.join(", ")}]
+          AND in.session.source != "claude-subagent"
+        ORDER BY ts DESC
+        LIMIT 30;
+    `);
+    return rows.map((row) => ({ ...row, kind: table }));
+}
+
+async function loadFileEvidence(db: Surreal, fileIds: readonly string[]): Promise<FileEvidenceRow[]> {
+    const [reads, searches] = await Promise.all([
+        loadFileEvidenceTable(db, "read_file", fileIds),
+        loadFileEvidenceTable(db, "searched_file", fileIds),
+    ]);
+    return compactFileEvidence([...reads, ...searches])
+        .slice(0, 12);
 }
 
 async function loadNeighborFiles(db: Surreal, touches: readonly TouchRow[], targetPaths: readonly string[]): Promise<NeighborFile[]> {
@@ -286,7 +479,6 @@ async function loadProducedSessionTurns(db: Surreal, touches: readonly TouchRow[
             <string>ts AS ts,
             message_kind,
             intent_kind,
-            text,
             text_excerpt
         FROM turn
         WHERE session IN [${sessionIds.join(", ")}]
@@ -303,7 +495,8 @@ async function loadProducedSessionTurns(db: Surreal, touches: readonly TouchRow[
         .filter((row) => ["organic_task", "correction", "preference"].includes(row.intent_kind ?? ""));
 }
 
-async function loadMentionTurns(db: Surreal, signals: MentionSignals, fileRows: readonly FileRow[]): Promise<MentionTurn[]> {
+async function loadMentionTurns(db: Surreal, signals: MentionSignals, fileRows: readonly FileRow[], enabled: boolean): Promise<MentionTurn[]> {
+    if (!enabled) return [];
     const needles = Array.from(
         new Set([
             ...signals.errors,
@@ -323,18 +516,17 @@ async function loadMentionTurns(db: Surreal, signals: MentionSignals, fileRows: 
             <string>ts AS ts,
             message_kind,
             intent_kind,
-            text,
             text_excerpt
         FROM turn
-        WHERE text IS NOT NONE
+        WHERE text_excerpt IS NOT NONE
           AND message_kind = "task"
         ORDER BY ts DESC
-        LIMIT 5000;
+        LIMIT 1000;
     `);
     return rows
         .map((row) => {
             const intentKind = row.intent_kind ?? classifyTurnIntent({ role: "user", messageKind: row.message_kind ?? "task", source: row.source ?? null, text: row.text ?? row.text_excerpt ?? null });
-            const text = `${row.text ?? ""} ${row.text_excerpt ?? ""}`.toLowerCase();
+            const text = `${row.text_excerpt ?? ""}`.toLowerCase();
             let score = 0;
             const why: string[] = [];
             for (const error of signals.errors) {
@@ -362,6 +554,7 @@ async function loadMentionTurns(db: Surreal, signals: MentionSignals, fileRows: 
             if (why.length > 0 && (intentKind === "correction" || intentKind === "preference")) score += 2;
             return { ...row, intent_kind: intentKind, score, why };
         })
+        .filter((row) => row.source !== "claude-subagent")
         .filter((row) => ["organic_task", "correction", "preference"].includes(row.intent_kind ?? ""))
         .filter((row) => row.why.length > 0)
         .sort((a, b) => b.score - a.score || (b.ts ?? "").localeCompare(a.ts ?? ""))
@@ -372,6 +565,7 @@ async function loadReferenceMentionTurns(db: Surreal, signals: MentionSignals, f
     const scored = new Map<string, MentionTurn>();
     const addRows = (rows: Array<Omit<MentionTurn, "score" | "why"> & { readonly score: number; readonly why: string }>) => {
         for (const row of rows) {
+            if (row.source === "claude-subagent") continue;
             const intentKind = row.intent_kind ?? classifyTurnIntent({ role: "user", messageKind: "task", source: row.source ?? null, text: row.text ?? row.text_excerpt ?? null });
             if (!["organic_task", "correction", "preference"].includes(intentKind)) continue;
             const existing = scored.get(row.id);
@@ -408,12 +602,12 @@ async function loadReferenceMentionTurns(db: Surreal, signals: MentionSignals, f
                 in.seq AS seq,
                 <string>in.ts AS ts,
                 in.intent_kind AS intent_kind,
-                in.text AS text,
                 in.text_excerpt AS text_excerpt,
                 8 AS score,
-                string::concat("mentioned_file: ", out.path) AS why
+                string::concat(source, ": ", out.path) AS why
             FROM mentioned_file
             WHERE out IN [${fileIds.join(", ")}]
+              AND in.session.source != "claude-subagent"
             ORDER BY ts DESC
             LIMIT 40;
         `);
@@ -430,12 +624,12 @@ async function loadReferenceMentionTurns(db: Surreal, signals: MentionSignals, f
                 in.seq AS seq,
                 <string>in.ts AS ts,
                 in.intent_kind AS intent_kind,
-                in.text AS text,
                 in.text_excerpt AS text_excerpt,
                 5 AS score,
-                string::concat("mentioned_symbol: ", out.name) AS why
+                string::concat(source, ": ", out.name) AS why
             FROM mentioned_symbol
             WHERE out IN [${symbolIds.join(", ")}]
+              AND in.session.source != "claude-subagent"
             ORDER BY ts DESC
             LIMIT 40;
         `);
@@ -452,12 +646,12 @@ async function loadReferenceMentionTurns(db: Surreal, signals: MentionSignals, f
                 in.seq AS seq,
                 <string>in.ts AS ts,
                 in.intent_kind AS intent_kind,
-                in.text AS text,
                 in.text_excerpt AS text_excerpt,
                 10 AS score,
-                string::concat("mentioned_error: ", out.text) AS why
+                string::concat(source, ": ", out.text) AS why
             FROM mentioned_error
             WHERE out IN [${errorIds.join(", ")}]
+              AND in.session.source != "claude-subagent"
             ORDER BY ts DESC
             LIMIT 40;
         `);
@@ -484,6 +678,7 @@ function renderAiContext(
     args: Args,
     signals: MentionSignals,
     files: readonly FileRow[],
+    fileEvidence: readonly FileEvidenceRow[],
     edits: readonly EditRow[],
     touches: readonly TouchRow[],
     sessionTurns: readonly SessionTurn[],
@@ -508,6 +703,18 @@ function renderAiContext(
         lines.push("", "Extracted bug signals:");
         for (const error of signals.errors) lines.push(`- error: ${error}`);
         for (const symbol of signals.symbols.slice(0, 8)) lines.push(`- symbol: ${symbol}`);
+    }
+
+    if (fileEvidence.length > 0) {
+        lines.push("", "Observed tool evidence for these files:");
+        for (const evidence of fileEvidence.slice(0, 6)) {
+            const turn = evidence.turn;
+            const tool = [evidence.tool_name, evidence.command_norm].filter(Boolean).join("/") || "?";
+            const observationCount = evidenceObservationCount(evidence);
+            const observations = observationCount > 1 ? ` (${observationCount} observations)` : "";
+            lines.push(`- ${evidence.kind}: ${evidence.path ?? evidence.path_seen ?? "?"} via ${tool}${observations}`);
+            lines.push(`  Source: ${turn?.session?.source ?? "?"} ${turn?.session?.id ?? "?"} seq ${turn?.seq ?? "?"}; ${evidence.evidence ?? "observed"}`);
+        }
     }
 
     if (rankedEdits.length > 0) {
@@ -554,17 +761,53 @@ function renderAiContext(
     return lines.join("\n");
 }
 
+function buildContextPack(
+    args: Args,
+    signals: MentionSignals,
+    files: readonly FileRow[],
+    fileEvidence: readonly FileEvidenceRow[],
+    edits: readonly EditRow[],
+    touches: readonly TouchRow[],
+    sessionTurns: readonly SessionTurn[],
+    mentionTurns: readonly MentionTurn[],
+    neighbors: readonly NeighborFile[],
+): ContextPack {
+    return {
+        kind: "ax.file_context_pack",
+        task: args.q,
+        generated_at: new Date().toISOString(),
+        html_path: args.html,
+        options: {
+            scan_turns: args.scanTurns,
+        },
+        signals,
+        files,
+        ai_context: renderAiContext(args, signals, files, fileEvidence, edits, touches, sessionTurns, mentionTurns, neighbors),
+        graph_inspection_query: renderGraphInspectionQuery(files),
+        evidence: {
+            tool_file: fileEvidence,
+            edits,
+            touches,
+            produced_session_turns: sessionTurns,
+            mention_turns: mentionTurns,
+            neighbor_files: neighbors,
+        },
+    };
+}
+
 async function writeHtml(
     args: Args,
     signals: MentionSignals,
     files: readonly FileRow[],
+    fileEvidence: readonly FileEvidenceRow[],
     edits: readonly EditRow[],
     touches: readonly TouchRow[],
     sessionTurns: readonly SessionTurn[],
     mentionTurns: readonly MentionTurn[],
     neighbors: readonly NeighborFile[],
 ) {
-    const aiContext = renderAiContext(args, signals, files, edits, touches, sessionTurns, mentionTurns, neighbors);
+    const aiContext = renderAiContext(args, signals, files, fileEvidence, edits, touches, sessionTurns, mentionTurns, neighbors);
+    const inspectionQuery = renderGraphInspectionQuery(files);
     const topics = classifyTopics(args.q);
     const fileRows = files.map((file) => `<tr><td>${escapeHtml(file.path)}</td><td>${escapeHtml(file.id)}</td><td>${escapeHtml(file.repo ?? "")}</td></tr>`).join("");
     const editRows = edits
@@ -585,6 +828,13 @@ async function writeHtml(
     const mentionTurnRows = mentionTurns
         .slice(0, 20)
         .map((turn) => `<tr><td>${escapeHtml(turn.score)}</td><td>${escapeHtml(turn.intent_kind ?? "?")}</td><td>${escapeHtml(turn.session)}</td><td>${escapeHtml(turn.why.join("; "))}</td><td>${escapeHtml(clip((turn.text ?? turn.text_excerpt ?? "").replace(/\s+/g, " "), 240))}</td></tr>`)
+        .join("");
+    const fileEvidenceRows = fileEvidence
+        .slice(0, 20)
+        .map((evidence) => {
+            const observations = evidenceObservationCount(evidence);
+            return `<tr><td>${escapeHtml(evidence.kind)}</td><td>${escapeHtml(fileEvidence.indexOf(evidence) + 1)}</td><td>${escapeHtml(observations)}</td><td>${escapeHtml(evidence.path ?? evidence.path_seen ?? "?")}</td><td>${escapeHtml([evidence.tool_name, evidence.command_norm].filter(Boolean).join("/") || "?")}</td><td>${escapeHtml(evidence.evidence ?? "")}</td><td>${escapeHtml(evidence.turn?.session?.id ?? "?")}</td><td>${escapeHtml(clip((evidence.excerpt ?? "").replace(/\s+/g, " "), 180))}</td></tr>`;
+        })
         .join("");
     const neighborRows = neighbors.map((n) => `<li>${escapeHtml(n.path)} <span class="muted">(${n.count})</span></li>`).join("");
     const html = `<!doctype html>
@@ -612,11 +862,13 @@ async function writeHtml(
 <body>
 <main>
   <h1>Ax File Context Prototype</h1>
-  <div class="meta">Task: ${escapeHtml(args.q)}<br>Input files: ${escapeHtml(args.files.join(", ") || "(path hints from prompt)") || "(none)"}<br>Detected topics: ${escapeHtml(topics.join(", ") || "none")}<br>Extracted symbols: ${escapeHtml(signals.symbols.join(", ") || "none")}<br>Extracted errors: ${escapeHtml(signals.errors.join(", ") || "none")}</div>
+  <div class="meta">Task: ${escapeHtml(args.q)}<br>Input files: ${escapeHtml(args.files.join(", ") || "(path hints from prompt)") || "(none)"}<br>Fallback transcript scan: ${args.scanTurns ? "on" : "off"}<br>Detected topics: ${escapeHtml(topics.join(", ") || "none")}<br>Extracted symbols: ${escapeHtml(signals.symbols.join(", ") || "none")}<br>Extracted errors: ${escapeHtml(signals.errors.join(", ") || "none")}</div>
   <div class="grid">
     <section><h2>What The AI Sees</h2><pre>${escapeHtml(aiContext)}</pre></section>
     <section><h2>Matched File Nodes</h2><table><thead><tr><th>Path</th><th>ID</th><th>Repo</th></tr></thead><tbody>${fileRows}</tbody></table></section>
   </div>
+  <section><h2>Graph Inspection Query</h2><pre>${escapeHtml(inspectionQuery)}</pre></section>
+  <section><h2>Observed Tool Evidence</h2><table><thead><tr><th>Kind</th><th>Rank</th><th>Obs</th><th>File</th><th>Tool</th><th>Evidence</th><th>Session</th><th>Excerpt</th></tr></thead><tbody>${fileEvidenceRows}</tbody></table></section>
   <section><h2>Prior Edited Turns</h2><table><thead><tr><th>File</th><th>Intent</th><th>Session</th><th>Message</th></tr></thead><tbody>${editRows}</tbody></table></section>
   <section><h2>Turns From Sessions That Produced Touching Commits</h2><table><thead><tr><th>Intent</th><th>Session</th><th>Message</th></tr></thead><tbody>${sessionTurnRows}</tbody></table></section>
   <section><h2>Turns Mentioning Same Files / Errors / Symbols</h2><table><thead><tr><th>Score</th><th>Intent</th><th>Session</th><th>Why</th><th>Message</th></tr></thead><tbody>${mentionTurnRows}</tbody></table></section>
@@ -633,17 +885,26 @@ async function main() {
     const db = await connect();
     try {
         const signals = extractMentionSignals(args.q, args.files);
-        const files = await findFiles(db, signals.paths);
+        const files = await timed(args, "findFiles", () => findFiles(db, signals.paths));
         const fileIds = files.map((file) => file.id);
-        const edits = await loadEdits(db, fileIds);
-        const touches = await loadTouches(db, fileIds);
-        const sessionTurns = await loadProducedSessionTurns(db, touches);
-        const referenceMentionTurns = await loadReferenceMentionTurns(db, signals, files);
-        const mentionTurns = referenceMentionTurns.length > 0 ? referenceMentionTurns : await loadMentionTurns(db, signals, files);
-        const neighbors = await loadNeighborFiles(db, touches, files.map((file) => file.path));
-        await writeHtml(args, signals, files, edits, touches, sessionTurns, mentionTurns, neighbors);
-        console.log(`HTML preview: ${args.html}`);
-        console.log(renderAiContext(args, signals, files, edits, touches, sessionTurns, mentionTurns, neighbors));
+        const fileEvidence = await timed(args, "loadFileEvidence", () => loadFileEvidence(db, fileIds));
+        const edits = await timed(args, "loadEdits", () => loadEdits(db, fileIds));
+        const touches = await timed(args, "loadTouches", () => loadTouches(db, fileIds));
+        const sessionTurns = await timed(args, "loadProducedSessionTurns", () => loadProducedSessionTurns(db, touches));
+        const referenceMentionTurns = await timed(args, "loadReferenceMentionTurns", () => loadReferenceMentionTurns(db, signals, files));
+        const mentionTurns = referenceMentionTurns.length > 0 ? referenceMentionTurns : await timed(args, "loadMentionTurns", () => loadMentionTurns(db, signals, files, args.scanTurns));
+        const neighbors = await timed(args, "loadNeighborFiles", () => loadNeighborFiles(db, touches, files.map((file) => file.path)));
+        const pack = buildContextPack(args, signals, files, fileEvidence, edits, touches, sessionTurns, mentionTurns, neighbors);
+        await timed(args, "writeHtml", () => writeHtml(args, signals, files, fileEvidence, edits, touches, sessionTurns, mentionTurns, neighbors));
+        if (args.json) {
+            console.log(JSON.stringify(pack, null, 2));
+        } else {
+            console.log(`HTML preview: ${args.html}`);
+            console.log(pack.ai_context);
+            console.log("");
+            console.log("Graph inspection query:");
+            console.log(pack.graph_inspection_query);
+        }
     } finally {
         await db.close();
     }

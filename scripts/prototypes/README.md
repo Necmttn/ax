@@ -43,6 +43,28 @@ The output is graph-first: matched `file` nodes, prior `edited` turns, commits
 through `touched`, neighboring files from shared commits, and an
 `<ax_file_context>` block.
 
+By default, the preview only uses bounded graph-derived context. Pass
+`--scan-turns` to enable the older fallback scan over recent turn excerpts when
+reference edges are missing.
+
+Emit the same result as a machine-readable context pack:
+
+```sh
+bun run prototype:file-context -- \
+  --q "Working memory not initialized from update_working_memory" \
+  --file apps/nokta/app/tools/update-working-memory.ts \
+  --json
+```
+
+The product-shaped CLI version is:
+
+```sh
+axctl context file \
+  --files=apps/nokta/app/tools/update-working-memory.ts,apps/nokta/app/processors/working-memory.ts \
+  --json \
+  "Working memory not initialized from update_working_memory"
+```
+
 ## Turn References Prototype
 
 Question: can we make file/symbol/error mentions into first-class graph edges so
@@ -52,6 +74,12 @@ Run:
 
 ```sh
 bun run prototype:turn-references -- --limit 500
+```
+
+Include tool input/output evidence:
+
+```sh
+bun run prototype:turn-references -- --limit 500 --include-tools
 ```
 
 For a single session:
@@ -67,6 +95,8 @@ The script extracts and writes:
 - `turn -> mentioned_file -> file`
 - `turn -> mentioned_symbol -> symbol`
 - `turn -> mentioned_error -> error_signature`
+- `tool_call -> read_file -> file`
+- `tool_call -> searched_file -> file`
 
-Those edges are the next product-grade ingestion layer behind file-based
-context injection.
+Sources are recorded as `text`, `tool_input`, or `tool_output`. Those edges are
+the next product-grade ingestion layer behind file-based context injection.
