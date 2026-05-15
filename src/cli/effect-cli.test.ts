@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { insightsOnlyConflicts, rootCommand } from "./index.ts";
+import { DB_COMMANDS, insightsOnlyConflicts, rootCommand } from "./index.ts";
 
 const topLevelNames = (): string[] =>
     rootCommand.subcommands.flatMap((group) =>
@@ -99,6 +99,7 @@ describe("effect cli", () => {
         expect(context).toBeDefined();
         const subNames = context!.subcommands.flatMap((g) => g.commands.map((c) => c.name));
         expect(subNames).toEqual(expect.arrayContaining(["file"]));
+        expect(DB_COMMANDS.has("context")).toBe(true);
     });
 });
 

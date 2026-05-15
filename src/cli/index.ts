@@ -1907,7 +1907,7 @@ const withoutDb = (args: ReadonlyArray<string>): CliProgram => {
 // Commands whose handlers reach into SurrealClient via AppLayer. Anything
 // outside this set runs through `withoutDb` so the user gets fast, honest
 // errors (e.g. "unknown command") instead of a 5s connect timeout.
-const DB_COMMANDS: ReadonlySet<string> = new Set([
+export const DB_COMMANDS: ReadonlySet<string> = new Set([
     "ingest",
     "derive-signals",
     "insights",
@@ -1916,6 +1916,7 @@ const DB_COMMANDS: ReadonlySet<string> = new Set([
     "recall",
     "skills",
     "project",
+    "context",
     "evidence",
     "tui",
     "dogfood",

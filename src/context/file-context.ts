@@ -81,6 +81,51 @@ interface NeighborFile {
     readonly count: number;
 }
 
+interface PriorFileSession {
+    readonly session: string;
+    readonly title: string | null;
+    readonly project: string | null;
+    readonly source: string | null;
+    readonly weight: number;
+    readonly files_touched: number;
+    readonly top_files: readonly string[];
+    readonly produced_commits: number;
+    readonly delivery_status: string | null;
+    readonly review_pain: string | null;
+    readonly pr_size: string | null;
+    readonly pr_title: string | null;
+    readonly merged_to_main: boolean;
+    readonly user_turns: number;
+    readonly assistant_turns: number;
+    readonly corrections: number;
+    readonly interruptions: number;
+    readonly duration_ms: number | null;
+    readonly hands_free_ms: number | null;
+    readonly last_seen: string | null;
+}
+
+interface PriorFileSessionAccumulator {
+    session: string;
+    title: string | null;
+    project: string | null;
+    source: string | null;
+    weight: number;
+    produced_commits: number;
+    delivery_status: string | null;
+    review_pain: string | null;
+    pr_size: string | null;
+    pr_title: string | null;
+    merged_to_main: boolean;
+    user_turns: number;
+    assistant_turns: number;
+    corrections: number;
+    interruptions: number;
+    duration_ms: number | null;
+    hands_free_ms: number | null;
+    last_seen: string | null;
+    fileWeights: Map<string, number>;
+}
+
 interface MentionSignals {
     readonly paths: readonly string[];
     readonly symbols: readonly string[];
@@ -99,6 +144,7 @@ export interface FileContextPack {
         readonly tool_file: readonly ToolEvidenceRow[];
         readonly touches: readonly TouchRow[];
         readonly produced_session_turns: readonly SessionTurn[];
+        readonly prior_file_sessions: readonly PriorFileSession[];
         readonly mention_turns: readonly MentionTurn[];
         readonly neighbor_files: readonly NeighborFile[];
     };
@@ -160,6 +206,7 @@ function renderInspectionQuery(files: readonly FileRow[]): string {
         "SELECT id, evidence, path_seen, ts, out.{ id, path } AS file, in.{ id, name, command_norm, turn, session } AS tool_call FROM read_file WHERE out IN $files ORDER BY ts DESC LIMIT 40;",
         "SELECT id, evidence, path_seen, ts, out.{ id, path } AS file, in.{ id, name, command_norm, turn, session } AS tool_call FROM searched_file WHERE out IN $files ORDER BY ts DESC LIMIT 40;",
         "SELECT id, source, confidence, ts, out.{ id, path } AS file, in.{ id, session, seq, intent_kind, text_excerpt } AS turn FROM mentioned_file WHERE out IN $files ORDER BY ts DESC LIMIT 40;",
+        "SELECT in.session AS session, out.path AS file, count() AS edit_count, time::max(ts) AS last_seen FROM edited WHERE out IN $files GROUP BY session, file ORDER BY edit_count DESC, last_seen DESC LIMIT 40;",
         "SELECT id, additions, deletions, ts, out.{ id, path } AS file, in.{ sha, message, author, ts, sessions: <-produced.in.{ id, source, cwd } } AS commit FROM touched WHERE out IN $files ORDER BY ts DESC LIMIT 40;",
     ].join("\n\n");
 }
@@ -171,6 +218,7 @@ function renderAiContext(
     toolEvidence: readonly ToolEvidenceRow[],
     touches: readonly TouchRow[],
     producedSessionTurns: readonly SessionTurn[],
+    priorFileSessions: readonly PriorFileSession[],
     mentions: readonly MentionTurn[],
     neighbors: readonly NeighborFile[],
 ): string {
@@ -213,6 +261,26 @@ function renderAiContext(
         for (const turn of rankedProducedTurns.slice(0, 6)) {
             lines.push(`- ${clip((turn.text_excerpt ?? "").replace(/\s+/g, " "), 240)}`);
             lines.push(`  Source: ${turn.session} seq ${turn.seq ?? "?"}; intent=${turn.intent_kind ?? "?"}`);
+        }
+    }
+
+    if (priorFileSessions.length > 0) {
+        lines.push("", "Prior sessions that edited these files:");
+        for (const session of priorFileSessions.slice(0, 6)) {
+            const parts = [
+                `${session.weight} edits`,
+                `${session.files_touched} files`,
+                `${session.produced_commits} commits`,
+                `${session.user_turns}u/${session.assistant_turns}a`,
+                session.corrections > 0 ? `${session.corrections} corrections` : null,
+                session.interruptions > 0 ? `${session.interruptions} interruptions` : null,
+                session.merged_to_main ? "main" : null,
+                session.delivery_status,
+                session.review_pain ? `${session.review_pain} review` : null,
+            ].filter(Boolean);
+            lines.push(`- ${clip((session.title ?? session.project ?? session.session).replace(/\s+/g, " "), 240)}`);
+            lines.push(`  Source: ${session.session}; ${parts.join(", ")}`);
+            if (session.top_files.length > 0) lines.push(`  Files: ${session.top_files.slice(0, 3).join(", ")}`);
         }
     }
 
@@ -466,6 +534,154 @@ const loadProducedSessionTurns = (touches: readonly TouchRow[]) =>
             .filter((row) => ["organic_task", "correction", "preference"].includes(row.intent_kind ?? ""));
     });
 
+interface PriorFileSessionRow {
+    readonly session?: string | null;
+    readonly title?: string | null;
+    readonly project?: string | null;
+    readonly source?: string | null;
+    readonly file?: string | null;
+    readonly weight?: number | null;
+    readonly last_seen?: string | null;
+    readonly started_at?: string | null;
+    readonly ended_at?: string | null;
+    readonly user_turns?: number | null;
+    readonly assistant_turns?: number | null;
+    readonly corrections?: number | null;
+    readonly interruptions?: number | null;
+    readonly hands_free_ms?: number | null;
+    readonly produced_commits?: number | null;
+    readonly delivery_status?: string | null;
+    readonly review_pain?: string | null;
+    readonly pr_size?: string | null;
+    readonly pr_title?: string | null;
+}
+
+function numeric(value: number | null | undefined): number {
+    return Number.isFinite(value) ? Math.max(0, Number(value)) : 0;
+}
+
+function durationMs(startedAt: string | null | undefined, endedAt: string | null | undefined): number | null {
+    if (!startedAt || !endedAt) return null;
+    const start = new Date(startedAt).getTime();
+    const end = new Date(endedAt).getTime();
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
+    return end - start;
+}
+
+const loadPriorFileSessions = (fileIds: readonly string[]) =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        if (fileIds.length === 0) return [] as PriorFileSession[];
+        const [rows] = yield* db.query<[PriorFileSessionRow[]]>(`
+            SELECT
+                <string>session AS session,
+                (
+                    (SELECT text_excerpt, seq FROM turn
+                        WHERE session = $parent.session
+                          AND role = "user"
+                          AND message_kind = "task"
+                          AND intent_kind IN ["organic_task", "preference", "correction"]
+                          AND text_excerpt IS NOT NONE
+                        ORDER BY seq ASC
+                        LIMIT 1
+                    )[0].text_excerpt
+                    ?? session.project
+                    ?? <string>session
+                ) AS title,
+                session.project AS project,
+                session.source AS source,
+                session.started_at AS started_at,
+                session.ended_at AS ended_at,
+                file.path AS file,
+                weight,
+                last_seen,
+                array::len((SELECT id FROM turn WHERE session = $parent.session AND role = "user")) AS user_turns,
+                array::len((SELECT id FROM turn WHERE session = $parent.session AND role = "assistant")) AS assistant_turns,
+                array::len((SELECT id FROM turn WHERE session = $parent.session AND role = "user" AND intent_kind = "correction")) AS corrections,
+                ((SELECT interruptions FROM session_health WHERE session = $parent.session LIMIT 1)[0].interruptions ?? 0) AS interruptions,
+                ((SELECT math::sum(duration_ms) AS total, session FROM phase_span WHERE session = $parent.session AND user_turns = 0 GROUP BY session)[0].total ?? NONE) AS hands_free_ms,
+                array::len((SELECT id FROM produced WHERE in = $parent.session)) AS produced_commits,
+                ((SELECT status FROM delivery_outcome WHERE session = $parent.session LIMIT 1)[0].status ?? NONE) AS delivery_status,
+                ((SELECT review_pain FROM delivery_outcome WHERE session = $parent.session LIMIT 1)[0].review_pain ?? NONE) AS review_pain,
+                ((SELECT pr_size FROM delivery_outcome WHERE session = $parent.session LIMIT 1)[0].pr_size ?? NONE) AS pr_size,
+                ((SELECT pull_request.title AS pr_title FROM delivery_outcome WHERE session = $parent.session LIMIT 1)[0].pr_title ?? NONE) AS pr_title
+            FROM (
+                SELECT in.session AS session, out AS file, count() AS weight, time::max(ts) AS last_seen
+                FROM edited
+                WHERE out IN [${fileIds.join(", ")}]
+                  AND in.session.source != "claude-subagent"
+                GROUP BY session, file
+            )
+            ORDER BY weight DESC, last_seen DESC
+            LIMIT 40;
+        `);
+
+        const bySession = new Map<string, PriorFileSessionAccumulator>();
+        for (const row of rows) {
+            if (!row.session) continue;
+            const existing = bySession.get(row.session);
+            const weight = Math.max(1, numeric(row.weight));
+            const base: PriorFileSessionAccumulator = existing ?? {
+                session: row.session,
+                title: row.title ?? row.project ?? row.session,
+                project: row.project ?? null,
+                source: row.source ?? null,
+                weight: 0,
+                produced_commits: numeric(row.produced_commits),
+                delivery_status: row.delivery_status ?? null,
+                review_pain: row.review_pain ?? null,
+                pr_size: row.pr_size ?? null,
+                pr_title: row.pr_title ?? null,
+                merged_to_main: row.delivery_status === "merged_to_main" || row.delivery_status === "promoted_without_pr",
+                user_turns: numeric(row.user_turns),
+                assistant_turns: numeric(row.assistant_turns),
+                corrections: numeric(row.corrections),
+                interruptions: numeric(row.interruptions),
+                duration_ms: durationMs(row.started_at, row.ended_at),
+                hands_free_ms: row.hands_free_ms ?? null,
+                last_seen: row.last_seen ?? null,
+                fileWeights: new Map(),
+            };
+            base.weight += weight;
+            base.produced_commits = Math.max(base.produced_commits, numeric(row.produced_commits));
+            base.user_turns = Math.max(base.user_turns, numeric(row.user_turns));
+            base.assistant_turns = Math.max(base.assistant_turns, numeric(row.assistant_turns));
+            base.corrections = Math.max(base.corrections, numeric(row.corrections));
+            base.interruptions = Math.max(base.interruptions, numeric(row.interruptions));
+            if (row.file) base.fileWeights.set(row.file, (base.fileWeights.get(row.file) ?? 0) + weight);
+            bySession.set(row.session, base);
+        }
+
+        return Array.from(bySession.values())
+            .map((session): PriorFileSession => ({
+                session: session.session,
+                title: session.title,
+                project: session.project,
+                source: session.source,
+                weight: session.weight,
+                files_touched: session.fileWeights.size,
+                top_files: Array.from(session.fileWeights.entries())
+                    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+                    .slice(0, 4)
+                    .map(([path]) => path),
+                produced_commits: session.produced_commits,
+                delivery_status: session.delivery_status,
+                review_pain: session.review_pain,
+                pr_size: session.pr_size,
+                pr_title: session.pr_title,
+                merged_to_main: session.merged_to_main,
+                user_turns: session.user_turns,
+                assistant_turns: session.assistant_turns,
+                corrections: session.corrections,
+                interruptions: session.interruptions,
+                duration_ms: session.duration_ms,
+                hands_free_ms: session.hands_free_ms,
+                last_seen: session.last_seen,
+            }))
+            .sort((a, b) => b.weight - a.weight || (b.last_seen ?? "").localeCompare(a.last_seen ?? ""))
+            .slice(0, 8);
+    });
+
 const loadNeighborFiles = (touches: readonly TouchRow[], targetPaths: readonly string[]) =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
@@ -501,8 +717,9 @@ export const buildFileContextPack = (input: BuildFileContextInput): Effect.Effec
             loadMentions(signals, files),
         ]);
         const toolEvidence = compactToolEvidence([...reads, ...searches]).slice(0, 12);
-        const [producedSessionTurns, neighbors] = yield* Effect.all([
+        const [producedSessionTurns, priorFileSessions, neighbors] = yield* Effect.all([
             loadProducedSessionTurns(touches),
+            loadPriorFileSessions(fileIds),
             loadNeighborFiles(touches, files.map((file) => file.path)),
         ]);
         return {
@@ -511,12 +728,13 @@ export const buildFileContextPack = (input: BuildFileContextInput): Effect.Effec
             generated_at: new Date().toISOString(),
             signals,
             files,
-            ai_context: renderAiContext(input, signals, files, toolEvidence, touches, producedSessionTurns, mentions, neighbors),
+            ai_context: renderAiContext(input, signals, files, toolEvidence, touches, producedSessionTurns, priorFileSessions, mentions, neighbors),
             graph_inspection_query: renderInspectionQuery(files),
             evidence: {
                 tool_file: toolEvidence,
                 touches,
                 produced_session_turns: producedSessionTurns,
+                prior_file_sessions: priorFileSessions,
                 mention_turns: mentions,
                 neighbor_files: neighbors,
             },

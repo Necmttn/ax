@@ -108,6 +108,52 @@ function fakeContextClient(): SurrealClientShape {
                         },
                     ]] as T;
                 }
+                if (sql.includes("FROM edited")) {
+                    return [[
+                        {
+                            session: "session:s1",
+                            title: "can we fix ingest intent bug in codex transcript",
+                            project: "ax",
+                            source: "codex",
+                            file: "src/ingest/codex.ts",
+                            weight: 7,
+                            last_seen: "2026-05-10T00:03:00.000Z",
+                            started_at: "2026-05-10T00:00:00.000Z",
+                            ended_at: "2026-05-10T00:20:00.000Z",
+                            user_turns: 3,
+                            assistant_turns: 8,
+                            corrections: 1,
+                            interruptions: 0,
+                            hands_free_ms: 600_000,
+                            produced_commits: 1,
+                            delivery_status: "merged_to_main",
+                            review_pain: "moderate",
+                            pr_size: "small",
+                            pr_title: "Fix Codex ingest intent",
+                        },
+                        {
+                            session: "session:s1",
+                            title: "can we fix ingest intent bug in codex transcript",
+                            project: "ax",
+                            source: "codex",
+                            file: "schema/schema.surql",
+                            weight: 2,
+                            last_seen: "2026-05-10T00:03:00.000Z",
+                            started_at: "2026-05-10T00:00:00.000Z",
+                            ended_at: "2026-05-10T00:20:00.000Z",
+                            user_turns: 3,
+                            assistant_turns: 8,
+                            corrections: 1,
+                            interruptions: 0,
+                            hands_free_ms: 600_000,
+                            produced_commits: 1,
+                            delivery_status: "merged_to_main",
+                            review_pain: "moderate",
+                            pr_size: "small",
+                            pr_title: "Fix Codex ingest intent",
+                        },
+                    ]] as T;
+                }
                 if (sql.includes("FROM turn")) {
                     return [[
                         {
@@ -167,7 +213,19 @@ describe("file context signals", () => {
         expect(pack.evidence.tool_file).toHaveLength(2);
         expect(pack.evidence.mention_turns.map((turn) => turn.id)).toEqual(["turn:user"]);
         expect(pack.ai_context).toContain("can we fix ingest intent bug in codex transcript");
+        expect(pack.ai_context).toContain("Prior sessions that edited these files:");
+        expect(pack.ai_context).toContain("9 edits, 2 files, 1 commits, 3u/8a, 1 corrections, main, merged_to_main, moderate review");
         expect(pack.ai_context.match(/abc1234567/g)?.length).toBe(1);
+        expect(pack.evidence.prior_file_sessions[0]).toMatchObject({
+            session: "session:s1",
+            weight: 9,
+            files_touched: 2,
+            produced_commits: 1,
+            merged_to_main: true,
+            corrections: 1,
+            review_pain: "moderate",
+            hands_free_ms: 600_000,
+        });
         expect(pack.evidence.neighbor_files).toEqual([{ path: "package.json", count: 2 }]);
     });
 });
