@@ -15,6 +15,8 @@ import { EpisodeRoute } from "./routes/episode.tsx";
 import { ProjectRoute } from "./routes/project.tsx";
 import { RecallRoute } from "./routes/recall.tsx";
 import { SkillGraphRoute } from "./routes/skill-graph.tsx";
+import { GraphRoute } from "./routes/graph.tsx";
+import type { GraphExplorerMode } from "@shared/dashboard-types.ts";
 
 const rootRoute = createRootRoute({
     component: () => (
@@ -106,6 +108,36 @@ const skillGraphRoute = createRoute({
     }),
 });
 
+const graphModes = new Set<GraphExplorerMode>([
+    "file-attention",
+    "ask-outcome",
+    "phase-balance",
+    "delivery",
+    "patterns",
+    "skill-pairs",
+]);
+
+const graphRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/graph",
+    component: GraphRoute,
+    validateSearch: (search): {
+        mode?: GraphExplorerMode;
+        q?: string;
+        limit?: number;
+    } => ({
+        mode:
+            typeof search.mode === "string" && graphModes.has(search.mode as GraphExplorerMode)
+                ? search.mode as GraphExplorerMode
+                : undefined,
+        q: typeof search.q === "string" ? search.q : undefined,
+        limit:
+            typeof search.limit === "number" && Number.isFinite(search.limit)
+                ? search.limit
+                : undefined,
+    }),
+});
+
 const recallRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/recall",
@@ -133,6 +165,7 @@ const routeTree = rootRoute.addChildren([
     episodeRoute,
     projectRoute,
     skillGraphRoute,
+    graphRoute,
     recallRoute,
 ]);
 

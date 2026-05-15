@@ -1,5 +1,7 @@
 import type {
     EpisodeTimelinePayload,
+    GraphExplorerMode,
+    GraphExplorerPayload,
     ProjectPagePayload,
     RecallResponse,
     SkillGraphPayload,
@@ -65,6 +67,18 @@ export const api = {
         jsonFetch(`/api/episodes/${encodeURIComponent(parentId)}`),
     project: (slug: string): Promise<ProjectPagePayload> =>
         jsonFetch(`/api/projects/${encodeURIComponent(slug)}`),
+    graphExplorer: (params: {
+        mode?: GraphExplorerMode;
+        q?: string | null;
+        limit?: number;
+    } = {}): Promise<GraphExplorerPayload> => {
+        const usp = new URLSearchParams();
+        if (params.mode) usp.set("mode", params.mode);
+        if (params.q) usp.set("q", params.q);
+        if (params.limit != null) usp.set("limit", String(params.limit));
+        const qs = usp.toString();
+        return jsonFetch(qs ? `/api/graph-explorer?${qs}` : "/api/graph-explorer");
+    },
     skillGraph: (params: { minCount?: number; limit?: number } = {}): Promise<SkillGraphPayload> => {
         const usp = new URLSearchParams();
         if (params.minCount != null) usp.set("minCount", String(params.minCount));

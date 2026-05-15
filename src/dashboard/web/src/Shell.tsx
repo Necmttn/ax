@@ -9,6 +9,7 @@ interface Tab {
     readonly to:
         | "/skills"
         | "/skills/graph"
+        | "/graph"
         | "/tools"
         | "/decisions"
         | "/workflow"
@@ -43,12 +44,12 @@ export function Shell({ children }: { children: ReactNode }) {
                 }),
         },
         {
-            to: "/skills/graph",
+            to: "/graph",
             label: "Graph",
             prefetch: () =>
                 queryClient.prefetchQuery({
-                    queryKey: ["skill-graph", 10],
-                    queryFn: () => api.skillGraph({ minCount: 10, limit: 400 }),
+                    queryKey: ["graph-explorer", "file-attention", "", 160],
+                    queryFn: () => api.graphExplorer({ mode: "file-attention", limit: 160 }),
                 }),
         },
         {
