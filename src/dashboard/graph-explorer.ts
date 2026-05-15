@@ -7,6 +7,7 @@ import type {
     GraphExplorerNode,
     GraphExplorerPanel,
     GraphExplorerPayload,
+    GraphExplorerStoryCard,
     GraphMetricValue,
     GraphNodeKind,
 } from "../lib/shared/dashboard-types.ts";
@@ -87,7 +88,19 @@ SELECT
     (file.lang ?? file.kind ?? NONE) AS target_subtitle,
     "edited" AS relation,
     weight,
-    last_seen
+    last_seen,
+    session.started_at AS source_started_at,
+    session.ended_at AS source_ended_at,
+    array::len((SELECT id FROM turn WHERE session = $parent.session AND role = "user")) AS source_user_turns,
+    array::len((SELECT id FROM turn WHERE session = $parent.session AND role = "assistant")) AS source_assistant_turns,
+    array::len((SELECT id FROM turn WHERE session = $parent.session AND role = "user" AND intent_kind = "correction")) AS source_corrections,
+    ((SELECT interruptions FROM session_health WHERE session = $parent.session LIMIT 1)[0].interruptions ?? 0) AS source_interruptions,
+    ((SELECT math::sum(duration_ms) AS total, session FROM phase_span WHERE session = $parent.session AND user_turns = 0 GROUP BY session)[0].total ?? NONE) AS source_hands_free_ms,
+    array::len((SELECT id FROM produced WHERE in = $parent.session)) AS source_produced_commits,
+    ((SELECT status FROM delivery_outcome WHERE session = $parent.session LIMIT 1)[0].status ?? NONE) AS source_delivery_status,
+    ((SELECT review_pain FROM delivery_outcome WHERE session = $parent.session LIMIT 1)[0].review_pain ?? NONE) AS source_review_pain,
+    ((SELECT pr_size FROM delivery_outcome WHERE session = $parent.session LIMIT 1)[0].pr_size ?? NONE) AS source_pr_size,
+    ((SELECT pull_request.title AS pr_title FROM delivery_outcome WHERE session = $parent.session LIMIT 1)[0].pr_title ?? NONE) AS source_pr_title
 FROM (
     SELECT
         in.session AS session,
@@ -123,6 +136,9 @@ export function validateFileAttentionSql(sql = FILE_ATTENTION_SQL): ReadonlyArra
     }
     if (!/message_kind\s*=\s*"task"/i.test(sql) || !/local-command/i.test(sql)) {
         warnings.push("missing human-task filter for session labels");
+    }
+    if (!/session_health/i.test(sql) || !/delivery_outcome/i.test(sql) || !/produced/i.test(sql) || !/phase_span/i.test(sql)) {
+        warnings.push("missing session story signal decoration");
     }
     return warnings;
 }
@@ -247,6 +263,163 @@ const makeNode = (input: {
     ...(input.metrics ? { metrics: input.metrics } : {}),
 });
 
+interface StoryAccumulator {
+    readonly sessionId: string;
+    title: string;
+    project: string | null;
+    deliveryStatus: string | null;
+    reviewPain: string | null;
+    prSize: string | null;
+    prTitle: string | null;
+    producedCommits: number;
+    durationMs: number | null;
+    handsFreeMs: number | null;
+    userTurns: number;
+    assistantTurns: number;
+    corrections: number;
+    interruptions: number;
+    edgeWeight: number;
+    readonly files: Map<string, { label: string; weight: number }>;
+}
+
+const durationBetween = (startedAt: string | null, endedAt: string | null): number | null => {
+    if (!startedAt || !endedAt) return null;
+    const start = new Date(startedAt).getTime();
+    const end = new Date(endedAt).getTime();
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
+    return end - start;
+};
+
+const outcomeStatus = (story: StoryAccumulator): string => {
+    if (story.deliveryStatus === "merged_to_main" || story.deliveryStatus === "promoted_without_pr") return "shipped";
+    if (story.deliveryStatus === "merged_unverified") return "merged";
+    if (story.deliveryStatus === "open_pr") return "review_requested";
+    if (story.deliveryStatus === "closed_unmerged") return "failed";
+    if (story.interruptions > 0) return "interrupted";
+    if (story.producedCommits > 0) return "local_commit";
+    return "local_only";
+};
+
+const whyScore = (story: StoryAccumulator): { score: number; reason: string } => {
+    const filesTouched = story.files.size;
+    let score = Math.min(60, story.edgeWeight) + filesTouched * 4;
+    const reasons: string[] = [`${filesTouched} files`, `${story.edgeWeight} edits`];
+    if (story.producedCommits > 0) {
+        score += Math.min(30, story.producedCommits * 10);
+        reasons.push(`${story.producedCommits} commits`);
+    }
+    if (story.deliveryStatus === "merged_to_main" || story.deliveryStatus === "promoted_without_pr") {
+        score += 30;
+        reasons.push("main signal");
+    }
+    if (story.deliveryStatus === "open_pr") {
+        score += 18;
+        reasons.push("open PR");
+    }
+    if (story.reviewPain === "high" || story.reviewPain === "roasted") {
+        score += 16;
+        reasons.push(`${story.reviewPain} review`);
+    }
+    if (story.corrections > 0) {
+        score += Math.min(20, story.corrections * 5);
+        reasons.push(`${story.corrections} corrections`);
+    }
+    if (story.interruptions > 0) {
+        score += Math.min(14, story.interruptions * 4);
+        reasons.push(`${story.interruptions} interruptions`);
+    }
+    return { score: Math.round(score), reason: reasons.join(" / ") };
+};
+
+const storyCardsFromRows = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<GraphExplorerStoryCard> => {
+    const stories = new Map<string, StoryAccumulator>();
+
+    for (const row of rows) {
+        if (!isRecord(row)) continue;
+        const sessionId = stringifyField(row, "source_id");
+        const targetId = stringifyField(row, "target_id");
+        const targetLabel = stringifyField(row, "target_label") ?? targetId;
+        const title = stringifyField(row, "source_label") ?? sessionId;
+        if (!sessionId || !targetId || !targetLabel || !title) continue;
+
+        const startedAt = dateField(row, "source_started_at");
+        const endedAt = dateField(row, "source_ended_at");
+        const story = stories.get(sessionId) ?? {
+            sessionId,
+            title,
+            project: stringifyField(row, "source_subtitle"),
+            deliveryStatus: stringifyField(row, "source_delivery_status"),
+            reviewPain: stringifyField(row, "source_review_pain"),
+            prSize: stringifyField(row, "source_pr_size"),
+            prTitle: stringifyField(row, "source_pr_title"),
+            producedCommits: numberField(row, "source_produced_commits"),
+            durationMs: durationBetween(startedAt, endedAt),
+            handsFreeMs: numberField(row, "source_hands_free_ms") || null,
+            userTurns: numberField(row, "source_user_turns"),
+            assistantTurns: numberField(row, "source_assistant_turns"),
+            corrections: numberField(row, "source_corrections"),
+            interruptions: numberField(row, "source_interruptions"),
+            edgeWeight: 0,
+            files: new Map<string, { label: string; weight: number }>(),
+        };
+
+        story.title = title;
+        story.project = story.project ?? stringifyField(row, "source_subtitle");
+        story.deliveryStatus = story.deliveryStatus ?? stringifyField(row, "source_delivery_status");
+        story.reviewPain = story.reviewPain ?? stringifyField(row, "source_review_pain");
+        story.prSize = story.prSize ?? stringifyField(row, "source_pr_size");
+        story.prTitle = story.prTitle ?? stringifyField(row, "source_pr_title");
+        story.producedCommits = Math.max(story.producedCommits, numberField(row, "source_produced_commits"));
+        story.handsFreeMs = Math.max(story.handsFreeMs ?? 0, numberField(row, "source_hands_free_ms")) || null;
+        story.userTurns = Math.max(story.userTurns, numberField(row, "source_user_turns"));
+        story.assistantTurns = Math.max(story.assistantTurns, numberField(row, "source_assistant_turns"));
+        story.corrections = Math.max(story.corrections, numberField(row, "source_corrections"));
+        story.interruptions = Math.max(story.interruptions, numberField(row, "source_interruptions"));
+
+        const weight = Math.max(1, numberField(row, "weight"));
+        story.edgeWeight += weight;
+        const existingFile = story.files.get(targetId);
+        story.files.set(targetId, {
+            label: targetLabel,
+            weight: (existingFile?.weight ?? 0) + weight,
+        });
+        stories.set(sessionId, story);
+    }
+
+    return Array.from(stories.values())
+        .map((story) => {
+            const why = whyScore(story);
+            const deliveryStatus = story.deliveryStatus;
+            return {
+                session_id: story.sessionId,
+                title: story.title,
+                project: story.project,
+                outcome_status: outcomeStatus(story),
+                delivery_status: deliveryStatus,
+                review_pain: story.reviewPain,
+                pr_size: story.prSize,
+                pr_title: story.prTitle,
+                files_touched: story.files.size,
+                top_files: Array.from(story.files.values())
+                    .sort((a, b) => b.weight - a.weight || a.label.localeCompare(b.label))
+                    .slice(0, 4)
+                    .map((file) => file.label),
+                produced_commits: story.producedCommits,
+                merged_to_main: deliveryStatus === "merged_to_main" || deliveryStatus === "promoted_without_pr",
+                duration_ms: story.durationMs,
+                hands_free_ms: story.handsFreeMs,
+                user_turns: story.userTurns,
+                assistant_turns: story.assistantTurns,
+                corrections: story.corrections,
+                interruptions: story.interruptions,
+                why_score: why.score,
+                why_reason: why.reason,
+            };
+        })
+        .sort((a, b) => b.why_score - a.why_score || b.files_touched - a.files_touched || a.title.localeCompare(b.title))
+        .slice(0, 12);
+};
+
 export function rowsToGraphPayload(input: RowsToGraphPayloadInput): GraphExplorerPayload {
     const mode = input.mode ?? DEFAULT_MODE;
     const nodes = new Map<string, GraphExplorerNode>();
@@ -345,6 +518,7 @@ export function rowsToGraphPayload(input: RowsToGraphPayloadInput): GraphExplore
         query: input.query ?? null,
         nodes: sortedNodes,
         edges: sortedEdges,
+        story_cards: storyCardsFromRows(input.rows),
         panels,
         warnings: input.warnings ?? [],
     };

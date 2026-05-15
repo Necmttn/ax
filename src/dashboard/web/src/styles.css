@@ -636,6 +636,110 @@ tr.detail-row td {
     padding: 12px;
 }
 
+.graph-main-column {
+    display: grid;
+    gap: 12px;
+    min-width: 0;
+}
+
+.graph-story-strip {
+    border: 1px solid var(--line);
+    background: color-mix(in srgb, var(--panel) 90%, var(--track));
+    padding: 10px;
+}
+
+.graph-story-strip header {
+    align-items: center;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.graph-story-strip h3 {
+    margin: 0;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.graph-story-strip header span {
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.graph-story-list {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.graph-story-list button {
+    position: relative;
+    min-height: 132px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--ink);
+    cursor: pointer;
+    display: grid;
+    align-content: start;
+    gap: 6px;
+    padding: 9px 10px;
+    text-align: left;
+}
+
+.graph-story-list button:hover,
+.graph-story-list button.is-active {
+    border-color: var(--ink);
+}
+
+.graph-story-list strong {
+    display: -webkit-box;
+    min-height: 34px;
+    overflow: hidden;
+    font-size: 12px;
+    line-height: 1.35;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+
+.graph-story-list small,
+.graph-story-list p {
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.3;
+}
+
+.graph-story-list p {
+    display: -webkit-box;
+    margin: 0;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+
+.graph-story-score {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    color: var(--blue);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.graph-story-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.graph-story-tags span {
+    border: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 10px;
+    padding: 2px 5px;
+}
+
 .graph-rail-title,
 .graph-query label,
 .graph-display-options > label,
@@ -950,9 +1054,21 @@ tr.detail-row td {
     color: var(--muted);
 }
 
+.graph-panel-rows dd small {
+    display: block;
+    margin-top: 3px;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.3;
+}
+
 @media (max-width: 1100px) {
     .graph-shell {
         grid-template-columns: 160px minmax(360px, 1fr);
+    }
+
+    .graph-story-list {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .graph-inspector {

@@ -377,12 +377,36 @@ export interface GraphExplorerPanel {
     }>;
 }
 
+export interface GraphExplorerStoryCard {
+    readonly session_id: string;
+    readonly title: string;
+    readonly project: string | null;
+    readonly outcome_status: string;
+    readonly delivery_status: string | null;
+    readonly review_pain: string | null;
+    readonly pr_size: string | null;
+    readonly pr_title: string | null;
+    readonly files_touched: number;
+    readonly top_files: ReadonlyArray<string>;
+    readonly produced_commits: number;
+    readonly merged_to_main: boolean;
+    readonly duration_ms: number | null;
+    readonly hands_free_ms: number | null;
+    readonly user_turns: number;
+    readonly assistant_turns: number;
+    readonly corrections: number;
+    readonly interruptions: number;
+    readonly why_score: number;
+    readonly why_reason: string;
+}
+
 export interface GraphExplorerPayload {
     readonly generatedAt: string;
     readonly mode: GraphExplorerMode;
     readonly query: string | null;
     readonly nodes: ReadonlyArray<GraphExplorerNode>;
     readonly edges: ReadonlyArray<GraphExplorerEdge>;
+    readonly story_cards: ReadonlyArray<GraphExplorerStoryCard>;
     readonly panels: ReadonlyArray<GraphExplorerPanel>;
     readonly warnings: ReadonlyArray<string>;
 }

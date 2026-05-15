@@ -64,6 +64,18 @@ describe("graph explorer", () => {
                     relation: "edited",
                     weight: 3,
                     last_seen: "2026-05-14T12:00:00.000Z",
+                    source_started_at: "2026-05-14T11:00:00.000Z",
+                    source_ended_at: "2026-05-14T11:45:00.000Z",
+                    source_user_turns: 4,
+                    source_assistant_turns: 9,
+                    source_corrections: 1,
+                    source_interruptions: 0,
+                    source_hands_free_ms: 900_000,
+                    source_produced_commits: 2,
+                    source_delivery_status: "merged_to_main",
+                    source_review_pain: "low",
+                    source_pr_size: "small",
+                    source_pr_title: "Improve graph explainability",
                 },
             ],
         });
@@ -116,6 +128,27 @@ describe("graph explorer", () => {
         expect(payload.panels[1]?.rows[0]?.detail).toBe(
             "Can you make the graph explain what the session was about? -> src/dashboard/server.ts",
         );
+        expect(payload.story_cards[0]).toMatchObject({
+            session_id: "session:one",
+            title: "Can you make the graph explain what the session was about?",
+            project: "ax",
+            outcome_status: "shipped",
+            delivery_status: "merged_to_main",
+            review_pain: "low",
+            pr_size: "small",
+            pr_title: "Improve graph explainability",
+            files_touched: 1,
+            top_files: ["src/dashboard/server.ts"],
+            produced_commits: 2,
+            merged_to_main: true,
+            duration_ms: 2_700_000,
+            hands_free_ms: 900_000,
+            user_turns: 4,
+            assistant_turns: 9,
+            corrections: 1,
+            interruptions: 0,
+        });
+        expect(payload.story_cards[0]?.why_reason).toContain("main signal");
     });
 
     test("rowsToGraphPayload can represent a staged mode placeholder", () => {
@@ -131,6 +164,7 @@ describe("graph explorer", () => {
         expect(payload.mode).toBe("delivery");
         expect(payload.nodes).toEqual([]);
         expect(payload.edges).toEqual([]);
+        expect(payload.story_cards).toEqual([]);
         expect(payload.warnings).toEqual(['Mode "delivery" is staged; no graph query is implemented yet.']);
         expect(payload.panels[0]?.rows).toContainEqual({ label: "Mode", value: "delivery" });
     });
@@ -176,5 +210,9 @@ describe("graph explorer", () => {
         expect(payload.edges).toHaveLength(3);
         expect(payload.nodes.find((node) => node.id === "session:one")?.weight).toBe(6);
         expect(payload.nodes.find((node) => node.id === "file:server")?.weight).toBe(3);
+        expect(payload.story_cards.find((story) => story.session_id === "session:one")).toMatchObject({
+            files_touched: 2,
+            top_files: ["src/dashboard/graph-explorer.ts", "src/dashboard/server.ts"],
+        });
     });
 });

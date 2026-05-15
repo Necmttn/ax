@@ -7,6 +7,7 @@ import type {
     GraphExplorerMode,
     GraphExplorerNode,
     GraphExplorerPayload,
+    GraphExplorerStoryCard,
     GraphMetricValue,
 } from "@shared/dashboard-types.ts";
 
@@ -32,6 +33,24 @@ const formatMetric = (value: GraphMetricValue): string => {
     if (typeof value === "boolean") return value ? "true" : "false";
     if (typeof value === "number") return Number.isInteger(value) ? value.toLocaleString("en-US") : value.toFixed(2);
     return value;
+};
+
+const formatDuration = (ms: number | null): string => {
+    if (ms === null || !Number.isFinite(ms)) return "unknown";
+    const minutes = Math.max(1, Math.round(ms / 60_000));
+    if (minutes < 60) return `${minutes}m`;
+    const hours = Math.floor(minutes / 60);
+    const remainder = minutes % 60;
+    return remainder === 0 ? `${hours}h` : `${hours}h ${remainder}m`;
+};
+
+const storyOutcomeLabel = (story: GraphExplorerStoryCard): string => {
+    if (story.outcome_status === "shipped") return "shipped";
+    if (story.outcome_status === "review_requested") return "review";
+    if (story.outcome_status === "failed") return "failed";
+    if (story.outcome_status === "interrupted") return "interrupted";
+    if (story.outcome_status === "local_commit") return "committed";
+    return story.outcome_status.replace(/_/g, " ");
 };
 
 const edgeKey = (edge: GraphExplorerEdge, index: number): string =>
@@ -221,6 +240,10 @@ export function GraphRoute() {
         () => new Map((data?.nodes ?? []).map((node) => [node.id, node.label])),
         [data],
     );
+    const storyBySessionId = useMemo(
+        () => new Map((data?.story_cards ?? []).map((story) => [story.session_id, story])),
+        [data],
+    );
     const connectedIds = useMemo(() => {
         if (!selectedId || !data) return new Set<string>();
         const ids = new Set<string>([selectedId]);
@@ -362,93 +385,131 @@ export function GraphRoute() {
                     </div>
                 </aside>
 
-                <div className="graph-stage" ref={ref}>
-                    {stagedMode ? (
-                        <div className="empty">
-                            {activeMode.label} is staged. File attention is the implemented graph mode.
-                        </div>
-                    ) : null}
-                    {error ? <div className="error">Error: {error}</div> : null}
-                    {loading && !data ? <div className="loading">Loading graph...</div> : null}
-                    {data?.warnings.length ? (
-                        <div className="graph-warnings">
-                            {data.warnings.map((warning) => (
-                                <span key={warning}>{warning}</span>
-                            ))}
-                        </div>
-                    ) : null}
-                    {data && data.nodes.length === 0 ? (
-                        <div className="empty">No graph data for this mode and query.</div>
-                    ) : null}
-                    <svg
-                        className="graph-svg"
-                        width="100%"
-                        height={box.h}
-                        viewBox={`0 0 ${box.w} ${box.h}`}
-                        role="img"
-                        aria-label="Graph explorer canvas"
-                    >
-                        <g>
-                            {data?.edges.map((edge, index) => {
-                                const source = positions.get(edge.source);
-                                const target = positions.get(edge.target);
-                                if (!source || !target) return null;
-                                const active =
-                                    selectedId === null ||
-                                    edge.source === selectedId ||
-                                    edge.target === selectedId ||
-                                    edge.source === hoveredId ||
-                                    edge.target === hoveredId;
-                                return (
-                                    <line
-                                        key={edgeKey(edge, index)}
-                                        x1={source.x}
-                                        y1={source.y}
-                                        x2={target.x}
-                                        y2={target.y}
-                                        className={`graph-edge tone-${toneClass(edge.tone)}`}
-                                        strokeDasharray={edge.dashed ? "5 5" : undefined}
-                                        strokeWidth={Math.max(1, (edge.weight / maxEdgeWeight) * 4)}
-                                        opacity={active ? 0.72 : 0.18}
-                                    />
-                                );
-                            })}
-                            {laidOut.map((node) => {
-                                const radius = radiusFor(node.weight, maxNodeWeight);
-                                const label = labelPlacement(node, radius, box.w);
-                                const selectedNode = node.id === selectedId;
-                                const hoveredNode = node.id === hoveredId;
-                                const showLabel =
-                                    showAllLabels ||
-                                    selectedNode ||
-                                    hoveredNode ||
-                                    prominentLabelIds.has(node.id);
-                                const related = connectedIds.size === 0 || connectedIds.has(node.id);
-                                return (
-                                    <g
-                                        key={node.id}
-                                        transform={`translate(${node.x}, ${node.y})`}
-                                        className={`graph-node ${selectedNode ? "is-selected" : ""}`}
-                                        opacity={related ? 1 : 0.34}
-                                        onMouseEnter={() => setHoveredId(node.id)}
-                                        onMouseLeave={() => setHoveredId((current) => current === node.id ? null : current)}
-                                        onClick={() => setSelectedId(node.id)}
+                <div className="graph-main-column">
+                    {data?.story_cards.length ? (
+                        <section className="graph-story-strip" aria-label="Session stories">
+                            <header>
+                                <h3>Session Stories</h3>
+                                <span>{data.story_cards.length.toLocaleString("en-US")} ranked</span>
+                            </header>
+                            <div className="graph-story-list">
+                                {data.story_cards.slice(0, 6).map((story) => (
+                                    <button
+                                        key={story.session_id}
+                                        type="button"
+                                        className={story.session_id === selectedId ? "is-active" : undefined}
+                                        onClick={() => setSelectedId(story.session_id)}
                                     >
-                                        <title>{node.label}</title>
-                                        <circle
-                                            r={radius}
-                                            className={`tone-${toneClass(node.tone)} kind-${node.kind}`}
+                                        <span className="graph-story-score">{story.why_score}</span>
+                                        <strong>{story.title}</strong>
+                                        <small>{story.project ?? "unknown project"}</small>
+                                        <div className="graph-story-tags">
+                                            <span>{storyOutcomeLabel(story)}</span>
+                                            <span>{story.files_touched} files</span>
+                                            <span>{story.produced_commits} commits</span>
+                                            <span>{story.user_turns}u / {story.assistant_turns}a</span>
+                                            <span>{formatDuration(story.duration_ms)}</span>
+                                            {story.hands_free_ms !== null ? <span>{formatDuration(story.hands_free_ms)} hands-free</span> : null}
+                                            {story.merged_to_main ? <span>main</span> : null}
+                                            {story.pr_size ? <span>{story.pr_size} PR</span> : null}
+                                            {story.review_pain ? <span>{story.review_pain} review</span> : null}
+                                            {story.corrections > 0 ? <span>{story.corrections} corrections</span> : null}
+                                        </div>
+                                        <p>{story.pr_title ?? story.why_reason}</p>
+                                    </button>
+                                ))}
+                            </div>
+                        </section>
+                    ) : null}
+
+                    <div className="graph-stage" ref={ref}>
+                        {stagedMode ? (
+                            <div className="empty">
+                                {activeMode.label} is staged. File attention is the implemented graph mode.
+                            </div>
+                        ) : null}
+                        {error ? <div className="error">Error: {error}</div> : null}
+                        {loading && !data ? <div className="loading">Loading graph...</div> : null}
+                        {data?.warnings.length ? (
+                            <div className="graph-warnings">
+                                {data.warnings.map((warning) => (
+                                    <span key={warning}>{warning}</span>
+                                ))}
+                            </div>
+                        ) : null}
+                        {data && data.nodes.length === 0 ? (
+                            <div className="empty">No graph data for this mode and query.</div>
+                        ) : null}
+                        <svg
+                            className="graph-svg"
+                            width="100%"
+                            height={box.h}
+                            viewBox={`0 0 ${box.w} ${box.h}`}
+                            role="img"
+                            aria-label="Graph explorer canvas"
+                        >
+                            <g>
+                                {data?.edges.map((edge, index) => {
+                                    const source = positions.get(edge.source);
+                                    const target = positions.get(edge.target);
+                                    if (!source || !target) return null;
+                                    const active =
+                                        selectedId === null ||
+                                        edge.source === selectedId ||
+                                        edge.target === selectedId ||
+                                        edge.source === hoveredId ||
+                                        edge.target === hoveredId;
+                                    return (
+                                        <line
+                                            key={edgeKey(edge, index)}
+                                            x1={source.x}
+                                            y1={source.y}
+                                            x2={target.x}
+                                            y2={target.y}
+                                            className={`graph-edge tone-${toneClass(edge.tone)}`}
+                                            strokeDasharray={edge.dashed ? "5 5" : undefined}
+                                            strokeWidth={Math.max(1, (edge.weight / maxEdgeWeight) * 4)}
+                                            opacity={active ? 0.72 : 0.18}
                                         />
-                                        {showLabel ? (
-                                            <text x={label.x} y={4} textAnchor={label.textAnchor}>
-                                                {label.displayLabel}
-                                            </text>
-                                        ) : null}
-                                    </g>
-                                );
-                            })}
-                        </g>
-                    </svg>
+                                    );
+                                })}
+                                {laidOut.map((node) => {
+                                    const radius = radiusFor(node.weight, maxNodeWeight);
+                                    const label = labelPlacement(node, radius, box.w);
+                                    const selectedNode = node.id === selectedId;
+                                    const hoveredNode = node.id === hoveredId;
+                                    const showLabel =
+                                        showAllLabels ||
+                                        selectedNode ||
+                                        hoveredNode ||
+                                        prominentLabelIds.has(node.id);
+                                    const related = connectedIds.size === 0 || connectedIds.has(node.id);
+                                    return (
+                                        <g
+                                            key={node.id}
+                                            transform={`translate(${node.x}, ${node.y})`}
+                                            className={`graph-node ${selectedNode ? "is-selected" : ""}`}
+                                            opacity={related ? 1 : 0.34}
+                                            onMouseEnter={() => setHoveredId(node.id)}
+                                            onMouseLeave={() => setHoveredId((current) => current === node.id ? null : current)}
+                                            onClick={() => setSelectedId(node.id)}
+                                        >
+                                            <title>{node.label}</title>
+                                            <circle
+                                                r={radius}
+                                                className={`tone-${toneClass(node.tone)} kind-${node.kind}`}
+                                            />
+                                            {showLabel ? (
+                                                <text x={label.x} y={4} textAnchor={label.textAnchor}>
+                                                    {label.displayLabel}
+                                                </text>
+                                            ) : null}
+                                        </g>
+                                    );
+                                })}
+                            </g>
+                        </svg>
+                    </div>
                 </div>
 
                 <aside className="graph-inspector">
@@ -487,12 +548,24 @@ export function GraphRoute() {
                                 <dl className="graph-panel-rows">
                                     {selectedEdges.slice(0, 12).map((edge, index) => {
                                         const otherId = edge.source === selected.id ? edge.target : edge.source;
+                                        const story = storyBySessionId.get(otherId);
                                         return (
                                             <div key={`${edgeKey(edge, index)}-selected`}>
                                                 <dt>{edge.relation}</dt>
                                                 <dd>
                                                     <strong>{edge.weight.toLocaleString("en-US")}</strong>
                                                     <span>{nodeLabels.get(otherId) ?? otherId}</span>
+                                                    {story ? (
+                                                        <small>
+                                                            {storyOutcomeLabel(story)}
+                                                            {" / "}
+                                                            {story.files_touched} files
+                                                            {" / "}
+                                                            {story.corrections} corrections
+                                                            {story.review_pain ? ` / ${story.review_pain} review` : ""}
+                                                            {story.merged_to_main ? " / main" : ""}
+                                                        </small>
+                                                    ) : null}
                                                 </dd>
                                             </div>
                                         );
