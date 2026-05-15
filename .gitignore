@@ -8,3 +8,4 @@ bun.lockb
 *.tsbuildinfo
 dist/
 .worktrees/
+.superpowers/
