@@ -403,6 +403,92 @@ export interface RecallResponse {
     readonly truncated: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// Agent Wrapped: personality-led usage recap
+// ---------------------------------------------------------------------------
+
+export type WrappedConfidence = "low" | "medium" | "high";
+export type WrappedSensitivity = "public" | "aggregate" | "sensitive";
+
+export interface WrappedPeriod {
+    readonly label: string;
+    readonly startedAt: string;
+    readonly endedAt: string;
+}
+
+export interface WrappedEvidence {
+    readonly kind: "session" | "tool" | "skill" | "project" | "query" | "insight";
+    readonly label: string;
+    readonly href?: string;
+    readonly count?: number;
+    readonly sensitive?: boolean;
+}
+
+export interface WrappedArchetype {
+    readonly id: string;
+    readonly label: string;
+    readonly score: number;
+    readonly confidence: WrappedConfidence;
+    readonly publicLine: string;
+    readonly internalExplanation: string;
+    readonly evidence: ReadonlyArray<WrappedEvidence>;
+}
+
+export interface WrappedFact {
+    readonly id: string;
+    readonly title: string;
+    readonly publicText: string;
+    readonly internalText: string;
+    readonly sensitivity: WrappedSensitivity;
+    readonly evidence: ReadonlyArray<WrappedEvidence>;
+}
+
+export interface WrappedUsageDay {
+    readonly date: string;
+    readonly sessions: number;
+    readonly turns: number;
+    readonly tokens: number | null;
+}
+
+export interface WrappedUsageOverview {
+    readonly sessions: number;
+    readonly messages: number;
+    readonly totalTokens: number | null;
+    readonly activeDays: number;
+    readonly currentStreakDays: number;
+    readonly longestStreakDays: number;
+    readonly peakHour: number | null;
+    readonly favoriteModel: string | null;
+    readonly tokenComparison: string | null;
+    readonly days: ReadonlyArray<WrappedUsageDay>;
+}
+
+export interface WrappedMetrics {
+    readonly toolCalls: number;
+    readonly toolFailures: number;
+    readonly distinctTools: number;
+    readonly distinctSkills: number;
+    readonly repositories: number;
+    readonly verificationCalls: number;
+    readonly spawnedAgents: number;
+}
+
+export interface WrappedPrivacySummary {
+    readonly publicSafe: boolean;
+    readonly redactedFields: ReadonlyArray<string>;
+}
+
+export interface WrappedProfile {
+    readonly generatedAt: string;
+    readonly period: WrappedPeriod;
+    readonly usage: WrappedUsageOverview;
+    readonly primaryArchetype: WrappedArchetype;
+    readonly secondaryArchetypes: ReadonlyArray<WrappedArchetype>;
+    readonly facts: ReadonlyArray<WrappedFact>;
+    readonly metrics: WrappedMetrics;
+    readonly privacy: WrappedPrivacySummary;
+}
+
 export interface IngestEvent {
     readonly id?: string;
     readonly run?: string;

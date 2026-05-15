@@ -13,6 +13,7 @@ import type {
     ToolFailuresResponse,
     TriageDecision,
     WorkflowResponse,
+    WrappedProfile,
 } from "@shared/dashboard-types.ts";
 
 async function jsonFetch<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
@@ -102,4 +103,7 @@ export const api = {
     toolFailures: (): Promise<ToolFailuresResponse> => jsonFetch("/api/tool-failures"),
     toolFailureDetail: (label: string): Promise<ToolFailureDetailPayload> =>
         jsonFetch(`/api/tool-failures/${encodeURIComponent(label)}/detail`),
+    wrapped: (): Promise<WrappedProfile> => jsonFetch("/api/wrapped"),
+    wrappedPublicPreview: (): Promise<WrappedProfile> =>
+        jsonFetch("/api/wrapped/public-preview"),
 };

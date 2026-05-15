@@ -13,7 +13,8 @@ interface Tab {
         | "/tools"
         | "/decisions"
         | "/workflow"
-        | "/recall";
+        | "/recall"
+        | "/wrapped";
     readonly label: string;
     readonly prefetch: () => Promise<unknown>;
 }
@@ -74,6 +75,21 @@ export function Shell({ children }: { children: ReactNode }) {
             to: "/recall",
             label: "Recall",
             prefetch: () => Promise.resolve(undefined),
+        },
+        {
+            to: "/wrapped",
+            label: "Wrapped",
+            prefetch: () =>
+                Promise.all([
+                    queryClient.prefetchQuery({
+                        queryKey: ["wrapped"],
+                        queryFn: () => api.wrapped(),
+                    }),
+                    queryClient.prefetchQuery({
+                        queryKey: ["wrapped", "public-preview"],
+                        queryFn: () => api.wrappedPublicPreview(),
+                    }),
+                ]),
         },
     ];
 

@@ -17,6 +17,7 @@ import { RecallRoute } from "./routes/recall.tsx";
 import { SkillGraphRoute } from "./routes/skill-graph.tsx";
 import { GraphRoute } from "./routes/graph.tsx";
 import type { GraphExplorerMode } from "@shared/dashboard-types.ts";
+import { WrappedRoute } from "./routes/wrapped.tsx";
 
 const rootRoute = createRootRoute({
     component: () => (
@@ -155,6 +156,12 @@ const recallRoute = createRoute({
     }),
 });
 
+const wrappedRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/wrapped",
+    component: WrappedRoute,
+});
+
 const routeTree = rootRoute.addChildren([
     indexRoute,
     skillsRoute,
@@ -167,6 +174,7 @@ const routeTree = rootRoute.addChildren([
     skillGraphRoute,
     graphRoute,
     recallRoute,
+    wrappedRoute,
 ]);
 
 export const router = createRouter({ routeTree });
