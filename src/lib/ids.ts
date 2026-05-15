@@ -28,6 +28,11 @@ export type MentionedRelationKeyInput = {
     readonly targetKey: string;
     readonly source: string;
 };
+export type ToolFileRelationKeyInput = {
+    readonly toolCallKey: string;
+    readonly fileKey: string;
+    readonly kind: string;
+};
 
 export function stableDigest(value: string, length = 16): string {
     // Preserve existing Bun.hash behavior - agentctl's 89 baseline tests depend on these exact hashes.
@@ -119,4 +124,8 @@ export function editedRelationRecordKey(input: EditedRelationKeyInput): string {
 
 export function mentionedRelationRecordKey(input: MentionedRelationKeyInput): string {
     return stableDigest(`${input.turnKey}|${input.targetKey}|${input.source}`);
+}
+
+export function toolFileRelationRecordKey(input: ToolFileRelationKeyInput): string {
+    return stableDigest(`${input.toolCallKey}|${input.fileKey}|${input.kind}`);
 }

@@ -30,4 +30,15 @@ describe("turn reference extraction", () => {
         expect(classifySymbolKind("update_working_memory")).toBe("snake");
         expect(classifySymbolKind("renderContext")).toBe("function");
     });
+
+    test("extracts references from command and tool output text", () => {
+        const refs = extractTurnReferences([
+            "rg -n WorkingMemoryProcessor apps/nokta/app/processors/working-memory.ts",
+            "TypeError: Working memory not initialized at line 42",
+        ].join("\n"));
+
+        expect(refs.files).toEqual(["apps/nokta/app/processors/working-memory.ts"]);
+        expect(refs.symbols).toContain("WorkingMemoryProcessor");
+        expect(refs.errors).toEqual(["TypeError: Working memory not initialized at line 42"]);
+    });
 });

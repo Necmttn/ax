@@ -12,6 +12,7 @@ export {
     sanitizeRecordKeyPart,
     stableDigest,
     symbolRecordKey,
+    toolFileRelationRecordKey,
     toolCallRecordKey,
     toolRecordKey,
     turnRecordKey,
@@ -21,6 +22,7 @@ export type {
     InvokedRelationKeyInput,
     MentionedRelationKeyInput,
     RepositoryKeyInput,
+    ToolFileRelationKeyInput,
     ToolCallKeyInput,
     ToolKeyInput,
 } from "../lib/ids.ts";
