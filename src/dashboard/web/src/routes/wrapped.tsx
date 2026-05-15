@@ -26,6 +26,11 @@ const heatLevel = (day: WrappedUsageDay, max: number): number => {
     return Math.max(1, Math.min(4, Math.ceil((day.sessions / max) * 4)));
 };
 
+const activityLabel = (day: WrappedUsageDay): string =>
+    `${day.date}: ${fmtCount(day.sessions)} sessions, ${fmtCount(day.turns)} turns, ${
+        day.tokens == null ? "tokens not available" : `${fmtCount(day.tokens)} tokens`
+    }`;
+
 export function WrappedRoute() {
     const wrappedQuery = useQuery({
         queryKey: ["wrapped"],
@@ -127,20 +132,24 @@ function DailyHeatmap({ days }: { days: ReadonlyArray<WrappedUsageDay> }) {
             {days.length === 0 ? (
                 <div className="empty">No daily activity in this period.</div>
             ) : (
-                <div className="wrapped-heatmap" aria-label="Daily activity heatmap">
-                    {days.map((day) => {
-                        const title = `${day.date}: ${fmtCount(day.sessions)} sessions, ${fmtCount(day.turns)} turns`;
-                        return (
+                <>
+                    <div className="wrapped-heatmap" aria-hidden="true">
+                        {days.map((day) => (
                             <span
                                 key={day.date}
                                 className={`wrapped-day level-${heatLevel(day, maxSessions)}`}
-                                title={title}
+                                title={activityLabel(day)}
                             >
                                 <span>{day.date.slice(5)}</span>
                             </span>
-                        );
-                    })}
-                </div>
+                        ))}
+                    </div>
+                    <ul className="sr-only" aria-label="Daily activity values">
+                        {days.map((day) => (
+                            <li key={day.date}>{activityLabel(day)}</li>
+                        ))}
+                    </ul>
+                </>
             )}
         </>
     );
