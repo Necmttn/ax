@@ -130,7 +130,8 @@ const LABEL_GAP = 7;
 const LABEL_EDGE_PADDING = 12;
 const LABEL_CHAR_WIDTH = 6.4;
 const DEFAULT_LIMIT = 80;
-const DEFAULT_PROMINENT_LABELS = 8;
+const DEFAULT_PROMINENT_SESSION_LABELS = 6;
+const DEFAULT_PROMINENT_FILE_LABELS = 4;
 
 const truncateLabel = (label: string, availableWidth: number): string => {
     const maxChars = Math.floor(Math.max(0, availableWidth) / LABEL_CHAR_WIDTH);
@@ -202,7 +203,7 @@ export function GraphRoute() {
     useEffect(() => {
         if (!data) return;
         if (selectedId && data.nodes.some((node) => node.id === selectedId)) return;
-        setSelectedId(data.nodes[0]?.id ?? null);
+        setSelectedId(data.nodes.find((node) => node.kind === "session")?.id ?? data.nodes[0]?.id ?? null);
     }, [data, selectedId]);
 
     const laidOut = useMemo(() => data ? layout(data, box.w, box.h) : [], [data, box.w, box.h]);
@@ -216,6 +217,10 @@ export function GraphRoute() {
         [data],
     );
     const selected = selectedId ? positions.get(selectedId) ?? data?.nodes.find((node) => node.id === selectedId) ?? null : null;
+    const nodeLabels = useMemo(
+        () => new Map((data?.nodes ?? []).map((node) => [node.id, node.label])),
+        [data],
+    );
     const connectedIds = useMemo(() => {
         if (!selectedId || !data) return new Set<string>();
         const ids = new Set<string>([selectedId]);
@@ -225,12 +230,31 @@ export function GraphRoute() {
         }
         return ids;
     }, [data, selectedId]);
+    const selectedEdges = useMemo(() => {
+        if (!selectedId || !data) return [];
+        return data.edges
+            .filter((edge) => edge.source === selectedId || edge.target === selectedId)
+            .slice()
+            .sort((a, b) => b.weight - a.weight);
+    }, [data, selectedId]);
+    const selectedConnectionTitle = selected?.kind === "session"
+        ? "Files Touched"
+        : selected?.kind === "file"
+            ? "Sessions"
+            : "Connections";
     const prominentLabelIds = useMemo(() => {
+        const byWeight = (a: LaidOutNode, b: LaidOutNode) => b.weight - a.weight;
+        const sessions = laidOut
+            .filter((node) => node.kind === "session")
+            .sort(byWeight)
+            .slice(0, DEFAULT_PROMINENT_SESSION_LABELS);
+        const files = laidOut
+            .filter((node) => node.kind === "file")
+            .sort(byWeight)
+            .slice(0, DEFAULT_PROMINENT_FILE_LABELS);
         return new Set(
-            laidOut
+            [...sessions, ...files]
                 .slice()
-                .sort((a, b) => b.weight - a.weight)
-                .slice(0, DEFAULT_PROMINENT_LABELS)
                 .map((node) => node.id),
         );
     }, [laidOut]);
@@ -333,7 +357,8 @@ export function GraphRoute() {
                             />
                             Show all labels
                         </label>
-                        <p>Default view labels the selected, hovered, and highest-weight nodes only.</p>
+                        <p>Session nodes are labeled by the first user ask when transcripts have one.</p>
+                        <p>Edges mean that session edited that file; weight is repeated edit evidence.</p>
                     </div>
                 </aside>
 
@@ -452,6 +477,30 @@ export function GraphRoute() {
                             <p className="workflow-help">Select a node to inspect it.</p>
                         )}
                     </div>
+
+                    {selected ? (
+                        <div className="graph-inspector-section">
+                            <h3>{selectedConnectionTitle}</h3>
+                            {selectedEdges.length === 0 ? (
+                                <p className="workflow-help">No connected edges.</p>
+                            ) : (
+                                <dl className="graph-panel-rows">
+                                    {selectedEdges.slice(0, 12).map((edge, index) => {
+                                        const otherId = edge.source === selected.id ? edge.target : edge.source;
+                                        return (
+                                            <div key={`${edgeKey(edge, index)}-selected`}>
+                                                <dt>{edge.relation}</dt>
+                                                <dd>
+                                                    <strong>{edge.weight.toLocaleString("en-US")}</strong>
+                                                    <span>{nodeLabels.get(otherId) ?? otherId}</span>
+                                                </dd>
+                                            </div>
+                                        );
+                                    })}
+                                </dl>
+                            )}
+                        </div>
+                    ) : null}
 
                     {data?.panels.map((panel) => (
                         <div className="graph-inspector-section" key={`${panel.kind}-${panel.title}`}>

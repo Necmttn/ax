@@ -764,6 +764,10 @@ tr.detail-row td {
     line-height: 1.35;
 }
 
+.graph-display-options p + p {
+    margin-top: 6px;
+}
+
 .graph-stage {
     position: relative;
     min-height: 620px;

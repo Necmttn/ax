@@ -35,6 +35,11 @@ describe("graph explorer", () => {
         expect(FILE_ATTENTION_SQL).toContain("$limit");
         expect(FILE_ATTENTION_SQL).toContain("time::max(ts) AS last_seen");
         expect(FILE_ATTENTION_SQL).toContain("GROUP BY session, file");
+        expect(FILE_ATTENTION_SQL).toContain("FROM turn");
+        expect(FILE_ATTENTION_SQL).toContain("\"organic_task\"");
+        expect(FILE_ATTENTION_SQL).toContain("message_kind = \"task\"");
+        expect(FILE_ATTENTION_SQL).toContain("<local-command");
+        expect(FILE_ATTENTION_SQL).toContain("text_excerpt");
         expect(FILE_ATTENTION_SQL).not.toContain("GROUP BY in.session");
         expect(FILE_ATTENTION_SQL).not.toContain("math::max(ts)");
     });
@@ -49,9 +54,9 @@ describe("graph explorer", () => {
             rows: [
                 {
                     source_id: "session:one",
-                    source_label: "ax",
+                    source_label: "Can you make the graph explain what the session was about?",
                     source_kind: "session",
-                    source_subtitle: "codex",
+                    source_subtitle: "ax",
                     target_id: "file:dashboard",
                     target_label: "src/dashboard/server.ts",
                     target_kind: "file",
@@ -77,11 +82,11 @@ describe("graph explorer", () => {
         });
         expect(payload.nodes).toContainEqual({
             id: "session:one",
-            label: "ax",
+            label: "Can you make the graph explain what the session was about?",
             kind: "session",
             weight: 3,
             tone: "neutral",
-            subtitle: "codex",
+            subtitle: "ax",
         });
         expect(payload.edges).toEqual([
             {
@@ -108,6 +113,9 @@ describe("graph explorer", () => {
             ],
         });
         expect(payload.panels[1]?.kind).toBe("evidence");
+        expect(payload.panels[1]?.rows[0]?.detail).toBe(
+            "Can you make the graph explain what the session was about? -> src/dashboard/server.ts",
+        );
     });
 
     test("rowsToGraphPayload can represent a staged mode placeholder", () => {

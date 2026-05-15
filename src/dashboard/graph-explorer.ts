@@ -35,9 +35,52 @@ const NODE_KINDS = new Set<GraphNodeKind>([
 export const FILE_ATTENTION_SQL = `
 SELECT
     <string>session AS source_id,
-    (session.project ?? <string>session) AS source_label,
+    (
+        (SELECT text_excerpt, seq FROM turn
+            WHERE session = $parent.session
+              AND role = "user"
+              AND message_kind = "task"
+              AND intent_kind IN ["organic_task", "preference", "correction"]
+              AND text_excerpt IS NOT NONE
+              AND !(string::lowercase(text_excerpt) CONTAINS "<local-command")
+              AND !(string::lowercase(text_excerpt) CONTAINS "base directory for this skill:")
+              AND !(string::lowercase(text_excerpt) CONTAINS "base directory for this plugin:")
+              AND !(string::lowercase(text_excerpt) CONTAINS "<environment_context>")
+              AND !(string::lowercase(text_excerpt) CONTAINS "<instructions>")
+              AND !(string::lowercase(text_excerpt) CONTAINS "# agents.md instructions")
+              AND !(string::lowercase(text_excerpt) CONTAINS "# claude.md")
+              AND !(string::lowercase(text_excerpt) CONTAINS "review all changed files for reuse")
+              AND !(string::lowercase(text_excerpt) CONTAINS "session-scoped stop hook")
+              AND !(string::lowercase(text_excerpt) CONTAINS "this session is being continued")
+            ORDER BY seq ASC
+            LIMIT 1
+        )[0].text_excerpt
+        ??
+        (SELECT text_excerpt, seq FROM turn
+            WHERE session = $parent.session
+              AND role = "user"
+              AND message_kind = "task"
+              AND text_excerpt IS NOT NONE
+              AND !(string::lowercase(text_excerpt) CONTAINS "<local-command")
+              AND !(string::lowercase(text_excerpt) CONTAINS "base directory for this skill:")
+              AND !(string::lowercase(text_excerpt) CONTAINS "base directory for this plugin:")
+              AND !(string::lowercase(text_excerpt) CONTAINS "<environment_context>")
+              AND !(string::lowercase(text_excerpt) CONTAINS "<instructions>")
+              AND !(string::lowercase(text_excerpt) CONTAINS "# agents.md instructions")
+              AND !(string::lowercase(text_excerpt) CONTAINS "# claude.md")
+              AND !(string::lowercase(text_excerpt) CONTAINS "review all changed files for reuse")
+              AND !(string::lowercase(text_excerpt) CONTAINS "session-scoped stop hook")
+              AND !(string::lowercase(text_excerpt) CONTAINS "this session is being continued")
+            ORDER BY seq ASC
+            LIMIT 1
+        )[0].text_excerpt
+        ??
+        session.project
+        ??
+        <string>session
+    ) AS source_label,
     "session" AS source_kind,
-    (session.source ?? NONE) AS source_subtitle,
+    (session.project ?? session.cwd ?? session.source ?? NONE) AS source_subtitle,
     <string>file AS target_id,
     file.path AS target_label,
     "file" AS target_kind,
@@ -74,6 +117,12 @@ export function validateFileAttentionSql(sql = FILE_ATTENTION_SQL): ReadonlyArra
     }
     if (!/FROM\s*\(\s*SELECT[\s\S]*GROUP\s+BY\s+session\s*,\s*file[\s\S]*\)/i.test(sql)) {
         warnings.push("missing aggregate subquery grouped by session and file aliases");
+    }
+    if (!/FROM\s+turn/i.test(sql) || !/text_excerpt/i.test(sql) || !/organic_task/i.test(sql)) {
+        warnings.push("missing first-user-ask session decoration");
+    }
+    if (!/message_kind\s*=\s*"task"/i.test(sql) || !/local-command/i.test(sql)) {
+        warnings.push("missing human-task filter for session labels");
     }
     return warnings;
 }
