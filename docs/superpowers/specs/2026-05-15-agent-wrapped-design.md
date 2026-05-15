@@ -32,6 +32,7 @@ The internal report is a local dashboard route at `/wrapped`. It can show sensit
 
 It should include:
 
+- A Claude-style usage snapshot with sessions, messages, token volume, active days, streaks, peak hour, model mix, and activity heatmap when the data is available.
 - Primary archetype and confidence.
 - Secondary archetypes.
 - Evidence-backed explanations for why the archetype was assigned.
@@ -49,7 +50,8 @@ Public cards should show:
 - The main archetype.
 - A short personality line.
 - Aggregate supporting stats.
-- Interesting "most you" facts.
+- One compact "usage wrapped" card inspired by Claude Code's insights overview: total sessions/messages, token scale, active days, streak, peak hour, and favorite model.
+- Interesting "most you" facts with internet-native labels such as "Token Maxxing" or "Skill Stacker."
 - An `ax` brand mark or footer.
 - Optional public URL slot for a future static report.
 
@@ -79,6 +81,34 @@ Candidate archetypes:
 - `The Tool Tamer`: broad tool usage with declining tool failure rate or strong recovery from tool failures.
 
 The profile should expose both scores and explanations. A card should never claim an archetype unless the backing score includes enough evidence.
+
+## Interesting Facts
+
+Wrapped should include a layer of small, memorable facts. These are not primary archetypes; they are shareable observations that make the deck feel personal.
+
+Each fact needs three forms:
+
+- Internal title and explanation with evidence links.
+- Public-safe title and copy.
+- Deterministic query/scoring rule.
+
+Candidate facts:
+
+- `Token Maxxing`: biggest token day, token-heavy sessions, token streaks, and token scale comparisons.
+- `Tool Tamer`: most-used tool, tool diversity, and strongest tool-failure recovery pattern.
+- `Verifycel`: unusually high test, check, or `project verify` activity before completion.
+- `Context Gobbler`: high recall, context, file-read, or search volume before edits.
+- `Peak Hour Agent`: strongest hour-of-day activity cluster.
+- `Model Loyalist`: dominant model usage or notable model switching behavior.
+- `Friction Farmer`: repeated failures that later became solved or reduced patterns.
+- `Skill Stacker`: frequent skill pairings or unusually diverse skill invocation.
+- `Repo Monogamist`: deep focus in one repository.
+- `Repo Hopper`: broad activity across many repositories.
+- `Subagent Summoner`: frequent spawned-agent or orchestration behavior.
+- `Patch Sprinter`: short time from first edit to verification or completion.
+- `Night Shift Builder`: sessions clustered late at night.
+
+The public deck should prefer these labels over dry metric names. The internal report should make the evidence plain enough that the label feels earned, not random.
 
 ## WrappedProfile Data Contract
 
@@ -198,6 +228,14 @@ Useful existing graph tables and relations:
 - `repository`, `checkout`, `commit`, `produced`, `touched`, `edited`
 - `session_health`, `command_outcome`, `workflow_epoch`, `skill_candidate`
 
+Claude Code's built-in insights view is a useful reference and possible data source where transcript-derived values line up:
+
+- Sessions and messages map to `session` and `turn`.
+- Token totals and model usage should use `session_token_usage` when available, then fall back to estimates or omit the card.
+- Active days, streaks, and peak hour can be computed from session/turn timestamps.
+- The activity heatmap can be generated from per-day turn, session, or token totals.
+- Memorable scale comparisons such as "tokens vs. a book" are allowed in public exports if they use aggregate counts only.
+
 The feature should prefer existing derived signals where available, then fall back to direct query aggregation.
 
 ## V1 Scope
@@ -207,6 +245,7 @@ V1 should deliver:
 - `/wrapped` route.
 - Deterministic `WrappedProfile` query.
 - 5-7 archetypes with documented scoring.
+- Claude-style usage overview section and heatmap.
 - Internal evidence-backed report.
 - Sanitized public preview.
 - Static export bundle to a local directory.

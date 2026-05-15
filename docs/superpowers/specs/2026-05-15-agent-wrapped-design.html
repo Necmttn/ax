@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Agent Wrapped Design</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #171614;
+      --muted: #6c665d;
+      --paper: #f6f0e6;
+      --panel: #fffaf1;
+      --line: #cfc5b4;
+      --red: #c74335;
+      --green: #3f7b65;
+      --blue: #334d74;
+      --gold: #b98628;
+      --shadow: 0 24px 60px rgba(48, 39, 26, .14);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background:
+        linear-gradient(90deg, rgba(23, 22, 20, .045) 1px, transparent 1px) 0 0 / 42px 42px,
+        linear-gradient(180deg, rgba(23, 22, 20, .035) 1px, transparent 1px) 0 0 / 42px 42px,
+        var(--paper);
+      color: var(--ink);
+      font: 16px/1.5 Georgia, "Times New Roman", serif;
+    }
+
+    .wrap {
+      width: min(1180px, calc(100vw - 40px));
+      margin: 0 auto;
+      padding: 48px 0 72px;
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(280px, .8fr);
+      gap: 28px;
+      align-items: stretch;
+      margin-bottom: 32px;
+    }
+
+    .hero,
+    .card,
+    .toc {
+      background: rgba(255, 250, 241, .88);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+    }
+
+    .hero {
+      padding: clamp(28px, 5vw, 56px);
+      min-height: 430px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .eyebrow,
+    .label {
+      font: 700 12px/1.1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      letter-spacing: .09em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    h1 {
+      margin: 32px 0 18px;
+      font-size: clamp(54px, 9vw, 118px);
+      line-height: .82;
+      letter-spacing: 0;
+      max-width: 760px;
+    }
+
+    .dek {
+      margin: 0;
+      max-width: 740px;
+      font-size: clamp(20px, 2.4vw, 30px);
+      line-height: 1.2;
+    }
+
+    .hero-meta {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 38px;
+    }
+
+    .pill {
+      border: 1px solid var(--ink);
+      padding: 7px 10px;
+      font: 700 12px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: var(--panel);
+    }
+
+    .poster {
+      background: #121514;
+      color: #f5efe5;
+      padding: 28px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-height: 430px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .poster::before {
+      content: "";
+      position: absolute;
+      inset: 18px;
+      border: 1px solid rgba(245, 239, 229, .28);
+      pointer-events: none;
+    }
+
+    .poster-title {
+      position: relative;
+      font-size: 48px;
+      line-height: .92;
+      font-weight: 900;
+      margin-top: 74px;
+    }
+
+    .poster-copy {
+      position: relative;
+      font-size: 17px;
+      color: #d6d0c7;
+      max-width: 270px;
+      margin-bottom: 10px;
+    }
+
+    .toc {
+      margin-bottom: 32px;
+      padding: 18px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .toc a {
+      color: var(--ink);
+      text-decoration: none;
+      border: 1px solid var(--line);
+      padding: 8px 10px;
+      background: rgba(255, 255, 255, .45);
+      font: 700 12px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    section {
+      margin: 22px 0;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 18px;
+    }
+
+    .card {
+      padding: 24px;
+    }
+
+    .span-7 { grid-column: span 7; }
+    .span-5 { grid-column: span 5; }
+    .span-4 { grid-column: span 4; }
+    .span-6 { grid-column: span 6; }
+    .span-12 { grid-column: span 12; }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: clamp(28px, 4vw, 48px);
+      line-height: .98;
+    }
+
+    h3 {
+      margin: 0 0 10px;
+      font-size: 23px;
+      line-height: 1.1;
+    }
+
+    p { margin: 0 0 12px; }
+    ul, ol { margin: 0; padding-left: 22px; }
+    li { margin: 7px 0; }
+
+    code {
+      font: 700 13px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: rgba(23, 22, 20, .08);
+      padding: 2px 5px;
+    }
+
+    pre {
+      margin: 14px 0 0;
+      padding: 18px;
+      overflow: auto;
+      background: #171614;
+      color: #f6f0e6;
+      border: 1px solid #000;
+      font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .archetypes {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .archetype {
+      border: 1px solid var(--line);
+      padding: 14px;
+      background: rgba(255, 255, 255, .42);
+    }
+
+    .archetype strong {
+      display: block;
+      font-size: 18px;
+      margin-bottom: 4px;
+    }
+
+    .privacy {
+      background: #17201c;
+      color: #f3efe7;
+      border-color: #17201c;
+    }
+
+    .privacy .label,
+    .privacy code {
+      color: #cdd9d2;
+    }
+
+    .privacy code {
+      background: rgba(255, 255, 255, .12);
+    }
+
+    .stripe {
+      border-top: 9px solid var(--red);
+    }
+
+    .stripe.green { border-top-color: var(--green); }
+    .stripe.blue { border-top-color: var(--blue); }
+    .stripe.gold { border-top-color: var(--gold); }
+
+    footer {
+      margin-top: 34px;
+      color: var(--muted);
+      font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    @media (max-width: 860px) {
+      header,
+      .grid,
+      .archetypes {
+        display: block;
+      }
+
+      .poster,
+      .card {
+        margin-top: 18px;
+      }
+    }
+
+    @media print {
+      body { background: white; }
+      .hero, .card, .toc { box-shadow: none; }
+      .toc { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <header>
+      <div class="hero">
+        <div>
+          <div class="eyebrow">ax feature design · May 15, 2026</div>
+          <h1>Agent Wrapped</h1>
+          <p class="dek">A personality-led recap for AI agent harness use: private evidence report inside `ax`, public story deck for X.</p>
+        </div>
+        <div class="hero-meta">
+          <span class="pill">local-first</span>
+          <span class="pill">evidence-backed</span>
+          <span class="pill">public-safe export</span>
+          <span class="pill">future R2 static pages</span>
+        </div>
+      </div>
+      <aside class="poster">
+        <div class="eyebrow">Share angle</div>
+        <div class="poster-title">The<br />Verifier</div>
+        <p class="poster-copy">You test before you declare victory. Every public card links back to local proof.</p>
+      </aside>
+    </header>
+
+    <nav class="toc">
+      <a href="#shape">Product Shape</a>
+      <a href="#archetypes">Archetypes</a>
+      <a href="#privacy">Privacy</a>
+      <a href="#contract">Profile Contract</a>
+      <a href="#scope">V1 Scope</a>
+      <a href="#r2">Future R2</a>
+    </nav>
+
+    <section id="shape" class="grid">
+      <article class="card span-7 stripe">
+        <div class="label">Product shape</div>
+        <h2>Two outputs, one profile.</h2>
+        <p>Agent Wrapped turns the local `ax` evidence graph into an internal report and a sanitized public story deck. The report is the trusted surface. The deck is the shareable hook.</p>
+        <p>The core question is: <strong>What kind of agent collaborator am I?</strong></p>
+      </article>
+
+      <article class="card span-5 stripe gold">
+        <div class="label">Outputs</div>
+        <h3>Internal report</h3>
+        <p>Local `/wrapped` route with a Claude-style usage snapshot, archetypes, evidence, sessions, tool calls, skills, failures, verification behavior, and links into existing dashboard pages.</p>
+        <h3>Public deck</h3>
+        <p>X-friendly portrait cards with aggregate facts, including one compact usage card and meme-readable facts like Token Maxxing, redacted by default and ready for screenshots or static export.</p>
+      </article>
+    </section>
+
+    <section class="grid">
+      <article class="card span-12 stripe">
+        <div class="label">Usage snapshot</div>
+        <h2>Borrow Claude Code's overview pattern.</h2>
+        <p>The internal report should lead with compact metrics people already understand: sessions, messages, total tokens, active days, current streak, longest streak, peak hour, favorite model, and an activity heatmap.</p>
+        <p>The public deck can include a sanitized "usage wrapped" card with aggregate counts and one memorable scale comparison, such as tokens compared with a familiar book. No prompts, paths, repo names, command text, or raw transcript excerpts are needed.</p>
+      </article>
+    </section>
+
+    <section id="archetypes" class="grid">
+      <article class="card span-12 stripe blue">
+        <div class="label">Personality lens</div>
+        <h2>Deterministic archetypes from graph behavior.</h2>
+        <p>V1 should use explainable scoring rules. A card should never claim an archetype unless enough graph evidence exists.</p>
+        <div class="archetypes">
+          <div class="archetype"><strong>The Verifier</strong>High verification commands, completion checks, test usage, and low unverified completion rate.</div>
+          <div class="archetype"><strong>The Debugger</strong>High friction-to-recovery activity, diagnostic loops, and repeated failed-command recovery.</div>
+          <div class="archetype"><strong>The Orchestrator</strong>Plans, subagents, tool diversity, and cross-session coordination.</div>
+          <div class="archetype"><strong>The Skill Collector</strong>Skill diversity, skill pairing, and active use of installed skills.</div>
+          <div class="archetype"><strong>The Refactorer</strong>File-change breadth, architecture notes, refactor commits, and co-change clusters.</div>
+          <div class="archetype"><strong>The Context Curator</strong>Recall, file-context, project-context, and grounding before edits.</div>
+          <div class="archetype"><strong>The Tool Tamer</strong>Broad tool usage with declining failures or strong recovery from tool failures.</div>
+        </div>
+      </article>
+    </section>
+
+    <section class="grid">
+      <article class="card span-12 stripe gold">
+        <div class="label">Interesting facts</div>
+        <h2>Make the graph sound like the internet.</h2>
+        <p>Wrapped needs small facts with memorable labels, not dry metric names. Each fact should have internal evidence, public-safe copy, and a deterministic query rule.</p>
+        <div class="archetypes">
+          <div class="archetype"><strong>Token Maxxing</strong>Biggest token day, token-heavy sessions, token streaks, and scale comparisons.</div>
+          <div class="archetype"><strong>Tool Tamer</strong>Most-used tool, tool diversity, and strongest recovery from tool failures.</div>
+          <div class="archetype"><strong>Verifycel</strong>Unusually high test, check, or project verify activity before completion.</div>
+          <div class="archetype"><strong>Context Gobbler</strong>High recall, context, file-read, or search volume before edits.</div>
+          <div class="archetype"><strong>Skill Stacker</strong>Frequent skill pairings or unusually diverse skill invocation.</div>
+          <div class="archetype"><strong>Subagent Summoner</strong>Frequent spawned-agent or orchestration behavior.</div>
+          <div class="archetype"><strong>Repo Monogamist / Repo Hopper</strong>Depth in one repository versus breadth across many repositories.</div>
+          <div class="archetype"><strong>Night Shift Builder</strong>Sessions clustered late at night or a clear peak-hour pattern.</div>
+        </div>
+      </article>
+    </section>
+
+    <section id="privacy" class="grid">
+      <article class="card span-6 privacy">
+        <div class="label">Internal profile</div>
+        <h2>Rich and local.</h2>
+        <ul>
+          <li>May include sensitive labels and links.</li>
+          <li>May include local-only evidence.</li>
+          <li>Can deep-link to sessions, tools, skills, projects, workflow, and recall.</li>
+          <li>Never leaves the machine unless the user exports or publishes it.</li>
+        </ul>
+      </article>
+
+      <article class="card span-6 privacy">
+        <div class="label">Public profile</div>
+        <h2>Aggregate by default.</h2>
+        <ul>
+          <li>No repository names.</li>
+          <li>No file paths.</li>
+          <li>No command text or raw error text.</li>
+          <li>No prompt or transcript snippets.</li>
+          <li>No usernames, local paths, remotes, or private issue references.</li>
+        </ul>
+      </article>
+    </section>
+
+    <section id="contract" class="grid">
+      <article class="card span-12 stripe green">
+        <div class="label">Data contract</div>
+        <h2>`WrappedProfile` sits below rendering.</h2>
+        <p>Query code computes the profile. Dashboard code renders it. Export code sanitizes it. Future static/R2 publishing consumes only the sanitized artifact bundle.</p>
+<pre><code>interface WrappedProfile {
+  readonly period: {
+    readonly label: string;
+    readonly startedAt: string;
+    readonly endedAt: string;
+  };
+  readonly primaryArchetype: WrappedArchetype;
+  readonly secondaryArchetypes: readonly WrappedArchetype[];
+  readonly facts: readonly WrappedFact[];
+  readonly metrics: WrappedMetrics;
+  readonly privacy: WrappedPrivacySummary;
+}</code></pre>
+      </article>
+    </section>
+
+    <section class="grid">
+      <article class="card span-4">
+        <div class="label">Flow</div>
+        <h3>Dashboard</h3>
+        <ol>
+          <li>Open `/wrapped`.</li>
+          <li>Fetch `/api/wrapped`.</li>
+          <li>Render archetype, traits, facts, and evidence.</li>
+          <li>Preview public deck.</li>
+          <li>Adjust redaction.</li>
+          <li>Export static bundle.</li>
+        </ol>
+      </article>
+
+      <article class="card span-4">
+        <div class="label">API</div>
+        <h3>Endpoints</h3>
+        <ul>
+          <li><code>GET /api/wrapped?period=year</code></li>
+          <li><code>GET /api/wrapped/public-preview?period=year</code></li>
+          <li><code>POST /api/wrapped/export</code></li>
+        </ul>
+      </article>
+
+      <article class="card span-4">
+        <div class="label">Sources</div>
+        <h3>Graph evidence</h3>
+        <p>`session`, `turn`, `tool_call`, `skill`, `invoked`, `skill_paired`, `friction_event`, `diagnostic_event`, `recovered_by`, `plan`, `repository`, `commit`, `produced`, `touched`, `session_token_usage`, and derived signals.</p>
+      </article>
+    </section>
+
+    <section id="scope" class="grid">
+      <article class="card span-6 stripe gold">
+        <div class="label">V1 delivers</div>
+        <h2>Local report and export bundle.</h2>
+        <ul>
+          <li>`/wrapped` route.</li>
+          <li>Deterministic `WrappedProfile` query.</li>
+          <li>5-7 archetypes with documented scoring.</li>
+          <li>Claude-style usage overview and activity heatmap.</li>
+          <li>Internal evidence-backed report.</li>
+          <li>Sanitized public preview.</li>
+          <li>Static export bundle to a local directory.</li>
+        </ul>
+      </article>
+
+      <article class="card span-6">
+        <div class="label">Deferred</div>
+        <h2>Keep publishing out of v1.</h2>
+        <ul>
+          <li>PNG generation if HTML cards are enough for screenshots.</li>
+          <li>R2 publishing.</li>
+          <li>Public permalink management.</li>
+          <li>Share text generation.</li>
+          <li>Time-series animation or video.</li>
+        </ul>
+      </article>
+    </section>
+
+    <section id="r2" class="grid">
+      <article class="card span-12 stripe green">
+        <div class="label">Future static publishing</div>
+        <h2>R2 receives only sanitized artifacts.</h2>
+        <ol>
+          <li>Generate `wrapped-public.json`.</li>
+          <li>Generate static HTML/CSS assets.</li>
+          <li>Upload to R2 or another static host.</li>
+          <li>Return a public URL.</li>
+        </ol>
+        <p>The publisher should not need database access and should not receive raw internal evidence.</p>
+      </article>
+    </section>
+
+    <section class="grid">
+      <article class="card span-6">
+        <div class="label">Tests</div>
+        <h2>Safety and scoring need fixtures.</h2>
+        <ul>
+          <li>Archetype scoring on fixed fixture profiles.</li>
+          <li>Privacy sanitizer removes sensitive fields.</li>
+          <li>Public profile cannot include repo names, file paths, raw command text, or transcript excerpts by default.</li>
+          <li>Dashboard API handles empty, sparse, and rich graphs.</li>
+        </ul>
+      </article>
+
+      <article class="card span-6">
+        <div class="label">Open decisions</div>
+        <h2>Still to choose.</h2>
+        <ul>
+          <li>Exact visual identity for public cards.</li>
+          <li>PNG generation versus browser screenshots.</li>
+          <li>Default period: year-to-date, last 365 days, or all-time.</li>
+          <li>Persist archetype scoring or compute on demand.</li>
+        </ul>
+      </article>
+    </section>
+
+    <footer>
+      Source: docs/superpowers/specs/2026-05-15-agent-wrapped-design.md
+    </footer>
+  </main>
+</body>
+</html>
