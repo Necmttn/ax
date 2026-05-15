@@ -1865,13 +1865,66 @@ export const rootCommand = Command.make("axctl").pipe(
     ]),
 );
 
+/**
+ * Run the CLI command tree. Returns an Effect typed as needing only
+ * `SurrealClient`; the cast bridges an Effect v4 beta gap where
+ * `Command.runWith`'s `Environment` services (Stdio/Path/FileSystem/
+ * Terminal/ChildProcessSpawner) are surfaced as compile-time requirements
+ * even though they are satisfied implicitly at runtime. This is the only
+ * place the cast lives - callers stay type-safe.
+ */
 export const runCli = (args: ReadonlyArray<string>): Effect.Effect<void, unknown, SurrealClient> =>
     Command.runWith(rootCommand, { version: AGENTCTL_VERSION })(args) as unknown as Effect.Effect<void, unknown, SurrealClient>;
+
+/** CLI invocation that has had its `SurrealClient` requirement satisfied. */
+type CliProgram = Effect.Effect<void, unknown, never>;
+
+/**
+ * Provide AppLayer (SurrealClient + AgentctlConfig + ProcessService) and a
+ * scope so handlers that allocate scoped resources work. Used by commands
+ * whose handlers actually touch SurrealDB.
+ */
+const withDb = (args: ReadonlyArray<string>): CliProgram =>
+    runCli(args).pipe(Effect.provide(AppLayer), Effect.scoped);
+
+/**
+ * Provide a sentinel SurrealClient that panics on access. Used by lifecycle
+ * commands (install/daemon/doctor/uninstall/version/update) and unknown
+ * commands / typos - none of these should reach the DB, so accidental
+ * access is a bug worth surfacing loudly.
+ */
+const withoutDb = (args: ReadonlyArray<string>): CliProgram => {
+    const stub: SurrealClientShape = new Proxy({} as SurrealClientShape, {
+        get(_target, prop) {
+            throw new Error(
+                `axctl: SurrealClient.${String(prop)} accessed on the no-DB code path - this command was routed without AppLayer`,
+            );
+        },
+    });
+    return runCli(args).pipe(Effect.provideService(SurrealClient, stub));
+};
+
+// Commands whose handlers reach into SurrealClient via AppLayer. Anything
+// outside this set runs through `withoutDb` so the user gets fast, honest
+// errors (e.g. "unknown command") instead of a 5s connect timeout.
+const DB_COMMANDS: ReadonlySet<string> = new Set([
+    "ingest",
+    "derive-signals",
+    "insights",
+    "interventions",
+    "dashboard",
+    "recall",
+    "skills",
+    "project",
+    "evidence",
+    "tui",
+    "dogfood",
+]);
 
 async function main() {
     const [, , ...args] = process.argv;
     if (args[0] === undefined || args[0] === "help" || args[0] === "--help" || args[0] === "-h") {
-        await Effect.runPromise(runCli(["--help"]) as Effect.Effect<void>);
+        await Effect.runPromise(withoutDb(["--help"]));
         return;
     }
     if (args[0] === "-V") {
@@ -1879,34 +1932,14 @@ async function main() {
         return;
     }
     if (args[0] === "upgrade") {
-        await Effect.runPromise(runCli(["update", ...args.slice(1)]) as Effect.Effect<void>);
+        await Effect.runPromise(withoutDb(["update", ...args.slice(1)]));
         return;
     }
-    // Only known DB-requiring commands route through AppLayer (which connects
-    // SurrealDB). Lifecycle commands (install/daemon/doctor/uninstall/version/
-    // update) and unknown commands / typos skip the connect attempt so the
-    // user sees Effect CLI's "unknown command" error instead of a 5s DB
-    // connect timeout dump.
-    const dbCommands = new Set([
-        "ingest",
-        "derive-signals",
-        "insights",
-        "interventions",
-        "dashboard",
-        "recall",
-        "skills",
-        "project",
-        "evidence",
-        "tui",
-        "dogfood",
-    ]);
-    if (dbCommands.has(args[0] ?? "")) {
-        await Effect.runPromise(
-            runCli(args).pipe(Effect.provide(AppLayer), Effect.scoped) as Effect.Effect<void>,
-        );
+    if (DB_COMMANDS.has(args[0] ?? "")) {
+        await Effect.runPromise(withDb(args));
         return;
     }
-    await Effect.runPromise(runCli(args) as Effect.Effect<void>);
+    await Effect.runPromise(withoutDb(args));
 }
 
 if (import.meta.main) {
