@@ -640,6 +640,20 @@ tr.detail-row td {
     text-align: left;
 }
 
+.graph-mode-list button {
+    align-items: center;
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.graph-mode-list button small {
+    color: var(--muted);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
 .graph-query button {
     text-align: center;
 }
@@ -653,6 +667,19 @@ tr.detail-row td {
     background: var(--ink);
     border-color: var(--ink);
     color: var(--page);
+}
+
+.graph-mode-list button:disabled,
+.graph-query button:disabled,
+.graph-query input:disabled {
+    color: var(--muted);
+    cursor: not-allowed;
+    opacity: 0.68;
+}
+
+.graph-mode-list button.is-staged:hover,
+.graph-query button:disabled:hover {
+    border-color: var(--line);
 }
 
 .graph-query {

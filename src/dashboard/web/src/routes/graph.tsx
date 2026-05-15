@@ -10,13 +10,13 @@ import type {
     GraphMetricValue,
 } from "@shared/dashboard-types.ts";
 
-const MODES: ReadonlyArray<{ mode: GraphExplorerMode; label: string }> = [
-    { mode: "file-attention", label: "File attention" },
-    { mode: "ask-outcome", label: "Ask -> Outcome" },
-    { mode: "phase-balance", label: "Phase balance" },
-    { mode: "delivery", label: "Delivery" },
-    { mode: "patterns", label: "Patterns" },
-    { mode: "skill-pairs", label: "Skill pairs" },
+const MODES: ReadonlyArray<{ mode: GraphExplorerMode; label: string; implemented: boolean }> = [
+    { mode: "file-attention", label: "File attention", implemented: true },
+    { mode: "ask-outcome", label: "Ask -> Outcome", implemented: false },
+    { mode: "phase-balance", label: "Phase balance", implemented: false },
+    { mode: "delivery", label: "Delivery", implemented: false },
+    { mode: "patterns", label: "Patterns", implemented: false },
+    { mode: "skill-pairs", label: "Skill pairs", implemented: false },
 ];
 
 interface LaidOutNode extends GraphExplorerNode {
@@ -159,6 +159,8 @@ export function GraphRoute() {
     const navigate = useNavigate({ from: "/graph" });
     const search = useSearch({ from: "/graph" });
     const mode = search.mode ?? "file-attention";
+    const activeMode = MODES.find((item) => item.mode === mode) ?? MODES[0]!;
+    const stagedMode = !activeMode.implemented;
     const activeQ = (search.q ?? "").trim();
     const limit = search.limit ?? 160;
     const [q, setQ] = useState(activeQ);
@@ -188,10 +190,11 @@ export function GraphRoute() {
     const query = useQuery({
         queryKey: ["graph-explorer", mode, activeQ, limit],
         queryFn: () => api.graphExplorer({ mode, q: activeQ || null, limit }),
+        enabled: !stagedMode,
     });
     const data = query.data ?? null;
-    const loading = query.isLoading || query.isFetching;
-    const error = query.error ? String(query.error) : null;
+    const loading = !stagedMode && (query.isLoading || query.isFetching);
+    const error = !stagedMode && query.error ? String(query.error) : null;
 
     useEffect(() => {
         if (!data) return;
@@ -222,6 +225,7 @@ export function GraphRoute() {
 
     const submit = (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
+        if (stagedMode) return;
         void navigate({
             search: {
                 mode,
@@ -260,10 +264,16 @@ export function GraphRoute() {
                             <button
                                 key={item.mode}
                                 type="button"
-                                className={item.mode === mode ? "is-active" : undefined}
-                                onClick={() => selectMode(item.mode)}
+                                className={[
+                                    item.mode === mode ? "is-active" : "",
+                                    item.implemented ? "" : "is-staged",
+                                ].filter(Boolean).join(" ") || undefined}
+                                disabled={!item.implemented}
+                                title={item.implemented ? item.label : `${item.label} is staged`}
+                                onClick={() => item.implemented ? selectMode(item.mode) : undefined}
                             >
-                                {item.label}
+                                <span>{item.label}</span>
+                                {!item.implemented ? <small>Staged</small> : null}
                             </button>
                         ))}
                     </div>
@@ -274,13 +284,19 @@ export function GraphRoute() {
                             type="search"
                             value={q}
                             placeholder="filter files or projects"
+                            disabled={stagedMode}
                             onChange={(event) => setQ(event.target.value)}
                         />
-                        <button type="submit">Apply</button>
+                        <button type="submit" disabled={stagedMode}>Apply</button>
                     </form>
                 </aside>
 
                 <div className="graph-stage" ref={ref}>
+                    {stagedMode ? (
+                        <div className="empty">
+                            {activeMode.label} is staged. File attention is the implemented graph mode.
+                        </div>
+                    ) : null}
                     {error ? <div className="error">Error: {error}</div> : null}
                     {loading && !data ? <div className="loading">Loading graph...</div> : null}
                     {data?.warnings.length ? (

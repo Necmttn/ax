@@ -2,6 +2,7 @@ export type PrSizeLabel = "small" | "medium" | "large";
 export type ReviewPainLabel = "low" | "moderate" | "high" | "roasted";
 export type DeliveryStatus =
     | "merged_to_main"
+    | "merged_unverified"
     | "promoted_without_pr"
     | "closed_unmerged"
     | "open_pr"
@@ -122,7 +123,8 @@ export function classifyDeliveryStatus(input: DeliveryStatusInput): DeliveryStat
     if (input.reachedMain) {
         return input.prState === "merged" ? "merged_to_main" : "promoted_without_pr";
     }
-    if (input.prState === "closed" || input.prState === "merged") return "closed_unmerged";
+    if (input.prState === "merged") return "merged_unverified";
+    if (input.prState === "closed") return "closed_unmerged";
     if (input.prState === "open") return "open_pr";
     return "local_only";
 }

@@ -156,24 +156,31 @@ axctl uninstall
 `axctl dashboard serve` exposes `/graph`, a typed graph explorer over agent
 telemetry.
 
-Initial modes:
+Implemented mode:
 
-- `File attention`: files connected to user messages, reads/searches, and
-  touched outcomes.
-- `Ask -> Outcome`: user asks connected to sessions, phase spans, delivery
-  outcomes, and feedback.
-- `Phase balance`: planning, implementation, verification, review, and
-  hands-free work duration.
-- `Delivery`: branches, commits, PRs, reviews, checks, and mainline promotion.
-- `Patterns`: cross-session pattern candidates backed by messages, files,
-  sessions, and outcomes.
-- `Skill pairs`: the existing skill co-occurrence graph as a compatibility
-  mode.
+- `File attention`: files connected to sessions through existing edited-file
+  evidence. This is the first concrete `/graph` query.
 
-The delivery model distinguishes local-only work, open PRs, closed-unmerged
-PRs, promoted-without-PR work, and merged-to-main work. PR review signals
-include size, review rounds, changes requested, failed checks, unresolved
-threads, and AI reviewer comments.
+Staged/planned modes:
+
+- `Ask -> Outcome`: planned user asks connected to sessions, phase spans,
+  delivery outcomes, and feedback.
+- `Phase balance`: planned planning, implementation, verification, review, and
+  hands-free work duration view.
+- `Delivery`: planned branches, commits, PRs, reviews, checks, and mainline
+  promotion view.
+- `Patterns`: planned cross-session pattern candidates backed by messages,
+  files, sessions, and outcomes.
+- `Skill pairs`: planned compatibility mode for the existing skill
+  co-occurrence graph.
+
+The new delivery, phase, and ask/outcome tables and classifiers are groundwork
+for these views. User-message mentions, read/search references, touched
+outcomes, ingestion writers/population, and backing graph queries are follow-on
+work; staged modes stay disabled/empty until those pieces exist. The delivery
+classifier distinguishes local-only work, open PRs, closed-unmerged PRs, merged
+PRs without mainline evidence, promoted-without-PR work, and merged-to-main
+work.
 
 ### Development (AX_DEV=1)
 

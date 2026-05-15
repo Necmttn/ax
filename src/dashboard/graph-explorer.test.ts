@@ -14,16 +14,18 @@ describe("graph explorer", () => {
         expect(normalizeGraphMode("delivery")).toBe("delivery");
     });
 
-    test("resolveGraphExplorerMode falls back to file-attention as the effective payload mode", () => {
+    test("resolveGraphExplorerMode marks staged modes without falling back", () => {
         expect(resolveGraphExplorerMode("file-attention")).toEqual({
             requestedMode: "file-attention",
             effectiveMode: "file-attention",
+            implemented: true,
             warnings: [],
         });
         expect(resolveGraphExplorerMode("delivery")).toEqual({
             requestedMode: "delivery",
-            effectiveMode: "file-attention",
-            warnings: ['Mode "delivery" is not implemented yet; showing file-attention graph.'],
+            effectiveMode: "delivery",
+            implemented: false,
+            warnings: ['Mode "delivery" is staged; no graph query is implemented yet.'],
         });
     });
 
@@ -38,7 +40,7 @@ describe("graph explorer", () => {
     });
 
     test("rowsToGraphPayload builds typed graph with inspector panels", () => {
-        const modeResolution = resolveGraphExplorerMode("delivery");
+        const modeResolution = resolveGraphExplorerMode("file-attention");
         const payload = rowsToGraphPayload({
             generatedAt: "2026-05-15T00:00:00.000Z",
             mode: modeResolution.effectiveMode,
@@ -63,7 +65,7 @@ describe("graph explorer", () => {
 
         expect(payload.generatedAt).toBe("2026-05-15T00:00:00.000Z");
         expect(payload.mode).toBe("file-attention");
-        expect(payload.warnings).toEqual(['Mode "delivery" is not implemented yet; showing file-attention graph.']);
+        expect(payload.warnings).toEqual([]);
         expect(payload.query).toBe("dashboard");
         expect(payload.nodes).toContainEqual({
             id: "file:dashboard",
@@ -106,6 +108,23 @@ describe("graph explorer", () => {
             ],
         });
         expect(payload.panels[1]?.kind).toBe("evidence");
+    });
+
+    test("rowsToGraphPayload can represent a staged mode placeholder", () => {
+        const modeResolution = resolveGraphExplorerMode("delivery");
+        const payload = rowsToGraphPayload({
+            generatedAt: "2026-05-15T00:00:00.000Z",
+            mode: modeResolution.effectiveMode,
+            query: null,
+            warnings: modeResolution.warnings,
+            rows: [],
+        });
+
+        expect(payload.mode).toBe("delivery");
+        expect(payload.nodes).toEqual([]);
+        expect(payload.edges).toEqual([]);
+        expect(payload.warnings).toEqual(['Mode "delivery" is staged; no graph query is implemented yet.']);
+        expect(payload.panels[0]?.rows).toContainEqual({ label: "Mode", value: "delivery" });
     });
 
     test("rowsToGraphPayload dedupes shared source and target nodes", () => {

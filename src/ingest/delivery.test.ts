@@ -126,6 +126,10 @@ describe("classifyDeliveryStatus", () => {
         expect(classifyDeliveryStatus({ prState: "closed", reachedMain: false })).toBe("closed_unmerged");
     });
 
+    test("does not classify a merged PR without main evidence as closed unmerged", () => {
+        expect(classifyDeliveryStatus({ prState: "merged", reachedMain: false })).toBe("merged_unverified");
+    });
+
     test("classifies an open PR that has not reached main", () => {
         expect(classifyDeliveryStatus({ prState: "open", reachedMain: false })).toBe("open_pr");
     });

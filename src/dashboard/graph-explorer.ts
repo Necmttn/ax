@@ -20,6 +20,7 @@ const GRAPH_MODES = new Set<GraphExplorerMode>([
     "delivery",
     "patterns",
 ]);
+const IMPLEMENTED_MODES = new Set<GraphExplorerMode>([DEFAULT_MODE]);
 const NODE_KINDS = new Set<GraphNodeKind>([
     "skill",
     "file",
@@ -94,6 +95,7 @@ export interface RowsToGraphPayloadInput {
 export interface GraphExplorerModeResolution {
     readonly requestedMode: GraphExplorerMode;
     readonly effectiveMode: GraphExplorerMode;
+    readonly implemented: boolean;
     readonly warnings: ReadonlyArray<string>;
 }
 
@@ -105,13 +107,14 @@ export function normalizeGraphMode(value: unknown): GraphExplorerMode {
 
 export function resolveGraphExplorerMode(value: unknown): GraphExplorerModeResolution {
     const requestedMode = normalizeGraphMode(value);
-    if (requestedMode === DEFAULT_MODE) {
-        return { requestedMode, effectiveMode: DEFAULT_MODE, warnings: [] };
+    if (IMPLEMENTED_MODES.has(requestedMode)) {
+        return { requestedMode, effectiveMode: requestedMode, implemented: true, warnings: [] };
     }
     return {
         requestedMode,
-        effectiveMode: DEFAULT_MODE,
-        warnings: [`Mode "${requestedMode}" is not implemented yet; showing file-attention graph.`],
+        effectiveMode: requestedMode,
+        implemented: false,
+        warnings: [`Mode "${requestedMode}" is staged; no graph query is implemented yet.`],
     };
 }
 
@@ -308,13 +311,22 @@ export const fetchGraphExplorer = (
     params: GraphExplorerParams = {},
 ): Effect.Effect<GraphExplorerPayload, DbError, SurrealClient> =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
         const modeResolution = resolveGraphExplorerMode(params.mode);
         const query = typeof params.q === "string" && params.q.trim().length > 0
             ? params.q.trim()
             : null;
         const limit = clampLimit(params.limit);
 
+        if (!modeResolution.implemented) {
+            return rowsToGraphPayload({
+                mode: modeResolution.effectiveMode,
+                query,
+                rows: [],
+                warnings: modeResolution.warnings,
+            });
+        }
+
+        const db = yield* SurrealClient;
         const rows = yield* db.query<[Array<Record<string, unknown>>]>(
             FILE_ATTENTION_SQL,
             { q: query?.toLowerCase() ?? "", limit },
