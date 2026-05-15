@@ -18,6 +18,7 @@ describe("effect cli", () => {
             "dashboard",
             "recall",
             "skills",
+            "context",
             "project",
             "evidence",
             "version",
@@ -89,6 +90,15 @@ describe("effect cli", () => {
         expect(subNames).toEqual(expect.arrayContaining([
             "guidance-next", "session-summary", "weekly",
         ]));
+    });
+
+    test("context group exposes file context packs", () => {
+        const context = rootCommand.subcommands
+            .flatMap((g) => g.commands)
+            .find((c) => c.name === "context");
+        expect(context).toBeDefined();
+        const subNames = context!.subcommands.flatMap((g) => g.commands.map((c) => c.name));
+        expect(subNames).toEqual(expect.arrayContaining(["file"]));
     });
 });
 

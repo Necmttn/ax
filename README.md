@@ -139,6 +139,7 @@ axctl dashboard [--limit=N] [--out=path]
 axctl dashboard serve [--port=N]
 axctl recall <query> [--project=...] [--skill=...] [--since=...] [--json]
 axctl skills <search|stats|recent|unused|taste|pairs|recovery>
+axctl context file [--files=path,path] [--json] <query>
 axctl project <context|verify|harness> [--json]
 axctl evidence <guidance-next|session-summary|weekly> [--json]
 axctl version [--check] [--json]
