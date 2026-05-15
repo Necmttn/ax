@@ -21,6 +21,7 @@ import { fetchSessionDetail } from "./session-detail.ts";
 import { fetchEpisodeTimeline } from "./episode-timeline.ts";
 import { fetchProject } from "./project.ts";
 import { fetchRecall } from "./recall.ts";
+import { fetchGraphExplorer } from "./graph-explorer.ts";
 import { fetchSkillGraph } from "./skill-graph.ts";
 
 /**
@@ -325,6 +326,32 @@ export async function handleDashboardRequest(req: Request): Promise<Response> {
         try {
             const payload = await Effect.runPromise(
                 fetchEpisodeTimeline(parentId).pipe(
+                    Effect.provide(AppLayer),
+                    Effect.scoped,
+                ) as Effect.Effect<unknown>,
+            );
+            return jsonResponse(payload);
+        } catch (err) {
+            return jsonResponse(
+                { error: err instanceof Error ? err.message : String(err) },
+                500,
+            );
+        }
+    }
+    if (url.pathname === "/api/graph-explorer" && req.method === "GET") {
+        const mode = url.searchParams.get("mode");
+        const q = url.searchParams.get("q");
+        const limitParam = url.searchParams.get("limit");
+        const limit = limitParam ? Number(limitParam) : undefined;
+        const params: { mode?: string; q?: string | null; limit?: number } = {};
+        if (mode !== null) params.mode = mode;
+        if (q !== null) params.q = q;
+        if (typeof limit === "number" && Number.isFinite(limit)) {
+            params.limit = limit;
+        }
+        try {
+            const payload = await Effect.runPromise(
+                fetchGraphExplorer(params).pipe(
                     Effect.provide(AppLayer),
                     Effect.scoped,
                 ) as Effect.Effect<unknown>,

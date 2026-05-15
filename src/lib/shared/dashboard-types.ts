@@ -324,6 +324,69 @@ export interface SkillGraphPayload {
     readonly edges: ReadonlyArray<SkillGraphEdge>;
 }
 
+export type GraphExplorerMode =
+    | "skill-pairs"
+    | "file-attention"
+    | "ask-outcome"
+    | "phase-balance"
+    | "delivery"
+    | "patterns";
+
+export type GraphNodeKind =
+    | "skill"
+    | "file"
+    | "session"
+    | "message"
+    | "commit"
+    | "pull_request"
+    | "pattern"
+    | "phase";
+
+export type GraphPanelKind = "summary" | "evidence" | "timeline" | "pattern";
+
+export type GraphMetricValue = string | number | boolean | null;
+
+export interface GraphExplorerNode {
+    readonly id: string;
+    readonly label: string;
+    readonly kind: GraphNodeKind;
+    readonly weight: number;
+    readonly tone: string;
+    readonly subtitle?: string;
+    readonly metrics?: Readonly<Record<string, GraphMetricValue>>;
+}
+
+export interface GraphExplorerEdge {
+    readonly source: string;
+    readonly target: string;
+    readonly relation: string;
+    readonly weight: number;
+    readonly tone: string;
+    readonly dashed?: boolean;
+    readonly label?: string;
+    readonly metrics?: Readonly<Record<string, GraphMetricValue>>;
+}
+
+export interface GraphExplorerPanel {
+    readonly title: string;
+    readonly kind: GraphPanelKind;
+    readonly rows: ReadonlyArray<{
+        readonly label: string;
+        readonly value: string;
+        readonly detail?: string;
+    }>;
+}
+
+export interface GraphExplorerPayload {
+    readonly generatedAt: string;
+    readonly mode: GraphExplorerMode;
+    readonly query: string | null;
+    readonly nodes: ReadonlyArray<GraphExplorerNode>;
+    readonly edges: ReadonlyArray<GraphExplorerEdge>;
+    readonly panels: ReadonlyArray<GraphExplorerPanel>;
+    readonly warnings: ReadonlyArray<string>;
+}
+
 export interface RecallHit {
     readonly turn_id: string;
     readonly session_id: string;
