@@ -151,6 +151,30 @@ axctl doctor [--json]
 axctl uninstall
 ```
 
+### Graph Explorer
+
+`axctl dashboard serve` exposes `/graph`, a typed graph explorer over agent
+telemetry.
+
+Initial modes:
+
+- `File attention`: files connected to user messages, reads/searches, and
+  touched outcomes.
+- `Ask -> Outcome`: user asks connected to sessions, phase spans, delivery
+  outcomes, and feedback.
+- `Phase balance`: planning, implementation, verification, review, and
+  hands-free work duration.
+- `Delivery`: branches, commits, PRs, reviews, checks, and mainline promotion.
+- `Patterns`: cross-session pattern candidates backed by messages, files,
+  sessions, and outcomes.
+- `Skill pairs`: the existing skill co-occurrence graph as a compatibility
+  mode.
+
+The delivery model distinguishes local-only work, open PRs, closed-unmerged
+PRs, promoted-without-PR work, and merged-to-main work. PR review signals
+include size, review rounds, changes requested, failed checks, unresolved
+threads, and AI reviewer comments.
+
 ### Development (AX_DEV=1)
 
 These subcommands are only exposed when `AX_DEV=1` is set in the environment.
