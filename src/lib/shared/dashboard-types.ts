@@ -536,6 +536,9 @@ export interface SessionListRow {
     /** True when a raw transcript pointer exists (session is inspectable). */
     readonly has_raw_file: boolean;
     readonly turn_count: number;
+    /** Parent session id when this row was spawned by another session (e.g. a
+     *  Claude subagent / Codex agent). Null for top-level sessions. */
+    readonly parent_session: string | null;
 }
 
 export interface SessionListResponse {

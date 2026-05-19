@@ -58,6 +58,20 @@ export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<Se
             LIMIT ${limit};
         `);
 
+        // Look up parent → child via the `spawned` relation so the SPA can
+        // group subagent sessions under the session that spawned them. Cheap:
+        // single batched IN-list query against a relation table.
+        const sessionIds = rows.map((r) => r.id).filter(Boolean);
+        const parentBySession = new Map<string, string>();
+        if (sessionIds.length > 0) {
+            const [edges] = yield* db.query<[Array<{ child: string; parent: string }>]>(`
+                SELECT <string>out AS child, <string>in AS parent
+                FROM spawned
+                WHERE out IN [${sessionIds.join(", ")}];
+            `);
+            for (const e of edges) parentBySession.set(e.child, e.parent);
+        }
+
         // turn_count is intentionally NOT joined here: the cross-session turn
         // table is huge and a batched IN-list count still takes ~8 s at the
         // 200-row scale we want. Surface 0 in the wire format and let the
@@ -74,6 +88,7 @@ export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<Se
                 ended_at: r.ended_at,
                 has_raw_file: !!r.has_raw_file,
                 turn_count: 0,
+                parent_session: parentBySession.get(r.id) ?? null,
             })),
         };
     });
