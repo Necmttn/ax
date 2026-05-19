@@ -1,11 +1,9 @@
 import { Fragment, useMemo, useState } from "react";
-import type { CSSProperties } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { api } from "../api.ts";
 import { prettifyProjectSlug } from "@shared/project-slug.ts";
 import type { SessionListRow } from "@shared/dashboard-types.ts";
-import { groupByParent } from "./group-sessions.ts";
 
 /** Strip the `session:` prefix and any backtick / ⟨⟩ wrappers so we can use
  *  the bare id as a tanstack-router path param. JSONL filenames + the inspect
@@ -54,14 +52,13 @@ function SourceBadge({ source }: { source: string }) {
 interface RowProps {
     readonly s: SessionListRow;
     readonly indent?: boolean;
-    readonly expandedToggle?: { expanded: boolean; childCount: number; onToggle: () => void };
+    readonly expandedToggle?: { expanded: boolean; childCount: number; loading?: boolean; onToggle: () => void };
 }
 
 function Row({ s, indent, expandedToggle }: RowProps) {
     const sid = bareId(s.id);
     const pretty = s.project ? prettifyProjectSlug(s.project) : null;
     const project = (pretty && pretty !== "(no repo)") ? pretty : (s.cwd ? (s.cwd.split("/").pop() ?? "-") : "-");
-    const isStub = !!s.is_stub;
 
     // Warm the inspect-data query on hover/focus - intent-based prefetch
     // avoids stampeding the API when the page has 200 rows.
@@ -75,12 +72,7 @@ function Row({ s, indent, expandedToggle }: RowProps) {
         });
     };
 
-    const rowStyle: CSSProperties = {
-        ...(indent ? { background: "#fafafa" } : {}),
-        ...(isStub
-            ? { opacity: 0.65, borderTop: "1px dashed #cbd5e1", borderBottom: "1px dashed #cbd5e1" }
-            : {}),
-    };
+    const rowStyle = indent ? { background: "#fafafa" } : undefined;
 
     return (
         <tr style={rowStyle} onMouseEnter={onIntent} onFocus={onIntent}>
@@ -95,6 +87,7 @@ function Row({ s, indent, expandedToggle }: RowProps) {
                         title={`${expandedToggle.expanded ? "Collapse" : "Expand"} ${expandedToggle.childCount} subagent${expandedToggle.childCount === 1 ? "" : "s"}`}
                     >
                         {expandedToggle.expanded ? "▼" : "▶"} {expandedToggle.childCount}
+                        {expandedToggle.loading ? " …" : ""}
                     </button>
                 ) : indent ? (
                     <span style={{ color: "#cbd5e1", marginRight: 6 }}>↳</span>
@@ -102,17 +95,6 @@ function Row({ s, indent, expandedToggle }: RowProps) {
                     <span style={{ display: "inline-block", width: 32 }} />
                 )}
                 <code title={s.id} style={{ marginLeft: 4 }}>{shortId(s.id)}</code>
-                {isStub ? (
-                    <span
-                        title="Parent session hydrated from outside the current page window. Click 'inspect' to load its full transcript."
-                        style={{
-                            marginLeft: 8, padding: "1px 6px", borderRadius: 3, fontSize: 10,
-                            background: "#f1f5f9", color: "#64748b", fontWeight: 600,
-                        }}
-                    >
-                        out of window
-                    </span>
-                ) : null}
             </td>
             <td><SourceBadge source={s.source} /></td>
             <td>{project}</td>
@@ -133,6 +115,10 @@ function Row({ s, indent, expandedToggle }: RowProps) {
     );
 }
 
+/** Number of direct children for a root row. Uses the server-supplied count
+ *  (which is always present on `/api/sessions` rows). */
+const childCountOf = (row: SessionListRow): number => row.direct_children_count ?? 0;
+
 export function SessionsRoute() {
     const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
     const [search, setSearch] = useState("");
@@ -143,24 +129,45 @@ export function SessionsRoute() {
         queryFn: () => api.sessions(sourceFilter === "all" ? { limit: 200 } : { limit: 200, source: sourceFilter }),
     });
 
-    const allRows = query.data?.sessions ?? [];
-    const parentStubs = query.data?.parent_stubs ?? [];
-    const filteredRows = useMemo(() => {
-        if (!search) return allRows;
+    const allRoots = query.data?.sessions ?? [];
+    const filteredRoots = useMemo(() => {
+        if (!search) return allRoots;
         const needle = search.toLowerCase();
-        return allRows.filter((s) => {
+        return allRoots.filter((s) => {
             const hay = `${s.id} ${s.project ?? ""} ${s.cwd ?? ""} ${s.model ?? ""}`.toLowerCase();
             return hay.includes(needle);
         });
-    }, [allRows, search]);
+    }, [allRoots, search]);
 
-    // Only pass stubs through when no text-filter is active; otherwise the
-    // muted "out of window" rows could appear without matching the search and
-    // mislead the user. Within-page grouping still works because in-window
-    // parents survive the filter naturally.
-    const filteredStubs = useMemo(() => (search ? [] : parentStubs), [parentStubs, search]);
+    // Count of roots that have at least one direct child. Server tells us
+    // this per-row via direct_children_count - no extra fetch needed.
+    const rootsWithChildren = useMemo(
+        () => filteredRoots.reduce((n, r) => n + (childCountOf(r) > 0 ? 1 : 0), 0),
+        [filteredRoots],
+    );
 
-    const grouped = useMemo(() => groupByParent(filteredRows, filteredStubs), [filteredRows, filteredStubs]);
+    // Lazy children fetches, one per currently-expanded root. TanStack
+    // Query dedups + caches across re-renders so a row that's collapsed and
+    // re-expanded doesn't refetch within the staleTime window.
+    const expandedIds = useMemo(() => Array.from(expanded), [expanded]);
+    const childQueries = useQueries({
+        queries: expandedIds.map((id) => ({
+            queryKey: ["session-children", id] as const,
+            queryFn: () => api.sessionChildren(bareId(id)),
+            staleTime: 5 * 60_000,
+        })),
+    });
+    const childrenByParent = useMemo(() => {
+        const m = new Map<string, { loading: boolean; rows: ReadonlyArray<SessionListRow> }>();
+        expandedIds.forEach((id, i) => {
+            const q = childQueries[i];
+            m.set(id, {
+                loading: !!q?.isLoading,
+                rows: q?.data?.children ?? [],
+            });
+        });
+        return m;
+    }, [expandedIds, childQueries]);
 
     const toggleExpanded = (id: string) => {
         setExpanded((prev) => {
@@ -171,13 +178,18 @@ export function SessionsRoute() {
         });
     };
 
+    const allExpandableIds = useMemo(
+        () => filteredRoots.filter((r) => childCountOf(r) > 0).map((r) => r.id),
+        [filteredRoots],
+    );
+
     return (
         <section className="panel">
             <header>
                 <h2>Sessions</h2>
                 <span className="meta">
                     {query.data
-                        ? `${filteredRows.length} of ${allRows.length} · ${grouped.childrenByParent.size} with subagents${filteredStubs.length > 0 ? ` · +${filteredStubs.length} parent stub${filteredStubs.length === 1 ? "" : "s"}` : ""}`
+                        ? `${filteredRoots.length} of ${allRoots.length} roots · ${rootsWithChildren} with subagents`
                         : "-"}
                 </span>
             </header>
@@ -206,17 +218,17 @@ export function SessionsRoute() {
                     placeholder="filter by id / project / cwd / model"
                     style={{ flex: 1, maxWidth: 360, padding: "4px 8px", fontSize: 12, border: "1px solid #e2e8f0", borderRadius: 4 }}
                 />
-                {grouped.childrenByParent.size > 0 ? (
+                {allExpandableIds.length > 0 ? (
                     <button
                         onClick={() => setExpanded((prev) =>
-                            prev.size === grouped.childrenByParent.size ? new Set() : new Set(grouped.childrenByParent.keys()),
+                            prev.size === allExpandableIds.length ? new Set() : new Set(allExpandableIds),
                         )}
                         style={{
                             padding: "4px 10px", fontSize: 11, border: "1px solid #e2e8f0",
                             background: "#fff", color: "#475569", borderRadius: 4, cursor: "pointer",
                         }}
                     >
-                        {expanded.size === grouped.childrenByParent.size ? "collapse all" : "expand all"}
+                        {expanded.size === allExpandableIds.length ? "collapse all" : "expand all"}
                     </button>
                 ) : null}
             </div>
@@ -235,19 +247,27 @@ export function SessionsRoute() {
                         </tr>
                     </thead>
                     <tbody>
-                        {grouped.topLevel.map((parent) => {
-                            const kids = grouped.childrenByParent.get(parent.id) ?? [];
+                        {filteredRoots.map((parent) => {
+                            const childCount = childCountOf(parent);
                             const isExpanded = expanded.has(parent.id);
+                            const kidState = childrenByParent.get(parent.id);
                             return (
                                 <Fragment key={parent.id}>
                                     <Row
                                         s={parent}
-                                        {...(kids.length > 0
-                                            ? { expandedToggle: { expanded: isExpanded, childCount: kids.length, onToggle: () => toggleExpanded(parent.id) } }
+                                        {...(childCount > 0
+                                            ? {
+                                                expandedToggle: {
+                                                    expanded: isExpanded,
+                                                    childCount,
+                                                    loading: !!kidState?.loading,
+                                                    onToggle: () => toggleExpanded(parent.id),
+                                                },
+                                            }
                                             : {})}
                                     />
                                     {isExpanded
-                                        ? kids.map((child) => <Row key={child.id} s={child} indent />)
+                                        ? (kidState?.rows ?? []).map((child) => <Row key={child.id} s={child} indent />)
                                         : null}
                                 </Fragment>
                             );
