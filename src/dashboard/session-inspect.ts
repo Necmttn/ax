@@ -19,8 +19,13 @@ import type {
     SessionInspectPayload,
     SpawnMeta,
 } from "../lib/shared/dashboard-types.ts";
+import {
+    interpolateRid,
+    queryMany,
+    queryOptional,
+} from "../lib/shared/graph-query.ts";
 import { clampPagination, type PaginationConfig } from "../lib/shared/pagination.ts";
-import { toBareSessionId, toSessionRid } from "../lib/shared/session-id.ts";
+import { toBareSessionId } from "../lib/shared/session-id.ts";
 
 const INSPECT_TURNS_PAGINATION: PaginationConfig = { defaultLimit: 2000, maxLimit: 2000 };
 
@@ -161,57 +166,31 @@ interface ChildEdge {
     readonly nickname: string | null;
 }
 
-/** Resolve the spawning parent of this session (codex spawn_agent / claude
- *  Task). Returns nulls if not a subagent. Defensive: swallows DB errors so
- *  the inspector still renders without graph attribution. */
-const resolveParent = (sessionId: string): Effect.Effect<ParentInfo, never, SurrealClient> =>
-    Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const sessionRid = toSessionRid(toBareSessionId(sessionId));
-        const [rows] = yield* db.query<[Array<{ parent: string | null; nickname: string | null }>]>(`
-            SELECT <string>in AS parent, nickname FROM spawned WHERE out = ${sessionRid} LIMIT 1;
-        `);
-        const row = rows[0];
-        if (!row) return { parent_session: null, parent_nickname: null };
-        // Strip the record-id decoration before the value crosses the HTTP
-        // seam. See src/lib/shared/session-id.ts for the seam contract.
-        return {
-            parent_session: row.parent ? toBareSessionId(row.parent) : null,
-            parent_nickname: row.nickname ?? null,
-        };
-    }).pipe(Effect.catch((err) =>
-        Effect.sync(() => {
-            console.error("axctl session-inspect resolveParent failed:", err);
-            return { parent_session: null, parent_nickname: null };
-        }),
-    ));
+/** SQL constants kept near their resolvers so the only thing the helper hides
+ *  is the Effect.gen + Effect.catch ceremony - the SQL stays grep-able. */
+const PARENT_SQL = `
+    SELECT <string>in AS parent, nickname FROM spawned WHERE out = $sid LIMIT 1;
+`;
+const CHILDREN_SQL = `
+    SELECT <string>out AS child, <string>ts AS ts, tool, nickname
+    FROM spawned
+    WHERE in = $sid
+    ORDER BY ts ASC;
+`;
+const HOOK_FIRES_SQL = `
+    SELECT ts, event, file_path, inject, reason, latency_ms, injected_titles
+    FROM hook_fire
+    WHERE session = $sid
+    ORDER BY ts ASC;
+`;
 
-/** Sessions this one spawned (its subagents). Same defensive shape as
- *  resolveParent - DB failure degrades to empty list. */
-const resolveChildren = (sessionId: string): Effect.Effect<ReadonlyArray<ChildEdge>, never, SurrealClient> =>
-    Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const sessionRid = toSessionRid(toBareSessionId(sessionId));
-        const [rows] = yield* db.query<[Array<{ child: string; ts: string | null; tool: string | null; nickname: string | null }>]>(`
-            SELECT <string>out AS child, <string>ts AS ts, tool, nickname
-            FROM spawned
-            WHERE in = ${sessionRid}
-            ORDER BY ts ASC;
-        `);
-        return rows.map((r): ChildEdge => ({
-            // Bare session id over the HTTP seam.
-            session_id: toBareSessionId(r.child),
-            ts: r.ts ?? null,
-            tool: r.tool ?? null,
-            nickname: r.nickname ?? null,
-        }));
-    }).pipe(Effect.catch((err) =>
-        Effect.sync(() => {
-            console.error("axctl session-inspect resolveChildren failed:", err);
-            return [] as ReadonlyArray<ChildEdge>;
-        }),
-    ));
-
+interface ParentRow { readonly parent: string | null; readonly nickname: string | null }
+interface ChildEdgeRow {
+    readonly child: string;
+    readonly ts: string | null;
+    readonly tool: string | null;
+    readonly nickname: string | null;
+}
 /** Raw shape returned by Surreal for hook_fire SELECT. Datetime fields come
  *  back as JS Date via the SDK. */
 interface HookFireRow {
@@ -224,22 +203,45 @@ interface HookFireRow {
     readonly injected_titles: ReadonlyArray<string> | null;
 }
 
+/** Resolve the spawning parent of this session (codex spawn_agent / claude
+ *  Task). Returns nulls if not a subagent. Defensive: swallows DB errors so
+ *  the inspector still renders without graph attribution. */
+const resolveParent = (sessionId: string): Effect.Effect<ParentInfo, never, SurrealClient> =>
+    queryOptional<ParentRow, ParentInfo>(
+        interpolateRid(PARENT_SQL, toBareSessionId(sessionId)),
+        (row) => ({
+            // Strip the record-id decoration before the value crosses the
+            // HTTP seam. See src/lib/shared/session-id.ts for the seam.
+            parent_session: row.parent ? toBareSessionId(row.parent) : null,
+            parent_nickname: row.nickname ?? null,
+        }),
+        "session-inspect resolveParent",
+    ).pipe(Effect.map((v) => v ?? { parent_session: null, parent_nickname: null }));
+
+/** Sessions this one spawned (its subagents). Same defensive shape as
+ *  resolveParent - DB failure degrades to empty list. */
+const resolveChildren = (sessionId: string): Effect.Effect<ReadonlyArray<ChildEdge>, never, SurrealClient> =>
+    queryMany<ChildEdgeRow, ChildEdge>(
+        interpolateRid(CHILDREN_SQL, toBareSessionId(sessionId)),
+        (r) => ({
+            // Bare session id over the HTTP seam.
+            session_id: toBareSessionId(r.child),
+            ts: r.ts ?? null,
+            tool: r.tool ?? null,
+            nickname: r.nickname ?? null,
+        }),
+        "session-inspect resolveChildren",
+    );
+
 /** Fetch every hook_fire row for the session, ts-ordered. N is small
  *  (tens-to-hundreds in practice) so fetching whole-session is fine; the
  *  window filter happens after assigning stable idx so paginating doesn't
  *  shift the dom anchors. Degrades to [] on DB error - hook telemetry is
  *  decorative for the inspector, not load-bearing. */
 const resolveHookFires = (sessionId: string): Effect.Effect<ReadonlyArray<HookFireDto>, never, SurrealClient> =>
-    Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const sessionRid = toSessionRid(toBareSessionId(sessionId));
-        const [rows] = yield* db.query<[HookFireRow[]]>(`
-            SELECT ts, event, file_path, inject, reason, latency_ms, injected_titles
-            FROM hook_fire
-            WHERE session = ${sessionRid}
-            ORDER BY ts ASC;
-        `);
-        return rows.map((row, idx): HookFireDto => ({
+    queryMany<HookFireRow, HookFireDto>(
+        interpolateRid(HOOK_FIRES_SQL, toBareSessionId(sessionId)),
+        (row, idx) => ({
             idx,
             ts: row.ts instanceof Date ? row.ts.toISOString() : String(row.ts),
             event: row.event,
@@ -248,13 +250,9 @@ const resolveHookFires = (sessionId: string): Effect.Effect<ReadonlyArray<HookFi
             reason: row.reason,
             latency_ms: row.latency_ms,
             injected_titles: row.injected_titles ?? [],
-        }));
-    }).pipe(Effect.catch((err) =>
-        Effect.sync(() => {
-            console.error("axctl session-inspect resolveHookFires failed:", err);
-            return [] as ReadonlyArray<HookFireDto>;
         }),
-    ));
+        "session-inspect resolveHookFires",
+    );
 
 /** Spawn args parsed out of a parent tool_use call. Keyed by call_id when
  *  available (codex), else by ts so we can match approximately. */
