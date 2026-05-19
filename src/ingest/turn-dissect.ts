@@ -19,6 +19,7 @@ export type TurnSpanKind =
     | "hook_injection"
     | "tool_result"
     | "subagent_notification"
+    | "subagent_task"
     | "pasted_reference";
 
 export interface TurnSpan {

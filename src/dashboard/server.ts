@@ -509,7 +509,12 @@ export async function handleDashboardRequest(req: Request): Promise<Response> {
         const sessionId = decodeURIComponent(sessionInspectMatch[1] ?? "");
         if (!sessionId) return jsonResponse({ error: "missing session id" }, 400);
         try {
-            const payload = await Effect.runPromise(fetchSessionInspect(sessionId));
+            const payload = await Effect.runPromise(
+                fetchSessionInspect(sessionId).pipe(
+                    Effect.provide(AppLayer),
+                    Effect.scoped,
+                ) as Effect.Effect<unknown>,
+            );
             return jsonResponse(payload);
         } catch (err) {
             return jsonResponse(

@@ -558,6 +558,7 @@ export type InspectSpanKind =
     | "hook_injection"
     | "tool_result"
     | "subagent_notification"
+    | "subagent_task"
     | "pasted_reference";
 
 export interface InspectSpanDto {
@@ -585,4 +586,9 @@ export interface SessionInspectPayload {
     readonly turns: ReadonlyArray<InspectTurnDto>;
     /** Aggregate char counts by span kind across the whole session. */
     readonly totals_by_kind: Partial<Record<InspectSpanKind, number>>;
+    /** Parent session id when this session was spawned by another (codex
+     *  spawn_agent, claude Task). Null for top-level sessions. */
+    readonly parent_session: string | null;
+    /** Codex assigns short names like "Pauli", "Turing" to spawned subagents. */
+    readonly parent_nickname: string | null;
 }

@@ -11,6 +11,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { dissectTurn, type TurnSpan } from "../ingest/turn-dissect.ts";
+import { SurrealClient } from "../lib/db.ts";
 import type {
     InspectSpanDto,
     InspectSpanKind,
@@ -194,10 +195,72 @@ function parseCodexLine(line: string): CanonicalTurn | null {
     return null;
 }
 
+interface ParentInfo {
+    readonly parent_session: string | null;
+    readonly parent_nickname: string | null;
+}
+
+/** Resolve the spawning parent of this session (codex spawn_agent / claude
+ *  Task). Returns nulls if not a subagent. Defensive: swallows DB errors so
+ *  the inspector still renders without graph attribution. */
+const resolveParent = (sessionId: string): Effect.Effect<ParentInfo, never, SurrealClient> =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const escaped = sessionId.replace(/`/g, "");
+        // Surreal parses hyphens in unquoted ids as subtraction. UUIDs are the
+        // common case here - always backtick-wrap anything that isn't purely
+        // alphanumeric + underscore.
+        const sessionRid = /^[A-Za-z0-9_]+$/.test(escaped) ? `session:${escaped}` : `session:\`${escaped}\``;
+        const [rows] = yield* db.query<[Array<{ parent: string | null; nickname: string | null }>]>(`
+            SELECT <string>in AS parent, nickname FROM spawned WHERE out = ${sessionRid} LIMIT 1;
+        `);
+        const row = rows[0];
+        if (!row) return { parent_session: null, parent_nickname: null };
+        return {
+            parent_session: row.parent ?? null,
+            parent_nickname: row.nickname ?? null,
+        };
+    }).pipe(Effect.catch((err) =>
+        Effect.sync(() => {
+            console.error("axctl session-inspect resolveParent failed:", err);
+            return { parent_session: null, parent_nickname: null };
+        }),
+    ));
+
+/** When the session has a parent, the first user-role turn whose dissected
+ *  spans are entirely default-kind (no system/wrapper markers) is the task
+ *  brief the parent passed in. Re-tag it as subagent_task. */
+function applySubagentTaskTagging(
+    turns: InspectTurnDto[],
+    totals: Partial<Record<InspectSpanKind, number>>,
+): void {
+    for (const turn of turns) {
+        if (turn.role !== "user") continue;
+        if (turn.semantic_role !== "user_input") continue;
+        // Skip the auto-injected <environment_context> envelope etc.
+        const hasOnlyDefault = turn.spans.every((s) => s.kind === "user_input");
+        if (!hasOnlyDefault || turn.char_count < 80) continue;
+        // Found the brief: re-tag every span and update the semantic role.
+        const retagged: InspectSpanDto[] = turn.spans.map((s) => {
+            totals.user_input = (totals.user_input ?? 0) - s.text.length;
+            totals.subagent_task = (totals.subagent_task ?? 0) + s.text.length;
+            const dto: InspectSpanDto = s.label !== undefined
+                ? { kind: "subagent_task", text: s.text, label: s.label }
+                : { kind: "subagent_task", text: s.text };
+            return dto;
+        });
+        (turn as { -readonly [K in keyof InspectTurnDto]: InspectTurnDto[K] }).semantic_role = "subagent_task";
+        (turn as { -readonly [K in keyof InspectTurnDto]: InspectTurnDto[K] }).spans = retagged;
+        return; // only the first qualifying message
+    }
+}
+
 /** Read the JSONL, dissect every user/assistant message, return a wire-format
- *  payload. Side-effect free aside from file reads. */
-export const fetchSessionInspect = (sessionId: string): Effect.Effect<SessionInspectPayload, Error> =>
-    Effect.tryPromise({
+ *  payload. Resolves parent session for subagent attribution. */
+export const fetchSessionInspect = (sessionId: string): Effect.Effect<SessionInspectPayload, Error, SurrealClient> =>
+    Effect.gen(function* () {
+        const parent = yield* resolveParent(sessionId);
+        const payload = yield* Effect.tryPromise({
         try: async () => {
             const found = await findTranscript(sessionId);
             const raw = await readFile(found.path, "utf8");
@@ -232,13 +295,22 @@ export const fetchSessionInspect = (sessionId: string): Effect.Effect<SessionIns
                 });
             }
 
+            // If this session was spawned, the parent's brief landed in the
+            // first non-environment user message. Re-tag it so the dissector
+            // view stops claiming it's "user input".
+            if (parent.parent_session) applySubagentTaskTagging(turns, totals);
+
             return {
                 session_id: sessionId,
                 source_path: found.path,
                 total_chars: totalChars,
                 turns,
                 totals_by_kind: totals,
+                parent_session: parent.parent_session,
+                parent_nickname: parent.parent_nickname,
             };
         },
         catch: (err) => err instanceof Error ? err : new Error(String(err)),
+    });
+        return payload;
     });

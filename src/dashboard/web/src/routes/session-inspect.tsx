@@ -14,12 +14,19 @@ const KIND_STYLE: Record<InspectSpanKind, KindStyle> = {
     wrapper_instruction:   { bg: "#fde68a", fg: "#92400e", bar: "#f59e0b", label: "wrapper" },
     hook_injection:        { bg: "#bbf7d0", fg: "#065f46", bar: "#10b981", label: "hook" },
     tool_result:           { bg: "#e9d5ff", fg: "#5b21b6", bar: "#a855f7", label: "tool result" },
-    subagent_notification: { bg: "#fed7aa", fg: "#9a3412", bar: "#f97316", label: "subagent" },
+    subagent_notification: { bg: "#fed7aa", fg: "#9a3412", bar: "#f97316", label: "subagent notif" },
+    subagent_task:         { bg: "#ffe4e6", fg: "#9f1239", bar: "#e11d48", label: "subagent task" },
     pasted_reference:      { bg: "#fecaca", fg: "#7f1d1d", bar: "#ef4444", label: "pasted" },
 };
 
 const shortId = (id: string): string =>
     id.replace(/^session:⟨/, "").replace(/⟩$/, "").slice(0, 12) + "…";
+
+const bareId = (id: string): string => {
+    let s = id.startsWith("session:") ? id.slice("session:".length) : id;
+    s = s.replace(/^[`⟨]+/, "").replace(/[`⟩]+$/, "");
+    return s;
+};
 
 function Span({ span }: { span: InspectSpanDto }) {
     const s = KIND_STYLE[span.kind];
@@ -119,6 +126,21 @@ export function SessionInspectRoute() {
                     <div style={{ padding: "8px 24px", color: "#64748b", fontSize: 12, fontFamily: "ui-monospace, monospace" }}>
                         {data.turns.length} turns · {data.total_chars.toLocaleString()} chars · source: <code>{data.source_path}</code>
                     </div>
+                    {data.parent_session ? (
+                        <div style={{ padding: "6px 24px", background: "#ffe4e6", borderTop: "1px solid #fecdd3", borderBottom: "1px solid #fecdd3", fontSize: 12 }}>
+                            <strong style={{ color: "#9f1239" }}>↑ spawned by</strong>
+                            {" "}
+                            <Link
+                                to="/sessions/$sessionId/inspect"
+                                params={{ sessionId: bareId(data.parent_session) }}
+                                style={{ color: "#9f1239", fontWeight: 600, fontFamily: "ui-monospace, monospace" }}
+                            >
+                                {bareId(data.parent_session).slice(0, 12)}…
+                            </Link>
+                            {data.parent_nickname ? <span style={{ color: "#9f1239", marginLeft: 8 }}>· nickname: <strong>{data.parent_nickname}</strong></span> : null}
+                            <span style={{ color: "#9f1239", marginLeft: 8, opacity: 0.7 }}>This is a subagent session.</span>
+                        </div>
+                    ) : null}
                     <div style={{ display: "flex", gap: 4, flexWrap: "wrap", padding: "4px 24px 8px" }}>
                         {(Object.keys(KIND_STYLE) as InspectSpanKind[]).map((kind) => {
                             const c = KIND_STYLE[kind];
