@@ -6,12 +6,11 @@
  * `scripts/prototypes/ax-session-inspect.ts`.
  */
 
-import { readdir, readFile, stat } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { readFile } from "node:fs/promises";
 import { Effect } from "effect";
 import { dissectTurn, type TurnSpan } from "../ingest/turn-dissect.ts";
 import { SurrealClient } from "../lib/db.ts";
+import { locateTranscript } from "../lib/transcript-locator.ts";
 import type {
     HookFireDto,
     InspectSpanDto,
@@ -41,77 +40,6 @@ interface JsonlMessage {
         role?: string;
         content?: string | JsonlContentBlock[];
     };
-}
-
-type Harness = "claude" | "codex";
-
-interface FoundTranscript {
-    readonly path: string;
-    readonly harness: Harness;
-}
-
-async function findClaudeJsonl(sessionId: string): Promise<FoundTranscript | null> {
-    const projectsDir = join(homedir(), ".claude", "projects");
-    let subdirs: string[];
-    try { subdirs = await readdir(projectsDir); } catch { return null; }
-    for (const sub of subdirs) {
-        const candidate = join(projectsDir, sub, `${sessionId}.jsonl`);
-        try {
-            await stat(candidate);
-            return { path: candidate, harness: "claude" };
-        } catch { /* not here */ }
-    }
-    return null;
-}
-
-/** Codex transcripts live under ~/.codex/sessions/YYYY/MM/DD/rollout-{ts}-{sessionId}.jsonl */
-async function findCodexJsonl(sessionId: string): Promise<FoundTranscript | null> {
-    const root = join(homedir(), ".codex", "sessions");
-    try {
-        for (const year of await readdir(root)) {
-            const yearDir = join(root, year);
-            for (const month of await readdir(yearDir).catch(() => [])) {
-                const monthDir = join(yearDir, month);
-                for (const day of await readdir(monthDir).catch(() => [])) {
-                    const dayDir = join(monthDir, day);
-                    for (const file of await readdir(dayDir).catch(() => [])) {
-                        if (file.endsWith(`-${sessionId}.jsonl`)) {
-                            return { path: join(dayDir, file), harness: "codex" };
-                        }
-                    }
-                }
-            }
-        }
-    } catch { /* root missing */ }
-    return null;
-}
-
-/** Infer harness from a transcript file path. Codex transcripts live under
- *  ~/.codex/sessions/; everything else (including Claude subagent JSONLs at
- *  ~/.claude/projects/<proj>/<parent>/subagents/agent-<id>.jsonl) parses with
- *  the claude shape. Exported for unit tests. */
-export function harnessFromPath(path: string): Harness {
-    return path.includes("/.codex/sessions/") ? "codex" : "claude";
-}
-
-export async function findTranscript(
-    sessionId: string,
-    rawFileHint?: string | null,
-): Promise<FoundTranscript> {
-    // Hinted path wins when it actually exists on disk - this is how synthetic
-    // session ids (e.g. claude-subagent-<agentId>) resolve to their real
-    // jsonl, since the hint was persisted at ingest time.
-    if (rawFileHint) {
-        try {
-            await stat(rawFileHint);
-            return { path: rawFileHint, harness: harnessFromPath(rawFileHint) };
-        } catch { /* hint stale - fall through to search */ }
-    }
-    const claude = await findClaudeJsonl(sessionId);
-    if (claude) return claude;
-    const codex = await findCodexJsonl(sessionId);
-    if (codex) return codex;
-    throw new Error(`session transcript not found: ${sessionId}.jsonl`);
 }
 
 function blockToText(block: JsonlContentBlock): string {
@@ -330,31 +258,6 @@ const resolveHookFires = (sessionId: string): Effect.Effect<ReadonlyArray<HookFi
         }),
     ));
 
-/** Pull the persisted transcript path (`raw_file`) off the session row.
- *  Synthetic session ids (claude-subagent-<agentId>) don't map to the
- *  filename patterns findClaudeJsonl/findCodexJsonl scan for, so the hint
- *  is the only way the inspector can locate the actual jsonl.
- *
- *  Defensive (same pattern as resolveParent): DB error or missing field
- *  degrades to null, so the search-based fallback still runs. */
-const resolveRawFile = (sessionId: string): Effect.Effect<string | null, never, SurrealClient> =>
-    Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const escaped = sessionId.replace(/`/g, "");
-        const sessionRid = /^[A-Za-z0-9_]+$/.test(escaped) ? `session:${escaped}` : `session:\`${escaped}\``;
-        const [rows] = yield* db.query<[Array<{ raw_file: string | null }>]>(`
-            SELECT raw_file FROM ${sessionRid} LIMIT 1;
-        `);
-        const row = rows[0];
-        if (!row) return null;
-        return typeof row.raw_file === "string" && row.raw_file.length > 0 ? row.raw_file : null;
-    }).pipe(Effect.catch((err) =>
-        Effect.sync(() => {
-            console.error("axctl session-inspect resolveRawFile failed:", err);
-            return null as string | null;
-        }),
-    ));
-
 /** Spawn args parsed out of a parent tool_use call. Keyed by call_id when
  *  available (codex), else by ts so we can match approximately. */
 interface SpawnCall {
@@ -473,11 +376,11 @@ export const fetchSessionInspect = (
     opts: FetchSessionInspectOptions = {},
 ): Effect.Effect<SessionInspectPayload, Error, SurrealClient> =>
     Effect.gen(function* () {
-        const [parent, childrenEdges, allHookFires, rawFileHint] = yield* Effect.all([
+        const [parent, childrenEdges, allHookFires, found] = yield* Effect.all([
             resolveParent(sessionId),
             resolveChildren(sessionId),
             resolveHookFires(sessionId),
-            resolveRawFile(sessionId),
+            locateTranscript(sessionId),
         ], { concurrency: "unbounded" });
         const { offset: turnOffset, limit: turnLimit } = clampPagination(
             { offset: opts.turnOffset, limit: opts.turnLimit },
@@ -485,7 +388,6 @@ export const fetchSessionInspect = (
         );
         const payload = yield* Effect.tryPromise({
         try: async () => {
-            const found = await findTranscript(sessionId, rawFileHint);
             const raw = await readFile(found.path, "utf8");
             const parseLine = found.harness === "codex" ? parseCodexLine : parseClaudeLine;
 
