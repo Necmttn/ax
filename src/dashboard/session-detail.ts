@@ -18,6 +18,7 @@ import type {
     SessionToolCall,
     SessionTopSkill,
 } from "../lib/shared/dashboard-types.ts";
+import { toBareSessionId } from "../lib/shared/session-id.ts";
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
     typeof v === "object" && v !== null && !Array.isArray(v);
@@ -74,7 +75,8 @@ const parseOverview = (raw: unknown): SessionOverview | null => {
     const id = recordIdString(raw.id);
     if (!id) return null;
     return {
-        id,
+        // Bare session id over the HTTP seam; see src/lib/shared/session-id.ts.
+        id: toBareSessionId(id),
         project: stringField(raw, "project"),
         cwd: stringField(raw, "cwd"),
         model: stringField(raw, "model"),
@@ -112,7 +114,8 @@ const parseLink = (raw: unknown, sessionKey: "child" | "parent"): SessionLink | 
     const sid = recordIdString(raw[sessionKey]);
     if (!sid) return null;
     return {
-        session_id: sid,
+        // Bare session id over the HTTP seam; see src/lib/shared/session-id.ts.
+        session_id: toBareSessionId(sid),
         project: stringField(raw, "project"),
         started_at: dateField(raw, "started_at"),
         nickname: stringField(raw, "nickname"),

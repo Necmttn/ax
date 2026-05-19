@@ -17,6 +17,7 @@ import type {
     EpisodeNode,
     EpisodeTimelinePayload,
 } from "../lib/shared/dashboard-types.ts";
+import { toBareSessionId } from "../lib/shared/session-id.ts";
 
 const SESSION_ID_RE = /^[A-Za-z0-9_-]{6,80}$/;
 
@@ -71,9 +72,11 @@ function summarizePerSession(
     }
     const bySession = new Map<string, Acc>();
     for (const raw of invocations) {
-        const session = recordIdString(raw.session);
+        const sessionRaw = recordIdString(raw.session);
         const skill = stringField(raw, "skill");
-        if (!session || !skill) continue;
+        if (!sessionRaw || !skill) continue;
+        // Bare keys so lookups against toBareSessionId(raw.id) below match.
+        const session = toBareSessionId(sessionRaw);
         const phase = classifyPhase(skill);
         const acc = bySession.get(session) ?? {
             skills: new Map<string, number>(),
@@ -193,7 +196,9 @@ export const fetchEpisodeTimeline = (
             ...(childInvocationRows?.[0] ?? []),
         ];
         const summary = summarizePerSession(combinedInvocations);
-        const parentIdNormalized = `session:⟨${uuid}⟩`;
+        // Wire format is bare; the storage record-id form (`session:⟨uuid⟩`)
+        // stays in `parentRef` for SurrealQL interpolation above.
+        const parentBareId = uuid;
         const nodes: EpisodeNode[] = [];
         let parentMeta: EpisodeNode | null = null;
 
@@ -201,8 +206,9 @@ export const fetchEpisodeTimeline = (
             raw: Record<string, unknown>,
             role: "parent" | "child",
         ): EpisodeNode | null => {
-            const id = recordIdString(raw.id);
-            if (!id) return null;
+            const idRaw = recordIdString(raw.id);
+            if (!idRaw) return null;
+            const id = toBareSessionId(idRaw);
             const started_at = dateField(raw, "started_at");
             const ended_at = dateField(raw, "ended_at");
             const sum = summary.get(id);
@@ -257,7 +263,7 @@ export const fetchEpisodeTimeline = (
                 : null;
 
         return {
-            parent_session_id: parentIdNormalized,
+            parent_session_id: parentBareId,
             project: parentMeta?.project ?? null,
             started_at: parentMeta?.started_at ?? null,
             ended_at: parentMeta?.ended_at ?? null,

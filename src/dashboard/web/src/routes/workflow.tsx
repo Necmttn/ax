@@ -13,6 +13,7 @@ import type {
 import { fmtCount, fmtTs } from "@shared/formatters.ts";
 import { prettifyProjectSlug } from "@shared/project-slug.ts";
 import { PHASE_LABEL, type Phase } from "@shared/phases.ts";
+import { shortSessionId } from "@shared/session-id.ts";
 
 const HEATMAP_TOP_N = 12;
 
@@ -455,13 +456,7 @@ function EpisodesTable({
                                 params={{ sessionId: ep.parent_session_id }}
                                 title="open session"
                             >
-                                <code>
-                                    {ep.parent_session_id
-                                        .replace(/^session:⟨/, "")
-                                        .replace(/⟩$/, "")
-                                        .slice(0, 12)}
-                                    …
-                                </code>
+                                <code>{shortSessionId(ep.parent_session_id)}…</code>
                             </Link>
                         </td>
                         <td>

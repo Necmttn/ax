@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { SurrealClient } from "../lib/db.ts";
 import type { DbError } from "../lib/errors.ts";
+import { toBareSessionId } from "../lib/shared/session-id.ts";
 import {
     WEEKS_LOOKBACK,
     WORKFLOW_EPISODES_SQL,
@@ -202,7 +203,8 @@ function aggregateShapes(
                 (p): p is "plan" | "execute" | "review" | "merge" => p !== "other",
             ),
             session_count: bucket.sessions.length,
-            example_session_ids: bucket.sessions.slice(0, 3),
+            // Bare session ids over the HTTP seam; see src/lib/shared/session-id.ts.
+            example_session_ids: bucket.sessions.slice(0, 3).map(toBareSessionId),
         }));
     return { shapes, total };
 }
@@ -300,7 +302,7 @@ function aggregateEpisodeShapes(
                 (p): p is "plan" | "execute" | "review" | "merge" => p !== "other",
             ),
             episode_count: bucket.parents.length,
-            example_parent_ids: bucket.parents.slice(0, 3),
+            example_parent_ids: bucket.parents.slice(0, 3).map(toBareSessionId),
             avg_children:
                 bucket.parents.length === 0
                     ? 0
@@ -378,7 +380,8 @@ export const fetchWorkflow = (): Effect.Effect<
                     ? dateField({ x: startedRaw[0] }, "x")
                     : dateField(raw, "started_at");
                 return {
-                    parent_session_id: parent,
+                    // Bare session id over the HTTP seam; see src/lib/shared/session-id.ts.
+                    parent_session_id: toBareSessionId(parent),
                     project,
                     started_at: started,
                     child_count: numericField(raw, "child_count"),

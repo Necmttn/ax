@@ -23,6 +23,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { SurrealClient } from "./db.ts";
+import { toBareSessionId, toSessionRid } from "./shared/session-id.ts";
 
 export type Harness = "claude" | "codex";
 
@@ -93,11 +94,7 @@ async function findCodexJsonl(sessionId: string): Promise<FoundTranscript | null
 const resolveRawFileFromDb = (sessionId: string): Effect.Effect<string | null, never, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
-        const escaped = sessionId.replace(/`/g, "");
-        // Surreal parses hyphens in unquoted ids as subtraction. UUIDs are
-        // the common case here - always backtick-wrap anything that isn't
-        // purely alphanumeric + underscore.
-        const sessionRid = /^[A-Za-z0-9_]+$/.test(escaped) ? `session:${escaped}` : `session:\`${escaped}\``;
+        const sessionRid = toSessionRid(toBareSessionId(sessionId));
         const [rows] = yield* db.query<[Array<{ raw_file: string | null }>]>(`
             SELECT raw_file FROM ${sessionRid} LIMIT 1;
         `);

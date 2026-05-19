@@ -4,9 +4,7 @@ import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { api } from "../api.ts";
 import { fmtTs } from "@shared/formatters.ts";
 import { prettifyProjectSlug } from "@shared/project-slug.ts";
-
-const shortId = (id: string): string =>
-    id.replace(/^session:⟨/, "").replace(/⟩$/, "").slice(0, 12) + "…";
+import { shortSessionId } from "@shared/session-id.ts";
 
 function highlight(snippet: string, q: string): React.ReactNode {
     if (!q) return snippet;
@@ -213,7 +211,7 @@ export function RecallRoute() {
                                         to="/sessions/$sessionId"
                                         params={{ sessionId: hit.session_id }}
                                     >
-                                        <code>{shortId(hit.session_id)}</code>
+                                        <code>{shortSessionId(hit.session_id)}…</code>
                                     </Link>
                                     <code>{hit.ts ? fmtTs(hit.ts) : "-"}</code>
                                 </div>

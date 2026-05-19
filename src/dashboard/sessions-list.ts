@@ -18,6 +18,7 @@ import type {
     SessionListRow,
 } from "../lib/shared/dashboard-types.ts";
 import { clampPagination, type PaginationConfig } from "../lib/shared/pagination.ts";
+import { toBareSessionId, toSessionRid } from "../lib/shared/session-id.ts";
 
 export interface SessionsListOpts {
     readonly offset?: number;
@@ -55,13 +56,10 @@ const safeLiteral = (value: string): string => {
 };
 
 /**
- * Surreal record-id literal: bare session ids may be UUIDs (need
- * backticks) or already prefixed `session:`-style strings. Callers below
- * pass record ids extracted via `<string>id`, e.g.
- * `session:\`abc-...\``. We need to embed those into SurrealQL without
- * double-quoting (which would force a string compare instead of a
- * record-link compare). The existing IN-list pattern in this file did the
- * same thing - keep parity.
+ * Surreal record-id literal IN-list. The ids here come straight out of
+ * `<string>id` casts (already `session:\`uuid\`` form) and are interpolated
+ * into SurrealQL as record-link comparators, so we don't double-quote them.
+ * Bare ids in DTOs go through `toSessionRid` before reaching this helper.
  */
 const formatRecordIdList = (ids: ReadonlyArray<string>): string => ids.join(", ");
 
@@ -123,8 +121,11 @@ export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<Se
             for (const r of counts) childCountByRoot.set(r.parent, Number(r.c) || 0);
         }
 
+        // Bare ids cross the HTTP seam; record-id form is kept only for the
+        // childCountByRoot lookup (whose keys were also raw record-id strings
+        // from `<string>in AS parent`). See src/lib/shared/session-id.ts.
         const sessions: SessionListRow[] = rows.map((r): SessionListRow => ({
-            id: r.id,
+            id: toBareSessionId(r.id),
             project: r.project,
             source: r.source ?? "unknown",
             cwd: r.cwd,
@@ -156,25 +157,12 @@ export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<Se
     });
 
 /**
- * Convert a bare session id (the URL-friendly form, e.g. a UUID) into a
- * Surreal record-id literal embeddable in SurrealQL. Mirrors the pattern in
- * session-inspect.ts (`resolveParent` / `resolveChildren`).
- *
- * UUIDs contain hyphens which Surreal parses as subtraction in unquoted
- * ids, so anything that isn't pure alphanumeric+underscore must be
- * backtick-wrapped.
- */
-const toSessionRid = (bareId: string): string => {
-    const escaped = bareId.replace(/`/g, "");
-    return /^[A-Za-z0-9_]+$/.test(escaped) ? `session:${escaped}` : `session:\`${escaped}\``;
-};
-
-/**
  * Direct children of `parentId` (one level only, NOT a recursive descent).
  * Used by `/api/sessions/:id/children` when the SPA expands a root row.
  *
  * Accepts the bare URL-form session id (UUID / claude-subagent-...);
- * normalises to a Surreal record id internally.
+ * normalises to a Surreal record id internally via `toSessionRid` and emits
+ * bare ids back over HTTP via `toBareSessionId`.
  *
  * Ordered started_at ASC so children read top→bottom in spawn order, which
  * matches what the inspector's spawned-child list does.
@@ -187,7 +175,8 @@ export const fetchSessionChildren = (
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         const limit = Math.max(1, Math.min(opts.limit ?? 500, MAX_CHILDREN));
-        const parentRid = toSessionRid(parentBareId);
+        const parent_session = toBareSessionId(parentBareId);
+        const parentRid = toSessionRid(parent_session);
         // Two-step: fetch child record ids from `spawned`, then materialise
         // the child session rows. Avoids a nested subquery that Surreal can
         // mis-bind, and matches the existing IN-list pattern used elsewhere
@@ -197,7 +186,7 @@ export const fetchSessionChildren = (
         `);
         const childIds = edges.map((e) => e.child).filter(Boolean);
         if (childIds.length === 0) {
-            return { parent_session: parentRid, children: [] };
+            return { parent_session, children: [] };
         }
         const [rows] = yield* db.query<[RawRow[]]>(`
             SELECT
@@ -216,7 +205,7 @@ export const fetchSessionChildren = (
         `);
 
         const children: SessionListRow[] = rows.map((r): SessionListRow => ({
-            id: r.id,
+            id: toBareSessionId(r.id),
             project: r.project,
             source: r.source ?? "unknown",
             cwd: r.cwd,
@@ -225,8 +214,8 @@ export const fetchSessionChildren = (
             ended_at: r.ended_at,
             has_raw_file: !!r.has_raw_file,
             turn_count: 0,
-            parent_session: parentRid,
+            parent_session,
         }));
 
-        return { parent_session: parentRid, children };
+        return { parent_session, children };
     });

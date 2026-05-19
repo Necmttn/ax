@@ -4,17 +4,7 @@ import { Link } from "@tanstack/react-router";
 import { api } from "../api.ts";
 import { prettifyProjectSlug } from "@shared/project-slug.ts";
 import type { SessionListResponse, SessionListRow } from "@shared/dashboard-types.ts";
-
-/** Strip the `session:` prefix and any backtick / ⟨⟩ wrappers so we can use
- *  the bare id as a tanstack-router path param. JSONL filenames + the inspect
- *  API both expect the bare id. */
-const bareId = (id: string): string => {
-    let s = id.startsWith("session:") ? id.slice("session:".length) : id;
-    s = s.replace(/^[`⟨]+/, "").replace(/[`⟩]+$/, "");
-    return s;
-};
-
-const shortId = (id: string): string => bareId(id).slice(0, 12);
+import { shortSessionId } from "@shared/session-id.ts";
 
 const fmtTs = (ts: string | null): string => {
     if (!ts) return "-";
@@ -56,7 +46,9 @@ interface RowProps {
 }
 
 function Row({ s, indent, expandedToggle }: RowProps) {
-    const sid = bareId(s.id);
+    // The wire seam delivers a bare session id (see src/lib/shared/session-id.ts);
+    // any backtick/`session:` prefix reaching us would be a server bug.
+    const sid = s.id;
     const pretty = s.project ? prettifyProjectSlug(s.project) : null;
     const project = (pretty && pretty !== "(no repo)") ? pretty : (s.cwd ? (s.cwd.split("/").pop() ?? "-") : "-");
 
@@ -94,7 +86,7 @@ function Row({ s, indent, expandedToggle }: RowProps) {
                 ) : (
                     <span style={{ display: "inline-block", width: 32 }} />
                 )}
-                <code title={s.id} style={{ marginLeft: 4 }}>{shortId(s.id)}</code>
+                <code title={s.id} style={{ marginLeft: 4 }}>{shortSessionId(s.id)}</code>
             </td>
             <td><SourceBadge source={s.source} /></td>
             <td>{project}</td>
@@ -224,7 +216,7 @@ export function SessionsRoute() {
     const childQueries = useQueries({
         queries: expandedIds.map((id) => ({
             queryKey: ["session-children", id] as const,
-            queryFn: () => api.sessionChildren(bareId(id)),
+            queryFn: () => api.sessionChildren(id),
             staleTime: 5 * 60_000,
         })),
     });

@@ -20,6 +20,7 @@ import type {
     SpawnMeta,
 } from "../lib/shared/dashboard-types.ts";
 import { clampPagination, type PaginationConfig } from "../lib/shared/pagination.ts";
+import { toBareSessionId, toSessionRid } from "../lib/shared/session-id.ts";
 
 const INSPECT_TURNS_PAGINATION: PaginationConfig = { defaultLimit: 2000, maxLimit: 2000 };
 
@@ -166,18 +167,16 @@ interface ChildEdge {
 const resolveParent = (sessionId: string): Effect.Effect<ParentInfo, never, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
-        const escaped = sessionId.replace(/`/g, "");
-        // Surreal parses hyphens in unquoted ids as subtraction. UUIDs are the
-        // common case here - always backtick-wrap anything that isn't purely
-        // alphanumeric + underscore.
-        const sessionRid = /^[A-Za-z0-9_]+$/.test(escaped) ? `session:${escaped}` : `session:\`${escaped}\``;
+        const sessionRid = toSessionRid(toBareSessionId(sessionId));
         const [rows] = yield* db.query<[Array<{ parent: string | null; nickname: string | null }>]>(`
             SELECT <string>in AS parent, nickname FROM spawned WHERE out = ${sessionRid} LIMIT 1;
         `);
         const row = rows[0];
         if (!row) return { parent_session: null, parent_nickname: null };
+        // Strip the record-id decoration before the value crosses the HTTP
+        // seam. See src/lib/shared/session-id.ts for the seam contract.
         return {
-            parent_session: row.parent ?? null,
+            parent_session: row.parent ? toBareSessionId(row.parent) : null,
             parent_nickname: row.nickname ?? null,
         };
     }).pipe(Effect.catch((err) =>
@@ -192,8 +191,7 @@ const resolveParent = (sessionId: string): Effect.Effect<ParentInfo, never, Surr
 const resolveChildren = (sessionId: string): Effect.Effect<ReadonlyArray<ChildEdge>, never, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
-        const escaped = sessionId.replace(/`/g, "");
-        const sessionRid = /^[A-Za-z0-9_]+$/.test(escaped) ? `session:${escaped}` : `session:\`${escaped}\``;
+        const sessionRid = toSessionRid(toBareSessionId(sessionId));
         const [rows] = yield* db.query<[Array<{ child: string; ts: string | null; tool: string | null; nickname: string | null }>]>(`
             SELECT <string>out AS child, <string>ts AS ts, tool, nickname
             FROM spawned
@@ -201,7 +199,8 @@ const resolveChildren = (sessionId: string): Effect.Effect<ReadonlyArray<ChildEd
             ORDER BY ts ASC;
         `);
         return rows.map((r): ChildEdge => ({
-            session_id: r.child,
+            // Bare session id over the HTTP seam.
+            session_id: toBareSessionId(r.child),
             ts: r.ts ?? null,
             tool: r.tool ?? null,
             nickname: r.nickname ?? null,
@@ -233,8 +232,7 @@ interface HookFireRow {
 const resolveHookFires = (sessionId: string): Effect.Effect<ReadonlyArray<HookFireDto>, never, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
-        const escaped = sessionId.replace(/`/g, "");
-        const sessionRid = /^[A-Za-z0-9_]+$/.test(escaped) ? `session:${escaped}` : `session:\`${escaped}\``;
+        const sessionRid = toSessionRid(toBareSessionId(sessionId));
         const [rows] = yield* db.query<[HookFireRow[]]>(`
             SELECT ts, event, file_path, inject, reason, latency_ms, injected_titles
             FROM hook_fire
@@ -376,11 +374,14 @@ export const fetchSessionInspect = (
     opts: FetchSessionInspectOptions = {},
 ): Effect.Effect<SessionInspectPayload, Error, SurrealClient> =>
     Effect.gen(function* () {
+        // Normalise inbound id at the seam so the rest of the function operates
+        // on a bare id (also what we echo back as payload.session_id).
+        const bareSessionId = toBareSessionId(sessionId);
         const [parent, childrenEdges, allHookFires, found] = yield* Effect.all([
-            resolveParent(sessionId),
-            resolveChildren(sessionId),
-            resolveHookFires(sessionId),
-            locateTranscript(sessionId),
+            resolveParent(bareSessionId),
+            resolveChildren(bareSessionId),
+            resolveHookFires(bareSessionId),
+            locateTranscript(bareSessionId),
         ], { concurrency: "unbounded" });
         const { offset: turnOffset, limit: turnLimit } = clampPagination(
             { offset: opts.turnOffset, limit: opts.turnLimit },
@@ -515,7 +516,7 @@ export const fetchSessionInspect = (
             });
 
             return {
-                session_id: sessionId,
+                session_id: bareSessionId,
                 source_path: found.path,
                 total_chars: totalChars,
                 total_turns: turns.length,

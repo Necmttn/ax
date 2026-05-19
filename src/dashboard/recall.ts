@@ -8,6 +8,7 @@ import {
 } from "../queries/recall.ts";
 import type { RecallHit, RecallResponse } from "../lib/shared/dashboard-types.ts";
 import { clampPagination, type PaginationConfig } from "../lib/shared/pagination.ts";
+import { toBareSessionId } from "../lib/shared/session-id.ts";
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
     typeof v === "object" && v !== null && !Array.isArray(v);
@@ -129,7 +130,8 @@ export const fetchRecall = (
             const text = stringField(raw, "text_excerpt") ?? "";
             hits.push({
                 turn_id: recordIdString(raw.id) ?? "",
-                session_id: session,
+                // Bare session id over the HTTP seam; see src/lib/shared/session-id.ts.
+                session_id: toBareSessionId(session),
                 project: stringField(raw, "project"),
                 source: stringField(raw, "source"),
                 role: stringField(raw, "role"),

@@ -6,6 +6,7 @@ import type { HookFireDto, InspectSpanDto, InspectSpanKind, InspectTurnDto } fro
 import { spawnAnchorSet } from "./inspector-filters.ts";
 import { spliceHookFires } from "@shared/hook-fire-splice.ts";
 import { FilterBar } from "./inspector-filter-bar.tsx";
+import { shortSessionId } from "@shared/session-id.ts";
 
 interface KindStyle { bg: string; fg: string; bar: string; label: string }
 const KIND_STYLE: Record<InspectSpanKind, KindStyle> = {
@@ -20,15 +21,6 @@ const KIND_STYLE: Record<InspectSpanKind, KindStyle> = {
     subagent_notification: { bg: "#fed7aa", fg: "#9a3412", bar: "#f97316", label: "subagent notif" },
     subagent_task:         { bg: "#ffe4e6", fg: "#9f1239", bar: "#e11d48", label: "subagent task" },
     pasted_reference:      { bg: "#fecaca", fg: "#7f1d1d", bar: "#ef4444", label: "pasted" },
-};
-
-const shortId = (id: string): string =>
-    id.replace(/^session:⟨/, "").replace(/⟩$/, "").slice(0, 12) + "…";
-
-const bareId = (id: string): string => {
-    let s = id.startsWith("session:") ? id.slice("session:".length) : id;
-    s = s.replace(/^[`⟨]+/, "").replace(/[`⟩]+$/, "");
-    return s;
 };
 
 function Span({ span }: { span: InspectSpanDto }) {
@@ -58,7 +50,8 @@ interface SpawnChildDto {
 }
 
 function SpawnMarker({ child }: { child: SpawnChildDto }) {
-    const childBare = bareId(child.session_id);
+    // Wire seam: child.session_id is already bare (see src/lib/shared/session-id.ts).
+    const childBare = child.session_id;
     const ts = child.ts ? new Date(child.ts).toISOString().slice(11, 19) : "";
     const m = child.meta;
     const chips: Array<{ label: string; value: string }> = [];
@@ -370,7 +363,7 @@ export function SessionInspectRoute() {
             <header>
                 <h2>Session inspect</h2>
                 <span className="meta">
-                    <code>{shortId(decoded)}</code>
+                    <code>{shortSessionId(decoded)}…</code>
                     {" · "}
                     <Link to="/sessions/$sessionId" params={{ sessionId }} style={{ color: "var(--muted, #64748b)" }}>← overview</Link>
                 </span>
@@ -391,7 +384,8 @@ export function SessionInspectRoute() {
                             <strong style={{ color: "#9f1239" }}>↓ spawned {data.children.length} subagent{data.children.length === 1 ? "" : "s"}</strong>
                             <span style={{ marginLeft: 12, color: "#9f1239", opacity: 0.7 }}>
                                 {data.children.slice(0, 6).map((c, i) => {
-                                    const bare = bareId(c.session_id);
+                                    // Wire seam: c.session_id is already bare.
+                                    const bare = c.session_id;
                                     return (
                                         <span key={c.session_id}>
                                             {i > 0 ? " · " : " "}
@@ -415,10 +409,10 @@ export function SessionInspectRoute() {
                             {" "}
                             <Link
                                 to="/sessions/$sessionId/inspect"
-                                params={{ sessionId: bareId(data.parent_session) }}
+                                params={{ sessionId: data.parent_session }}
                                 style={{ color: "#9f1239", fontWeight: 600, fontFamily: "ui-monospace, monospace" }}
                             >
-                                {bareId(data.parent_session).slice(0, 12)}…
+                                {shortSessionId(data.parent_session)}…
                             </Link>
                             {data.parent_nickname ? <span style={{ color: "#9f1239", marginLeft: 8 }}>· nickname: <strong>{data.parent_nickname}</strong></span> : null}
                             <span style={{ color: "#9f1239", marginLeft: 8, opacity: 0.7 }}>This is a subagent session.</span>

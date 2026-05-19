@@ -9,6 +9,7 @@ import type {
 import { fmtCount, fmtLastUsed, fmtTs } from "@shared/formatters.ts";
 import { prettifyProjectSlug } from "@shared/project-slug.ts";
 import { PHASE_LABEL, type Phase } from "@shared/phases.ts";
+import { shortSessionId } from "@shared/session-id.ts";
 
 const PHASE_TONE: Record<Phase, string> = {
     plan: "var(--gold)",
@@ -30,9 +31,6 @@ function PhaseBadge({ phase }: { phase: Phase }) {
     );
 }
 
-const shortId = (id: string): string =>
-    id.replace(/^session:⟨/, "").replace(/⟩$/, "").slice(0, 12) + "…";
-
 export function SessionRoute() {
     const { sessionId } = useParams({ from: "/sessions/$sessionId" });
     const decoded = decodeURIComponent(sessionId);
@@ -48,7 +46,7 @@ export function SessionRoute() {
             <header>
                 <h2>Session</h2>
                 <span className="meta">
-                    <code>{shortId(decoded)}</code>
+                    <code>{shortSessionId(decoded)}…</code>
                     {" · "}
                     <Link
                         to="/sessions/$sessionId/inspect"
@@ -242,7 +240,7 @@ function SessionLinkLi({ link }: { link: SessionLink }) {
                 params={{ sessionId: link.session_id }}
                 className="session-link"
             >
-                <code>{shortId(link.session_id)}</code>
+                <code>{shortSessionId(link.session_id)}…</code>
                 {link.nickname ? <span className="chip">{link.nickname}</span> : null}
                 {link.project ? (
                     <span>{prettifyProjectSlug(link.project)}</span>

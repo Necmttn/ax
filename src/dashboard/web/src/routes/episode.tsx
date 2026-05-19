@@ -9,6 +9,7 @@ import type {
 import { fmtCount, fmtTs } from "@shared/formatters.ts";
 import { prettifyProjectSlug } from "@shared/project-slug.ts";
 import { PHASE_LABEL, type Phase } from "@shared/phases.ts";
+import { shortSessionId } from "@shared/session-id.ts";
 
 const PHASE_TONE: Record<EpisodeNode["phase"], string> = {
     plan: "var(--gold)",
@@ -18,9 +19,6 @@ const PHASE_TONE: Record<EpisodeNode["phase"], string> = {
     other: "var(--muted)",
     mixed: "var(--red)",
 };
-
-const shortId = (id: string): string =>
-    id.replace(/^session:⟨/, "").replace(/⟩$/, "").slice(0, 12) + "…";
 
 const fmtDuration = (ms: number | null): string => {
     if (ms === null || ms < 0) return "-";
@@ -52,7 +50,7 @@ export function EpisodeRoute() {
                 <span className="meta">
                     {data ? (
                         <>
-                            <code>{shortId(data.parent_session_id)}</code>
+                            <code>{shortSessionId(data.parent_session_id)}…</code>
                             {" · "}
                             {prettifyProjectSlug(data.project)}
                             {" · "}
@@ -114,7 +112,7 @@ function EpisodeTimelineView({ data }: { data: EpisodeTimelinePayload }) {
                                 to="/sessions/$sessionId"
                                 params={{ sessionId: parent.session_id }}
                             >
-                                <code>{shortId(parent.session_id)}</code>
+                                <code>{shortSessionId(parent.session_id)}…</code>
                             </Link>{" "}
                             <span className="chip">{parent.source ?? "?"}</span>
                         </span>
@@ -175,7 +173,7 @@ function EpisodeTimelineView({ data }: { data: EpisodeTimelinePayload }) {
                                     params={{ sessionId: node.session_id }}
                                     className="timeline-link"
                                 >
-                                    <code>{shortId(node.session_id)}</code>
+                                    <code>{shortSessionId(node.session_id)}…</code>
                                 </Link>
                                 <span
                                     className="phase-badge"

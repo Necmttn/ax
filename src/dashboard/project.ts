@@ -15,6 +15,7 @@ import type {
     ProjectRecentSession,
     ProjectTopSkill,
 } from "../lib/shared/dashboard-types.ts";
+import { toBareSessionId } from "../lib/shared/session-id.ts";
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
     typeof v === "object" && v !== null && !Array.isArray(v);
@@ -127,7 +128,8 @@ export const fetchProject = (
             const id = recordIdString(raw.id);
             if (!id) continue;
             recent_sessions.push({
-                session_id: id,
+                // Bare session id over the HTTP seam; see src/lib/shared/session-id.ts.
+                session_id: toBareSessionId(id),
                 source: stringField(raw, "source"),
                 started_at: dateField(raw, "started_at"),
                 ended_at: dateField(raw, "ended_at"),
@@ -141,7 +143,7 @@ export const fetchProject = (
             const parent = recordIdString(raw.parent);
             if (!parent) continue;
             top_episodes.push({
-                parent_session_id: parent,
+                parent_session_id: toBareSessionId(parent),
                 started_at: dateField(raw, "started_at"),
                 child_count: numField(raw, "child_count"),
                 distinct_nicknames: numField(raw, "distinct_nicknames"),

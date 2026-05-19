@@ -13,6 +13,7 @@ import type {
     ToolFailureRecommendation,
     ToolFailuresResponse,
 } from "../lib/shared/dashboard-types.ts";
+import { toBareSessionId } from "../lib/shared/session-id.ts";
 
 const numericField = (row: Record<string, unknown>, key: string): number => {
     const value = Number(row[key] ?? 0);
@@ -153,11 +154,12 @@ const coerceSample = (raw: Record<string, unknown>): ToolFailureSample | null =>
         output_excerpt: stringField(raw, "output_excerpt"),
         command_text: stringField(raw, "command_text"),
         project: stringField(raw, "project"),
+        // Bare session id over the HTTP seam; see src/lib/shared/session-id.ts.
         session_id:
             typeof sessionRaw === "string"
-                ? sessionRaw
+                ? toBareSessionId(sessionRaw)
                 : sessionRaw && typeof sessionRaw === "object" && "toString" in sessionRaw
-                  ? String(sessionRaw)
+                  ? toBareSessionId(String(sessionRaw))
                   : null,
         cwd: stringField(raw, "cwd"),
     };

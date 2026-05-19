@@ -3,9 +3,7 @@ import { Link, useParams } from "@tanstack/react-router";
 import { api } from "../api.ts";
 import { fmtCount, fmtLastUsed, fmtTs } from "@shared/formatters.ts";
 import { prettifyProjectSlug } from "@shared/project-slug.ts";
-
-const shortId = (id: string): string =>
-    id.replace(/^session:⟨/, "").replace(/⟩$/, "").slice(0, 12) + "…";
+import { shortSessionId } from "@shared/session-id.ts";
 
 const fmtDuration = (start: string | null, end: string | null): string => {
     if (!start || !end) return "-";
@@ -185,7 +183,7 @@ export function ProjectRoute() {
                                                 to="/sessions/$sessionId"
                                                 params={{ sessionId: ep.parent_session_id }}
                                             >
-                                                <code>{shortId(ep.parent_session_id)}</code>
+                                                <code>{shortSessionId(ep.parent_session_id)}…</code>
                                             </Link>
                                         </td>
                                         <td>
@@ -240,7 +238,7 @@ export function ProjectRoute() {
                                                 to="/sessions/$sessionId"
                                                 params={{ sessionId: s.session_id }}
                                             >
-                                                <code>{shortId(s.session_id)}</code>
+                                                <code>{shortSessionId(s.session_id)}…</code>
                                             </Link>
                                         </td>
                                     </tr>

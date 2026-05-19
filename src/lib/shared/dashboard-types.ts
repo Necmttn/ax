@@ -3,6 +3,10 @@
  * dashboard SPA. Keep these stable - both sides depend on them.
  */
 
+import type { SessionId } from "./session-id.ts";
+
+export type { SessionId } from "./session-id.ts";
+
 export type TriageDecision = "keep" | "archive" | "review";
 
 export interface SkillRow {
@@ -113,7 +117,7 @@ export interface ToolFailureSample {
     readonly output_excerpt: string | null;
     readonly command_text: string | null;
     readonly project: string | null;
-    readonly session_id: string | null;
+    readonly session_id: SessionId | null;
     readonly cwd: string | null;
 }
 
@@ -151,11 +155,11 @@ export interface SessionShapeAggregate {
     /** Phase letters as an array, e.g. ["P","E","R","M"]. */
     readonly phases: ReadonlyArray<"plan" | "execute" | "review" | "merge">;
     readonly session_count: number;
-    readonly example_session_ids: ReadonlyArray<string>;
+    readonly example_session_ids: ReadonlyArray<SessionId>;
 }
 
 export interface SessionOverview {
-    readonly id: string;
+    readonly id: SessionId;
     readonly project: string | null;
     readonly cwd: string | null;
     readonly model: string | null;
@@ -178,7 +182,7 @@ export interface SessionToolCall {
 }
 
 export interface SessionLink {
-    readonly session_id: string;
+    readonly session_id: SessionId;
     readonly project: string | null;
     readonly started_at: string | null;
     readonly nickname: string | null;
@@ -206,7 +210,7 @@ export interface SessionDetailPayload {
 }
 
 export interface WorkflowEpisode {
-    readonly parent_session_id: string;
+    readonly parent_session_id: SessionId;
     readonly project: string | null;
     readonly started_at: string | null;
     readonly child_count: number;
@@ -214,7 +218,7 @@ export interface WorkflowEpisode {
 }
 
 export interface EpisodeNode {
-    readonly session_id: string;
+    readonly session_id: SessionId;
     readonly role: "parent" | "child";
     readonly project: string | null;
     readonly source: string | null;
@@ -227,7 +231,7 @@ export interface EpisodeNode {
 }
 
 export interface EpisodeTimelinePayload {
-    readonly parent_session_id: string;
+    readonly parent_session_id: SessionId;
     readonly project: string | null;
     readonly started_at: string | null;
     readonly ended_at: string | null;
@@ -241,7 +245,7 @@ export interface EpisodeShapeAggregate {
     readonly shape: string;
     readonly phases: ReadonlyArray<"plan" | "execute" | "review" | "merge">;
     readonly episode_count: number;
-    readonly example_parent_ids: ReadonlyArray<string>;
+    readonly example_parent_ids: ReadonlyArray<SessionId>;
     readonly avg_children: number;
 }
 
@@ -275,7 +279,7 @@ export interface ProjectFailure {
 }
 
 export interface ProjectRecentSession {
-    readonly session_id: string;
+    readonly session_id: SessionId;
     readonly source: string | null;
     readonly started_at: string | null;
     readonly ended_at: string | null;
@@ -283,7 +287,7 @@ export interface ProjectRecentSession {
 }
 
 export interface ProjectEpisode {
-    readonly parent_session_id: string;
+    readonly parent_session_id: SessionId;
     readonly started_at: string | null;
     readonly child_count: number;
     readonly distinct_nicknames: number;
@@ -413,7 +417,7 @@ export interface GraphExplorerPayload {
 
 export interface RecallHit {
     readonly turn_id: string;
-    readonly session_id: string;
+    readonly session_id: SessionId;
     readonly project: string | null;
     readonly source: string | null;
     readonly role: string | null;
@@ -533,7 +537,7 @@ export interface IngestEvent {
 }
 
 export interface SessionListRow {
-    readonly id: string;
+    readonly id: SessionId;
     readonly project: string | null;
     readonly source: string;
     readonly cwd: string | null;
@@ -547,7 +551,7 @@ export interface SessionListRow {
      *  Claude subagent / Codex agent). Null for top-level sessions. Always
      *  null on rows returned from `/api/sessions` (roots-only). Populated on
      *  rows returned from `/api/sessions/:id/children`. */
-    readonly parent_session: string | null;
+    readonly parent_session: SessionId | null;
     /** Count of direct children (subagents) this session spawned. Used by the
      *  SPA to render an expand toggle without first fetching children. Only
      *  populated on roots returned from `/api/sessions`. */
@@ -566,7 +570,7 @@ export interface SessionListResponse {
 }
 
 export interface SessionChildrenResponse {
-    readonly parent_session: string;
+    readonly parent_session: SessionId;
     readonly children: ReadonlyArray<SessionListRow>;
 }
 
@@ -618,7 +622,7 @@ export interface SpawnMeta {
 }
 
 export interface SpawnedChild {
-    readonly session_id: string;
+    readonly session_id: SessionId;
     readonly ts: string | null;
     readonly tool: string | null;       // 'spawn_agent' | 'Task' | ...
     readonly nickname: string | null;
@@ -655,7 +659,7 @@ export interface HookFireDto {
 }
 
 export interface SessionInspectPayload {
-    readonly session_id: string;
+    readonly session_id: SessionId;
     readonly source_path: string;
     readonly total_chars: number;
     /** All-session totals across every turn, NOT just the returned slice. */
@@ -668,7 +672,7 @@ export interface SessionInspectPayload {
     readonly turns: ReadonlyArray<InspectTurnDto>;
     /** Parent session id when this session was spawned by another (codex
      *  spawn_agent, claude Task). Null for top-level sessions. */
-    readonly parent_session: string | null;
+    readonly parent_session: SessionId | null;
     /** Codex assigns short names like "Pauli", "Turing" to spawned subagents. */
     readonly parent_nickname: string | null;
     /** Subagents this session spawned, in order. Empty for leaf sessions. */
