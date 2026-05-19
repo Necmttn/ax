@@ -546,10 +546,18 @@ export interface SessionListRow {
     /** Parent session id when this row was spawned by another session (e.g. a
      *  Claude subagent / Codex agent). Null for top-level sessions. */
     readonly parent_session: string | null;
+    /** Server-side hydrated parent stub: this row was injected so an
+     *  in-window subagent could group under its parent even though the parent
+     *  sits beyond the page window. SPA renders these muted + click-to-inspect. */
+    readonly is_stub?: boolean;
 }
 
 export interface SessionListResponse {
     readonly sessions: ReadonlyArray<SessionListRow>;
+    /** Minimal stubs for parent sessions whose children are in `sessions`
+     *  but the parent itself sits outside the page window. Empty for pages
+     *  where every referenced parent is already present. */
+    readonly parent_stubs?: ReadonlyArray<SessionListRow>;
 }
 
 /** Session inspector: dissected turns with semantic span labels.

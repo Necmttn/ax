@@ -72,23 +72,64 @@ export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<Se
             for (const e of edges) parentBySession.set(e.child, e.parent);
         }
 
+        const sessions: SessionListRow[] = rows.map((r): SessionListRow => ({
+            id: r.id,
+            project: r.project,
+            source: r.source ?? "unknown",
+            cwd: r.cwd,
+            model: r.model,
+            started_at: r.started_at,
+            ended_at: r.ended_at,
+            has_raw_file: !!r.has_raw_file,
+            turn_count: 0,
+            parent_session: parentBySession.get(r.id) ?? null,
+        }));
+
+        // Parent-stub hydration: when a child's parent is outside the page
+        // window, the SPA can't nest it under that parent. Fetch minimal
+        // stubs so grouping works across windows. Cheap: one IN-list query.
+        const inWindow = new Set(sessionIds);
+        const missingParents = new Set<string>();
+        for (const childParent of parentBySession.values()) {
+            if (!inWindow.has(childParent)) missingParents.add(childParent);
+        }
+        const stubs: SessionListRow[] = [];
+        if (missingParents.size > 0) {
+            const ids = [...missingParents];
+            const [stubRows] = yield* db.query<[Omit<RawRow, "turn_count">[]]>(`
+                SELECT
+                    <string>id AS id,
+                    project,
+                    source,
+                    cwd,
+                    model,
+                    <string>started_at AS started_at,
+                    <string>ended_at AS ended_at,
+                    raw_file != NONE AS has_raw_file
+                FROM session
+                WHERE id IN [${ids.join(", ")}];
+            `);
+            for (const r of stubRows) {
+                stubs.push({
+                    id: r.id,
+                    project: r.project,
+                    source: r.source ?? "unknown",
+                    cwd: r.cwd,
+                    model: r.model,
+                    started_at: r.started_at,
+                    ended_at: r.ended_at,
+                    has_raw_file: !!r.has_raw_file,
+                    turn_count: 0,
+                    parent_session: null,
+                    is_stub: true,
+                });
+            }
+        }
+
         // turn_count is intentionally NOT joined here: the cross-session turn
         // table is huge and a batched IN-list count still takes ~8 s at the
         // 200-row scale we want. Surface 0 in the wire format and let the
         // per-session detail view fetch it on demand. A materialised
         // session_summary view (TBD) will let us bring this back cheaply.
-        return {
-            sessions: rows.map((r): SessionListRow => ({
-                id: r.id,
-                project: r.project,
-                source: r.source ?? "unknown",
-                cwd: r.cwd,
-                model: r.model,
-                started_at: r.started_at,
-                ended_at: r.ended_at,
-                has_raw_file: !!r.has_raw_file,
-                turn_count: 0,
-                parent_session: parentBySession.get(r.id) ?? null,
-            })),
-        };
+        return { sessions, parent_stubs: stubs };
     });
