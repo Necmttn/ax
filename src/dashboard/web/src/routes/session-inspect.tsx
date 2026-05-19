@@ -1,8 +1,17 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { api } from "../api.ts";
 import type { InspectSpanDto, InspectSpanKind, InspectTurnDto } from "@shared/dashboard-types.ts";
+import {
+    isCorrectionTurn,
+    isRoleTurn,
+    isSpawnAnchorTurn,
+    matchesSearch,
+    matchingSeqs,
+    nextMatchAfter,
+    spawnAnchorSet,
+} from "./inspector-filters.ts";
 
 interface KindStyle { bg: string; fg: string; bar: string; label: string }
 const KIND_STYLE: Record<InspectSpanKind, KindStyle> = {
@@ -185,6 +194,210 @@ function Turn({ turn, anchored, childrenSpawnedHere }: { turn: InspectTurnDto; a
     );
 }
 
+interface FilterBarProps {
+    readonly turns: ReadonlyArray<InspectTurnDto>;
+    readonly anchorSeqs: ReadonlySet<number>;
+    readonly currentSeq: number | null;
+    readonly loadedCount: number;
+    readonly totalCount: number;
+    readonly appendLoading: boolean;
+    readonly loadMore: (count?: number) => Promise<void>;
+    /** Returns the latest `turns` array - bypasses prop staleness across an
+     *  `await loadMore()` boundary so retry-after-load can see new entries. */
+    readonly getTurns: () => ReadonlyArray<InspectTurnDto>;
+    /** Same as above for the hash-derived cursor seq. */
+    readonly getCurrentSeq: () => number | null;
+}
+
+type QuickFilter =
+    | { key: "correction"; label: string; pred: (t: InspectTurnDto) => boolean }
+    | { key: "spawn"; label: string; pred: (t: InspectTurnDto) => boolean }
+    | { key: InspectSpanKind; label: string; pred: (t: InspectTurnDto) => boolean };
+
+function FilterBar({
+    turns,
+    anchorSeqs,
+    currentSeq,
+    loadedCount,
+    totalCount,
+    appendLoading,
+    loadMore,
+    getTurns,
+    getCurrentSeq,
+}: FilterBarProps) {
+    const [searchInput, setSearchInput] = useState("");
+    const [searchQuery, setSearchQuery] = useState("");
+
+    // Debounce free-text input → searchQuery (~250 ms).
+    useEffect(() => {
+        const handle = window.setTimeout(() => setSearchQuery(searchInput), 250);
+        return () => window.clearTimeout(handle);
+    }, [searchInput]);
+
+    const quickFilters: ReadonlyArray<QuickFilter> = useMemo(() => [
+        { key: "correction",     label: "next correction",  pred: isCorrectionTurn },
+        { key: "spawn",          label: "next spawn",       pred: (t) => isSpawnAnchorTurn(t, anchorSeqs) },
+        { key: "tool_use",       label: "next tool_use",    pred: (t) => isRoleTurn(t, "tool_use") },
+        { key: "tool_result",    label: "next tool_result", pred: (t) => isRoleTurn(t, "tool_result") },
+        { key: "hook_injection", label: "next hook",        pred: (t) => isRoleTurn(t, "hook_injection") },
+    ], [anchorSeqs]);
+
+    // Precompute matching seqs per filter against the currently-loaded window.
+    // If the filter yields nothing in the loaded window AND we haven't loaded
+    // everything yet, the button stays enabled and clicking will trigger a
+    // bigger page fetch (handled in handleJump).
+    const matchesByKey = useMemo(() => {
+        const m = new Map<string, ReadonlyArray<number>>();
+        for (const f of quickFilters) m.set(f.key, matchingSeqs(turns, f.pred));
+        return m;
+    }, [turns, quickFilters]);
+
+    const searchSeqs = useMemo<ReadonlyArray<number>>(() => {
+        const q = searchQuery.trim();
+        if (q.length === 0) return [];
+        return matchingSeqs(turns, (t) => matchesSearch(t, q));
+    }, [turns, searchQuery]);
+
+    const fullyLoaded = loadedCount >= totalCount;
+
+    const jumpTo = (seq: number) => {
+        // Setting the hash triggers our hashchange listener, which updates
+        // anchoredSeq → re-fires the scroll + auto-load useEffects. The
+        // browser steals focus to the hash target on navigation, so preserve
+        // the previously-focused element (typically the search input) so
+        // repeated Enter / button-clicks keep working without re-focusing.
+        const prevFocus = document.activeElement as HTMLElement | null;
+        if (window.location.hash === `#turn-${seq}`) {
+            const el = document.getElementById(`turn-${seq}`);
+            if (el) el.scrollIntoView({ behavior: "auto", block: "start" });
+        } else {
+            window.location.hash = `#turn-${seq}`;
+        }
+        if (prevFocus && typeof prevFocus.focus === "function" && prevFocus !== document.body) {
+            // Restore on the next frame, after the browser's hash-focus steal.
+            window.requestAnimationFrame(() => prevFocus.focus({ preventScroll: true }));
+        }
+    };
+
+    const handleJump = async (pred: (t: InspectTurnDto) => boolean) => {
+        // Always recompute matches and cursor from refs - the closure may be
+        // stale across rapid repeat clicks faster than React re-renders.
+        const seqs = matchingSeqs(getTurns(), pred);
+        const next = nextMatchAfter(seqs, getCurrentSeq());
+        if (next != null) { jumpTo(next); return; }
+        // No match in loaded window. If pagination still has pages, load
+        // everything and retry once against the fresh data.
+        if (fullyLoaded || appendLoading) return;
+        await loadMore(totalCount - loadedCount);
+        const fresh = matchingSeqs(getTurns(), pred);
+        const retry = nextMatchAfter(fresh, getCurrentSeq());
+        if (retry != null) jumpTo(retry);
+    };
+
+    const jumpSearch = () => {
+        const q = searchInput.trim();
+        if (q.length === 0) return;
+        // Force immediate apply (skip debounce) on Enter so the visible hit
+        // counter matches what the jump uses.
+        setSearchQuery(searchInput);
+        // Always read via refs so rapid repeat-Enter (faster than React's
+        // re-render) sees the freshest cursor and turn list.
+        const fresh = matchingSeqs(getTurns(), (t) => matchesSearch(t, q));
+        const next = nextMatchAfter(fresh, getCurrentSeq());
+        if (next != null) { jumpTo(next); return; }
+        if (fullyLoaded || appendLoading) return;
+        void loadMore(totalCount - loadedCount).then(() => {
+            const after = matchingSeqs(getTurns(), (t) => matchesSearch(t, q));
+            const retry = nextMatchAfter(after, getCurrentSeq());
+            if (retry != null) jumpTo(retry);
+        });
+    };
+
+    const onSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            jumpSearch();
+        }
+    };
+
+    const btnStyle = (enabled: boolean): React.CSSProperties => ({
+        padding: "3px 10px",
+        fontSize: 11,
+        fontFamily: "ui-monospace, monospace",
+        border: "1px solid #e2e8f0",
+        background: enabled ? "#fff" : "#f1f5f9",
+        color: enabled ? "#475569" : "#94a3b8",
+        borderRadius: 4,
+        cursor: enabled ? "pointer" : "not-allowed",
+    });
+
+    return (
+        <div style={{
+            display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center",
+            padding: "6px 24px", borderTop: "1px solid #e2e8f0", background: "#f8fafc",
+            fontFamily: "ui-monospace, monospace", fontSize: 11,
+        }}>
+            <span style={{ color: "#64748b", marginRight: 4 }}>jump:</span>
+            {quickFilters.map((f) => {
+                const seqs = matchesByKey.get(f.key) ?? [];
+                // Button is "enabled" if matches exist in window OR pagination
+                // can still discover more. We never permanently disable until
+                // the full session is loaded and zero matches were found.
+                const hasMatches = seqs.length > 0;
+                const canDiscoverMore = !fullyLoaded;
+                const enabled = (hasMatches || canDiscoverMore) && !appendLoading;
+                const count = hasMatches ? ` (${seqs.length})` : "";
+                const title = !hasMatches && fullyLoaded
+                    ? "no matches in this session"
+                    : !hasMatches
+                        ? `no matches in loaded ${loadedCount.toLocaleString()} turns - click to load more`
+                        : `${seqs.length} match${seqs.length === 1 ? "" : "es"} in loaded window`;
+                return (
+                    <button
+                        key={f.key}
+                        onClick={() => { void handleJump(f.pred); }}
+                        disabled={!enabled}
+                        title={title}
+                        style={btnStyle(enabled)}
+                    >
+                        {f.label}{count}
+                    </button>
+                );
+            })}
+            <div style={{ display: "flex", gap: 4, marginLeft: 8, alignItems: "center", flex: "1 1 220px", minWidth: 180 }}>
+                <input
+                    type="search"
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
+                    onKeyDown={onSearchKeyDown}
+                    placeholder="find in turns (Enter to jump)…"
+                    style={{
+                        flex: 1, padding: "3px 8px", fontSize: 11, fontFamily: "inherit",
+                        border: "1px solid #e2e8f0", borderRadius: 4, background: "#fff",
+                        color: "#1f2937", minWidth: 0,
+                    }}
+                />
+                <button
+                    type="button"
+                    onClick={jumpSearch}
+                    disabled={searchInput.trim().length === 0}
+                    title="jump to next match (or press Enter)"
+                    style={btnStyle(searchInput.trim().length > 0)}
+                >
+                    next
+                </button>
+                {searchQuery.trim().length > 0 ? (
+                    <span style={{ color: searchSeqs.length > 0 ? "#475569" : "#ef4444" }}>
+                        {searchSeqs.length > 0
+                            ? `${searchSeqs.length} hit${searchSeqs.length === 1 ? "" : "s"}`
+                            : (fullyLoaded ? "no hits" : "no hits in loaded window")}
+                    </span>
+                ) : null}
+            </div>
+        </div>
+    );
+}
+
 export function SessionInspectRoute() {
     const { sessionId } = useParams({ from: "/sessions/$sessionId/inspect" });
     const decoded = decodeURIComponent(sessionId);
@@ -201,11 +414,21 @@ export function SessionInspectRoute() {
     const data = query.data ?? null;
     const [appendLoading, setAppendLoading] = useState(false);
 
-    // Deep-link to a specific turn via #turn-N (set by URL or page load).
-    const anchoredSeq = (() => {
-        const m = typeof window !== "undefined" ? window.location.hash.match(/^#turn-(\d+)$/) : null;
+    // Deep-link to a specific turn via #turn-N (set by URL, page load, or
+    // programmatically by the filter bar). Re-read on every hashchange so
+    // jump buttons can move the cursor and re-trigger scroll/auto-load.
+    const readHashSeq = (): number | null => {
+        if (typeof window === "undefined") return null;
+        const m = window.location.hash.match(/^#turn-(\d+)$/);
         return m ? Number(m[1]) : null;
-    })();
+    };
+    const [anchoredSeq, setAnchoredSeq] = useState<number | null>(() => readHashSeq());
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        const onHashChange = () => setAnchoredSeq(readHashSeq());
+        window.addEventListener("hashchange", onHashChange);
+        return () => window.removeEventListener("hashchange", onHashChange);
+    }, []);
 
     /** Fetch the next page of turns and append them to the cached payload. */
     const loadMore = async (count: number = PAGE_SIZE) => {
@@ -246,6 +469,19 @@ export function SessionInspectRoute() {
         const el = document.getElementById(`turn-${anchoredSeq}`);
         if (el) el.scrollIntoView({ behavior: "auto", block: "start" });
     }, [anchoredSeq, data]);
+
+    // Refs that always reflect the latest values - used by FilterBar handlers
+    // that need to read state after `await loadMore()` resolves.
+    const turnsRef = useRef<ReadonlyArray<InspectTurnDto>>(data?.turns ?? []);
+    turnsRef.current = data?.turns ?? [];
+    const anchoredSeqRef = useRef<number | null>(anchoredSeq);
+    anchoredSeqRef.current = anchoredSeq;
+
+    // Anchor seqs for the "next spawn" filter, recomputed when children change.
+    const anchorSeqs = useMemo(
+        () => spawnAnchorSet(data?.children ?? []),
+        [data?.children],
+    );
 
     // IntersectionObserver on a sentinel triggers the next page load.
     const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -319,6 +555,17 @@ export function SessionInspectRoute() {
                             <span style={{ color: "#9f1239", marginLeft: 8, opacity: 0.7 }}>This is a subagent session.</span>
                         </div>
                     ) : null}
+                    <FilterBar
+                        turns={data.turns}
+                        anchorSeqs={anchorSeqs}
+                        currentSeq={anchoredSeq}
+                        loadedCount={data.turns.length}
+                        totalCount={data.total_turns}
+                        appendLoading={appendLoading}
+                        loadMore={loadMore}
+                        getTurns={() => turnsRef.current}
+                        getCurrentSeq={() => anchoredSeqRef.current}
+                    />
                     <div style={{ display: "flex", gap: 4, flexWrap: "wrap", padding: "4px 24px 8px" }}>
                         {(Object.keys(KIND_STYLE) as InspectSpanKind[]).map((kind) => {
                             const c = KIND_STYLE[kind];

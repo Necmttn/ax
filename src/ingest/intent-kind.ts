@@ -1,3 +1,5 @@
+import { CORRECTION_MAX_LENGTH, isCorrectionPhrase } from "../lib/shared/correction-phrase.ts";
+
 export type TurnIntentKind =
     | "assistant"
     | "control"
@@ -67,27 +69,10 @@ export function classifyTurnIntent(input: TurnIntentInput): TurnIntentKind {
     // Correction: must be short user pushback. Long bodies are almost never
     // corrections - they're slash-command templates, FAQ pastes, or design
     // docs that happen to contain keywords like "wait" or "actually."
-    if (text.length < 500 && isCorrectionPhrase(text)) {
+    if (text.length < CORRECTION_MAX_LENGTH && isCorrectionPhrase(text)) {
         return "correction";
     }
 
     if (/\b(i wanna|i want|we would like|can we|please|let'?s|okay if|i prefer)\b/i.test(text)) return "preference";
     return "organic_task";
-}
-
-/**
- * Tight correction-phrase regex. Requires either a leading negation/pause
- * marker or a high-signal correction verb. Avoids generic keywords like
- * "wait" and "actually" that fire on unrelated text.
- */
-function isCorrectionPhrase(text: string): boolean {
-    if (/^(no[,\s]|stop[,\s]|wait,|hmm,|actually,)/i.test(text)) return true;
-    if (/\bdon'?t (do|use|add|mock|change|touch|edit)\b/i.test(text)) return true;
-    if (/\b(this|that)('?s| (is|was|are|were)) wrong\b/i.test(text)) return true;
-    if (/\bi was talking about\b/i.test(text)) return true;
-    if (/\b(you misunderstood|not what i (asked|wanted|meant))\b/i.test(text)) return true;
-    if (/\b(go back|revert (it|that|this|the change)|undo that|never ?mind)\b/i.test(text)) return true;
-    if (/\b(i said|i told you)\b/i.test(text)) return true;
-    if (/\bdid you (test|check|read)\b/i.test(text)) return true;
-    return false;
 }
