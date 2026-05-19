@@ -349,6 +349,24 @@ function compactToolEvidence(rows: readonly ToolEvidenceRow[]): ToolEvidenceRow[
         .sort((a, b) => rankToolEvidence(b) - rankToolEvidence(a) || (b.ts ?? "").localeCompare(a.ts ?? ""));
 }
 
+/** Exact-path-only lookup. Hot path for the hook - never falls back to
+ *  `string::ends_with` against bare basenames, which can scan large slices of
+ *  the file table when a basename (e.g. `route.tsx`) appears in many repos. */
+const findFilesExact = (paths: readonly string[]) =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const clean = Array.from(new Set(paths.map((path) => path.trim()).filter(Boolean)));
+        if (clean.length === 0) return [] as FileRow[];
+        const exactList = clean.map(sqlString).join(", ");
+        const [rows] = yield* db.query<[FileRow[]]>(`
+            SELECT <string>id AS id, path, repo, <string>repository AS repository
+            FROM file
+            WHERE path IN [${exactList}]
+            LIMIT 20;
+        `);
+        return rows.slice(0, 8);
+    });
+
 const findFiles = (signals: MentionSignals) =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
@@ -568,10 +586,196 @@ function durationMs(startedAt: string | null | undefined, endedAt: string | null
     return end - start;
 }
 
-const loadPriorFileSessions = (fileIds: readonly string[]) =>
+/**
+ * Hook hot path: two-stage aggregation.
+ *
+ * `loadPriorFileSessions` builds the full per-session summary via SurrealQL
+ * per-row subqueries against `turn`, `produced`, `delivery_outcome`,
+ * `session_health`, and `phase_span`. SurrealDB v3 cannot use index lookups
+ * inside `$parent.session` references, so each subquery does a partial scan;
+ * empirically a single high-signal session costs ~3.5 s.
+ *
+ * This variant runs the cheap inner aggregation first (one indexed query),
+ * then issues five batched `IN [sessions]` queries in parallel and aggregates
+ * counts client-side. Same shape, ~27 ms instead of ~3500 ms.
+ */
+const loadPriorFileSessionsLean = (fileIds: readonly string[], limit: number) =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         if (fileIds.length === 0) return [] as PriorFileSession[];
+        const cappedLimit = Math.max(1, Math.min(limit, 50));
+        const [aggRows] = yield* db.query<[
+            Array<{
+                session: string;
+                file: string;
+                weight: number;
+                last_seen: string;
+            }>
+        ]>(`
+            SELECT <string>in.session AS session, <string>out AS file, count() AS weight, time::max(ts) AS last_seen
+            FROM edited
+            WHERE out IN [${fileIds.join(", ")}]
+              AND in.session.source != "claude-subagent"
+            GROUP BY session, file
+            ORDER BY weight DESC, last_seen DESC
+            LIMIT ${cappedLimit};
+        `);
+        if (aggRows.length === 0) return [] as PriorFileSession[];
+
+        const sessionIds = Array.from(new Set(aggRows.map((r) => r.session)));
+        const sidLiteral = sessionIds.join(", ");
+
+        const [sessionsResult, turnsResult, producedResult, deliveryResult, healthResult, titleResult] =
+            yield* Effect.all([
+                db.query<[Array<{ id: string; project: string | null; source: string | null; started_at: string | null; ended_at: string | null }>]>(
+                    `SELECT <string>id AS id, project, source, started_at, ended_at FROM session WHERE id IN [${sidLiteral}];`,
+                ),
+                db.query<[Array<{ session: string; role: string; intent_kind: string | null }>]>(
+                    `SELECT <string>session AS session, role, intent_kind FROM turn WHERE session IN [${sidLiteral}] AND role IN ['user','assistant'];`,
+                ),
+                db.query<[Array<{ in: string }>]>(
+                    `SELECT <string>in AS in FROM produced WHERE in IN [${sidLiteral}];`,
+                ),
+                db.query<[Array<{ session: string; status: string | null; review_pain: string | null; pr_size: string | null; pr_title: string | null }>]>(
+                    `SELECT <string>session AS session, status, review_pain, pr_size, pull_request.title AS pr_title FROM delivery_outcome WHERE session IN [${sidLiteral}];`,
+                ),
+                db.query<[Array<{ session: string; interruptions: number }>]>(
+                    `SELECT <string>session AS session, interruptions FROM session_health WHERE session IN [${sidLiteral}];`,
+                ),
+                db.query<[Array<{ session: string; text_excerpt: string; seq: number; intent_kind: string | null }>]>(
+                    `SELECT <string>session AS session, text_excerpt, seq, intent_kind FROM turn WHERE session IN [${sidLiteral}] AND role = 'user' AND message_kind = 'task' AND intent_kind IN ['organic_task','preference','correction'] AND text_excerpt IS NOT NONE ORDER BY seq ASC;`,
+                ),
+            ], { concurrency: "unbounded" });
+
+        const [sessionsRows] = sessionsResult;
+        const [turnsRows] = turnsResult;
+        const [producedRows] = producedResult;
+        const [deliveryRows] = deliveryResult;
+        const [healthRows] = healthResult;
+        const [titleRows] = titleResult;
+
+        const sessionMeta = new Map<string, { project: string | null; source: string | null; started_at: string | null; ended_at: string | null }>();
+        for (const row of sessionsRows) sessionMeta.set(row.id, row);
+
+        const turnCounts = new Map<string, { user: number; assistant: number; corrections: number }>();
+        for (const row of turnsRows) {
+            const counts = turnCounts.get(row.session) ?? { user: 0, assistant: 0, corrections: 0 };
+            if (row.role === "user") {
+                counts.user += 1;
+                if (row.intent_kind === "correction") counts.corrections += 1;
+            } else if (row.role === "assistant") {
+                counts.assistant += 1;
+            }
+            turnCounts.set(row.session, counts);
+        }
+
+        const producedCounts = new Map<string, number>();
+        for (const row of producedRows) producedCounts.set(row.in, (producedCounts.get(row.in) ?? 0) + 1);
+
+        const deliveryBySession = new Map<string, { status: string | null; review_pain: string | null; pr_size: string | null; pr_title: string | null }>();
+        for (const row of deliveryRows) {
+            if (!deliveryBySession.has(row.session)) deliveryBySession.set(row.session, row);
+        }
+
+        const interruptionsBySession = new Map<string, number>();
+        for (const row of healthRows) interruptionsBySession.set(row.session, numeric(row.interruptions));
+
+        // Title priority: shipped PR title > correction text > preference text >
+        // organic_task. PR titles describe what was DELIVERED; corrections
+        // capture the precise user-feedback that drove behaviour change; both
+        // are more file-relevant than the session-opening organic_task, which
+        // is often a generic kickoff prompt.
+        const INTENT_PRIORITY: Record<string, number> = { correction: 3, preference: 2, organic_task: 1 };
+        const turnsBySession = new Map<string, Array<{ text_excerpt: string; seq: number; intent_kind: string | null }>>();
+        for (const row of titleRows) {
+            const list = turnsBySession.get(row.session) ?? [];
+            list.push({ text_excerpt: row.text_excerpt, seq: row.seq, intent_kind: row.intent_kind });
+            turnsBySession.set(row.session, list);
+        }
+        const titleBySession = new Map<string, string>();
+        for (const [session, turns] of turnsBySession) {
+            const ranked = turns.slice().sort((a, b) => {
+                const pa = INTENT_PRIORITY[a.intent_kind ?? ""] ?? 0;
+                const pb = INTENT_PRIORITY[b.intent_kind ?? ""] ?? 0;
+                if (pa !== pb) return pb - pa;
+                // Same priority: corrections benefit from being most recent;
+                // organic_task benefits from being earliest (session intent).
+                if ((a.intent_kind ?? "") === "correction") return b.seq - a.seq;
+                return a.seq - b.seq;
+            });
+            const pick = ranked[0];
+            if (pick) titleBySession.set(session, pick.text_excerpt);
+        }
+
+        const bySession = new Map<string, PriorFileSessionAccumulator>();
+        for (const row of aggRows) {
+            const meta = sessionMeta.get(row.session);
+            const delivery = deliveryBySession.get(row.session);
+            const turns = turnCounts.get(row.session) ?? { user: 0, assistant: 0, corrections: 0 };
+            const weight = Math.max(1, numeric(row.weight));
+            const existing = bySession.get(row.session);
+            const base: PriorFileSessionAccumulator = existing ?? {
+                session: row.session,
+                // Shipped PR title takes top priority for "what made this session matter to this file".
+                title: delivery?.pr_title ?? titleBySession.get(row.session) ?? meta?.project ?? row.session,
+                project: meta?.project ?? null,
+                source: meta?.source ?? null,
+                weight: 0,
+                produced_commits: producedCounts.get(row.session) ?? 0,
+                delivery_status: delivery?.status ?? null,
+                review_pain: delivery?.review_pain ?? null,
+                pr_size: delivery?.pr_size ?? null,
+                pr_title: delivery?.pr_title ?? null,
+                merged_to_main: delivery?.status === "merged_to_main" || delivery?.status === "promoted_without_pr",
+                user_turns: turns.user,
+                assistant_turns: turns.assistant,
+                corrections: turns.corrections,
+                interruptions: interruptionsBySession.get(row.session) ?? 0,
+                duration_ms: durationMs(meta?.started_at, meta?.ended_at),
+                hands_free_ms: null,
+                last_seen: row.last_seen ?? null,
+                fileWeights: new Map(),
+            };
+            base.weight += weight;
+            if (row.file) base.fileWeights.set(row.file, (base.fileWeights.get(row.file) ?? 0) + weight);
+            bySession.set(row.session, base);
+        }
+
+        return Array.from(bySession.values())
+            .map((session): PriorFileSession => ({
+                session: session.session,
+                title: session.title,
+                project: session.project,
+                source: session.source,
+                weight: session.weight,
+                files_touched: session.fileWeights.size,
+                top_files: Array.from(session.fileWeights.entries())
+                    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+                    .slice(0, 4)
+                    .map(([path]) => path),
+                produced_commits: session.produced_commits,
+                delivery_status: session.delivery_status,
+                review_pain: session.review_pain,
+                pr_size: session.pr_size,
+                pr_title: session.pr_title,
+                merged_to_main: session.merged_to_main,
+                user_turns: session.user_turns,
+                assistant_turns: session.assistant_turns,
+                corrections: session.corrections,
+                interruptions: session.interruptions,
+                duration_ms: session.duration_ms,
+                hands_free_ms: session.hands_free_ms,
+                last_seen: session.last_seen,
+            }))
+            .sort((a, b) => b.weight - a.weight || (b.last_seen ?? "").localeCompare(a.last_seen ?? ""))
+            .slice(0, 8);
+    });
+
+const loadPriorFileSessions = (fileIds: readonly string[], limit = 40) =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        if (fileIds.length === 0) return [] as PriorFileSession[];
+        const cappedLimit = Math.max(1, Math.min(limit, 200));
         const [rows] = yield* db.query<[PriorFileSessionRow[]]>(`
             SELECT
                 <string>session AS session,
@@ -613,7 +817,7 @@ const loadPriorFileSessions = (fileIds: readonly string[]) =>
                 GROUP BY session, file
             )
             ORDER BY weight DESC, last_seen DESC
-            LIMIT 40;
+            LIMIT ${cappedLimit};
         `);
 
         const bySession = new Map<string, PriorFileSessionAccumulator>();
@@ -703,6 +907,254 @@ const loadNeighborFiles = (touches: readonly TouchRow[], targetPaths: readonly s
             .map(([path, count]) => ({ path, count }))
             .sort((a, b) => b.count - a.count || a.path.localeCompare(b.path))
             .slice(0, 12);
+    });
+
+export interface FileMemoryCorrection {
+    readonly turn_id: string;
+    readonly session_id: string;
+    readonly ts: string | null;
+    readonly text: string;
+    readonly delivery_status: string | null;
+    readonly pr_title: string | null;
+}
+
+export interface FileMemoryCommit {
+    readonly commit_id: string;
+    readonly sha: string | null;
+    readonly message: string | null;
+    readonly ts: string | null;
+}
+
+export interface FileMemoryCoTouch {
+    readonly path: string;
+    readonly co_sessions: number;
+    readonly total_sessions: number;
+}
+
+export interface FileContextHookEvidence {
+    readonly files: readonly FileRow[];
+    readonly prior_file_sessions: readonly PriorFileSession[];
+    readonly corrections: readonly FileMemoryCorrection[];
+    readonly commits: readonly FileMemoryCommit[];
+    readonly co_touched: readonly FileMemoryCoTouch[];
+}
+
+/** Pull turns where intent_kind=correction AND the user explicitly mentioned
+ *  one of the target files (via `mentioned_file` relation). Strictness =
+ *  precision: matches only when the user named the file or a symbol it owns,
+ *  not "any correction in a session that happened to edit this file." */
+const loadFileTargetedCorrections = (fileIds: readonly string[], limit: number) =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        if (fileIds.length === 0) return [] as FileMemoryCorrection[];
+        const cap = Math.max(1, Math.min(limit, 20));
+        // Defense-in-depth: existing turn rows still carry the old (loose)
+        // intent_kind classification. Filter slash-command bodies and long
+        // text at query time so the hook doesn't surface non-corrections
+        // until a re-derivation pass cleans them up.
+        const [rows] = yield* db.query<[
+            Array<{
+                turn_id: string;
+                session_id: string;
+                ts: string | null;
+                text: string | null;
+            }>
+        ]>(`
+            SELECT
+                <string>in.id AS turn_id,
+                <string>in.session AS session_id,
+                <string>in.ts AS ts,
+                in.text_excerpt AS text
+            FROM mentioned_file
+            WHERE out IN [${fileIds.join(", ")}]
+              AND in.role = "user"
+              AND in.intent_kind = "correction"
+              AND in.session.source != "claude-subagent"
+              AND in.text_excerpt IS NOT NONE
+              AND string::len(in.text_excerpt) < 500
+            ORDER BY ts DESC
+            LIMIT ${cap * 2};
+        `);
+        if (rows.length === 0) return [] as FileMemoryCorrection[];
+
+        // Defense-in-depth filter (TS side): existing rows still carry old
+        // loose intent classification. Drop wrapper-instruction-shaped text
+        // that slipped through. Once intent-kind.ts is re-derived this becomes
+        // a no-op.
+        const filtered = rows.filter((r) => {
+            const t = (r.text ?? "").trimStart();
+            if (t.startsWith("## Your task")) return false;
+            if (t.startsWith("# /")) return false;
+            if (t.startsWith("<task")) return false;
+            return true;
+        }).slice(0, cap);
+        if (filtered.length === 0) return [] as FileMemoryCorrection[];
+
+        // Batch-fetch delivery_outcome for the unique sessions to surface
+        // `merged_to_main` and PR titles next to each correction quote.
+        const sessionIds = Array.from(new Set(filtered.map((r) => r.session_id)));
+        const sidLiteral = sessionIds.join(", ");
+        const [deliveryRows] = yield* db.query<[
+            Array<{ session: string; status: string | null; pr_title: string | null }>
+        ]>(
+            `SELECT <string>session AS session, status, pull_request.title AS pr_title FROM delivery_outcome WHERE session IN [${sidLiteral}];`,
+        );
+        const deliveryBySession = new Map<string, { status: string | null; pr_title: string | null }>();
+        for (const row of deliveryRows) deliveryBySession.set(row.session, row);
+
+        return filtered.map((row): FileMemoryCorrection => {
+            const delivery = deliveryBySession.get(row.session_id);
+            return {
+                turn_id: row.turn_id,
+                session_id: row.session_id,
+                ts: row.ts,
+                text: (row.text ?? "").trim(),
+                delivery_status: delivery?.status ?? null,
+                pr_title: delivery?.pr_title ?? null,
+            };
+        });
+    });
+
+/** Recent commits whose `touched` relation points to any of these files. */
+const loadRecentCommitsForFile = (fileIds: readonly string[], limit: number) =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        if (fileIds.length === 0) return [] as FileMemoryCommit[];
+        const cap = Math.max(1, Math.min(limit, 20));
+        const [rows] = yield* db.query<[
+            Array<{ commit_id: string; sha: string | null; message: string | null; ts: string | null }>
+        ]>(`
+            SELECT
+                <string>in.id AS commit_id,
+                in.sha AS sha,
+                in.message AS message,
+                <string>in.ts AS ts
+            FROM touched
+            WHERE out IN [${fileIds.join(", ")}]
+            ORDER BY ts DESC
+            LIMIT ${cap};
+        `);
+        // De-dupe by commit_id (multiple touched rows can share a commit when
+        // we feed in several file-id variants for the same canonical file).
+        const seen = new Set<string>();
+        const out: FileMemoryCommit[] = [];
+        for (const row of rows) {
+            if (seen.has(row.commit_id)) continue;
+            seen.add(row.commit_id);
+            out.push({
+                commit_id: row.commit_id,
+                sha: row.sha,
+                message: row.message?.split("\n")[0]?.trim() ?? null,
+                ts: row.ts,
+            });
+            if (out.length >= cap) break;
+        }
+        return out;
+    });
+
+/** Files that show up alongside the target file across many sessions. Surfaces
+ *  hidden coupling that single-commit `git log` can't see. */
+const loadCoTouchedFiles = (fileIds: readonly string[], limit: number) =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        if (fileIds.length === 0) return [] as FileMemoryCoTouch[];
+        const cap = Math.max(1, Math.min(limit, 20));
+        const targetSet = new Set(fileIds);
+
+        // Stage 1: top sessions that edited the target file. `count()` must
+        // appear in SELECT to be sortable in ORDER BY under SurrealDB v3.
+        const [sessionsRows] = yield* db.query<[Array<{ session: string; n: number }>]>(`
+            SELECT <string>in.session AS session, count() AS n
+            FROM edited
+            WHERE out IN [${fileIds.join(", ")}]
+              AND in.session.source != "claude-subagent"
+            GROUP BY session
+            ORDER BY n DESC
+            LIMIT 15;
+        `);
+        const sessionIds = sessionsRows.map((r) => r.session).filter(Boolean);
+        if (sessionIds.length === 0) return [] as FileMemoryCoTouch[];
+
+        // Stage 2: all files those sessions touched. Aggregate per file in JS.
+        const [editedRows] = yield* db.query<[
+            Array<{ session: string; file: string; path: string | null }>
+        ]>(`
+            SELECT <string>in.session AS session, <string>out AS file, out.path AS path
+            FROM edited
+            WHERE in.session IN [${sessionIds.join(", ")}];
+        `);
+
+        // Count distinct sessions per co-touched file (not total edits, to
+        // weight files that show up across MANY sessions over heavy churn in
+        // one session).
+        const sessionsByFile = new Map<string, { path: string | null; sessions: Set<string> }>();
+        for (const row of editedRows) {
+            if (targetSet.has(row.file)) continue;
+            const entry = sessionsByFile.get(row.file) ?? { path: row.path, sessions: new Set<string>() };
+            entry.sessions.add(row.session);
+            if (!entry.path && row.path) entry.path = row.path;
+            sessionsByFile.set(row.file, entry);
+        }
+
+        // Filter out trivia: co-touch is only a useful signal when there are
+        // enough sessions for a pattern to emerge. With 1-2 sessions, every
+        // co-edited file looks like a "always touched together" but is really
+        // just "happened to be in the same session."
+        const MIN_SESSIONS = 3;
+        const MIN_CO_RATIO = 0.5;
+        if (sessionIds.length < MIN_SESSIONS) return [] as FileMemoryCoTouch[];
+
+        return Array.from(sessionsByFile.entries())
+            .map(([, entry]): FileMemoryCoTouch => ({
+                path: entry.path ?? "(unknown)",
+                co_sessions: entry.sessions.size,
+                total_sessions: sessionIds.length,
+            }))
+            .filter((c) => c.co_sessions / c.total_sessions >= MIN_CO_RATIO)
+            .sort((a, b) => b.co_sessions - a.co_sessions || a.path.localeCompare(b.path))
+            .slice(0, cap);
+    });
+
+/**
+ * Lean evidence path for the agent-harness hook. Resolves files exactly, then
+ * fetches: aggregate prior-session stats (for inject-or-not decision), file-
+ * targeted user corrections (the novel "what user pushed back on" signal),
+ * recent commits (concrete shipped intent with SHA), and co-touched files
+ * (hidden coupling). All queries run in parallel, file-id-scoped, indexed.
+ */
+export const buildFileContextHookEvidence = (
+    input: BuildFileContextInput,
+): Effect.Effect<FileContextHookEvidence, DbError, SurrealClient> =>
+    Effect.gen(function* () {
+        const signals = extractFileContextSignals(input.q, input.files);
+        const files = yield* findFilesExact(signals.paths);
+        if (files.length === 0) {
+            return {
+                files: [] as readonly FileRow[],
+                prior_file_sessions: [] as readonly PriorFileSession[],
+                corrections: [] as readonly FileMemoryCorrection[],
+                commits: [] as readonly FileMemoryCommit[],
+                co_touched: [] as readonly FileMemoryCoTouch[],
+            };
+        }
+        const fileIds = files.map((file) => file.id);
+        // Each evidence query is isolated: a SQL failure in one (schema drift,
+        // bad cast, missing table) must not block the hook output. Degrade to
+        // empty and log to stderr; the agent still gets whatever did succeed.
+        const guard = <T,>(eff: Effect.Effect<T, DbError, SurrealClient>, label: string, fallback: T) =>
+            eff.pipe(Effect.catch((err) =>
+                Effect.sync(() => {
+                    console.error(`axctl hook ${label} query failed:`, err.message);
+                    return fallback;
+                }),
+            ));
+        const [prior_file_sessions, corrections, commits, co_touched] = yield* Effect.all([
+            guard(loadPriorFileSessionsLean(fileIds, 5), "prior_file_sessions", [] as readonly PriorFileSession[]),
+            guard(loadFileTargetedCorrections(fileIds, 5), "corrections", [] as readonly FileMemoryCorrection[]),
+            guard(loadRecentCommitsForFile(fileIds, 5), "commits", [] as readonly FileMemoryCommit[]),
+            guard(loadCoTouchedFiles(fileIds, 5), "co_touched", [] as readonly FileMemoryCoTouch[]),
+        ], { concurrency: "unbounded" });
+        return { files, prior_file_sessions, corrections, commits, co_touched };
     });
 
 export const buildFileContextPack = (input: BuildFileContextInput): Effect.Effect<FileContextPack, DbError, SurrealClient> =>

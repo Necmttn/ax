@@ -9,3 +9,6 @@ bun.lockb
 dist/
 .worktrees/
 .superpowers/
+
+# local dogfood outputs (HTML reports, profiling scratch)
+dogfood-output/

@@ -1033,3 +1033,35 @@ DEFINE FIELD decision   ON skill_triage_decision TYPE string;  -- keep | archive
 DEFINE FIELD reason     ON skill_triage_decision TYPE option<string>;
 DEFINE FIELD decided_at ON skill_triage_decision TYPE datetime DEFAULT time::now();
 DEFINE INDEX skill_triage_decision_name ON skill_triage_decision FIELDS skill_name UNIQUE;
+
+-- ---------------------------------------------------------------------------
+-- Hook-fire telemetry. Every `axctl hook file-context` decision (inject or
+-- skip) writes a row here. Codex transcripts replay-synthesize rows too.
+-- See docs/superpowers/specs/2026-05-17-hook-fire-telemetry-design.md.
+--
+-- Record id is sha1("harness|session_id|file_path|ts_ms|event").slice(0,16)
+-- so Codex replay can upsert idempotently on re-ingest.
+-- ---------------------------------------------------------------------------
+DEFINE TABLE hook_fire SCHEMAFULL;
+-- Common telemetry base fields (mirrors src/lib/telemetry-base.ts).
+DEFINE FIELD ts         ON hook_fire TYPE datetime;
+DEFINE FIELD kind       ON hook_fire TYPE string;                       -- always "hook_fire"
+DEFINE FIELD session    ON hook_fire TYPE option<record<session>>;
+DEFINE FIELD file       ON hook_fire TYPE option<record<file>>;
+DEFINE FIELD file_path  ON hook_fire TYPE string;                       -- raw path even when no file record exists
+DEFINE FIELD harness    ON hook_fire TYPE string;                       -- claude | codex | unknown
+DEFINE FIELD ok         ON hook_fire TYPE bool;
+DEFINE FIELD latency_ms ON hook_fire TYPE int;
+-- Hook-fire-specific fields.
+DEFINE FIELD event                     ON hook_fire TYPE string;        -- pre-edit | read | write | search | unknown
+DEFINE FIELD inject                    ON hook_fire TYPE bool;
+DEFINE FIELD reason                    ON hook_fire TYPE string;        -- high_signal | suppressed_path | no_prior_sessions | low_signal_only | no_files
+DEFINE FIELD prior_sessions_considered ON hook_fire TYPE int;
+DEFINE FIELD task_excerpt              ON hook_fire TYPE string;        -- clipped 240 chars
+DEFINE FIELD top_prior_sessions        ON hook_fire TYPE array<record<session>>;
+DEFINE FIELD injected_titles           ON hook_fire TYPE array<string> DEFAULT [];   -- clipped titles of injected sessions (max 3, empty when inject=false)
+
+DEFINE INDEX hook_fire_by_ts      ON hook_fire FIELDS ts;
+DEFINE INDEX hook_fire_by_session ON hook_fire FIELDS session;
+DEFINE INDEX hook_fire_by_file    ON hook_fire FIELDS file;
+DEFINE INDEX hook_fire_by_reason  ON hook_fire FIELDS reason;

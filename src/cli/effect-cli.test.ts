@@ -13,12 +13,14 @@ describe("effect cli", () => {
         expect(names).toEqual(expect.arrayContaining([
             "ingest",
             "derive-signals",
+            "derive-intents",
             "insights",
             "interventions",
             "dashboard",
             "recall",
             "skills",
             "context",
+            "hook",
             "project",
             "evidence",
             "version",
@@ -100,6 +102,16 @@ describe("effect cli", () => {
         const subNames = context!.subcommands.flatMap((g) => g.commands.map((c) => c.name));
         expect(subNames).toEqual(expect.arrayContaining(["file"]));
         expect(DB_COMMANDS.has("context")).toBe(true);
+    });
+
+    test("hook group exposes file-context and is a DB command", () => {
+        const hook = rootCommand.subcommands
+            .flatMap((g) => g.commands)
+            .find((c) => c.name === "hook");
+        expect(hook).toBeDefined();
+        const subNames = hook!.subcommands.flatMap((g) => g.commands.map((c) => c.name));
+        expect(subNames).toEqual(expect.arrayContaining(["file-context"]));
+        expect(DB_COMMANDS.has("hook")).toBe(true);
     });
 });
 

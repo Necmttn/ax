@@ -50,6 +50,7 @@ export function classifyTurnIntent(input: TurnIntentInput): TurnIntentKind {
         text.startsWith("<task>") ||
         text.startsWith("<task-notification>") ||
         text.startsWith("# /") ||
+        text.startsWith("## Your task") ||
         text.startsWith("# Observability") ||
         text.startsWith("This session is being continued")
     ) {
@@ -62,9 +63,31 @@ export function classifyTurnIntent(input: TurnIntentInput): TurnIntentKind {
     }
     if (/dogfood|qa wrapper|subagent notifications|skill dumps/i.test(text)) return "dogfood_prompt";
     if (/^---|the video showcases|competitor|here'?s another|copy below|full git diff/i.test(text)) return "pasted_reference";
-    if (/\b(did you test|i was talking about|not that|wait|actually|this is wrong)\b/i.test(text) || /why .*\?/i.test(text)) {
+
+    // Correction: must be short user pushback. Long bodies are almost never
+    // corrections - they're slash-command templates, FAQ pastes, or design
+    // docs that happen to contain keywords like "wait" or "actually."
+    if (text.length < 500 && isCorrectionPhrase(text)) {
         return "correction";
     }
+
     if (/\b(i wanna|i want|we would like|can we|please|let'?s|okay if|i prefer)\b/i.test(text)) return "preference";
     return "organic_task";
+}
+
+/**
+ * Tight correction-phrase regex. Requires either a leading negation/pause
+ * marker or a high-signal correction verb. Avoids generic keywords like
+ * "wait" and "actually" that fire on unrelated text.
+ */
+function isCorrectionPhrase(text: string): boolean {
+    if (/^(no[,\s]|stop[,\s]|wait,|hmm,|actually,)/i.test(text)) return true;
+    if (/\bdon'?t (do|use|add|mock|change|touch|edit)\b/i.test(text)) return true;
+    if (/\b(this|that)('?s| (is|was|are|were)) wrong\b/i.test(text)) return true;
+    if (/\bi was talking about\b/i.test(text)) return true;
+    if (/\b(you misunderstood|not what i (asked|wanted|meant))\b/i.test(text)) return true;
+    if (/\b(go back|revert (it|that|this|the change)|undo that|never ?mind)\b/i.test(text)) return true;
+    if (/\b(i said|i told you)\b/i.test(text)) return true;
+    if (/\bdid you (test|check|read)\b/i.test(text)) return true;
+    return false;
 }

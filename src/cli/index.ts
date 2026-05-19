@@ -20,6 +20,7 @@ import { deriveLearningRegistry } from "../ingest/learning-registry.ts";
 import { ingestClaudeInsights } from "../ingest/claude-insights.ts";
 import { ingestLegacySelfImprove } from "../ingest/legacy-self-improve.ts";
 import { deriveSignals } from "../ingest/derive-signals.ts";
+import { deriveTurnIntents } from "../ingest/derive-intents.ts";
 import { deriveSpawned } from "../ingest/derive-spawned.ts";
 import { deriveClaudeSubagents } from "../ingest/derive-claude-subagents.ts";
 import { INSIGHT_VIEWS, insightSqlForView, isInsightView } from "../queries/insights.ts";
@@ -37,6 +38,15 @@ import { cmdProject } from "./project.ts";
 import { AGENTCTL_VERSION, liveVersionDeps, printVersion, updateAgentctl } from "./version.ts";
 import { cmdDogfoodTerminal } from "../dogfood/wterm.ts";
 import { buildFileContextPack } from "../context/file-context.ts";
+import {
+    buildFileContextHookResponse,
+    parseFileContextHookFlags,
+    parseFileContextHookStdin,
+    type FileContextHookInput,
+} from "../hooks/file-context-hook.ts";
+import { recordHookFire } from "../hooks/telemetry.ts";
+import type { TelemetryHarness } from "../lib/telemetry-base.ts";
+import { formatHookLogRowsTsv, queryHookLog } from "../hooks/log.ts";
 import { guidanceNext, parseSelfImproveArgs, selfImproveWeekly, sessionSummary } from "../self-improve/commands.ts";
 import {
     buildIngestEventStatement,
@@ -1509,6 +1519,36 @@ const deriveSignalsCommand = Command.make(
         cmdDeriveSignals([...intArg("since", optionValue(since)), `--progress=${progress}`, ...boolArg("verbose", verbose)]),
 ).pipe(Command.withDescription("Derive friction, diagnostic, recommendation, and recovery signals"));
 
+const deriveIntentsCommand = Command.make(
+    "derive-intents",
+    {
+        dryRun: Flag.boolean("dry-run").pipe(Flag.withDefault(false)),
+        json: jsonFlag,
+    },
+    ({ dryRun, json }) =>
+        Effect.gen(function* () {
+            const summary = yield* deriveTurnIntents({ dryRun });
+            if (json) {
+                console.log(prettyPrint({
+                    considered: summary.considered,
+                    changed: summary.changed,
+                    by_transition: summary.byTransition,
+                    dry_run: dryRun,
+                }));
+                return;
+            }
+            console.log(`considered: ${summary.considered}`);
+            console.log(`changed:    ${summary.changed}${dryRun ? "  (dry-run - no writes)" : ""}`);
+            if (summary.changed === 0) return;
+            console.log("");
+            console.log("transitions:");
+            const sorted = Object.entries(summary.byTransition).sort((a, b) => b[1] - a[1]);
+            for (const [transition, n] of sorted) {
+                console.log(`  ${String(n).padStart(6)}  ${transition}`);
+            }
+        }),
+).pipe(Command.withDescription("Re-run intent classification over existing turn rows; updates intent_kind in place"));
+
 const insightView = Argument.choice("view", INSIGHT_VIEWS).pipe(Argument.withDefault("repositories"));
 
 const insightsCommand = Command.make(
@@ -1724,6 +1764,137 @@ const contextCommand = Command.make("context").pipe(
     Command.withSubcommands([contextFileCommand]),
 );
 
+const readStdinAll = (): Promise<string> =>
+    new Promise((resolve, reject) => {
+        let data = "";
+        process.stdin.setEncoding("utf8");
+        process.stdin.on("data", (chunk) => {
+            data += chunk;
+        });
+        process.stdin.on("end", () => resolve(data));
+        process.stdin.on("error", reject);
+    });
+
+const mergeHookInputs = (
+    base: FileContextHookInput,
+    overrides: FileContextHookInput,
+): FileContextHookInput => ({
+    event: overrides.event !== "unknown" ? overrides.event : base.event,
+    task: overrides.task ? overrides.task : base.task,
+    files: overrides.files.length > 0 ? overrides.files : base.files,
+    lookupPaths: overrides.files.length > 0 ? overrides.lookupPaths : base.lookupPaths,
+    sessionId: overrides.sessionId ?? base.sessionId,
+    format: overrides.format !== "plain" ? overrides.format : base.format,
+});
+
+const hookFileContextCommand = Command.make(
+    "file-context",
+    {
+        event: Flag.string("event").pipe(Flag.optional),
+        task: Flag.string("task").pipe(Flag.optional),
+        file: Flag.string("file").pipe(Flag.optional),
+        files: Flag.string("files").pipe(Flag.optional),
+        sessionId: Flag.string("session-id").pipe(Flag.optional),
+        format: Flag.string("format").pipe(Flag.optional),
+        json: jsonFlag,
+        stdin: Flag.boolean("stdin").pipe(Flag.withDefault(false)),
+    },
+    ({ event, task, file, files, sessionId, format, json, stdin }) =>
+        Effect.gen(function* () {
+            const flagFiles = [
+                ...parseFileHints(file),
+                ...parseFileHints(files),
+            ];
+            const flagInput = parseFileContextHookFlags({
+                event: optionValue(event) ?? null,
+                task: optionValue(task) ?? null,
+                files: flagFiles,
+                sessionId: optionValue(sessionId) ?? null,
+                format: optionValue(format) ?? null,
+            });
+            const shouldReadStdin = stdin || !process.stdin.isTTY;
+            const stdinInput = shouldReadStdin
+                ? yield* Effect.promise(() => readStdinAll()).pipe(
+                    Effect.map((text) =>
+                        text.trim().length > 0 ? parseFileContextHookStdin(text) : null,
+                    ),
+                )
+                : null;
+            const merged = stdinInput ? mergeHookInputs(stdinInput, flagInput) : flagInput;
+            const startMs = performance.now();
+            const response = yield* buildFileContextHookResponse(merged);
+            const latencyMs = Math.round(performance.now() - startMs);
+
+            if (json || merged.format === "json") {
+                console.log(prettyPrint(response));
+            } else if (merged.format === "claude") {
+                // Claude Code hook protocol: PreToolUse hook output is shown to
+                // the user as plain stdout but is NOT injected into the model's
+                // context unless wrapped as JSON with `hookSpecificOutput.
+                // additionalContext`. Emit the envelope only when we have
+                // something to inject; emit nothing otherwise so Claude Code
+                // doesn't show an empty additionalContext block to the user.
+                if (response.inject && response.context.length > 0) {
+                    console.log(JSON.stringify({
+                        hookSpecificOutput: {
+                            hookEventName: "PreToolUse",
+                            additionalContext: response.context,
+                        },
+                    }));
+                }
+            } else if (response.inject && response.context.length > 0) {
+                // Default plain format for shell/manual use: emit the raw memory block.
+                console.log(response.context);
+            }
+
+            const harness: TelemetryHarness = merged.format === "claude" ? "claude" : "unknown";
+            yield* recordHookFire({
+                input: merged,
+                decision: { inject: response.inject, reason: response.reason },
+                priorSessions: response.evidence.prior_file_sessions,
+                corrections: response.evidence.corrections,
+                commits: response.evidence.commits,
+                harness,
+                latencyMs,
+            });
+        }),
+).pipe(Command.withDescription("Decide and emit file-context memory for an agent harness hook"));
+
+const hookLogCommand = Command.make(
+    "log",
+    {
+        tail: Flag.integer("tail").pipe(Flag.withDefault(20)),
+        since: Flag.integer("since").pipe(Flag.optional),
+        reason: Flag.string("reason").pipe(Flag.optional),
+        file: Flag.string("file").pipe(Flag.optional),
+        inject: Flag.string("inject").pipe(Flag.optional),
+        harness: Flag.string("harness").pipe(Flag.optional),
+        json: jsonFlag,
+    },
+    ({ tail, since, reason, file, inject, harness, json }) =>
+        Effect.gen(function* () {
+            const injectStr = optionValue(inject);
+            const rows = yield* queryHookLog({
+                tail,
+                sinceHours: optionValue(since),
+                reason: optionValue(reason),
+                file: optionValue(file),
+                inject: injectStr === undefined ? undefined : injectStr === "true",
+                harness: optionValue(harness),
+            });
+            if (json) {
+                console.log(prettyPrint(rows));
+                return;
+            }
+            console.log(formatHookLogRowsTsv(rows));
+        }),
+).pipe(Command.withDescription("Tail and filter hook_fire telemetry rows"));
+
+const hookCommand = Command.make("hook").pipe(
+    Command.withDescription("Generic agent harness hooks (file-context, log, ...)"),
+    Command.withSubcommands([hookFileContextCommand, hookLogCommand]),
+);
+
 const jsonSelfImprove = (cmd: "guidance" | "session" | "self-improve", rest: string[]) => {
     const parsed = parseSelfImproveArgs(cmd, rest);
     const effect =
@@ -1846,12 +2017,14 @@ export const rootCommand = Command.make("axctl").pipe(
     Command.withSubcommands([
         ingestCommand,
         deriveSignalsCommand,
+        deriveIntentsCommand,
         insightsCommand,
         interventionsCommand,
         dashboardCommand,
         recallCommand,
         skillsCommand,
         contextCommand,
+        hookCommand,
         projectCommand,
         evidenceCommand,
         versionCommand,
@@ -1910,6 +2083,7 @@ const withoutDb = (args: ReadonlyArray<string>): CliProgram => {
 export const DB_COMMANDS: ReadonlySet<string> = new Set([
     "ingest",
     "derive-signals",
+    "derive-intents",
     "insights",
     "interventions",
     "dashboard",
@@ -1917,6 +2091,7 @@ export const DB_COMMANDS: ReadonlySet<string> = new Set([
     "skills",
     "project",
     "context",
+    "hook",
     "evidence",
     "tui",
     "dogfood",
