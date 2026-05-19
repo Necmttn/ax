@@ -33,6 +33,7 @@ export interface SessionChildrenOpts {
 
 const DEFAULT_LIMIT = 200;
 const MAX_LIMIT = 500;
+const MAX_CHILDREN = 1000;
 
 /** Clamp the requested page size into a defensible range. Exported so the
  *  HTTP layer and tests share the exact same rule. Mirrors
@@ -189,13 +190,14 @@ const toSessionRid = (bareId: string): string => {
  * Ordered started_at ASC so children read top→bottom in spawn order, which
  * matches what the inspector's spawned-child list does.
  */
+// Pagination deferred: heaviest observed fan-out ~390; 500 default covers the practical case. Add offset if needed.
 export const fetchSessionChildren = (
     parentBareId: string,
     opts: SessionChildrenOpts = {},
 ): Effect.Effect<SessionChildrenResponse, DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
-        const limit = Math.max(1, Math.min(opts.limit ?? 500, 1000));
+        const limit = Math.max(1, Math.min(opts.limit ?? 500, MAX_CHILDREN));
         const parentRid = toSessionRid(parentBareId);
         // Two-step: fetch child record ids from `spawned`, then materialise
         // the child session rows. Avoids a nested subquery that Surreal can

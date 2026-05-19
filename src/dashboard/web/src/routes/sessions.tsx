@@ -167,6 +167,10 @@ export function SessionsRoute() {
                 // the cumulative loaded range. Leave it pinned to the first
                 // page so its documented semantic ("server-returned slice")
                 // holds (mirrors recall.tsx fix).
+                // why total_count diverges from recall.tsx (which preserves prev.total_count):
+                // sessions list can grow under concurrent ingest; a stale total misleads the
+                // "X of Y roots" meta line and could keep the IntersectionObserver firing
+                // past the true end.
                 return {
                     ...prev,
                     sessions: [...prev.sessions, ...page.sessions],
@@ -215,6 +219,7 @@ export function SessionsRoute() {
     // Lazy children fetches, one per currently-expanded root. TanStack
     // Query dedups + caches across re-renders so a row that's collapsed and
     // re-expanded doesn't refetch within the staleTime window.
+    // TODO: direct_children_count is computed at fetch time. If ingest writes new children mid-session, the displayed count won't refresh until the user reloads the roots query. Acceptable for v0.1.
     const expandedIds = useMemo(() => Array.from(expanded), [expanded]);
     const childQueries = useQueries({
         queries: expandedIds.map((id) => ({
