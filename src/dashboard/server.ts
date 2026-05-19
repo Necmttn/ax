@@ -442,15 +442,25 @@ export async function handleDashboardRequest(req: Request): Promise<Response> {
     }
     if (url.pathname === "/api/recall" && req.method === "GET") {
         const q = url.searchParams.get("q") ?? "";
+        const offsetParam = Number(url.searchParams.get("offset") ?? "0");
+        const limitParam = Number(url.searchParams.get("limit") ?? "50");
+        const offset = Number.isFinite(offsetParam) ? offsetParam : 0;
+        const limit = Number.isFinite(limitParam) ? limitParam : 50;
         if (!q.trim()) {
-            return jsonResponse({ q, hits: [], truncated: false });
+            return jsonResponse({
+                q,
+                hits: [],
+                truncated: false,
+                total_count: 0,
+                window: { offset, limit },
+            });
         }
         const project = url.searchParams.get("project");
         const skill = url.searchParams.get("skill");
         const since = url.searchParams.get("since");
         try {
             const payload = await Effect.runPromise(
-                fetchRecall({ q, project, skill, since }).pipe(
+                fetchRecall({ q, project, skill, since, offset, limit }).pipe(
                     Effect.provide(AppLayer),
                     Effect.scoped,
                 ) as Effect.Effect<unknown>,

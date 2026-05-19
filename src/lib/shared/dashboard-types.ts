@@ -424,7 +424,14 @@ export interface RecallHit {
 export interface RecallResponse {
     readonly q: string;
     readonly hits: ReadonlyArray<RecallHit>;
+    /** Back-compat: true when more results exist beyond what was returned.
+     *  Now derived from total_count vs window; older callers may still rely
+     *  on it. */
     readonly truncated: boolean;
+    /** Total matches across the whole query (independent of window). */
+    readonly total_count: number;
+    /** The slice that was returned. */
+    readonly window: { readonly offset: number; readonly limit: number };
 }
 
 // ---------------------------------------------------------------------------

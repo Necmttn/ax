@@ -765,8 +765,10 @@ const cmdRecall = (opts: RecallCliOpts) =>
             console.log(`no matches for "${opts.query}"`);
             return;
         }
-        const cap = result.truncated ? " (capped at 50)" : "";
-        console.log(`${result.hits.length} match${result.hits.length === 1 ? "" : "es"}${cap}`);
+        const more = result.total_count > result.hits.length
+            ? ` (showing first ${result.hits.length} of ${result.total_count})`
+            : "";
+        console.log(`${result.hits.length} match${result.hits.length === 1 ? "" : "es"}${more}`);
         for (const hit of result.hits) {
             const ts = hit.ts ?? "?";
             const project = hit.project ? prettifyProjectSlug(hit.project) : "?";

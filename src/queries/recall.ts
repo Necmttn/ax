@@ -12,6 +12,8 @@
  *    if any token hits.
  *  - $project (optional, exact match on session.project)
  *  - $since (optional ISO datetime - only turns at or after this ts)
+ *  - $offset (integer >= 0) - page start
+ *  - $limit (integer 1..200) - page size
  *
  * The skill filter is handled by materialising the matching session IDs in a
  * separate cheap query and splicing them in as a SurrealQL array literal
@@ -33,7 +35,20 @@ WHERE text_excerpt @@ $q
   AND ($since IS NONE OR $since IS NULL OR ts >= $since)
   ${sessionFilterClause}
 ORDER BY ts DESC
-LIMIT 50;`;
+START $offset
+LIMIT $limit;`;
+
+/** Count of total matches for the same filter set - used to compute window
+ *  + drive the "load more" sentinel. Keeps bindings identical to the page
+ *  query (minus $offset/$limit). */
+export const RECALL_COUNT_SQL = (sessionFilterClause: string): string => `
+SELECT count() AS total
+FROM turn
+WHERE text_excerpt @@ $q
+  AND ($project IS NONE OR $project IS NULL OR session.project = $project)
+  AND ($since IS NONE OR $since IS NULL OR ts >= $since)
+  ${sessionFilterClause}
+GROUP ALL;`;
 
 /** Sessions that invoked a specific skill (cheap; uses the invoked indexes). */
 export const RECALL_SESSIONS_FOR_SKILL_SQL = `

@@ -111,12 +111,16 @@ export const api = {
         project?: string | null;
         skill?: string | null;
         since?: string | null;
+        offset?: number;
+        limit?: number;
     }): Promise<RecallResponse> => {
         const usp = new URLSearchParams();
         usp.set("q", params.q);
         if (params.project) usp.set("project", params.project);
         if (params.skill) usp.set("skill", params.skill);
         if (params.since) usp.set("since", params.since);
+        if (params.offset != null) usp.set("offset", String(params.offset));
+        if (params.limit != null) usp.set("limit", String(params.limit));
         return jsonFetch(`/api/recall?${usp.toString()}`);
     },
     toolFailures: (): Promise<ToolFailuresResponse> => jsonFetch("/api/tool-failures"),

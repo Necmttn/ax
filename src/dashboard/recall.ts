@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { SurrealClient } from "../lib/db.ts";
 import type { DbError } from "../lib/errors.ts";
 import {
+    RECALL_COUNT_SQL,
     RECALL_SESSIONS_FOR_SKILL_SQL,
     RECALL_TURNS_SQL,
 } from "../queries/recall.ts";
@@ -38,11 +39,31 @@ const recordIdString = (v: unknown): string | null => {
 const truncate = (s: string, n: number): string =>
     s.length <= n ? s : `${s.slice(0, n - 1)}…`;
 
+const DEFAULT_LIMIT = 50;
+const MAX_LIMIT = 200;
+
+/** Clamp the requested page size into a defensible range. Exported so the
+ *  HTTP layer and tests share the exact same rule. */
+export function clampRecallLimit(value: number | undefined): number {
+    const n = Math.trunc(value ?? DEFAULT_LIMIT);
+    if (!Number.isFinite(n) || n <= 0) return DEFAULT_LIMIT;
+    return Math.min(MAX_LIMIT, n);
+}
+
+/** Clamp offset to a non-negative integer. */
+export function clampRecallOffset(value: number | undefined): number {
+    const n = Math.trunc(value ?? 0);
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return n;
+}
+
 export interface RecallParams {
     readonly q: string;
     readonly project?: string | null;
     readonly skill?: string | null;
     readonly since?: string | null;
+    readonly offset?: number;
+    readonly limit?: number;
 }
 
 export const fetchRecall = (
@@ -51,8 +72,16 @@ export const fetchRecall = (
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         const q = params.q.trim().toLowerCase();
+        const offset = clampRecallOffset(params.offset);
+        const limit = clampRecallLimit(params.limit);
         if (!q) {
-            return { q: params.q, hits: [], truncated: false };
+            return {
+                q: params.q,
+                hits: [],
+                truncated: false,
+                total_count: 0,
+                window: { offset, limit },
+            };
         }
 
         // Optional skill filter: materialise sessions first.
@@ -71,24 +100,42 @@ export const fetchRecall = (
                 }
             }
             if (ids.length === 0) {
-                return { q: params.q, hits: [], truncated: false };
+                return {
+                    q: params.q,
+                    hits: [],
+                    truncated: false,
+                    total_count: 0,
+                    window: { offset, limit },
+                };
             }
             sessionFilterClause = `AND session IN [${ids.join(", ")}]`;
         }
 
-        const bindings: Record<string, unknown> = {
+        const baseBindings: Record<string, unknown> = {
             q,
             project: params.project?.trim() || null,
             since: params.since?.trim() || null,
         };
 
-        const rows = yield* db.query<[Array<Record<string, unknown>>]>(
-            RECALL_TURNS_SQL(sessionFilterClause),
-            bindings,
+        // Run page + count concurrently. Count is independent of offset/limit
+        // and uses the same WHERE filter set, so the answer is stable across
+        // pages of the same query.
+        const [pageRows, countRows] = yield* Effect.all(
+            [
+                db.query<[Array<Record<string, unknown>>]>(
+                    RECALL_TURNS_SQL(sessionFilterClause),
+                    { ...baseBindings, offset, limit },
+                ),
+                db.query<[Array<Record<string, unknown>>]>(
+                    RECALL_COUNT_SQL(sessionFilterClause),
+                    baseBindings,
+                ),
+            ],
+            { concurrency: "unbounded" },
         );
 
         const hits: RecallHit[] = [];
-        for (const raw of rows?.[0] ?? []) {
+        for (const raw of pageRows?.[0] ?? []) {
             if (!isRecord(raw)) continue;
             const session = recordIdString(raw.session);
             if (!session) continue;
@@ -103,9 +150,20 @@ export const fetchRecall = (
                 snippet: truncate(text, 240),
             });
         }
+
+        const countRow = countRows?.[0]?.[0];
+        const totalFromCount = isRecord(countRow)
+            ? Number(countRow.total ?? 0)
+            : 0;
+        const total_count = Number.isFinite(totalFromCount) && totalFromCount > 0
+            ? Math.trunc(totalFromCount)
+            : hits.length + offset;
+
         return {
             q: params.q,
             hits,
-            truncated: hits.length >= 50,
+            truncated: offset + hits.length < total_count,
+            total_count,
+            window: { offset, limit },
         };
     });
