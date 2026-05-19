@@ -17,6 +17,7 @@ import type {
     SessionListResponse,
     SessionListRow,
 } from "../lib/shared/dashboard-types.ts";
+import { queryPagedWithCount } from "../lib/shared/graph-query.ts";
 import { clampPagination, type PaginationConfig } from "../lib/shared/pagination.ts";
 import { toBareSessionId, toSessionRid } from "../lib/shared/session-id.ts";
 
@@ -86,7 +87,14 @@ export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<Se
         // multi-statement query: the shared SurrealDB websocket interleaves
         // independent .query() calls badly, so issuing both in one round-trip
         // keeps the response framing aligned.
-        const [rows, countRows] = yield* db.query<[RawRow[], Array<{ total: number }>]>(`
+        // Stash the raw record-id `<string>id` value during the page mapper
+        // so the second-step spawned-counts query has the keys it needs
+        // without re-running the SELECT. `<string>id` returns the wrapped
+        // form (`session:\`uuid\``) which is exactly what `<string>in` from
+        // the spawned table also returns - matching keys.
+        const rawIdByBare = new Map<string, string>();
+        const paged = yield* queryPagedWithCount<RawRow, { total: number }, SessionListRow>(
+            `
             SELECT
                 <string>id AS id,
                 project,
@@ -104,54 +112,63 @@ export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<Se
             FROM session
             ${whereClause}
             GROUP ALL;
-        `);
+        `,
+            (r) => {
+                // Bare ids cross the HTTP seam; raw record-id form is kept
+                // privately for the childCountByRoot lookup below. See
+                // src/lib/shared/session-id.ts for the seam contract.
+                const bareId = toBareSessionId(r.id);
+                rawIdByBare.set(bareId, r.id);
+                return {
+                    id: bareId,
+                    project: r.project,
+                    source: r.source ?? "unknown",
+                    cwd: r.cwd,
+                    model: r.model,
+                    started_at: r.started_at,
+                    ended_at: r.ended_at,
+                    has_raw_file: !!r.has_raw_file,
+                    // turn_count intentionally NOT joined here: the cross-
+                    // session turn table is huge and a batched IN-list count
+                    // still takes ~8 s at the 200-row scale we want. Surface
+                    // 0 in the wire format; per-session detail view fetches
+                    // it on demand.
+                    turn_count: 0,
+                    parent_session: null,
+                    // Filled in below after the spawned-counts query.
+                    direct_children_count: 0,
+                };
+            },
+            (row) => row.total,
+        );
 
         // Single grouped query against `spawned` gives us the direct-child
         // count per visible root. Lets the SPA render the expand toggle +
         // "K with subagents" metric without per-row fan-out fetches.
-        const rootIds = rows.map((r) => r.id).filter(Boolean);
-        const childCountByRoot = new Map<string, number>();
-        if (rootIds.length > 0) {
+        const rawIds = Array.from(rawIdByBare.values());
+        const childCountByRawId = new Map<string, number>();
+        if (rawIds.length > 0) {
             const [counts] = yield* db.query<[Array<{ parent: string; c: number }>]>(`
                 SELECT <string>in AS parent, count() AS c
                 FROM spawned
-                WHERE in IN [${formatRecordIdList(rootIds)}]
+                WHERE in IN [${formatRecordIdList(rawIds)}]
                 GROUP BY parent;
             `);
-            for (const r of counts) childCountByRoot.set(r.parent, Number(r.c) || 0);
+            for (const r of counts) {
+                childCountByRawId.set(r.parent, Number(r.c) || 0);
+            }
         }
-
-        // Bare ids cross the HTTP seam; record-id form is kept only for the
-        // childCountByRoot lookup (whose keys were also raw record-id strings
-        // from `<string>in AS parent`). See src/lib/shared/session-id.ts.
-        const sessions: SessionListRow[] = rows.map((r): SessionListRow => ({
-            id: toBareSessionId(r.id),
-            project: r.project,
-            source: r.source ?? "unknown",
-            cwd: r.cwd,
-            model: r.model,
-            started_at: r.started_at,
-            ended_at: r.ended_at,
-            has_raw_file: !!r.has_raw_file,
-            // turn_count intentionally NOT joined here: the cross-session
-            // turn table is huge and a batched IN-list count still takes
-            // ~8 s at the 200-row scale we want. Surface 0 in the wire
-            // format; per-session detail view fetches it on demand.
-            turn_count: 0,
-            parent_session: null,
-            direct_children_count: childCountByRoot.get(r.id) ?? 0,
+        const sessions: SessionListRow[] = paged.items.map((s) => ({
+            ...s,
+            direct_children_count:
+                childCountByRawId.get(rawIdByBare.get(s.id) ?? "") ?? 0,
         }));
 
-        const countRow = countRows?.[0];
-        const totalFromCount = countRow ? Number(countRow.total ?? 0) : 0;
         // why: same defence as recall.ts - the count query can legitimately
         // return 0 (empty row, GROUP ALL on empty filter set, or a race with
         // a concurrent ingest). Falling back to `sessions.length + offset`
         // keeps the UI from claiming fewer rows than it just rendered.
-        const total_count = Math.max(
-            Number.isFinite(totalFromCount) ? Math.trunc(totalFromCount) : 0,
-            sessions.length + offset,
-        );
+        const total_count = Math.max(paged.total, sessions.length + offset);
 
         return { sessions, total_count, window: { offset, limit } };
     });
