@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { api } from "../api.ts";
@@ -135,11 +135,45 @@ export function SessionInspectRoute() {
         return m ? Number(m[1]) : null;
     })();
 
+    // Windowed render: mount only the first PAGE_SIZE turns initially, then
+    // grow the window as the user scrolls near the bottom. Big sessions
+    // (2 k+ turns × ~10 spans each) otherwise freeze the renderer for tens
+    // of seconds because they create ~10 k+ DOM nodes up front.
+    const PAGE_SIZE = 100;
+    const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+
+    // If the user deep-linked to a turn past the initial window, expand the
+    // window so that turn exists before we try to scroll to it.
+    useEffect(() => {
+        if (anchoredSeq != null && anchoredSeq >= visibleCount) {
+            setVisibleCount(Math.max(visibleCount, anchoredSeq + 20));
+        }
+    }, [anchoredSeq, visibleCount]);
+
     useEffect(() => {
         if (anchoredSeq == null || !data) return;
         const el = document.getElementById(`turn-${anchoredSeq}`);
         if (el) el.scrollIntoView({ behavior: "auto", block: "start" });
-    }, [anchoredSeq, data]);
+    }, [anchoredSeq, data, visibleCount]);
+
+    // IntersectionObserver on a sentinel near the end of the visible window
+    // triggers another page load. No-op when we've already shown everything.
+    const sentinelRef = useRef<HTMLDivElement | null>(null);
+    useEffect(() => {
+        if (!data) return;
+        if (visibleCount >= data.turns.length) return;
+        const el = sentinelRef.current;
+        if (!el) return;
+        const obs = new IntersectionObserver((entries) => {
+            for (const e of entries) {
+                if (e.isIntersecting) {
+                    setVisibleCount((v) => Math.min(v + PAGE_SIZE, data.turns.length));
+                }
+            }
+        }, { rootMargin: "400px 0px" });
+        obs.observe(el);
+        return () => obs.disconnect();
+    }, [data, visibleCount]);
 
     return (
         <section className="panel">
@@ -217,7 +251,8 @@ export function SessionInspectRoute() {
                                 list.push(c);
                                 childrenByTurn.set(c.anchor_turn_seq, list);
                             }
-                            return data.turns.map((t) => (
+                            const visibleTurns = data.turns.slice(0, visibleCount);
+                            return visibleTurns.map((t) => (
                                 <Turn
                                     key={t.seq}
                                     turn={t}
@@ -226,6 +261,32 @@ export function SessionInspectRoute() {
                                 />
                             ));
                         })()}
+                        {visibleCount < data.turns.length ? (
+                            <div
+                                ref={sentinelRef}
+                                style={{
+                                    padding: "12px 24px", color: "#64748b", fontSize: 12, fontFamily: "ui-monospace, monospace",
+                                    textAlign: "center", borderTop: "1px dashed #e2e8f0",
+                                }}
+                            >
+                                showing {visibleCount.toLocaleString()} of {data.turns.length.toLocaleString()} turns ·{" "}
+                                <button
+                                    onClick={() => setVisibleCount((v) => Math.min(v + 200, data.turns.length))}
+                                    style={{
+                                        padding: "2px 10px", marginLeft: 6, fontSize: 11, border: "1px solid #e2e8f0",
+                                        background: "#fff", color: "#475569", borderRadius: 4, cursor: "pointer",
+                                    }}
+                                >load more</button>
+                                {" "}
+                                <button
+                                    onClick={() => setVisibleCount(data.turns.length)}
+                                    style={{
+                                        padding: "2px 10px", fontSize: 11, border: "1px solid #e2e8f0",
+                                        background: "#fff", color: "#475569", borderRadius: 4, cursor: "pointer",
+                                    }}
+                                >load all</button>
+                            </div>
+                        ) : null}
                     </div>
                 </>
             ) : null}
