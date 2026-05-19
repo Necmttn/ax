@@ -103,4 +103,26 @@ describe("dissectTurn", () => {
         expect(spans[0]!.kind).toBe("system_context");
         expect(spans[0]!.label).toBe("AGENTS.md");
     });
+
+    test("Codex developer-preamble blocks are tagged as system_context", () => {
+        const text = [
+            "<permissions instructions>sandbox=danger-full-access</permissions instructions>",
+            "<apps_instructions>## Apps...</apps_instructions>",
+            "<skills_instructions>## Skills...</skills_instructions>",
+            "<plugins_instructions>## Plugins...</plugins_instructions>",
+        ].join("");
+        const spans = dissectTurn(text);
+        expect(spans.map((s) => s.kind)).toEqual([
+            "system_context",
+            "system_context",
+            "system_context",
+            "system_context",
+        ]);
+        expect(spans.map((s) => s.label)).toEqual([
+            "permissions",
+            "apps_instructions",
+            "skills_instructions",
+            "plugins_instructions",
+        ]);
+    });
 });

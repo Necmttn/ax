@@ -49,6 +49,14 @@ const CLOSED_TAGS: readonly ClosedTag[] = [
     { pattern: /<environment_context>[\s\S]*?<\/environment_context>/g, kind: "system_context", label: "environment_context" },
     { pattern: /<permissions instructions>[\s\S]*?<\/permissions instructions>/g, kind: "system_context", label: "permissions" },
     { pattern: /<collaboration_mode>[\s\S]*?<\/collaboration_mode>/g, kind: "system_context", label: "collaboration_mode" },
+    // Codex developer-message preamble blocks. Each wraps a chunk of harness-
+    // injected instructions; treat as system context so the dissector view
+    // doesn't bleed them into "user input".
+    { pattern: /<apps_instructions>[\s\S]*?<\/apps_instructions>/g, kind: "system_context", label: "apps_instructions" },
+    { pattern: /<skills_instructions>[\s\S]*?<\/skills_instructions>/g, kind: "system_context", label: "skills_instructions" },
+    { pattern: /<plugins_instructions>[\s\S]*?<\/plugins_instructions>/g, kind: "system_context", label: "plugins_instructions" },
+    { pattern: /<user_instructions>[\s\S]*?<\/user_instructions>/g, kind: "system_context", label: "user_instructions" },
+    { pattern: /<project_doc>[\s\S]*?<\/project_doc>/g, kind: "system_context", label: "project_doc" },
 ];
 
 interface PrefixMarker {
