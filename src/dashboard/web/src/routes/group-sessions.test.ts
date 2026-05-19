@@ -70,6 +70,11 @@ describe("groupByParent", () => {
         expect(g.topLevel[0]?.is_stub).toBeUndefined();
     });
 
+    test("stub with no matching children still appears top-level (degenerate)", () => {
+        const g = groupByParent([], [row("session:lonely-stub", null, { is_stub: true })]);
+        expect(g.topLevel.map((r) => r.id)).toEqual(["session:lonely-stub"]);
+    });
+
     test("mixed: orphans + grouped + stub-grouped coexist", () => {
         const rows = [
             row("session:p1"),                                    // real parent in window

@@ -89,6 +89,7 @@ export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<Se
         // window, the SPA can't nest it under that parent. Fetch minimal
         // stubs so grouping works across windows. Cheap: one IN-list query.
         const inWindow = new Set(sessionIds);
+        // Bounded by |window|: at most ~limit distinct missing parents per page.
         const missingParents = new Set<string>();
         for (const childParent of parentBySession.values()) {
             if (!inWindow.has(childParent)) missingParents.add(childParent);
@@ -96,6 +97,7 @@ export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<Se
         const stubs: SessionListRow[] = [];
         if (missingParents.size > 0) {
             const ids = [...missingParents];
+            // Stub fetch deliberately ignores source/project filters: a parent in a different source must still appear so its in-window children can group.
             const [stubRows] = yield* db.query<[Omit<RawRow, "turn_count">[]]>(`
                 SELECT
                     <string>id AS id,
