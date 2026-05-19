@@ -20,6 +20,7 @@ import { fetchToolFailureDetail, fetchToolFailures } from "./tool-failures.ts";
 import { fetchWorkflow } from "./workflow.ts";
 import { fetchSessionDetail } from "./session-detail.ts";
 import { fetchSessionInspect } from "./session-inspect.ts";
+import { fetchSessionsList } from "./sessions-list.ts";
 import { fetchEpisodeTimeline } from "./episode-timeline.ts";
 import { fetchProject } from "./project.ts";
 import { fetchRecall } from "./recall.ts";
@@ -484,6 +485,24 @@ export async function handleDashboardRequest(req: Request): Promise<Response> {
             );
         }
     }
+    if (url.pathname === "/api/sessions" && req.method === "GET") {
+        const limit = Number(url.searchParams.get("limit") ?? "100");
+        const source = url.searchParams.get("source") ?? undefined;
+        const project = url.searchParams.get("project") ?? undefined;
+        try {
+            const payload = await Effect.runPromise(
+                fetchSessionsList({
+                    limit: Number.isFinite(limit) ? limit : 100,
+                    ...(source ? { source } : {}),
+                    ...(project ? { project } : {}),
+                }).pipe(Effect.provide(AppLayer), Effect.scoped) as Effect.Effect<unknown>,
+            );
+            return jsonResponse(payload);
+        } catch (err) {
+            return jsonResponse({ error: err instanceof Error ? err.message : String(err) }, 500);
+        }
+    }
+
     // Specific routes before the catch-all `sessions/(.+)` below.
     const sessionInspectMatch = url.pathname.match(/^\/api\/sessions\/(.+)\/inspect$/);
     if (sessionInspectMatch && req.method === "GET") {

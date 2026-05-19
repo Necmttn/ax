@@ -14,6 +14,7 @@ interface Tab {
         | "/decisions"
         | "/workflow"
         | "/recall"
+        | "/sessions"
         | "/wrapped";
     readonly label: string;
     readonly prefetch: () => Promise<unknown>;
@@ -33,6 +34,15 @@ export function Shell({ children }: { children: ReactNode }) {
                 queryClient.prefetchQuery({
                     queryKey: ["workflow"],
                     queryFn: () => api.workflow(),
+                }),
+        },
+        {
+            to: "/sessions",
+            label: "Sessions",
+            prefetch: () =>
+                queryClient.prefetchQuery({
+                    queryKey: ["sessions", "all"],
+                    queryFn: () => api.sessions({ limit: 200 }),
                 }),
         },
         {

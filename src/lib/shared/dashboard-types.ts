@@ -525,6 +525,23 @@ export interface IngestEvent {
     readonly ts: string;
 }
 
+export interface SessionListRow {
+    readonly id: string;
+    readonly project: string | null;
+    readonly source: string;
+    readonly cwd: string | null;
+    readonly model: string | null;
+    readonly started_at: string | null;
+    readonly ended_at: string | null;
+    /** True when a raw transcript pointer exists (session is inspectable). */
+    readonly has_raw_file: boolean;
+    readonly turn_count: number;
+}
+
+export interface SessionListResponse {
+    readonly sessions: ReadonlyArray<SessionListRow>;
+}
+
 /** Session inspector: dissected turns with semantic span labels.
  *  Wire format for the `/api/sessions/:id/inspect` endpoint and the
  *  `/sessions/:id/inspect` SPA route. */

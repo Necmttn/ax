@@ -7,6 +7,7 @@ import type {
     SkillGraphPayload,
     SessionDetailPayload,
     SessionInspectPayload,
+    SessionListResponse,
     SkillDetailPayload,
     SkillTriageNote,
     SkillTriageResponse,
@@ -63,6 +64,14 @@ export const api = {
     decisions: (): Promise<{ decisions: ReadonlyArray<SkillTriageNote> }> =>
         jsonFetch("/api/decisions"),
     workflow: (): Promise<WorkflowResponse> => jsonFetch("/api/workflow"),
+    sessions: (params: { limit?: number; source?: string; project?: string } = {}): Promise<SessionListResponse> => {
+        const usp = new URLSearchParams();
+        if (params.limit != null) usp.set("limit", String(params.limit));
+        if (params.source) usp.set("source", params.source);
+        if (params.project) usp.set("project", params.project);
+        const qs = usp.toString();
+        return jsonFetch(qs ? `/api/sessions?${qs}` : "/api/sessions");
+    },
     sessionDetail: (sessionId: string): Promise<SessionDetailPayload> =>
         jsonFetch(`/api/sessions/${encodeURIComponent(sessionId)}`),
     sessionInspect: (sessionId: string): Promise<SessionInspectPayload> =>
