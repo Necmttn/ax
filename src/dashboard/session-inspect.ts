@@ -20,6 +20,9 @@ import type {
     SessionInspectPayload,
     SpawnMeta,
 } from "../lib/shared/dashboard-types.ts";
+import { clampPagination, type PaginationConfig } from "../lib/shared/pagination.ts";
+
+const INSPECT_TURNS_PAGINATION: PaginationConfig = { defaultLimit: 2000, maxLimit: 2000 };
 
 interface JsonlContentBlock {
     type: string;
@@ -476,8 +479,10 @@ export const fetchSessionInspect = (
             resolveHookFires(sessionId),
             resolveRawFile(sessionId),
         ], { concurrency: "unbounded" });
-        const turnOffset = Math.max(0, Math.trunc(opts.turnOffset ?? 0));
-        const turnLimit = Math.max(1, Math.min(2000, Math.trunc(opts.turnLimit ?? 2000)));
+        const { offset: turnOffset, limit: turnLimit } = clampPagination(
+            { offset: opts.turnOffset, limit: opts.turnLimit },
+            INSPECT_TURNS_PAGINATION,
+        );
         const payload = yield* Effect.tryPromise({
         try: async () => {
             const found = await findTranscript(sessionId, rawFileHint);

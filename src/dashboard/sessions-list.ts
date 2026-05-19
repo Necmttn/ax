@@ -17,6 +17,7 @@ import type {
     SessionListResponse,
     SessionListRow,
 } from "../lib/shared/dashboard-types.ts";
+import { clampPagination, type PaginationConfig } from "../lib/shared/pagination.ts";
 
 export interface SessionsListOpts {
     readonly offset?: number;
@@ -31,25 +32,11 @@ export interface SessionChildrenOpts {
     readonly limit?: number;
 }
 
-const DEFAULT_LIMIT = 200;
-const MAX_LIMIT = 500;
+const SESSIONS_PAGINATION: PaginationConfig = { defaultLimit: 200, maxLimit: 500 };
+/** Hard cap on the per-parent children endpoint. NOT a pagination axis -
+ *  callers fetch all children in one shot; this just prevents runaway
+ *  payloads if fan-out ever spikes past observed ceilings. */
 const MAX_CHILDREN = 1000;
-
-/** Clamp the requested page size into a defensible range. Exported so the
- *  HTTP layer and tests share the exact same rule. Mirrors
- *  `clampRecallLimit` from `recall.ts`. */
-export function clampSessionListLimit(value: number | undefined): number {
-    const n = Math.trunc(value ?? DEFAULT_LIMIT);
-    if (!Number.isFinite(n) || n <= 0) return DEFAULT_LIMIT;
-    return Math.min(MAX_LIMIT, n);
-}
-
-/** Clamp offset to a non-negative integer. Mirrors `clampRecallOffset`. */
-export function clampSessionListOffset(value: number | undefined): number {
-    const n = Math.trunc(value ?? 0);
-    if (!Number.isFinite(n) || n <= 0) return 0;
-    return n;
-}
 
 interface RawRow {
     readonly id: string;
@@ -81,8 +68,10 @@ const formatRecordIdList = (ids: ReadonlyArray<string>): string => ids.join(", "
 export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<SessionListResponse, DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
-        const offset = clampSessionListOffset(opts.offset);
-        const limit = clampSessionListLimit(opts.limit);
+        const { offset, limit } = clampPagination(
+            { offset: opts.offset, limit: opts.limit },
+            SESSIONS_PAGINATION,
+        );
         // Roots-only filter: `!<-spawned` evaluates the graph traversal and
         // returns truthy when this session has zero inbound spawned edges.
         // Index `spawned_out` (on `spawned.out`) makes this cheap. Verified

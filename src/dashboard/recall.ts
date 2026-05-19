@@ -7,6 +7,7 @@ import {
     RECALL_TURNS_SQL,
 } from "../queries/recall.ts";
 import type { RecallHit, RecallResponse } from "../lib/shared/dashboard-types.ts";
+import { clampPagination, type PaginationConfig } from "../lib/shared/pagination.ts";
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
     typeof v === "object" && v !== null && !Array.isArray(v);
@@ -39,23 +40,7 @@ const recordIdString = (v: unknown): string | null => {
 const truncate = (s: string, n: number): string =>
     s.length <= n ? s : `${s.slice(0, n - 1)}…`;
 
-const DEFAULT_LIMIT = 50;
-const MAX_LIMIT = 200;
-
-/** Clamp the requested page size into a defensible range. Exported so the
- *  HTTP layer and tests share the exact same rule. */
-export function clampRecallLimit(value: number | undefined): number {
-    const n = Math.trunc(value ?? DEFAULT_LIMIT);
-    if (!Number.isFinite(n) || n <= 0) return DEFAULT_LIMIT;
-    return Math.min(MAX_LIMIT, n);
-}
-
-/** Clamp offset to a non-negative integer. */
-export function clampRecallOffset(value: number | undefined): number {
-    const n = Math.trunc(value ?? 0);
-    if (!Number.isFinite(n) || n <= 0) return 0;
-    return n;
-}
+const RECALL_PAGINATION: PaginationConfig = { defaultLimit: 50, maxLimit: 200 };
 
 export interface RecallParams {
     readonly q: string;
@@ -72,8 +57,10 @@ export const fetchRecall = (
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         const q = params.q.trim().toLowerCase();
-        const offset = clampRecallOffset(params.offset);
-        const limit = clampRecallLimit(params.limit);
+        const { offset, limit } = clampPagination(
+            { offset: params.offset, limit: params.limit },
+            RECALL_PAGINATION,
+        );
         if (!q) {
             return {
                 q: params.q,
