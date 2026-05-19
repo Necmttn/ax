@@ -609,9 +609,14 @@ export interface SessionInspectPayload {
     readonly session_id: string;
     readonly source_path: string;
     readonly total_chars: number;
-    readonly turns: ReadonlyArray<InspectTurnDto>;
-    /** Aggregate char counts by span kind across the whole session. */
+    /** All-session totals across every turn, NOT just the returned slice. */
     readonly totals_by_kind: Partial<Record<InspectSpanKind, number>>;
+    /** Total number of turns in the session (the returned `turns` slice may
+     *  be a window - see `turn_window`). */
+    readonly total_turns: number;
+    /** The window of turns included in this response. */
+    readonly turn_window: { readonly offset: number; readonly limit: number };
+    readonly turns: ReadonlyArray<InspectTurnDto>;
     /** Parent session id when this session was spawned by another (codex
      *  spawn_agent, claude Task). Null for top-level sessions. */
     readonly parent_session: string | null;

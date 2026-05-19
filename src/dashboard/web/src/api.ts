@@ -74,8 +74,15 @@ export const api = {
     },
     sessionDetail: (sessionId: string): Promise<SessionDetailPayload> =>
         jsonFetch(`/api/sessions/${encodeURIComponent(sessionId)}`),
-    sessionInspect: (sessionId: string): Promise<SessionInspectPayload> =>
-        jsonFetch(`/api/sessions/${encodeURIComponent(sessionId)}/inspect`),
+    sessionInspect: (sessionId: string, params: { turnOffset?: number; turnLimit?: number } = {}): Promise<SessionInspectPayload> => {
+        const usp = new URLSearchParams();
+        if (params.turnOffset != null) usp.set("turn_offset", String(params.turnOffset));
+        if (params.turnLimit != null) usp.set("turn_limit", String(params.turnLimit));
+        const qs = usp.toString();
+        return jsonFetch(qs
+            ? `/api/sessions/${encodeURIComponent(sessionId)}/inspect?${qs}`
+            : `/api/sessions/${encodeURIComponent(sessionId)}/inspect`);
+    },
     episodeTimeline: (parentId: string): Promise<EpisodeTimelinePayload> =>
         jsonFetch(`/api/episodes/${encodeURIComponent(parentId)}`),
     project: (slug: string): Promise<ProjectPagePayload> =>

@@ -363,14 +363,28 @@ function applySubagentTaskTagging(
     }
 }
 
+export interface FetchSessionInspectOptions {
+    readonly turnOffset?: number;
+    readonly turnLimit?: number;
+}
+
 /** Read the JSONL, dissect every user/assistant message, return a wire-format
- *  payload. Resolves parent session for subagent attribution. */
-export const fetchSessionInspect = (sessionId: string): Effect.Effect<SessionInspectPayload, Error, SurrealClient> =>
+ *  payload. Resolves parent session for subagent attribution.
+ *
+ *  When `turnLimit` is set, the returned `turns` is sliced to that window.
+ *  `totals_by_kind` always reflects the full session - only `turns` is paged.
+ *  This keeps the per-page payload small while preserving the legend %s. */
+export const fetchSessionInspect = (
+    sessionId: string,
+    opts: FetchSessionInspectOptions = {},
+): Effect.Effect<SessionInspectPayload, Error, SurrealClient> =>
     Effect.gen(function* () {
         const [parent, childrenEdges] = yield* Effect.all([
             resolveParent(sessionId),
             resolveChildren(sessionId),
         ], { concurrency: "unbounded" });
+        const turnOffset = Math.max(0, Math.trunc(opts.turnOffset ?? 0));
+        const turnLimit = Math.max(1, Math.min(2000, Math.trunc(opts.turnLimit ?? 2000)));
         const payload = yield* Effect.tryPromise({
         try: async () => {
             const found = await findTranscript(sessionId);
@@ -471,11 +485,18 @@ export const fetchSessionInspect = (sessionId: string): Effect.Effect<SessionIns
                 meta: metaForChild(edge.ts),
             }));
 
+            // Slice turns to the requested window. The full session totals
+            // (totals_by_kind, total_chars) are kept unchanged so the legend
+            // remains accurate even when only a page of turns ships.
+            const turnSlice = turns.slice(turnOffset, turnOffset + turnLimit);
+
             return {
                 session_id: sessionId,
                 source_path: found.path,
                 total_chars: totalChars,
-                turns,
+                total_turns: turns.length,
+                turn_window: { offset: turnOffset, limit: turnLimit },
+                turns: turnSlice,
                 totals_by_kind: totals,
                 parent_session: parent.parent_session,
                 parent_nickname: parent.parent_nickname,

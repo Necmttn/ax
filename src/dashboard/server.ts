@@ -508,9 +508,14 @@ export async function handleDashboardRequest(req: Request): Promise<Response> {
     if (sessionInspectMatch && req.method === "GET") {
         const sessionId = decodeURIComponent(sessionInspectMatch[1] ?? "");
         if (!sessionId) return jsonResponse({ error: "missing session id" }, 400);
+        const turnOffset = Number(url.searchParams.get("turn_offset") ?? "0");
+        const turnLimit = Number(url.searchParams.get("turn_limit") ?? "100");
         try {
             const payload = await Effect.runPromise(
-                fetchSessionInspect(sessionId).pipe(
+                fetchSessionInspect(sessionId, {
+                    turnOffset: Number.isFinite(turnOffset) ? turnOffset : 0,
+                    turnLimit: Number.isFinite(turnLimit) ? turnLimit : 100,
+                }).pipe(
                     Effect.provide(AppLayer),
                     Effect.scoped,
                 ) as Effect.Effect<unknown>,

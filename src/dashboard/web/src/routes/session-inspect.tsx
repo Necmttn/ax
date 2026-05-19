@@ -188,11 +188,18 @@ function Turn({ turn, anchored, childrenSpawnedHere }: { turn: InspectTurnDto; a
 export function SessionInspectRoute() {
     const { sessionId } = useParams({ from: "/sessions/$sessionId/inspect" });
     const decoded = decodeURIComponent(sessionId);
+    const queryClient = useQueryClient();
+
+    // Server-side pagination. Initial fetch pulls metadata + first PAGE_SIZE
+    // turns (small payload). Subsequent pages append to the in-memory copy.
+    const PAGE_SIZE = 100;
+    const baseKey = ["session-inspect", decoded] as const;
     const query = useQuery({
-        queryKey: ["session-inspect", decoded],
-        queryFn: () => api.sessionInspect(decoded),
+        queryKey: baseKey,
+        queryFn: () => api.sessionInspect(decoded, { turnOffset: 0, turnLimit: PAGE_SIZE }),
     });
     const data = query.data ?? null;
+    const [appendLoading, setAppendLoading] = useState(false);
 
     // Deep-link to a specific turn via #turn-N (set by URL or page load).
     const anchoredSeq = (() => {
@@ -200,45 +207,62 @@ export function SessionInspectRoute() {
         return m ? Number(m[1]) : null;
     })();
 
-    // Windowed render: mount only the first PAGE_SIZE turns initially, then
-    // grow the window as the user scrolls near the bottom. Big sessions
-    // (2 k+ turns × ~10 spans each) otherwise freeze the renderer for tens
-    // of seconds because they create ~10 k+ DOM nodes up front.
-    const PAGE_SIZE = 100;
-    const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-
-    // If the user deep-linked to a turn past the initial window, expand the
-    // window so that turn exists before we try to scroll to it.
-    useEffect(() => {
-        if (anchoredSeq != null && anchoredSeq >= visibleCount) {
-            setVisibleCount(Math.max(visibleCount, anchoredSeq + 20));
+    /** Fetch the next page of turns and append them to the cached payload. */
+    const loadMore = async (count: number = PAGE_SIZE) => {
+        if (!data) return;
+        if (data.turns.length >= data.total_turns) return;
+        if (appendLoading) return;
+        setAppendLoading(true);
+        try {
+            const page = await api.sessionInspect(decoded, {
+                turnOffset: data.turns.length,
+                turnLimit: count,
+            });
+            queryClient.setQueryData<typeof data>(baseKey, (prev) => {
+                if (!prev) return prev;
+                return {
+                    ...prev,
+                    turns: [...prev.turns, ...page.turns],
+                    turn_window: { offset: 0, limit: prev.turns.length + page.turns.length },
+                };
+            });
+        } finally {
+            setAppendLoading(false);
         }
-    }, [anchoredSeq, visibleCount]);
+    };
+
+    // If the user deep-linked to a turn past the loaded set, request enough
+    // pages to include it before scrolling.
+    useEffect(() => {
+        if (anchoredSeq == null || !data) return;
+        if (anchoredSeq < data.turns.length) return;
+        const needed = anchoredSeq + 20 - data.turns.length;
+        void loadMore(Math.max(needed, PAGE_SIZE));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [anchoredSeq, data]);
 
     useEffect(() => {
         if (anchoredSeq == null || !data) return;
         const el = document.getElementById(`turn-${anchoredSeq}`);
         if (el) el.scrollIntoView({ behavior: "auto", block: "start" });
-    }, [anchoredSeq, data, visibleCount]);
+    }, [anchoredSeq, data]);
 
-    // IntersectionObserver on a sentinel near the end of the visible window
-    // triggers another page load. No-op when we've already shown everything.
+    // IntersectionObserver on a sentinel triggers the next page load.
     const sentinelRef = useRef<HTMLDivElement | null>(null);
     useEffect(() => {
         if (!data) return;
-        if (visibleCount >= data.turns.length) return;
+        if (data.turns.length >= data.total_turns) return;
         const el = sentinelRef.current;
         if (!el) return;
         const obs = new IntersectionObserver((entries) => {
             for (const e of entries) {
-                if (e.isIntersecting) {
-                    setVisibleCount((v) => Math.min(v + PAGE_SIZE, data.turns.length));
-                }
+                if (e.isIntersecting) void loadMore();
             }
         }, { rootMargin: "400px 0px" });
         obs.observe(el);
         return () => obs.disconnect();
-    }, [data, visibleCount]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [data?.turns.length, data?.total_turns]);
 
     return (
         <section className="panel">
@@ -316,8 +340,7 @@ export function SessionInspectRoute() {
                                 list.push(c);
                                 childrenByTurn.set(c.anchor_turn_seq, list);
                             }
-                            const visibleTurns = data.turns.slice(0, visibleCount);
-                            return visibleTurns.map((t) => (
+                            return data.turns.map((t) => (
                                 <Turn
                                     key={t.seq}
                                     turn={t}
@@ -326,7 +349,7 @@ export function SessionInspectRoute() {
                                 />
                             ));
                         })()}
-                        {visibleCount < data.turns.length ? (
+                        {data.turns.length < data.total_turns ? (
                             <div
                                 ref={sentinelRef}
                                 style={{
@@ -334,22 +357,29 @@ export function SessionInspectRoute() {
                                     textAlign: "center", borderTop: "1px dashed #e2e8f0",
                                 }}
                             >
-                                showing {visibleCount.toLocaleString()} of {data.turns.length.toLocaleString()} turns ·{" "}
-                                <button
-                                    onClick={() => setVisibleCount((v) => Math.min(v + 200, data.turns.length))}
-                                    style={{
-                                        padding: "2px 10px", marginLeft: 6, fontSize: 11, border: "1px solid #e2e8f0",
-                                        background: "#fff", color: "#475569", borderRadius: 4, cursor: "pointer",
-                                    }}
-                                >load more</button>
-                                {" "}
-                                <button
-                                    onClick={() => setVisibleCount(data.turns.length)}
-                                    style={{
-                                        padding: "2px 10px", fontSize: 11, border: "1px solid #e2e8f0",
-                                        background: "#fff", color: "#475569", borderRadius: 4, cursor: "pointer",
-                                    }}
-                                >load all</button>
+                                {appendLoading
+                                    ? `loading next ${PAGE_SIZE} of ${data.total_turns.toLocaleString()}…`
+                                    : `loaded ${data.turns.length.toLocaleString()} of ${data.total_turns.toLocaleString()} turns ·`}
+                                {!appendLoading ? (
+                                    <>
+                                        {" "}
+                                        <button
+                                            onClick={() => void loadMore(200)}
+                                            style={{
+                                                padding: "2px 10px", marginLeft: 6, fontSize: 11, border: "1px solid #e2e8f0",
+                                                background: "#fff", color: "#475569", borderRadius: 4, cursor: "pointer",
+                                            }}
+                                        >load 200 more</button>
+                                        {" "}
+                                        <button
+                                            onClick={() => void loadMore(data.total_turns - data.turns.length)}
+                                            style={{
+                                                padding: "2px 10px", fontSize: 11, border: "1px solid #e2e8f0",
+                                                background: "#fff", color: "#475569", borderRadius: 4, cursor: "pointer",
+                                            }}
+                                        >load all</button>
+                                    </>
+                                ) : null}
                             </div>
                         ) : null}
                     </div>
