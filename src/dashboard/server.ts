@@ -20,7 +20,7 @@ import { fetchToolFailureDetail, fetchToolFailures } from "./tool-failures.ts";
 import { fetchWorkflow } from "./workflow.ts";
 import { fetchSessionDetail } from "./session-detail.ts";
 import { fetchSessionInspect } from "./session-inspect.ts";
-import { fetchSessionsList } from "./sessions-list.ts";
+import { fetchSessionChildren, fetchSessionsList } from "./sessions-list.ts";
 import { fetchEpisodeTimeline } from "./episode-timeline.ts";
 import { fetchProject } from "./project.ts";
 import { fetchRecall } from "./recall.ts";
@@ -514,6 +514,22 @@ export async function handleDashboardRequest(req: Request): Promise<Response> {
     }
 
     // Specific routes before the catch-all `sessions/(.+)` below.
+    const sessionChildrenMatch = url.pathname.match(/^\/api\/sessions\/(.+)\/children$/);
+    if (sessionChildrenMatch && req.method === "GET") {
+        const parentId = decodeURIComponent(sessionChildrenMatch[1] ?? "");
+        if (!parentId) return jsonResponse({ error: "missing parent id" }, 400);
+        const limitParam = Number(url.searchParams.get("limit") ?? "500");
+        try {
+            const payload = await Effect.runPromise(
+                fetchSessionChildren(parentId, {
+                    limit: Number.isFinite(limitParam) ? limitParam : 500,
+                }).pipe(Effect.provide(AppLayer), Effect.scoped) as Effect.Effect<unknown>,
+            );
+            return jsonResponse(payload);
+        } catch (err) {
+            return jsonResponse({ error: err instanceof Error ? err.message : String(err) }, 500);
+        }
+    }
     const sessionInspectMatch = url.pathname.match(/^\/api\/sessions\/(.+)\/inspect$/);
     if (sessionInspectMatch && req.method === "GET") {
         const sessionId = decodeURIComponent(sessionInspectMatch[1] ?? "");

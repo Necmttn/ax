@@ -544,20 +544,25 @@ export interface SessionListRow {
     readonly has_raw_file: boolean;
     readonly turn_count: number;
     /** Parent session id when this row was spawned by another session (e.g. a
-     *  Claude subagent / Codex agent). Null for top-level sessions. */
+     *  Claude subagent / Codex agent). Null for top-level sessions. Always
+     *  null on rows returned from `/api/sessions` (roots-only). Populated on
+     *  rows returned from `/api/sessions/:id/children`. */
     readonly parent_session: string | null;
-    /** Server-side hydrated parent stub: this row was injected so an
-     *  in-window subagent could group under its parent even though the parent
-     *  sits beyond the page window. SPA renders these muted + click-to-inspect. */
-    readonly is_stub?: boolean;
+    /** Count of direct children (subagents) this session spawned. Used by the
+     *  SPA to render an expand toggle without first fetching children. Only
+     *  populated on roots returned from `/api/sessions`. */
+    readonly direct_children_count?: number;
 }
 
 export interface SessionListResponse {
+    /** Root sessions only - those with no inbound `spawned` edge. To get a
+     *  root's children, call `/api/sessions/:id/children`. */
     readonly sessions: ReadonlyArray<SessionListRow>;
-    /** Minimal stubs for parent sessions whose children are in `sessions`
-     *  but the parent itself sits outside the page window. Empty for pages
-     *  where every referenced parent is already present. */
-    readonly parent_stubs?: ReadonlyArray<SessionListRow>;
+}
+
+export interface SessionChildrenResponse {
+    readonly parent_session: string;
+    readonly children: ReadonlyArray<SessionListRow>;
 }
 
 /** Session inspector: dissected turns with semantic span labels.
