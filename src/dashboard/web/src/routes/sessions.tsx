@@ -1,9 +1,9 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { api } from "../api.ts";
 import { prettifyProjectSlug } from "@shared/project-slug.ts";
-import type { SessionListRow } from "@shared/dashboard-types.ts";
+import type { SessionListResponse, SessionListRow } from "@shared/dashboard-types.ts";
 
 /** Strip the `session:` prefix and any backtick / ⟨⟩ wrappers so we can use
  *  the bare id as a tanstack-router path param. JSONL filenames + the inspect
@@ -119,17 +119,83 @@ function Row({ s, indent, expandedToggle }: RowProps) {
  *  (which is always present on `/api/sessions` rows). */
 const childCountOf = (row: SessionListRow): number => row.direct_children_count ?? 0;
 
+const PAGE_SIZE = 200;
+
 export function SessionsRoute() {
+    const queryClient = useQueryClient();
     const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
     const [search, setSearch] = useState("");
     const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
 
+    // Cache by filter set only - appended pages share the same key so
+    // setQueryData accumulates across loadMore() calls (mirrors recall.tsx).
+    const baseKey = ["sessions", sourceFilter] as const;
     const query = useQuery({
-        queryKey: ["sessions", sourceFilter] as const,
-        queryFn: () => api.sessions(sourceFilter === "all" ? { limit: 200 } : { limit: 200, source: sourceFilter }),
+        queryKey: baseKey,
+        queryFn: () =>
+            api.sessions(
+                sourceFilter === "all"
+                    ? { offset: 0, limit: PAGE_SIZE }
+                    : { offset: 0, limit: PAGE_SIZE, source: sourceFilter },
+            ),
     });
 
     const allRoots = query.data?.sessions ?? [];
+    const totalCount = query.data?.total_count ?? 0;
+    const [appendLoading, setAppendLoading] = useState(false);
+    // Synchronous re-entrancy guard - mirrors the inspector's loadingRef
+    // pattern so a rapid IntersectionObserver burst can't double-fetch the
+    // same page before React commits `appendLoading`.
+    const loadingRef = useRef(false);
+
+    const loadMore = async (count: number = PAGE_SIZE) => {
+        const data = query.data;
+        if (!data) return;
+        if (data.sessions.length >= data.total_count) return;
+        if (loadingRef.current) return;
+        loadingRef.current = true;
+        setAppendLoading(true);
+        try {
+            const page = await api.sessions(
+                sourceFilter === "all"
+                    ? { offset: data.sessions.length, limit: count }
+                    : { offset: data.sessions.length, limit: count, source: sourceFilter },
+            );
+            queryClient.setQueryData<SessionListResponse>(baseKey, (prev) => {
+                if (!prev) return prev;
+                // why: `window` describes the slice the server returned, not
+                // the cumulative loaded range. Leave it pinned to the first
+                // page so its documented semantic ("server-returned slice")
+                // holds (mirrors recall.tsx fix).
+                return {
+                    ...prev,
+                    sessions: [...prev.sessions, ...page.sessions],
+                    total_count: page.total_count,
+                };
+            });
+        } finally {
+            loadingRef.current = false;
+            setAppendLoading(false);
+        }
+    };
+
+    // Sentinel-driven lazy page load. Same rootMargin as recall.tsx so the
+    // next page kicks in before the user reaches the bottom.
+    const sentinelRef = useRef<HTMLTableRowElement | null>(null);
+    useEffect(() => {
+        if (!query.data) return;
+        if (query.data.sessions.length >= query.data.total_count) return;
+        const el = sentinelRef.current;
+        if (!el) return;
+        const obs = new IntersectionObserver((entries) => {
+            for (const e of entries) {
+                if (e.isIntersecting) void loadMore();
+            }
+        }, { rootMargin: "400px 0px" });
+        obs.observe(el);
+        return () => obs.disconnect();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [query.data?.sessions.length, query.data?.total_count]);
     const filteredRoots = useMemo(() => {
         if (!search) return allRoots;
         const needle = search.toLowerCase();
@@ -189,7 +255,7 @@ export function SessionsRoute() {
                 <h2>Sessions</h2>
                 <span className="meta">
                     {query.data
-                        ? `${filteredRoots.length} of ${allRoots.length} roots · ${rootsWithChildren} with subagents`
+                        ? `${allRoots.length.toLocaleString()} of ${totalCount.toLocaleString()} roots · ${rootsWithChildren} with subagents${search ? ` · ${filteredRoots.length} match search` : ""}`
                         : "-"}
                 </span>
             </header>
@@ -272,6 +338,32 @@ export function SessionsRoute() {
                                 </Fragment>
                             );
                         })}
+                        {allRoots.length < totalCount ? (
+                            <tr ref={sentinelRef}>
+                                <td colSpan={7} style={{
+                                    padding: "12px 24px", color: "#64748b", fontSize: 12,
+                                    fontFamily: "ui-monospace, monospace",
+                                    textAlign: "center", borderTop: "1px dashed #e2e8f0",
+                                }}>
+                                    {appendLoading
+                                        ? `loading next ${PAGE_SIZE} of ${totalCount.toLocaleString()}…`
+                                        : `loaded ${allRoots.length.toLocaleString()} of ${totalCount.toLocaleString()} ·`}
+                                    {!appendLoading ? (
+                                        <>
+                                            {" "}
+                                            <button
+                                                onClick={() => void loadMore(PAGE_SIZE)}
+                                                style={{
+                                                    padding: "2px 10px", marginLeft: 6, fontSize: 11,
+                                                    border: "1px solid #e2e8f0", background: "#fff",
+                                                    color: "#475569", borderRadius: 4, cursor: "pointer",
+                                                }}
+                                            >load {PAGE_SIZE} more</button>
+                                        </>
+                                    ) : null}
+                                </td>
+                            </tr>
+                        ) : null}
                     </tbody>
                 </table>
             ) : null}

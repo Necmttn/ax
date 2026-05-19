@@ -496,13 +496,15 @@ export async function handleDashboardRequest(req: Request): Promise<Response> {
         }
     }
     if (url.pathname === "/api/sessions" && req.method === "GET") {
-        const limit = Number(url.searchParams.get("limit") ?? "100");
+        const offsetParam = Number(url.searchParams.get("offset") ?? "0");
+        const limitParam = Number(url.searchParams.get("limit") ?? "200");
         const source = url.searchParams.get("source") ?? undefined;
         const project = url.searchParams.get("project") ?? undefined;
         try {
             const payload = await Effect.runPromise(
                 fetchSessionsList({
-                    limit: Number.isFinite(limit) ? limit : 100,
+                    offset: Number.isFinite(offsetParam) ? offsetParam : 0,
+                    limit: Number.isFinite(limitParam) ? limitParam : 200,
                     ...(source ? { source } : {}),
                     ...(project ? { project } : {}),
                 }).pipe(Effect.provide(AppLayer), Effect.scoped) as Effect.Effect<unknown>,

@@ -558,6 +558,11 @@ export interface SessionListResponse {
     /** Root sessions only - those with no inbound `spawned` edge. To get a
      *  root's children, call `/api/sessions/:id/children`. */
     readonly sessions: ReadonlyArray<SessionListRow>;
+    /** Total root count for the active filter set (independent of window). */
+    readonly total_count: number;
+    /** The slice that was returned. Stays pinned to the first page on the
+     *  SPA side when subsequent pages are appended to the same cache key. */
+    readonly window: { readonly offset: number; readonly limit: number };
 }
 
 export interface SessionChildrenResponse {

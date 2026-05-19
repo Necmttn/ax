@@ -19,6 +19,7 @@ import type {
 } from "../lib/shared/dashboard-types.ts";
 
 export interface SessionsListOpts {
+    readonly offset?: number;
     readonly limit?: number;
     readonly source?: string;       // 'claude' | 'codex'
     readonly project?: string;
@@ -28,6 +29,25 @@ export interface SessionChildrenOpts {
     /** Hard cap on returned children. Heaviest observed fan-out is ~390;
      *  default 500 leaves headroom without risking unbounded payloads. */
     readonly limit?: number;
+}
+
+const DEFAULT_LIMIT = 200;
+const MAX_LIMIT = 500;
+
+/** Clamp the requested page size into a defensible range. Exported so the
+ *  HTTP layer and tests share the exact same rule. Mirrors
+ *  `clampRecallLimit` from `recall.ts`. */
+export function clampSessionListLimit(value: number | undefined): number {
+    const n = Math.trunc(value ?? DEFAULT_LIMIT);
+    if (!Number.isFinite(n) || n <= 0) return DEFAULT_LIMIT;
+    return Math.min(MAX_LIMIT, n);
+}
+
+/** Clamp offset to a non-negative integer. Mirrors `clampRecallOffset`. */
+export function clampSessionListOffset(value: number | undefined): number {
+    const n = Math.trunc(value ?? 0);
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return n;
 }
 
 interface RawRow {
@@ -60,7 +80,8 @@ const formatRecordIdList = (ids: ReadonlyArray<string>): string => ids.join(", "
 export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<SessionListResponse, DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
-        const limit = Math.max(1, Math.min(opts.limit ?? 100, 500));
+        const offset = clampSessionListOffset(opts.offset);
+        const limit = clampSessionListLimit(opts.limit);
         // Roots-only filter: `!<-spawned` evaluates the graph traversal and
         // returns truthy when this session has zero inbound spawned edges.
         // Index `spawned_out` (on `spawned.out`) makes this cheap. Verified
@@ -72,8 +93,12 @@ export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<Se
         // Per-row subqueries against `turn` deadlock at scale (same anti-
         // pattern that bit loadPriorFileSessions). Fetch the session-only
         // columns first, then batch-count subagent fan-out via one grouped
-        // query against `spawned`.
-        const [rows] = yield* db.query<[RawRow[]]>(`
+        // query against `spawned`. The count query reuses the same WHERE
+        // filter set so the answer is stable across pages. Run as a single
+        // multi-statement query: the shared SurrealDB websocket interleaves
+        // independent .query() calls badly, so issuing both in one round-trip
+        // keeps the response framing aligned.
+        const [rows, countRows] = yield* db.query<[RawRow[], Array<{ total: number }>]>(`
             SELECT
                 <string>id AS id,
                 project,
@@ -86,7 +111,11 @@ export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<Se
             FROM session
             ${whereClause}
             ORDER BY started_at DESC
-            LIMIT ${limit};
+            START ${offset} LIMIT ${limit};
+            SELECT count() AS total
+            FROM session
+            ${whereClause}
+            GROUP ALL;
         `);
 
         // Single grouped query against `spawned` gives us the direct-child
@@ -122,7 +151,18 @@ export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<Se
             direct_children_count: childCountByRoot.get(r.id) ?? 0,
         }));
 
-        return { sessions };
+        const countRow = countRows?.[0];
+        const totalFromCount = countRow ? Number(countRow.total ?? 0) : 0;
+        // why: same defence as recall.ts - the count query can legitimately
+        // return 0 (empty row, GROUP ALL on empty filter set, or a race with
+        // a concurrent ingest). Falling back to `sessions.length + offset`
+        // keeps the UI from claiming fewer rows than it just rendered.
+        const total_count = Math.max(
+            Number.isFinite(totalFromCount) ? Math.trunc(totalFromCount) : 0,
+            sessions.length + offset,
+        );
+
+        return { sessions, total_count, window: { offset, limit } };
     });
 
 /**
