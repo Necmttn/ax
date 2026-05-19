@@ -579,6 +579,19 @@ export interface InspectTurnDto {
     readonly spans: ReadonlyArray<InspectSpanDto>;
 }
 
+export interface SpawnMeta {
+    /** 'codex' | 'claude'. */
+    readonly provider: string;
+    /** codex: explorer | implementer | ... · claude: subagent_type. */
+    readonly agent_type: string | null;
+    /** codex spawn_agent flag. */
+    readonly fork_context: boolean | null;
+    /** codex: low | medium | high. */
+    readonly reasoning_effort: string | null;
+    /** First ~200 chars of the brief / prompt the parent sent in. */
+    readonly brief: string | null;
+}
+
 export interface SpawnedChild {
     readonly session_id: string;
     readonly ts: string | null;
@@ -587,6 +600,9 @@ export interface SpawnedChild {
     /** Sequence of the parent turn that fired this spawn (best-effort match
      *  by ts proximity). Null if no matching turn within the session. */
     readonly anchor_turn_seq: number | null;
+    /** Args extracted from the parent's tool_use call. Null if we couldn't
+     *  match the call (e.g. spawn happened off-JSONL or args weren't parseable). */
+    readonly meta: SpawnMeta | null;
 }
 
 export interface SessionInspectPayload {

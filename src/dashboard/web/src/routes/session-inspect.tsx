@@ -38,32 +38,65 @@ function Span({ span }: { span: InspectSpanDto }) {
     );
 }
 
-function SpawnMarker({ child, sessionId }: { child: { session_id: string; nickname: string | null; tool: string | null; ts: string | null }; sessionId: string }) {
+interface SpawnMetaDto {
+    readonly provider: string;
+    readonly agent_type: string | null;
+    readonly fork_context: boolean | null;
+    readonly reasoning_effort: string | null;
+    readonly brief: string | null;
+}
+
+interface SpawnChildDto {
+    readonly session_id: string;
+    readonly nickname: string | null;
+    readonly tool: string | null;
+    readonly ts: string | null;
+    readonly meta: SpawnMetaDto | null;
+}
+
+function SpawnMarker({ child }: { child: SpawnChildDto }) {
     const childBare = bareId(child.session_id);
     const ts = child.ts ? new Date(child.ts).toISOString().slice(11, 19) : "";
+    const m = child.meta;
+    const chips: Array<{ label: string; value: string }> = [];
+    if (m?.agent_type) chips.push({ label: "type", value: m.agent_type });
+    if (m?.reasoning_effort) chips.push({ label: "effort", value: m.reasoning_effort });
+    if (m?.fork_context != null) chips.push({ label: "fork", value: m.fork_context ? "yes" : "no" });
     return (
         <div style={{
-            margin: "4px 0", padding: "4px 10px", background: "#ffe4e6",
+            margin: "4px 0", padding: "6px 10px", background: "#ffe4e6",
             borderLeft: "3px solid #e11d48", borderRadius: 3, fontSize: 11,
             fontFamily: "ui-monospace, monospace", color: "#9f1239",
-            display: "flex", alignItems: "center", gap: 8,
         }}>
-            <span>→ spawned</span>
-            <Link
-                to="/sessions/$sessionId/inspect"
-                params={{ sessionId: childBare }}
-                style={{ color: "#9f1239", fontWeight: 600 }}
-            >
-                {childBare.slice(0, 12)}…
-            </Link>
-            {child.nickname ? <span>· "{child.nickname}"</span> : null}
-            {child.tool ? <span style={{ opacity: 0.7 }}>via {child.tool}</span> : null}
-            <span style={{ opacity: 0.6, marginLeft: "auto" }}>{ts}</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span>→ spawned</span>
+                <Link
+                    to="/sessions/$sessionId/inspect"
+                    params={{ sessionId: childBare }}
+                    style={{ color: "#9f1239", fontWeight: 600 }}
+                >
+                    {child.nickname ? `"${child.nickname}"` : `${childBare.slice(0, 12)}…`}
+                </Link>
+                {child.nickname ? <span style={{ opacity: 0.6 }}>{childBare.slice(0, 10)}…</span> : null}
+                {child.tool ? <span style={{ opacity: 0.6 }}>via {child.tool}</span> : null}
+                {m ? <span style={{ background: "#fecdd3", color: "#7f1d1d", padding: "0 6px", borderRadius: 2, fontSize: 10, fontWeight: 600 }}>{m.provider}</span> : null}
+                {chips.map((c) => (
+                    <span key={c.label} style={{ background: "#fee2e2", padding: "0 6px", borderRadius: 2, fontSize: 10 }}>
+                        {c.label}: <strong>{c.value}</strong>
+                    </span>
+                ))}
+                <span style={{ opacity: 0.6, marginLeft: "auto" }}>{ts}</span>
+            </div>
+            {m?.brief ? (
+                <div style={{ marginTop: 4, color: "#7f1d1d", fontStyle: "italic", opacity: 0.85, fontSize: 11, lineHeight: 1.4 }}>
+                    “{m.brief}”
+                </div>
+            ) : null}
         </div>
     );
 }
 
-function Turn({ turn, anchored, childrenSpawnedHere }: { turn: InspectTurnDto; anchored: boolean; childrenSpawnedHere?: ReadonlyArray<{ session_id: string; nickname: string | null; tool: string | null; ts: string | null }> }) {
+function Turn({ turn, anchored, childrenSpawnedHere }: { turn: InspectTurnDto; anchored: boolean; childrenSpawnedHere?: ReadonlyArray<SpawnChildDto> }) {
     const s = KIND_STYLE[turn.semantic_role];
     const kindCounts = new Map<InspectSpanKind, number>();
     for (const sp of turn.spans) kindCounts.set(sp.kind, (kindCounts.get(sp.kind) ?? 0) + sp.text.length);
@@ -112,7 +145,7 @@ function Turn({ turn, anchored, childrenSpawnedHere }: { turn: InspectTurnDto; a
             {childrenSpawnedHere && childrenSpawnedHere.length > 0 ? (
                 <div style={{ padding: "0 0 4px" }}>
                     {childrenSpawnedHere.map((c) => (
-                        <SpawnMarker key={c.session_id} child={c} sessionId="" />
+                        <SpawnMarker key={c.session_id} child={c} />
                     ))}
                 </div>
             ) : null}

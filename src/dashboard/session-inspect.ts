@@ -17,6 +17,7 @@ import type {
     InspectSpanKind,
     InspectTurnDto,
     SessionInspectPayload,
+    SpawnMeta,
 } from "../lib/shared/dashboard-types.ts";
 
 interface JsonlContentBlock {
@@ -260,6 +261,50 @@ const resolveChildren = (sessionId: string): Effect.Effect<ReadonlyArray<ChildEd
         }),
     ));
 
+/** Spawn args parsed out of a parent tool_use call. Keyed by call_id when
+ *  available (codex), else by ts so we can match approximately. */
+interface SpawnCall {
+    readonly ts: string | null;
+    readonly call_id: string | null;
+    readonly meta: SpawnMeta;
+}
+
+const SPAWN_TOOLS = new Set(["spawn_agent", "Task"]);
+
+function clipBrief(s: unknown, n = 200): string | null {
+    if (typeof s !== "string") return null;
+    const trimmed = s.trim();
+    if (!trimmed) return null;
+    return trimmed.length <= n ? trimmed : `${trimmed.slice(0, n - 1)}…`;
+}
+
+function parseSpawnArgs(provider: "codex" | "claude", name: string, argsJson: unknown): SpawnMeta | null {
+    if (!SPAWN_TOOLS.has(name)) return null;
+    let args: Record<string, unknown> = {};
+    if (typeof argsJson === "string") {
+        try { args = JSON.parse(argsJson) as Record<string, unknown>; } catch { return null; }
+    } else if (argsJson && typeof argsJson === "object") {
+        args = argsJson as Record<string, unknown>;
+    }
+    if (provider === "codex") {
+        return {
+            provider: "codex",
+            agent_type: typeof args.agent_type === "string" ? args.agent_type : null,
+            fork_context: typeof args.fork_context === "boolean" ? args.fork_context : null,
+            reasoning_effort: typeof args.reasoning_effort === "string" ? args.reasoning_effort : null,
+            brief: clipBrief(args.message),
+        };
+    }
+    // Claude Code Task: subagent_type, prompt, description
+    return {
+        provider: "claude",
+        agent_type: typeof args.subagent_type === "string" ? args.subagent_type : null,
+        fork_context: null,
+        reasoning_effort: null,
+        brief: clipBrief(args.prompt) ?? clipBrief(args.description),
+    };
+}
+
 /** Best-effort: find the turn whose ts is the closest match to the spawn
  *  timestamp (within 60 s, prefer the turn at-or-just-before the spawn). */
 function anchorChildToTurn(
@@ -364,12 +409,64 @@ export const fetchSessionInspect = (sessionId: string): Effect.Effect<SessionIns
             // view stops claiming it's "user input".
             if (parent.parent_session) applySubagentTaskTagging(turns, totals);
 
+            // Harvest spawn-tool calls + their args from the raw JSONL so we
+            // can attach metadata to each spawned child below.
+            const provider: "codex" | "claude" = found.harness === "codex" ? "codex" : "claude";
+            const spawnCalls: SpawnCall[] = [];
+            for (const line of raw.split("\n")) {
+                if (!line.trim()) continue;
+                if (!line.includes("spawn_agent") && !line.includes("\"Task\"")) continue;
+                let entry: { timestamp?: string; payload?: { type?: string; name?: string; arguments?: string; call_id?: string }; message?: { content?: Array<{ type?: string; name?: string; input?: unknown; id?: string }> } };
+                try { entry = JSON.parse(line); } catch { continue; }
+                if (provider === "codex") {
+                    const p = entry.payload;
+                    if (!p || p.type !== "function_call") continue;
+                    const meta = parseSpawnArgs("codex", p.name ?? "", p.arguments);
+                    if (!meta) continue;
+                    spawnCalls.push({ ts: entry.timestamp ?? null, call_id: p.call_id ?? null, meta });
+                } else {
+                    const blocks = entry.message?.content;
+                    if (!Array.isArray(blocks)) continue;
+                    for (const b of blocks) {
+                        if (b.type !== "tool_use" || b.name !== "Task") continue;
+                        const meta = parseSpawnArgs("claude", b.name, b.input);
+                        if (!meta) continue;
+                        spawnCalls.push({ ts: entry.timestamp ?? null, call_id: b.id ?? null, meta });
+                    }
+                }
+            }
+            // Match each spawn call to the child whose spawn ts is closest.
+            // (Children whose spawn fell outside the JSONL - e.g. cron-launched
+            // agents - get meta=null.)
+            const usedCallIdx = new Set<number>();
+            const metaForChild = (childTs: string | null): SpawnMeta | null => {
+                if (!childTs) return null;
+                const childMs = new Date(childTs).getTime();
+                if (!Number.isFinite(childMs)) return null;
+                let bestIdx = -1;
+                let bestDelta = Infinity;
+                for (let i = 0; i < spawnCalls.length; i++) {
+                    if (usedCallIdx.has(i)) continue;
+                    const callTs = spawnCalls[i]!.ts;
+                    if (!callTs) continue;
+                    const ms = new Date(callTs).getTime();
+                    if (!Number.isFinite(ms)) continue;
+                    const delta = Math.abs(childMs - ms);
+                    if (delta > 60_000) continue;
+                    if (delta < bestDelta) { bestDelta = delta; bestIdx = i; }
+                }
+                if (bestIdx < 0) return null;
+                usedCallIdx.add(bestIdx);
+                return spawnCalls[bestIdx]!.meta;
+            };
+
             const children = childrenEdges.map((edge) => ({
                 session_id: edge.session_id,
                 ts: edge.ts,
                 tool: edge.tool,
                 nickname: edge.nickname,
                 anchor_turn_seq: anchorChildToTurn(turns, edge.ts),
+                meta: metaForChild(edge.ts),
             }));
 
             return {
