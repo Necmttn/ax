@@ -37,16 +37,54 @@ interface JsonlMessage {
     };
 }
 
-async function findJsonl(sessionId: string): Promise<string> {
+type Harness = "claude" | "codex";
+
+interface FoundTranscript {
+    readonly path: string;
+    readonly harness: Harness;
+}
+
+async function findClaudeJsonl(sessionId: string): Promise<FoundTranscript | null> {
     const projectsDir = join(homedir(), ".claude", "projects");
-    const subdirs = await readdir(projectsDir);
+    let subdirs: string[];
+    try { subdirs = await readdir(projectsDir); } catch { return null; }
     for (const sub of subdirs) {
         const candidate = join(projectsDir, sub, `${sessionId}.jsonl`);
         try {
             await stat(candidate);
-            return candidate;
+            return { path: candidate, harness: "claude" };
         } catch { /* not here */ }
     }
+    return null;
+}
+
+/** Codex transcripts live under ~/.codex/sessions/YYYY/MM/DD/rollout-{ts}-{sessionId}.jsonl */
+async function findCodexJsonl(sessionId: string): Promise<FoundTranscript | null> {
+    const root = join(homedir(), ".codex", "sessions");
+    try {
+        for (const year of await readdir(root)) {
+            const yearDir = join(root, year);
+            for (const month of await readdir(yearDir).catch(() => [])) {
+                const monthDir = join(yearDir, month);
+                for (const day of await readdir(monthDir).catch(() => [])) {
+                    const dayDir = join(monthDir, day);
+                    for (const file of await readdir(dayDir).catch(() => [])) {
+                        if (file.endsWith(`-${sessionId}.jsonl`)) {
+                            return { path: join(dayDir, file), harness: "codex" };
+                        }
+                    }
+                }
+            }
+        }
+    } catch { /* root missing */ }
+    return null;
+}
+
+async function findTranscript(sessionId: string): Promise<FoundTranscript> {
+    const claude = await findClaudeJsonl(sessionId);
+    if (claude) return claude;
+    const codex = await findCodexJsonl(sessionId);
+    if (codex) return codex;
     throw new Error(`session transcript not found: ${sessionId}.jsonl`);
 }
 
@@ -85,13 +123,85 @@ function dominantKind(spans: readonly TurnSpan[], fallback: InspectSpanKind): In
 const toSpanDto = (s: TurnSpan): InspectSpanDto =>
     s.label !== undefined ? { kind: s.kind, text: s.text, label: s.label } : { kind: s.kind, text: s.text };
 
+interface CanonicalTurn {
+    readonly role: string;       // 'user' | 'assistant' | 'developer' | etc.
+    readonly text: string;
+    readonly ts: string | null;
+}
+
+function parseClaudeLine(line: string): CanonicalTurn | null {
+    let entry: JsonlMessage;
+    try { entry = JSON.parse(line); } catch { return null; }
+    if (entry.type !== "user" && entry.type !== "assistant") return null;
+    const content = entry.message?.content;
+    const text = typeof content === "string"
+        ? content
+        : Array.isArray(content) ? content.map(blockToText).join("") : "";
+    if (!text) return null;
+    return {
+        role: entry.message?.role ?? entry.type,
+        text,
+        ts: entry.timestamp ?? null,
+    };
+}
+
+/** Codex JSONL line shape - payload.type drives semantics. */
+interface CodexLine {
+    timestamp?: string;
+    type?: string;
+    payload?: {
+        type?: string;
+        role?: string;
+        content?: Array<{ type?: string; text?: string }>;
+        name?: string;
+        arguments?: string;
+        output?: unknown;
+        call_id?: string;
+    };
+}
+
+function parseCodexLine(line: string): CanonicalTurn | null {
+    let entry: CodexLine;
+    try { entry = JSON.parse(line); } catch { return null; }
+    const p = entry.payload;
+    if (!p) return null;
+    if (p.type === "message") {
+        if (p.role !== "user" && p.role !== "assistant" && p.role !== "developer") return null;
+        const text = Array.isArray(p.content)
+            ? p.content.map((b) => (b.type === "input_text" || b.type === "output_text") ? (b.text ?? "") : "").join("")
+            : "";
+        if (!text) return null;
+        return { role: p.role, text, ts: entry.timestamp ?? null };
+    }
+    if (p.type === "function_call") {
+        const name = p.name ?? "function";
+        const args = p.arguments ?? "{}";
+        const clipped = args.length > 400 ? `${args.slice(0, 400)}...` : args;
+        return {
+            role: "assistant",
+            text: `<tool_use name="${name.replace(/"/g, "")}">${clipped}</tool_use>`,
+            ts: entry.timestamp ?? null,
+        };
+    }
+    if (p.type === "function_call_output") {
+        const out = typeof p.output === "string" ? p.output : JSON.stringify(p.output ?? {});
+        return {
+            role: "user",
+            text: `<local-command-stdout>${out}</local-command-stdout>`,
+            ts: entry.timestamp ?? null,
+        };
+    }
+    return null;
+}
+
 /** Read the JSONL, dissect every user/assistant message, return a wire-format
  *  payload. Side-effect free aside from file reads. */
 export const fetchSessionInspect = (sessionId: string): Effect.Effect<SessionInspectPayload, Error> =>
     Effect.tryPromise({
         try: async () => {
-            const jsonlPath = await findJsonl(sessionId);
-            const raw = await readFile(jsonlPath, "utf8");
+            const found = await findTranscript(sessionId);
+            const raw = await readFile(found.path, "utf8");
+            const parseLine = found.harness === "codex" ? parseCodexLine : parseClaudeLine;
 
             const turns: InspectTurnDto[] = [];
             const totals: Partial<Record<InspectSpanKind, number>> = {};
@@ -100,15 +210,9 @@ export const fetchSessionInspect = (sessionId: string): Effect.Effect<SessionIns
 
             for (const line of raw.split("\n")) {
                 if (!line.trim()) continue;
-                let entry: JsonlMessage;
-                try { entry = JSON.parse(line); } catch { continue; }
-                if (entry.type !== "user" && entry.type !== "assistant") continue;
-                const content = entry.message?.content;
-                const text = typeof content === "string"
-                    ? content
-                    : Array.isArray(content) ? content.map(blockToText).join("") : "";
-                if (!text) continue;
-                const role = entry.message?.role ?? entry.type;
+                const canonical = parseLine(line);
+                if (!canonical) continue;
+                const { role, text, ts } = canonical;
                 const fallbackKind: InspectSpanKind = role === "assistant" ? "assistant_text" : "user_input";
                 const spans = dissectTurn(text, { defaultKind: fallbackKind });
                 const semantic = dominantKind(spans, fallbackKind);
@@ -122,7 +226,7 @@ export const fetchSessionInspect = (sessionId: string): Effect.Effect<SessionIns
                     seq: seq++,
                     role,
                     semantic_role: semantic,
-                    ts: entry.timestamp ?? null,
+                    ts,
                     char_count: text.length,
                     spans: spans.map(toSpanDto),
                 });
@@ -130,7 +234,7 @@ export const fetchSessionInspect = (sessionId: string): Effect.Effect<SessionIns
 
             return {
                 session_id: sessionId,
-                source_path: jsonlPath,
+                source_path: found.path,
                 total_chars: totalChars,
                 turns,
                 totals_by_kind: totals,
