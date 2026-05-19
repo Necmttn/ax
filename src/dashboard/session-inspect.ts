@@ -13,6 +13,7 @@ import { Effect } from "effect";
 import { dissectTurn, type TurnSpan } from "../ingest/turn-dissect.ts";
 import { SurrealClient } from "../lib/db.ts";
 import type {
+    HookFireDto,
     InspectSpanDto,
     InspectSpanKind,
     InspectTurnDto,
@@ -261,6 +262,51 @@ const resolveChildren = (sessionId: string): Effect.Effect<ReadonlyArray<ChildEd
         }),
     ));
 
+/** Raw shape returned by Surreal for hook_fire SELECT. Datetime fields come
+ *  back as JS Date via the SDK. */
+interface HookFireRow {
+    readonly ts: Date | string;
+    readonly event: string;
+    readonly file_path: string;
+    readonly inject: boolean;
+    readonly reason: string;
+    readonly latency_ms: number;
+    readonly injected_titles: ReadonlyArray<string> | null;
+}
+
+/** Fetch every hook_fire row for the session, ts-ordered. N is small
+ *  (tens-to-hundreds in practice) so fetching whole-session is fine; the
+ *  window filter happens after assigning stable idx so paginating doesn't
+ *  shift the dom anchors. Degrades to [] on DB error - hook telemetry is
+ *  decorative for the inspector, not load-bearing. */
+const resolveHookFires = (sessionId: string): Effect.Effect<ReadonlyArray<HookFireDto>, never, SurrealClient> =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const escaped = sessionId.replace(/`/g, "");
+        const sessionRid = /^[A-Za-z0-9_]+$/.test(escaped) ? `session:${escaped}` : `session:\`${escaped}\``;
+        const [rows] = yield* db.query<[HookFireRow[]]>(`
+            SELECT ts, event, file_path, inject, reason, latency_ms, injected_titles
+            FROM hook_fire
+            WHERE session = ${sessionRid}
+            ORDER BY ts ASC;
+        `);
+        return rows.map((row, idx): HookFireDto => ({
+            idx,
+            ts: row.ts instanceof Date ? row.ts.toISOString() : String(row.ts),
+            event: row.event,
+            file_path: row.file_path,
+            inject: row.inject,
+            reason: row.reason,
+            latency_ms: row.latency_ms,
+            injected_titles: row.injected_titles ?? [],
+        }));
+    }).pipe(Effect.catch((err) =>
+        Effect.sync(() => {
+            console.error("axctl session-inspect resolveHookFires failed:", err);
+            return [] as ReadonlyArray<HookFireDto>;
+        }),
+    ));
+
 /** Spawn args parsed out of a parent tool_use call. Keyed by call_id when
  *  available (codex), else by ts so we can match approximately. */
 interface SpawnCall {
@@ -379,9 +425,10 @@ export const fetchSessionInspect = (
     opts: FetchSessionInspectOptions = {},
 ): Effect.Effect<SessionInspectPayload, Error, SurrealClient> =>
     Effect.gen(function* () {
-        const [parent, childrenEdges] = yield* Effect.all([
+        const [parent, childrenEdges, allHookFires] = yield* Effect.all([
             resolveParent(sessionId),
             resolveChildren(sessionId),
+            resolveHookFires(sessionId),
         ], { concurrency: "unbounded" });
         const turnOffset = Math.max(0, Math.trunc(opts.turnOffset ?? 0));
         const turnLimit = Math.max(1, Math.min(2000, Math.trunc(opts.turnLimit ?? 2000)));
@@ -490,6 +537,30 @@ export const fetchSessionInspect = (
             // remains accurate even when only a page of turns ships.
             const turnSlice = turns.slice(turnOffset, turnOffset + turnLimit);
 
+            // Filter hook_fires to the ts range of the loaded turn slice so
+            // the SPA can splice them in without pulling all hooks per page.
+            // First page (offset=0) also gets any pre-first-turn hooks; last
+            // page picks up any post-last-turn orphans.
+            const isFirstPage = turnOffset === 0;
+            const isLastPage = turnOffset + turnSlice.length >= turns.length;
+            const firstTs = turnSlice.find((t) => t.ts)?.ts ?? null;
+            const lastTs = [...turnSlice].reverse().find((t) => t.ts)?.ts ?? null;
+            const firstMs = firstTs ? new Date(firstTs).getTime() : null;
+            const lastMs = lastTs ? new Date(lastTs).getTime() : null;
+            const hookFireSlice = allHookFires.filter((h) => {
+                const hMs = new Date(h.ts).getTime();
+                if (!Number.isFinite(hMs)) return false;
+                // Before the window: include only on the first page.
+                if (firstMs != null && hMs < firstMs) return isFirstPage;
+                // After the window: include only on the last page.
+                if (lastMs != null && hMs > lastMs) return isLastPage;
+                // Within the [firstMs, lastMs] envelope - always include.
+                // (If both bounds are null - all turns lack ts - keep everything
+                // on the first page so the user still sees them.)
+                if (firstMs == null && lastMs == null) return isFirstPage;
+                return true;
+            });
+
             return {
                 session_id: sessionId,
                 source_path: found.path,
@@ -501,6 +572,8 @@ export const fetchSessionInspect = (
                 parent_session: parent.parent_session,
                 parent_nickname: parent.parent_nickname,
                 children,
+                hook_fires: hookFireSlice,
+                total_hook_fires: allHookFires.length,
             };
         },
         catch: (err) => err instanceof Error ? err : new Error(String(err)),

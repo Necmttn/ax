@@ -21,6 +21,16 @@ export interface FilterBarProps {
     readonly getTurns: () => ReadonlyArray<InspectTurnDto>;
     /** Same as above for the hash-derived cursor seq. */
     readonly getCurrentSeq: () => number | null;
+    /** Idx values of hook_fires in the loaded window, ts-ordered. Used by the
+     *  "next hook fire" jump button - hook_fires have their own DOM ids
+     *  (#hook-N), separate from the turn seq nav. */
+    readonly hookFireIdxs: ReadonlyArray<number>;
+    /** Latest hook_fire idxs accessor - bypasses prop staleness across the
+     *  `await loadMore()` boundary in the next-hook-fire handler. */
+    readonly getHookFireIdxs: () => ReadonlyArray<number>;
+    /** Total hook_fires across the whole session - used to label the button
+     *  and decide whether to keep paginating when the loaded window is dry. */
+    readonly totalHookFires: number;
 }
 
 type QuickFilter =
@@ -37,6 +47,9 @@ export function FilterBar({
     loadMore,
     getTurns,
     getCurrentSeq,
+    hookFireIdxs,
+    getHookFireIdxs,
+    totalHookFires,
 }: FilterBarProps) {
     const [searchInput, setSearchInput] = useState("");
     const [searchQuery, setSearchQuery] = useState("");
@@ -58,8 +71,32 @@ export function FilterBar({
         { key: "spawn",          label: "next spawn",       pred: (t) => isSpawnAnchorTurn(t, anchorSeqs) },
         { key: "tool_use",       label: "next tool_use",    pred: (t) => isRoleTurn(t, "tool_use") },
         { key: "tool_result",    label: "next tool_result", pred: (t) => isRoleTurn(t, "tool_result") },
-        { key: "hook_injection", label: "next hook",        pred: (t) => isRoleTurn(t, "hook_injection") },
+        { key: "hook_injection", label: "next hook ctx",    pred: (t) => isRoleTurn(t, "hook_injection") },
     ], [anchorSeqs]);
+
+    // "next hook fire" jumps among the spliced hook_fire markers - those have
+    // their own #hook-N DOM ids, separate from the turn seq nav. We do not
+    // mutate window.location.hash (that would clobber the turn cursor), just
+    // scrollIntoView. Click again to advance to the next.
+    const hookCursorRef = useRef<number>(-1);
+    const jumpNextHookFire = async () => {
+        let idxs = getHookFireIdxs();
+        if (idxs.length === 0) {
+            if (totalHookFires === 0 || appendLoading) return;
+            // Hook fires exist but none are in the loaded window - load all
+            // remaining turns (the server slices hook_fires alongside) and
+            // retry from the fresh idx list.
+            await loadMore(totalCount - loadedCount);
+            if (!isMountedRef.current) return;
+            idxs = getHookFireIdxs();
+            if (idxs.length === 0) return;
+        }
+        // idxs is ts-ordered. Advance to next, wrap when past the end.
+        hookCursorRef.current = (hookCursorRef.current + 1) % idxs.length;
+        const idx = idxs[hookCursorRef.current]!;
+        const el = document.getElementById(`hook-${idx}`);
+        if (el) el.scrollIntoView({ behavior: "auto", block: "center" });
+    };
 
     // Precompute matching seqs per filter against the currently-loaded window.
     // If the filter yields nothing in the loaded window AND we haven't loaded
@@ -159,6 +196,28 @@ export function FilterBar({
             fontFamily: "ui-monospace, monospace", fontSize: 11,
         }}>
             <span style={{ color: "#64748b", marginRight: 4 }}>jump:</span>
+            {(() => {
+                const hasLoaded = hookFireIdxs.length > 0;
+                const canDiscoverMore = loadedCount < totalCount && totalHookFires > 0;
+                const enabled = (hasLoaded || canDiscoverMore) && !appendLoading;
+                const count = totalHookFires > 0 ? ` (${totalHookFires})` : "";
+                const title = totalHookFires === 0
+                    ? "no hook decisions logged for this session"
+                    : hasLoaded
+                        ? `${hookFireIdxs.length} loaded · ${totalHookFires} total`
+                        : `${totalHookFires} hook fire${totalHookFires === 1 ? "" : "s"} - click to load more`;
+                return (
+                    <button
+                        key="hook-fire"
+                        onClick={() => { void jumpNextHookFire(); }}
+                        disabled={!enabled}
+                        title={title}
+                        style={{ ...btnStyle(enabled), borderLeft: "3px solid #10b981" }}
+                    >
+                        next hook fire{count}
+                    </button>
+                );
+            })()}
             {quickFilters.map((f) => {
                 const seqs = matchesByKey.get(f.key) ?? [];
                 // Button is "enabled" if matches exist in window OR pagination

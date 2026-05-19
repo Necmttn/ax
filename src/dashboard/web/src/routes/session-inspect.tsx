@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { api } from "../api.ts";
-import type { InspectSpanDto, InspectSpanKind, InspectTurnDto } from "@shared/dashboard-types.ts";
+import type { HookFireDto, InspectSpanDto, InspectSpanKind, InspectTurnDto } from "@shared/dashboard-types.ts";
 import { spawnAnchorSet } from "./inspector-filters.ts";
+import { spliceHookFires } from "@shared/hook-fire-splice.ts";
 import { FilterBar } from "./inspector-filter-bar.tsx";
 
 interface KindStyle { bg: string; fg: string; bar: string; label: string }
@@ -130,6 +131,61 @@ function SpawnMarker({ child }: { child: SpawnChildDto }) {
     );
 }
 
+/** A PreToolUse hook decision spliced into the turn stream. Green vertical
+ *  bar matches the existing "hook_injection" span color in KIND_STYLE so the
+ *  visual language is consistent. Chips surface inject/reason/event; when
+ *  inject=true we also show the clipped titles of the prior-session memory
+ *  that landed in the agent's context window. */
+function HookFireMarker({ hook }: { hook: HookFireDto }) {
+    const ts = hook.ts ? new Date(hook.ts).toISOString().slice(11, 19) : "";
+    const injectBg = hook.inject ? "#bbf7d0" : "#e2e8f0";
+    const injectFg = hook.inject ? "#065f46" : "#475569";
+    const filePathShort = hook.file_path.length > 60
+        ? `…${hook.file_path.slice(-58)}`
+        : hook.file_path;
+    return (
+        <div
+            id={`hook-${hook.idx}`}
+            data-hook-fire="true"
+            style={{
+                margin: "4px 24px", padding: "6px 10px",
+                borderLeft: "3px solid #10b981",
+                background: hook.inject ? "#ecfdf5" : "#f8fafc",
+                borderRadius: 3, fontSize: 11,
+                fontFamily: "ui-monospace, monospace", color: "#065f46",
+            }}
+        >
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontWeight: 600 }}>⚙ hook_fire</span>
+                <span style={{ background: injectBg, color: injectFg, padding: "0 6px", borderRadius: 2, fontSize: 10, fontWeight: 600 }}>
+                    inject: {hook.inject ? "yes" : "no"}
+                </span>
+                <span style={{ background: "#e0e7ff", color: "#3730a3", padding: "0 6px", borderRadius: 2, fontSize: 10 }}>
+                    event: <strong>{hook.event}</strong>
+                </span>
+                <span style={{ background: "#fef3c7", color: "#92400e", padding: "0 6px", borderRadius: 2, fontSize: 10 }}>
+                    reason: <strong>{hook.reason}</strong>
+                </span>
+                <span style={{ color: "#64748b", fontSize: 10 }}>{hook.latency_ms}ms</span>
+                <span style={{ color: "#64748b", marginLeft: "auto" }}>{ts}</span>
+            </div>
+            <div style={{ marginTop: 3, color: "#475569", fontSize: 11, wordBreak: "break-all" }}>
+                {filePathShort}
+            </div>
+            {hook.inject && hook.injected_titles.length > 0 ? (
+                <div style={{ marginTop: 4, paddingTop: 4, borderTop: "1px dashed #a7f3d0", fontSize: 10, color: "#065f46" }}>
+                    <span style={{ fontWeight: 600 }}>injected memory ({hook.injected_titles.length}):</span>
+                    <ul style={{ margin: "2px 0 0 16px", padding: 0 }}>
+                        {hook.injected_titles.map((t, i) => (
+                            <li key={i} style={{ listStyle: "disc", lineHeight: 1.4 }}>{t}</li>
+                        ))}
+                    </ul>
+                </div>
+            ) : null}
+        </div>
+    );
+}
+
 function Turn({ turn, anchored, childrenSpawnedHere }: { turn: InspectTurnDto; anchored: boolean; childrenSpawnedHere?: ReadonlyArray<SpawnChildDto> }) {
     const s = KIND_STYLE[turn.semantic_role];
     const kindCounts = new Map<InspectSpanKind, number>();
@@ -240,10 +296,19 @@ export function SessionInspectRoute() {
             });
             queryClient.setQueryData<typeof data>(baseKey, (prev) => {
                 if (!prev) return prev;
+                // Hook fires are server-windowed by the turn slice ts range,
+                // so each page returns a different subset. Merge by idx
+                // (stable across pages) and re-sort to keep render order
+                // deterministic.
+                const byIdx = new Map<number, typeof prev.hook_fires[number]>();
+                for (const h of prev.hook_fires) byIdx.set(h.idx, h);
+                for (const h of page.hook_fires) byIdx.set(h.idx, h);
+                const mergedHooks = [...byIdx.values()].sort((a, b) => a.idx - b.idx);
                 return {
                     ...prev,
                     turns: [...prev.turns, ...page.turns],
                     turn_window: { offset: 0, limit: prev.turns.length + page.turns.length },
+                    hook_fires: mergedHooks,
                 };
             });
         } finally {
@@ -274,6 +339,8 @@ export function SessionInspectRoute() {
     turnsRef.current = data?.turns ?? [];
     const anchoredSeqRef = useRef<number | null>(anchoredSeq);
     anchoredSeqRef.current = anchoredSeq;
+    const hookFireIdxsRef = useRef<ReadonlyArray<number>>([]);
+    hookFireIdxsRef.current = data?.hook_fires.map((h) => h.idx) ?? [];
 
     // Anchor seqs for the "next spawn" filter, recomputed when children change.
     const anchorSeqs = useMemo(
@@ -313,7 +380,11 @@ export function SessionInspectRoute() {
             {data ? (
                 <>
                     <div style={{ padding: "8px 24px", color: "#64748b", fontSize: 12, fontFamily: "ui-monospace, monospace" }}>
-                        {data.turns.length} turns · {data.total_chars.toLocaleString()} chars · source: <code>{data.source_path}</code>
+                        {data.turns.length} turns · {data.total_chars.toLocaleString()} chars
+                        {data.total_hook_fires > 0 ? (
+                            <> · <span style={{ color: "#065f46" }}>{data.total_hook_fires} hook decision{data.total_hook_fires === 1 ? "" : "s"}</span></>
+                        ) : null}
+                        {" · source: "}<code>{data.source_path}</code>
                     </div>
                     {data.children.length > 0 ? (
                         <div style={{ padding: "6px 24px", background: "#ffe4e6", borderTop: "1px solid #fecdd3", borderBottom: "1px solid #fecdd3", fontSize: 12 }}>
@@ -362,6 +433,9 @@ export function SessionInspectRoute() {
                         loadMore={loadMore}
                         getTurns={() => turnsRef.current}
                         getCurrentSeq={() => anchoredSeqRef.current}
+                        hookFireIdxs={data.hook_fires.map((h) => h.idx)}
+                        getHookFireIdxs={() => hookFireIdxsRef.current}
+                        totalHookFires={data.total_hook_fires}
                     />
                     <div style={{ display: "flex", gap: 4, flexWrap: "wrap", padding: "4px 24px 8px" }}>
                         {(Object.keys(KIND_STYLE) as InspectSpanKind[]).map((kind) => {
@@ -384,14 +458,21 @@ export function SessionInspectRoute() {
                                 list.push(c);
                                 childrenByTurn.set(c.anchor_turn_seq, list);
                             }
-                            return data.turns.map((t) => (
-                                <Turn
-                                    key={t.seq}
-                                    turn={t}
-                                    anchored={anchoredSeq === t.seq}
-                                    childrenSpawnedHere={childrenByTurn.get(t.seq)}
-                                />
-                            ));
+                            const items = spliceHookFires(data.turns, data.hook_fires);
+                            return items.map((item) => {
+                                if (item.kind === "hook_fire") {
+                                    return <HookFireMarker key={`hook-${item.hook.idx}`} hook={item.hook} />;
+                                }
+                                const t = item.turn;
+                                return (
+                                    <Turn
+                                        key={`turn-${t.seq}`}
+                                        turn={t}
+                                        anchored={anchoredSeq === t.seq}
+                                        childrenSpawnedHere={childrenByTurn.get(t.seq)}
+                                    />
+                                );
+                            });
                         })()}
                         {data.turns.length < data.total_turns ? (
                             <div

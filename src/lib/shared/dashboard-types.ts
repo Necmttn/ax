@@ -612,6 +612,30 @@ export interface SpawnedChild {
     readonly meta: SpawnMeta | null;
 }
 
+/** A single PreToolUse hook decision row, surfaced alongside turns so the
+ *  inspector can show where ax contributed context vs stayed silent.
+ *
+ *  These rows are NOT in the JSONL transcript - they come from the
+ *  `hook_fire` SurrealDB table and are spliced into the turn stream client-
+ *  side, positioned by ts immediately BEFORE the tool call they gated. */
+export interface HookFireDto {
+    /** Per-payload monotonic index, used for stable DOM ids on the SPA side. */
+    readonly idx: number;
+    readonly ts: string;
+    /** pre-edit | read | write | search | unknown */
+    readonly event: string;
+    readonly file_path: string;
+    /** True when ax actually injected an `<ax_file_memory>` block into the
+     *  agent's context (the next assistant turn saw it). */
+    readonly inject: boolean;
+    /** high_signal | suppressed_path | no_prior_sessions | low_signal_only | no_files */
+    readonly reason: string;
+    readonly latency_ms: number;
+    /** Clipped titles of the prior sessions whose memory landed in the
+     *  context. Empty when inject=false. */
+    readonly injected_titles: ReadonlyArray<string>;
+}
+
 export interface SessionInspectPayload {
     readonly session_id: string;
     readonly source_path: string;
@@ -631,4 +655,14 @@ export interface SessionInspectPayload {
     readonly parent_nickname: string | null;
     /** Subagents this session spawned, in order. Empty for leaf sessions. */
     readonly children: ReadonlyArray<SpawnedChild>;
+    /** PreToolUse hook decisions whose ts falls within the loaded turn
+     *  window's ts range. Server pre-filters by window so the SPA can splice
+     *  them inline without an extra round-trip. Each fire's `idx` is stable
+     *  within this payload and unique across pages (server uses the row's
+     *  ts-ordered position in the whole session). */
+    readonly hook_fires: ReadonlyArray<HookFireDto>;
+    /** Total hook_fire rows across the whole session (independent of the
+     *  loaded window). Lets the SPA show "23 hook decisions in this session"
+     *  even when only a page worth has shipped. */
+    readonly total_hook_fires: number;
 }
