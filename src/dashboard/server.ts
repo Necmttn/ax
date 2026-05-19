@@ -19,6 +19,7 @@ import {
 import { fetchToolFailureDetail, fetchToolFailures } from "./tool-failures.ts";
 import { fetchWorkflow } from "./workflow.ts";
 import { fetchSessionDetail } from "./session-detail.ts";
+import { fetchSessionInspect } from "./session-inspect.ts";
 import { fetchEpisodeTimeline } from "./episode-timeline.ts";
 import { fetchProject } from "./project.ts";
 import { fetchRecall } from "./recall.ts";
@@ -483,6 +484,22 @@ export async function handleDashboardRequest(req: Request): Promise<Response> {
             );
         }
     }
+    // Specific routes before the catch-all `sessions/(.+)` below.
+    const sessionInspectMatch = url.pathname.match(/^\/api\/sessions\/(.+)\/inspect$/);
+    if (sessionInspectMatch && req.method === "GET") {
+        const sessionId = decodeURIComponent(sessionInspectMatch[1] ?? "");
+        if (!sessionId) return jsonResponse({ error: "missing session id" }, 400);
+        try {
+            const payload = await Effect.runPromise(fetchSessionInspect(sessionId));
+            return jsonResponse(payload);
+        } catch (err) {
+            return jsonResponse(
+                { error: err instanceof Error ? err.message : String(err) },
+                err instanceof Error && /not found/i.test(err.message) ? 404 : 500,
+            );
+        }
+    }
+
     const sessionDetailMatch = url.pathname.match(/^\/api\/sessions\/(.+)$/);
     if (sessionDetailMatch && req.method === "GET") {
         const sessionId = decodeURIComponent(sessionDetailMatch[1] ?? "");

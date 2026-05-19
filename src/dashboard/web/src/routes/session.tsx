@@ -49,6 +49,15 @@ export function SessionRoute() {
                 <h2>Session</h2>
                 <span className="meta">
                     <code>{shortId(decoded)}</code>
+                    {" · "}
+                    <Link
+                        to="/sessions/$sessionId/inspect"
+                        params={{ sessionId }}
+                        style={{ color: "var(--blue, #3b82f6)", textDecoration: "none" }}
+                        title="Open the dissected-spans view of this session"
+                    >
+                        inspect →
+                    </Link>
                 </span>
             </header>
             {error ? <div className="error">Error: {error}</div> : null}

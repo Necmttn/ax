@@ -6,6 +6,7 @@ import type {
     RecallResponse,
     SkillGraphPayload,
     SessionDetailPayload,
+    SessionInspectPayload,
     SkillDetailPayload,
     SkillTriageNote,
     SkillTriageResponse,
@@ -64,6 +65,8 @@ export const api = {
     workflow: (): Promise<WorkflowResponse> => jsonFetch("/api/workflow"),
     sessionDetail: (sessionId: string): Promise<SessionDetailPayload> =>
         jsonFetch(`/api/sessions/${encodeURIComponent(sessionId)}`),
+    sessionInspect: (sessionId: string): Promise<SessionInspectPayload> =>
+        jsonFetch(`/api/sessions/${encodeURIComponent(sessionId)}/inspect`),
     episodeTimeline: (parentId: string): Promise<EpisodeTimelinePayload> =>
         jsonFetch(`/api/episodes/${encodeURIComponent(parentId)}`),
     project: (slug: string): Promise<ProjectPagePayload> =>

@@ -524,3 +524,45 @@ export interface IngestEvent {
     readonly raw?: unknown;
     readonly ts: string;
 }
+
+/** Session inspector: dissected turns with semantic span labels.
+ *  Wire format for the `/api/sessions/:id/inspect` endpoint and the
+ *  `/sessions/:id/inspect` SPA route. */
+export type InspectSpanKind =
+    | "user_input"
+    | "assistant_text"
+    | "tool_use"
+    | "skill_context"
+    | "system_context"
+    | "wrapper_instruction"
+    | "hook_injection"
+    | "tool_result"
+    | "subagent_notification"
+    | "pasted_reference";
+
+export interface InspectSpanDto {
+    readonly kind: InspectSpanKind;
+    readonly text: string;
+    readonly label?: string;
+}
+
+export interface InspectTurnDto {
+    /** Sequence within session, 0-indexed in JSONL message order. */
+    readonly seq: number;
+    /** JSONL framing role: 'user' | 'assistant'. */
+    readonly role: string;
+    /** Dominant span kind - what the content actually IS, regardless of framing. */
+    readonly semantic_role: InspectSpanKind;
+    readonly ts: string | null;
+    readonly char_count: number;
+    readonly spans: ReadonlyArray<InspectSpanDto>;
+}
+
+export interface SessionInspectPayload {
+    readonly session_id: string;
+    readonly source_path: string;
+    readonly total_chars: number;
+    readonly turns: ReadonlyArray<InspectTurnDto>;
+    /** Aggregate char counts by span kind across the whole session. */
+    readonly totals_by_kind: Partial<Record<InspectSpanKind, number>>;
+}

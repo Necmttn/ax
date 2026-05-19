@@ -11,6 +11,7 @@ import { DecisionsRoute } from "./routes/decisions.tsx";
 import { ToolFailuresRoute } from "./routes/tools.tsx";
 import { WorkflowRoute } from "./routes/workflow.tsx";
 import { SessionRoute } from "./routes/session.tsx";
+import { SessionInspectRoute } from "./routes/session-inspect.tsx";
 import { EpisodeRoute } from "./routes/episode.tsx";
 import { ProjectRoute } from "./routes/project.tsx";
 import { RecallRoute } from "./routes/recall.tsx";
@@ -83,6 +84,12 @@ const sessionRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/sessions/$sessionId",
     component: SessionRoute,
+});
+
+const sessionInspectRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/sessions/$sessionId/inspect",
+    component: SessionInspectRoute,
 });
 
 const episodeRoute = createRoute({
@@ -169,6 +176,7 @@ const routeTree = rootRoute.addChildren([
     toolsRoute,
     workflowRoute,
     sessionRoute,
+    sessionInspectRoute,
     episodeRoute,
     projectRoute,
     skillGraphRoute,
