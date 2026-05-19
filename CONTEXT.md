@@ -68,10 +68,16 @@ The dashboard, website, or app interface that turns graph evidence into visible
 session, repository, file, friction, and recommendation insights.
 _Avoid_: report export
 
+**Turn**:
+A single message in an agent session transcript: one user or assistant
+JSONL record. The atomic unit of the transcript stream. A Turn may carry
+zero or more **Tool Calls** in its content.
+_Avoid_: message, exchange
+
 **Tool Call**:
 A single observed execution event, such as an agent builtin tool, CLI command,
-MCP call, or skill invocation.
-_Avoid_: turn
+MCP call, or skill invocation. A Tool Call belongs to exactly one **Turn**.
+_Avoid_: invocation
 
 **Friction Event**:
 An observed or inferred failure, correction, retry, wrong approach, repeated
@@ -133,6 +139,55 @@ _Avoid_: install steps
 The complete behavior-shaping setup around one or more agents, including
 Guidance, tools, checks, integrations, workflows, and provider configuration.
 _Avoid_: agent config
+
+**Harness Hook Event**:
+A native lifecycle event emitted by an agent harness, such as a pre-tool,
+post-tool, session-start, prompt-submit, stop, or permission event.
+_Avoid_: ax hook, hook fire
+
+**Hook Command**:
+A configured command invoked by a **Harness Hook Event**.
+_Avoid_: hook event
+
+**Feedback Case**:
+A short-horizon evaluation of whether a Harness signal changed subsequent agent
+behavior in the intended direction.
+_Avoid_: hook result
+
+**Feedback Case Type**:
+A reusable definition of how to recognize and evaluate a class of **Feedback
+Cases** for a user- or team-specific Harness signal.
+_Avoid_: table type
+
+**Case Authoring**:
+The workflow that turns observed Local Evidence into a **Feedback Case Type**,
+possibly with AI assistance and user approval.
+_Avoid_: automatic inference
+
+**Evaluation Rule**:
+Versioned measurement logic that classifies **Feedback Cases** without changing
+the underlying Guidance.
+_Avoid_: guidance
+
+**Agent Retrospective**:
+A recurring evidence review that explains what agents did well or poorly,
+proposes measured improvements, and tracks whether those changes helped.
+_Avoid_: doctor
+
+**Retrospective Candidate**:
+A proposed improvement found in Local Evidence that may become an Intervention
+after backtesting, scoping, and lifecycle setup.
+_Avoid_: recommendation
+
+**Autonomous Intervention Run**:
+An agent-led improvement pass that can create, test, enable, pause, or revise
+Interventions from Local Evidence with minimal user steering.
+_Avoid_: recommendation report
+
+**Recovery Path**:
+A user-available way to disable or revert an Intervention even when the active
+agent harness is broken by that Intervention.
+_Avoid_: rollback note
 
 **Agent Tooling**:
 Developer tooling intentionally exposed to agents to improve perception,
@@ -251,13 +306,28 @@ _Avoid_: task
 - Use `code_finding` for code-structure findings so future non-code findings can use their own terms.
 - **Current Views** are read surfaces over stored status fields; supersession edges remain canonical truth.
 - The **Insights Surface** should make the graph legible to humans first, then let agents reuse the same queries for automated context.
+- A **Turn** is the atomic unit of the transcript stream; it owns timestamp, role, raw text, and `semantic_role`/`message_kind`/`intent_kind` classifications.
+- A **Tool Call** belongs to exactly one **Turn** and is observed by parsing tool_use blocks inside that Turn's content.
 - **Tool Calls** are canonical execution evidence; edit, skill, command, MCP, and diagnostic signals should attach to Tool Calls when possible.
+- Schema and storage use `turn` and `tool_call` as table names; UI and CLI surfaces may say "turn" because it is the now-canonical message-grain term.
 - **Friction Events**, **Feedback Events**, and **Diagnostic Events** are evidence/events, while **Insights**, **Recommendations**, **Change Sets**, and **File Memories** are derived memory/product layer records.
 - **Guidance** must be versioned so `axctl` can compare agent behavior before and after CLAUDE.md, AGENTS.md, hook, settings, or instruction changes.
 - **Guidance** can be repo-local or global; **Guidance Scope** distinguishes where it applies rather than creating separate concepts for repo instructions, global skills, hooks, or commands.
 - A **Guidance Source** can be local to a project or global to the user; global guidance should be tracked through a dotfiles Repository when possible.
 - An **Intervention** materializes a recommendation into one or more **Guidance** changes, and should have scope, expected effect, review criteria, and cleanup rules.
 - An **Intervention Observation** evaluates whether an **Intervention** changed targeted signals without introducing unacceptable side effects.
+- Native **Harness Hook Events** and **Hook Commands** are stable Local Evidence because they describe the Harness behavior baseline.
+- A **Harness Hook Event** and a **Hook Command** invocation should be modeled separately: one lifecycle event can invoke multiple commands, and each command can allow, block, modify input, inject context, notify, or no-op independently.
+- A blocking **Hook Command** is not necessarily a failure; it may be positive boundary feedback, evaluated through a **Feedback Case** rather than the single event alone.
+- A **Feedback Case** must be generic because Hook Commands and their intended meanings are user- and team-specific; worktree guards, lint gates, recall injections, and future community hooks are case types, not separate top-level concepts.
+- **Case Authoring** should use existing transcripts and hook evidence to draft candidate **Feedback Case Types**, but promotion still needs user approval because hook intent is local taste and policy.
+- An **Evaluation Rule** is separate from **Guidance**: Guidance changes agent behavior, while Evaluation Rules measure whether that behavior appears to help.
+- Evaluation Rules should run deterministically by default for reproducible backtests; AI is primarily used to draft, explain, review ambiguous cases, and suggest refinements.
+- An **Autonomous Intervention Run** may create hooks, skills, Evaluation Rules, and other Guidance changes, but each change remains an **Intervention** with evidence, scope, backtest results where possible, and a stop path.
+- Autonomous changes to global harness settings are allowed only when they are tracked, revertable, and have a **Recovery Path** that does not depend on the broken agent successfully running its hooks.
+- Global hook settings should point to an ax-managed intervention runner such as `axctl intervention run <id>` rather than embedding arbitrary generated shell directly; the runner owns timeout, smoke-test, fail policy, disable switches, and rollback metadata.
+- Ax-managed intervention runners should fail open by default to preserve agent usability; fail-closed behavior is reserved for explicit high-risk boundary controls with smoke tests and a Recovery Path.
+- When a Guidance Source is Git-tracked, an **Autonomous Intervention Run** should commit ax-managed Guidance changes separately from user work and record the commit, before/after hashes, and rollback command.
 - **Intervention Observation** is local measured impact; **Learning Feedback** is structured feedback on a Harness Learning for possible revision or sharing.
 - **Intervention Strength** lets `axctl` recommend the least forceful Harness change likely to work, then escalate only when observations show the behavior persists.
 - Intervention Strength levels are advisory, workflow, automation, guardrail, and hard boundary.
@@ -285,6 +355,9 @@ _Avoid_: task
 - **Agent Tooling** is channel-agnostic; CLI tools, MCP servers, browser automation, APIs, CI systems, and local scripts can all be Agent Tooling when they shape the agent loop.
 - **Harness Doctor** reports whether the environment is capable of good agent work; **Insights** report whether observed agent behavior improved or regressed.
 - **Harness Doctor** is setup/config/evidence readiness; **Interventions** manage lifecycle; **Insights** measure empirical behavior and impact.
+- An **Agent Retrospective** is different from **Harness Doctor**: Doctor checks readiness, while the retrospective reviews behavior over time and may run an **Autonomous Intervention Run**.
+- Historical self-improve proposal sessions should be preserved as **Retrospective Candidates** so later retrospectives can backtest, activate, discard, or revise them instead of losing that prior work.
+- Native hook observability should land before autonomous retrospective activation because **Harness Hook Events**, **Hook Commands**, and **Feedback Cases** provide the measurement substrate for safe Interventions.
 - **Harness Doctor** should inspect global machine setup, global Guidance Sources, repo-local Guidance, package scripts, test/lint/typecheck commands, Git settings, worktree support, and CI configuration.
 - A tool being installed globally is not enough; the active Repository should expose reliable commands or workflows that agents can discover and run.
 - **Harness Doctor** should use observed Insights to report whether agents actually use available Agent Tooling and Guidance, not only whether those capabilities exist.
@@ -341,3 +414,5 @@ _Avoid_: task
 
 - "repo" was used to mean both stable Git identity and local filesystem path — resolved: the stable identity is **Repository**, the local path is **Checkout**.
 - "change context" was used for both whole-work summaries and per-file explanations — resolved: the whole work unit is **Change Set**, and the per-file artifact is **File Memory**.
+
+- "turn" was previously listed under `Avoid` for **Tool Call** — resolved: **Turn** is now a first-class term for the JSONL message-grain unit, and **Tool Call** is the execution event nested inside a Turn. They are distinct concepts at different grains; both stay.
