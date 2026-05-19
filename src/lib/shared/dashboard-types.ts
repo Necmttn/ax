@@ -579,6 +579,16 @@ export interface InspectTurnDto {
     readonly spans: ReadonlyArray<InspectSpanDto>;
 }
 
+export interface SpawnedChild {
+    readonly session_id: string;
+    readonly ts: string | null;
+    readonly tool: string | null;       // 'spawn_agent' | 'Task' | ...
+    readonly nickname: string | null;
+    /** Sequence of the parent turn that fired this spawn (best-effort match
+     *  by ts proximity). Null if no matching turn within the session. */
+    readonly anchor_turn_seq: number | null;
+}
+
 export interface SessionInspectPayload {
     readonly session_id: string;
     readonly source_path: string;
@@ -591,4 +601,6 @@ export interface SessionInspectPayload {
     readonly parent_session: string | null;
     /** Codex assigns short names like "Pauli", "Turing" to spawned subagents. */
     readonly parent_nickname: string | null;
+    /** Subagents this session spawned, in order. Empty for leaf sessions. */
+    readonly children: ReadonlyArray<SpawnedChild>;
 }

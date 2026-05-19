@@ -38,7 +38,32 @@ function Span({ span }: { span: InspectSpanDto }) {
     );
 }
 
-function Turn({ turn, anchored }: { turn: InspectTurnDto; anchored: boolean }) {
+function SpawnMarker({ child, sessionId }: { child: { session_id: string; nickname: string | null; tool: string | null; ts: string | null }; sessionId: string }) {
+    const childBare = bareId(child.session_id);
+    const ts = child.ts ? new Date(child.ts).toISOString().slice(11, 19) : "";
+    return (
+        <div style={{
+            margin: "4px 0", padding: "4px 10px", background: "#ffe4e6",
+            borderLeft: "3px solid #e11d48", borderRadius: 3, fontSize: 11,
+            fontFamily: "ui-monospace, monospace", color: "#9f1239",
+            display: "flex", alignItems: "center", gap: 8,
+        }}>
+            <span>→ spawned</span>
+            <Link
+                to="/sessions/$sessionId/inspect"
+                params={{ sessionId: childBare }}
+                style={{ color: "#9f1239", fontWeight: 600 }}
+            >
+                {childBare.slice(0, 12)}…
+            </Link>
+            {child.nickname ? <span>· "{child.nickname}"</span> : null}
+            {child.tool ? <span style={{ opacity: 0.7 }}>via {child.tool}</span> : null}
+            <span style={{ opacity: 0.6, marginLeft: "auto" }}>{ts}</span>
+        </div>
+    );
+}
+
+function Turn({ turn, anchored, childrenSpawnedHere }: { turn: InspectTurnDto; anchored: boolean; childrenSpawnedHere?: ReadonlyArray<{ session_id: string; nickname: string | null; tool: string | null; ts: string | null }> }) {
     const s = KIND_STYLE[turn.semantic_role];
     const kindCounts = new Map<InspectSpanKind, number>();
     for (const sp of turn.spans) kindCounts.set(sp.kind, (kindCounts.get(sp.kind) ?? 0) + sp.text.length);
@@ -84,6 +109,13 @@ function Turn({ turn, anchored }: { turn: InspectTurnDto; anchored: boolean }) {
             <pre style={{ margin: 0, padding: "4px 0 6px", whiteSpace: "pre-wrap", wordBreak: "break-word", font: "12px/1.55 ui-monospace, monospace", maxHeight: 400, overflow: "auto" }}>
                 {turn.spans.map((sp, i) => <Span key={i} span={sp} />)}
             </pre>
+            {childrenSpawnedHere && childrenSpawnedHere.length > 0 ? (
+                <div style={{ padding: "0 0 4px" }}>
+                    {childrenSpawnedHere.map((c) => (
+                        <SpawnMarker key={c.session_id} child={c} sessionId="" />
+                    ))}
+                </div>
+            ) : null}
         </div>
     );
 }
@@ -126,6 +158,29 @@ export function SessionInspectRoute() {
                     <div style={{ padding: "8px 24px", color: "#64748b", fontSize: 12, fontFamily: "ui-monospace, monospace" }}>
                         {data.turns.length} turns · {data.total_chars.toLocaleString()} chars · source: <code>{data.source_path}</code>
                     </div>
+                    {data.children.length > 0 ? (
+                        <div style={{ padding: "6px 24px", background: "#ffe4e6", borderTop: "1px solid #fecdd3", borderBottom: "1px solid #fecdd3", fontSize: 12 }}>
+                            <strong style={{ color: "#9f1239" }}>↓ spawned {data.children.length} subagent{data.children.length === 1 ? "" : "s"}</strong>
+                            <span style={{ marginLeft: 12, color: "#9f1239", opacity: 0.7 }}>
+                                {data.children.slice(0, 6).map((c, i) => {
+                                    const bare = bareId(c.session_id);
+                                    return (
+                                        <span key={c.session_id}>
+                                            {i > 0 ? " · " : " "}
+                                            <Link
+                                                to="/sessions/$sessionId/inspect"
+                                                params={{ sessionId: bare }}
+                                                style={{ color: "#9f1239", fontFamily: "ui-monospace, monospace" }}
+                                            >
+                                                {c.nickname ? `"${c.nickname}"` : `${bare.slice(0, 10)}…`}
+                                            </Link>
+                                        </span>
+                                    );
+                                })}
+                                {data.children.length > 6 ? <span> · …+{data.children.length - 6}</span> : null}
+                            </span>
+                        </div>
+                    ) : null}
                     {data.parent_session ? (
                         <div style={{ padding: "6px 24px", background: "#ffe4e6", borderTop: "1px solid #fecdd3", borderBottom: "1px solid #fecdd3", fontSize: 12 }}>
                             <strong style={{ color: "#9f1239" }}>↑ spawned by</strong>
@@ -154,9 +209,23 @@ export function SessionInspectRoute() {
                         })}
                     </div>
                     <div>
-                        {data.turns.map((t) => (
-                            <Turn key={t.seq} turn={t} anchored={anchoredSeq === t.seq} />
-                        ))}
+                        {(() => {
+                            const childrenByTurn = new Map<number, typeof data.children[number][]>();
+                            for (const c of data.children) {
+                                if (c.anchor_turn_seq == null) continue;
+                                const list = childrenByTurn.get(c.anchor_turn_seq) ?? [];
+                                list.push(c);
+                                childrenByTurn.set(c.anchor_turn_seq, list);
+                            }
+                            return data.turns.map((t) => (
+                                <Turn
+                                    key={t.seq}
+                                    turn={t}
+                                    anchored={anchoredSeq === t.seq}
+                                    childrenSpawnedHere={childrenByTurn.get(t.seq)}
+                                />
+                            ));
+                        })()}
                     </div>
                 </>
             ) : null}

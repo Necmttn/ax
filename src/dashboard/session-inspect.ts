@@ -200,6 +200,13 @@ interface ParentInfo {
     readonly parent_nickname: string | null;
 }
 
+interface ChildEdge {
+    readonly session_id: string;
+    readonly ts: string | null;
+    readonly tool: string | null;
+    readonly nickname: string | null;
+}
+
 /** Resolve the spawning parent of this session (codex spawn_agent / claude
  *  Task). Returns nulls if not a subagent. Defensive: swallows DB errors so
  *  the inspector still renders without graph attribution. */
@@ -226,6 +233,60 @@ const resolveParent = (sessionId: string): Effect.Effect<ParentInfo, never, Surr
             return { parent_session: null, parent_nickname: null };
         }),
     ));
+
+/** Sessions this one spawned (its subagents). Same defensive shape as
+ *  resolveParent - DB failure degrades to empty list. */
+const resolveChildren = (sessionId: string): Effect.Effect<ReadonlyArray<ChildEdge>, never, SurrealClient> =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const escaped = sessionId.replace(/`/g, "");
+        const sessionRid = /^[A-Za-z0-9_]+$/.test(escaped) ? `session:${escaped}` : `session:\`${escaped}\``;
+        const [rows] = yield* db.query<[Array<{ child: string; ts: string | null; tool: string | null; nickname: string | null }>]>(`
+            SELECT <string>out AS child, <string>ts AS ts, tool, nickname
+            FROM spawned
+            WHERE in = ${sessionRid}
+            ORDER BY ts ASC;
+        `);
+        return rows.map((r): ChildEdge => ({
+            session_id: r.child,
+            ts: r.ts ?? null,
+            tool: r.tool ?? null,
+            nickname: r.nickname ?? null,
+        }));
+    }).pipe(Effect.catch((err) =>
+        Effect.sync(() => {
+            console.error("axctl session-inspect resolveChildren failed:", err);
+            return [] as ReadonlyArray<ChildEdge>;
+        }),
+    ));
+
+/** Best-effort: find the turn whose ts is the closest match to the spawn
+ *  timestamp (within 60 s, prefer the turn at-or-just-before the spawn). */
+function anchorChildToTurn(
+    turns: ReadonlyArray<InspectTurnDto>,
+    spawnTs: string | null,
+): number | null {
+    if (!spawnTs) return null;
+    const spawnMs = new Date(spawnTs).getTime();
+    if (!Number.isFinite(spawnMs)) return null;
+    let best: number | null = null;
+    let bestDelta = Infinity;
+    for (const t of turns) {
+        if (!t.ts) continue;
+        const ms = new Date(t.ts).getTime();
+        if (!Number.isFinite(ms)) continue;
+        const delta = spawnMs - ms;
+        // Prefer turns at-or-just-before the spawn (delta >= 0). Tolerate a
+        // small overshoot for clock skew. Then minimise |delta|.
+        if (delta < -5_000) continue;
+        if (Math.abs(delta) > 60_000) continue;
+        if (delta < bestDelta) {
+            bestDelta = delta;
+            best = t.seq;
+        }
+    }
+    return best;
+}
 
 /** When the session has a parent, the first user-role turn whose dissected
  *  spans are entirely default-kind (no system/wrapper markers) is the task
@@ -259,7 +320,10 @@ function applySubagentTaskTagging(
  *  payload. Resolves parent session for subagent attribution. */
 export const fetchSessionInspect = (sessionId: string): Effect.Effect<SessionInspectPayload, Error, SurrealClient> =>
     Effect.gen(function* () {
-        const parent = yield* resolveParent(sessionId);
+        const [parent, childrenEdges] = yield* Effect.all([
+            resolveParent(sessionId),
+            resolveChildren(sessionId),
+        ], { concurrency: "unbounded" });
         const payload = yield* Effect.tryPromise({
         try: async () => {
             const found = await findTranscript(sessionId);
@@ -300,6 +364,14 @@ export const fetchSessionInspect = (sessionId: string): Effect.Effect<SessionIns
             // view stops claiming it's "user input".
             if (parent.parent_session) applySubagentTaskTagging(turns, totals);
 
+            const children = childrenEdges.map((edge) => ({
+                session_id: edge.session_id,
+                ts: edge.ts,
+                tool: edge.tool,
+                nickname: edge.nickname,
+                anchor_turn_seq: anchorChildToTurn(turns, edge.ts),
+            }));
+
             return {
                 session_id: sessionId,
                 source_path: found.path,
@@ -308,6 +380,7 @@ export const fetchSessionInspect = (sessionId: string): Effect.Effect<SessionIns
                 totals_by_kind: totals,
                 parent_session: parent.parent_session,
                 parent_nickname: parent.parent_nickname,
+                children,
             };
         },
         catch: (err) => err instanceof Error ? err : new Error(String(err)),
