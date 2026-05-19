@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { api } from "../api.ts";
 import { prettifyProjectSlug } from "@shared/project-slug.ts";
@@ -59,8 +59,21 @@ function Row({ s, indent, expandedToggle }: RowProps) {
     const sid = bareId(s.id);
     const pretty = s.project ? prettifyProjectSlug(s.project) : null;
     const project = (pretty && pretty !== "(no repo)") ? pretty : (s.cwd ? (s.cwd.split("/").pop() ?? "-") : "-");
+
+    // Warm the inspect-data query on hover/focus - intent-based prefetch
+    // avoids stampeding the API when the page has 200 rows.
+    const queryClient = useQueryClient();
+    const onIntent = () => {
+        if (!s.has_raw_file) return;
+        void queryClient.prefetchQuery({
+            queryKey: ["session-inspect", sid],
+            queryFn: () => api.sessionInspect(sid),
+            staleTime: 5 * 60_000,
+        });
+    };
+
     return (
-        <tr style={indent ? { background: "#fafafa" } : undefined}>
+        <tr style={indent ? { background: "#fafafa" } : undefined} onMouseEnter={onIntent} onFocus={onIntent}>
             <td style={{ fontFamily: "ui-monospace, monospace", fontSize: 12, paddingLeft: indent ? 32 : 8 }}>
                 {expandedToggle ? (
                     <button
@@ -86,9 +99,9 @@ function Row({ s, indent, expandedToggle }: RowProps) {
             <td style={{ fontFamily: "ui-monospace, monospace", fontSize: 12, color: "#64748b", textAlign: "right" }}>{fmtDuration(s.started_at, s.ended_at)}</td>
             <td style={{ textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 12, color: "#cbd5e1" }}>{s.turn_count > 0 ? s.turn_count.toLocaleString() : "-"}</td>
             <td style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <Link to="/sessions/$sessionId" params={{ sessionId: sid }} style={{ color: "var(--muted, #64748b)" }}>overview</Link>
+                <Link to="/sessions/$sessionId" params={{ sessionId: sid }} preload="intent" style={{ color: "var(--muted, #64748b)" }}>overview</Link>
                 {s.has_raw_file ? (
-                    <Link to="/sessions/$sessionId/inspect" params={{ sessionId: sid }} style={{ color: "var(--blue, #3b82f6)", fontWeight: 600 }}>
+                    <Link to="/sessions/$sessionId/inspect" params={{ sessionId: sid }} preload="intent" style={{ color: "var(--blue, #3b82f6)", fontWeight: 600 }}>
                         inspect →
                     </Link>
                 ) : (

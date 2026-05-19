@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { api } from "../api.ts";
 import type { InspectSpanDto, InspectSpanKind, InspectTurnDto } from "@shared/dashboard-types.ts";
@@ -62,8 +62,25 @@ function SpawnMarker({ child }: { child: SpawnChildDto }) {
     if (m?.agent_type) chips.push({ label: "type", value: m.agent_type });
     if (m?.reasoning_effort) chips.push({ label: "effort", value: m.reasoning_effort });
     if (m?.fork_context != null) chips.push({ label: "fork", value: m.fork_context ? "yes" : "no" });
+
+    // Prefetch the spawned child's inspect data on hover/focus only -
+    // mass-prefetching all 52 spawn markers at once would stampede the API.
+    const queryClient = useQueryClient();
+    const onIntent = () => {
+        void queryClient.prefetchQuery({
+            queryKey: ["session-inspect", childBare],
+            queryFn: () => api.sessionInspect(childBare),
+            staleTime: 5 * 60_000,
+        });
+    };
+
+    const [expanded, setExpanded] = useState(false);
+    const brief = m?.brief ?? null;
+    const briefClippedLen = 200;
+    const briefIsLong = !!brief && brief.length > briefClippedLen;
+
     return (
-        <div style={{
+        <div onMouseEnter={onIntent} onFocus={onIntent} style={{
             margin: "4px 0", padding: "6px 10px", background: "#ffe4e6",
             borderLeft: "3px solid #e11d48", borderRadius: 3, fontSize: 11,
             fontFamily: "ui-monospace, monospace", color: "#9f1239",
@@ -73,6 +90,7 @@ function SpawnMarker({ child }: { child: SpawnChildDto }) {
                 <Link
                     to="/sessions/$sessionId/inspect"
                     params={{ sessionId: childBare }}
+                    preload="intent"
                     style={{ color: "#9f1239", fontWeight: 600 }}
                 >
                     {child.nickname ? `"${child.nickname}"` : `${childBare.slice(0, 12)}…`}
@@ -87,9 +105,23 @@ function SpawnMarker({ child }: { child: SpawnChildDto }) {
                 ))}
                 <span style={{ opacity: 0.6, marginLeft: "auto" }}>{ts}</span>
             </div>
-            {m?.brief ? (
-                <div style={{ marginTop: 4, color: "#7f1d1d", fontStyle: "italic", opacity: 0.85, fontSize: 11, lineHeight: 1.4 }}>
-                    “{m.brief}”
+            {brief ? (
+                <div style={{ marginTop: 4, color: "#7f1d1d", opacity: 0.9, fontSize: 11, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                    <span style={{ fontStyle: "italic" }}>
+                        “{expanded || !briefIsLong ? brief : `${brief.slice(0, briefClippedLen - 1)}…`}”
+                    </span>
+                    {briefIsLong ? (
+                        <button
+                            onClick={() => setExpanded((v) => !v)}
+                            style={{
+                                marginLeft: 6, padding: "0 6px", fontSize: 10, fontFamily: "inherit",
+                                background: "transparent", border: "1px solid #fecdd3", borderRadius: 3,
+                                color: "#9f1239", cursor: "pointer",
+                            }}
+                        >
+                            {expanded ? "show less" : `show full (${brief.length.toLocaleString()}c)`}
+                        </button>
+                    ) : null}
                 </div>
             ) : null}
         </div>

@@ -271,11 +271,13 @@ interface SpawnCall {
 
 const SPAWN_TOOLS = new Set(["spawn_agent", "Task"]);
 
-function clipBrief(s: unknown, n = 200): string | null {
+/** Full brief text - the SPA decides whether to clip for display. Cap at 20k
+ *  chars defensively so a runaway prompt can't bloat the payload. */
+function fullBrief(s: unknown): string | null {
     if (typeof s !== "string") return null;
     const trimmed = s.trim();
     if (!trimmed) return null;
-    return trimmed.length <= n ? trimmed : `${trimmed.slice(0, n - 1)}…`;
+    return trimmed.length <= 20_000 ? trimmed : `${trimmed.slice(0, 19_999)}…`;
 }
 
 function parseSpawnArgs(provider: "codex" | "claude", name: string, argsJson: unknown): SpawnMeta | null {
@@ -292,7 +294,7 @@ function parseSpawnArgs(provider: "codex" | "claude", name: string, argsJson: un
             agent_type: typeof args.agent_type === "string" ? args.agent_type : null,
             fork_context: typeof args.fork_context === "boolean" ? args.fork_context : null,
             reasoning_effort: typeof args.reasoning_effort === "string" ? args.reasoning_effort : null,
-            brief: clipBrief(args.message),
+            brief: fullBrief(args.message),
         };
     }
     // Claude Code Task: subagent_type, prompt, description
@@ -301,7 +303,7 @@ function parseSpawnArgs(provider: "codex" | "claude", name: string, argsJson: un
         agent_type: typeof args.subagent_type === "string" ? args.subagent_type : null,
         fork_context: null,
         reasoning_effort: null,
-        brief: clipBrief(args.prompt) ?? clipBrief(args.description),
+        brief: fullBrief(args.prompt) ?? fullBrief(args.description),
     };
 }
 
