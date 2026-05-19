@@ -76,14 +76,13 @@ export function RecallRoute() {
             });
             queryClient.setQueryData<typeof data>(baseKey, (prev) => {
                 if (!prev) return prev;
+                // why: `window` describes the slice the server returned, not the
+                // cumulative loaded range. Leave it pinned to the first page so
+                // its documented semantic ("server-returned slice") holds.
                 return {
                     ...prev,
                     hits: [...prev.hits, ...page.hits],
                     truncated: prev.hits.length + page.hits.length < prev.total_count,
-                    window: {
-                        offset: 0,
-                        limit: prev.hits.length + page.hits.length,
-                    },
                 };
             });
         } finally {

@@ -9,6 +9,8 @@ describe("recall pagination", () => {
         expect(clampRecallLimit(-5)).toBe(50);
         expect(clampRecallLimit(NaN)).toBe(50);
         expect(clampRecallLimit(20)).toBe(20);
+        expect(clampRecallLimit(200)).toBe(200); // exact max
+        expect(clampRecallLimit(201)).toBe(200); // max+1 still clamps
         expect(clampRecallLimit(9999)).toBe(200);
     });
 

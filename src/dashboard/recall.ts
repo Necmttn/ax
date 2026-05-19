@@ -155,9 +155,15 @@ export const fetchRecall = (
         const totalFromCount = isRecord(countRow)
             ? Number(countRow.total ?? 0)
             : 0;
-        const total_count = Number.isFinite(totalFromCount) && totalFromCount > 0
-            ? Math.trunc(totalFromCount)
-            : hits.length + offset;
+        // why: the count query can legitimately return 0 (empty/missing row, or
+        // a Surreal aggregate quirk if the index races a write) even when the
+        // page query returned hits. Falling back to `hits.length + offset`
+        // guarantees the UI never claims fewer rows than it just rendered, and
+        // Math.max keeps the count monotonic if both signals disagree.
+        const total_count = Math.max(
+            Number.isFinite(totalFromCount) ? Math.trunc(totalFromCount) : 0,
+            hits.length + offset,
+        );
 
         return {
             q: params.q,
