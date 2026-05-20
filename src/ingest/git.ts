@@ -311,11 +311,6 @@ const fetchCommits = (
 
 // ---------- DB writers ----------
 
-// SurrealQL string literal - routes through the shared write seam so
-// transcript-sourced text (commit messages, paths) is JSON-escaped and lone
-// surrogates are stripped before embedding.
-const sqlString = surrealString;
-
 const recordLiteral = (table: string, key: string): string => `${table}:\`${key}\``;
 
 const dbRecordLiteral = (fallbackTable: string, id: unknown, fallbackKey: string): string => {
@@ -356,28 +351,28 @@ interface FileUpsertInput {
 
 export function buildCommitLookupQueries(input: CommitLookupInput): string[] {
     return [
-        `SELECT id FROM commit WHERE repository = ${input.repositoryId} AND repo = ${sqlString(input.stableRepo)} AND sha = ${sqlString(input.sha)} LIMIT 1;`,
-        `SELECT id FROM commit WHERE repo = ${sqlString(input.stableRepo)} AND sha = ${sqlString(input.sha)} LIMIT 1;`,
-        `SELECT id FROM commit WHERE repository = ${input.repositoryId} AND sha = ${sqlString(input.sha)} LIMIT 1;`,
-        `SELECT id FROM commit WHERE repo = ${sqlString(input.checkoutPath)} AND sha = ${sqlString(input.sha)} LIMIT 1;`,
+        `SELECT id FROM commit WHERE repository = ${input.repositoryId} AND repo = ${surrealString(input.stableRepo)} AND sha = ${surrealString(input.sha)} LIMIT 1;`,
+        `SELECT id FROM commit WHERE repo = ${surrealString(input.stableRepo)} AND sha = ${surrealString(input.sha)} LIMIT 1;`,
+        `SELECT id FROM commit WHERE repository = ${input.repositoryId} AND sha = ${surrealString(input.sha)} LIMIT 1;`,
+        `SELECT id FROM commit WHERE repo = ${surrealString(input.checkoutPath)} AND sha = ${surrealString(input.sha)} LIMIT 1;`,
     ];
 }
 
 export function buildFileLookupQueries(input: FileLookupInput): string[] {
     return [
-        `SELECT id FROM file WHERE repository = ${input.repositoryId} AND repo = ${sqlString(input.stableRepo)} AND path = ${sqlString(input.path)} LIMIT 1;`,
-        `SELECT id FROM file WHERE repo = ${sqlString(input.stableRepo)} AND path = ${sqlString(input.path)} LIMIT 1;`,
-        `SELECT id FROM file WHERE repository = ${input.repositoryId} AND path = ${sqlString(input.path)} LIMIT 1;`,
-        `SELECT id FROM file WHERE repo = ${sqlString(input.checkoutPath)} AND path = ${sqlString(input.path)} LIMIT 1;`,
+        `SELECT id FROM file WHERE repository = ${input.repositoryId} AND repo = ${surrealString(input.stableRepo)} AND path = ${surrealString(input.path)} LIMIT 1;`,
+        `SELECT id FROM file WHERE repo = ${surrealString(input.stableRepo)} AND path = ${surrealString(input.path)} LIMIT 1;`,
+        `SELECT id FROM file WHERE repository = ${input.repositoryId} AND path = ${surrealString(input.path)} LIMIT 1;`,
+        `SELECT id FROM file WHERE repo = ${surrealString(input.checkoutPath)} AND path = ${surrealString(input.path)} LIMIT 1;`,
     ];
 }
 
 export function buildCommitUpsertStatement(input: CommitUpsertInput): string {
-    return `UPSERT ${input.id} CONTENT { sha: ${sqlString(input.sha)}, repo: ${sqlString(input.stableRepo)}, message: ${sqlString(input.message)}, author: ${sqlString(input.author)}, ts: d"${input.ts}", repository: ${input.repositoryId} };`;
+    return `UPSERT ${input.id} CONTENT { sha: ${surrealString(input.sha)}, repo: ${surrealString(input.stableRepo)}, message: ${surrealString(input.message)}, author: ${surrealString(input.author)}, ts: d"${input.ts}", repository: ${input.repositoryId} };`;
 }
 
 export function buildFileUpsertStatement(input: FileUpsertInput): string {
-    return `UPSERT ${input.id} CONTENT { repo: ${sqlString(input.stableRepo)}, path: ${sqlString(input.path)}, repository: ${input.repositoryId}, identity_scope: "repository" };`;
+    return `UPSERT ${input.id} CONTENT { repo: ${surrealString(input.stableRepo)}, path: ${surrealString(input.path)}, repository: ${input.repositoryId}, identity_scope: "repository" };`;
 }
 
 interface TouchedRelationFile {
@@ -461,8 +456,8 @@ interface WriteStats {
 }
 
 export function buildSessionRepoWhere(repoPath: string): string {
-    const repoLit = sqlString(repoPath);
-    const prefixLit = sqlString(repoPath.endsWith("/") ? repoPath : `${repoPath}/`);
+    const repoLit = surrealString(repoPath);
+    const prefixLit = surrealString(repoPath.endsWith("/") ? repoPath : `${repoPath}/`);
     return `(cwd = ${repoLit} OR string::starts_with(cwd ?? "", ${prefixLit}))`;
 }
 
@@ -534,21 +529,21 @@ const writeRepo = (
         yield* db.query(
             [
                 `UPSERT ${repositoryId} MERGE {`,
-                `name: ${sqlString(repositoryName)},`,
-                `remote_url: ${repo.remoteUrl === null ? "NONE" : sqlString(repo.remoteUrl)},`,
-                `initial_commit: ${repo.initialCommit === null ? "NONE" : sqlString(repo.initialCommit)},`,
+                `name: ${surrealString(repositoryName)},`,
+                `remote_url: ${repo.remoteUrl === null ? "NONE" : surrealString(repo.remoteUrl)},`,
+                `initial_commit: ${repo.initialCommit === null ? "NONE" : surrealString(repo.initialCommit)},`,
                 "updated_at: time::now()",
                 "};",
-                `UPDATE ${repositoryId} SET root_path = ${sqlString(repo.path)} WHERE ${shouldUpdateRepositoryRoot} RETURN NONE;`,
+                `UPDATE ${repositoryId} SET root_path = ${surrealString(repo.path)} WHERE ${shouldUpdateRepositoryRoot} RETURN NONE;`,
                 repo.worktreeKind === "normal" && repo.branch !== null
-                    ? `UPDATE ${repositoryId} SET default_branch = ${sqlString(repo.branch)} RETURN NONE;`
+                    ? `UPDATE ${repositoryId} SET default_branch = ${surrealString(repo.branch)} RETURN NONE;`
                     : "",
                 `UPSERT ${checkoutId} MERGE {`,
                 `repository: ${repositoryId},`,
-                `path: ${sqlString(repo.path)},`,
-                `branch: ${repo.branch === null ? "NONE" : sqlString(repo.branch)},`,
-                `head_sha: ${repo.headSha === null ? "NONE" : sqlString(repo.headSha)},`,
-                `worktree_name: ${repo.worktreeKind === "worktree" ? sqlString(basename(repo.path)) : "NONE"},`,
+                `path: ${surrealString(repo.path)},`,
+                `branch: ${repo.branch === null ? "NONE" : surrealString(repo.branch)},`,
+                `head_sha: ${repo.headSha === null ? "NONE" : surrealString(repo.headSha)},`,
+                `worktree_name: ${repo.worktreeKind === "worktree" ? surrealString(basename(repo.path)) : "NONE"},`,
                 "dirty: false,",
                 "updated_at: time::now()",
                 "};",

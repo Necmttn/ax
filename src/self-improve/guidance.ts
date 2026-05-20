@@ -15,9 +15,6 @@ export interface GuidanceDraft {
     readonly createdAt: string;
 }
 
-const sqlString = surrealString;
-const sqlJson = surrealJson;
-
 function hashKey(value: string): string {
     return Bun.hash(value).toString(16).padStart(16, "0");
 }
@@ -47,15 +44,15 @@ export function guidanceFromSignal(signal: DerivedSignal): GuidanceDraft {
 
 export function buildGuidanceWriteStatements(guidance: GuidanceDraft): string[] {
     const artifactStatements = guidance.evidenceIds.map((evidenceId) =>
-        `UPSERT artifact:\`${hashKey(evidenceId)}\` MERGE { kind: "signal_evidence", uri: ${sqlString(evidenceId)}, title: ${sqlString(evidenceId)}, raw: ${sqlJson({ evidenceId })}, created_at: time::now() };`,
+        `UPSERT artifact:\`${hashKey(evidenceId)}\` MERGE { kind: "signal_evidence", uri: ${surrealString(evidenceId)}, title: ${surrealString(evidenceId)}, raw: ${surrealJson({ evidenceId })}, created_at: time::now() };`,
     );
     const derivedFromStatements = guidance.evidenceIds.map((evidenceId) => {
         const edgeKey = hashKey(`${guidance.versionKey}|${evidenceId}`);
-        return `RELATE guidance_version:\`${guidance.versionKey}\`->derived_from:\`${edgeKey}\`->artifact:\`${hashKey(evidenceId)}\` SET kind = "signal_evidence", labels = ${sqlJson({ evidenceId })};`;
+        return `RELATE guidance_version:\`${guidance.versionKey}\`->derived_from:\`${edgeKey}\`->artifact:\`${hashKey(evidenceId)}\` SET kind = "signal_evidence", labels = ${surrealJson({ evidenceId })};`;
     });
     return [
-        `UPSERT guidance:\`${guidance.key}\` MERGE { slug: ${sqlString(guidance.slug)}, title: ${sqlString(guidance.title)}, status: "proposed", updated_at: time::now() };`,
-        `UPSERT guidance_version:\`${guidance.versionKey}\` CONTENT { guidance: guidance:\`${guidance.key}\`, version: "v1", text: ${sqlString(guidance.text)}, status: ${sqlString(guidance.status)}, scope: ${sqlString(guidance.scope)}, risk: ${sqlString(guidance.risk)}, evidence: ${sqlJson(guidance.evidenceIds)}, metrics_before: ${sqlJson(guidance.metrics)}, metrics_after: NONE, raw: ${sqlJson(guidance)}, created_at: d${sqlString(guidance.createdAt)} };`,
+        `UPSERT guidance:\`${guidance.key}\` MERGE { slug: ${surrealString(guidance.slug)}, title: ${surrealString(guidance.title)}, status: "proposed", updated_at: time::now() };`,
+        `UPSERT guidance_version:\`${guidance.versionKey}\` CONTENT { guidance: guidance:\`${guidance.key}\`, version: "v1", text: ${surrealString(guidance.text)}, status: ${surrealString(guidance.status)}, scope: ${surrealString(guidance.scope)}, risk: ${surrealString(guidance.risk)}, evidence: ${surrealJson(guidance.evidenceIds)}, metrics_before: ${surrealJson(guidance.metrics)}, metrics_after: NONE, raw: ${surrealJson(guidance)}, created_at: d${surrealString(guidance.createdAt)} };`,
         ...artifactStatements,
         ...derivedFromStatements,
     ];

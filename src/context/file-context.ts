@@ -156,7 +156,6 @@ export interface BuildFileContextInput {
     readonly files: readonly string[];
 }
 
-const sqlString = surrealString;
 const clip = (s: string, n: number): string => (s.length <= n ? s : `${s.slice(0, n - 1)}...`);
 const GENERIC_BASENAMES = new Set(["index.ts", "index.tsx", "index.js", "README.md", "package.json", "tsconfig.json"]);
 const STOP_WORDS = new Set(["after", "from", "with", "that", "this", "when", "then", "into", "bug"]);
@@ -358,7 +357,7 @@ const findFilesExact = (paths: readonly string[]) =>
         const db = yield* SurrealClient;
         const clean = Array.from(new Set(paths.map((path) => path.trim()).filter(Boolean)));
         if (clean.length === 0) return [] as FileRow[];
-        const exactList = clean.map(sqlString).join(", ");
+        const exactList = clean.map(surrealString).join(", ");
         const [rows] = yield* db.query<[FileRow[]]>(`
             SELECT <string>id AS id, path, repo, <string>repository AS repository
             FROM file
@@ -373,7 +372,7 @@ const findFiles = (signals: MentionSignals) =>
         const db = yield* SurrealClient;
         const clean = Array.from(new Set(signals.paths.map((path) => path.trim()).filter(Boolean)));
         if (clean.length === 0) return [] as FileRow[];
-        const exactList = clean.map(sqlString).join(", ");
+        const exactList = clean.map(surrealString).join(", ");
         const [exactRows] = yield* db.query<[FileRow[]]>(`
             SELECT <string>id AS id, path, repo, <string>repository AS repository
             FROM file
@@ -384,9 +383,9 @@ const findFiles = (signals: MentionSignals) =>
 
         const clauses = clean.flatMap((path) => {
             const base = path.split("/").at(-1) ?? path;
-            const pathClauses = [`string::ends_with(path, ${sqlString(path)})`];
+            const pathClauses = [`string::ends_with(path, ${surrealString(path)})`];
             if (path.includes("/") && !GENERIC_BASENAMES.has(base)) {
-                pathClauses.push(`string::ends_with(path, ${sqlString(base)})`);
+                pathClauses.push(`string::ends_with(path, ${surrealString(base)})`);
             }
             return pathClauses;
         });
