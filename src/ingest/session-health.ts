@@ -4,7 +4,7 @@ import { AppLayer } from "../lib/layers.ts";
 import { decodeJsonOrNull } from "../lib/decode.ts";
 import type { DbError } from "../lib/errors.ts";
 import { recordRef } from "./evidence-writers.ts";
-import { surrealJsonOption, surrealString } from "../lib/shared/surql.ts";
+import { surrealDate, surrealJsonOption, surrealObject, surrealOptionInt, surrealOptionString, surrealString } from "../lib/shared/surql.ts";
 import { deriveTaskLabel } from "../lib/shared/task-label.ts";
 
 type TimestampInput = Date | string | { readonly constructor: { readonly name: string }; toString(): string };
@@ -95,17 +95,8 @@ export interface SessionHealthStats {
     readonly sessionHealth: number;
 }
 
-const sqlString = surrealString;
-const sqlOptionString = (value: string | null | undefined): string =>
-    value === null || value === undefined ? "NONE" : sqlString(value);
-const sqlDate = (value: string): string => `d${JSON.stringify(value)}`;
-const sqlOptionInt = (value: number | null | undefined): string =>
-    value === null || value === undefined ? "NONE" : Math.trunc(value).toString(10);
 const sqlOptionFloat = (value: number | null | undefined): string =>
     value === null || value === undefined ? "NONE" : Number(value.toFixed(4)).toString();
-const sqlJsonOption = surrealJsonOption;
-const sqlObject = (fields: readonly (readonly [string, string])[]): string =>
-    `{ ${fields.map(([name, value]) => `${name}: ${value}`).join(", ")} }`;
 
 const safeKeyPart = (value: string): string => {
     const sanitized = value
@@ -332,51 +323,51 @@ export function __testBuildSessionHealthRows(input: Parameters<typeof buildRows>
 }
 
 function workflowEpochStatements(firstSuperpowersAt: string | null): string[] {
-    const gsdEnds = firstSuperpowersAt ? sqlDate(firstSuperpowersAt) : "NONE";
-    const superpowersStarts = firstSuperpowersAt ? sqlDate(firstSuperpowersAt) : "NONE";
+    const gsdEnds = firstSuperpowersAt ? surrealDate(firstSuperpowersAt) : "NONE";
+    const superpowersStarts = firstSuperpowersAt ? surrealDate(firstSuperpowersAt) : "NONE";
     return [
-        `UPSERT ${recordRef("workflow_epoch", "gsd")} MERGE ${sqlObject([
-            ["name", sqlString("gsd")],
+        `UPSERT ${recordRef("workflow_epoch", "gsd")} MERGE ${surrealObject([
+            ["name", surrealString("gsd")],
             ["starts_at", "NONE"],
             ["ends_at", gsdEnds],
-            ["evidence_kind", sqlOptionString("derived_skill_invocation")],
-            ["evidence_ref", sqlOptionString("first superpowers skill invocation")],
-            ["notes", sqlOptionString("Sessions before first observed Superpowers skill invocation.")],
+            ["evidence_kind", surrealOptionString("derived_skill_invocation")],
+            ["evidence_ref", surrealOptionString("first superpowers skill invocation")],
+            ["notes", surrealOptionString("Sessions before first observed Superpowers skill invocation.")],
         ])};`,
-        `UPSERT ${recordRef("workflow_epoch", "superpowers")} MERGE ${sqlObject([
-            ["name", sqlString("superpowers")],
+        `UPSERT ${recordRef("workflow_epoch", "superpowers")} MERGE ${surrealObject([
+            ["name", surrealString("superpowers")],
             ["starts_at", superpowersStarts],
             ["ends_at", "NONE"],
-            ["evidence_kind", sqlOptionString("derived_skill_invocation")],
-            ["evidence_ref", sqlOptionString("first superpowers skill invocation")],
-            ["notes", sqlOptionString("Sessions at or after first observed Superpowers skill invocation.")],
+            ["evidence_kind", surrealOptionString("derived_skill_invocation")],
+            ["evidence_ref", surrealOptionString("first superpowers skill invocation")],
+            ["notes", surrealOptionString("Sessions at or after first observed Superpowers skill invocation.")],
         ])};`,
     ];
 }
 
 function tokenUsageStatement(row: SessionTokenUsage): string {
-    return `UPSERT ${recordRef("session_token_usage", safeKeyPart(row.sessionKey))} MERGE ${sqlObject([
+    return `UPSERT ${recordRef("session_token_usage", safeKeyPart(row.sessionKey))} MERGE ${surrealObject([
         ["session", recordRef("session", row.sessionKey)],
-        ["source", sqlString(row.source)],
+        ["source", surrealString(row.source)],
         ["workflow_epoch", row.workflowEpoch ? recordRef("workflow_epoch", row.workflowEpoch) : "NONE"],
-        ["model", sqlOptionString(row.model)],
-        ["prompt_tokens", sqlOptionInt(row.promptTokens)],
-        ["completion_tokens", sqlOptionInt(row.completionTokens)],
-        ["cache_creation_input_tokens", sqlOptionInt(row.cacheCreationInputTokens)],
-        ["cache_read_input_tokens", sqlOptionInt(row.cacheReadInputTokens)],
+        ["model", surrealOptionString(row.model)],
+        ["prompt_tokens", surrealOptionInt(row.promptTokens)],
+        ["completion_tokens", surrealOptionInt(row.completionTokens)],
+        ["cache_creation_input_tokens", surrealOptionInt(row.cacheCreationInputTokens)],
+        ["cache_read_input_tokens", surrealOptionInt(row.cacheReadInputTokens)],
         ["estimated_tokens", Math.trunc(row.estimatedTokens).toString(10)],
         ["transcript_bytes", Math.trunc(row.transcriptBytes).toString(10)],
-        ["context_window", sqlOptionInt(row.contextWindow)],
-        ["labels", sqlJsonOption(row.labels)],
-        ["metrics", sqlJsonOption(row.metrics)],
-        ["ts", sqlDate(row.ts)],
+        ["context_window", surrealOptionInt(row.contextWindow)],
+        ["labels", surrealJsonOption(row.labels)],
+        ["metrics", surrealJsonOption(row.metrics)],
+        ["ts", surrealDate(row.ts)],
     ])};`;
 }
 
 function sessionHealthStatement(row: SessionHealth): string {
-    return `UPSERT ${recordRef("session_health", safeKeyPart(row.sessionKey))} MERGE ${sqlObject([
+    return `UPSERT ${recordRef("session_health", safeKeyPart(row.sessionKey))} MERGE ${surrealObject([
         ["session", recordRef("session", row.sessionKey)],
-        ["source", sqlString(row.source)],
+        ["source", surrealString(row.source)],
         ["workflow_epoch", row.workflowEpoch ? recordRef("workflow_epoch", row.workflowEpoch) : "NONE"],
         ["turns", row.turns.toString(10)],
         ["tool_calls", row.toolCalls.toString(10)],
@@ -388,14 +379,14 @@ function sessionHealthStatement(row: SessionHealth): string {
         ["estimated_tokens", Math.trunc(row.estimatedTokens).toString(10)],
         ["cache_read_ratio", sqlOptionFloat(row.cacheReadRatio)],
         ["cache_creation_ratio", sqlOptionFloat(row.cacheCreationRatio)],
-        ["context_pressure", sqlString(row.contextPressure)],
-        ["task_label", sqlOptionString(row.taskLabel)],
+        ["context_pressure", surrealString(row.contextPressure)],
+        ["task_label", surrealOptionString(row.taskLabel)],
         ["user_turns", row.userTurns.toString(10)],
         ["assistant_turns", row.assistantTurns.toString(10)],
         ["correction_turns", row.correctionTurns.toString(10)],
-        ["labels", sqlJsonOption(row.labels)],
-        ["metrics", sqlJsonOption(row.metrics)],
-        ["ts", sqlDate(row.ts)],
+        ["labels", surrealJsonOption(row.labels)],
+        ["metrics", surrealJsonOption(row.metrics)],
+        ["ts", surrealDate(row.ts)],
     ])};`;
 }
 
