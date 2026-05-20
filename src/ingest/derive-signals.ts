@@ -4,7 +4,7 @@ import { skillRecordKey } from "../lib/skill-id.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
 import { recordRef } from "./evidence-writers.ts";
-import { surrealString } from "../lib/shared/surql.ts";
+import { surrealDate, surrealJsonTextOption, surrealObject, surrealOptionDate, surrealOptionRecord, surrealOptionString, surrealString } from "../lib/shared/surql.ts";
 
 /**
  * Negation patterns that signal a user pushed back on the previous assistant
@@ -185,32 +185,6 @@ interface SessionTurns {
     turns: TurnRow[];
 }
 
-const sqlString = surrealString;
-
-const sqlOptionString = (value: string | null | undefined): string =>
-    value === null || value === undefined ? "NONE" : sqlString(value);
-
-const sqlDate = (value: TimestampInput): string => {
-    const iso = value instanceof Date ? value.toISOString() : value;
-    return `d${JSON.stringify(iso)}`;
-};
-
-const sqlOptionDate = (value: TimestampInput | null | undefined): string =>
-    value === null || value === undefined ? "NONE" : sqlDate(value);
-
-const sqlOptionRecord = (
-    table: string,
-    key: string | null | undefined,
-): string => (key === null || key === undefined ? "NONE" : recordRef(table, key));
-
-const sqlJsonString = (value: unknown): string =>
-    sqlString(typeof value === "string" ? value : JSON.stringify(value) ?? "null");
-
-const sqlJsonOption = (value: unknown | null | undefined): string =>
-    value === null || value === undefined ? "NONE" : sqlJsonString(value);
-
-const sqlObject = (fields: readonly (readonly [string, string])[]): string =>
-    `{ ${fields.map(([name, value]) => `${name}: ${value}`).join(", ")} }`;
 
 const nonEmptyString = (value: unknown): string | null => {
     if (typeof value !== "string") return null;
@@ -909,7 +883,7 @@ const upsertCorrections = (edges: CorrectionEdge[]) =>
         const db = yield* SurrealClient;
         const stmts = edges.map((e) => {
             const edgeId = correctedByEdgeId(e.fromTurnKey, e.toTurnKey);
-            return `RELATE turn:\`${e.fromTurnKey}\` -> corrected_by:\`${edgeId}\` -> turn:\`${e.toTurnKey}\` SET pattern = ${sqlString(e.pattern)}, ts = d"${e.ts}";`;
+            return `RELATE turn:\`${e.fromTurnKey}\` -> corrected_by:\`${edgeId}\` -> turn:\`${e.toTurnKey}\` SET pattern = ${surrealString(e.pattern)}, ts = d"${e.ts}";`;
         });
         for (let i = 0; i < stmts.length; i += 500) {
             yield* db.query(stmts.slice(i, i + 500).join(""));
@@ -964,7 +938,7 @@ const upsertProposed = (edges: ProposedEdge[]) =>
         const db = yield* SurrealClient;
         const stmts = edges.map((e) => {
             const edgeId = proposedEdgeId(e.fromTurnKey, e.skillKey);
-            return `RELATE turn:\`${e.fromTurnKey}\` -> proposed:\`${edgeId}\` -> skill:\`${e.skillKey}\` SET ts = d"${e.ts}", context_excerpt = ${sqlString(e.contextExcerpt)};`;
+            return `RELATE turn:\`${e.fromTurnKey}\` -> proposed:\`${edgeId}\` -> skill:\`${e.skillKey}\` SET ts = d"${e.ts}", context_excerpt = ${surrealString(e.contextExcerpt)};`;
         });
         for (let i = 0; i < stmts.length; i += 500) {
             yield* db.query(stmts.slice(i, i + 500).join(""));
@@ -997,7 +971,7 @@ const upsertRecovered = (edges: RecoveryEdge[]) =>
         const stmts = edges.map((e) => {
             const edgeId = recoveredByEdgeId(e.fromTurnKey, e.skillKey);
             const excerpt =
-                e.errorExcerpt == null ? "NONE" : sqlString(e.errorExcerpt);
+                e.errorExcerpt == null ? "NONE" : surrealString(e.errorExcerpt);
             return `RELATE turn:\`${e.fromTurnKey}\` -> recovered_by:\`${edgeId}\` -> skill:\`${e.skillKey}\` SET ts = d"${e.ts}", error_excerpt = ${excerpt};`;
         });
         for (let i = 0; i < stmts.length; i += 500) {
@@ -1011,15 +985,15 @@ const upsertFrictionEvents = (events: readonly DerivedFrictionEvent[]) =>
         const db = yield* SurrealClient;
         const stmts = events.map(
             (event) =>
-                `UPSERT ${recordRef("friction_event", event.key)} MERGE ${sqlObject([
-                    ["session", sqlOptionRecord("session", event.sessionId)],
-                    ["turn", sqlOptionRecord("turn", event.turnKey)],
-                    ["kind", sqlString(event.kind)],
-                    ["text", sqlOptionString(event.text)],
-                    ["labels", sqlJsonOption(event.labels)],
-                    ["metrics", sqlJsonOption(event.metrics)],
-                    ["raw", sqlJsonOption(event.raw)],
-                    ["ts", sqlDate(event.ts)],
+                `UPSERT ${recordRef("friction_event", event.key)} MERGE ${surrealObject([
+                    ["session", surrealOptionRecord("session", event.sessionId)],
+                    ["turn", surrealOptionRecord("turn", event.turnKey)],
+                    ["kind", surrealString(event.kind)],
+                    ["text", surrealOptionString(event.text)],
+                    ["labels", surrealJsonTextOption(event.labels)],
+                    ["metrics", surrealJsonTextOption(event.metrics)],
+                    ["raw", surrealJsonTextOption(event.raw)],
+                    ["ts", surrealDate(event.ts)],
                 ])};`,
         );
         for (let i = 0; i < stmts.length; i += 500) {
@@ -1033,16 +1007,16 @@ const upsertDiagnosticEvents = (events: readonly DerivedDiagnosticEvent[]) =>
         const db = yield* SurrealClient;
         const stmts = events.map(
             (event) =>
-                `UPSERT ${recordRef("diagnostic_event", event.key)} MERGE ${sqlObject([
-                    ["session", sqlOptionRecord("session", event.sessionId)],
-                    ["turn", sqlOptionRecord("turn", event.turnKey)],
-                    ["kind", sqlString(event.kind)],
-                    ["status", sqlOptionString(event.status)],
-                    ["text", sqlOptionString(event.text)],
-                    ["labels", sqlJsonOption(event.labels)],
-                    ["metrics", sqlJsonOption(event.metrics)],
-                    ["raw", sqlJsonOption(event.raw)],
-                    ["ts", sqlDate(event.ts)],
+                `UPSERT ${recordRef("diagnostic_event", event.key)} MERGE ${surrealObject([
+                    ["session", surrealOptionRecord("session", event.sessionId)],
+                    ["turn", surrealOptionRecord("turn", event.turnKey)],
+                    ["kind", surrealString(event.kind)],
+                    ["status", surrealOptionString(event.status)],
+                    ["text", surrealOptionString(event.text)],
+                    ["labels", surrealJsonTextOption(event.labels)],
+                    ["metrics", surrealJsonTextOption(event.metrics)],
+                    ["raw", surrealJsonTextOption(event.raw)],
+                    ["ts", surrealDate(event.ts)],
                 ])};`,
         );
         for (let i = 0; i < stmts.length; i += 500) {
@@ -1056,16 +1030,16 @@ const upsertRecommendations = (recommendations: readonly DerivedRecommendation[]
         const db = yield* SurrealClient;
         const stmts = recommendations.map(
             (recommendation) =>
-                `UPSERT ${recordRef("recommendation", recommendation.key)} MERGE ${sqlObject([
-                    ["subject_type", sqlOptionString(recommendation.subjectType)],
-                    ["subject_id", sqlOptionString(recommendation.subjectId)],
-                    ["status", sqlString(recommendation.status)],
-                    ["text", sqlString(recommendation.text)],
-                    ["rationale", sqlOptionString(recommendation.rationale)],
-                    ["labels", sqlJsonOption(recommendation.labels)],
-                    ["metrics", sqlJsonOption(recommendation.metrics)],
-                    ["created_at", sqlDate(recommendation.createdAt)],
-                    ["updated_at", sqlOptionDate(recommendation.updatedAt)],
+                `UPSERT ${recordRef("recommendation", recommendation.key)} MERGE ${surrealObject([
+                    ["subject_type", surrealOptionString(recommendation.subjectType)],
+                    ["subject_id", surrealOptionString(recommendation.subjectId)],
+                    ["status", surrealString(recommendation.status)],
+                    ["text", surrealString(recommendation.text)],
+                    ["rationale", surrealOptionString(recommendation.rationale)],
+                    ["labels", surrealJsonTextOption(recommendation.labels)],
+                    ["metrics", surrealJsonTextOption(recommendation.metrics)],
+                    ["created_at", surrealDate(recommendation.createdAt)],
+                    ["updated_at", surrealOptionDate(recommendation.updatedAt)],
                 ])};`,
         );
         for (let i = 0; i < stmts.length; i += 500) {

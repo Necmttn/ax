@@ -7,10 +7,9 @@ import { decodeJsonOrNull } from "../lib/decode.ts";
 import type { DbError } from "../lib/errors.ts";
 import { AppLayer } from "../lib/layers.ts";
 import { recordRef } from "./evidence-writers.ts";
-import { surrealString } from "../lib/shared/surql.ts";
+import { surrealDate, surrealJsonTextOption, surrealObject, surrealOptionDate, surrealOptionRecord, surrealOptionString, surrealSet, surrealString } from "../lib/shared/surql.ts";
 
 type JsonRecord = Record<string, unknown>;
-type TimestampInput = Date | string;
 
 export interface ClaudeInsightRecordShape {
     readonly key: string;
@@ -359,35 +358,6 @@ export function facetToInsightAndFriction(input: {
     };
 }
 
-const sqlString = surrealString;
-
-const sqlOptionString = (value: string | null | undefined): string =>
-    value === null || value === undefined ? "NONE" : sqlString(value);
-
-const sqlDate = (value: TimestampInput): string => {
-    const iso = value instanceof Date ? value.toISOString() : value;
-    return `d${JSON.stringify(iso)}`;
-};
-
-const sqlOptionDate = (value: TimestampInput | null | undefined): string =>
-    value === null || value === undefined ? "NONE" : sqlDate(value);
-
-const encodeJsonText = (value: unknown): string =>
-    typeof value === "string" ? value : (JSON.stringify(value) ?? "null");
-
-const sqlJsonOption = (value: unknown): string =>
-    value === null || value === undefined ? "NONE" : sqlString(encodeJsonText(value));
-
-const sqlObject = (fields: readonly (readonly [string, string])[]): string =>
-    `{ ${fields.map(([name, value]) => `${name}: ${value}`).join(", ")} }`;
-
-const sqlSet = (fields: readonly (readonly [string, string])[]): string =>
-    fields.map(([name, value]) => `${name} = ${value}`).join(", ");
-
-const sqlOptionRecord = (
-    table: string,
-    key: string | null | undefined,
-): string => (key === null || key === undefined ? "NONE" : recordRef(table, key));
 
 function sessionEndTime(meta: JsonRecord | null): string | null {
     const startedAt = metaStartTime(meta);
@@ -405,14 +375,14 @@ function sessionPlaceholderStatement(
     const projectName = projectPath ? basename(projectPath) : null;
     const startedAt = metaStartTime(meta);
     const endedAt = sessionEndTime(meta);
-    const fields: Array<readonly [string, string]> = [["source", sqlString("claude")]];
+    const fields: Array<readonly [string, string]> = [["source", surrealString("claude")]];
 
-    if (projectName) fields.push(["project", sqlOptionString(projectName)]);
-    if (projectPath) fields.push(["cwd", sqlOptionString(projectPath)]);
-    if (startedAt) fields.push(["started_at", sqlOptionDate(startedAt)]);
-    if (endedAt) fields.push(["ended_at", sqlOptionDate(endedAt)]);
+    if (projectName) fields.push(["project", surrealOptionString(projectName)]);
+    if (projectPath) fields.push(["cwd", surrealOptionString(projectPath)]);
+    if (startedAt) fields.push(["started_at", surrealOptionDate(startedAt)]);
+    if (endedAt) fields.push(["ended_at", surrealOptionDate(endedAt)]);
 
-    return `UPSERT ${recordRef("session", sessionId)} MERGE ${sqlObject(fields)};`;
+    return `UPSERT ${recordRef("session", sessionId)} MERGE ${surrealObject(fields)};`;
 }
 
 export function buildClaudeInsightStatements(
@@ -429,49 +399,49 @@ export function buildClaudeInsightStatements(
     }
 
     const insightFields: Array<readonly [string, string]> = [
-        ["subject_type", sqlString(insight.subjectType)],
-        ["subject_id", sqlOptionString(insight.subjectId)],
-        ["kind", sqlOptionString(insight.kind)],
-        ["text", sqlString(insight.text)],
-        ["labels", sqlJsonOption(insight.labels)],
-        ["metrics", sqlJsonOption(insight.metrics)],
+        ["subject_type", surrealString(insight.subjectType)],
+        ["subject_id", surrealOptionString(insight.subjectId)],
+        ["kind", surrealOptionString(insight.kind)],
+        ["text", surrealString(insight.text)],
+        ["labels", surrealJsonTextOption(insight.labels)],
+        ["metrics", surrealJsonTextOption(insight.metrics)],
     ];
     if (insight.createdAt) {
-        insightFields.push(["created_at", sqlDate(insight.createdAt)]);
+        insightFields.push(["created_at", surrealDate(insight.createdAt)]);
     }
 
     statements.push(
-        `UPSERT ${insightRef} MERGE ${sqlObject(insightFields)};`,
+        `UPSERT ${insightRef} MERGE ${surrealObject(insightFields)};`,
     );
 
     if (insight.sessionId) {
         const sessionRef = recordRef("session", insight.sessionId);
         statements.push(
             `DELETE concerns WHERE in = ${insightRef} AND out = ${sessionRef} AND kind = "session_classification";`,
-            `RELATE ${insightRef}->concerns->${sessionRef} SET ${sqlSet([
-                ["kind", sqlString("session_classification")],
-                ["reason", sqlOptionString("Claude /insights classified this session")],
-                ["labels", sqlJsonOption({ source: "claude_insights" })],
-                ["metrics", sqlJsonOption(insight.metrics)],
-                ["ts", insight.createdAt ? sqlDate(insight.createdAt) : "time::now()"],
+            `RELATE ${insightRef}->concerns->${sessionRef} SET ${surrealSet([
+                ["kind", surrealString("session_classification")],
+                ["reason", surrealOptionString("Claude /insights classified this session")],
+                ["labels", surrealJsonTextOption({ source: "claude_insights" })],
+                ["metrics", surrealJsonTextOption(insight.metrics)],
+                ["ts", insight.createdAt ? surrealDate(insight.createdAt) : "time::now()"],
             ])};`,
         );
     }
 
     for (const event of conversion.frictionEvents) {
         const fields: Array<readonly [string, string]> = [
-            ["session", sqlOptionRecord("session", event.sessionId)],
+            ["session", surrealOptionRecord("session", event.sessionId)],
             ["turn", "NONE"],
-            ["kind", sqlString(event.kind)],
-            ["text", sqlOptionString(event.text)],
-            ["labels", sqlJsonOption(event.labels)],
-            ["metrics", sqlJsonOption(event.metrics)],
-            ["raw", sqlJsonOption(event.raw)],
-            ["ts", event.ts ? sqlDate(event.ts) : "time::now()"],
+            ["kind", surrealString(event.kind)],
+            ["text", surrealOptionString(event.text)],
+            ["labels", surrealJsonTextOption(event.labels)],
+            ["metrics", surrealJsonTextOption(event.metrics)],
+            ["raw", surrealJsonTextOption(event.raw)],
+            ["ts", event.ts ? surrealDate(event.ts) : "time::now()"],
         ];
 
         statements.push(
-            `UPSERT ${recordRef("friction_event", event.key)} MERGE ${sqlObject(fields)};`,
+            `UPSERT ${recordRef("friction_event", event.key)} MERGE ${surrealObject(fields)};`,
         );
     }
 
