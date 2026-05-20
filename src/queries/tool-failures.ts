@@ -56,9 +56,6 @@ LIMIT 10;`;
 // Typed Query seam
 // ---------------------------------------------------------------------------
 
-const numF = (row: Record<string, unknown>, key: string): number =>
-    numberField(row, key) ?? 0;
-
 const intArrayField = (row: Record<string, unknown>, key: string): ReadonlyArray<number> => {
     const value = row[key];
     if (!Array.isArray(value)) return [];
@@ -74,8 +71,8 @@ export const toolFailuresQuery = defineQuery<
     sql: () => TOOL_FAILURES_SQL,
     mapRow: (raw) => {
         if (!isRecord(raw)) return null;
-        const failure = numF(raw, "failure_count");
-        const total = numF(raw, "total_calls");
+        const failure = numberField(raw, "failure_count") ?? 0;
+        const total = numberField(raw, "total_calls") ?? 0;
         const rate = total > 0 ? failure / total : 0;
         return {
             label: String(raw.label ?? "(unknown)"),
@@ -83,7 +80,7 @@ export const toolFailuresQuery = defineQuery<
             last_seen: dateField(raw, "last_seen"),
             last_error_text: stringField(raw, "last_error_text"),
             last_project: stringField(raw, "last_project"),
-            distinct_sessions: numF(raw, "distinct_sessions"),
+            distinct_sessions: numberField(raw, "distinct_sessions") ?? 0,
             total_calls: total,
             failure_rate: rate,
             exit_codes: intArrayField(raw, "exit_codes"),
