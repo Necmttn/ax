@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
 import type { DbError } from "../lib/errors.ts";
 import { skillRecordKey } from "../lib/skill-id.ts";
+import { executeStatements, executeStatementsWith } from "../lib/shared/statement-exec.ts";
 import { toolCallRecordKey, toolRecordKey } from "./record-keys.ts";
 import {
     surrealString,
@@ -18,8 +19,6 @@ import {
 } from "../lib/shared/surql.ts";
 
 export { recordRef } from "../lib/shared/surql.ts";
-
-const STATEMENT_CHUNK_SIZE = 250;
 
 type JsonInput = unknown;
 type TimestampInput = Date | string;
@@ -283,26 +282,6 @@ export function buildPlanSnapshotStatements(snapshot: PlanSnapshotWrite): string
     return statements;
 }
 
-const queryStatementsWithClient = (
-    db: SurrealClientShape,
-    statements: readonly string[],
-): Effect.Effect<void, DbError> =>
-    Effect.gen(function* () {
-        if (statements.length === 0) return;
-
-        for (let i = 0; i < statements.length; i += STATEMENT_CHUNK_SIZE) {
-            yield* db.query(statements.slice(i, i + STATEMENT_CHUNK_SIZE).join(""));
-        }
-    });
-
-const queryStatements = (
-    statements: readonly string[],
-): Effect.Effect<void, DbError, SurrealClient> =>
-    Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        yield* queryStatementsWithClient(db, statements);
-    });
-
 const skillExists = (
     db: SurrealClientShape,
     skillName: string,
@@ -317,7 +296,7 @@ export const writeToolCalls = (
     calls: readonly ToolCallWrite[],
 ): Effect.Effect<{ count: number }, DbError, SurrealClient> =>
     Effect.gen(function* () {
-        yield* queryStatements(buildToolCallStatements(calls));
+        yield* executeStatements(buildToolCallStatements(calls));
         return { count: calls.length };
     });
 
@@ -329,7 +308,7 @@ export const relateToolCallSkill = (
         const placeholderStatements = (yield* skillExists(db, input.skillName))
             ? []
             : buildSkillPlaceholderStatements(input.skillName);
-        yield* queryStatementsWithClient(db, [
+        yield* executeStatementsWith(db, [
             ...placeholderStatements,
             ...buildRelateToolCallSkillStatements(input),
         ]);
@@ -339,6 +318,6 @@ export const writePlanSnapshot = (
     snapshot: PlanSnapshotWrite,
 ): Effect.Effect<{ items: number }, DbError, SurrealClient> =>
     Effect.gen(function* () {
-        yield* queryStatements(buildPlanSnapshotStatements(snapshot));
+        yield* executeStatements(buildPlanSnapshotStatements(snapshot));
         return { items: snapshot.items.length };
     });
