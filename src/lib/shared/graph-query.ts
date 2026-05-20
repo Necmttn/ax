@@ -50,6 +50,7 @@ import { Effect } from "effect";
 import { SurrealClient } from "../db.ts";
 import type { DbError } from "../errors.ts";
 import { toSessionRid, type SessionId } from "./session-id.ts";
+import type { Query, SingleQuery } from "../../queries/query.ts";
 
 /** Single-row select. Maps to `T | null` and swallows DB errors to `null`.
  *  Use for "fetch this thing for this session if it exists". */
@@ -140,6 +141,56 @@ export const queryPagedWithCount = <PageRow, CountRow, T>(
  * Use only for record-id splicing. Pass strings, numbers, dates etc. via the
  * SDK's `bindings` arg.
  */
+/**
+ * Execute a {@link Query}: build SQL + bindings from params, run, map rows.
+ * Defensive - a DB failure logs `query.name` and degrades to `[]`, matching
+ * the `queryMany` policy. Mapper exceptions are NOT caught.
+ */
+export const runQuery = <Params, Row, T>(
+    query: Query<Params, Row, T>,
+    params: Params,
+): Effect.Effect<ReadonlyArray<T>, never, SurrealClient> =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const [rows] = yield* db.query<[Row[]]>(
+            query.sql(params),
+            query.bindings?.(params),
+        );
+        return (rows ?? []).map((row, i) => query.mapRow(row, i));
+    }).pipe(
+        Effect.catch((err: DbError) =>
+            Effect.sync(() => {
+                console.error(`axctl ${query.name} failed:`, err);
+                return [] as ReadonlyArray<T>;
+            }),
+        ),
+    );
+
+/**
+ * Execute a {@link SingleQuery}: returns the mapped first row or `null`.
+ * Same defensive policy as {@link runQuery}.
+ */
+export const runSingleQuery = <Params, Row, T>(
+    query: SingleQuery<Params, Row, T>,
+    params: Params,
+): Effect.Effect<T | null, never, SurrealClient> =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const [rows] = yield* db.query<[Row[]]>(
+            query.sql(params),
+            query.bindings?.(params),
+        );
+        const row = rows?.[0];
+        return row === undefined ? null : query.mapRow(row, 0);
+    }).pipe(
+        Effect.catch((err: DbError) =>
+            Effect.sync(() => {
+                console.error(`axctl ${query.name} failed:`, err);
+                return null as T | null;
+            }),
+        ),
+    );
+
 export const interpolateRid = (
     sql: string,
     sessionId: SessionId,

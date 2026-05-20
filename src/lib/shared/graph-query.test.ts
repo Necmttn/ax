@@ -218,6 +218,68 @@ describe("queryPagedWithCount", () => {
     });
 });
 
+import { runQuery, runSingleQuery } from "./graph-query.ts";
+import { defineQuery, defineSingleQuery } from "../../queries/query.ts";
+
+const clientReturning = (rows: unknown[]): SurrealClientShape => ({
+    query: <T extends unknown[]>() => Effect.succeed([rows] as unknown as T),
+    upsert: () => Effect.void,
+    relate: () => Effect.void,
+    putFile: () => Effect.void,
+    getFile: () => Effect.succeed(""),
+    raw: {} as never,
+});
+
+const run = (eff: Effect.Effect<unknown, unknown, SurrealClient>, c: SurrealClientShape) =>
+    Effect.runPromise(eff.pipe(Effect.provideService(SurrealClient, c)));
+
+const demo = defineQuery({
+    name: "demo",
+    sql: () => "SELECT * FROM x;",
+    mapRow: (row) => String(row.id ?? ""),
+});
+
+describe("runQuery", () => {
+    test("maps every row", async () => {
+        const out = await run(runQuery(demo, {}), clientReturning([{ id: 1 }, { id: 2 }]));
+        expect(out).toEqual(["1", "2"]);
+    });
+    test("DB error degrades to []", async () => {
+        const failing: SurrealClientShape = {
+            ...clientReturning([]),
+            query: <T extends unknown[]>(_sql: string, _bindings?: Record<string, unknown>): Effect.Effect<T, DbError> =>
+                Effect.fail(new DbError({ operation: "query", message: "boom" })) as Effect.Effect<T, DbError>,
+        };
+        const out = await run(runQuery(demo, {}), failing);
+        expect(out).toEqual([]);
+    });
+});
+
+describe("runSingleQuery", () => {
+    test("returns mapped first row or null", async () => {
+        const one = defineSingleQuery({
+            name: "demo1",
+            sql: () => "SELECT * FROM x LIMIT 1;",
+            mapRow: (row) => String(row.id ?? ""),
+        });
+        expect(await run(runSingleQuery(one, {}), clientReturning([{ id: 9 }]))).toBe("9");
+        expect(await run(runSingleQuery(one, {}), clientReturning([]))).toBe(null);
+    });
+    test("DB error degrades to null", async () => {
+        const one = defineSingleQuery({
+            name: "demo1",
+            sql: () => "SELECT * FROM x LIMIT 1;",
+            mapRow: (row) => String(row.id ?? ""),
+        });
+        const failing: SurrealClientShape = {
+            ...clientReturning([]),
+            query: <T extends unknown[]>() =>
+                Effect.fail(new DbError({ operation: "query", message: "boom" })) as Effect.Effect<T, DbError>,
+        };
+        expect(await run(runSingleQuery(one, {}), failing)).toBe(null);
+    });
+});
+
 describe("interpolateRid", () => {
     test("replaces $sid with the wrapped record-id form", () => {
         // UUIDs need backtick wrapping (contain hyphens).
