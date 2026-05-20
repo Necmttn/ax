@@ -39,7 +39,9 @@ describe("dashboard telemetry", () => {
             message: "ok",
             counts: { files: 3 },
         });
-        expect(buildIngestEventStatement(event)).toContain('"files":3');
+        // counts is embedded as a SurrealQL string literal via the shared
+        // `surql` seam, which JSON-quotes (double quotes, escaped).
+        expect(buildIngestEventStatement(event)).toContain('{\\"files\\":3}');
     });
 
     test("stage statements use deterministic stage ids", () => {
@@ -51,7 +53,7 @@ describe("dashboard telemetry", () => {
             stage: "fetch",
             status: "ok",
             counts: { commits: 2 },
-        })).toContain("counts = '{\"commits\":2}'");
+        })).toContain('counts = "{\\"commits\\":2}"');
     });
 
     test("publishIngestEvent fans out to subscribers", () => {
