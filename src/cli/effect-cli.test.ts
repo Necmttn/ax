@@ -113,6 +113,16 @@ describe("effect cli", () => {
         expect(subNames).toEqual(expect.arrayContaining(["file-context"]));
         expect(DB_COMMANDS.has("hook")).toBe(true);
     });
+
+    test("hooks group exposes native hook inspection commands", () => {
+        const hooks = rootCommand.subcommands
+            .flatMap((g) => g.commands)
+            .find((c) => c.name === "hooks");
+        expect(hooks).toBeDefined();
+        const subNames = hooks!.subcommands.flatMap((g) => g.commands.map((c) => c.name));
+        expect(subNames).toEqual(expect.arrayContaining(["summary", "invocations", "session", "backtest"]));
+        expect(DB_COMMANDS.has("hooks")).toBe(true);
+    });
 });
 
 describe("AX_DEV flag", () => {

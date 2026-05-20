@@ -79,6 +79,45 @@ interface Edit {
     tool: string;
 }
 
+export type HookProviderStatus = "progress_only" | "success" | "blocking_error";
+export type HookEffect = "allowed" | "blocked" | "injected_context" | "modified_input" | "notified" | "no_op" | "unknown";
+
+export interface HarnessHookEventWrite {
+    readonly key: string;
+    readonly session: string;
+    readonly ts: string;
+    readonly harness: "claude";
+    readonly event_name: string;
+    readonly hook_name: string;
+    readonly tool_call_id: string | null;
+    readonly tool_call_key: string | null;
+    readonly cwd: string | null;
+    readonly transcript_uuid: string | null;
+    readonly source_type: string;
+}
+
+export interface HookCommandInvocationWrite {
+    readonly key: string;
+    readonly hook_event_key: string;
+    readonly session: string;
+    readonly ts: string;
+    readonly harness: "claude";
+    readonly event_name: string;
+    readonly hook_name: string;
+    readonly tool_call_id: string | null;
+    readonly tool_call_key: string | null;
+    readonly command: string;
+    readonly command_hash: string;
+    readonly provider_status: HookProviderStatus;
+    readonly effect: HookEffect;
+    readonly exit_code: number | null;
+    readonly duration_ms: number | null;
+    readonly stdout_excerpt: string | null;
+    readonly stderr_excerpt: string | null;
+    readonly content_excerpt: string | null;
+    readonly blocking_error_excerpt: string | null;
+}
+
 function deriveProject(transcriptDir: string): string {
     // ~/.claude/projects encodes cwd as `-Users-necmttn-Projects-quera`
     const m = basename(transcriptDir);
@@ -221,6 +260,19 @@ function boundedExcerpt(input: string): string {
         : text;
 }
 
+function stringOrJsonExcerpt(input: unknown): string | null {
+    if (input === undefined || input === null) return null;
+    const text = typeof input === "string" ? input : jsonText(input);
+    if (!text) return null;
+    const excerpt = boundedExcerpt(text);
+    return excerpt.length > 0 ? excerpt : null;
+}
+
+function numberField(input: Record<string, unknown>, field: string): number | null {
+    const value = input[field];
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 export function claudeConcurrency(raw = process.env.AGENTCTL_CLAUDE_CONCURRENCY): number {
     if (!raw) return DEFAULT_CLAUDE_CONCURRENCY;
     const parsed = Number.parseInt(raw, 10);
@@ -282,6 +334,8 @@ interface FileExtract {
     toolCalls: ToolCallWrite[];
     skillRelations: ToolCallSkillRelationWrite[];
     planSnapshots: PlanSnapshotWrite[];
+    hookEvents: HarnessHookEventWrite[];
+    hookCommandInvocations: HookCommandInvocationWrite[];
 }
 
 function createClaudeExtractor(projectDir: string, sessionId: string) {
@@ -292,6 +346,8 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
     const toolCalls: MutableToolCallWrite[] = [];
     const skillRelations: ToolCallSkillRelationWrite[] = [];
     const planSnapshots: PlanSnapshotWrite[] = [];
+    const hookEventsByKey = new Map<string, HarnessHookEventWrite>();
+    const hookCommandInvocationsByKey = new Map<string, HookCommandInvocationWrite>();
     const toolCallsByCallId = new Map<string, MutableToolCallWrite>();
     const pendingToolResultsByCallId = new Map<string, ToolResultFields>();
     const planCreatedAtBySource = new Map<string, string>();
@@ -472,6 +528,236 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
         }
     };
 
+    const hookEventKey = (input: {
+        readonly hookEvent: string;
+        readonly hookName: string;
+        readonly toolUseId: string | null;
+        readonly transcriptUuid: string | null;
+    }): string =>
+        stableHash([
+            sessionId,
+            input.hookEvent,
+            input.hookName,
+            input.toolUseId ?? "-",
+            input.toolUseId ? "-" : input.transcriptUuid ?? "-",
+        ].join("|"));
+
+    const hookInvocationKey = (input: {
+        readonly eventKey: string;
+        readonly command: string;
+    }): string =>
+        stableHash([
+            input.eventKey,
+            input.command,
+        ].join("|"));
+
+    const toolCallKeyForId = (callId: string | null): string | null => {
+        if (!callId) return null;
+        const call = toolCallsByCallId.get(callId);
+        if (!call) return null;
+        return toolCallRecordKey({
+            sessionId,
+            seq: call.seq,
+            callId,
+        });
+    };
+
+    const upsertHookEvent = (input: {
+        readonly ts: string;
+        readonly turnCwd: string | null;
+        readonly hookEvent: string | null;
+        readonly hookName: string | null;
+        readonly toolUseId: string | null;
+        readonly transcriptUuid: string | null;
+        readonly sourceType: string;
+    }): string | null => {
+        const eventName = input.hookEvent ?? "unknown";
+        const hookName = input.hookName ?? `${eventName}:unknown`;
+        const key = hookEventKey({
+            hookEvent: eventName,
+            hookName,
+            toolUseId: input.toolUseId,
+            transcriptUuid: input.transcriptUuid,
+        });
+        const existing = hookEventsByKey.get(key);
+        const next: HarnessHookEventWrite = {
+            key,
+            session: sessionId,
+            ts: existing?.ts ?? input.ts,
+            harness: "claude",
+            event_name: eventName,
+            hook_name: hookName,
+            tool_call_id: input.toolUseId,
+            tool_call_key: existing?.tool_call_key ?? toolCallKeyForId(input.toolUseId),
+            cwd: input.turnCwd,
+            transcript_uuid: input.transcriptUuid,
+            source_type: input.sourceType,
+        };
+        hookEventsByKey.set(key, next);
+        return key;
+    };
+
+    const classifyHookSuccessEffect = (attachment: Record<string, unknown>): HookEffect => {
+        const stdout = stringField(attachment, "stdout");
+        const content = attachment.content;
+        const combined = `${stdout ?? ""}\n${stringOrJsonExcerpt(content) ?? ""}`;
+        if (combined.includes("additionalContext")) return "injected_context";
+        if (combined.includes("updatedInput")) return "modified_input";
+        if (combined.includes('"permissionDecision"') || combined.includes("permissionDecision")) {
+            return combined.includes('"deny"') || combined.includes(": \"deny\"")
+                ? "blocked"
+                : "allowed";
+        }
+        return "no_op";
+    };
+
+    const upsertHookInvocation = (input: {
+        readonly eventKey: string;
+        readonly ts: string;
+        readonly hookEvent: string;
+        readonly hookName: string;
+        readonly toolUseId: string | null;
+        readonly command: string;
+        readonly providerStatus: HookProviderStatus;
+        readonly effect: HookEffect;
+        readonly exitCode?: number | null;
+        readonly durationMs?: number | null;
+        readonly stdout?: unknown;
+        readonly stderr?: unknown;
+        readonly content?: unknown;
+        readonly blockingError?: unknown;
+    }): void => {
+        const key = hookInvocationKey({
+            eventKey: input.eventKey,
+            command: input.command,
+        });
+        const existing = hookCommandInvocationsByKey.get(key);
+        const isTerminal = input.providerStatus !== "progress_only";
+        const chosen = existing && !isTerminal && existing.provider_status !== "progress_only"
+            ? existing
+            : {
+                key,
+                hook_event_key: input.eventKey,
+                session: sessionId,
+                ts: input.ts,
+                harness: "claude" as const,
+                event_name: input.hookEvent,
+                hook_name: input.hookName,
+                tool_call_id: input.toolUseId,
+                tool_call_key: toolCallKeyForId(input.toolUseId),
+                command: input.command,
+                command_hash: stableHash(input.command),
+                provider_status: input.providerStatus,
+                effect: input.effect,
+                exit_code: input.exitCode ?? existing?.exit_code ?? null,
+                duration_ms: input.durationMs ?? existing?.duration_ms ?? null,
+                stdout_excerpt: stringOrJsonExcerpt(input.stdout) ?? existing?.stdout_excerpt ?? null,
+                stderr_excerpt: stringOrJsonExcerpt(input.stderr) ?? existing?.stderr_excerpt ?? null,
+                content_excerpt: stringOrJsonExcerpt(input.content) ?? existing?.content_excerpt ?? null,
+                blocking_error_excerpt: stringOrJsonExcerpt(input.blockingError) ?? existing?.blocking_error_excerpt ?? null,
+            };
+        hookCommandInvocationsByKey.set(key, chosen);
+    };
+
+    const processHookProgress = (
+        data: Record<string, unknown>,
+        ts: string,
+        turnCwd: string | null,
+        entry: Record<string, unknown>,
+    ): void => {
+        const hookEvent = stringField(data, "hookEvent");
+        const hookName = stringField(data, "hookName");
+        const command = stringField(data, "command");
+        const toolUseId = stringField(entry, "toolUseID") ?? stringField(entry, "parentToolUseID");
+        const eventKey = upsertHookEvent({
+            ts,
+            turnCwd,
+            hookEvent,
+            hookName,
+            toolUseId,
+            transcriptUuid: stringField(entry, "uuid"),
+            sourceType: "hook_progress",
+        });
+        if (!eventKey || !command) return;
+        upsertHookInvocation({
+            eventKey,
+            ts,
+            hookEvent: hookEvent ?? "unknown",
+            hookName: hookName ?? `${hookEvent ?? "unknown"}:unknown`,
+            toolUseId,
+            command,
+            providerStatus: "progress_only",
+            effect: "unknown",
+        });
+    };
+
+    const processHookAttachment = (
+        attachment: Record<string, unknown>,
+        ts: string,
+        turnCwd: string | null,
+        entry: Record<string, unknown>,
+    ): void => {
+        const attachmentType = stringField(attachment, "type");
+        if (
+            attachmentType !== "hook_success" &&
+            attachmentType !== "hook_blocking_error" &&
+            attachmentType !== "hook_additional_context"
+        ) return;
+        const hookEvent = stringField(attachment, "hookEvent");
+        const hookName = stringField(attachment, "hookName");
+        const toolUseId = stringField(attachment, "toolUseID");
+        const eventKey = upsertHookEvent({
+            ts,
+            turnCwd,
+            hookEvent,
+            hookName,
+            toolUseId,
+            transcriptUuid: stringField(entry, "uuid"),
+            sourceType: attachmentType,
+        });
+        if (!eventKey) return;
+
+        if (attachmentType === "hook_success") {
+            const command = stringField(attachment, "command");
+            if (!command) return;
+            upsertHookInvocation({
+                eventKey,
+                ts,
+                hookEvent: hookEvent ?? "unknown",
+                hookName: hookName ?? `${hookEvent ?? "unknown"}:unknown`,
+                toolUseId,
+                command,
+                providerStatus: "success",
+                effect: classifyHookSuccessEffect(attachment),
+                exitCode: numberField(attachment, "exitCode"),
+                durationMs: numberField(attachment, "durationMs"),
+                stdout: attachment.stdout,
+                stderr: attachment.stderr,
+                content: attachment.content,
+            });
+            return;
+        }
+
+        if (attachmentType === "hook_blocking_error") {
+            const blocking = isRecord(attachment.blockingError)
+                ? attachment.blockingError
+                : {};
+            const command = stringField(blocking, "command");
+            if (!command) return;
+            upsertHookInvocation({
+                eventKey,
+                ts,
+                hookEvent: hookEvent ?? "unknown",
+                hookName: hookName ?? `${hookEvent ?? "unknown"}:unknown`,
+                toolUseId,
+                command,
+                providerStatus: "blocking_error",
+                effect: "blocked",
+                blockingError: blocking.blockingError,
+            });
+        }
+    };
+
     const processToolResult = (block: Record<string, unknown>): boolean => {
         const callId = stringField(block, "tool_use_id");
         const hasError = block.is_error === true;
@@ -509,6 +795,14 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
             if (!ts) return;
             const turnCwd = typeof entry.cwd === "string" ? entry.cwd : cwd;
             if (!cwd && turnCwd) cwd = turnCwd;
+            const data = isRecord(entry.data) ? entry.data : null;
+            if (data && stringField(data, "type") === "hook_progress") {
+                processHookProgress(data, ts, turnCwd, entry);
+            }
+            const attachment = isRecord(entry.attachment) ? entry.attachment : null;
+            if (attachment) {
+                processHookAttachment(attachment, ts, turnCwd, entry);
+            }
             if (!session) {
                 session = {
                     id: sessionId,
@@ -574,6 +868,14 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
         },
         finish(): FileExtract | null {
             if (!session) return null;
+            const hookEvents = [...hookEventsByKey.values()].map((event) => ({
+                ...event,
+                tool_call_key: event.tool_call_key ?? toolCallKeyForId(event.tool_call_id),
+            }));
+            const hookCommandInvocations = [...hookCommandInvocationsByKey.values()].map((invocation) => ({
+                ...invocation,
+                tool_call_key: invocation.tool_call_key ?? toolCallKeyForId(invocation.tool_call_id),
+            }));
             return {
                 session,
                 turns,
@@ -582,6 +884,8 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
                 toolCalls,
                 skillRelations,
                 planSnapshots,
+                hookEvents,
+                hookCommandInvocations,
             };
         },
     };
@@ -704,6 +1008,36 @@ const buildTurnStatements = (turns: readonly Turn[]): string[] =>
             }, has_tool_use: ${t.has_tool_use}, has_error: ${t.has_error} };`,
     );
 
+const escapeRecordKey = (key: string): string =>
+    key
+        .replace(/\\/g, "\\\\")
+        .replace(/`/g, "\\`")
+        .replace(/\n/g, "\\n")
+        .replace(/\r/g, "\\r")
+        .replace(/\t/g, "\\t");
+
+const recordRef = (table: string, key: string): string =>
+    `${table}:\`${escapeRecordKey(key)}\``;
+
+const optionRecordRef = (table: string, key: string | null): string =>
+    key === null ? "NONE" : recordRef(table, key);
+
+const optionString = (value: string | null): string =>
+    value === null ? "NONE" : JSON.stringify(value);
+
+const optionInt = (value: number | null): string =>
+    value === null ? "NONE" : String(Math.trunc(value));
+
+const buildHarnessHookEventStatements = (events: readonly HarnessHookEventWrite[]): string[] =>
+    events.map((event) =>
+        `UPSERT ${recordRef("harness_hook_event", event.key)} CONTENT { session: ${recordRef("session", event.session)}, ts: d"${event.ts}", harness: ${JSON.stringify(event.harness)}, event_name: ${JSON.stringify(event.event_name)}, hook_name: ${JSON.stringify(event.hook_name)}, tool_call_id: ${optionString(event.tool_call_id)}, tool_call: ${optionRecordRef("tool_call", event.tool_call_key)}, cwd: ${optionString(event.cwd)}, transcript_uuid: ${optionString(event.transcript_uuid)}, source_type: ${JSON.stringify(event.source_type)} };`,
+    );
+
+const buildHookCommandInvocationStatements = (invocations: readonly HookCommandInvocationWrite[]): string[] =>
+    invocations.map((invocation) =>
+        `UPSERT ${recordRef("hook_command_invocation", invocation.key)} CONTENT { hook_event: ${recordRef("harness_hook_event", invocation.hook_event_key)}, session: ${recordRef("session", invocation.session)}, ts: d"${invocation.ts}", harness: ${JSON.stringify(invocation.harness)}, event_name: ${JSON.stringify(invocation.event_name)}, hook_name: ${JSON.stringify(invocation.hook_name)}, tool_call_id: ${optionString(invocation.tool_call_id)}, tool_call: ${optionRecordRef("tool_call", invocation.tool_call_key)}, command: ${surrealLiteral(invocation.command)}, command_hash: ${JSON.stringify(invocation.command_hash)}, provider_status: ${JSON.stringify(invocation.provider_status)}, effect: ${JSON.stringify(invocation.effect)}, exit_code: ${optionInt(invocation.exit_code)}, duration_ms: ${optionInt(invocation.duration_ms)}, stdout_excerpt: ${optionString(invocation.stdout_excerpt)}, stderr_excerpt: ${optionString(invocation.stderr_excerpt)}, content_excerpt: ${optionString(invocation.content_excerpt)}, blocking_error_excerpt: ${optionString(invocation.blocking_error_excerpt)} };`,
+    );
+
 const queryTranscriptStatements = (statements: readonly string[]) =>
     Effect.gen(function* () {
         if (statements.length === 0) return;
@@ -821,6 +1155,15 @@ const writePlanSnapshots = (snapshots: PlanSnapshotWrite[]) =>
 const writeToolCallStatements = (toolCalls: readonly ToolCallWrite[]) =>
     queryTranscriptStatements(buildToolCallStatements(toolCalls));
 
+const writeHookEvidence = (
+    events: readonly HarnessHookEventWrite[],
+    invocations: readonly HookCommandInvocationWrite[],
+) =>
+    queryTranscriptStatements([
+        ...buildHarnessHookEventStatements(events),
+        ...buildHookCommandInvocationStatements(invocations),
+    ]);
+
 interface IngestOpts {
     sinceDays: number | undefined;
     project: string | undefined;
@@ -836,6 +1179,8 @@ export interface TranscriptStats {
     edits: number;
     toolCalls: number;
     planSnapshots: number;
+    hookEvents: number;
+    hookCommandInvocations: number;
 }
 
 export const ingestTranscripts = (
@@ -860,9 +1205,18 @@ export const ingestTranscripts = (
         let editCount = 0;
         let toolCallCount = 0;
         let planSnapshotCount = 0;
+        let hookEventCount = 0;
+        let hookCommandInvocationCount = 0;
         let activeFiles = 0;
         const concurrency = cfg.knobs.claudeConcurrency;
-        const recordCount = () => turnCount + invCount + editCount + toolCallCount + planSnapshotCount;
+        const recordCount = () =>
+            turnCount +
+            invCount +
+            editCount +
+            toolCallCount +
+            planSnapshotCount +
+            hookEventCount +
+            hookCommandInvocationCount;
 
         for (const projectDir of projectDirs) {
             const fullProject = join(transcriptsDir, projectDir);
@@ -901,6 +1255,8 @@ export const ingestTranscripts = (
                     edits: editCount,
                     toolCalls: toolCallCount,
                     planSnapshots: planSnapshotCount,
+                    hookEvents: hookEventCount,
+                    hookCommandInvocations: hookCommandInvocationCount,
                 });
             }
             const extracted = yield* Effect.promise(() =>
@@ -927,6 +1283,9 @@ export const ingestTranscripts = (
             yield* relateToolCallSkills(extracted.skillRelations);
             yield* writePlanSnapshots(extracted.planSnapshots);
             planSnapshotCount += extracted.planSnapshots.length;
+            yield* writeHookEvidence(extracted.hookEvents, extracted.hookCommandInvocations);
+            hookEventCount += extracted.hookEvents.length;
+            hookCommandInvocationCount += extracted.hookCommandInvocations.length;
             yield* upsertEdits(extracted.edits);
             editCount += extracted.edits.length;
             if (opts.onProgress && (files <= 5 || files % 10 === 0)) {
@@ -942,6 +1301,8 @@ export const ingestTranscripts = (
                     edits: editCount,
                     toolCalls: toolCallCount,
                     planSnapshots: planSnapshotCount,
+                    hookEvents: hookEventCount,
+                    hookCommandInvocations: hookCommandInvocationCount,
                 });
             }
             if (files % 50 === 0) {
@@ -957,6 +1318,8 @@ export const ingestTranscripts = (
                     edits: editCount,
                     toolCalls: toolCallCount,
                     planSnapshots: planSnapshotCount,
+                    hookEvents: hookEventCount,
+                    hookCommandInvocations: hookCommandInvocationCount,
                 };
                 if (opts.onProgress) yield* opts.onProgress(counts);
                 yield* Effect.logDebug("transcript ingest progress", {
@@ -974,6 +1337,8 @@ export const ingestTranscripts = (
             edits: editCount,
             toolCalls: toolCallCount,
             planSnapshots: planSnapshotCount,
+            hookEvents: hookEventCount,
+            hookCommandInvocations: hookCommandInvocationCount,
         });
         return {
             records: recordCount(),
@@ -984,6 +1349,8 @@ export const ingestTranscripts = (
             edits: editCount,
             toolCalls: toolCallCount,
             planSnapshots: planSnapshotCount,
+            hookEvents: hookEventCount,
+            hookCommandInvocations: hookCommandInvocationCount,
         };
     });
 

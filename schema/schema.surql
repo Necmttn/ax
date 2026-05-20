@@ -1035,6 +1035,86 @@ DEFINE FIELD decided_at ON skill_triage_decision TYPE datetime DEFAULT time::now
 DEFINE INDEX skill_triage_decision_name ON skill_triage_decision FIELDS skill_name UNIQUE;
 
 -- ---------------------------------------------------------------------------
+-- Native agent-harness hook evidence. These rows describe the harness layer
+-- itself (Claude/Codex lifecycle hooks), not ax's experimental recall hook.
+-- One Harness Hook Event may invoke multiple Hook Commands.
+-- ---------------------------------------------------------------------------
+DEFINE TABLE harness_hook_event SCHEMAFULL;
+DEFINE FIELD session         ON harness_hook_event TYPE record<session>;
+DEFINE FIELD ts              ON harness_hook_event TYPE datetime;
+DEFINE FIELD harness         ON harness_hook_event TYPE string;                 -- claude | codex
+DEFINE FIELD event_name      ON harness_hook_event TYPE string;                 -- PreToolUse | PostToolUse | SessionStart | ...
+DEFINE FIELD hook_name       ON harness_hook_event TYPE string;                 -- e.g. PreToolUse:Bash
+DEFINE FIELD tool_call_id    ON harness_hook_event TYPE option<string>;
+DEFINE FIELD tool_call       ON harness_hook_event TYPE option<record<tool_call>>;
+DEFINE FIELD cwd             ON harness_hook_event TYPE option<string>;
+DEFINE FIELD transcript_uuid ON harness_hook_event TYPE option<string>;
+DEFINE FIELD source_type     ON harness_hook_event TYPE string;                 -- hook_progress | hook_success | hook_blocking_error | hook_additional_context
+DEFINE INDEX harness_hook_event_by_ts      ON harness_hook_event FIELDS ts;
+DEFINE INDEX harness_hook_event_by_session ON harness_hook_event FIELDS session;
+DEFINE INDEX harness_hook_event_by_name    ON harness_hook_event FIELDS hook_name;
+DEFINE INDEX harness_hook_event_by_tool    ON harness_hook_event FIELDS tool_call;
+
+DEFINE TABLE hook_command_invocation SCHEMAFULL;
+DEFINE FIELD hook_event             ON hook_command_invocation TYPE record<harness_hook_event>;
+DEFINE FIELD session                ON hook_command_invocation TYPE record<session>;
+DEFINE FIELD ts                     ON hook_command_invocation TYPE datetime;
+DEFINE FIELD harness                ON hook_command_invocation TYPE string;      -- claude | codex
+DEFINE FIELD event_name             ON hook_command_invocation TYPE string;
+DEFINE FIELD hook_name              ON hook_command_invocation TYPE string;
+DEFINE FIELD tool_call_id           ON hook_command_invocation TYPE option<string>;
+DEFINE FIELD tool_call              ON hook_command_invocation TYPE option<record<tool_call>>;
+DEFINE FIELD command                ON hook_command_invocation TYPE string;
+DEFINE FIELD command_hash           ON hook_command_invocation TYPE string;
+DEFINE FIELD provider_status        ON hook_command_invocation TYPE string;      -- progress_only | success | blocking_error
+DEFINE FIELD effect                 ON hook_command_invocation TYPE string;      -- allowed | blocked | injected_context | modified_input | notified | no_op | unknown
+DEFINE FIELD exit_code              ON hook_command_invocation TYPE option<int>;
+DEFINE FIELD duration_ms            ON hook_command_invocation TYPE option<int>;
+DEFINE FIELD stdout_excerpt         ON hook_command_invocation TYPE option<string>;
+DEFINE FIELD stderr_excerpt         ON hook_command_invocation TYPE option<string>;
+DEFINE FIELD content_excerpt        ON hook_command_invocation TYPE option<string>;
+DEFINE FIELD blocking_error_excerpt ON hook_command_invocation TYPE option<string>;
+DEFINE INDEX hook_command_invocation_by_ts      ON hook_command_invocation FIELDS ts;
+DEFINE INDEX hook_command_invocation_by_session ON hook_command_invocation FIELDS session;
+DEFINE INDEX hook_command_invocation_by_event   ON hook_command_invocation FIELDS hook_event;
+DEFINE INDEX hook_command_invocation_by_command ON hook_command_invocation FIELDS command_hash;
+DEFINE INDEX hook_command_invocation_by_status  ON hook_command_invocation FIELDS provider_status;
+DEFINE INDEX hook_command_invocation_by_effect  ON hook_command_invocation FIELDS effect;
+
+-- ---------------------------------------------------------------------------
+-- Generic feedback case definitions and deterministic backtest results.
+-- Case types encode "what behavior should follow this evidence?" without
+-- creating hook-specific tables. Results are per evidence item/run.
+-- ---------------------------------------------------------------------------
+DEFINE TABLE feedback_case_type SCHEMAFULL;
+DEFINE FIELD name             ON feedback_case_type TYPE string;
+DEFINE FIELD title            ON feedback_case_type TYPE string;
+DEFINE FIELD target_kind      ON feedback_case_type TYPE string;                 -- hook_command_invocation | tool_call | session | ...
+DEFINE FIELD selector_json    ON feedback_case_type TYPE string;                 -- JSON-encoded selector
+DEFINE FIELD rule_kind        ON feedback_case_type TYPE string;                 -- deterministic | ai_review | hybrid
+DEFINE FIELD rule_json        ON feedback_case_type TYPE string;                 -- JSON-encoded rule
+DEFINE FIELD status           ON feedback_case_type TYPE string DEFAULT 'active'; -- active | paused | retired
+DEFINE FIELD created_at       ON feedback_case_type TYPE datetime DEFAULT time::now();
+DEFINE FIELD updated_at       ON feedback_case_type TYPE option<datetime>;
+DEFINE INDEX feedback_case_type_name ON feedback_case_type FIELDS name UNIQUE;
+DEFINE INDEX feedback_case_type_status ON feedback_case_type FIELDS status;
+
+DEFINE TABLE feedback_case_result SCHEMAFULL;
+DEFINE FIELD case_type        ON feedback_case_result TYPE record<feedback_case_type>;
+DEFINE FIELD target_kind      ON feedback_case_result TYPE string;
+DEFINE FIELD target           ON feedback_case_result TYPE option<record<hook_command_invocation>>;
+DEFINE FIELD session          ON feedback_case_result TYPE option<record<session>>;
+DEFINE FIELD ts               ON feedback_case_result TYPE datetime;
+DEFINE FIELD status           ON feedback_case_result TYPE string;               -- passed | failed | inconclusive
+DEFINE FIELD reason           ON feedback_case_result TYPE string;
+DEFINE FIELD window_json      ON feedback_case_result TYPE string;               -- JSON-encoded inspected window
+DEFINE FIELD evidence_json    ON feedback_case_result TYPE string;               -- JSON-encoded matched evidence
+DEFINE FIELD observed_at      ON feedback_case_result TYPE datetime DEFAULT time::now();
+DEFINE INDEX feedback_case_result_by_case ON feedback_case_result FIELDS case_type, observed_at;
+DEFINE INDEX feedback_case_result_by_status ON feedback_case_result FIELDS status;
+DEFINE INDEX feedback_case_result_by_session ON feedback_case_result FIELDS session;
+
+-- ---------------------------------------------------------------------------
 -- Hook-fire telemetry. Every `axctl hook file-context` decision (inject or
 -- skip) writes a row here. Codex transcripts replay-synthesize rows too.
 -- See docs/superpowers/specs/2026-05-17-hook-fire-telemetry-design.md.

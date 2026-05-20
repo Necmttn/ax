@@ -561,4 +561,164 @@ describe("Claude transcript extraction", () => {
             extracted.planSnapshots[1]?.items[0]?.key,
         );
     });
+
+    test("extracts native Claude hook events and command invocation outcomes", () => {
+        const extracted = __testExtractClaudeJsonlLines(
+            [
+                JSON.stringify({
+                    type: "assistant",
+                    timestamp: "2026-05-19T07:38:28.000Z",
+                    cwd: "/Users/necmttn/Projects/ax",
+                    message: {
+                        content: [
+                            {
+                                type: "tool_use",
+                                id: "toolu_edit",
+                                name: "Edit",
+                                input: { file_path: "src/a.ts" },
+                            },
+                        ],
+                    },
+                }),
+                JSON.stringify({
+                    type: "progress",
+                    data: {
+                        type: "hook_progress",
+                        hookEvent: "PreToolUse",
+                        hookName: "PreToolUse:Edit",
+                        command: "bash \"/Users/necmttn/.claude/hooks/block-em-dash.sh\"",
+                    },
+                    toolUseID: "toolu_edit",
+                    uuid: "progress-uuid",
+                    timestamp: "2026-05-19T07:38:28.100Z",
+                    cwd: "/Users/necmttn/Projects/ax",
+                }),
+                JSON.stringify({
+                    attachment: {
+                        type: "hook_success",
+                        hookName: "PreToolUse:Edit",
+                        toolUseID: "toolu_edit",
+                        hookEvent: "PreToolUse",
+                        stdout: "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\"}}",
+                        stderr: "",
+                        exitCode: 0,
+                        command: "bash \"/Users/necmttn/.claude/hooks/block-em-dash.sh\"",
+                        durationMs: 34,
+                    },
+                    type: "attachment",
+                    uuid: "success-uuid",
+                    timestamp: "2026-05-19T07:38:28.170Z",
+                    cwd: "/Users/necmttn/Projects/ax",
+                }),
+                JSON.stringify({
+                    attachment: {
+                        type: "hook_success",
+                        hookName: "PreToolUse:Edit",
+                        toolUseID: "toolu_edit",
+                        hookEvent: "PreToolUse",
+                        stdout: "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"<ax_file_memory>...</ax_file_memory>\"}}",
+                        stderr: "",
+                        exitCode: 0,
+                        command: "axctl hook file-context --format claude",
+                        durationMs: 198,
+                    },
+                    type: "attachment",
+                    uuid: "context-uuid",
+                    timestamp: "2026-05-19T07:38:28.334Z",
+                    cwd: "/Users/necmttn/Projects/ax",
+                }),
+                JSON.stringify({
+                    attachment: {
+                        type: "hook_additional_context",
+                        content: ["<ax_file_memory>...</ax_file_memory>"],
+                        hookName: "PreToolUse:Edit",
+                        toolUseID: "toolu_edit",
+                        hookEvent: "PreToolUse",
+                    },
+                    type: "attachment",
+                    uuid: "additional-context-uuid",
+                    timestamp: "2026-05-19T07:38:28.334Z",
+                    cwd: "/Users/necmttn/Projects/ax",
+                }),
+                JSON.stringify({
+                    attachment: {
+                        type: "hook_blocking_error",
+                        hookName: "PostToolUse:Edit",
+                        toolUseID: "toolu_edit",
+                        hookEvent: "PostToolUse",
+                        blockingError: {
+                            command: "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/oxlint-file.sh\"",
+                            blockingError: "Found 1 warning and 0 errors.",
+                        },
+                    },
+                    type: "attachment",
+                    uuid: "blocking-uuid",
+                    timestamp: "2026-05-19T07:38:29.000Z",
+                    cwd: "/Users/necmttn/Projects/ax",
+                }),
+            ],
+            "-Users-necmttn-Projects-ax",
+            "claude-hook-session",
+        );
+
+        expect(extracted).not.toBeNull();
+        if (!extracted) return;
+
+        expect(extracted.hookEvents.map((event) => ({
+            event_name: event.event_name,
+            hook_name: event.hook_name,
+            tool_call_id: event.tool_call_id,
+            tool_call_key: event.tool_call_key,
+        }))).toEqual([
+            {
+                event_name: "PreToolUse",
+                hook_name: "PreToolUse:Edit",
+                tool_call_id: "toolu_edit",
+                tool_call_key: toolCallRecordKey({
+                    sessionId: "claude-hook-session",
+                    seq: 1,
+                    callId: "toolu_edit",
+                }),
+            },
+            {
+                event_name: "PostToolUse",
+                hook_name: "PostToolUse:Edit",
+                tool_call_id: "toolu_edit",
+                tool_call_key: toolCallRecordKey({
+                    sessionId: "claude-hook-session",
+                    seq: 1,
+                    callId: "toolu_edit",
+                }),
+            },
+        ]);
+        expect(extracted.hookCommandInvocations.map((invocation) => ({
+            command: invocation.command,
+            provider_status: invocation.provider_status,
+            effect: invocation.effect,
+            duration_ms: invocation.duration_ms,
+            blocking_error_excerpt: invocation.blocking_error_excerpt,
+        }))).toEqual([
+            {
+                command: "bash \"/Users/necmttn/.claude/hooks/block-em-dash.sh\"",
+                provider_status: "success",
+                effect: "allowed",
+                duration_ms: 34,
+                blocking_error_excerpt: null,
+            },
+            {
+                command: "axctl hook file-context --format claude",
+                provider_status: "success",
+                effect: "injected_context",
+                duration_ms: 198,
+                blocking_error_excerpt: null,
+            },
+            {
+                command: "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/oxlint-file.sh\"",
+                provider_status: "blocking_error",
+                effect: "blocked",
+                duration_ms: null,
+                blocking_error_excerpt: "Found 1 warning and 0 errors.",
+            },
+        ]);
+    });
 });

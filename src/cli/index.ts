@@ -47,6 +47,17 @@ import {
 import { recordHookFire } from "../hooks/telemetry.ts";
 import type { TelemetryHarness } from "../lib/telemetry-base.ts";
 import { formatHookLogRowsTsv, queryHookLog } from "../hooks/log.ts";
+import {
+    formatHookInvocationRows,
+    formatHookSummaryRows,
+    queryHookInvocations,
+    queryHookSession,
+    queryHookSummary,
+} from "../queries/hooks.ts";
+import {
+    backtestEnforceWorktreeCase,
+    formatFeedbackBacktestSummary,
+} from "../queries/feedback-cases.ts";
 import { guidanceNext, parseSelfImproveArgs, selfImproveWeekly, sessionSummary } from "../self-improve/commands.ts";
 import {
     buildIngestEventStatement,
@@ -1897,6 +1908,109 @@ const hookCommand = Command.make("hook").pipe(
     Command.withSubcommands([hookFileContextCommand, hookLogCommand]),
 );
 
+const hooksSummaryCommand = Command.make(
+    "summary",
+    {
+        since: Flag.integer("since").pipe(Flag.optional),
+        tail: Flag.integer("tail").pipe(Flag.withDefault(20)),
+        command: Flag.string("command").pipe(Flag.optional),
+        json: jsonFlag,
+    },
+    ({ since, tail, command, json }) =>
+        Effect.gen(function* () {
+            const rows = yield* queryHookSummary({
+                sinceDays: optionValue(since),
+                tail,
+                command: optionValue(command),
+            });
+            if (json) {
+                console.log(prettyPrint(rows));
+                return;
+            }
+            console.log(formatHookSummaryRows(rows));
+        }),
+).pipe(Command.withDescription("Summarize native harness hook command invocations"));
+
+const hooksInvocationsCommand = Command.make(
+    "invocations",
+    {
+        since: Flag.integer("since").pipe(Flag.optional),
+        tail: Flag.integer("tail").pipe(Flag.withDefault(50)),
+        command: Flag.string("command").pipe(Flag.optional),
+        json: jsonFlag,
+    },
+    ({ since, tail, command, json }) =>
+        Effect.gen(function* () {
+            const rows = yield* queryHookInvocations({
+                sinceDays: optionValue(since),
+                tail,
+                command: optionValue(command),
+            });
+            if (json) {
+                console.log(prettyPrint(rows));
+                return;
+            }
+            console.log(formatHookInvocationRows(rows));
+        }),
+).pipe(Command.withDescription("List native harness hook command invocations"));
+
+const hooksSessionCommand = Command.make(
+    "session",
+    {
+        sessionId: Argument.string("session-id"),
+        json: jsonFlag,
+    },
+    ({ sessionId, json }) =>
+        Effect.gen(function* () {
+            const rows = yield* queryHookSession(sessionId);
+            if (json) {
+                console.log(prettyPrint(rows));
+                return;
+            }
+            console.log(formatHookInvocationRows(rows));
+        }),
+).pipe(Command.withDescription("List native harness hook command invocations for one session"));
+
+const hooksBacktestCase = Argument.choice("case", ["enforce-worktree"] as const).pipe(
+    Argument.withDefault("enforce-worktree"),
+);
+
+const hooksBacktestCommand = Command.make(
+    "backtest",
+    {
+        caseName: hooksBacktestCase,
+        since: Flag.integer("since").pipe(Flag.optional),
+        tail: Flag.integer("tail").pipe(Flag.withDefault(100)),
+        window: Flag.integer("window").pipe(Flag.withDefault(3)),
+        noPersist: Flag.boolean("no-persist"),
+        json: jsonFlag,
+    },
+    ({ since, tail, window, noPersist, json }) =>
+        Effect.gen(function* () {
+            const summary = yield* backtestEnforceWorktreeCase({
+                sinceDays: optionValue(since),
+                tail,
+                window,
+                persist: !noPersist,
+            });
+            if (json) {
+                console.log(prettyPrint(summary));
+                return;
+            }
+            console.log(formatFeedbackBacktestSummary(summary));
+        }),
+).pipe(Command.withDescription("Run deterministic feedback-case backtests for hook evidence"));
+
+const hooksCommand = Command.make("hooks").pipe(
+    Command.withDescription("Inspect native Claude/Codex harness hook evidence"),
+    Command.withSubcommands([
+        hooksSummaryCommand,
+        hooksInvocationsCommand,
+        hooksSessionCommand,
+        hooksBacktestCommand,
+    ]),
+);
+
 const jsonSelfImprove = (cmd: "guidance" | "session" | "self-improve", rest: string[]) => {
     const parsed = parseSelfImproveArgs(cmd, rest);
     const effect =
@@ -2027,6 +2141,7 @@ export const rootCommand = Command.make("axctl").pipe(
         skillsCommand,
         contextCommand,
         hookCommand,
+        hooksCommand,
         projectCommand,
         evidenceCommand,
         versionCommand,
@@ -2094,6 +2209,7 @@ export const DB_COMMANDS: ReadonlySet<string> = new Set([
     "project",
     "context",
     "hook",
+    "hooks",
     "evidence",
     "tui",
     "dogfood",
