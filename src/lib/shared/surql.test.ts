@@ -33,6 +33,13 @@ describe("surrealString", () => {
         expect(JSON.parse(out)).toBe("idea 💡 done");
     });
 
+    test("nullish input coerces to an empty-string literal", () => {
+        // DB-sourced rows hand back undefined/null where a string was
+        // declared; surrealString must not throw on them.
+        expect(surrealString(undefined as unknown as string)).toBe('""');
+        expect(surrealString(null as unknown as string)).toBe('""');
+    });
+
     test("crash-input shape produces parser-safe output", () => {
         // Reconstructs the shape from the SurrealDB parse error:
         // an excerpt ending in `## ` followed by a lone high surrogate.

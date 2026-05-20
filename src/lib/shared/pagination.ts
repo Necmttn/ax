@@ -22,8 +22,8 @@ export interface PaginationConfig {
 }
 
 export interface PaginationParams {
-    readonly offset?: number;
-    readonly limit?: number;
+    readonly offset?: number | undefined;
+    readonly limit?: number | undefined;
 }
 
 export interface ClampedPagination {

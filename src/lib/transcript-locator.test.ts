@@ -122,15 +122,15 @@ describe("locateTranscript (with DB hint)", () => {
         const eff = locateTranscript(bogus).pipe(
             Effect.provide(Layer.succeed(SurrealClient, fakeLocatorClient(null))),
         );
-        try {
-            await Effect.runPromise(eff);
-            throw new Error("expected to throw");
-        } catch (err) {
-            // Effect wraps errors in a FiberFailure-ish shell; the inner cause
-            // should expose TranscriptNotFoundError properties.
-            const message = err instanceof Error ? err.message : String(err);
-            expect(message).toContain(bogus);
-            expect(message).toContain("session transcript not found");
-        }
+        const exit = await Effect.runPromise(Effect.exit(eff));
+        expect(exit._tag).toBe("Failure");
+        const failure = await Effect.runPromise(
+            eff.pipe(Effect.flip, Effect.orElseSucceed(() => null)),
+        );
+        expect(failure).toBeInstanceOf(TranscriptNotFoundError);
+        expect((failure as TranscriptNotFoundError).sessionId).toBe(bogus);
+        expect((failure as TranscriptNotFoundError).message).toContain(
+            "session transcript not found",
+        );
     });
 });
