@@ -5,6 +5,7 @@ import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
 import { recordRef } from "./evidence-writers.ts";
 import { surrealDate, surrealJsonTextOption, surrealObject, surrealOptionDate, surrealOptionRecord, surrealOptionString, surrealString } from "../lib/shared/surql.ts";
+import { executeStatementsWith } from "../lib/shared/statement-exec.ts";
 
 /**
  * Negation patterns that signal a user pushed back on the previous assistant
@@ -885,9 +886,7 @@ const upsertCorrections = (edges: CorrectionEdge[]) =>
             const edgeId = correctedByEdgeId(e.fromTurnKey, e.toTurnKey);
             return `RELATE turn:\`${e.fromTurnKey}\` -> corrected_by:\`${edgeId}\` -> turn:\`${e.toTurnKey}\` SET pattern = ${surrealString(e.pattern)}, ts = d"${e.ts}";`;
         });
-        for (let i = 0; i < stmts.length; i += 500) {
-            yield* db.query(stmts.slice(i, i + 500).join(""));
-        }
+        yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
     });
 
 /**
@@ -927,9 +926,7 @@ const markWasCorrected = (edges: CorrectionEdge[]) =>
             (turnKey) =>
                 `UPDATE invoked SET was_corrected = true WHERE in = turn:\`${turnKey}\` RETURN NONE;`,
         );
-        for (let i = 0; i < stmts.length; i += 500) {
-            yield* db.query(stmts.slice(i, i + 500).join(""));
-        }
+        yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
     });
 
 const upsertProposed = (edges: ProposedEdge[]) =>
@@ -940,9 +937,7 @@ const upsertProposed = (edges: ProposedEdge[]) =>
             const edgeId = proposedEdgeId(e.fromTurnKey, e.skillKey);
             return `RELATE turn:\`${e.fromTurnKey}\` -> proposed:\`${edgeId}\` -> skill:\`${e.skillKey}\` SET ts = d"${e.ts}", context_excerpt = ${surrealString(e.contextExcerpt)};`;
         });
-        for (let i = 0; i < stmts.length; i += 500) {
-            yield* db.query(stmts.slice(i, i + 500).join(""));
-        }
+        yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
     });
 
 /**
@@ -959,9 +954,7 @@ const upsertSkillPairs = (pairs: SkillPairAccum[], edgeIds: string[]) =>
             const edgeId = edgeIds[i];
             return `RELATE skill:\`${p.fromKey}\` -> skill_paired:\`${edgeId}\` -> skill:\`${p.toKey}\` SET count = ${p.count}, last_seen = d"${p.lastSeen}";`;
         });
-        for (let i = 0; i < stmts.length; i += 500) {
-            yield* db.query(stmts.slice(i, i + 500).join(""));
-        }
+        yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
     });
 
 const upsertRecovered = (edges: RecoveryEdge[]) =>
@@ -974,9 +967,7 @@ const upsertRecovered = (edges: RecoveryEdge[]) =>
                 e.errorExcerpt == null ? "NONE" : surrealString(e.errorExcerpt);
             return `RELATE turn:\`${e.fromTurnKey}\` -> recovered_by:\`${edgeId}\` -> skill:\`${e.skillKey}\` SET ts = d"${e.ts}", error_excerpt = ${excerpt};`;
         });
-        for (let i = 0; i < stmts.length; i += 500) {
-            yield* db.query(stmts.slice(i, i + 500).join(""));
-        }
+        yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
     });
 
 const upsertFrictionEvents = (events: readonly DerivedFrictionEvent[]) =>
@@ -996,9 +987,7 @@ const upsertFrictionEvents = (events: readonly DerivedFrictionEvent[]) =>
                     ["ts", surrealDate(event.ts)],
                 ])};`,
         );
-        for (let i = 0; i < stmts.length; i += 500) {
-            yield* db.query(stmts.slice(i, i + 500).join(""));
-        }
+        yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
     });
 
 const upsertDiagnosticEvents = (events: readonly DerivedDiagnosticEvent[]) =>
@@ -1019,9 +1008,7 @@ const upsertDiagnosticEvents = (events: readonly DerivedDiagnosticEvent[]) =>
                     ["ts", surrealDate(event.ts)],
                 ])};`,
         );
-        for (let i = 0; i < stmts.length; i += 500) {
-            yield* db.query(stmts.slice(i, i + 500).join(""));
-        }
+        yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
     });
 
 const upsertRecommendations = (recommendations: readonly DerivedRecommendation[]) =>
@@ -1042,9 +1029,7 @@ const upsertRecommendations = (recommendations: readonly DerivedRecommendation[]
                     ["updated_at", surrealOptionDate(recommendation.updatedAt)],
                 ])};`,
         );
-        for (let i = 0; i < stmts.length; i += 500) {
-            yield* db.query(stmts.slice(i, i + 500).join(""));
-        }
+        yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
     });
 
 export interface DeriveStats {
