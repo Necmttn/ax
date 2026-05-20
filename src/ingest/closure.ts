@@ -4,6 +4,7 @@ import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
 import { recordRef } from "./evidence-writers.ts";
 import { surrealDate, surrealJsonOption, surrealObject, surrealOptionString, surrealString } from "../lib/shared/surql.ts";
+import { executeStatementsWith } from "../lib/shared/statement-exec.ts";
 
 type TimestampInput = Date | string | { readonly constructor: { readonly name: string }; toString(): string };
 
@@ -328,9 +329,7 @@ FROM session_health;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
             ...rows.skillCandidates.flatMap(skillCandidateStatements),
         ];
         yield* db.query("DELETE later_fixed_by;DELETE suggests_skill;DELETE skill_candidate;DELETE commit_classification;");
-        for (let i = 0; i < statements.length; i += 500) {
-            yield* db.query(statements.slice(i, i + 500).join(""));
-        }
+        yield* executeStatementsWith(db, statements, { chunkSize: 500 });
         return {
             commitClassifications: rows.classifications.length,
             fixChains: rows.fixChains.length,
