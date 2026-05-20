@@ -20,6 +20,11 @@
  * (sessionFilterClause), because IN (SELECT ...) over the 600k-row
  * invoked table tanks perf (we hit this for episodes in R16-A).
  */
+import { defineQuery } from "./query.ts";
+import { isRecord, stringField, dateField, recordIdString } from "../lib/shared/row-fields.ts";
+import { toBareSessionId } from "../lib/shared/session-id.ts";
+import type { RecallHit } from "../lib/shared/dashboard-types.ts";
+
 export const RECALL_TURNS_SQL = (sessionFilterClause: string): string => `
 SELECT
     id,
@@ -57,3 +62,50 @@ FROM invoked
 WHERE out.name = $skill
 GROUP ALL
 LIMIT 1;`;
+
+// ---------------------------------------------------------------------------
+// Typed Query seam
+// ---------------------------------------------------------------------------
+
+export interface RecallTurnsParams {
+    readonly q: string;
+    readonly project: string | null;
+    readonly since: string | null;
+    readonly offset: number;
+    readonly limit: number;
+    readonly sessionFilterClause: string;
+}
+
+const truncate = (s: string, n: number): string =>
+    s.length <= n ? s : `${s.slice(0, n - 1)}…`;
+
+export const recallTurnsQuery = defineQuery<
+    RecallTurnsParams,
+    Record<string, unknown>,
+    RecallHit | null
+>({
+    name: "recall.turns",
+    sql: (p) => RECALL_TURNS_SQL(p.sessionFilterClause),
+    bindings: (p) => ({
+        q: p.q,
+        project: p.project,
+        since: p.since,
+        offset: p.offset,
+        limit: p.limit,
+    }),
+    mapRow: (raw) => {
+        if (!isRecord(raw)) return null;
+        const session = recordIdString(raw.session);
+        if (!session) return null;
+        const text = stringField(raw, "text_excerpt") ?? "";
+        return {
+            turn_id: recordIdString(raw.id) ?? "",
+            session_id: toBareSessionId(session),
+            project: stringField(raw, "project"),
+            source: stringField(raw, "source"),
+            role: stringField(raw, "role"),
+            ts: dateField(raw, "ts"),
+            snippet: truncate(text, 240),
+        };
+    },
+});

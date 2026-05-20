@@ -4,42 +4,12 @@ import type { DbError } from "../lib/errors.ts";
 import {
     RECALL_COUNT_SQL,
     RECALL_SESSIONS_FOR_SKILL_SQL,
-    RECALL_TURNS_SQL,
+    recallTurnsQuery,
 } from "../queries/recall.ts";
 import type { RecallHit, RecallResponse } from "../lib/shared/dashboard-types.ts";
 import { clampPagination, type PaginationConfig } from "../lib/shared/pagination.ts";
-import { toBareSessionId } from "../lib/shared/session-id.ts";
-
-const isRecord = (v: unknown): v is Record<string, unknown> =>
-    typeof v === "object" && v !== null && !Array.isArray(v);
-
-const stringField = (row: Record<string, unknown>, key: string): string | null => {
-    const v = row[key];
-    return typeof v === "string" && v.length > 0 ? v : null;
-};
-
-const dateField = (row: Record<string, unknown>, key: string): string | null => {
-    const v = row[key];
-    if (typeof v === "string" && v.length > 0) return v;
-    if (v instanceof Date && !Number.isNaN(v.getTime())) return v.toISOString();
-    if (v && typeof v === "object" && "toJSON" in v) {
-        const j = (v as { toJSON: () => unknown }).toJSON();
-        if (typeof j === "string" && j.length > 0) return j;
-    }
-    return null;
-};
-
-const recordIdString = (v: unknown): string | null => {
-    if (typeof v === "string" && v.length > 0) return v;
-    if (v && typeof v === "object" && "toString" in v) {
-        const s = String(v);
-        return s.length > 0 ? s : null;
-    }
-    return null;
-};
-
-const truncate = (s: string, n: number): string =>
-    s.length <= n ? s : `${s.slice(0, n - 1)}…`;
+import { isRecord, recordIdString } from "../lib/shared/row-fields.ts";
+import { runQuery } from "../lib/shared/graph-query.ts";
 
 const RECALL_PAGINATION: PaginationConfig = { defaultLimit: 50, maxLimit: 200 };
 
@@ -108,12 +78,16 @@ export const fetchRecall = (
         // Run page + count concurrently. Count is independent of offset/limit
         // and uses the same WHERE filter set, so the answer is stable across
         // pages of the same query.
-        const [pageRows, countRows] = yield* Effect.all(
+        const [mapped, countRows] = yield* Effect.all(
             [
-                db.query<[Array<Record<string, unknown>>]>(
-                    RECALL_TURNS_SQL(sessionFilterClause),
-                    { ...baseBindings, offset, limit },
-                ),
+                runQuery(recallTurnsQuery, {
+                    q,
+                    project: baseBindings.project as string | null,
+                    since: baseBindings.since as string | null,
+                    offset,
+                    limit,
+                    sessionFilterClause,
+                }),
                 db.query<[Array<Record<string, unknown>>]>(
                     RECALL_COUNT_SQL(sessionFilterClause),
                     baseBindings,
@@ -121,24 +95,7 @@ export const fetchRecall = (
             ],
             { concurrency: "unbounded" },
         );
-
-        const hits: RecallHit[] = [];
-        for (const raw of pageRows?.[0] ?? []) {
-            if (!isRecord(raw)) continue;
-            const session = recordIdString(raw.session);
-            if (!session) continue;
-            const text = stringField(raw, "text_excerpt") ?? "";
-            hits.push({
-                turn_id: recordIdString(raw.id) ?? "",
-                // Bare session id over the HTTP seam; see src/lib/shared/session-id.ts.
-                session_id: toBareSessionId(session),
-                project: stringField(raw, "project"),
-                source: stringField(raw, "source"),
-                role: stringField(raw, "role"),
-                ts: dateField(raw, "ts"),
-                snippet: truncate(text, 240),
-            });
-        }
+        const hits: RecallHit[] = mapped.filter((h): h is RecallHit => h !== null);
 
         const countRow = countRows?.[0]?.[0];
         const totalFromCount = isRecord(countRow)
