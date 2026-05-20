@@ -15,7 +15,7 @@ import type {
     StackSignal,
 } from "../project/types.ts";
 import { recordRef } from "./evidence-writers.ts";
-import { surrealJsonOption, surrealString } from "../lib/shared/surql.ts";
+import { surrealDate, surrealJsonOption, surrealObject, surrealOptionString, surrealString } from "../lib/shared/surql.ts";
 
 export interface HarnessIngestStats {
     readonly guidanceSources: number;
@@ -27,19 +27,7 @@ export interface HarnessIngestStats {
     readonly interventionObservations: number;
 }
 
-const sqlString = surrealString;
-
-const sqlOptionString = (value: string | null | undefined): string =>
-    value === null || value === undefined ? "NONE" : sqlString(value);
-
-const sqlJsonOption = surrealJsonOption;
-
-const sqlDate = (value: string): string => `d${JSON.stringify(value)}`;
-
 const sqlBool = (value: boolean): string => value ? "true" : "false";
-
-const sqlObject = (fields: readonly (readonly [string, string])[]): string =>
-    `{ ${fields.map(([name, value]) => `${name}: ${value}`).join(", ")} }`;
 
 const safeKeyPart = (value: string): string => {
     const sanitized = value
@@ -72,79 +60,79 @@ export const interventionObservationKey = (observation: Pick<InterventionObserva
     `${safeKeyPart(observation.target)}__${Bun.hash(`${observation.target}:${observedAt}`).toString(16).slice(0, 16)}`;
 
 function guidanceSourceStatement(source: GuidanceSource): string {
-    return `UPSERT ${recordRef("guidance_source", guidanceSourceKey(source))} MERGE ${sqlObject([
-        ["path", sqlString(source.path)],
-        ["kind", sqlString(source.kind)],
-        ["scope", sqlString(source.scope)],
-        ["provider", sqlString(source.provider)],
-        ["evidence_strength", sqlString(source.evidenceStrength)],
-        ["git_root", sqlOptionString(source.gitRoot)],
+    return `UPSERT ${recordRef("guidance_source", guidanceSourceKey(source))} MERGE ${surrealObject([
+        ["path", surrealString(source.path)],
+        ["kind", surrealString(source.kind)],
+        ["scope", surrealString(source.scope)],
+        ["provider", surrealString(source.provider)],
+        ["evidence_strength", surrealString(source.evidenceStrength)],
+        ["git_root", surrealOptionString(source.gitRoot)],
         ["tracked", sqlBool(source.tracked)],
         ["observed_at", "time::now()"],
     ])};`;
 }
 
 function guidanceRevisionStatement(revision: GuidanceRevision): string {
-    return `UPSERT ${recordRef("guidance_revision", guidanceRevisionKey(revision))} MERGE ${sqlObject([
+    return `UPSERT ${recordRef("guidance_revision", guidanceRevisionKey(revision))} MERGE ${surrealObject([
         ["source", recordRef("guidance_source", guidanceSourceKey({ path: revision.sourcePath }))],
-        ["source_path", sqlString(revision.sourcePath)],
-        ["scope", sqlString(revision.scope)],
-        ["content_hash", sqlString(revision.contentHash)],
-        ["evidence_strength", sqlString(revision.evidenceStrength)],
-        ["commit_evidence", sqlOptionString(revision.commitEvidence)],
-        ["file_evidence", sqlOptionString(revision.fileEvidence)],
-        ["observed_at", sqlDate(revision.observedAt)],
+        ["source_path", surrealString(revision.sourcePath)],
+        ["scope", surrealString(revision.scope)],
+        ["content_hash", surrealString(revision.contentHash)],
+        ["evidence_strength", surrealString(revision.evidenceStrength)],
+        ["commit_evidence", surrealOptionString(revision.commitEvidence)],
+        ["file_evidence", surrealOptionString(revision.fileEvidence)],
+        ["observed_at", surrealDate(revision.observedAt)],
     ])};`;
 }
 
 function stackStatement(signal: StackSignal): string {
-    return `UPSERT ${recordRef("stack", stackKey(signal))} MERGE ${sqlObject([
-        ["name", sqlString(signal.name)],
+    return `UPSERT ${recordRef("stack", stackKey(signal))} MERGE ${surrealObject([
+        ["name", surrealString(signal.name)],
         ["aliases", "NONE"],
-        ["labels", sqlJsonOption({ confidence: signal.confidence, evidence: signal.evidence })],
+        ["labels", surrealJsonOption({ confidence: signal.confidence, evidence: signal.evidence })],
         ["updated_at", "time::now()"],
     ])};`;
 }
 
 function agentToolingStatement(tool: AgentToolingSignal): string {
-    return `UPSERT ${recordRef("agent_tooling", agentToolingKey(tool))} MERGE ${sqlObject([
-        ["name", sqlString(tool.name)],
-        ["layer", sqlString(tool.layer)],
-        ["source", sqlString(tool.source)],
-        ["evidence", sqlOptionString(tool.evidence)],
+    return `UPSERT ${recordRef("agent_tooling", agentToolingKey(tool))} MERGE ${surrealObject([
+        ["name", surrealString(tool.name)],
+        ["layer", surrealString(tool.layer)],
+        ["source", surrealString(tool.source)],
+        ["evidence", surrealOptionString(tool.evidence)],
         ["labels", "NONE"],
         ["updated_at", "time::now()"],
     ])};`;
 }
 
 function harnessLearningStatement(learning: HarnessLearningCandidate): string {
-    return `UPSERT ${recordRef("harness_learning", harnessLearningKey(learning))} MERGE ${sqlObject([
-        ["title", sqlString(learning.title)],
-        ["status", sqlString("local")],
-        ["problem", sqlString(learning.problem)],
-        ["pattern", sqlString(learning.pattern)],
-        ["harness_layer", sqlString(learning.harnessLayer)],
-        ["applicability", sqlJsonOption(learning.appliesWhen)],
-        ["counterconditions", sqlJsonOption(learning.avoidWhen)],
-        ["evidence_summary", sqlJsonOption(learning.evidenceSummary)],
+    return `UPSERT ${recordRef("harness_learning", harnessLearningKey(learning))} MERGE ${surrealObject([
+        ["title", surrealString(learning.title)],
+        ["status", surrealString("local")],
+        ["problem", surrealString(learning.problem)],
+        ["pattern", surrealString(learning.pattern)],
+        ["harness_layer", surrealString(learning.harnessLayer)],
+        ["applicability", surrealJsonOption(learning.appliesWhen)],
+        ["counterconditions", surrealJsonOption(learning.avoidWhen)],
+        ["evidence_summary", surrealJsonOption(learning.evidenceSummary)],
         ["observed_effect", "NONE"],
         ["side_effects", "NONE"],
-        ["confidence", sqlString(learning.confidence)],
-        ["privacy_level", sqlString("local")],
-        ["suggested_intervention", sqlOptionString(learning.suggestedIntervention)],
-        ["risk", sqlJsonOption(learning.risk)],
+        ["confidence", surrealString(learning.confidence)],
+        ["privacy_level", surrealString("local")],
+        ["suggested_intervention", surrealOptionString(learning.suggestedIntervention)],
+        ["risk", surrealJsonOption(learning.risk)],
         ["updated_at", "time::now()"],
     ])};`;
 }
 
 function interventionStatement(intervention: InterventionSuggestion): string {
-    return `UPSERT ${recordRef("intervention", interventionKey(intervention))} MERGE ${sqlObject([
-        ["title", sqlString(intervention.title)],
-        ["status", sqlString("suggested")],
-        ["strength", sqlString(intervention.strength)],
+    return `UPSERT ${recordRef("intervention", interventionKey(intervention))} MERGE ${surrealObject([
+        ["title", surrealString(intervention.title)],
+        ["status", surrealString("suggested")],
+        ["strength", surrealString(intervention.strength)],
         ["risk", "NONE"],
-        ["expected_effect", sqlOptionString(intervention.expectedEffect)],
-        ["review_criteria", sqlJsonOption(intervention.reviewCriteria)],
+        ["expected_effect", surrealOptionString(intervention.expectedEffect)],
+        ["review_criteria", surrealJsonOption(intervention.reviewCriteria)],
         ["approval_required", sqlBool(intervention.approvalRequired)],
         ["updated_at", "time::now()"],
     ])};`;
@@ -155,15 +143,15 @@ function interventionObservationStatement(
     intervention: InterventionSuggestion | undefined,
     observedAt: string,
 ): string {
-    return `UPSERT ${recordRef("intervention_observation", interventionObservationKey(observation, observedAt))} MERGE ${sqlObject([
+    return `UPSERT ${recordRef("intervention_observation", interventionObservationKey(observation, observedAt))} MERGE ${surrealObject([
         ["intervention", intervention ? recordRef("intervention", interventionKey(intervention)) : "NONE"],
-        ["target", sqlString(observation.target)],
-        ["status", sqlString(observation.status)],
-        ["metrics_before", sqlJsonOption(observation.before)],
-        ["metrics_after", sqlJsonOption(observation.after)],
-        ["metrics", sqlJsonOption(observation.metrics)],
-        ["notes", sqlJsonOption(observation.notes)],
-        ["observed_at", sqlDate(observedAt)],
+        ["target", surrealString(observation.target)],
+        ["status", surrealString(observation.status)],
+        ["metrics_before", surrealJsonOption(observation.before)],
+        ["metrics_after", surrealJsonOption(observation.after)],
+        ["metrics", surrealJsonOption(observation.metrics)],
+        ["notes", surrealJsonOption(observation.notes)],
+        ["observed_at", surrealDate(observedAt)],
     ])};`;
 }
 
