@@ -529,6 +529,13 @@ DEFINE FIELD estimated_tokens ON session_health TYPE int DEFAULT 0;
 DEFINE FIELD cache_read_ratio ON session_health TYPE option<float>;
 DEFINE FIELD cache_creation_ratio ON session_health TYPE option<float>;
 DEFINE FIELD context_pressure ON session_health TYPE string DEFAULT 'unknown';
+-- Precomputed attention metrics for the graph-explorer endpoint (issue #77).
+-- task_label: first organic-task user turn excerpt; turn counts by role/intent.
+-- Derived from turns once per ingest so the dashboard avoids per-row turn scans.
+DEFINE FIELD task_label    ON session_health TYPE option<string>;
+DEFINE FIELD user_turns    ON session_health TYPE int DEFAULT 0;
+DEFINE FIELD assistant_turns ON session_health TYPE int DEFAULT 0;
+DEFINE FIELD correction_turns ON session_health TYPE int DEFAULT 0;
 DEFINE FIELD labels        ON session_health TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD metrics       ON session_health TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD ts            ON session_health TYPE datetime DEFAULT time::now();
