@@ -8,6 +8,7 @@ import type { DbError } from "../lib/errors.ts";
 import { AppLayer } from "../lib/layers.ts";
 import { recordRef } from "./evidence-writers.ts";
 import { surrealJsonOption, surrealObject, surrealOptionDate, surrealOptionString, surrealString } from "../lib/shared/surql.ts";
+import { executeStatements } from "../lib/shared/statement-exec.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -55,8 +56,6 @@ export interface LegacySelfImproveIngestStats {
 interface LegacySelfImproveIngestOpts {
     readonly rootDir: string | undefined;
 }
-
-const STATEMENT_CHUNK_SIZE = 250;
 
 const sqlFloatOption = (value: number | null | undefined): string =>
     value === null || value === undefined || !Number.isFinite(value) ? "NONE" : String(value);
@@ -513,13 +512,7 @@ export function buildLegacySelfImproveStatements(
 const queryStatements = (
     statements: readonly string[],
 ): Effect.Effect<void, DbError, SurrealClient> =>
-    Effect.gen(function* () {
-        if (statements.length === 0) return;
-        const db = yield* SurrealClient;
-        for (let i = 0; i < statements.length; i += STATEMENT_CHUNK_SIZE) {
-            yield* db.query(statements.slice(i, i + STATEMENT_CHUNK_SIZE).join(""));
-        }
-    });
+    executeStatements(statements);
 
 export const ingestLegacySelfImprove = (
     opts: Partial<LegacySelfImproveIngestOpts> = {},
