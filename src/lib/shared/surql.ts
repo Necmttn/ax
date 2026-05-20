@@ -62,3 +62,107 @@ export const surrealJson = (value: unknown): string =>
  */
 export const surrealJsonOption = (value: unknown): string =>
     value === null || value === undefined ? "NONE" : surrealJson(value);
+
+/**
+ * Escape a string for safe use inside a backtick-quoted SurrealQL record key.
+ * Mirrors the escaping `evidence-writers.ts` used before this seam existed.
+ */
+export const surrealRecordKey = (key: string): string =>
+    key
+        .replace(/\\/g, "\\\\")
+        .replace(/`/g, "\\`")
+        .replace(/\n/g, "\\n")
+        .replace(/\r/g, "\\r")
+        .replace(/\t/g, "\\t");
+
+/** A SurrealQL record reference: `table:`key``. The single way to splice a
+ *  record id built from an arbitrary key string into a statement. */
+export const recordRef = (table: string, key: string): string =>
+    `${table}:\`${surrealRecordKey(key)}\``;
+
+/** A SurrealQL datetime literal (`d"ISO"`). Accepts a Date or a pre-formed
+ *  ISO string. */
+export const surrealDate = (value: Date | string): string => {
+    const iso = value instanceof Date ? value.toISOString() : value;
+    return `d${JSON.stringify(iso)}`;
+};
+
+/** `{ name: value, ... }` - values must already be SurrealQL literals. */
+export const surrealObject = (
+    fields: readonly (readonly [string, string])[],
+): string => `{ ${fields.map(([n, v]) => `${n}: ${v}`).join(", ")} }`;
+
+/** `name = value, ...` - values must already be SurrealQL literals. */
+export const surrealSet = (
+    fields: readonly (readonly [string, string])[],
+): string => fields.map(([n, v]) => `${n} = ${v}`).join(", ");
+
+/** `surrealString` or the SurrealQL keyword `NONE` for nullish input. */
+export const surrealOptionString = (value: string | null | undefined): string =>
+    value === null || value === undefined ? "NONE" : surrealString(value);
+
+/** A truncated integer literal, or `NONE` for nullish / non-finite input. */
+export const surrealOptionInt = (value: number | null | undefined): string =>
+    value === null || value === undefined || !Number.isFinite(value)
+        ? "NONE"
+        : Math.trunc(value).toString(10);
+
+/** A datetime literal, or `NONE` for nullish input. */
+export const surrealOptionDate = (
+    value: Date | string | null | undefined,
+): string =>
+    value === null || value === undefined ? "NONE" : surrealDate(value);
+
+/** A record reference, or `NONE` for a nullish key. */
+export const surrealOptionRecord = (
+    table: string,
+    key: string | null | undefined,
+): string =>
+    key === null || key === undefined ? "NONE" : recordRef(table, key);
+
+/**
+ * A SurrealQL literal for a column that stores JSON *text*. A value that is
+ * already a string is treated as pre-encoded JSON and embedded verbatim (then
+ * quoted once); any other value is `JSON.stringify`-d exactly once.
+ *
+ * This is DELIBERATELY different from `surrealJson`, which always
+ * re-stringifies. Collapsing the two double-encodes pre-encoded columns. See
+ * the JSON-text columns written by `evidence-writers.ts` (`input_json`,
+ * `items`, `raw`).
+ */
+export const surrealJsonText = (value: unknown): string =>
+    surrealString(typeof value === "string" ? value : JSON.stringify(value) ?? "null");
+
+/** Like `surrealJsonText`, but nullish input yields the keyword `NONE`. */
+export const surrealJsonTextOption = (value: unknown): string =>
+    value === null || value === undefined ? "NONE" : surrealJsonText(value);
+
+/**
+ * Universal value encoder: turn any JS value into a SurrealQL literal.
+ *
+ *  - string  → quoted string literal
+ *  - finite number → bare numeric literal
+ *  - boolean → `true` / `false`
+ *  - null / undefined → `NONE`
+ *  - Date → datetime literal
+ *  - array → `[...]` of encoded elements
+ *  - object → `surrealJson` literal (JSON-text column)
+ *
+ * Used by the telemetry write path, where rows are heterogeneous and a typed
+ * per-field builder would be overkill. Record references must be encoded by
+ * the caller via `recordRef` before reaching here - a `RecordId` instance is
+ * encoded through its `toString()` only as a last resort.
+ */
+export const surrealValue = (value: unknown): string => {
+    if (value === null || value === undefined) return "NONE";
+    if (typeof value === "string") return surrealString(value);
+    if (typeof value === "number") {
+        return Number.isFinite(value) ? value.toString(10) : "NONE";
+    }
+    if (typeof value === "boolean") return value ? "true" : "false";
+    if (value instanceof Date) return surrealDate(value);
+    if (Array.isArray(value)) {
+        return `[${value.map((v) => surrealValue(v)).join(", ")}]`;
+    }
+    return surrealJson(value);
+};

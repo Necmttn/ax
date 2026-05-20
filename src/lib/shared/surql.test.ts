@@ -1,6 +1,22 @@
 import { describe, expect, test } from "bun:test";
 
-import { surrealJson, surrealJsonOption, surrealString } from "./surql.ts";
+import {
+    surrealJson,
+    surrealJsonOption,
+    surrealString,
+    recordRef,
+    surrealRecordKey,
+    surrealDate,
+    surrealObject,
+    surrealSet,
+    surrealOptionString,
+    surrealOptionInt,
+    surrealOptionDate,
+    surrealOptionRecord,
+    surrealJsonText,
+    surrealJsonTextOption,
+    surrealValue,
+} from "./surql.ts";
 
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 
@@ -97,5 +113,102 @@ describe("crash regression", () => {
         const decoded = JSON.parse(out) as string;
         expect(LONE_SURROGATE.test(decoded)).toBe(false);
         expect(decoded).toBe("text\n\n## ");
+    });
+});
+
+describe("recordRef", () => {
+    test("wraps key in backticks", () => {
+        expect(recordRef("session", "abc")).toBe("session:`abc`");
+    });
+    test("escapes backticks and control chars in the key", () => {
+        expect(recordRef("t", "a`b\nc")).toBe("t:`a\\`b\\nc`");
+    });
+});
+
+describe("surrealRecordKey", () => {
+    test("escapes backslash, backtick, newline, return, tab", () => {
+        expect(surrealRecordKey("a\\b`c\nd\re\tf")).toBe("a\\\\b\\`c\\nd\\re\\tf");
+    });
+});
+
+describe("surrealDate", () => {
+    test("emits a d-prefixed JSON ISO string", () => {
+        expect(surrealDate(new Date("2026-01-02T03:04:05.000Z"))).toBe(
+            'd"2026-01-02T03:04:05.000Z"',
+        );
+    });
+    test("accepts a pre-formed ISO string", () => {
+        expect(surrealDate("2026-01-02T03:04:05.000Z")).toBe(
+            'd"2026-01-02T03:04:05.000Z"',
+        );
+    });
+});
+
+describe("surrealObject / surrealSet", () => {
+    test("surrealObject joins name:value pairs in braces", () => {
+        expect(surrealObject([["a", "1"], ["b", '"x"']])).toBe('{ a: 1, b: "x" }');
+    });
+    test("surrealSet joins name = value pairs", () => {
+        expect(surrealSet([["a", "1"], ["b", '"x"']])).toBe('a = 1, b = "x"');
+    });
+});
+
+describe("option helpers", () => {
+    test("surrealOptionString → NONE for nullish", () => {
+        expect(surrealOptionString(null)).toBe("NONE");
+        expect(surrealOptionString(undefined)).toBe("NONE");
+        expect(surrealOptionString("x")).toBe('"x"');
+    });
+    test("surrealOptionInt truncates and NONE for non-finite", () => {
+        expect(surrealOptionInt(3.9)).toBe("3");
+        expect(surrealOptionInt(null)).toBe("NONE");
+        expect(surrealOptionInt(Number.NaN)).toBe("NONE");
+    });
+    test("surrealOptionDate → NONE for nullish", () => {
+        expect(surrealOptionDate(null)).toBe("NONE");
+    });
+    test("surrealOptionRecord → NONE for nullish key", () => {
+        expect(surrealOptionRecord("session", null)).toBe("NONE");
+        expect(surrealOptionRecord("session", "k")).toBe("session:`k`");
+    });
+});
+
+describe("surrealJsonText (pass-through semantics)", () => {
+    test("a string value is NOT re-stringified", () => {
+        expect(surrealJsonText('{"a":1}')).toBe('"{\\"a\\":1}"');
+    });
+    test("a non-string value is JSON-encoded once", () => {
+        expect(surrealJsonText({ a: 1 })).toBe('"{\\"a\\":1}"');
+    });
+    test("surrealJsonTextOption → NONE for nullish", () => {
+        expect(surrealJsonTextOption(null)).toBe("NONE");
+        expect(surrealJsonTextOption(undefined)).toBe("NONE");
+    });
+});
+
+describe("surrealValue (universal encoder)", () => {
+    test("string → quoted literal", () => {
+        expect(surrealValue("x")).toBe('"x"');
+    });
+    test("finite number → bare literal", () => {
+        expect(surrealValue(3)).toBe("3");
+    });
+    test("boolean → true/false", () => {
+        expect(surrealValue(true)).toBe("true");
+    });
+    test("null/undefined → NONE", () => {
+        expect(surrealValue(null)).toBe("NONE");
+        expect(surrealValue(undefined)).toBe("NONE");
+    });
+    test("Date → surrealDate literal", () => {
+        expect(surrealValue(new Date("2026-01-02T03:04:05.000Z"))).toBe(
+            'd"2026-01-02T03:04:05.000Z"',
+        );
+    });
+    test("array → bracketed list of encoded values", () => {
+        expect(surrealValue([1, "a"])).toBe('[1, "a"]');
+    });
+    test("plain object → surrealJson literal", () => {
+        expect(surrealValue({ a: 1 })).toBe('"{\\"a\\":1}"');
     });
 });
