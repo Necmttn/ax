@@ -5,6 +5,7 @@ import { decodeJsonOrNull } from "../lib/decode.ts";
 import type { DbError } from "../lib/errors.ts";
 import { recordRef } from "./evidence-writers.ts";
 import { surrealDate, surrealJsonOption, surrealObject, surrealOptionInt, surrealOptionString, surrealString } from "../lib/shared/surql.ts";
+import { executeStatementsWith } from "../lib/shared/statement-exec.ts";
 import { deriveTaskLabel } from "../lib/shared/task-label.ts";
 
 type TimestampInput = Date | string | { readonly constructor: { readonly name: string }; toString(): string };
@@ -447,9 +448,7 @@ WHERE kind = "claude_insights";`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
             ...usages.map(tokenUsageStatement),
             ...health.map(sessionHealthStatement),
         ];
-        for (let i = 0; i < statements.length; i += 500) {
-            yield* db.query(statements.slice(i, i + 500).join(""));
-        }
+        yield* executeStatementsWith(db, statements, { chunkSize: 500 });
         return {
             workflowEpochs: 2,
             sessionTokenUsage: usages.length,
