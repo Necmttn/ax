@@ -25,6 +25,7 @@ import {
 import { classifyTurnIntent } from "./intent-kind.ts";
 import { normalizeCodexUpdatePlan, type PlanStatus } from "./plans.ts";
 import { invokedRelationRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
+import { executeStatements } from "../lib/shared/statement-exec.ts";
 
 const DEFAULT_CODEX_RAW_MAX_BYTES = 5 * 1024 * 1024;
 const DEFAULT_CODEX_PROGRESS_EVERY = 10;
@@ -32,7 +33,6 @@ const DEFAULT_CODEX_FLUSH_EVERY = 500;
 const DEFAULT_CODEX_CONCURRENCY = 1;
 const DEFAULT_CODEX_PAYLOAD_MAX_BYTES = 1200;
 const CODEX_PROGRESS_LINE_EVERY = 100;
-const CODEX_STATEMENT_CHUNK_SIZE = 500;
 
 interface CodexSession {
     id: string;
@@ -769,13 +769,7 @@ const buildCodexBatchStatements = (
 ];
 
 const queryCodexStatements = (statements: readonly string[]) =>
-    Effect.gen(function* () {
-        if (statements.length === 0) return;
-        const db = yield* SurrealClient;
-        for (let i = 0; i < statements.length; i += CODEX_STATEMENT_CHUNK_SIZE) {
-            yield* db.query(statements.slice(i, i + CODEX_STATEMENT_CHUNK_SIZE).join(""));
-        }
-    });
+    executeStatements(statements, { chunkSize: 500 });
 
 interface CodexIngestOpts {
     sinceDays: number | undefined;
