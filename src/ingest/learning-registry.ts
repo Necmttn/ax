@@ -4,6 +4,7 @@ import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
 import { recordRef } from "./evidence-writers.ts";
 import { surrealJsonOption, surrealObject, surrealOptionString, surrealString } from "../lib/shared/surql.ts";
+import { executeStatementsWith } from "../lib/shared/statement-exec.ts";
 
 interface SkillCandidateRow {
     readonly id?: unknown;
@@ -206,9 +207,7 @@ export const deriveLearningRegistry = (): Effect.Effect<LearningRegistryStats, D
             db.query<[HarnessLearningRow[]]>("SELECT id, name, pattern, scope, confidence FROM harness_learning;").pipe(Effect.map((rows) => rows?.[0] ?? [])),
         ], { concurrency: 3 });
         const { statements, stats } = buildLearningRegistryStatements({ skillCandidates, stacks, harnessLearnings });
-        for (let i = 0; i < statements.length; i += 500) {
-            yield* db.query(statements.slice(i, i + 500).join(""));
-        }
+        yield* executeStatementsWith(db, statements, { chunkSize: 500 });
         return stats;
     });
 
