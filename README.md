@@ -223,12 +223,16 @@ Doctor tables through the `harness/doctor` ingest stage.
 
 ## Agent Integration
 
-This repo ships an installable skill at `skill/SKILL.md`.
+This repo ships installable agent skills:
 
-Install it for Claude Code and Codex:
+- `axctl` at `skill/SKILL.md` for day-to-day project grounding.
+- `ax-retro` at `skills/ax-retro/SKILL.md` for evidence-backed retrospectives.
+
+Install them for Claude Code and Codex:
 
 ```bash
 npx skills add git@github.com:Necmttn/ax.git --skill axctl -g -a claude-code -a codex -y
+npx skills add git@github.com:Necmttn/ax.git --skill ax-retro -g -a claude-code -a codex -y
 ```
 
 Local development symlink:
@@ -237,6 +241,8 @@ Local development symlink:
 mkdir -p ~/.claude/skills ~/.agents/skills
 ln -sfn "$PWD/skill" ~/.claude/skills/axctl
 ln -sfn "$PWD/skill" ~/.agents/skills/axctl
+ln -sfn "$PWD/skills/ax-retro" ~/.claude/skills/ax-retro
+ln -sfn "$PWD/skills/ax-retro" ~/.agents/skills/ax-retro
 ```
 
 Agent checklist:
