@@ -5,6 +5,7 @@ import { decodeJsonOrNull } from "../lib/decode.ts";
 import type { DbError } from "../lib/errors.ts";
 import { recordRef } from "./evidence-writers.ts";
 import { surrealJsonOption, surrealString } from "../lib/shared/surql.ts";
+import { deriveTaskLabel } from "../lib/shared/task-label.ts";
 
 type TimestampInput = Date | string | { readonly constructor: { readonly name: string }; toString(): string };
 type JsonRecord = Record<string, unknown>;
@@ -19,7 +20,10 @@ interface SessionRow {
 
 interface TurnRow {
     readonly session: unknown;
+    readonly seq?: number | null;
     readonly role?: string | null;
+    readonly message_kind?: string | null;
+    readonly intent_kind?: string | null;
     readonly text_excerpt?: string | null;
     readonly has_error?: boolean | null;
 }
@@ -76,6 +80,10 @@ export interface SessionHealth {
     readonly cacheReadRatio: number | null;
     readonly cacheCreationRatio: number | null;
     readonly contextPressure: "low" | "medium" | "high" | "unknown";
+    readonly taskLabel: string | null;
+    readonly userTurns: number;
+    readonly assistantTurns: number;
+    readonly correctionTurns: number;
     readonly labels: JsonRecord;
     readonly metrics: JsonRecord;
     readonly ts: string;
@@ -246,6 +254,9 @@ function buildRows(input: {
         const cacheCreationRatio = ratio(cacheCreationInputTokens, promptTokens);
         const epoch = workflowEpochFor(startedAt, input.firstSuperpowersAt);
         const userTurns = sessionTurns.filter((turn) => turn.role === "user");
+        const assistantTurnCount = sessionTurns.filter((turn) => turn.role === "assistant").length;
+        const correctionTurnCount = userTurns.filter((turn) => turn.intent_kind === "correction").length;
+        const taskLabel = deriveTaskLabel(sessionTurns);
         const userCorrections = userTurns.filter((turn) =>
             /\b(no|wrong|instead|not that|actually|stop doing|don't)\b/i.test(turn.text_excerpt ?? ""),
         ).length;
@@ -299,6 +310,10 @@ function buildRows(input: {
             cacheReadRatio,
             cacheCreationRatio,
             contextPressure: pressure,
+            taskLabel,
+            userTurns: userTurns.length,
+            assistantTurns: assistantTurnCount,
+            correctionTurns: correctionTurnCount,
             labels: { source: "session_health" },
             metrics: {
                 transcript_bytes: transcriptBytes,
@@ -374,6 +389,10 @@ function sessionHealthStatement(row: SessionHealth): string {
         ["cache_read_ratio", sqlOptionFloat(row.cacheReadRatio)],
         ["cache_creation_ratio", sqlOptionFloat(row.cacheCreationRatio)],
         ["context_pressure", sqlString(row.contextPressure)],
+        ["task_label", sqlOptionString(row.taskLabel)],
+        ["user_turns", row.userTurns.toString(10)],
+        ["assistant_turns", row.assistantTurns.toString(10)],
+        ["correction_turns", row.correctionTurns.toString(10)],
         ["labels", sqlJsonOption(row.labels)],
         ["metrics", sqlJsonOption(row.metrics)],
         ["ts", sqlDate(row.ts)],
@@ -407,7 +426,7 @@ FROM session
 ${sinceWhere("started_at", opts.sinceDays)}
 ORDER BY started_at DESC;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
             db.query<[TurnRow[]]>(`
-SELECT session, role, text_excerpt, has_error
+SELECT session, seq, role, message_kind, intent_kind, text_excerpt, has_error
 FROM turn
 ${sinceWhere("ts", opts.sinceDays)};`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
             db.query<[ToolCallRow[]]>(`
