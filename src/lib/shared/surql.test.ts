@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { RecordId } from "surrealdb";
 import {
     surrealJson,
     surrealJsonOption,
@@ -210,5 +211,18 @@ describe("surrealValue (universal encoder)", () => {
     });
     test("plain object → surrealJson literal", () => {
         expect(surrealValue({ a: 1 })).toBe('"{\\"a\\":1}"');
+    });
+    test("RecordId → native record reference literal", () => {
+        const rid = new RecordId("session", "s1");
+        expect(surrealValue(rid)).toBe("session:`s1`");
+    });
+    test("array of RecordId → bracketed record refs", () => {
+        const rids = [new RecordId("session", "s1"), new RecordId("session", "s2")];
+        expect(surrealValue(rids)).toBe("[session:`s1`, session:`s2`]");
+    });
+    test("RecordId with a non-string id falls through to JSON, not a mangled ref", () => {
+        const rid = { table: { name: "t" }, id: { x: 1 } };
+        // not a native ref - must not produce t:`[object Object]`
+        expect(surrealValue(rid)).not.toContain("[object Object]");
     });
 });

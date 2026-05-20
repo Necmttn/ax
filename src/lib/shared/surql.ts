@@ -138,6 +138,27 @@ export const surrealJsonTextOption = (value: unknown): string =>
     value === null || value === undefined ? "NONE" : surrealJsonText(value);
 
 /**
+ * Duck-type check for a SurrealDB `RecordId` instance. Avoids importing the
+ * surrealdb package at the module level (would make surql.ts depend on the
+ * DB client) while still emitting a native record reference literal when a
+ * `RecordId` flows through `surrealValue`.
+ *
+ * A `RecordId` has `.table.name` (string) and `.id` (RecordIdValue). The
+ * `toString()` shape is `table:id`, so we use that as the canonical check.
+ */
+const isRecordId = (
+    value: unknown,
+): value is { table: { name: string }; id: unknown } =>
+    typeof value === "object" &&
+    value !== null &&
+    "table" in value &&
+    typeof (value as { table: unknown }).table === "object" &&
+    (value as { table: unknown }).table !== null &&
+    "name" in (value as { table: { name: unknown } }).table &&
+    typeof (value as { table: { name: unknown } }).table.name === "string" &&
+    "id" in value;
+
+/**
  * Universal value encoder: turn any JS value into a SurrealQL literal.
  *
  *  - string  → quoted string literal
@@ -145,13 +166,12 @@ export const surrealJsonTextOption = (value: unknown): string =>
  *  - boolean → `true` / `false`
  *  - null / undefined → `NONE`
  *  - Date → datetime literal
- *  - array → `[...]` of encoded elements
+ *  - RecordId (string id) → `table:`key`` native record reference
+ *  - array → `[...]` of encoded elements (RecordId elements become refs)
  *  - object → `surrealJson` literal (JSON-text column)
  *
  * Used by the telemetry write path, where rows are heterogeneous and a typed
- * per-field builder would be overkill. Record references must be encoded by
- * the caller via `recordRef` before reaching here - a `RecordId` instance is
- * encoded through its `toString()` only as a last resort.
+ * per-field builder would be overkill.
  */
 export const surrealValue = (value: unknown): string => {
     if (value === null || value === undefined) return "NONE";
@@ -161,6 +181,12 @@ export const surrealValue = (value: unknown): string => {
     }
     if (typeof value === "boolean") return value ? "true" : "false";
     if (value instanceof Date) return surrealDate(value);
+    // Only a string id yields a native record reference. A RecordId with a
+    // non-string id (object/array key) would `String()`-mangle into garbage
+    // like `t:`[object Object]``; let it fall through to the JSON fallback.
+    if (isRecordId(value) && typeof value.id === "string") {
+        return recordRef(value.table.name, value.id);
+    }
     if (Array.isArray(value)) {
         return `[${value.map((v) => surrealValue(v)).join(", ")}]`;
     }

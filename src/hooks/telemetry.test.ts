@@ -1,29 +1,31 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
-import { RecordId } from "surrealdb";
 import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
 import { DbError } from "../lib/errors.ts";
 import { recordHookFire } from "./telemetry.ts";
 
-interface RecordedCall {
-    readonly id: RecordId;
-    readonly content: Record<string, unknown>;
-}
-
-function fakeClient(): { client: SurrealClientShape; calls: RecordedCall[] } {
-    const calls: RecordedCall[] = [];
+/**
+ * After ADR-0005 the hook telemetry write path no longer calls `db.upsert`;
+ * `writeTelemetryRow` builds an `UPSERT` statement and runs it through
+ * `executeStatements` → `db.query`. The fake therefore spies on `query`,
+ * collecting every emitted SQL string. `upsert` stays on the shape only so
+ * the object still satisfies `SurrealClientShape`; it is no longer the
+ * assertion target.
+ */
+function fakeClient(): { client: SurrealClientShape; statements: string[] } {
+    const statements: string[] = [];
     const client: SurrealClientShape = {
-        query: () => Effect.succeed([] as unknown as never),
-        upsert: (id, content) =>
-            Effect.sync(() => {
-                calls.push({ id, content });
-            }),
+        query: <T extends unknown[]>(sql: string) => {
+            statements.push(sql);
+            return Effect.succeed([] as unknown as T);
+        },
+        upsert: () => Effect.succeed(undefined),
         relate: () => Effect.void,
         putFile: () => Effect.void,
         getFile: () => Effect.succeed(""),
         raw: {} as never,
     };
-    return { client, calls };
+    return { client, statements };
 }
 
 const minimalPriorSession = {
@@ -51,7 +53,7 @@ const minimalPriorSession = {
 
 describe("recordHookFire", () => {
     test("writes one hook_fire row per file in the input", async () => {
-        const { client, calls } = fakeClient();
+        const { client, statements } = fakeClient();
 
         await Effect.runPromise(
             recordHookFire({
@@ -70,16 +72,21 @@ describe("recordHookFire", () => {
             }).pipe(Effect.provide(Layer.succeed(SurrealClient, client))),
         );
 
-        expect(calls).toHaveLength(2);
-        expect(calls[0]!.id.toString()).toMatch(/^hook_fire:[0-9a-f]{16}$/);
-        expect(calls[0]!.content.file_path).toBe("src/a.ts");
-        expect(calls[1]!.content.file_path).toBe("src/b.ts");
-        // Different file path → different deterministic id.
-        expect(calls[0]!.id.toString()).not.toBe(calls[1]!.id.toString());
+        // recordHookFire calls writeTelemetryRow once per file; each one is an
+        // executeStatements([oneStatement]) → exactly one db.query call.
+        expect(statements).toHaveLength(2);
+        expect(statements[0]!).toMatch(/^UPSERT hook_fire:`[0-9a-f]{16}` CONTENT \{/);
+        expect(statements[1]!).toMatch(/^UPSERT hook_fire:`[0-9a-f]{16}` CONTENT \{/);
+        expect(statements[0]!).toContain('file_path: "src/a.ts"');
+        expect(statements[1]!).toContain('file_path: "src/b.ts"');
+        // Different file path → different deterministic id (different record key).
+        const id0 = statements[0]!.match(/^UPSERT hook_fire:`([0-9a-f]{16})`/)![1];
+        const id1 = statements[1]!.match(/^UPSERT hook_fire:`([0-9a-f]{16})`/)![1];
+        expect(id0).not.toBe(id1);
     });
 
     test("populates harness, event, decision, latency, and prior session metadata", async () => {
-        const { client, calls } = fakeClient();
+        const { client, statements } = fakeClient();
         const priors = [
             { ...minimalPriorSession, session: "session:s1" },
             { ...minimalPriorSession, session: "session:s2", weight: 5 },
@@ -103,24 +110,24 @@ describe("recordHookFire", () => {
             }).pipe(Effect.provide(Layer.succeed(SurrealClient, client))),
         );
 
-        const row = calls[0]!.content;
-        expect(row.harness).toBe("claude");
-        expect(row.event).toBe("pre-edit");
-        expect(row.inject).toBe(true);
-        expect(row.reason).toBe("high_signal");
-        expect(row.latency_ms).toBe(137);
-        expect(row.kind).toBe("hook_fire");
-        expect(row.ok).toBe(true);
-        expect(row.prior_sessions_considered).toBe(4);
-        // Top 3 sessions only, in order.
-        const top = row.top_prior_sessions as RecordId[];
-        expect(top).toHaveLength(3);
-        expect(top[0]!.toString()).toBe("session:s1");
-        expect(top[2]!.toString()).toBe("session:s3");
+        const sql = statements[0]!;
+        expect(sql).toContain('harness: "claude"');
+        expect(sql).toContain('event: "pre-edit"');
+        expect(sql).toContain("inject: true");
+        expect(sql).toContain('reason: "high_signal"');
+        expect(sql).toContain("latency_ms: 137");
+        expect(sql).toContain('kind: "hook_fire"');
+        expect(sql).toContain("ok: true");
+        expect(sql).toContain("prior_sessions_considered: 4");
+        // Top 3 sessions only, in order, as native record references.
+        expect(sql).toContain(
+            "top_prior_sessions: [session:`s1`, session:`s2`, session:`s3`]",
+        );
+        expect(sql).not.toContain("session:`s4`");
     });
 
     test("clips task_excerpt to 240 chars", async () => {
-        const { client, calls } = fakeClient();
+        const { client, statements } = fakeClient();
         const longTask = "x".repeat(500);
 
         await Effect.runPromise(
@@ -138,11 +145,15 @@ describe("recordHookFire", () => {
             }).pipe(Effect.provide(Layer.succeed(SurrealClient, client))),
         );
 
-        expect((calls[0]!.content.task_excerpt as string).length).toBeLessThanOrEqual(240);
+        const sql = statements[0]!;
+        // The clipped excerpt (239 chars + ellipsis) is present; the full
+        // 500-char string is not.
+        expect(sql).toContain(`task_excerpt: "${"x".repeat(239)}…"`);
+        expect(sql).not.toContain("x".repeat(500));
     });
 
     test("emits no rows when input.files is empty", async () => {
-        const { client, calls } = fakeClient();
+        const { client, statements } = fakeClient();
 
         await Effect.runPromise(
             recordHookFire({
@@ -159,14 +170,14 @@ describe("recordHookFire", () => {
             }).pipe(Effect.provide(Layer.succeed(SurrealClient, client))),
         );
 
-        expect(calls).toHaveLength(0);
+        expect(statements).toHaveLength(0);
     });
 
     test("swallows db errors so the hook still emits output", async () => {
         const failing: SurrealClientShape = {
-            query: () => Effect.succeed([] as unknown as never),
-            upsert: () =>
-                Effect.fail(new DbError({ operation: "upsert", message: "db is down" })),
+            query: () =>
+                Effect.fail(new DbError({ operation: "query", message: "db is down" })),
+            upsert: () => Effect.succeed(undefined),
             relate: () => Effect.void,
             putFile: () => Effect.void,
             getFile: () => Effect.succeed(""),
