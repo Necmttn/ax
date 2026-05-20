@@ -7,7 +7,7 @@ import { decodeJsonOrNull } from "../lib/decode.ts";
 import type { DbError } from "../lib/errors.ts";
 import { AppLayer } from "../lib/layers.ts";
 import { recordRef } from "./evidence-writers.ts";
-import { surrealJsonOption, surrealString } from "../lib/shared/surql.ts";
+import { surrealDate, surrealJsonOption, surrealObject, surrealOptionDate, surrealOptionString, surrealString } from "../lib/shared/surql.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -58,17 +58,8 @@ interface LegacySelfImproveIngestOpts {
 
 const STATEMENT_CHUNK_SIZE = 250;
 
-const sqlString = surrealString;
-const sqlOptionString = (value: string | null | undefined): string =>
-    value === null || value === undefined ? "NONE" : sqlString(value);
-const sqlDate = (value: string): string => `d${JSON.stringify(value)}`;
-const sqlOptionDate = (value: string | null | undefined): string =>
-    value === null || value === undefined ? "NONE" : sqlDate(value);
 const sqlFloatOption = (value: number | null | undefined): string =>
     value === null || value === undefined || !Number.isFinite(value) ? "NONE" : String(value);
-const sqlJsonOption = surrealJsonOption;
-const sqlObject = (fields: readonly (readonly [string, string])[]): string =>
-    `{ ${fields.map(([name, value]) => `${name}: ${value}`).join(", ")} }`;
 
 function defaultLegacySelfImproveDir(): string {
     return (
@@ -296,13 +287,13 @@ function artifactStatement(input: {
     readonly raw: unknown;
     readonly content: string;
 }): string {
-    return `UPSERT ${recordRef("artifact", input.key)} MERGE ${sqlObject([
-        ["kind", sqlString(input.kind)],
-        ["title", sqlOptionString(input.title)],
-        ["uri", sqlOptionString(`file://${input.path}`)],
-        ["path", sqlOptionString(input.path)],
-        ["content_hash", sqlOptionString(shortHash(input.content))],
-        ["raw", sqlJsonOption(input.raw)],
+    return `UPSERT ${recordRef("artifact", input.key)} MERGE ${surrealObject([
+        ["kind", surrealString(input.kind)],
+        ["title", surrealOptionString(input.title)],
+        ["uri", surrealOptionString(`file://${input.path}`)],
+        ["path", surrealOptionString(input.path)],
+        ["content_hash", surrealOptionString(shortHash(input.content))],
+        ["raw", surrealJsonOption(input.raw)],
         ["updated_at", "time::now()"],
     ])};`;
 }
@@ -316,7 +307,7 @@ function hasArtifactStatements(input: {
     const edgeKey = `${input.runKey}__${input.artifactKey}`;
     return [
         `DELETE ${recordRef("has_artifact", edgeKey)};`,
-        `RELATE ${input.runRef}->has_artifact:\`${edgeKey}\`->${recordRef("artifact", input.artifactKey)} SET kind = ${sqlString(input.kind)}, labels = ${sqlJsonOption({ source: "legacy_self_improve" })}, ts = time::now();`,
+        `RELATE ${input.runRef}->has_artifact:\`${edgeKey}\`->${recordRef("artifact", input.artifactKey)} SET kind = ${surrealString(input.kind)}, labels = ${surrealJsonOption({ source: "legacy_self_improve" })}, ts = time::now();`,
     ];
 }
 
@@ -329,7 +320,7 @@ function derivedFromStatements(input: {
     const edgeKey = `${input.subjectKey}__${input.artifactKey}`;
     return [
         `DELETE ${recordRef("derived_from", edgeKey)};`,
-        `RELATE ${input.subjectRef}->derived_from:\`${edgeKey}\`->${recordRef("artifact", input.artifactKey)} SET kind = ${sqlString(input.kind)}, labels = ${sqlJsonOption({ source: "legacy_self_improve" })}, ts = time::now();`,
+        `RELATE ${input.subjectRef}->derived_from:\`${edgeKey}\`->${recordRef("artifact", input.artifactKey)} SET kind = ${surrealString(input.kind)}, labels = ${surrealJsonOption({ source: "legacy_self_improve" })}, ts = time::now();`,
     ];
 }
 
@@ -342,15 +333,15 @@ export function buildLegacySelfImproveStatements(
     const spend = spendMetrics(run.spendSamples);
     const spendTotal = typeof spend.spend_total === "number" ? spend.spend_total : null;
 
-    statements.push(`UPSERT ${runRef} MERGE ${sqlObject([
-        ["run_id", sqlString(run.runId)],
-        ["path", sqlString(run.path)],
+    statements.push(`UPSERT ${runRef} MERGE ${surrealObject([
+        ["run_id", surrealString(run.runId)],
+        ["path", surrealString(run.path)],
         ["event_count", run.events.length.toString(10)],
         ["cluster_count", run.clusters.length.toString(10)],
-        ["proposal_path", sqlOptionString(run.proposalPath)],
+        ["proposal_path", surrealOptionString(run.proposalPath)],
         ["spend_total", sqlFloatOption(spendTotal)],
-        ["labels", sqlJsonOption({ source: "legacy_self_improve", imported_as_evidence: true })],
-        ["metrics", sqlJsonOption({
+        ["labels", surrealJsonOption({ source: "legacy_self_improve", imported_as_evidence: true })],
+        ["metrics", surrealJsonOption({
             ...spend,
             event_types: eventTypeCounts(run.events),
             malformed_events: run.malformedEvents,
@@ -421,12 +412,12 @@ export function buildLegacySelfImproveStatements(
     for (const event of run.events) {
         const eventKey = `legacy_self_improve__${safeKeyPart(run.runId)}__event__${safeKeyPart(event.id)}`;
         const eventRef = recordRef("friction_event", eventKey);
-        statements.push(`UPSERT ${eventRef} MERGE ${sqlObject([
+        statements.push(`UPSERT ${eventRef} MERGE ${surrealObject([
             ["session", event.sessionId ? recordRef("session", event.sessionId) : "NONE"],
             ["turn", "NONE"],
-            ["kind", sqlString(normalizeKind(event.type))],
-            ["text", sqlOptionString(event.snippet)],
-            ["labels", sqlJsonOption({
+            ["kind", surrealString(normalizeKind(event.type))],
+            ["text", surrealOptionString(event.snippet)],
+            ["labels", surrealJsonOption({
                 source: "legacy_self_improve",
                 run_id: run.runId,
                 project_slug: event.projectSlug,
@@ -434,9 +425,9 @@ export function buildLegacySelfImproveStatements(
                 cluster_id: event.clusterId,
                 trigger: event.trigger,
             })],
-            ["metrics", sqlJsonOption({ turn_index: event.turnIndex })],
-            ["raw", sqlJsonOption(event.raw)],
-            ["ts", sqlOptionDate(event.timestamp) === "NONE" ? "time::now()" : sqlOptionDate(event.timestamp)],
+            ["metrics", surrealJsonOption({ turn_index: event.turnIndex })],
+            ["raw", surrealJsonOption(event.raw)],
+            ["ts", surrealOptionDate(event.timestamp) === "NONE" ? "time::now()" : surrealOptionDate(event.timestamp)],
         ])};`);
         statements.push(...derivedFromStatements({
             subjectRef: eventRef,
@@ -449,13 +440,13 @@ export function buildLegacySelfImproveStatements(
     for (const cluster of run.clusters) {
         const key = clusterInsightKey(run.runId, cluster.id);
         const insightRef = recordRef("insight", key);
-        statements.push(`UPSERT ${insightRef} MERGE ${sqlObject([
-            ["subject_type", sqlString("self_improve_run")],
-            ["subject_id", sqlOptionString(run.runId)],
-            ["kind", sqlOptionString("legacy_self_improve_cluster")],
-            ["text", sqlString(`${cluster.name} (${cluster.count} events)`)],
-            ["labels", sqlJsonOption({ source: "legacy_self_improve", run_id: run.runId, cluster_id: cluster.id })],
-            ["metrics", sqlJsonOption({ count: cluster.count, event_ids_preview: cluster.eventIds.slice(0, 25) })],
+        statements.push(`UPSERT ${insightRef} MERGE ${surrealObject([
+            ["subject_type", surrealString("self_improve_run")],
+            ["subject_id", surrealOptionString(run.runId)],
+            ["kind", surrealOptionString("legacy_self_improve_cluster")],
+            ["text", surrealString(`${cluster.name} (${cluster.count} events)`)],
+            ["labels", surrealJsonOption({ source: "legacy_self_improve", run_id: run.runId, cluster_id: cluster.id })],
+            ["metrics", surrealJsonOption({ count: cluster.count, event_ids_preview: cluster.eventIds.slice(0, 25) })],
             ["created_at", "time::now()"],
         ])};`);
         statements.push(...derivedFromStatements({
@@ -469,13 +460,13 @@ export function buildLegacySelfImproveStatements(
     if (run.proposalText !== null) {
         const key = insightKey(run.runId, "proposal");
         const insightRef = recordRef("insight", key);
-        statements.push(`UPSERT ${insightRef} MERGE ${sqlObject([
-            ["subject_type", sqlString("self_improve_run")],
-            ["subject_id", sqlOptionString(run.runId)],
-            ["kind", sqlOptionString("legacy_self_improve_proposal")],
-            ["text", sqlString(proposalExcerpt(run.proposalText) ?? "Legacy self-improve proposed guidance")],
-            ["labels", sqlJsonOption({ source: "legacy_self_improve", run_id: run.runId, imported_as_evidence: true })],
-            ["metrics", sqlJsonOption({ bytes: run.proposalText.length })],
+        statements.push(`UPSERT ${insightRef} MERGE ${surrealObject([
+            ["subject_type", surrealString("self_improve_run")],
+            ["subject_id", surrealOptionString(run.runId)],
+            ["kind", surrealOptionString("legacy_self_improve_proposal")],
+            ["text", surrealString(proposalExcerpt(run.proposalText) ?? "Legacy self-improve proposed guidance")],
+            ["labels", surrealJsonOption({ source: "legacy_self_improve", run_id: run.runId, imported_as_evidence: true })],
+            ["metrics", surrealJsonOption({ bytes: run.proposalText.length })],
             ["created_at", "time::now()"],
         ])};`);
         statements.push(...derivedFromStatements({
@@ -489,13 +480,13 @@ export function buildLegacySelfImproveStatements(
     if (run.spendSamples.length > 0) {
         const key = insightKey(run.runId, "spend");
         const insightRef = recordRef("insight", key);
-        statements.push(`UPSERT ${insightRef} MERGE ${sqlObject([
-            ["subject_type", sqlString("self_improve_run")],
-            ["subject_id", sqlOptionString(run.runId)],
-            ["kind", sqlOptionString("legacy_self_improve_spend")],
-            ["text", sqlString(`Legacy self-improve spend samples: ${run.spendSamples.length}`)],
-            ["labels", sqlJsonOption({ source: "legacy_self_improve", run_id: run.runId })],
-            ["metrics", sqlJsonOption(spend)],
+        statements.push(`UPSERT ${insightRef} MERGE ${surrealObject([
+            ["subject_type", surrealString("self_improve_run")],
+            ["subject_id", surrealOptionString(run.runId)],
+            ["kind", surrealOptionString("legacy_self_improve_spend")],
+            ["text", surrealString(`Legacy self-improve spend samples: ${run.spendSamples.length}`)],
+            ["labels", surrealJsonOption({ source: "legacy_self_improve", run_id: run.runId })],
+            ["metrics", surrealJsonOption(spend)],
             ["created_at", "time::now()"],
         ])};`);
         statements.push(...derivedFromStatements({
