@@ -111,7 +111,8 @@ export type IngestStageKey = keyof typeof INGEST_STAGE_DEPS;
 export const deriveOnlyKeys = (): IngestStageKey[] =>
     ["signals", "outcomes", "session-health", "closure", "learning-registry"];
 
-const ALL_STAGE_KEYS = Object.keys(INGEST_STAGE_DEPS) as IngestStageKey[];
+/** Canonical Ingest Stage keys in execution order. Single source of truth. */
+export const ALL_STAGE_KEYS = Object.keys(INGEST_STAGE_DEPS) as IngestStageKey[];
 
 /** Validate + return the requested stage keys verbatim. Deps are NOT expanded:
  *  for `--stages=signals` the dep rows are assumed already ingested. Throws on

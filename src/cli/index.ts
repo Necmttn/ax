@@ -69,6 +69,15 @@ import {
     publishIngestEvent,
 } from "../dashboard/telemetry.ts";
 import type { DbError } from "../lib/errors.ts";
+import {
+    type IngestStageKey,
+    ALL_STAGE_KEYS,
+    INGEST_STAGE_DEPS,
+    deriveOnlyKeys,
+    selectStages,
+    runPipeline,
+    type StageSpec,
+} from "../ingest/pipeline.ts";
 
 const boolArg = (name: string, enabled: boolean): string[] =>
     enabled ? [`--${name}`] : [];
@@ -259,43 +268,13 @@ const progressUpdater = (
     (counts: Record<string, number>): Effect.Effect<void> =>
         Effect.sync(() => progress?.update({ source, stage }, counts));
 
-/** Canonical ingest stages, in execution order. Each is independently
- *  selectable via `--stages=`. */
-const INGEST_STAGE_KEYS = [
-    "skills",
-    "commands",
-    "claude",
-    "codex",
-    "subagents",
-    "spawned",
-    "git",
-    "signals",
-    "outcomes",
-    "session-health",
-    "closure",
-    "learning-registry",
-    "harness",
-] as const;
-type IngestStageKey = (typeof INGEST_STAGE_KEYS)[number];
-
-/** Stages that re-derive purely from already-ingested DB rows. `--derive-only`
- *  runs just these, skipping the slow raw transcript + git parse, so a
- *  derivation change can be re-checked in ~1 min instead of a full ~18. */
-const DERIVE_ONLY_KEYS: readonly IngestStageKey[] = [
-    "signals",
-    "outcomes",
-    "session-health",
-    "closure",
-    "learning-registry",
-];
-
 /** Legacy `--X-only` flags expressed as explicit stage sets, preserving their
  *  historical behaviour. New code should prefer `--stages=` / `--derive-only`. */
 const LEGACY_ONLY_SETS: Record<string, readonly IngestStageKey[]> = {
     "skills-only": ["skills", "commands"],
-    "transcripts-only": ["claude", "subagents", "spawned", ...DERIVE_ONLY_KEYS],
-    "claude-only": ["skills", "commands", "claude", "subagents", "spawned", ...DERIVE_ONLY_KEYS],
-    "codex-only": ["codex", "spawned", ...DERIVE_ONLY_KEYS],
+    "transcripts-only": ["claude", "subagents", "spawned", ...deriveOnlyKeys()],
+    "claude-only": ["skills", "commands", "claude", "subagents", "spawned", ...deriveOnlyKeys()],
+    "codex-only": ["codex", "spawned", ...deriveOnlyKeys()],
     "git-only": ["git"],
 };
 
@@ -319,7 +298,7 @@ const STAGE_PROGRESS: Record<IngestStageKey, ProgressStage> = {
 /** Resolve which ingest stages to run from CLI args. Precedence:
  *  `--stages=` (explicit list) > `--derive-only` > a legacy `--X-only` > all.
  *  Exits with code 2 on an unknown `--stages=` value. */
-export const resolveIngestStages = (args: string[]): Set<IngestStageKey> => {
+export const resolveIngestStages = (args: string[]): IngestStageKey[] => {
     const stagesArg = args.find((a) => a.startsWith("--stages="));
     if (stagesArg) {
         const raw = stagesArg
@@ -327,60 +306,61 @@ export const resolveIngestStages = (args: string[]): Set<IngestStageKey> => {
             .split(",")
             .map((s) => s.trim())
             .filter((s) => s.length > 0);
-        const bad = raw.filter((s) => !INGEST_STAGE_KEYS.includes(s as IngestStageKey));
-        if (bad.length > 0) {
-            console.error(
-                `axctl ingest: unknown --stages value(s): ${bad.join(", ")}\n` +
-                    `  valid stages: ${INGEST_STAGE_KEYS.join(", ")}`,
-            );
+        try {
+            return selectStages(raw);
+        } catch (err) {
+            process.stderr.write(`axctl ingest: ${(err as Error).message}\n`);
             process.exit(2);
         }
-        return new Set(raw as IngestStageKey[]);
     }
-    if (args.includes("--derive-only")) return new Set(DERIVE_ONLY_KEYS);
-    for (const [flag, set] of Object.entries(LEGACY_ONLY_SETS)) {
-        if (args.includes(`--${flag}`)) return new Set(set);
+    if (args.includes("--derive-only")) return deriveOnlyKeys();
+    for (const [flagName, set] of Object.entries(LEGACY_ONLY_SETS)) {
+        if (args.includes(`--${flagName}`)) {
+            process.stderr.write(
+                `axctl ingest: --${flagName} is deprecated; use --stages=${set.join(",")} or --derive-only\n`,
+            );
+            return [...set];
+        }
     }
-    return new Set(INGEST_STAGE_KEYS);
+    return ALL_STAGE_KEYS;
 };
 
-function ingestStages(args: string[]): ProgressStage[] {
-    const sel = resolveIngestStages(args);
-    return INGEST_STAGE_KEYS.filter((k) => sel.has(k)).map((k) => STAGE_PROGRESS[k]);
-}
 
-const cmdIngest = (args: string[]) =>
-    Effect.gen(function* () {
+const cmdIngest = (args: string[]) => {
+    // Validate + resolve stages synchronously before any Effect/DB work so that
+    // flag errors and deprecation warnings print even when the daemon is down.
+    // Issue #44: silent contradictions like `--codex-only --claude-only`
+    // turn the command into a no-op. Bail loudly instead.
+    const setOnly = Object.keys(LEGACY_ONLY_SETS)
+        .map((f) => `--${f}`)
+        .filter((f) => args.includes(f));
+    if (setOnly.length > 1) {
+        console.error(
+            `axctl ingest: ${setOnly.join(", ")} are mutually exclusive (each is a complete-source filter)`,
+        );
+        process.exit(2);
+    }
+    const hasStagesArg = args.some((a) => a.startsWith("--stages="));
+    const hasDeriveOnly = args.includes("--derive-only");
+    if ((hasStagesArg || hasDeriveOnly) && setOnly.length > 0) {
+        console.error(
+            `axctl ingest: ${hasStagesArg ? "--stages" : "--derive-only"} cannot be combined with ${setOnly.join(", ")}`,
+        );
+        process.exit(2);
+    }
+    if (hasStagesArg && hasDeriveOnly) {
+        console.error("axctl ingest: --stages and --derive-only are mutually exclusive");
+        process.exit(2);
+    }
+    // Single source of truth for which stages run; see resolveIngestStages.
+    // Also prints deprecation warnings for legacy --X-only flags.
+    const sel = resolveIngestStages(args);
+    const stages = sel.map((k) => STAGE_PROGRESS[k]);
+    return Effect.gen(function* () {
         const db = yield* SurrealClient;
         const runId = runIdFor("ingest");
         const progressMode = progressModeFor("ingest", args);
         const verbose = args.includes("--verbose");
-        const stages = ingestStages(args);
-        // Issue #44: silent contradictions like `--codex-only --claude-only`
-        // turn the command into a no-op. Bail loudly instead.
-        const setOnly = Object.keys(LEGACY_ONLY_SETS)
-            .map((f) => `--${f}`)
-            .filter((f) => args.includes(f));
-        if (setOnly.length > 1) {
-            console.error(
-                `axctl ingest: ${setOnly.join(", ")} are mutually exclusive (each is a complete-source filter)`,
-            );
-            process.exit(2);
-        }
-        const hasStagesArg = args.some((a) => a.startsWith("--stages="));
-        const hasDeriveOnly = args.includes("--derive-only");
-        if ((hasStagesArg || hasDeriveOnly) && setOnly.length > 0) {
-            console.error(
-                `axctl ingest: ${hasStagesArg ? "--stages" : "--derive-only"} cannot be combined with ${setOnly.join(", ")}`,
-            );
-            process.exit(2);
-        }
-        if (hasStagesArg && hasDeriveOnly) {
-            console.error("axctl ingest: --stages and --derive-only are mutually exclusive");
-            process.exit(2);
-        }
-        // Single source of truth for which stages run; see resolveIngestStages.
-        const sel = resolveIngestStages(args);
         const sinceDays = parseOptionalPositiveIntFlag("ingest", "since", args);
         yield* db.query(buildIngestRunStartStatement({
             runId,
@@ -393,131 +373,125 @@ const cmdIngest = (args: string[]) =>
             runId,
             stages,
         });
-        const program = Effect.gen(function* () {
-            if (sel.has("skills")) {
-                yield* telemetryStage(db, runId, "skills", "upsert", ingestSkills(), progress);
-            }
-            if (sel.has("commands")) {
-                // Slash commands live in `~/.claude/commands/` (and plugin
-                // command dirs) and aren't indexed by ingestSkills. Without
-                // this, every Skill-tool call against a slash command becomes
-                // an orphan `invoked` edge. See issues #41 / #42.
-                yield* telemetryStage(db, runId, "commands", "upsert", ingestCommands(), progress);
-            }
+        // Resolve services up front so stage lambdas can close over them and
+        // return Effect.Effect<unknown, DbError, never> (matching StageSpec.run).
+        const config = yield* AgentctlConfig;
+        const proc = yield* ProcessService;
+        const withServices = <A>(
+            eff: Effect.Effect<A, DbError, SurrealClient | AgentctlConfig | ProcessService>,
+        ): Effect.Effect<A, DbError, never> =>
+            eff.pipe(
+                Effect.provideService(SurrealClient, db),
+                Effect.provideService(AgentctlConfig, config),
+                Effect.provideService(ProcessService, proc),
+            );
 
-            const transcriptStages: Array<Effect.Effect<unknown, DbError, SurrealClient | AgentctlConfig | ProcessService>> = [];
-            if (sel.has("claude")) {
-                transcriptStages.push(telemetryStage(
-                    db,
-                    runId,
-                    "claude",
-                    "transcripts",
-                    ingestTranscripts({ sinceDays, onProgress: progressUpdater(progress, "claude", "transcripts") }),
-                    progress,
-                ));
-            }
-            if (sel.has("codex")) {
-                transcriptStages.push(telemetryStage(
-                    db,
-                    runId,
-                    "codex",
-                    "sessions",
-                    ingestCodex({ sinceDays, onProgress: progressUpdater(progress, "codex", "sessions") }),
-                    progress,
-                ));
-            }
-            yield* Effect.all(transcriptStages, { concurrency: 2, discard: true });
-
+        // Build stage run map: each key maps to a thunk returning a fully-
+        // provided Effect with R=never so it satisfies StageSpec.run.
+        const stageRun: Record<IngestStageKey, () => Effect.Effect<unknown, DbError, never>> = {
+            skills: () => withServices(telemetryStage(db, runId, "skills", "upsert", ingestSkills(), progress)),
+            // Slash commands live in `~/.claude/commands/` (and plugin
+            // command dirs) and aren't indexed by ingestSkills. Without
+            // this, every Skill-tool call against a slash command becomes
+            // an orphan `invoked` edge. See issues #41 / #42.
+            commands: () => withServices(telemetryStage(db, runId, "commands", "upsert", ingestCommands(), progress)),
+            claude: () => withServices(telemetryStage(
+                db,
+                runId,
+                "claude",
+                "transcripts",
+                ingestTranscripts({ sinceDays, onProgress: progressUpdater(progress, "claude", "transcripts") }),
+                progress,
+            )),
+            codex: () => withServices(telemetryStage(
+                db,
+                runId,
+                "codex",
+                "sessions",
+                ingestCodex({ sinceDays, onProgress: progressUpdater(progress, "codex", "sessions") }),
+                progress,
+            )),
             // Subagent stages run AFTER the parent transcript stages so the
             // parent sessions are already in the DB. Without this ordering
             // every spawn-derived edge would skip via missingParent.
-            if (sel.has("subagents")) {
-                yield* telemetryStage(
-                    db,
-                    runId,
-                    "claude",
-                    "subagents",
-                    deriveClaudeSubagents({ onProgress: progressUpdater(progress, "claude", "subagents") }),
-                    progress,
-                );
-            }
-            if (sel.has("spawned")) {
-                yield* telemetryStage(
-                    db,
-                    runId,
-                    "signals",
-                    "spawned",
-                    deriveSpawned(),
-                    progress,
-                );
-            }
-
-            if (sel.has("git")) {
-                yield* telemetryStage(
-                    db,
-                    runId,
-                    "git",
-                    "history",
-                    ingestGit({ sinceDays, onProgress: progressUpdater(progress, "git", "history") }),
-                    progress,
-                );
-            }
+            subagents: () => withServices(telemetryStage(
+                db,
+                runId,
+                "claude",
+                "subagents",
+                deriveClaudeSubagents({ onProgress: progressUpdater(progress, "claude", "subagents") }),
+                progress,
+            )),
+            spawned: () => withServices(telemetryStage(
+                db,
+                runId,
+                "signals",
+                "spawned",
+                deriveSpawned(),
+                progress,
+            )),
+            git: () => withServices(telemetryStage(
+                db,
+                runId,
+                "git",
+                "history",
+                ingestGit({ sinceDays, onProgress: progressUpdater(progress, "git", "history") }),
+                progress,
+            )),
             // Derive stages re-read already-ingested turn/session rows, so they
             // can run standalone via `--stages=` / `--derive-only` against an
             // existing DB without re-parsing transcripts.
-            if (sel.has("signals")) {
-                yield* telemetryStage(
-                    db,
-                    runId,
-                    "signals",
-                    "derive",
-                    deriveSignals({ sinceDays, onProgress: progressUpdater(progress, "signals", "derive") }),
-                    progress,
-                );
-            }
-            if (sel.has("outcomes")) {
-                yield* telemetryStage(
-                    db,
-                    runId,
-                    "outcomes",
-                    "derive",
-                    deriveOutcomes({ sinceDays }),
-                    progress,
-                );
-            }
-            if (sel.has("session-health")) {
-                yield* telemetryStage(
-                    db,
-                    runId,
-                    "session-health",
-                    "derive",
-                    deriveSessionHealth({ sinceDays }),
-                    progress,
-                );
-            }
-            if (sel.has("closure")) {
-                yield* telemetryStage(
-                    db,
-                    runId,
-                    "closure",
-                    "derive",
-                    deriveClosure(),
-                    progress,
-                );
-            }
-            if (sel.has("learning-registry")) {
-                yield* telemetryStage(
-                    db,
-                    runId,
-                    "learning-registry",
-                    "derive",
-                    deriveLearningRegistry(),
-                    progress,
-                );
-            }
-            if (sel.has("harness")) {
-                yield* telemetryStage(db, runId, "harness", "doctor", ingestHarness(), progress);
-            }
+            signals: () => withServices(telemetryStage(
+                db,
+                runId,
+                "signals",
+                "derive",
+                deriveSignals({ sinceDays, onProgress: progressUpdater(progress, "signals", "derive") }),
+                progress,
+            )),
+            outcomes: () => withServices(telemetryStage(
+                db,
+                runId,
+                "outcomes",
+                "derive",
+                deriveOutcomes({ sinceDays }),
+                progress,
+            )),
+            "session-health": () => withServices(telemetryStage(
+                db,
+                runId,
+                "session-health",
+                "derive",
+                deriveSessionHealth({ sinceDays }),
+                progress,
+            )),
+            closure: () => withServices(telemetryStage(
+                db,
+                runId,
+                "closure",
+                "derive",
+                deriveClosure(),
+                progress,
+            )),
+            "learning-registry": () => withServices(telemetryStage(
+                db,
+                runId,
+                "learning-registry",
+                "derive",
+                deriveLearningRegistry(),
+                progress,
+            )),
+            harness: () => withServices(telemetryStage(db, runId, "harness", "doctor", ingestHarness(), progress)),
+        };
+
+        const specs: StageSpec[] = sel.map((key) => ({
+            key,
+            deps: INGEST_STAGE_DEPS[key],
+            run: stageRun[key],
+        }));
+
+        const program = Effect.gen(function* () {
+            yield* runPipeline(specs);
         }).pipe(
             Effect.tap(() => db.query(buildIngestRunFinishStatement({ runId, status: "ok" })).pipe(Effect.asVoid)),
             Effect.catch((error) =>
@@ -535,6 +509,7 @@ const cmdIngest = (args: string[]) =>
         );
         yield* program;
     });
+};
 
 const cmdDeriveSignals = (args: string[]) =>
     Effect.gen(function* () {
