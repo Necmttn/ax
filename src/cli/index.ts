@@ -397,7 +397,14 @@ const cmdIngest = (args: string[]) =>
             }
 
             if (!skillsOnly && !transcriptsOnly && !codexOnly && !claudeOnly) {
-                yield* telemetryStage(db, runId, "git", "history", ingestGit({ sinceDays }), progress);
+                yield* telemetryStage(
+                    db,
+                    runId,
+                    "git",
+                    "history",
+                    ingestGit({ sinceDays, onProgress: progressUpdater(progress, "git", "history") }),
+                    progress,
+                );
             }
             // Auto-derive signals so taste queries always see fresh
             // corrected_by / proposed edges. Cheap: O(turns) in-memory walk.

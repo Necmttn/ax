@@ -711,6 +711,9 @@ const writeRepo = (
 
 export interface GitIngestOpts {
     sinceDays: number | undefined;
+    /** Emitted after each repository is written, with cumulative counts, so
+     *  the CLI progress bar ticks during the otherwise-silent repo walk. */
+    onProgress?: (counts: Record<string, number>) => Effect.Effect<void>;
 }
 
 export interface GitStats {
@@ -742,6 +745,11 @@ export const ingestGit = (
         // Legacy data can contain multiple checkout-scoped commit rows for
         // the same repo+sha; parallel canonicalization would race on the
         // `commit_sha_uq` index.
+        // Cumulative counters for progress. concurrency:4 means increments can
+        // interleave; a progress bar tolerates an approximate count, and the
+        // authoritative totals are recomputed from `perRepo` below.
+        let doneRepos = 0;
+        const running = { commits: 0, files: 0, produced: 0, touched: 0, sessions: 0 };
         const repoGroups = groupReposByRepositoryKey(repos);
         const perGroup = yield* Effect.forEach(
             repoGroups,
@@ -760,6 +768,15 @@ export const ingestGit = (
                                 produced: stats.produced,
                                 touched: stats.touched,
                             });
+                            doneRepos += 1;
+                            running.commits += stats.commits;
+                            running.files += stats.files;
+                            running.produced += stats.produced;
+                            running.touched += stats.touched;
+                            running.sessions += stats.sessions;
+                            if (opts.onProgress) {
+                                yield* opts.onProgress({ repos: doneRepos, ...running });
+                            }
                             return stats;
                         }),
                     { concurrency: 1 },
