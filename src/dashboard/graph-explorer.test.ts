@@ -35,11 +35,11 @@ describe("graph explorer", () => {
         expect(FILE_ATTENTION_SQL).toContain("$limit");
         expect(FILE_ATTENTION_SQL).toContain("time::max(ts) AS last_seen");
         expect(FILE_ATTENTION_SQL).toContain("GROUP BY session, file");
-        expect(FILE_ATTENTION_SQL).toContain("FROM turn");
-        expect(FILE_ATTENTION_SQL).toContain("\"organic_task\"");
-        expect(FILE_ATTENTION_SQL).toContain("message_kind = \"task\"");
-        expect(FILE_ATTENTION_SQL).toContain("<local-command");
-        expect(FILE_ATTENTION_SQL).toContain("text_excerpt");
+        // issue #77: turn-derived metrics are precomputed on session_health,
+        // so the query must NOT scan the turn table per result row.
+        expect(FILE_ATTENTION_SQL).not.toContain("FROM turn");
+        expect(FILE_ATTENTION_SQL).toContain("session_health");
+        expect(FILE_ATTENTION_SQL).toContain("task_label");
         expect(FILE_ATTENTION_SQL).not.toContain("GROUP BY in.session");
         expect(FILE_ATTENTION_SQL).not.toContain("math::max(ts)");
     });

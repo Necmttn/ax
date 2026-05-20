@@ -33,48 +33,19 @@ const NODE_KINDS = new Set<GraphNodeKind>([
     "phase",
 ]);
 
+// The five turn-derived metrics (task_label, user/assistant/correction turn
+// counts) plus interruptions are precomputed once per session during the
+// `session-health` ingest stage and stored on `session_health`. This query
+// reads them via a single per-row `session_health` subquery instead of the
+// ~5 correlated scans over the 400k-row `turn` table that hung the endpoint
+// (GitHub issue #77). The `task_label` derivation - the two-tier organic-task
+// fallback with boilerplate filtering - now lives in
+// `src/lib/shared/task-label.ts` (consumed by the ingest derivation).
 export const FILE_ATTENTION_SQL = `
 SELECT
     <string>session AS source_id,
     (
-        (SELECT text_excerpt, seq FROM turn
-            WHERE session = $parent.session
-              AND role = "user"
-              AND message_kind = "task"
-              AND intent_kind IN ["organic_task", "preference", "correction"]
-              AND text_excerpt IS NOT NONE
-              AND !(string::lowercase(text_excerpt) CONTAINS "<local-command")
-              AND !(string::lowercase(text_excerpt) CONTAINS "base directory for this skill:")
-              AND !(string::lowercase(text_excerpt) CONTAINS "base directory for this plugin:")
-              AND !(string::lowercase(text_excerpt) CONTAINS "<environment_context>")
-              AND !(string::lowercase(text_excerpt) CONTAINS "<instructions>")
-              AND !(string::lowercase(text_excerpt) CONTAINS "# agents.md instructions")
-              AND !(string::lowercase(text_excerpt) CONTAINS "# claude.md")
-              AND !(string::lowercase(text_excerpt) CONTAINS "review all changed files for reuse")
-              AND !(string::lowercase(text_excerpt) CONTAINS "session-scoped stop hook")
-              AND !(string::lowercase(text_excerpt) CONTAINS "this session is being continued")
-            ORDER BY seq ASC
-            LIMIT 1
-        )[0].text_excerpt
-        ??
-        (SELECT text_excerpt, seq FROM turn
-            WHERE session = $parent.session
-              AND role = "user"
-              AND message_kind = "task"
-              AND text_excerpt IS NOT NONE
-              AND !(string::lowercase(text_excerpt) CONTAINS "<local-command")
-              AND !(string::lowercase(text_excerpt) CONTAINS "base directory for this skill:")
-              AND !(string::lowercase(text_excerpt) CONTAINS "base directory for this plugin:")
-              AND !(string::lowercase(text_excerpt) CONTAINS "<environment_context>")
-              AND !(string::lowercase(text_excerpt) CONTAINS "<instructions>")
-              AND !(string::lowercase(text_excerpt) CONTAINS "# agents.md instructions")
-              AND !(string::lowercase(text_excerpt) CONTAINS "# claude.md")
-              AND !(string::lowercase(text_excerpt) CONTAINS "review all changed files for reuse")
-              AND !(string::lowercase(text_excerpt) CONTAINS "session-scoped stop hook")
-              AND !(string::lowercase(text_excerpt) CONTAINS "this session is being continued")
-            ORDER BY seq ASC
-            LIMIT 1
-        )[0].text_excerpt
+        (SELECT task_label FROM session_health WHERE session = $parent.session LIMIT 1)[0].task_label
         ??
         session.project
         ??
@@ -91,9 +62,9 @@ SELECT
     last_seen,
     session.started_at AS source_started_at,
     session.ended_at AS source_ended_at,
-    array::len((SELECT id FROM turn WHERE session = $parent.session AND role = "user")) AS source_user_turns,
-    array::len((SELECT id FROM turn WHERE session = $parent.session AND role = "assistant")) AS source_assistant_turns,
-    array::len((SELECT id FROM turn WHERE session = $parent.session AND role = "user" AND intent_kind = "correction")) AS source_corrections,
+    ((SELECT user_turns FROM session_health WHERE session = $parent.session LIMIT 1)[0].user_turns ?? 0) AS source_user_turns,
+    ((SELECT assistant_turns FROM session_health WHERE session = $parent.session LIMIT 1)[0].assistant_turns ?? 0) AS source_assistant_turns,
+    ((SELECT correction_turns FROM session_health WHERE session = $parent.session LIMIT 1)[0].correction_turns ?? 0) AS source_corrections,
     ((SELECT interruptions FROM session_health WHERE session = $parent.session LIMIT 1)[0].interruptions ?? 0) AS source_interruptions,
     ((SELECT math::sum(duration_ms) AS total, session FROM phase_span WHERE session = $parent.session AND user_turns = 0 GROUP BY session)[0].total ?? NONE) AS source_hands_free_ms,
     array::len((SELECT id FROM produced WHERE in = $parent.session)) AS source_produced_commits,
@@ -131,11 +102,11 @@ export function validateFileAttentionSql(sql = FILE_ATTENTION_SQL): ReadonlyArra
     if (!/FROM\s*\(\s*SELECT[\s\S]*GROUP\s+BY\s+session\s*,\s*file[\s\S]*\)/i.test(sql)) {
         warnings.push("missing aggregate subquery grouped by session and file aliases");
     }
-    if (!/FROM\s+turn/i.test(sql) || !/text_excerpt/i.test(sql) || !/organic_task/i.test(sql)) {
-        warnings.push("missing first-user-ask session decoration");
+    if (/FROM\s+turn/i.test(sql)) {
+        warnings.push("per-row turn-table scan reintroduced; read precomputed session_health metrics");
     }
-    if (!/message_kind\s*=\s*"task"/i.test(sql) || !/local-command/i.test(sql)) {
-        warnings.push("missing human-task filter for session labels");
+    if (!/session_health[\s\S]*task_label/i.test(sql)) {
+        warnings.push("missing precomputed task_label decoration from session_health");
     }
     if (!/session_health/i.test(sql) || !/delivery_outcome/i.test(sql) || !/produced/i.test(sql) || !/phase_span/i.test(sql)) {
         warnings.push("missing session story signal decoration");
