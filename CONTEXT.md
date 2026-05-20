@@ -47,6 +47,18 @@ _Avoid_: ground truth
 The agent-neutral logic that turns normalized sessions, edits, commits, and touched files into **Change Sets** and **File Memories**.
 _Avoid_: Codex parser, adapter
 
+**Ingest Stage**:
+One named unit of the ingest run - skills, commands, claude, codex, subagents,
+spawned, git, signals, outcomes, session-health, closure, learning-registry, or
+harness. A stage declares the other stages it depends on.
+_Avoid_: step, job
+
+**Ingest Pipeline**:
+The dependency-ordered execution of all selected **Ingest Stages**. The pipeline
+owns ordering, parallelism, and per-stage error events; it does not own stage
+logic. The derive-* stages remain the **Derivation Engine** subset.
+_Avoid_: ingest script, runner
+
 **Commit Signal**:
 The quality of commit evidence for reconstructing durable agent work memory.
 _Avoid_: commit lint
@@ -401,6 +413,9 @@ _Avoid_: task
 - `edited` edges should preserve observed edit evidence such as Checkout and absolute path seen while pointing to the canonical **File**.
 - `touched` edges should preserve commit diff evidence such as status, rename paths, additions, and deletions while pointing to the canonical **File**.
 - Claude and Codex session edits should resolve through **Checkout** before linking to canonical **Files**.
+- An **Ingest Stage** declares its dependency **Ingest Stages**; the **Ingest Pipeline** computes execution order and parallelism from that graph rather than a hardcoded list.
+- The **Ingest Pipeline** runs independent stages concurrently; `claude` and `codex` have no dependency between them and run in parallel.
+- `--stages=` and `--derive-only` select a subgraph of the **Ingest Pipeline**; legacy `--X-only` flags are deprecated aliases.
 
 ## Example dialogue
 
