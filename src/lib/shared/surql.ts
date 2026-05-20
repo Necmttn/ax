@@ -36,9 +36,15 @@ const stripLoneSurrogates = (s: string): string => s.replace(LONE_SURROGATE, "")
  * A SurrealQL string literal: JSON-quoted, lone surrogates removed. The one
  * way to embed arbitrary text (transcript excerpts, patterns, paths) into a
  * SurrealQL statement.
+ *
+ * The parameter type is `string`, but DB-sourced rows routinely hand back
+ * `null` / `undefined` where a `string` was declared (a missing column reads
+ * back as `undefined`). Rather than throw inside an ingest pipeline, a nullish
+ * value is coerced to the empty string. Callers that want a SurrealQL `NONE`
+ * for absent values must branch before calling (or use `surrealJsonOption`).
  */
 export const surrealString = (value: string): string =>
-    JSON.stringify(stripLoneSurrogates(value));
+    JSON.stringify(stripLoneSurrogates(value == null ? "" : value));
 
 /**
  * A SurrealQL literal for an arbitrary JSON-serialisable value - serialises to

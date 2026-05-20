@@ -997,7 +997,7 @@ const upsertRecovered = (edges: RecoveryEdge[]) =>
         const stmts = edges.map((e) => {
             const edgeId = recoveredByEdgeId(e.fromTurnKey, e.skillKey);
             const excerpt =
-                e.errorExcerpt === null ? "NONE" : sqlString(e.errorExcerpt);
+                e.errorExcerpt == null ? "NONE" : sqlString(e.errorExcerpt);
             return `RELATE turn:\`${e.fromTurnKey}\` -> recovered_by:\`${edgeId}\` -> skill:\`${e.skillKey}\` SET ts = d"${e.ts}", error_excerpt = ${excerpt};`;
         });
         for (let i = 0; i < stmts.length; i += 500) {
