@@ -5,9 +5,9 @@
  *
  * taste_score = total_inv - 2*corrections + commits_after - 0.5*proposals
  *
- * See `src/tui/queries.ts` history for perf notes (#31, #33): denormalised
- * `was_corrected` flag on the `invoked` edge + `time::max(ts)` aggregate
- * instead of per-row subqueries.
+ * See `src/tui/queries.ts` history for perf notes (#31, #33, dashboard
+ * startup): denormalised `was_corrected` flag on the `invoked` edge +
+ * batched follow-up queries instead of per-row subqueries.
  */
 export const SKILL_SUMMARY_SQL = `
 SELECT
@@ -22,18 +22,7 @@ SELECT
     last_used,
     corrections,
     proposals,
-    -- One discriminating fact per row: most recent project this skill ran
-    -- in. The (out, ts) index on \`invoked\` makes this LIMIT-1 lookup
-    -- cheap (147 outer rows * 1 indexed seek). SurrealDB requires the ORDER
-    -- BY column be in the projection, hence the explicit \`ts\`.
-    (SELECT in.session.project AS project, ts FROM invoked WHERE out.name = $parent.name ORDER BY ts DESC LIMIT 1)[0].project AS last_project,
-    array::len((SELECT id FROM produced WHERE in IN $parent.skill_sessions)) AS commits_after,
-    (
-        total_inv
-        - 2 * corrections
-        + array::len((SELECT id FROM produced WHERE in IN $parent.skill_sessions))
-        - 0.5 * proposals
-    ) AS taste_score
+    skill_sessions
 FROM (
     SELECT
         skill_id.name AS name,
@@ -60,9 +49,19 @@ FROM (
         GROUP BY out
     )
     WHERE skill_id.name IS NOT NONE
-)
-ORDER BY taste_score DESC, inv_30d DESC, total_inv DESC
-LIMIT 500;`;
+);`;
+
+export const SKILL_LAST_PROJECT_SQL = `
+SELECT out.name AS name, in.session.project AS project, ts
+FROM invoked
+ORDER BY ts DESC
+LIMIT 50000;`;
+
+export const PRODUCED_BY_SESSION_SQL = `
+SELECT in AS session, count() AS commits_after
+FROM produced
+GROUP BY in
+LIMIT 50000;`;
 
 /** Skills with `proposed` edges but no `invoked` edges. Union with the main
  *  scan on the JS side. */

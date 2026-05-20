@@ -26,6 +26,10 @@ interface SubagentManifest {
     readonly file: string;
 }
 
+export interface DeriveClaudeSubagentsOpts {
+    readonly onProgress?: (counts: Record<string, number>) => Effect.Effect<void>;
+}
+
 const isRecord = (v: unknown): v is Record<string, unknown> =>
     typeof v === "object" && v !== null && !Array.isArray(v);
 
@@ -123,10 +127,12 @@ export interface DeriveClaudeSubagentsStats {
 
 /**
  * Create one session record + one `spawned` edge per discovered subagent
- * transcript. Does NOT ingest the subagent's turns/tool_calls yet (that's a
- * second pass). Idempotent: re-running upserts the session and re-RELATEs.
+ * transcript, and ingest the subagent's own turns/tool calls. Idempotent:
+ * re-running upserts the session and re-RELATEs.
  */
-export const deriveClaudeSubagents = (): Effect.Effect<
+export const deriveClaudeSubagents = (
+    opts: DeriveClaudeSubagentsOpts = {},
+): Effect.Effect<
     DeriveClaudeSubagentsStats,
     DbError,
     SurrealClient | AgentctlConfig
@@ -134,7 +140,14 @@ export const deriveClaudeSubagents = (): Effect.Effect<
     Effect.gen(function* () {
         const cfg = yield* AgentctlConfig;
         const db = yield* SurrealClient;
+        if (opts.onProgress) yield* opts.onProgress({ phase: 1 });
         const manifests = yield* Effect.promise(() => discover(cfg.paths.transcriptsDir));
+        if (opts.onProgress) {
+            yield* opts.onProgress({
+                phase: 2,
+                totalSubagents: manifests.length,
+            });
+        }
 
         let written = 0;
         let missingParent = 0;
@@ -145,7 +158,23 @@ export const deriveClaudeSubagents = (): Effect.Effect<
         let editsTotal = 0;
         let planSnapshotsTotal = 0;
 
-        for (const m of manifests) {
+        for (const [index, m] of manifests.entries()) {
+            if (opts.onProgress && (index < 5 || index % 10 === 0)) {
+                yield* opts.onProgress({
+                    phase: 2,
+                    currentSubagent: index + 1,
+                    totalSubagents: manifests.length,
+                    subagents: written + missingParent + skippedExisting,
+                    written,
+                    missingParent,
+                    skippedExisting,
+                    turns: turnsTotal,
+                    invocations: invocationsTotal,
+                    toolCalls: toolCallsTotal,
+                    edits: editsTotal,
+                    planSnapshots: planSnapshotsTotal,
+                });
+            }
             // Confirm parent exists - subagent without its parent is orphaned data.
             const parentRid = `session:⟨${m.parentSessionId}⟩`;
             const check = yield* db.query<[Array<Record<string, unknown>>]>(
@@ -219,6 +248,23 @@ export const deriveClaudeSubagents = (): Effect.Effect<
                 `RELATE ${parentRid} -> spawned -> ${subagentRef} SET ts = d${surrealLiteral(m.startedAt ?? new Date().toISOString())}, tool = "Agent", nickname = ${surrealLiteral(m.agentId.slice(0, 12))};`,
             );
             written += 1;
+
+            if (opts.onProgress && (index < 5 || (index + 1) % 10 === 0 || index + 1 === manifests.length)) {
+                yield* opts.onProgress({
+                    phase: 2,
+                    currentSubagent: index + 1,
+                    totalSubagents: manifests.length,
+                    subagents: written + missingParent + skippedExisting,
+                    written,
+                    missingParent,
+                    skippedExisting,
+                    turns: turnsTotal,
+                    invocations: invocationsTotal,
+                    toolCalls: toolCallsTotal,
+                    edits: editsTotal,
+                    planSnapshots: planSnapshotsTotal,
+                });
+            }
         }
 
         return {

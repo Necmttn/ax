@@ -50,6 +50,10 @@ const countDisplayOrder = [
     "fileToolCalls",
     "activeFiles",
     "sessions",
+    "subagents",
+    "written",
+    "missingParent",
+    "skippedExisting",
     "turns",
     "toolCalls",
     "tool_calls",
@@ -112,6 +116,7 @@ function totalRows(counts: Record<string, number>): number {
         "records",
         "files",
         "sessions",
+        "subagents",
         "turns",
         "toolCalls",
         "tool_calls",
@@ -139,13 +144,28 @@ function summarizeCounts(counts: Record<string, number>): string {
         ? `${phase ? `${phase} ` : "processing "}${formatCount(counts.currentFile)}/${formatCount(counts.totalFiles)}${
             typeof counts.currentFileBytes === "number" ? ` (${formatBytes(counts.currentFileBytes)})` : ""
         }`
+        : typeof counts.currentSubagent === "number" && typeof counts.totalSubagents === "number"
+            ? `${phase ? `${phase} ` : "processing "}${formatCount(counts.currentSubagent)}/${formatCount(counts.totalSubagents)} subagents`
         : typeof counts.totalFiles === "number"
             ? `discovered ${formatCount(counts.totalFiles)} files${
                 typeof counts.totalBytes === "number" ? ` / ${formatBytes(counts.totalBytes)}` : ""
             }`
-            : "";
+            : typeof counts.totalSubagents === "number"
+                ? `discovered ${formatCount(counts.totalSubagents)} subagents`
+            : phase
+                ? `${phase} work`
+                : "";
     const entries = Object.entries(counts)
-        .filter(([key]) => key !== "currentFile" && key !== "totalFiles" && key !== "currentFileBytes" && key !== "totalBytes" && key !== "records" && key !== "phase")
+        .filter(([key]) =>
+            key !== "currentFile" &&
+            key !== "totalFiles" &&
+            key !== "currentFileBytes" &&
+            key !== "totalBytes" &&
+            key !== "currentSubagent" &&
+            key !== "totalSubagents" &&
+            key !== "records" &&
+            key !== "phase"
+        )
         .filter(([, value]) => Number.isFinite(value))
         .sort(([a], [b]) => {
             const ai = countDisplayOrder.indexOf(a as (typeof countDisplayOrder)[number]);

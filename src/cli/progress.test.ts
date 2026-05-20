@@ -322,6 +322,41 @@ describe("cli progress", () => {
         expect(output).not.toContain("       259");
     });
 
+    test("pipeline mode shows Claude subagent discovery and processing progress", () => {
+        const sink = memorySink(true, 120);
+        const progress = createProgressReporter({
+            command: "ingest",
+            mode: "pipeline",
+            runId: "abc123456789",
+            stages: [{ source: "claude", stage: "subagents" }],
+            sink,
+            now: () => 1_000,
+            intervalMs: 10_000,
+            env: {},
+        });
+
+        progress.start({ source: "claude", stage: "subagents" });
+        progress.update({ source: "claude", stage: "subagents" }, {
+            totalSubagents: 42,
+        });
+        progress.update({ source: "claude", stage: "subagents" }, {
+            phase: 2,
+            currentSubagent: 7,
+            totalSubagents: 42,
+            subagents: 6,
+            written: 5,
+            missingParent: 1,
+            turns: 200,
+            toolCalls: 30,
+        });
+        progress.stop();
+
+        const output = sink.chunks.join("");
+        expect(output).toContain("discovered 42 subagents");
+        expect(output).toContain("writing 7/42 subagents");
+        expect(output).toContain("subagents=6 written=5 missingParent=1 turns=200");
+    });
+
     test("pipeline mode renders multiple running stage details", () => {
         const sink = memorySink(true, 120);
         const progress = createProgressReporter({

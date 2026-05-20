@@ -2,7 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { Effect } from "effect";
 import { flushSync } from "@opentui/react";
 import type { SurrealClientShape } from "../../lib/db.ts";
-import { SKILL_SUMMARY_SQL, SKILL_SUMMARY_PROPOSED_ONLY_SQL } from "../queries.ts";
+import {
+    PRODUCED_BY_SESSION_SQL,
+    SKILL_LAST_PROJECT_SQL,
+    SKILL_SUMMARY_PROPOSED_ONLY_SQL,
+    SKILL_SUMMARY_SQL,
+} from "../queries.ts";
 
 export interface SkillRow {
     readonly name: string;
@@ -14,6 +19,22 @@ export interface SkillRow {
     readonly inv_30d: number;
     readonly last_used: string | null;
     readonly taste_score: number;
+}
+
+interface SkillSummaryRawRow extends SkillRow {
+    readonly corrections?: number;
+    readonly proposals?: number;
+    readonly skill_sessions?: ReadonlyArray<unknown>;
+}
+
+interface ProducedBySessionRow {
+    readonly session?: unknown;
+    readonly commits_after?: number;
+}
+
+interface LastProjectRow {
+    readonly name?: string;
+    readonly project?: string | null;
 }
 
 export interface SkillsState {
@@ -53,15 +74,20 @@ export function useSkills(client: SurrealClientShape): SkillsState {
         Effect.runPromise(
             Effect.all(
                 [
-                    client.query<[Array<SkillRow>]>(SKILL_SUMMARY_SQL),
+                    client.query<[Array<SkillSummaryRawRow>]>(SKILL_SUMMARY_SQL),
                     client.query<[Array<SkillRow>]>(SKILL_SUMMARY_PROPOSED_ONLY_SQL),
+                    client.query<[Array<ProducedBySessionRow>]>(PRODUCED_BY_SESSION_SQL),
+                    client.query<[Array<LastProjectRow>]>(SKILL_LAST_PROJECT_SQL),
                 ],
-                { concurrency: 2 },
+                { concurrency: 4 },
             ),
         )
-            .then(([invokedResult, proposedResult]) => {
+            .then(([invokedResult, proposedResult, producedResult, lastProjectResult]) => {
                 if (cancelled || !aliveRef.current) return;
-                const invokedRows = (invokedResult?.[0] ?? []) as Array<SkillRow>;
+                const commitCountsBySession = buildCommitCountsBySession(producedResult?.[0] ?? []);
+                const lastProjectBySkill = buildLastProjectBySkill(lastProjectResult?.[0] ?? []);
+                const invokedRows = ((invokedResult?.[0] ?? []) as Array<SkillSummaryRawRow>)
+                    .map((row) => enrichSkillRow(row, commitCountsBySession, lastProjectBySkill));
                 const proposedRows = (proposedResult?.[0] ?? []) as Array<SkillRow>;
                 const rows = [...invokedRows, ...proposedRows].sort((a, b) => {
                     const ds = (b.taste_score ?? 0) - (a.taste_score ?? 0);
@@ -111,3 +137,59 @@ export function useSkills(client: SurrealClientShape): SkillsState {
         refresh: () => setTick((t) => t + 1),
     };
 }
+
+const recordKey = (value: unknown): string | null => {
+    if (typeof value === "string" && value.length > 0) return value;
+    if (value && typeof value === "object" && "toString" in value) {
+        const text = String(value);
+        return text.length > 0 ? text : null;
+    }
+    return null;
+};
+
+const buildCommitCountsBySession = (
+    rows: ReadonlyArray<ProducedBySessionRow>,
+): Map<string, number> => {
+    const out = new Map<string, number>();
+    for (const raw of rows) {
+        const session = recordKey(raw.session);
+        if (!session) continue;
+        out.set(session, Number(raw.commits_after ?? 0));
+    }
+    return out;
+};
+
+const buildLastProjectBySkill = (
+    rows: ReadonlyArray<LastProjectRow>,
+): Map<string, string> => {
+    const out = new Map<string, string>();
+    for (const raw of rows) {
+        if (!raw.name || !raw.project || out.has(raw.name)) continue;
+        out.set(raw.name, raw.project);
+    }
+    return out;
+};
+
+const enrichSkillRow = (
+    row: SkillSummaryRawRow,
+    commitCountsBySession: ReadonlyMap<string, number>,
+    lastProjectBySkill: ReadonlyMap<string, string>,
+): SkillRow => {
+    const sessions = Array.isArray(row.skill_sessions)
+        ? row.skill_sessions.map(recordKey).filter((v): v is string => v !== null)
+        : [];
+    const commitsAfter = sessions.reduce(
+        (sum, session) => sum + (commitCountsBySession.get(session) ?? 0),
+        0,
+    );
+    const totalInv = Number(row.total_inv ?? 0);
+    const corrections = Number(row.corrections ?? 0);
+    const proposals = Number(row.proposals ?? 0);
+    return {
+        ...row,
+        taste_score: totalInv - 2 * corrections + commitsAfter - 0.5 * proposals,
+        // Preserve the extra field for callers that already tolerate it,
+        // without adding it to the public SkillRow interface.
+        last_project: lastProjectBySkill.get(row.name) ?? null,
+    } as SkillRow;
+};

@@ -3,6 +3,8 @@ import { SurrealClient } from "../lib/db.ts";
 import type { DbError } from "../lib/errors.ts";
 import { surrealLiteral } from "../lib/json.ts";
 import {
+    PRODUCED_BY_SESSION_SQL,
+    SKILL_LAST_PROJECT_SQL,
     SKILL_SUMMARY_SQL,
     SKILL_SUMMARY_PROPOSED_ONLY_SQL,
 } from "../queries/skill-summary.ts";
@@ -55,6 +57,21 @@ const dateField = (row: Record<string, unknown>, key: string): string | null => 
         if (typeof json === "string" && json.length > 0) return json;
     }
     return null;
+};
+
+const recordKey = (value: unknown): string | null => {
+    if (typeof value === "string" && value.length > 0) return value;
+    if (value && typeof value === "object" && "toString" in value) {
+        const text = String(value);
+        return text.length > 0 ? text : null;
+    }
+    return null;
+};
+
+const recordArrayField = (row: Record<string, unknown>, key: string): string[] => {
+    const value = row[key];
+    if (!Array.isArray(value)) return [];
+    return value.map(recordKey).filter((v): v is string => v !== null);
 };
 
 // Claude ships these as built-in slash commands (no SKILL.md on disk), so
@@ -113,6 +130,53 @@ const coerceRow = (raw: Record<string, unknown>): SkillRow => ({
     commits_after: numericField(raw, "commits_after"),
     taste_score: numericField(raw, "taste_score"),
 });
+
+const buildCommitCountsBySession = (
+    rows: ReadonlyArray<Record<string, unknown>>,
+): Map<string, number> => {
+    const out = new Map<string, number>();
+    for (const raw of rows) {
+        const session = recordKey(raw.session);
+        if (!session) continue;
+        out.set(session, numericField(raw, "commits_after"));
+    }
+    return out;
+};
+
+const buildLastProjectBySkill = (
+    rows: ReadonlyArray<Record<string, unknown>>,
+): Map<string, string> => {
+    const out = new Map<string, string>();
+    for (const raw of rows) {
+        const name = stringField(raw, "name");
+        const project = stringField(raw, "project");
+        if (!name || !project || out.has(name)) continue;
+        out.set(name, project);
+    }
+    return out;
+};
+
+const enrichSummaryRow = (
+    raw: Record<string, unknown>,
+    commitCountsBySession: ReadonlyMap<string, number>,
+    lastProjectBySkill: ReadonlyMap<string, string>,
+): Record<string, unknown> => {
+    const sessions = recordArrayField(raw, "skill_sessions");
+    const commitsAfter = sessions.reduce(
+        (sum, session) => sum + (commitCountsBySession.get(session) ?? 0),
+        0,
+    );
+    const totalInv = numericField(raw, "total_inv");
+    const corrections = numericField(raw, "corrections");
+    const proposals = numericField(raw, "proposals");
+    const name = String(raw.name ?? "");
+    return {
+        ...raw,
+        last_project: lastProjectBySkill.get(name) ?? null,
+        commits_after: commitsAfter,
+        taste_score: totalInv - 2 * corrections + commitsAfter - 0.5 * proposals,
+    };
+};
 
 const daysSince = (iso: string | null): number | null => {
     if (!iso) return null;
@@ -233,11 +297,15 @@ export const fetchSkillTriage = (): Effect.Effect<
 > =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
-        const [main, proposedOnly, decisions] = yield* Effect.all([
+        const [main, proposedOnly, decisions, commitCounts, lastProjects] = yield* Effect.all([
             db.query<[Array<Record<string, unknown>>]>(SKILL_SUMMARY_SQL),
             db.query<[Array<Record<string, unknown>>]>(SKILL_SUMMARY_PROPOSED_ONLY_SQL),
             db.query<[Array<Record<string, unknown>>]>(TRIAGE_DECISIONS_SQL),
+            db.query<[Array<Record<string, unknown>>]>(PRODUCED_BY_SESSION_SQL),
+            db.query<[Array<Record<string, unknown>>]>(SKILL_LAST_PROJECT_SQL),
         ]);
+        const commitCountsBySession = buildCommitCountsBySession(commitCounts?.[0] ?? []);
+        const lastProjectBySkill = buildLastProjectBySkill(lastProjects?.[0] ?? []);
         const decisionByName = new Map<string, SkillTriageNote>();
         for (const raw of decisions?.[0] ?? []) {
             const parsed = parseDecisionRow(raw);
@@ -246,7 +314,7 @@ export const fetchSkillTriage = (): Effect.Effect<
         const rows: SkillTriageEntry[] = [];
         const seen = new Set<string>();
         for (const raw of main?.[0] ?? []) {
-            const row = coerceRow(raw);
+            const row = coerceRow(enrichSummaryRow(raw, commitCountsBySession, lastProjectBySkill));
             if (!row.name) continue;
             seen.add(row.name);
             const rec = recommendForSkill(row);
@@ -268,6 +336,11 @@ export const fetchSkillTriage = (): Effect.Effect<
                 decision: decisionByName.get(row.name) ?? null,
             });
         }
+        rows.sort((a, b) =>
+            b.taste_score - a.taste_score ||
+            b.inv_30d - a.inv_30d ||
+            b.total_inv - a.total_inv,
+        );
         return {
             generatedAt: new Date().toISOString(),
             skills: rows,

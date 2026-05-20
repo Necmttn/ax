@@ -5,7 +5,12 @@
  * server can reuse it. Re-exported here for backward compatibility.
  */
 
-export { SKILL_SUMMARY_SQL, SKILL_SUMMARY_PROPOSED_ONLY_SQL } from "../queries/skill-summary.ts";
+export {
+    PRODUCED_BY_SESSION_SQL,
+    SKILL_LAST_PROJECT_SQL,
+    SKILL_SUMMARY_PROPOSED_ONLY_SQL,
+    SKILL_SUMMARY_SQL,
+} from "../queries/skill-summary.ts";
 
 /**
  * Detail payload for a single skill: skill metadata (no body - read from

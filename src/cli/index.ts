@@ -437,7 +437,7 @@ const cmdIngest = (args: string[]) =>
                     runId,
                     "claude",
                     "subagents",
-                    deriveClaudeSubagents(),
+                    deriveClaudeSubagents({ onProgress: progressUpdater(progress, "claude", "subagents") }),
                     progress,
                 );
             }
