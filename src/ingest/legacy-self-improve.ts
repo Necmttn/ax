@@ -7,7 +7,7 @@ import { decodeJsonOrNull } from "../lib/decode.ts";
 import type { DbError } from "../lib/errors.ts";
 import { AppLayer } from "../lib/layers.ts";
 import { recordRef } from "./evidence-writers.ts";
-import { surrealDate, surrealJsonOption, surrealObject, surrealOptionDate, surrealOptionString, surrealString } from "../lib/shared/surql.ts";
+import { surrealJsonOption, surrealObject, surrealOptionDate, surrealOptionString, surrealString } from "../lib/shared/surql.ts";
 
 type JsonRecord = Record<string, unknown>;
 
