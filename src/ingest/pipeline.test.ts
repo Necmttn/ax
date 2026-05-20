@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { runPipeline, topoLayers, type StageSpec } from "./pipeline.ts";
+import { INGEST_STAGE_DEPS, deriveOnlyKeys, runPipeline, topoLayers, type StageSpec } from "./pipeline.ts";
 
 /** Minimal specs - `run` records the order it executed in. */
 const spec = (key: string, deps: string[]): StageSpec => ({
@@ -73,5 +73,30 @@ describe("runPipeline", () => {
         expect(new Set(order)).toEqual(new Set(["a", "b", "c"]));
         expect(order.indexOf("a")).toBeLessThan(order.indexOf("b"));
         expect(order.indexOf("a")).toBeLessThan(order.indexOf("c"));
+    });
+});
+
+describe("INGEST_STAGE_DEPS", () => {
+    test("has all 13 canonical stages", () => {
+        expect(Object.keys(INGEST_STAGE_DEPS).sort()).toEqual(
+            [
+                "claude", "closure", "codex", "commands", "git", "harness",
+                "learning-registry", "outcomes", "session-health", "signals",
+                "skills", "spawned", "subagents",
+            ].sort(),
+        );
+    });
+    test("subagents depends on claude + codex", () => {
+        expect(new Set(INGEST_STAGE_DEPS.subagents)).toEqual(
+            new Set(["claude", "codex"]),
+        );
+    });
+    test("deriveOnlyKeys are the DB-only re-derive stages", () => {
+        expect(new Set(deriveOnlyKeys())).toEqual(
+            new Set([
+                "signals", "outcomes", "session-health",
+                "closure", "learning-registry",
+            ]),
+        );
     });
 });
