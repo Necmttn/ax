@@ -29,25 +29,21 @@ export const LAYER_CONCURRENCY = 2;
 
 /**
  * Compute execution layers via Kahn's algorithm. Layer N contains every stage
- * whose deps are all satisfied by layers < N. Throws on a dependency cycle or
- * a dep on a stage that is not in `specs`.
+ * whose deps are all satisfied by layers < N. Throws only on a dependency
+ * cycle. Deps that reference stages outside `specs` are treated as already
+ * satisfied (the caller is responsible for ensuring those rows exist in the
+ * DB - e.g. `--stages=signals` assumes transcript rows are already ingested).
  */
 export const topoLayers = (specs: readonly StageSpec[]): string[][] => {
     const byKey = new Map(specs.map((s) => [s.key, s]));
-    for (const s of specs) {
-        for (const d of s.deps) {
-            if (!byKey.has(d)) {
-                throw new Error(
-                    `ingest pipeline: stage "${s.key}" has unknown dep "${d}"`,
-                );
-            }
-        }
-    }
+    const inGraph = (d: string): boolean => byKey.has(d);
     const done = new Set<string>();
     const layers: string[][] = [];
     let remaining = [...specs];
     while (remaining.length > 0) {
-        const ready = remaining.filter((s) => s.deps.every((d) => done.has(d)));
+        const ready = remaining.filter((s) =>
+            s.deps.filter(inGraph).every((d) => done.has(d)),
+        );
         if (ready.length === 0) {
             throw new Error(
                 `ingest pipeline: dependency cycle among ${remaining
@@ -114,3 +110,19 @@ export type IngestStageKey = keyof typeof INGEST_STAGE_DEPS;
  *  `--derive-only` set. Defined as "no dep on a transcript/git parse stage". */
 export const deriveOnlyKeys = (): IngestStageKey[] =>
     ["signals", "outcomes", "session-health", "closure", "learning-registry"];
+
+const ALL_STAGE_KEYS = Object.keys(INGEST_STAGE_DEPS) as IngestStageKey[];
+
+/** Validate + return the requested stage keys verbatim. Deps are NOT expanded:
+ *  for `--stages=signals` the dep rows are assumed already ingested. Throws on
+ *  an unknown key. */
+export const selectStages = (keys: readonly string[]): IngestStageKey[] => {
+    const bad = keys.filter((k) => !ALL_STAGE_KEYS.includes(k as IngestStageKey));
+    if (bad.length > 0) {
+        throw new Error(
+            `ingest pipeline: unknown stage(s): ${bad.join(", ")}\n` +
+                `  valid stages: ${ALL_STAGE_KEYS.join(", ")}`,
+        );
+    }
+    return keys as IngestStageKey[];
+};

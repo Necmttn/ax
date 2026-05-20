@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { INGEST_STAGE_DEPS, deriveOnlyKeys, runPipeline, topoLayers, type StageSpec } from "./pipeline.ts";
+import { INGEST_STAGE_DEPS, deriveOnlyKeys, runPipeline, selectStages, topoLayers, type StageSpec } from "./pipeline.ts";
 
 /** Minimal specs - `run` records the order it executed in. */
 const spec = (key: string, deps: string[]): StageSpec => ({
@@ -35,10 +35,6 @@ describe("topoLayers", () => {
         expect(() => topoLayers([spec("a", ["b"]), spec("b", ["a"])])).toThrow(
             /cycle/i,
         );
-    });
-
-    test("a dep on an unselected stage throws", () => {
-        expect(() => topoLayers([spec("b", ["a"])])).toThrow(/unknown dep/i);
     });
 
     test("diamond deps: d lands in layer 2, not layer 1", () => {
@@ -98,5 +94,21 @@ describe("INGEST_STAGE_DEPS", () => {
                 "closure", "learning-registry",
             ]),
         );
+    });
+});
+
+describe("selectStages", () => {
+    test("explicit keys: only those stages, deps NOT auto-added", () => {
+        const sel = selectStages(["signals"]);
+        expect(sel).toEqual(["signals"]);
+    });
+    test("unknown key throws with the valid list", () => {
+        expect(() => selectStages(["bogus"])).toThrow(/bogus/);
+    });
+    test("topoLayers tolerates a dep outside the selection", () => {
+        const layers = topoLayers([
+            { key: "signals", deps: ["claude"], run: () => Effect.succeed(undefined) },
+        ]);
+        expect(layers).toEqual([["signals"]]);
     });
 });
