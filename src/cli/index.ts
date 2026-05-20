@@ -259,37 +259,94 @@ const progressUpdater = (
     (counts: Record<string, number>): Effect.Effect<void> =>
         Effect.sync(() => progress?.update({ source, stage }, counts));
 
+/** Canonical ingest stages, in execution order. Each is independently
+ *  selectable via `--stages=`. */
+const INGEST_STAGE_KEYS = [
+    "skills",
+    "commands",
+    "claude",
+    "codex",
+    "subagents",
+    "spawned",
+    "git",
+    "signals",
+    "outcomes",
+    "session-health",
+    "closure",
+    "learning-registry",
+    "harness",
+] as const;
+type IngestStageKey = (typeof INGEST_STAGE_KEYS)[number];
+
+/** Stages that re-derive purely from already-ingested DB rows. `--derive-only`
+ *  runs just these, skipping the slow raw transcript + git parse, so a
+ *  derivation change can be re-checked in ~1 min instead of a full ~18. */
+const DERIVE_ONLY_KEYS: readonly IngestStageKey[] = [
+    "signals",
+    "outcomes",
+    "session-health",
+    "closure",
+    "learning-registry",
+];
+
+/** Legacy `--X-only` flags expressed as explicit stage sets, preserving their
+ *  historical behaviour. New code should prefer `--stages=` / `--derive-only`. */
+const LEGACY_ONLY_SETS: Record<string, readonly IngestStageKey[]> = {
+    "skills-only": ["skills", "commands"],
+    "transcripts-only": ["claude", "subagents", "spawned", ...DERIVE_ONLY_KEYS],
+    "claude-only": ["skills", "commands", "claude", "subagents", "spawned", ...DERIVE_ONLY_KEYS],
+    "codex-only": ["codex", "spawned", ...DERIVE_ONLY_KEYS],
+    "git-only": ["git"],
+};
+
+/** ProgressStage descriptor for each stage key, in execution order. */
+const STAGE_PROGRESS: Record<IngestStageKey, ProgressStage> = {
+    skills: { source: "skills", stage: "upsert" },
+    commands: { source: "commands", stage: "upsert" },
+    claude: { source: "claude", stage: "transcripts" },
+    codex: { source: "codex", stage: "sessions" },
+    subagents: { source: "claude", stage: "subagents" },
+    spawned: { source: "signals", stage: "spawned" },
+    git: { source: "git", stage: "history" },
+    signals: { source: "signals", stage: "derive" },
+    outcomes: { source: "outcomes", stage: "derive" },
+    "session-health": { source: "session-health", stage: "derive" },
+    closure: { source: "closure", stage: "derive" },
+    "learning-registry": { source: "learning-registry", stage: "derive" },
+    harness: { source: "harness", stage: "doctor" },
+};
+
+/** Resolve which ingest stages to run from CLI args. Precedence:
+ *  `--stages=` (explicit list) > `--derive-only` > a legacy `--X-only` > all.
+ *  Exits with code 2 on an unknown `--stages=` value. */
+export const resolveIngestStages = (args: string[]): Set<IngestStageKey> => {
+    const stagesArg = args.find((a) => a.startsWith("--stages="));
+    if (stagesArg) {
+        const raw = stagesArg
+            .slice("--stages=".length)
+            .split(",")
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0);
+        const bad = raw.filter((s) => !INGEST_STAGE_KEYS.includes(s as IngestStageKey));
+        if (bad.length > 0) {
+            console.error(
+                `axctl ingest: unknown --stages value(s): ${bad.join(", ")}\n` +
+                    `  valid stages: ${INGEST_STAGE_KEYS.join(", ")}`,
+            );
+            process.exit(2);
+        }
+        return new Set(raw as IngestStageKey[]);
+    }
+    if (args.includes("--derive-only")) return new Set(DERIVE_ONLY_KEYS);
+    for (const [flag, set] of Object.entries(LEGACY_ONLY_SETS)) {
+        if (args.includes(`--${flag}`)) return new Set(set);
+    }
+    return new Set(INGEST_STAGE_KEYS);
+};
+
 function ingestStages(args: string[]): ProgressStage[] {
-    const skillsOnly = args.includes("--skills-only");
-    const transcriptsOnly = args.includes("--transcripts-only");
-    const claudeOnly = args.includes("--claude-only");
-    const codexOnly = args.includes("--codex-only");
-    const gitOnly = args.includes("--git-only");
-    const stages: ProgressStage[] = [];
-    if (!transcriptsOnly && !codexOnly && !gitOnly) {
-        stages.push({ source: "skills", stage: "upsert" });
-        stages.push({ source: "commands", stage: "upsert" });
-    }
-    if (!skillsOnly && !codexOnly && !gitOnly) {
-        stages.push({ source: "claude", stage: "transcripts" });
-    }
-    if (!skillsOnly && !transcriptsOnly && !claudeOnly && !gitOnly) {
-        stages.push({ source: "codex", stage: "sessions" });
-    }
-    if (!skillsOnly && !transcriptsOnly && !codexOnly && !claudeOnly) {
-        stages.push({ source: "git", stage: "history" });
-    }
-    if (!skillsOnly && !gitOnly) {
-        stages.push({ source: "signals", stage: "derive" });
-        stages.push({ source: "outcomes", stage: "derive" });
-        stages.push({ source: "session-health", stage: "derive" });
-        stages.push({ source: "closure", stage: "derive" });
-        stages.push({ source: "learning-registry", stage: "derive" });
-    }
-    if (!skillsOnly && !transcriptsOnly && !claudeOnly && !codexOnly && !gitOnly) {
-        stages.push({ source: "harness", stage: "doctor" });
-    }
-    return stages;
+    const sel = resolveIngestStages(args);
+    return INGEST_STAGE_KEYS.filter((k) => sel.has(k)).map((k) => STAGE_PROGRESS[k]);
 }
 
 const cmdIngest = (args: string[]) =>
@@ -299,27 +356,31 @@ const cmdIngest = (args: string[]) =>
         const progressMode = progressModeFor("ingest", args);
         const verbose = args.includes("--verbose");
         const stages = ingestStages(args);
-        const skillsOnly = args.includes("--skills-only");
-        const transcriptsOnly = args.includes("--transcripts-only");
-        const claudeOnly = args.includes("--claude-only");
-        const codexOnly = args.includes("--codex-only");
-        const gitOnly = args.includes("--git-only");
         // Issue #44: silent contradictions like `--codex-only --claude-only`
         // turn the command into a no-op. Bail loudly instead.
-        const onlyFlags = [
-            ["--skills-only", skillsOnly],
-            ["--transcripts-only", transcriptsOnly],
-            ["--claude-only", claudeOnly],
-            ["--codex-only", codexOnly],
-            ["--git-only", gitOnly],
-        ] as const;
-        const setOnly = onlyFlags.filter(([, v]) => v).map(([k]) => k);
+        const setOnly = Object.keys(LEGACY_ONLY_SETS)
+            .map((f) => `--${f}`)
+            .filter((f) => args.includes(f));
         if (setOnly.length > 1) {
             console.error(
                 `axctl ingest: ${setOnly.join(", ")} are mutually exclusive (each is a complete-source filter)`,
             );
             process.exit(2);
         }
+        const hasStagesArg = args.some((a) => a.startsWith("--stages="));
+        const hasDeriveOnly = args.includes("--derive-only");
+        if ((hasStagesArg || hasDeriveOnly) && setOnly.length > 0) {
+            console.error(
+                `axctl ingest: ${hasStagesArg ? "--stages" : "--derive-only"} cannot be combined with ${setOnly.join(", ")}`,
+            );
+            process.exit(2);
+        }
+        if (hasStagesArg && hasDeriveOnly) {
+            console.error("axctl ingest: --stages and --derive-only are mutually exclusive");
+            process.exit(2);
+        }
+        // Single source of truth for which stages run; see resolveIngestStages.
+        const sel = resolveIngestStages(args);
         const sinceDays = parseOptionalPositiveIntFlag("ingest", "since", args);
         yield* db.query(buildIngestRunStartStatement({
             runId,
@@ -333,15 +394,10 @@ const cmdIngest = (args: string[]) =>
             stages,
         });
         const program = Effect.gen(function* () {
-            // Issue #44: --claude-only is the *Claude* side of the world, which
-            // includes both `~/.claude/skills` and `~/.claude/projects`
-            // transcripts. Codex + git stay suppressed.
-            // Each `--X-only` flag suppresses every step except the matching one
-            // (and, for `--claude-only`, the matching pair: skills + transcripts).
-            // The mutual-exclusion check above guarantees at most one is set, so
-            // these conditions just enumerate "is some other --only filter on".
-            if (!transcriptsOnly && !codexOnly && !gitOnly) {
+            if (sel.has("skills")) {
                 yield* telemetryStage(db, runId, "skills", "upsert", ingestSkills(), progress);
+            }
+            if (sel.has("commands")) {
                 // Slash commands live in `~/.claude/commands/` (and plugin
                 // command dirs) and aren't indexed by ingestSkills. Without
                 // this, every Skill-tool call against a slash command becomes
@@ -350,7 +406,7 @@ const cmdIngest = (args: string[]) =>
             }
 
             const transcriptStages: Array<Effect.Effect<unknown, DbError, SurrealClient | AgentctlConfig | ProcessService>> = [];
-            if (!skillsOnly && !codexOnly && !gitOnly) {
+            if (sel.has("claude")) {
                 transcriptStages.push(telemetryStage(
                     db,
                     runId,
@@ -360,7 +416,7 @@ const cmdIngest = (args: string[]) =>
                     progress,
                 ));
             }
-            if (!skillsOnly && !transcriptsOnly && !claudeOnly && !gitOnly) {
+            if (sel.has("codex")) {
                 transcriptStages.push(telemetryStage(
                     db,
                     runId,
@@ -375,7 +431,7 @@ const cmdIngest = (args: string[]) =>
             // Subagent stages run AFTER the parent transcript stages so the
             // parent sessions are already in the DB. Without this ordering
             // every spawn-derived edge would skip via missingParent.
-            if (!skillsOnly && !codexOnly && !gitOnly) {
+            if (sel.has("subagents")) {
                 yield* telemetryStage(
                     db,
                     runId,
@@ -385,7 +441,7 @@ const cmdIngest = (args: string[]) =>
                     progress,
                 );
             }
-            if (!skillsOnly && !gitOnly) {
+            if (sel.has("spawned")) {
                 yield* telemetryStage(
                     db,
                     runId,
@@ -396,7 +452,7 @@ const cmdIngest = (args: string[]) =>
                 );
             }
 
-            if (!skillsOnly && !transcriptsOnly && !codexOnly && !claudeOnly) {
+            if (sel.has("git")) {
                 yield* telemetryStage(
                     db,
                     runId,
@@ -406,10 +462,10 @@ const cmdIngest = (args: string[]) =>
                     progress,
                 );
             }
-            // Auto-derive signals so taste queries always see fresh
-            // corrected_by / proposed edges. Cheap: O(turns) in-memory walk.
-            // Skip when only running git ingest - signals don't depend on commits.
-            if (!skillsOnly && !gitOnly) {
+            // Derive stages re-read already-ingested turn/session rows, so they
+            // can run standalone via `--stages=` / `--derive-only` against an
+            // existing DB without re-parsing transcripts.
+            if (sel.has("signals")) {
                 yield* telemetryStage(
                     db,
                     runId,
@@ -418,6 +474,8 @@ const cmdIngest = (args: string[]) =>
                     deriveSignals({ sinceDays, onProgress: progressUpdater(progress, "signals", "derive") }),
                     progress,
                 );
+            }
+            if (sel.has("outcomes")) {
                 yield* telemetryStage(
                     db,
                     runId,
@@ -426,6 +484,8 @@ const cmdIngest = (args: string[]) =>
                     deriveOutcomes({ sinceDays }),
                     progress,
                 );
+            }
+            if (sel.has("session-health")) {
                 yield* telemetryStage(
                     db,
                     runId,
@@ -434,6 +494,8 @@ const cmdIngest = (args: string[]) =>
                     deriveSessionHealth({ sinceDays }),
                     progress,
                 );
+            }
+            if (sel.has("closure")) {
                 yield* telemetryStage(
                     db,
                     runId,
@@ -442,6 +504,8 @@ const cmdIngest = (args: string[]) =>
                     deriveClosure(),
                     progress,
                 );
+            }
+            if (sel.has("learning-registry")) {
                 yield* telemetryStage(
                     db,
                     runId,
@@ -451,7 +515,7 @@ const cmdIngest = (args: string[]) =>
                     progress,
                 );
             }
-            if (!skillsOnly && !transcriptsOnly && !claudeOnly && !codexOnly && !gitOnly) {
+            if (sel.has("harness")) {
                 yield* telemetryStage(db, runId, "harness", "doctor", ingestHarness(), progress);
             }
         }).pipe(
@@ -1494,11 +1558,16 @@ const ingestCommand = Command.make(
         gitOnly: Flag.boolean("git-only").pipe(Flag.withDefault(false)),
         claudeOnly: Flag.boolean("claude-only").pipe(Flag.withDefault(false)),
         insightsOnly: Flag.boolean("insights-only").pipe(Flag.withDefault(false)),
+        // Run a chosen subset of stages, e.g. --stages=signals,outcomes.
+        stages: Flag.string("stages").pipe(Flag.optional),
+        // Shortcut: only the DB-derive stages (signals/outcomes/session-health/
+        // closure/learning-registry) - skips the slow transcript + git parse.
+        deriveOnly: Flag.boolean("derive-only").pipe(Flag.withDefault(false)),
         since: optionalSince,
         progress: progressFlag,
         verbose: verboseFlag,
     },
-    ({ skillsOnly, transcriptsOnly, codexOnly, gitOnly, claudeOnly, insightsOnly, since, progress, verbose }) => {
+    ({ skillsOnly, transcriptsOnly, codexOnly, gitOnly, claudeOnly, insightsOnly, stages, deriveOnly, since, progress, verbose }) => {
         if (insightsOnly) {
             const conflicts = insightsOnlyConflicts({
                 skillsOnly,
@@ -1525,12 +1594,17 @@ const ingestCommand = Command.make(
             ...boolArg("codex-only", codexOnly),
             ...boolArg("git-only", gitOnly),
             ...boolArg("claude-only", claudeOnly),
+            ...stringArg("stages", optionValue(stages)),
+            ...boolArg("derive-only", deriveOnly),
             ...intArg("since", optionValue(since)),
             `--progress=${progress}`,
             ...boolArg("verbose", verbose),
         ]);
     },
-).pipe(Command.withDescription("Ingest skills, transcripts, Codex sessions, git history, and insight artifacts"));
+).pipe(Command.withDescription(
+    "Ingest skills, transcripts, Codex sessions, git history, and insight artifacts. " +
+        "Use --stages=<a,b,c> or --derive-only to run a subset against an already-ingested DB.",
+));
 
 const deriveSignalsCommand = Command.make(
     "derive-signals",

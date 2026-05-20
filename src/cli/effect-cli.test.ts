@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DB_COMMANDS, insightsOnlyConflicts, rootCommand } from "./index.ts";
+import { DB_COMMANDS, insightsOnlyConflicts, resolveIngestStages, rootCommand } from "./index.ts";
 
 const topLevelNames = (): string[] =>
     rootCommand.subcommands.flatMap((group) =>
@@ -81,6 +81,37 @@ describe("effect cli", () => {
             "--codex-only",
             "--since",
         ]);
+    });
+
+    test("resolveIngestStages: default runs every stage", () => {
+        expect(resolveIngestStages([]).size).toBe(13);
+    });
+
+    test("resolveIngestStages: --stages= runs exactly the listed stages", () => {
+        expect([...resolveIngestStages(["--stages=signals,outcomes"])].sort()).toEqual([
+            "outcomes",
+            "signals",
+        ]);
+    });
+
+    test("resolveIngestStages: --derive-only runs only the DB-derive stages", () => {
+        expect([...resolveIngestStages(["--derive-only"])].sort()).toEqual([
+            "closure",
+            "learning-registry",
+            "outcomes",
+            "session-health",
+            "signals",
+        ]);
+    });
+
+    test("resolveIngestStages: --stages= takes precedence over --derive-only and legacy", () => {
+        expect([...resolveIngestStages(["--stages=git", "--derive-only", "--codex-only"])]).toEqual([
+            "git",
+        ]);
+    });
+
+    test("resolveIngestStages: legacy --git-only maps to the git stage alone", () => {
+        expect([...resolveIngestStages(["--git-only"])]).toEqual(["git"]);
     });
 
     test("evidence group exposes guidance/session/weekly", () => {
