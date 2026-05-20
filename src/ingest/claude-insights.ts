@@ -7,6 +7,7 @@ import { decodeJsonOrNull } from "../lib/decode.ts";
 import type { DbError } from "../lib/errors.ts";
 import { AppLayer } from "../lib/layers.ts";
 import { recordRef } from "./evidence-writers.ts";
+import { surrealString } from "../lib/shared/surql.ts";
 
 type JsonRecord = Record<string, unknown>;
 type TimestampInput = Date | string;
@@ -358,7 +359,7 @@ export function facetToInsightAndFriction(input: {
     };
 }
 
-const sqlString = (value: string): string => JSON.stringify(value);
+const sqlString = surrealString;
 
 const sqlOptionString = (value: string | null | undefined): string =>
     value === null || value === undefined ? "NONE" : sqlString(value);

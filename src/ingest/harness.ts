@@ -15,8 +15,7 @@ import type {
     StackSignal,
 } from "../project/types.ts";
 import { recordRef } from "./evidence-writers.ts";
-
-type JsonInput = unknown;
+import { surrealJsonOption, surrealString } from "../lib/shared/surql.ts";
 
 export interface HarnessIngestStats {
     readonly guidanceSources: number;
@@ -28,15 +27,12 @@ export interface HarnessIngestStats {
     readonly interventionObservations: number;
 }
 
-const sqlString = (value: string): string => JSON.stringify(value);
+const sqlString = surrealString;
 
 const sqlOptionString = (value: string | null | undefined): string =>
     value === null || value === undefined ? "NONE" : sqlString(value);
 
-const sqlJsonString = (value: JsonInput): string => sqlString(JSON.stringify(value) ?? "null");
-
-const sqlJsonOption = (value: JsonInput | null | undefined): string =>
-    value === null || value === undefined ? "NONE" : sqlJsonString(value);
+const sqlJsonOption = surrealJsonOption;
 
 const sqlDate = (value: string): string => `d${JSON.stringify(value)}`;
 

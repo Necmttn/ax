@@ -1,4 +1,5 @@
 import type { DerivedSignal } from "./signals.ts";
+import { surrealJson, surrealString } from "../lib/shared/surql.ts";
 
 export interface GuidanceDraft {
     readonly key: string;
@@ -14,8 +15,8 @@ export interface GuidanceDraft {
     readonly createdAt: string;
 }
 
-const sqlString = (value: string): string => JSON.stringify(value);
-const sqlJson = (value: unknown): string => JSON.stringify(JSON.stringify(value));
+const sqlString = surrealString;
+const sqlJson = surrealJson;
 
 function hashKey(value: string): string {
     return Bun.hash(value).toString(16).padStart(16, "0");

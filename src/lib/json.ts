@@ -8,16 +8,18 @@
  *    dump of a value it already trusts (computed in-process, no external
  *    payload).
  *  - `surrealLiteral` quotes a string for inclusion inside a SurrealQL
- *    statement literal. The DB driver does not expose a parameterised binding
- *    in every code path we hit, so we rely on `JSON.stringify`'s deterministic
- *    string escape (it is a subset of valid SurrealQL string syntax).
+ *    statement literal. It is a thin re-export of `surrealString` from the
+ *    shared SurrealQL write seam (`lib/shared/surql.ts`), kept here for its
+ *    existing call sites; new code should import `surrealString` directly.
  *
  * Real decode boundaries (`JSON.parse` on jsonl lines / file payloads) live in
  * `src/ingest/*` and should use Effect Schema decoders directly - those are
  * tracked in issue #71 ("Add boundary schemas for JSON IO").
  */
 
+import { surrealString } from "./shared/surql.ts";
+
 export const prettyPrint = (value: unknown): string =>
     JSON.stringify(value, null, 2);
 
-export const surrealLiteral = (value: string): string => JSON.stringify(value);
+export const surrealLiteral = surrealString;

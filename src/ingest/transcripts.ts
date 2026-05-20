@@ -1001,10 +1001,10 @@ const upsertTurns = (turns: Turn[]) =>
 const buildTurnStatements = (turns: readonly Turn[]): string[] =>
     turns.map(
         (t) =>
-            `UPSERT turn:\`${turnRecordKey(t.session, t.seq)}\` CONTENT { session: session:\`${t.session}\`, seq: ${t.seq}, ts: d"${t.ts}", role: "${t.role}", message_kind: ${JSON.stringify(t.message_kind)}, intent_kind: ${JSON.stringify(t.intent_kind)}, text: ${
-                t.text === null ? "NONE" : JSON.stringify(t.text)
+            `UPSERT turn:\`${turnRecordKey(t.session, t.seq)}\` CONTENT { session: session:\`${t.session}\`, seq: ${t.seq}, ts: d"${t.ts}", role: "${t.role}", message_kind: ${surrealLiteral(t.message_kind)}, intent_kind: ${surrealLiteral(t.intent_kind)}, text: ${
+                t.text === null ? "NONE" : surrealLiteral(t.text)
             }, text_excerpt: ${
-                t.text_excerpt === null ? "NONE" : JSON.stringify(t.text_excerpt)
+                t.text_excerpt === null ? "NONE" : surrealLiteral(t.text_excerpt)
             }, has_tool_use: ${t.has_tool_use}, has_error: ${t.has_error} };`,
     );
 
@@ -1023,19 +1023,19 @@ const optionRecordRef = (table: string, key: string | null): string =>
     key === null ? "NONE" : recordRef(table, key);
 
 const optionString = (value: string | null): string =>
-    value === null ? "NONE" : JSON.stringify(value);
+    value === null ? "NONE" : surrealLiteral(value);
 
 const optionInt = (value: number | null): string =>
     value === null ? "NONE" : String(Math.trunc(value));
 
 const buildHarnessHookEventStatements = (events: readonly HarnessHookEventWrite[]): string[] =>
     events.map((event) =>
-        `UPSERT ${recordRef("harness_hook_event", event.key)} CONTENT { session: ${recordRef("session", event.session)}, ts: d"${event.ts}", harness: ${JSON.stringify(event.harness)}, event_name: ${JSON.stringify(event.event_name)}, hook_name: ${JSON.stringify(event.hook_name)}, tool_call_id: ${optionString(event.tool_call_id)}, tool_call: ${optionRecordRef("tool_call", event.tool_call_key)}, cwd: ${optionString(event.cwd)}, transcript_uuid: ${optionString(event.transcript_uuid)}, source_type: ${JSON.stringify(event.source_type)} };`,
+        `UPSERT ${recordRef("harness_hook_event", event.key)} CONTENT { session: ${recordRef("session", event.session)}, ts: d"${event.ts}", harness: ${surrealLiteral(event.harness)}, event_name: ${surrealLiteral(event.event_name)}, hook_name: ${surrealLiteral(event.hook_name)}, tool_call_id: ${optionString(event.tool_call_id)}, tool_call: ${optionRecordRef("tool_call", event.tool_call_key)}, cwd: ${optionString(event.cwd)}, transcript_uuid: ${optionString(event.transcript_uuid)}, source_type: ${surrealLiteral(event.source_type)} };`,
     );
 
 const buildHookCommandInvocationStatements = (invocations: readonly HookCommandInvocationWrite[]): string[] =>
     invocations.map((invocation) =>
-        `UPSERT ${recordRef("hook_command_invocation", invocation.key)} CONTENT { hook_event: ${recordRef("harness_hook_event", invocation.hook_event_key)}, session: ${recordRef("session", invocation.session)}, ts: d"${invocation.ts}", harness: ${JSON.stringify(invocation.harness)}, event_name: ${JSON.stringify(invocation.event_name)}, hook_name: ${JSON.stringify(invocation.hook_name)}, tool_call_id: ${optionString(invocation.tool_call_id)}, tool_call: ${optionRecordRef("tool_call", invocation.tool_call_key)}, command: ${surrealLiteral(invocation.command)}, command_hash: ${JSON.stringify(invocation.command_hash)}, provider_status: ${JSON.stringify(invocation.provider_status)}, effect: ${JSON.stringify(invocation.effect)}, exit_code: ${optionInt(invocation.exit_code)}, duration_ms: ${optionInt(invocation.duration_ms)}, stdout_excerpt: ${optionString(invocation.stdout_excerpt)}, stderr_excerpt: ${optionString(invocation.stderr_excerpt)}, content_excerpt: ${optionString(invocation.content_excerpt)}, blocking_error_excerpt: ${optionString(invocation.blocking_error_excerpt)} };`,
+        `UPSERT ${recordRef("hook_command_invocation", invocation.key)} CONTENT { hook_event: ${recordRef("harness_hook_event", invocation.hook_event_key)}, session: ${recordRef("session", invocation.session)}, ts: d"${invocation.ts}", harness: ${surrealLiteral(invocation.harness)}, event_name: ${surrealLiteral(invocation.event_name)}, hook_name: ${surrealLiteral(invocation.hook_name)}, tool_call_id: ${optionString(invocation.tool_call_id)}, tool_call: ${optionRecordRef("tool_call", invocation.tool_call_key)}, command: ${surrealLiteral(invocation.command)}, command_hash: ${surrealLiteral(invocation.command_hash)}, provider_status: ${surrealLiteral(invocation.provider_status)}, effect: ${surrealLiteral(invocation.effect)}, exit_code: ${optionInt(invocation.exit_code)}, duration_ms: ${optionInt(invocation.duration_ms)}, stdout_excerpt: ${optionString(invocation.stdout_excerpt)}, stderr_excerpt: ${optionString(invocation.stderr_excerpt)}, content_excerpt: ${optionString(invocation.content_excerpt)}, blocking_error_excerpt: ${optionString(invocation.blocking_error_excerpt)} };`,
     );
 
 const queryTranscriptStatements = (statements: readonly string[]) =>
@@ -1085,7 +1085,7 @@ const relateInvocations = (invocations: Invocation[]) =>
             if (missing.length > 0) {
                 const placeholders = missing.map(
                     (n) =>
-                        `UPSERT skill:\`${skillRecordKey(n)}\` MERGE { name: ${JSON.stringify(n)}, scope: "unknown", dir_path: "(unknown)", content_hash: "unknown" };`,
+                        `UPSERT skill:\`${skillRecordKey(n)}\` MERGE { name: ${surrealLiteral(n)}, scope: "unknown", dir_path: "(unknown)", content_hash: "unknown" };`,
                 );
                 for (let i = 0; i < placeholders.length; i += 500) {
                     yield* db.query(placeholders.slice(i, i + 500).join(""));
@@ -1099,7 +1099,7 @@ const relateInvocations = (invocations: Invocation[]) =>
             const args = JSON.stringify(inv.args);
             const edgeKey = invokedRelationRecordKey({ turnKey, skillKey, args });
             return [
-                `RELATE turn:\`${turnKey}\`->invoked:\`${edgeKey}\`->skill:\`${skillKey}\` SET ts = d"${inv.ts}", args = ${JSON.stringify(args)}, turn_has_error = ${inv.turn_has_error};`,
+                `RELATE turn:\`${turnKey}\`->invoked:\`${edgeKey}\`->skill:\`${skillKey}\` SET ts = d"${inv.ts}", args = ${surrealLiteral(args)}, turn_has_error = ${inv.turn_has_error};`,
             ];
         });
         for (let i = 0; i < stmts.length; i += 500) {

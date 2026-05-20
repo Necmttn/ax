@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { SurrealClient } from "../lib/db.ts";
 import type { DbError } from "../lib/errors.ts";
 import { errorSignatureRecordKey, symbolRecordKey } from "../ingest/record-keys.ts";
+import { surrealString } from "../lib/shared/surql.ts";
 import { normalizeErrorSignature } from "../ingest/turn-references.ts";
 import { classifyTurnIntent } from "../ingest/intent-kind.ts";
 
@@ -155,7 +156,7 @@ export interface BuildFileContextInput {
     readonly files: readonly string[];
 }
 
-const sqlString = (value: string): string => JSON.stringify(value);
+const sqlString = surrealString;
 const clip = (s: string, n: number): string => (s.length <= n ? s : `${s.slice(0, n - 1)}...`);
 const GENERIC_BASENAMES = new Set(["index.ts", "index.tsx", "index.js", "README.md", "package.json", "tsconfig.json"]);
 const STOP_WORDS = new Set(["after", "from", "with", "that", "this", "when", "then", "into", "bug"]);

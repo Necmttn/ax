@@ -17,6 +17,7 @@ import {
     type CheckoutKind,
     type RepositoryIdentityKind,
 } from "./repository-identity.ts";
+import { surrealString } from "../lib/shared/surql.ts";
 
 /**
  * Optional override file: one absolute repo path per line. Lines starting with
@@ -310,10 +311,10 @@ const fetchCommits = (
 
 // ---------- DB writers ----------
 
-const sqlString = (s: string): string => {
-    // Escape backslashes and double quotes; SurrealDB allows double-quoted strings.
-    return `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
-};
+// SurrealQL string literal - routes through the shared write seam so
+// transcript-sourced text (commit messages, paths) is JSON-escaped and lone
+// surrogates are stripped before embedding.
+const sqlString = surrealString;
 
 const recordLiteral = (table: string, key: string): string => `${table}:\`${key}\``;
 

@@ -4,6 +4,7 @@ import { skillRecordKey } from "../lib/skill-id.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
 import { recordRef } from "./evidence-writers.ts";
+import { surrealString } from "../lib/shared/surql.ts";
 
 /**
  * Negation patterns that signal a user pushed back on the previous assistant
@@ -184,7 +185,7 @@ interface SessionTurns {
     turns: TurnRow[];
 }
 
-const sqlString = (value: string): string => JSON.stringify(value);
+const sqlString = surrealString;
 
 const sqlOptionString = (value: string | null | undefined): string =>
     value === null || value === undefined ? "NONE" : sqlString(value);
@@ -908,7 +909,7 @@ const upsertCorrections = (edges: CorrectionEdge[]) =>
         const db = yield* SurrealClient;
         const stmts = edges.map((e) => {
             const edgeId = correctedByEdgeId(e.fromTurnKey, e.toTurnKey);
-            return `RELATE turn:\`${e.fromTurnKey}\` -> corrected_by:\`${edgeId}\` -> turn:\`${e.toTurnKey}\` SET pattern = ${JSON.stringify(e.pattern)}, ts = d"${e.ts}";`;
+            return `RELATE turn:\`${e.fromTurnKey}\` -> corrected_by:\`${edgeId}\` -> turn:\`${e.toTurnKey}\` SET pattern = ${sqlString(e.pattern)}, ts = d"${e.ts}";`;
         });
         for (let i = 0; i < stmts.length; i += 500) {
             yield* db.query(stmts.slice(i, i + 500).join(""));
@@ -963,7 +964,7 @@ const upsertProposed = (edges: ProposedEdge[]) =>
         const db = yield* SurrealClient;
         const stmts = edges.map((e) => {
             const edgeId = proposedEdgeId(e.fromTurnKey, e.skillKey);
-            return `RELATE turn:\`${e.fromTurnKey}\` -> proposed:\`${edgeId}\` -> skill:\`${e.skillKey}\` SET ts = d"${e.ts}", context_excerpt = ${JSON.stringify(e.contextExcerpt)};`;
+            return `RELATE turn:\`${e.fromTurnKey}\` -> proposed:\`${edgeId}\` -> skill:\`${e.skillKey}\` SET ts = d"${e.ts}", context_excerpt = ${sqlString(e.contextExcerpt)};`;
         });
         for (let i = 0; i < stmts.length; i += 500) {
             yield* db.query(stmts.slice(i, i + 500).join(""));
@@ -996,7 +997,7 @@ const upsertRecovered = (edges: RecoveryEdge[]) =>
         const stmts = edges.map((e) => {
             const edgeId = recoveredByEdgeId(e.fromTurnKey, e.skillKey);
             const excerpt =
-                e.errorExcerpt === null ? "NONE" : JSON.stringify(e.errorExcerpt);
+                e.errorExcerpt === null ? "NONE" : sqlString(e.errorExcerpt);
             return `RELATE turn:\`${e.fromTurnKey}\` -> recovered_by:\`${edgeId}\` -> skill:\`${e.skillKey}\` SET ts = d"${e.ts}", error_excerpt = ${excerpt};`;
         });
         for (let i = 0; i < stmts.length; i += 500) {

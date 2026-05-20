@@ -7,6 +7,7 @@ import { decodeJsonOrNull } from "../lib/decode.ts";
 import type { DbError } from "../lib/errors.ts";
 import { AppLayer } from "../lib/layers.ts";
 import { recordRef } from "./evidence-writers.ts";
+import { surrealJsonOption, surrealString } from "../lib/shared/surql.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -57,7 +58,7 @@ interface LegacySelfImproveIngestOpts {
 
 const STATEMENT_CHUNK_SIZE = 250;
 
-const sqlString = (value: string): string => JSON.stringify(value);
+const sqlString = surrealString;
 const sqlOptionString = (value: string | null | undefined): string =>
     value === null || value === undefined ? "NONE" : sqlString(value);
 const sqlDate = (value: string): string => `d${JSON.stringify(value)}`;
@@ -65,8 +66,7 @@ const sqlOptionDate = (value: string | null | undefined): string =>
     value === null || value === undefined ? "NONE" : sqlDate(value);
 const sqlFloatOption = (value: number | null | undefined): string =>
     value === null || value === undefined || !Number.isFinite(value) ? "NONE" : String(value);
-const sqlJsonOption = (value: unknown | null | undefined): string =>
-    value === null || value === undefined ? "NONE" : sqlString(JSON.stringify(value) ?? "null");
+const sqlJsonOption = surrealJsonOption;
 const sqlObject = (fields: readonly (readonly [string, string])[]): string =>
     `{ ${fields.map(([name, value]) => `${name}: ${value}`).join(", ")} }`;
 

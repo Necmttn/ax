@@ -5,6 +5,7 @@ import { RecordId, SurrealClient, filePointer } from "../lib/db.ts";
 import { AgentctlConfig } from "../lib/config.ts";
 import { decodeJsonOrNull } from "../lib/decode.ts";
 import { skillRecordKey } from "../lib/skill-id.ts";
+import { surrealString } from "../lib/shared/surql.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
 import {
@@ -723,7 +724,7 @@ export function __testStreamCodexJsonlLines(lines: Iterable<string>, every: numb
 const buildTurnStatements = (turns: readonly CodexTurn[]): string[] =>
     turns.map(
         (t) =>
-            `UPSERT turn:\`${turnRecordKey(t.session, t.seq)}\` CONTENT { session: session:\`${t.session}\`, seq: ${t.seq}, ts: d"${t.ts}", role: ${JSON.stringify(t.role)}, message_kind: ${JSON.stringify(t.message_kind)}, intent_kind: ${JSON.stringify(t.intent_kind)}, text: ${t.text === null ? "NONE" : JSON.stringify(t.text)}, text_excerpt: ${t.text_excerpt === null ? "NONE" : JSON.stringify(t.text_excerpt)}, has_tool_use: ${t.has_tool_use}, has_error: false };`,
+            `UPSERT turn:\`${turnRecordKey(t.session, t.seq)}\` CONTENT { session: session:\`${t.session}\`, seq: ${t.seq}, ts: d"${t.ts}", role: ${surrealString(t.role)}, message_kind: ${surrealString(t.message_kind)}, intent_kind: ${surrealString(t.intent_kind)}, text: ${t.text === null ? "NONE" : surrealString(t.text)}, text_excerpt: ${t.text_excerpt === null ? "NONE" : surrealString(t.text_excerpt)}, has_tool_use: ${t.has_tool_use}, has_error: false };`,
     );
 
 const buildSyntheticSkillAndInvocationStatements = (
@@ -733,7 +734,7 @@ const buildSyntheticSkillAndInvocationStatements = (
     const codexTools = new Set(invocations.map((i) => i.skill));
     const skillStmts = [...codexTools].map(
         (name) =>
-            `UPSERT skill:\`${skillRecordKey(name)}\` MERGE { name: ${JSON.stringify(name)}, scope: "codex-tool", dir_path: "(synthetic)", content_hash: "codex" };`,
+            `UPSERT skill:\`${skillRecordKey(name)}\` MERGE { name: ${surrealString(name)}, scope: "codex-tool", dir_path: "(synthetic)", content_hash: "codex" };`,
     );
 
     const invStmts = invocations.flatMap((inv) => {
@@ -742,7 +743,7 @@ const buildSyntheticSkillAndInvocationStatements = (
         const args = JSON.stringify(inv.args);
         const edgeKey = invokedRelationRecordKey({ turnKey, skillKey, args });
         return [
-            `RELATE turn:\`${turnKey}\`->invoked:\`${edgeKey}\`->skill:\`${skillKey}\` SET ts = d"${inv.ts}", args = ${JSON.stringify(args)}, turn_has_error = false;`,
+            `RELATE turn:\`${turnKey}\`->invoked:\`${edgeKey}\`->skill:\`${skillKey}\` SET ts = d"${inv.ts}", args = ${surrealString(args)}, turn_has_error = false;`,
         ];
     });
     return [...skillStmts, ...invStmts];

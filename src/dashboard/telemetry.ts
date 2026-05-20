@@ -1,3 +1,5 @@
+import { surrealJson, surrealString } from "../lib/shared/surql.ts";
+
 export type IngestEventLevel = "debug" | "info" | "warn" | "error";
 
 export interface IngestEvent {
@@ -12,16 +14,11 @@ export interface IngestEvent {
     readonly ts: string;
 }
 
-const sqlString = (value: string): string => JSON.stringify(value);
+const sqlString = surrealString;
 const sqlIdPart = (value: string): string =>
     value.replace(/[^A-Za-z0-9_:-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 96) || "stage";
 // Encodes a value as a SurrealDB string literal containing compact JSON.
-// Single-quotes are used so inner double-quotes don't need escaping.
-const sqlJsonOption = (value: unknown): string => {
-    const json = JSON.stringify(value);
-    // Escape single quotes inside the JSON (rare but possible in string values)
-    return `'${json.replace(/'/g, "\\'")}'`;
-};
+const sqlJsonOption = (value: unknown): string => surrealJson(value);
 
 export function makeIngestEvent(input: Omit<IngestEvent, "type" | "id" | "ts"> & { readonly ts?: string }): IngestEvent {
     const ts = input.ts ?? new Date().toISOString();

@@ -3,6 +3,7 @@ import { SurrealClient } from "../lib/db.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
 import { recordRef } from "./evidence-writers.ts";
+import { surrealJsonOption, surrealString } from "../lib/shared/surql.ts";
 
 interface SkillCandidateRow {
     readonly id?: unknown;
@@ -37,11 +38,10 @@ export interface LearningRegistryStats {
     readonly adoptions: number;
 }
 
-const sqlString = (value: string): string => JSON.stringify(value);
+const sqlString = surrealString;
 const sqlOptionString = (value: string | null | undefined): string =>
     value === null || value === undefined ? "NONE" : sqlString(value);
-const sqlJsonOption = (value: unknown | null | undefined): string =>
-    value === null || value === undefined ? "NONE" : sqlString(JSON.stringify(value) ?? "null");
+const sqlJsonOption = surrealJsonOption;
 const sqlObject = (fields: readonly (readonly [string, string])[]): string =>
     `{ ${fields.map(([name, value]) => `${name}: ${value}`).join(", ")} }`;
 

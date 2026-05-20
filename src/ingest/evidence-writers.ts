@@ -3,6 +3,7 @@ import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
 import type { DbError } from "../lib/errors.ts";
 import { skillRecordKey } from "../lib/skill-id.ts";
 import { toolCallRecordKey, toolRecordKey } from "./record-keys.ts";
+import { surrealString } from "../lib/shared/surql.ts";
 
 const STATEMENT_CHUNK_SIZE = 250;
 
@@ -65,7 +66,7 @@ export interface PlanSnapshotWrite {
     readonly items: readonly PlanSnapshotItemWrite[];
 }
 
-const sqlString = (value: string): string => JSON.stringify(value);
+const sqlString = surrealString;
 
 const sqlOptionString = (value: string | null | undefined): string =>
     value === null || value === undefined ? "NONE" : sqlString(value);

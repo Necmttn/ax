@@ -7,6 +7,7 @@ import type { ServerWebSocket } from "bun";
 import { SurrealClient } from "../lib/db.ts";
 import { AppLayer } from "../lib/layers.ts";
 import { recordRef } from "../ingest/evidence-writers.ts";
+import { surrealJson, surrealString } from "../lib/shared/surql.ts";
 
 export type DogfoodScenario = "axctl-setup" | "interactive";
 export type DogfoodTransport = "auto" | "pty" | "process";
@@ -80,8 +81,8 @@ export interface DogfoodAgentPreset {
 const DEFAULT_PORT = 1742;
 const SUCCESS_MARKER = "AXCTL_DOGFOOD_SETUP_OK";
 
-const sqlString = (value: string): string => JSON.stringify(value);
-const sqlJson = (value: unknown): string => sqlString(JSON.stringify(value) ?? "null");
+const sqlString = surrealString;
+const sqlJson = surrealJson;
 const sqlDate = (value: string): string => `d${JSON.stringify(value)}`;
 const sqlObject = (fields: readonly (readonly [string, string])[]): string =>
     `{ ${fields.map(([name, value]) => `${name}: ${value}`).join(", ")} }`;
