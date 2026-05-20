@@ -4,6 +4,7 @@ import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
 import { recordRef } from "./evidence-writers.ts";
 import { surrealDate, surrealJsonOption, surrealObject, surrealOptionDate, surrealOptionString, surrealString } from "../lib/shared/surql.ts";
+import { executeStatementsWith } from "../lib/shared/statement-exec.ts";
 
 type TimestampInput = Date | string | { readonly constructor: { readonly name: string }; toString(): string };
 
@@ -294,9 +295,7 @@ export const deriveOutcomes = (opts: { sinceDays: number | undefined } = { since
             ...ngrams.map(ngramStatement),
         ];
         yield* db.query("DELETE user_message_ngram;");
-        for (let i = 0; i < statements.length; i += 500) {
-            yield* db.query(statements.slice(i, i + 500).join(""));
-        }
+        yield* executeStatementsWith(db, statements, { chunkSize: 500 });
         return {
             commandOutcomes: outcomes.length,
             userMessageNgrams: ngrams.length,
