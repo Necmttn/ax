@@ -8,6 +8,7 @@ import type { DbError } from "../lib/errors.ts";
 import { AppLayer } from "../lib/layers.ts";
 import { recordRef } from "./evidence-writers.ts";
 import { surrealDate, surrealJsonTextOption, surrealObject, surrealOptionDate, surrealOptionRecord, surrealOptionString, surrealSet, surrealString } from "../lib/shared/surql.ts";
+import { executeStatements } from "../lib/shared/statement-exec.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -490,14 +491,7 @@ function sessionIdForFile(filePath: string, record: JsonRecord): string {
 const queryStatements = (
     statements: readonly string[],
 ): Effect.Effect<void, DbError, SurrealClient> =>
-    Effect.gen(function* () {
-        if (statements.length === 0) return;
-
-        const db = yield* SurrealClient;
-        for (let i = 0; i < statements.length; i += 250) {
-            yield* db.query(statements.slice(i, i + 250).join(""));
-        }
-    });
+    executeStatements(statements);
 
 const writeClaudeInsightConversion = (
     conversion: ClaudeInsightConversion,
