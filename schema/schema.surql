@@ -48,6 +48,10 @@ DEFINE FIELD workspace      ON session TYPE option<record<workspace>>;
 DEFINE INDEX session_repository_started ON session FIELDS repository, started_at;
 DEFINE INDEX session_checkout_started ON session FIELDS checkout, started_at;
 DEFINE INDEX session_workspace_started ON session FIELDS workspace, started_at;
+-- Standalone started_at index: the dashboard roots query orders all sessions
+-- by started_at with no repository/checkout/workspace prefix, so the composite
+-- indexes above don't cover it. See GitHub issue #76.
+DEFINE INDEX session_started ON session FIELDS started_at;
 
 -- ==== File buckets (SurrealDB 3.0 experimental) ====
 -- Requires: surreal start --allow-experimental files
