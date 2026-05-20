@@ -31,9 +31,10 @@ import {
     turnRecordKey,
 } from "./record-keys.ts";
 
+import { executeStatements, executeStatementsWith } from "../lib/shared/statement-exec.ts";
+
 const MAX_OUTPUT_EXCERPT_CHARS = 1200;
 const DEFAULT_CLAUDE_CONCURRENCY = 4;
-const CLAUDE_STATEMENT_CHUNK_SIZE = 500;
 
 interface Session {
     id: string;
@@ -1039,13 +1040,7 @@ const buildHookCommandInvocationStatements = (invocations: readonly HookCommandI
     );
 
 const queryTranscriptStatements = (statements: readonly string[]) =>
-    Effect.gen(function* () {
-        if (statements.length === 0) return;
-        const db = yield* SurrealClient;
-        for (let i = 0; i < statements.length; i += CLAUDE_STATEMENT_CHUNK_SIZE) {
-            yield* db.query(statements.slice(i, i + CLAUDE_STATEMENT_CHUNK_SIZE).join(""));
-        }
-    });
+    executeStatements(statements, { chunkSize: 500 });
 
 const relateInvocations = (invocations: Invocation[]) =>
     Effect.gen(function* () {
@@ -1087,9 +1082,7 @@ const relateInvocations = (invocations: Invocation[]) =>
                     (n) =>
                         `UPSERT skill:\`${skillRecordKey(n)}\` MERGE { name: ${surrealLiteral(n)}, scope: "unknown", dir_path: "(unknown)", content_hash: "unknown" };`,
                 );
-                for (let i = 0; i < placeholders.length; i += 500) {
-                    yield* db.query(placeholders.slice(i, i + 500).join(""));
-                }
+                yield* executeStatementsWith(db, placeholders, { chunkSize: 500 });
             }
         }
 
@@ -1102,9 +1095,7 @@ const relateInvocations = (invocations: Invocation[]) =>
                 `RELATE turn:\`${turnKey}\`->invoked:\`${edgeKey}\`->skill:\`${skillKey}\` SET ts = d"${inv.ts}", args = ${surrealLiteral(args)}, turn_has_error = ${inv.turn_has_error};`,
             ];
         });
-        for (let i = 0; i < stmts.length; i += 500) {
-            yield* db.query(stmts.slice(i, i + 500).join(""));
-        }
+        yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
     });
 
 const upsertEdits = (edits: Edit[]) =>
@@ -1128,12 +1119,8 @@ const upsertEdits = (edits: Edit[]) =>
                 `RELATE turn:\`${turnKey}\`->edited:\`${edgeKey}\`->file:\`${fileKey}\` SET tool = "${e.tool}", ts = d"${e.ts}";`,
             );
         }
-        for (let i = 0; i < fileStmts.length; i += 500) {
-            yield* db.query(fileStmts.slice(i, i + 500).join(""));
-        }
-        for (let i = 0; i < relStmts.length; i += 500) {
-            yield* db.query(relStmts.slice(i, i + 500).join(""));
-        }
+        yield* executeStatementsWith(db, fileStmts, { chunkSize: 500 });
+        yield* executeStatementsWith(db, relStmts, { chunkSize: 500 });
     });
 
 const relateToolCallSkills = (relations: ToolCallSkillRelationWrite[]) =>
