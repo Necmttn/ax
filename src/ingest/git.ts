@@ -18,6 +18,7 @@ import {
     type RepositoryIdentityKind,
 } from "./repository-identity.ts";
 import { surrealString } from "../lib/shared/surql.ts";
+import { executeStatementsWith } from "../lib/shared/statement-exec.ts";
 
 /**
  * Optional override file: one absolute repo path per line. Lines starting with
@@ -598,9 +599,7 @@ const writeRepo = (
                 ts: c.ts,
             }));
         }
-        for (let i = 0; i < commitStmts.length; i += 500) {
-            yield* db.query(commitStmts.slice(i, i + 500).join(""));
-        }
+        yield* executeStatementsWith(db, commitStmts, { chunkSize: 500 });
 
         // 2. Bulk-upsert files (deduped by path).
         const seenFiles = new Set<string>();
@@ -630,9 +629,7 @@ const writeRepo = (
                 }));
             }
         }
-        for (let i = 0; i < fileStmts.length; i += 500) {
-            yield* db.query(fileStmts.slice(i, i + 500).join(""));
-        }
+        yield* executeStatementsWith(db, fileStmts, { chunkSize: 500 });
 
         // 3. Bulk-RELATE commit -> touched -> file. Touched is checkout-scoped
         //    edge evidence, so re-runs delete only this checkout's rows before
@@ -655,9 +652,7 @@ const writeRepo = (
                 ts: c.ts,
             });
             touchedCount += c.files.length;
-            for (let i = 0; i < stmts.length; i += 500) {
-                yield* db.query(stmts.slice(i, i + 500).join(""));
-            }
+            yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
         }
 
         // 4. session -> produced -> commit. For each commit, find sessions whose
@@ -686,9 +681,7 @@ const writeRepo = (
                     checkoutId,
                     ts: c.ts,
                 });
-                for (let i = 0; i < stmts.length; i += 500) {
-                    yield* db.query(stmts.slice(i, i + 500).join(""));
-                }
+                yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
             }
             producedCount += sessions.length;
         }
