@@ -3,7 +3,21 @@ import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
 import type { DbError } from "../lib/errors.ts";
 import { skillRecordKey } from "../lib/skill-id.ts";
 import { toolCallRecordKey, toolRecordKey } from "./record-keys.ts";
-import { surrealString } from "../lib/shared/surql.ts";
+import {
+    surrealString,
+    surrealDate,
+    surrealObject,
+    surrealSet,
+    surrealOptionString,
+    surrealOptionInt,
+    surrealOptionDate,
+    surrealOptionRecord,
+    surrealJsonText,
+    surrealJsonTextOption,
+    recordRef,
+} from "../lib/shared/surql.ts";
+
+export { recordRef } from "../lib/shared/surql.ts";
 
 const STATEMENT_CHUNK_SIZE = 250;
 
@@ -66,60 +80,6 @@ export interface PlanSnapshotWrite {
     readonly items: readonly PlanSnapshotItemWrite[];
 }
 
-const sqlString = surrealString;
-
-const sqlOptionString = (value: string | null | undefined): string =>
-    value === null || value === undefined ? "NONE" : sqlString(value);
-
-const sqlOptionInt = (value: number | null | undefined): string => {
-    if (value === null || value === undefined || !Number.isFinite(value)) {
-        return "NONE";
-    }
-
-    return Math.trunc(value).toString(10);
-};
-
-const sqlDate = (value: TimestampInput): string => {
-    const iso = value instanceof Date ? value.toISOString() : value;
-    return `d${JSON.stringify(iso)}`;
-};
-
-const sqlOptionDate = (value: TimestampInput | null | undefined): string =>
-    value === null || value === undefined ? "NONE" : sqlDate(value);
-
-const escapeRecordKey = (key: string): string =>
-    key
-        .replace(/\\/g, "\\\\")
-        .replace(/`/g, "\\`")
-        .replace(/\n/g, "\\n")
-        .replace(/\r/g, "\\r")
-        .replace(/\t/g, "\\t");
-
-export const recordRef = (table: string, key: string): string =>
-    `${table}:\`${escapeRecordKey(key)}\``;
-
-const sqlOptionRecord = (
-    table: string,
-    key: string | null | undefined,
-): string => (key === null || key === undefined ? "NONE" : recordRef(table, key));
-
-const encodeJsonText = (value: JsonInput): string => {
-    if (typeof value === "string") return value;
-
-    return JSON.stringify(value) ?? "null";
-};
-
-const sqlJsonString = (value: JsonInput): string => sqlString(encodeJsonText(value));
-
-const sqlJsonOption = (value: JsonInput | null | undefined): string =>
-    value === null || value === undefined ? "NONE" : sqlJsonString(value);
-
-const sqlObject = (fields: readonly (readonly [string, string])[]): string =>
-    `{ ${fields.map(([name, value]) => `${name}: ${value}`).join(", ")} }`;
-
-const sqlSet = (fields: readonly (readonly [string, string])[]): string =>
-    fields.map(([name, value]) => `${name} = ${value}`).join(", ");
-
 const toolIdentity = (provider: string, kind: string, name: string): string =>
     `${provider}:${kind}:${name}`;
 
@@ -134,11 +94,11 @@ const buildToolStatement = (input: {
     readonly kind: string;
     readonly name: string;
 }): string =>
-    `UPSERT ${recordRef("tool", input.key)} MERGE ${sqlObject([
-        ["name", sqlString(input.name)],
-        ["provider", sqlOptionString(input.provider)],
-        ["identity", sqlOptionString(toolIdentity(input.provider, input.kind, input.name))],
-        ["kind", sqlOptionString(input.kind)],
+    `UPSERT ${recordRef("tool", input.key)} MERGE ${surrealObject([
+        ["name", surrealString(input.name)],
+        ["provider", surrealOptionString(input.provider)],
+        ["identity", surrealOptionString(toolIdentity(input.provider, input.kind, input.name))],
+        ["kind", surrealOptionString(input.kind)],
         ["updated_at", "time::now()"],
     ])};`;
 
@@ -194,26 +154,26 @@ export function buildToolCallStatements(calls: readonly ToolCallWrite[]): string
         });
 
         statements.push(
-            `UPSERT ${recordRef("tool_call", toolCallKey)} CONTENT ${sqlObject([
+            `UPSERT ${recordRef("tool_call", toolCallKey)} CONTENT ${surrealObject([
                 ["session", recordRef("session", call.sessionId)],
-                ["turn", sqlOptionRecord("turn", call.turnKey)],
+                ["turn", surrealOptionRecord("turn", call.turnKey)],
                 ["tool", recordRef("tool", toolKey)],
-                ["name", sqlString(call.toolName)],
+                ["name", surrealString(call.toolName)],
                 ["seq", call.seq.toString(10)],
-                ["call_id", sqlOptionString(call.callId)],
-                ["ts", sqlDate(call.ts)],
-                ["status", sqlString(call.hasError ? "error" : "ok")],
-                ["input_json", sqlJsonOption(call.inputJson)],
-                ["output_json", sqlJsonOption(call.outputJson)],
-                ["raw", sqlJsonOption(call.rawJson)],
-                ["duration_ms", sqlOptionInt(call.durationMs)],
-                ["cwd", sqlOptionString(call.cwd)],
-                ["command_text", sqlOptionString(call.commandText)],
-                ["command_norm", sqlOptionString(call.commandNorm)],
-                ["command_tool", sqlOptionRecord("tool", commandToolKey)],
-                ["output_excerpt", sqlOptionString(call.outputExcerpt)],
-                ["error_text", sqlOptionString(call.errorText)],
-                ["exit_code", sqlOptionInt(call.exitCode)],
+                ["call_id", surrealOptionString(call.callId)],
+                ["ts", surrealDate(call.ts)],
+                ["status", surrealString(call.hasError ? "error" : "ok")],
+                ["input_json", surrealJsonTextOption(call.inputJson)],
+                ["output_json", surrealJsonTextOption(call.outputJson)],
+                ["raw", surrealJsonTextOption(call.rawJson)],
+                ["duration_ms", surrealOptionInt(call.durationMs)],
+                ["cwd", surrealOptionString(call.cwd)],
+                ["command_text", surrealOptionString(call.commandText)],
+                ["command_norm", surrealOptionString(call.commandNorm)],
+                ["command_tool", surrealOptionRecord("tool", commandToolKey)],
+                ["output_excerpt", surrealOptionString(call.outputExcerpt)],
+                ["error_text", surrealOptionString(call.errorText)],
+                ["exit_code", surrealOptionInt(call.exitCode)],
                 ["has_error", call.hasError ? "true" : "false"],
             ])};`,
         );
@@ -233,12 +193,12 @@ export function buildRelateToolCallSkillStatements(
         .padStart(16, "0");
 
     return [
-        `RELATE ${toolCallRef}->concerns:\`${edgeKey}\`->${skillRef} SET ${sqlSet([
-            ["kind", sqlString("invoked_skill")],
-            ["ts", sqlDate(input.ts)],
-            ["labels", sqlJsonOption(input.labels)],
-            ["metrics", sqlJsonOption(input.metrics)],
-            ["reason", sqlOptionString(input.reason)],
+        `RELATE ${toolCallRef}->concerns:\`${edgeKey}\`->${skillRef} SET ${surrealSet([
+            ["kind", surrealString("invoked_skill")],
+            ["ts", surrealDate(input.ts)],
+            ["labels", surrealJsonTextOption(input.labels)],
+            ["metrics", surrealJsonTextOption(input.metrics)],
+            ["reason", surrealOptionString(input.reason)],
         ])};`,
     ];
 }
@@ -247,11 +207,11 @@ export function buildSkillPlaceholderStatements(skillName: string): string[] {
     const skillRef = recordRef("skill", skillRecordKey(skillName));
 
     return [
-        `UPSERT ${skillRef} CONTENT ${sqlObject([
-            ["name", sqlString(skillName)],
-            ["scope", sqlString("unknown")],
-            ["dir_path", sqlString("(unknown)")],
-            ["content_hash", sqlString("unknown")],
+        `UPSERT ${skillRef} CONTENT ${surrealObject([
+            ["name", surrealString(skillName)],
+            ["scope", surrealString("unknown")],
+            ["dir_path", surrealString("(unknown)")],
+            ["content_hash", surrealString("unknown")],
         ])};`,
     ];
 }
@@ -277,25 +237,25 @@ export function buildPlanSnapshotStatements(snapshot: PlanSnapshotWrite): string
     const lastSeenAt = snapshot.updatedAt ?? snapshot.ts;
 
     const statements = [
-        `UPSERT ${recordRef("plan", snapshot.planKey)} CONTENT ${sqlObject([
+        `UPSERT ${recordRef("plan", snapshot.planKey)} CONTENT ${surrealObject([
             ["session", recordRef("session", snapshot.sessionId)],
-            ["source", sqlOptionString(snapshot.source)],
-            ["title", sqlOptionString(title)],
-            ["summary", sqlOptionString(summary)],
-            ["status", sqlOptionString(snapshot.status)],
-            ["items", sqlJsonString(snapshot.itemsJson)],
-            ["created_at", sqlDate(snapshot.createdAt)],
-            ["updated_at", sqlOptionDate(snapshot.updatedAt)],
+            ["source", surrealOptionString(snapshot.source)],
+            ["title", surrealOptionString(title)],
+            ["summary", surrealOptionString(summary)],
+            ["status", surrealOptionString(snapshot.status)],
+            ["items", surrealJsonText(snapshot.itemsJson)],
+            ["created_at", surrealDate(snapshot.createdAt)],
+            ["updated_at", surrealOptionDate(snapshot.updatedAt)],
         ])};`,
-        `UPSERT ${recordRef("plan_snapshot", snapshot.snapshotKey)} CONTENT ${sqlObject([
+        `UPSERT ${recordRef("plan_snapshot", snapshot.snapshotKey)} CONTENT ${surrealObject([
             ["plan", recordRef("plan", snapshot.planKey)],
             ["session", recordRef("session", snapshot.sessionId)],
-            ["tool_call", sqlOptionRecord("tool_call", snapshot.toolCallKey)],
-            ["source", sqlOptionString(snapshot.source)],
-            ["items", sqlJsonString(snapshot.itemsJson)],
-            ["summary", sqlOptionString(summary)],
-            ["explanation", sqlOptionString(snapshot.explanation)],
-            ["ts", sqlDate(snapshot.ts)],
+            ["tool_call", surrealOptionRecord("tool_call", snapshot.toolCallKey)],
+            ["source", surrealOptionString(snapshot.source)],
+            ["items", surrealJsonText(snapshot.itemsJson)],
+            ["summary", surrealOptionString(summary)],
+            ["explanation", surrealOptionString(snapshot.explanation)],
+            ["ts", surrealDate(snapshot.ts)],
         ])};`,
     ];
 
@@ -304,18 +264,18 @@ export function buildPlanSnapshotStatements(snapshot: PlanSnapshotWrite): string
             `DELETE plan_item WHERE plan = ${recordRef("plan", snapshot.planKey)} AND seq = ${item.seq.toString(10)} AND id != ${recordRef("plan_item", item.key)};`,
         );
         statements.push(
-            `UPSERT ${recordRef("plan_item", item.key)} CONTENT ${sqlObject([
+            `UPSERT ${recordRef("plan_item", item.key)} CONTENT ${surrealObject([
                 ["plan", recordRef("plan", snapshot.planKey)],
-                ["external_id", sqlOptionString(item.externalId)],
+                ["external_id", surrealOptionString(item.externalId)],
                 ["seq", item.seq.toString(10)],
-                ["text", sqlString(item.content)],
-                ["active_form", sqlOptionString(item.activeForm)],
-                ["status", sqlOptionString(item.status)],
-                ["raw", sqlJsonString(planItemRaw(item))],
-                ["created_at", sqlDate(snapshot.createdAt)],
-                ["updated_at", sqlOptionDate(snapshot.updatedAt)],
-                ["first_seen_at", sqlDate(snapshot.createdAt)],
-                ["last_seen_at", sqlDate(lastSeenAt)],
+                ["text", surrealString(item.content)],
+                ["active_form", surrealOptionString(item.activeForm)],
+                ["status", surrealOptionString(item.status)],
+                ["raw", surrealJsonText(planItemRaw(item))],
+                ["created_at", surrealDate(snapshot.createdAt)],
+                ["updated_at", surrealOptionDate(snapshot.updatedAt)],
+                ["first_seen_at", surrealDate(snapshot.createdAt)],
+                ["last_seen_at", surrealDate(lastSeenAt)],
             ])};`,
         );
     }
