@@ -16,6 +16,7 @@ import type {
 } from "../project/types.ts";
 import { recordRef } from "./evidence-writers.ts";
 import { surrealDate, surrealJsonOption, surrealObject, surrealOptionString, surrealString } from "../lib/shared/surql.ts";
+import { executeStatementsWith } from "../lib/shared/statement-exec.ts";
 
 export interface HarnessIngestStats {
     readonly guidanceSources: number;
@@ -174,9 +175,7 @@ export const ingestHarness = (): Effect.Effect<HarnessIngestStats, DbError, Surr
         const db = yield* SurrealClient;
         const report = yield* buildProjectHarnessReport();
         const statements = buildHarnessIngestStatements(report);
-        for (let i = 0; i < statements.length; i += 250) {
-            yield* db.query(statements.slice(i, i + 250).join(""));
-        }
+        yield* executeStatementsWith(db, statements);
         return {
             guidanceSources: report.guidanceSources.length,
             guidanceRevisions: report.guidanceRevisions.length,
