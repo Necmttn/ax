@@ -3,7 +3,7 @@ import { SurrealClient } from "../lib/db.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
 import { recordRef } from "./evidence-writers.ts";
-import { surrealJsonOption, surrealString } from "../lib/shared/surql.ts";
+import { surrealJsonOption, surrealObject, surrealOptionString, surrealString } from "../lib/shared/surql.ts";
 
 interface SkillCandidateRow {
     readonly id?: unknown;
@@ -37,13 +37,6 @@ export interface LearningRegistryStats {
     readonly learningMatches: number;
     readonly adoptions: number;
 }
-
-const sqlString = surrealString;
-const sqlOptionString = (value: string | null | undefined): string =>
-    value === null || value === undefined ? "NONE" : sqlString(value);
-const sqlJsonOption = surrealJsonOption;
-const sqlObject = (fields: readonly (readonly [string, string])[]): string =>
-    `{ ${fields.map(([name, value]) => `${name}: ${value}`).join(", ")} }`;
 
 const safeKeyPart = (value: string): string => {
     const sanitized = value
@@ -101,42 +94,42 @@ export function buildLearningRegistryStatements(input: {
         const workflowName = workflowForCandidate(candidate);
         workflowNames.add(workflowName);
         const gotchaKey = safeKeyPart(candidate.name);
-        statements.push(`UPSERT ${recordRef("gotcha", gotchaKey)} MERGE ${sqlObject([
-            ["name", sqlString(candidate.name)],
-            ["kind", sqlString("skill_candidate")],
-            ["pattern", sqlString(candidate.trigger_pattern ?? candidate.name)],
-            ["mitigation", sqlString(candidate.proposed_behavior ?? "Add a focused skill or guardrail.")],
-            ["strength", sqlString(candidate.confidence ?? "low")],
-            ["labels", sqlJsonOption({ source: "learning_registry", skill_candidate: candidateKey })],
-            ["metrics", sqlJsonOption({ suspected_gap: candidate.suspected_gap, raw_metrics: candidate.metrics })],
+        statements.push(`UPSERT ${recordRef("gotcha", gotchaKey)} MERGE ${surrealObject([
+            ["name", surrealString(candidate.name)],
+            ["kind", surrealString("skill_candidate")],
+            ["pattern", surrealString(candidate.trigger_pattern ?? candidate.name)],
+            ["mitigation", surrealString(candidate.proposed_behavior ?? "Add a focused skill or guardrail.")],
+            ["strength", surrealString(candidate.confidence ?? "low")],
+            ["labels", surrealJsonOption({ source: "learning_registry", skill_candidate: candidateKey })],
+            ["metrics", surrealJsonOption({ suspected_gap: candidate.suspected_gap, raw_metrics: candidate.metrics })],
             ["created_at", "time::now()"],
         ])};`);
         gotchas += 1;
 
-        statements.push(`UPSERT ${recordRef("taste_signal", gotchaKey)} MERGE ${sqlObject([
-            ["subject", sqlString(candidate.name)],
-            ["preference", sqlString(candidate.proposed_behavior ?? candidate.trigger_pattern ?? candidate.name)],
-            ["polarity", sqlString("positive")],
-            ["strength", sqlString(candidate.confidence ?? "low")],
-            ["evidence", sqlJsonOption({ source: "skill_candidate", candidate: candidateKey })],
+        statements.push(`UPSERT ${recordRef("taste_signal", gotchaKey)} MERGE ${surrealObject([
+            ["subject", surrealString(candidate.name)],
+            ["preference", surrealString(candidate.proposed_behavior ?? candidate.trigger_pattern ?? candidate.name)],
+            ["polarity", surrealString("positive")],
+            ["strength", surrealString(candidate.confidence ?? "low")],
+            ["evidence", surrealJsonOption({ source: "skill_candidate", candidate: candidateKey })],
             ["created_at", "time::now()"],
         ])};`);
         tasteSignals += 1;
 
-        statements.push(`UPSERT ${recordRef("learning_feedback", gotchaKey)} MERGE ${sqlObject([
-            ["target", sqlString(candidate.name)],
-            ["signal", sqlString(candidate.suspected_gap ?? "candidate derived from closure evidence")],
-            ["sentiment", sqlString("needs_action")],
-            ["evidence", sqlJsonOption({ source: "skill_candidate", candidate: candidateKey })],
+        statements.push(`UPSERT ${recordRef("learning_feedback", gotchaKey)} MERGE ${surrealObject([
+            ["target", surrealString(candidate.name)],
+            ["signal", surrealString(candidate.suspected_gap ?? "candidate derived from closure evidence")],
+            ["sentiment", surrealString("needs_action")],
+            ["evidence", surrealJsonOption({ source: "skill_candidate", candidate: candidateKey })],
             ["created_at", "time::now()"],
         ])};`);
         learningFeedback += 1;
 
-        statements.push(`UPSERT ${recordRef("adoption", gotchaKey)} MERGE ${sqlObject([
-            ["target", sqlString(candidate.name)],
-            ["scope", sqlString("local")],
-            ["status", sqlString("draft")],
-            ["evidence", sqlJsonOption({ source: "skill_candidate", candidate: candidateKey, hosted_share: "disabled" })],
+        statements.push(`UPSERT ${recordRef("adoption", gotchaKey)} MERGE ${surrealObject([
+            ["target", surrealString(candidate.name)],
+            ["scope", surrealString("local")],
+            ["status", surrealString("draft")],
+            ["evidence", surrealJsonOption({ source: "skill_candidate", candidate: candidateKey, hosted_share: "disabled" })],
             ["created_at", "time::now()"],
         ])};`);
         adoptions += 1;
@@ -146,14 +139,14 @@ export function buildLearningRegistryStatements(input: {
             if (!stackKey) continue;
             const matchKey = `${gotchaKey}__${safeKeyPart(stackKey)}`;
             const score = workflowName.includes("schema") && /surreal/i.test(stack.name ?? "") ? 0.9 : 0.45;
-            statements.push(`UPSERT ${recordRef("learning_match", matchKey)} MERGE ${sqlObject([
+            statements.push(`UPSERT ${recordRef("learning_match", matchKey)} MERGE ${surrealObject([
                 ["learning", "NONE"],
                 ["skill_candidate", recordRef("skill_candidate", candidateKey)],
                 ["stack", recordRef("stack", stackKey)],
                 ["workflow", recordRef("workflow", workflowName)],
                 ["score", score.toString()],
-                ["reason", sqlOptionString(`Candidate ${candidate.name} matched stack ${stack.name ?? stackKey}`)],
-                ["labels", sqlJsonOption({ source: "learning_registry" })],
+                ["reason", surrealOptionString(`Candidate ${candidate.name} matched stack ${stack.name ?? stackKey}`)],
+                ["labels", surrealJsonOption({ source: "learning_registry" })],
                 ["created_at", "time::now()"],
             ])};`);
             learningMatches += 1;
@@ -167,26 +160,26 @@ export function buildLearningRegistryStatements(input: {
         workflowNames.add(workflowName);
         if (!learningKey) continue;
         const matchKey = `${safeKeyPart(learningKey)}__${workflowName}`;
-        statements.push(`UPSERT ${recordRef("learning_match", matchKey)} MERGE ${sqlObject([
+        statements.push(`UPSERT ${recordRef("learning_match", matchKey)} MERGE ${surrealObject([
             ["learning", recordRef("harness_learning", learningKey)],
             ["skill_candidate", "NONE"],
             ["stack", "NONE"],
             ["workflow", recordRef("workflow", workflowName)],
             ["score", "0.75"],
-            ["reason", sqlOptionString(learning.pattern ?? "Harness learning matched to guardrail workflow")],
-            ["labels", sqlJsonOption({ source: "learning_registry", scope: learning.scope })],
+            ["reason", surrealOptionString(learning.pattern ?? "Harness learning matched to guardrail workflow")],
+            ["labels", surrealJsonOption({ source: "learning_registry", scope: learning.scope })],
             ["created_at", "time::now()"],
         ])};`);
         learningMatches += 1;
     }
 
     for (const workflowName of workflowNames) {
-        statements.push(`UPSERT ${recordRef("workflow", workflowName)} MERGE ${sqlObject([
-            ["name", sqlString(workflowName)],
-            ["kind", sqlString("local_learning")],
-            ["description", sqlOptionString(`Derived local learning workflow: ${workflowName}`)],
-            ["labels", sqlJsonOption({ source: "learning_registry" })],
-            ["metrics", sqlJsonOption({ hosted_share: "disabled", auto_publish: false })],
+        statements.push(`UPSERT ${recordRef("workflow", workflowName)} MERGE ${surrealObject([
+            ["name", surrealString(workflowName)],
+            ["kind", surrealString("local_learning")],
+            ["description", surrealOptionString(`Derived local learning workflow: ${workflowName}`)],
+            ["labels", surrealJsonOption({ source: "learning_registry" })],
+            ["metrics", surrealJsonOption({ hosted_share: "disabled", auto_publish: false })],
             ["created_at", "time::now()"],
         ])};`);
     }

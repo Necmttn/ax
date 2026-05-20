@@ -3,7 +3,7 @@ import { SurrealClient } from "../lib/db.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
 import { recordRef } from "./evidence-writers.ts";
-import { surrealJsonOption, surrealString } from "../lib/shared/surql.ts";
+import { surrealDate, surrealJsonOption, surrealObject, surrealOptionDate, surrealOptionString, surrealString } from "../lib/shared/surql.ts";
 
 type TimestampInput = Date | string | { readonly constructor: { readonly name: string }; toString(): string };
 
@@ -72,16 +72,6 @@ export interface OutcomeStats {
     readonly commandOutcomes: number;
     readonly userMessageNgrams: number;
 }
-
-const sqlString = surrealString;
-const sqlOptionString = (value: string | null | undefined): string =>
-    value === null || value === undefined ? "NONE" : sqlString(value);
-const sqlDate = (value: string): string => `d${JSON.stringify(value)}`;
-const sqlOptionDate = (value: string | null | undefined): string =>
-    value === null || value === undefined ? "NONE" : sqlDate(value);
-const sqlJsonOption = surrealJsonOption;
-const sqlObject = (fields: readonly (readonly [string, string])[]): string =>
-    `{ ${fields.map(([name, value]) => `${name}: ${value}`).join(", ")} }`;
 
 const safeKeyPart = (value: string): string => {
     const sanitized = value
@@ -236,33 +226,33 @@ export function deriveUserMessageNgrams(rows: readonly UserTurnRow[], sizes: rea
 }
 
 function commandOutcomeStatement(outcome: CommandOutcome): string {
-    return `UPSERT ${recordRef("command_outcome", outcome.key)} MERGE ${sqlObject([
+    return `UPSERT ${recordRef("command_outcome", outcome.key)} MERGE ${surrealObject([
         ["tool_call", outcome.toolCallKey ? recordRef("tool_call", outcome.toolCallKey) : "NONE"],
         ["session", outcome.sessionKey ? recordRef("session", outcome.sessionKey) : "NONE"],
-        ["command_norm", sqlOptionString(outcome.commandNorm)],
-        ["command_tool", sqlOptionString(outcome.commandTool)],
-        ["kind", sqlString(outcome.kind)],
-        ["status", sqlString(outcome.status)],
-        ["text", sqlOptionString(outcome.text)],
-        ["labels", sqlJsonOption(outcome.labels)],
-        ["metrics", sqlJsonOption(outcome.metrics)],
-        ["ts", sqlDate(outcome.ts)],
+        ["command_norm", surrealOptionString(outcome.commandNorm)],
+        ["command_tool", surrealOptionString(outcome.commandTool)],
+        ["kind", surrealString(outcome.kind)],
+        ["status", surrealString(outcome.status)],
+        ["text", surrealOptionString(outcome.text)],
+        ["labels", surrealJsonOption(outcome.labels)],
+        ["metrics", surrealJsonOption(outcome.metrics)],
+        ["ts", surrealDate(outcome.ts)],
     ])};`;
 }
 
 function ngramStatement(item: NgramAggregate): string {
     const key = `${item.n}__${safeKeyPart(item.ngram)}__${Bun.hash(item.ngram).toString(16).slice(0, 12)}`;
-    return `UPSERT ${recordRef("user_message_ngram", key)} MERGE ${sqlObject([
-        ["ngram", sqlString(item.ngram)],
+    return `UPSERT ${recordRef("user_message_ngram", key)} MERGE ${surrealObject([
+        ["ngram", surrealString(item.ngram)],
         ["n", item.n.toString(10)],
         ["count", item.count.toString(10)],
-        ["sessions", sqlJsonOption([...item.sessions].slice(0, 100))],
+        ["sessions", surrealJsonOption([...item.sessions].slice(0, 100))],
         ["near_correction_count", item.nearCorrectionCount.toString(10)],
         ["near_failed_tool_count", item.nearFailedToolCount.toString(10)],
         ["near_edit_count", item.nearEditCount.toString(10)],
         ["near_verification_count", item.nearVerificationCount.toString(10)],
-        ["first_seen", sqlOptionDate(item.firstSeen)],
-        ["last_seen", sqlOptionDate(item.lastSeen)],
+        ["first_seen", surrealOptionDate(item.firstSeen)],
+        ["last_seen", surrealOptionDate(item.lastSeen)],
     ])};`;
 }
 

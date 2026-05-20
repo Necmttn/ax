@@ -3,7 +3,7 @@ import { SurrealClient } from "../lib/db.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
 import { recordRef } from "./evidence-writers.ts";
-import { surrealJsonOption, surrealString } from "../lib/shared/surql.ts";
+import { surrealDate, surrealJsonOption, surrealObject, surrealOptionString, surrealString } from "../lib/shared/surql.ts";
 
 type TimestampInput = Date | string | { readonly constructor: { readonly name: string }; toString(): string };
 
@@ -67,14 +67,6 @@ export interface ClosureStats {
     readonly fixChains: number;
     readonly skillCandidates: number;
 }
-
-const sqlString = surrealString;
-const sqlOptionString = (value: string | null | undefined): string =>
-    value === null || value === undefined ? "NONE" : sqlString(value);
-const sqlDate = (value: string): string => `d${JSON.stringify(value)}`;
-const sqlJsonOption = surrealJsonOption;
-const sqlObject = (fields: readonly (readonly [string, string])[]): string =>
-    `{ ${fields.map(([name, value]) => `${name}: ${value}`).join(", ")} }`;
 
 const safeKeyPart = (value: string): string => {
     const sanitized = value
@@ -254,15 +246,15 @@ export function deriveClosureRows(input: {
 }
 
 function classificationStatement(row: CommitClassification): string {
-    return `UPSERT ${recordRef("commit_classification", safeKeyPart(row.commitKey))} MERGE ${sqlObject([
+    return `UPSERT ${recordRef("commit_classification", safeKeyPart(row.commitKey))} MERGE ${surrealObject([
         ["commit", recordRef("commit", row.commitKey)],
         ["repository", row.repositoryKey ? recordRef("repository", row.repositoryKey) : "NONE"],
-        ["kind", sqlString(row.kind)],
-        ["confidence", sqlString(row.confidence)],
-        ["message", sqlOptionString(row.message)],
-        ["labels", sqlJsonOption({ source: "closure" })],
-        ["metrics", sqlJsonOption({})],
-        ["ts", sqlDate(row.ts)],
+        ["kind", surrealString(row.kind)],
+        ["confidence", surrealString(row.confidence)],
+        ["message", surrealOptionString(row.message)],
+        ["labels", surrealJsonOption({ source: "closure" })],
+        ["metrics", surrealJsonOption({})],
+        ["ts", surrealDate(row.ts)],
     ])};`;
 }
 
@@ -272,12 +264,12 @@ function fixChainStatements(row: FixChain): string[] {
         `DELETE ${recordRef("later_fixed_by", edgeKey)};`,
         `RELATE ${recordRef("commit", row.featureKey)}->later_fixed_by:\`${edgeKey}\`->${recordRef("commit", row.fixKey)} SET ${[
             ["repository", row.repositoryKey ? recordRef("repository", row.repositoryKey) : "NONE"],
-            ["overlap_files", sqlJsonOption(row.overlapFiles)],
+            ["overlap_files", surrealJsonOption(row.overlapFiles)],
             ["overlap_count", row.overlapFiles.length.toString(10)],
             ["days_between", Number(row.daysBetween.toFixed(3)).toString()],
-            ["confidence", sqlString(row.confidence)],
-            ["reason", sqlOptionString(row.reason)],
-            ["ts", sqlDate(row.ts)],
+            ["confidence", surrealString(row.confidence)],
+            ["reason", surrealOptionString(row.reason)],
+            ["ts", surrealDate(row.ts)],
         ].map(([name, value]) => `${name} = ${value}`).join(", ")};`,
     ];
 }
@@ -285,16 +277,16 @@ function fixChainStatements(row: FixChain): string[] {
 function skillCandidateStatements(row: SkillCandidate): string[] {
     const candidateRef = recordRef("skill_candidate", row.key);
     const statements = [
-        `UPSERT ${candidateRef} MERGE ${sqlObject([
-            ["name", sqlString(row.name)],
-            ["trigger_pattern", sqlString(row.triggerPattern)],
-            ["suspected_gap", sqlString(row.suspectedGap)],
-            ["proposed_behavior", sqlString(row.proposedBehavior)],
-            ["confidence", sqlString(row.confidence)],
-            ["expected_impact", sqlOptionString(row.expectedImpact)],
-            ["status", sqlString("candidate")],
-            ["labels", sqlJsonOption({ source: "closure" })],
-            ["metrics", sqlJsonOption(row.metrics)],
+        `UPSERT ${candidateRef} MERGE ${surrealObject([
+            ["name", surrealString(row.name)],
+            ["trigger_pattern", surrealString(row.triggerPattern)],
+            ["suspected_gap", surrealString(row.suspectedGap)],
+            ["proposed_behavior", surrealString(row.proposedBehavior)],
+            ["confidence", surrealString(row.confidence)],
+            ["expected_impact", surrealOptionString(row.expectedImpact)],
+            ["status", surrealString("candidate")],
+            ["labels", surrealJsonOption({ source: "closure" })],
+            ["metrics", surrealJsonOption(row.metrics)],
             ["created_at", "time::now()"],
         ])};`,
     ];
@@ -302,7 +294,7 @@ function skillCandidateStatements(row: SkillCandidate): string[] {
         const edgeKey = `${safeKeyPart(commitKey)}__${row.key}`;
         statements.push(
             `DELETE ${recordRef("suggests_skill", edgeKey)};`,
-            `RELATE ${recordRef("commit", commitKey)}->suggests_skill:\`${edgeKey}\`->${candidateRef} SET reason = ${sqlOptionString(row.triggerPattern)}, evidence = ${sqlJsonOption(row.metrics)}, confidence = ${sqlString(row.confidence)}, ts = time::now();`,
+            `RELATE ${recordRef("commit", commitKey)}->suggests_skill:\`${edgeKey}\`->${candidateRef} SET reason = ${surrealOptionString(row.triggerPattern)}, evidence = ${surrealJsonOption(row.metrics)}, confidence = ${surrealString(row.confidence)}, ts = time::now();`,
         );
     }
     return statements;
