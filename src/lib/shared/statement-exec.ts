@@ -10,7 +10,7 @@
  * chunking + concurrency policy lives in exactly one place.
  */
 
-import { Effect } from "effect";
+import { Array as Arr, Effect } from "effect";
 import { SurrealClient, type SurrealClientShape } from "../db.ts";
 import type { DbError } from "../errors.ts";
 
@@ -31,13 +31,11 @@ export const executeStatementsWith = (
     statements: readonly string[],
     options?: ExecuteOptions,
 ): Effect.Effect<void, DbError> =>
-    Effect.gen(function* () {
-        if (statements.length === 0) return;
-        const chunkSize = options?.chunkSize ?? DEFAULT_CHUNK_SIZE;
-        for (let i = 0; i < statements.length; i += chunkSize) {
-            yield* db.query(statements.slice(i, i + chunkSize).join(""));
-        }
-    });
+    Effect.forEach(
+        Arr.chunksOf(statements, options?.chunkSize ?? DEFAULT_CHUNK_SIZE),
+        (chunk) => db.query(chunk.join("")),
+        { discard: true },
+    );
 
 /** Execute pre-built statements, resolving `SurrealClient` from context. */
 export const executeStatements = (

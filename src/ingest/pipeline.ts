@@ -69,8 +69,9 @@ export const runPipeline = (
     Effect.gen(function* () {
         const byKey = new Map(specs.map((s) => [s.key, s]));
         for (const layer of topoLayers(specs)) {
-            yield* Effect.all(
-                layer.map((key) => byKey.get(key)!.run()),
+            yield* Effect.forEach(
+                layer,
+                (key) => byKey.get(key)!.run(),
                 { concurrency: LAYER_CONCURRENCY, discard: true },
             );
         }
