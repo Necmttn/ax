@@ -9,26 +9,26 @@ import { recordKeyPart, safeKeyPart } from "../lib/shared/derive-keys.ts";
 
 interface SkillCandidateRow {
     readonly id?: unknown;
-    readonly name?: string | null;
-    readonly trigger_pattern?: string | null;
-    readonly suspected_gap?: string | null;
-    readonly proposed_behavior?: string | null;
-    readonly confidence?: string | null;
-    readonly metrics?: string | null;
+    readonly name?: string;
+    readonly trigger_pattern?: string;
+    readonly suspected_gap?: string;
+    readonly proposed_behavior?: string;
+    readonly confidence?: string;
+    readonly metrics?: string;
 }
 
 interface StackRow {
     readonly id?: unknown;
-    readonly name?: string | null;
-    readonly kind?: string | null;
+    readonly name?: string;
+    readonly kind?: string;
 }
 
 interface HarnessLearningRow {
     readonly id?: unknown;
-    readonly name?: string | null;
-    readonly pattern?: string | null;
-    readonly scope?: string | null;
-    readonly confidence?: string | null;
+    readonly name?: string;
+    readonly pattern?: string;
+    readonly scope?: string;
+    readonly confidence?: string;
 }
 
 export interface LearningRegistryStats {

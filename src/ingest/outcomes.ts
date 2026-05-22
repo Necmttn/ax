@@ -21,24 +21,24 @@ interface ToolCallOutcomeRow {
     readonly id?: unknown;
     readonly session?: unknown;
     readonly turn?: unknown;
-    readonly name?: string | null;
-    readonly command_norm?: string | null;
-    readonly command_text?: string | null;
-    readonly output_excerpt?: string | null;
-    readonly error_text?: string | null;
-    readonly exit_code?: number | null;
-    readonly has_error?: boolean | null;
-    readonly status?: string | null;
-    readonly ts?: TimestampInput | null;
+    readonly name?: string;
+    readonly command_norm?: string;
+    readonly command_text?: string;
+    readonly output_excerpt?: string;
+    readonly error_text?: string;
+    readonly exit_code?: number;
+    readonly has_error?: boolean;
+    readonly status?: string;
+    readonly ts?: TimestampInput;
 }
 
 interface UserTurnRow {
     readonly id?: unknown;
     readonly session?: unknown;
-    readonly seq?: number | null;
-    readonly text_excerpt?: string | null;
-    readonly ts?: TimestampInput | null;
-    readonly has_error?: boolean | null;
+    readonly seq?: number;
+    readonly text_excerpt?: string;
+    readonly ts?: TimestampInput;
+    readonly has_error?: boolean;
 }
 
 interface CommandOutcome {

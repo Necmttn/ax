@@ -80,33 +80,33 @@ type RecordRefLike = string | { tb?: string; id?: unknown };
 type JsonRecord = Record<string, unknown>;
 
 export interface ToolCallLike {
-    readonly id?: RecordRefLike | null;
-    readonly session?: RecordRefLike | null;
-    readonly turn?: RecordRefLike | null;
-    readonly tool?: RecordRefLike | { name?: unknown } | null;
-    readonly tool_name?: string | null;
-    readonly toolName?: string | null;
-    readonly name?: string | null;
-    readonly command_norm?: string | null;
-    readonly commandNorm?: string | null;
-    readonly output_excerpt?: string | null;
-    readonly outputExcerpt?: string | null;
-    readonly error_text?: string | null;
-    readonly errorText?: string | null;
-    readonly exit_code?: number | null;
-    readonly exitCode?: number | null;
-    readonly duration_ms?: number | null;
-    readonly durationMs?: number | null;
-    readonly status?: string | null;
-    readonly has_error?: boolean | null;
-    readonly hasError?: boolean | null;
-    readonly ts?: TimestampInput | null;
-    readonly cwd?: string | null;
-    readonly seq?: number | null;
-    readonly call_id?: string | null;
-    readonly callId?: string | null;
-    readonly repository?: RecordRefLike | null;
-    readonly checkout?: RecordRefLike | null;
+    readonly id?: RecordRefLike;
+    readonly session?: RecordRefLike;
+    readonly turn?: RecordRefLike;
+    readonly tool?: RecordRefLike | { name?: unknown };
+    readonly tool_name?: string;
+    readonly toolName?: string;
+    readonly name?: string;
+    readonly command_norm?: string;
+    readonly commandNorm?: string;
+    readonly output_excerpt?: string;
+    readonly outputExcerpt?: string;
+    readonly error_text?: string;
+    readonly errorText?: string;
+    readonly exit_code?: number;
+    readonly exitCode?: number;
+    readonly duration_ms?: number;
+    readonly durationMs?: number;
+    readonly status?: string;
+    readonly has_error?: boolean;
+    readonly hasError?: boolean;
+    readonly ts?: TimestampInput;
+    readonly cwd?: string;
+    readonly seq?: number;
+    readonly call_id?: string;
+    readonly callId?: string;
+    readonly repository?: RecordRefLike;
+    readonly checkout?: RecordRefLike;
 }
 
 export interface DerivedFrictionEvent {
@@ -169,13 +169,13 @@ interface TurnRow {
     id: { tb: string; id: string } | string;
     seq: number;
     role: string;
-    text_excerpt: string | null;
+    text_excerpt: string | undefined;
     ts: string | Date;
     has_error: boolean;
     invoked_skills: ReadonlyArray<string>; // skill names this turn already invoked
-    repository?: RecordRefLike | null;
-    checkout?: RecordRefLike | null;
-    cwd?: string | null;
+    repository?: RecordRefLike;
+    checkout?: RecordRefLike;
+    cwd?: string;
 }
 
 interface SessionTurns {
@@ -648,7 +648,7 @@ interface RecoveryEdge {
     skillKey: string;
     skillName: string;
     ts: string;
-    errorExcerpt: string | null;
+    errorExcerpt: string | undefined;
 }
 
 /**

@@ -11,23 +11,23 @@ export type CommitKind = "feature" | "fix" | "refactor" | "test" | "docs" | "cho
 
 interface CommitRow {
     readonly id: unknown;
-    readonly message?: string | null;
+    readonly message?: string;
     readonly repository?: unknown;
-    readonly ts?: TimestampInput | null;
+    readonly ts?: TimestampInput;
 }
 
 interface TouchedRow {
     readonly in?: unknown;
     readonly out?: unknown;
-    readonly path?: string | null;
+    readonly path?: string;
 }
 
 interface SessionHealthRow {
     readonly session?: unknown;
-    readonly tool_errors?: number | null;
-    readonly user_corrections?: number | null;
-    readonly interruptions?: number | null;
-    readonly context_pressure?: string | null;
+    readonly tool_errors?: number;
+    readonly user_corrections?: number;
+    readonly interruptions?: number;
+    readonly context_pressure?: string;
 }
 
 export interface CommitClassification {

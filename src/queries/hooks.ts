@@ -8,9 +8,9 @@ export interface HookSummaryRow {
     readonly provider_status: string;
     readonly effect: string;
     readonly count: number;
-    readonly avg_duration_ms?: number | null;
-    readonly max_duration_ms?: number | null;
-    readonly last_seen?: Date | string | null;
+    readonly avg_duration_ms?: number;
+    readonly max_duration_ms?: number;
+    readonly last_seen?: Date | string;
 }
 
 export interface HookInvocationRow {
@@ -21,15 +21,15 @@ export interface HookInvocationRow {
     readonly command: string;
     readonly provider_status: string;
     readonly effect: string;
-    readonly duration_ms?: number | null;
-    readonly exit_code?: number | null;
-    readonly stdout_excerpt?: string | null;
-    readonly stderr_excerpt?: string | null;
-    readonly blocking_error_excerpt?: string | null;
+    readonly duration_ms?: number;
+    readonly exit_code?: number;
+    readonly stdout_excerpt?: string;
+    readonly stderr_excerpt?: string;
+    readonly blocking_error_excerpt?: string;
 }
 
 export interface HookSessionRow extends HookInvocationRow {
-    readonly tool_call_id?: string | null;
+    readonly tool_call_id?: string;
 }
 
 export interface HookQueryOptions {

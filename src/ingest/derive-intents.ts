@@ -15,10 +15,10 @@ import { classifyTurnIntent, type TurnIntentKind } from "./intent-kind.ts";
 export interface TurnIntentRow {
     readonly id: string;
     readonly role: string;
-    readonly message_kind: string | null;
-    readonly text_excerpt: string | null;
-    readonly intent_kind: string | null;
-    readonly source: string | null;
+    readonly message_kind: string | undefined;
+    readonly text_excerpt: string | undefined;
+    readonly intent_kind: string | undefined;
+    readonly source: string | undefined;
 }
 
 export interface IntentChange {
@@ -41,9 +41,9 @@ export function computeIntentChanges(rows: readonly TurnIntentRow[]): DeriveInte
     for (const row of rows) {
         const next = classifyTurnIntent({
             role: row.role,
-            messageKind: row.message_kind,
-            text: row.text_excerpt,
-            source: row.source,
+            messageKind: row.message_kind ?? null,
+            text: row.text_excerpt ?? null,
+            source: row.source ?? null,
         });
         const prev = row.intent_kind ?? "(unset)";
         if (next === prev) continue;

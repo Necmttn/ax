@@ -5,7 +5,7 @@ function row(partial: Partial<TurnIntentRow> & Pick<TurnIntentRow, "id" | "inten
     return {
         role: "user",
         message_kind: "task",
-        source: null,
+        source: undefined,
         ...partial,
     };
 }

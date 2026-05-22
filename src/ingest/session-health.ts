@@ -13,31 +13,31 @@ type JsonRecord = Record<string, unknown>;
 
 interface SessionRow {
     readonly id: unknown;
-    readonly source?: string | null;
-    readonly model?: string | null;
-    readonly started_at?: TimestampInput | null;
-    readonly ended_at?: TimestampInput | null;
+    readonly source?: string;
+    readonly model?: string;
+    readonly started_at?: TimestampInput;
+    readonly ended_at?: TimestampInput;
 }
 
 interface TurnRow {
     readonly session: unknown;
-    readonly seq?: number | null;
-    readonly role?: string | null;
-    readonly message_kind?: string | null;
-    readonly intent_kind?: string | null;
-    readonly text_excerpt?: string | null;
-    readonly has_error?: boolean | null;
+    readonly seq?: number;
+    readonly role?: string;
+    readonly message_kind?: string;
+    readonly intent_kind?: string;
+    readonly text_excerpt?: string;
+    readonly has_error?: boolean;
 }
 
 interface ToolCallRow {
     readonly session: unknown;
-    readonly name?: string | null;
-    readonly command_norm?: string | null;
-    readonly input_json?: string | null;
-    readonly output_json?: string | null;
-    readonly output_excerpt?: string | null;
-    readonly error_text?: string | null;
-    readonly has_error?: boolean | null;
+    readonly name?: string;
+    readonly command_norm?: string;
+    readonly input_json?: string;
+    readonly output_json?: string;
+    readonly output_excerpt?: string;
+    readonly error_text?: string;
+    readonly has_error?: boolean;
 }
 
 interface PlanSnapshotRow {
@@ -45,8 +45,8 @@ interface PlanSnapshotRow {
 }
 
 interface InsightMetricRow {
-    readonly subject_id?: string | null;
-    readonly metrics?: string | null;
+    readonly subject_id?: string;
+    readonly metrics?: string;
 }
 
 export interface SessionTokenUsage {
