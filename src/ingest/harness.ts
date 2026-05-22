@@ -17,6 +17,7 @@ import type {
 import { recordRef } from "./evidence-writers.ts";
 import { surrealDate, surrealJsonOption, surrealObject, surrealOptionString, surrealString } from "../lib/shared/surql.ts";
 import { executeStatementsWith } from "../lib/shared/statement-exec.ts";
+import { safeKeyPart } from "../lib/shared/derive-keys.ts";
 
 export interface HarnessIngestStats {
     readonly guidanceSources: number;
@@ -30,14 +31,6 @@ export interface HarnessIngestStats {
 
 const sqlBool = (value: boolean): string => value ? "true" : "false";
 
-const safeKeyPart = (value: string): string => {
-    const sanitized = value
-        .replace(/:/g, "__")
-        .replace(/[^a-zA-Z0-9_]+/g, "_")
-        .replace(/_{3,}/g, "__")
-        .replace(/^_+|_+$/g, "");
-    return sanitized.length > 0 ? sanitized.slice(0, 96) : Bun.hash(value).toString(16);
-};
 
 export const guidanceSourceKey = (source: Pick<GuidanceSource, "path">): string =>
     `${safeKeyPart(source.path)}__${Bun.hash(source.path).toString(16).slice(0, 16)}`;

@@ -17,6 +17,7 @@ import {
     surrealJsonTextOption,
     recordRef,
 } from "../lib/shared/surql.ts";
+import { nonEmptyString } from "../lib/shared/derive-keys.ts";
 
 export { recordRef } from "../lib/shared/surql.ts";
 
@@ -81,11 +82,6 @@ export interface PlanSnapshotWrite {
 
 const toolIdentity = (provider: string, kind: string, name: string): string =>
     `${provider}:${kind}:${name}`;
-
-const nonEmptyString = (value: string | null | undefined): string | null => {
-    const trimmed = value?.trim();
-    return trimmed && trimmed.length > 0 ? trimmed : null;
-};
 
 const buildToolStatement = (input: {
     readonly key: string;

@@ -5,8 +5,7 @@ import type { DbError } from "../lib/errors.ts";
 import { recordRef } from "./evidence-writers.ts";
 import { surrealDate, surrealJsonOption, surrealObject, surrealOptionDate, surrealOptionString, surrealString } from "../lib/shared/surql.ts";
 import { executeStatementsWith } from "../lib/shared/statement-exec.ts";
-
-type TimestampInput = Date | string | { readonly constructor: { readonly name: string }; toString(): string };
+import { isoTimestamp, recordKeyPart, safeKeyPart, type TimestampInput } from "../lib/shared/derive-keys.ts";
 
 export type CommandOutcomeKind =
     | "success"
@@ -73,41 +72,6 @@ export interface OutcomeStats {
     readonly commandOutcomes: number;
     readonly userMessageNgrams: number;
 }
-
-const safeKeyPart = (value: string): string => {
-    const sanitized = value
-        .replace(/:/g, "__")
-        .replace(/[^a-zA-Z0-9_]+/g, "_")
-        .replace(/_{3,}/g, "__")
-        .replace(/^_+|_+$/g, "");
-    return sanitized.length > 0 ? sanitized.slice(0, 96) : Bun.hash(value).toString(16);
-};
-
-const isoTimestamp = (value: TimestampInput | null | undefined): string => {
-    if (value instanceof Date) return value.toISOString();
-    if (typeof value === "string" && value.length > 0) return value;
-    if (value && typeof value === "object" && value.constructor.name === "DateTime") return String(value);
-    return new Date(0).toISOString();
-};
-
-const recordKeyPart = (value: unknown, expectedTable?: string): string | null => {
-    if (value === null || value === undefined) return null;
-    if (typeof value === "string") {
-        let raw = value.trim();
-        const prefix = expectedTable ? `${expectedTable}:` : null;
-        if (prefix && raw.startsWith(prefix)) raw = raw.slice(prefix.length);
-        else if (raw.includes(":")) raw = raw.slice(raw.indexOf(":") + 1);
-        if ((raw.startsWith("`") && raw.endsWith("`")) || (raw.startsWith("⟨") && raw.endsWith("⟩"))) {
-            raw = raw.slice(1, -1);
-        }
-        return raw.length > 0 ? raw : null;
-    }
-    if (typeof value === "object" && "id" in value) {
-        const id = (value as { id: unknown }).id;
-        return id === null || id === undefined ? null : String(id);
-    }
-    return null;
-};
 
 const textFor = (row: ToolCallOutcomeRow): string =>
     [row.command_text, row.command_norm, row.error_text, row.output_excerpt]

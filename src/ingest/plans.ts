@@ -1,4 +1,5 @@
 import { decodeJsonOrNull } from "../lib/decode.ts";
+import { nonEmptyString } from "../lib/shared/derive-keys.ts";
 
 export type PlanStatus = "pending" | "in_progress" | "completed" | "abandoned";
 
@@ -57,13 +58,6 @@ function normalizeStatus(status: string | null | undefined): PlanStatus {
         return status;
     }
     return "pending";
-}
-
-function nonEmptyString(value: string | null | undefined): string | null {
-    if (typeof value !== "string") return null;
-
-    const trimmed = value.trim();
-    return trimmed.length > 0 ? trimmed : null;
 }
 
 function parseMaybeJsonObject(input: unknown): Record<string, unknown> {

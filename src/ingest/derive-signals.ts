@@ -6,6 +6,7 @@ import type { DbError } from "../lib/errors.ts";
 import { recordRef } from "./evidence-writers.ts";
 import { surrealDate, surrealJsonTextOption, surrealObject, surrealOptionDate, surrealOptionRecord, surrealOptionString, surrealString } from "../lib/shared/surql.ts";
 import { executeStatementsWith } from "../lib/shared/statement-exec.ts";
+import { isoTimestamp, nonEmptyString, recordKeyPart, safeKeyPart, type TimestampInput } from "../lib/shared/derive-keys.ts";
 
 /**
  * Negation patterns that signal a user pushed back on the previous assistant
@@ -77,7 +78,6 @@ function recoveredByEdgeId(fromTurnKey: string, skillKey: string): string {
 
 type RecordRefLike = string | { tb?: string; id?: unknown };
 type JsonRecord = Record<string, unknown>;
-type TimestampInput = Date | string;
 
 export interface ToolCallLike {
     readonly id?: RecordRefLike | null;
@@ -187,66 +187,16 @@ interface SessionTurns {
 }
 
 
-const nonEmptyString = (value: unknown): string | null => {
-    if (typeof value !== "string") return null;
-    const trimmed = value.trim();
-    return trimmed.length > 0 ? trimmed : null;
-};
-
 const compactRecord = (input: JsonRecord): JsonRecord =>
     Object.fromEntries(
         Object.entries(input).filter(([, value]) => value !== null && value !== undefined),
     );
-
-const recordKeyPart = (value: unknown, expectedTable?: string): string | null => {
-    if (value === null || value === undefined) return null;
-
-    if (typeof value === "string") {
-        let raw = value.trim();
-        if (raw.length === 0) return null;
-        const expectedPrefix = expectedTable ? `${expectedTable}:` : null;
-        if (expectedPrefix && raw.startsWith(expectedPrefix)) {
-            raw = raw.slice(expectedPrefix.length);
-        } else {
-            const colon = raw.indexOf(":");
-            if (colon !== -1) raw = raw.slice(colon + 1);
-        }
-        if (
-            (raw.startsWith("`") && raw.endsWith("`")) ||
-            (raw.startsWith("⟨") && raw.endsWith("⟩"))
-        ) {
-            raw = raw.slice(1, -1);
-        }
-        return raw.length > 0 ? raw : null;
-    }
-
-    if (typeof value === "object" && "id" in value) {
-        const id = (value as { id: unknown }).id;
-        return id === null || id === undefined ? null : String(id);
-    }
-
-    return null;
-};
 
 const recordLabel = (table: string, value: unknown): string | null => {
     const key = recordKeyPart(value, table);
     return key === null ? null : `${table}:${key}`;
 };
 
-const isoTimestamp = (value: TimestampInput | null | undefined): string => {
-    if (value instanceof Date) return value.toISOString();
-    const text = nonEmptyString(value);
-    return text ?? new Date(0).toISOString();
-};
-
-const safeKeyPart = (value: string): string => {
-    const sanitized = value
-        .replace(/:/g, "__")
-        .replace(/[^a-zA-Z0-9_]+/g, "_")
-        .replace(/_{3,}/g, "__")
-        .replace(/^_+|_+$/g, "");
-    return sanitized.length > 0 ? sanitized : Bun.hash(value).toString(16);
-};
 
 /** Extract the raw `id` portion of a turn record-id (`turn:⟨xyz⟩` → `xyz`). */
 function rawTurnKey(id: TurnRow["id"]): string {

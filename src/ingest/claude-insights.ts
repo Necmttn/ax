@@ -9,6 +9,7 @@ import { AppLayer } from "../lib/layers.ts";
 import { recordRef } from "./evidence-writers.ts";
 import { surrealDate, surrealJsonTextOption, surrealObject, surrealOptionDate, surrealOptionRecord, surrealOptionString, surrealSet, surrealString } from "../lib/shared/surql.ts";
 import { executeStatements } from "../lib/shared/statement-exec.ts";
+import { nonEmptyString } from "../lib/shared/derive-keys.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -121,12 +122,6 @@ function defaultUsageDir(): string {
 
 function isRecord(input: unknown): input is JsonRecord {
     return typeof input === "object" && input !== null && !Array.isArray(input);
-}
-
-function nonEmptyString(input: unknown): string | null {
-    if (typeof input !== "string") return null;
-    const trimmed = input.trim();
-    return trimmed.length > 0 ? trimmed : null;
 }
 
 function objectField(input: JsonRecord, field: string): JsonRecord | null {

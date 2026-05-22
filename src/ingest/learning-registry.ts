@@ -5,6 +5,7 @@ import type { DbError } from "../lib/errors.ts";
 import { recordRef } from "./evidence-writers.ts";
 import { surrealJsonOption, surrealObject, surrealOptionString, surrealString } from "../lib/shared/surql.ts";
 import { executeStatementsWith } from "../lib/shared/statement-exec.ts";
+import { recordKeyPart, safeKeyPart } from "../lib/shared/derive-keys.ts";
 
 interface SkillCandidateRow {
     readonly id?: unknown;
@@ -38,32 +39,6 @@ export interface LearningRegistryStats {
     readonly learningMatches: number;
     readonly adoptions: number;
 }
-
-const safeKeyPart = (value: string): string => {
-    const sanitized = value
-        .replace(/:/g, "__")
-        .replace(/[^a-zA-Z0-9_]+/g, "_")
-        .replace(/_{3,}/g, "__")
-        .replace(/^_+|_+$/g, "");
-    return sanitized.length > 0 ? sanitized.slice(0, 96) : Bun.hash(value).toString(16);
-};
-
-const recordKeyPart = (value: unknown, expectedTable?: string): string | null => {
-    if (value === null || value === undefined) return null;
-    if (typeof value === "string") {
-        let raw = value.trim();
-        const prefix = expectedTable ? `${expectedTable}:` : null;
-        if (prefix && raw.startsWith(prefix)) raw = raw.slice(prefix.length);
-        else if (raw.includes(":")) raw = raw.slice(raw.indexOf(":") + 1);
-        if ((raw.startsWith("`") && raw.endsWith("`")) || (raw.startsWith("⟨") && raw.endsWith("⟩"))) raw = raw.slice(1, -1);
-        return raw.length > 0 ? raw : null;
-    }
-    if (typeof value === "object" && "id" in value) {
-        const id = (value as { id: unknown }).id;
-        return id === null || id === undefined ? null : String(id);
-    }
-    return null;
-};
 
 function workflowForCandidate(candidate: SkillCandidateRow): string {
     const text = `${candidate.name ?? ""} ${candidate.trigger_pattern ?? ""} ${candidate.suspected_gap ?? ""}`.toLowerCase();
