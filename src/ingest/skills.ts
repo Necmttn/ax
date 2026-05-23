@@ -8,6 +8,7 @@ import { defaultSkillDirs } from "../lib/paths.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
 import { upsertSkillByName } from "./skill-upsert.ts";
+import { discoverProjectRoots } from "./project-discovery.ts";
 
 interface ParsedSkill {
     name: string;
@@ -134,14 +135,34 @@ async function readPluginSkills(): Promise<SkillItem[]> {
     return out;
 }
 
+async function readProjectSkills(): Promise<SkillItem[]> {
+    const roots = await discoverProjectRoots();
+    const out: SkillItem[] = [];
+    for (const root of roots) {
+        const skillsDir = join(root.path, ".claude", "skills");
+        const items = await readSkillDir(skillsDir, `project:${root.name}`);
+        // Re-namespace under the project so two repos with the same bare
+        // skill name (`expo-deployment`) don't collide in the catalog and
+        // the resolver's `:bare` suffix rule attaches invocations correctly.
+        items.forEach((it) => {
+            if (!it.skill.name.includes(":")) {
+                it.skill.name = `${root.name}:${it.skill.name}`;
+            }
+        });
+        out.push(...items);
+    }
+    return out;
+}
+
 const collectSkills = (): Effect.Effect<SkillItem[]> =>
     Effect.promise(async () => {
         const buckets = defaultSkillDirs();
-        const fromBaseDirs = (
-            await Promise.all(buckets.map(({ dir, scope }) => readSkillDir(dir, scope)))
-        ).flat();
-        const fromPlugins = await readPluginSkills();
-        const all = [...fromBaseDirs, ...fromPlugins];
+        const [fromBaseDirs, fromPlugins, fromProjects] = await Promise.all([
+            Promise.all(buckets.map(({ dir, scope }) => readSkillDir(dir, scope))).then((xs) => xs.flat()),
+            readPluginSkills(),
+            readProjectSkills(),
+        ]);
+        const all = [...fromBaseDirs, ...fromPlugins, ...fromProjects];
 
         // Dedup by name keeping highest-precedence (user dirs first, plugins last is fine)
         const byName = new Map<string, SkillItem>();

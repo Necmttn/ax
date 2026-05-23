@@ -703,7 +703,8 @@ export async function cmdInstall() {
     console.log();
     console.log("Installed. Try:");
     console.log("  axctl ingest          # initial fill");
-    console.log("  axctl tui             # interactive dashboard");
+    console.log("  axctl serve           # live web dashboard");
+    console.log("  axctl tui             # interactive terminal dashboard");
     console.log("  launchctl list | grep 'com.necmttn.ax'   # verify both LaunchAgents loaded");
     console.log();
     console.log(formatInstallOnboardingGuidance(buildOnboardingReport()));

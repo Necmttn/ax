@@ -106,6 +106,14 @@ const CLAUDE_BUILTINS = new Set<string>([
     "exit",
     "quit",
     "resume",
+    // Bundled Claude Code skills - shipped in the binary, no SKILL.md on disk,
+    // so they always come through as `scope:unknown` from the placeholder
+    // backstop. Relabel them honestly.
+    "loop",
+    "schedule",
+    "update-config",
+    "fewer-permission-prompts",
+    "keybindings-help",
 ]);
 
 const normalizeScope = (name: string, raw: unknown): string => {

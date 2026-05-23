@@ -17,6 +17,11 @@ import {
     setSkillDecisionsBulk,
 } from "./triage.ts";
 import { fetchToolFailureDetail, fetchToolFailures } from "./tool-failures.ts";
+import {
+    applySkillDecisionToDisk,
+    openSkillTarget,
+    readSkillSource,
+} from "./skill-source.ts";
 import { fetchWorkflow } from "./workflow.ts";
 import { fetchSessionDetail } from "./session-detail.ts";
 import { fetchSessionInspect } from "./session-inspect.ts";
@@ -70,6 +75,14 @@ const contentTypeFor = (path: string): string => {
 };
 
 const LEGACY_PATHS = new Set(["/index.html", "/app.js", "/styles.css"]);
+
+const staticHeaders = (
+    contentType: string,
+    cacheControl = "no-cache, no-store, must-revalidate",
+): Record<string, string> => ({
+    "content-type": contentType,
+    "cache-control": cacheControl,
+});
 
 export function parseDashboardServeArgs(args: string[]): { port: number } {
     const raw = args.find((arg) => arg.startsWith("--port="))?.split("=")[1];
@@ -200,7 +213,12 @@ async function handleSkillDecision(name: string, req: Request): Promise<Response
     if (req.method === "DELETE") {
         try {
             await Effect.runPromise(
-                clearSkillDecision(name).pipe(
+                Effect.gen(function* () {
+                    yield* clearSkillDecision(name);
+                    // Clearing a decision restores the skill on disk - a
+                    // cleared skill is no longer archive-decided.
+                    yield* applySkillDecisionToDisk(name, null);
+                }).pipe(
                     Effect.provide(AppLayer),
                     Effect.scoped,
                 ) as Effect.Effect<unknown>,
@@ -226,13 +244,22 @@ async function handleSkillDecision(name: string, req: Request): Promise<Response
             400,
         );
     }
+    // Capture the narrowed value before the closure below - the type
+    // predicate's narrowing does not reach into the nested Effect.gen.
+    const decision = payload.decision;
     const reason =
         typeof payload.reason === "string" && payload.reason.trim().length > 0
             ? payload.reason.trim()
             : null;
     try {
         const note = await Effect.runPromise(
-            setSkillDecision(name, payload.decision, reason).pipe(
+            Effect.gen(function* () {
+                const saved = yield* setSkillDecision(name, decision, reason);
+                // `archive` disables the skill on disk; `keep`/`review`
+                // restores it. No-op for non-editable (plugin/builtin) scopes.
+                yield* applySkillDecisionToDisk(name, decision);
+                return saved;
+            }).pipe(
                 Effect.provide(AppLayer),
                 Effect.scoped,
             ) as Effect.Effect<unknown>,
@@ -264,6 +291,56 @@ async function handleSkillDetail(name: string): Promise<Response> {
     }
 }
 
+/** GET /api/skills/:name/source - SKILL.md frontmatter + body + disk state. */
+async function handleSkillSource(name: string): Promise<Response> {
+    try {
+        const payload = await Effect.runPromise(
+            readSkillSource(name).pipe(
+                Effect.provide(AppLayer),
+                Effect.scoped,
+            ) as Effect.Effect<unknown>,
+        );
+        return jsonResponse(payload);
+    } catch (err) {
+        return jsonResponse(
+            { error: err instanceof Error ? err.message : String(err) },
+            500,
+        );
+    }
+}
+
+/** POST /api/skills/:name/open body: { target: "finder" | "editor" } */
+async function handleSkillOpen(name: string, req: Request): Promise<Response> {
+    if (req.method !== "POST") return jsonResponse({ error: "method_not_allowed" }, 405);
+    let payload: { target?: unknown };
+    try {
+        payload = (await req.json()) as { target?: unknown };
+    } catch {
+        return jsonResponse({ error: "invalid_json" }, 400);
+    }
+    const target =
+        payload.target === "editor" ? "editor"
+        : payload.target === "finder" ? "finder"
+        : null;
+    if (!target) {
+        return jsonResponse({ error: "target must be 'finder' or 'editor'" }, 400);
+    }
+    try {
+        const result = await Effect.runPromise(
+            openSkillTarget(name, target).pipe(
+                Effect.provide(AppLayer),
+                Effect.scoped,
+            ) as Effect.Effect<unknown>,
+        );
+        return jsonResponse(result);
+    } catch (err) {
+        return jsonResponse(
+            { error: err instanceof Error ? err.message : String(err) },
+            500,
+        );
+    }
+}
+
 /** POST /api/skills/decide-bulk body: { names: string[], decision, reason? } */
 async function handleSkillBulkDecision(req: Request): Promise<Response> {
     if (req.method !== "POST") return jsonResponse({ error: "method_not_allowed" }, 405);
@@ -285,13 +362,24 @@ async function handleSkillBulkDecision(req: Request): Promise<Response> {
     if (!isTriageDecision(payload.decision)) {
         return jsonResponse({ error: "decision must be one of keep|archive|review" }, 400);
     }
+    // Capture the narrowed value before the closure below - the type
+    // predicate's narrowing of `payload.decision` does not reach into the
+    // nested Effect.gen generator.
+    const decision = payload.decision;
     const reason =
         typeof payload.reason === "string" && payload.reason.trim().length > 0
             ? payload.reason.trim()
             : null;
     try {
         const notes = await Effect.runPromise(
-            setSkillDecisionsBulk(names, payload.decision, reason).pipe(
+            Effect.gen(function* () {
+                const saved = yield* setSkillDecisionsBulk(names, decision, reason);
+                // Reflect the decision onto disk for every editable skill.
+                for (const skillName of names) {
+                    yield* applySkillDecisionToDisk(skillName, decision);
+                }
+                return saved;
+            }).pipe(
                 Effect.provide(AppLayer),
                 Effect.scoped,
             ) as Effect.Effect<unknown>,
@@ -709,15 +797,34 @@ export async function handleDashboardRequest(req: Request): Promise<Response> {
         if (!name) return jsonResponse({ error: "missing skill name" }, 400);
         return handleSkillDetail(name);
     }
+    const sourceMatch = url.pathname.match(/^\/api\/skills\/(.+)\/source$/);
+    if (sourceMatch) {
+        const name = decodeURIComponent(sourceMatch[1] ?? "");
+        if (!name) return jsonResponse({ error: "missing skill name" }, 400);
+        return handleSkillSource(name);
+    }
+    const openMatch = url.pathname.match(/^\/api\/skills\/(.+)\/open$/);
+    if (openMatch) {
+        const name = decodeURIComponent(openMatch[1] ?? "");
+        if (!name) return jsonResponse({ error: "missing skill name" }, 400);
+        return handleSkillOpen(name, req);
+    }
     if (url.pathname.startsWith("/api/")) return queryApi(url.pathname);
     const asset = routeStaticAsset(url);
     if (asset) {
         try {
             return new Response(await readFirstAvailable(staticPathCandidates(asset.path)), {
-                headers: { "content-type": asset.contentType },
+                headers: staticHeaders(asset.contentType),
             });
         } catch {
-            // fall through to SPA shell
+            if (url.pathname === "/" || url.pathname === "/index.html" || url.pathname.startsWith("/assets/")) {
+                return new Response("asset not found", {
+                    status: 404,
+                    headers: staticHeaders("text/plain; charset=utf-8"),
+                });
+            }
+            // Extensionless SPA routes like /skills are asset-like only
+            // because / maps to index.html. Let the SPA fallback serve them.
         }
     }
     // SPA fallback: serve index.html for any non-asset, non-API path so
@@ -725,7 +832,7 @@ export async function handleDashboardRequest(req: Request): Promise<Response> {
     if (req.method === "GET" && !url.pathname.startsWith("/api/")) {
         try {
             return new Response(await readFirstAvailable(spaIndexCandidates()), {
-                headers: { "content-type": "text/html; charset=utf-8" },
+                headers: staticHeaders("text/html; charset=utf-8"),
             });
         } catch {
             return new Response("dashboard not built - run `bun run dashboard:build`", {

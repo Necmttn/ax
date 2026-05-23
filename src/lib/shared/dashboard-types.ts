@@ -82,6 +82,32 @@ export interface SkillDetailPayload {
     readonly paired: ReadonlyArray<SkillPair>;
 }
 
+/** On-disk state of a skill's SKILL.md file.
+ *  - `active`   - SKILL.md present; the agent harness loads it.
+ *  - `disabled` - renamed to SKILL.md.archived; harness skips it (reversible).
+ *  - `missing`  - no on-disk file (plugin synthetic, codex tool, stale path). */
+export type SkillSourceState = "active" | "disabled" | "missing";
+
+/** Wire format for `GET /api/skills/:name/source` - the skill's SKILL.md
+ *  content plus whether ax may rewrite it on disk. */
+export interface SkillSourcePayload {
+    readonly name: string;
+    readonly scope: string;
+    readonly dir_path: string | null;
+    /** Absolute path to SKILL.md (or the .archived variant when disabled). */
+    readonly file_path: string | null;
+    /** Raw YAML frontmatter text (between the `---` fences), if any. */
+    readonly frontmatter: string | null;
+    /** Markdown body after the frontmatter. */
+    readonly body: string | null;
+    readonly state: SkillSourceState;
+    /** True when ax may disable/restore this skill on disk - user-owned
+     *  scopes only. Plugin/builtin/codex skills are read-only. */
+    readonly editable: boolean;
+    /** Set when the file existed but could not be read. */
+    readonly error: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // Tool failure view
 // ---------------------------------------------------------------------------

@@ -10,6 +10,7 @@ import type {
     SessionInspectPayload,
     SessionListResponse,
     SkillDetailPayload,
+    SkillSourcePayload,
     SkillTriageNote,
     SkillTriageResponse,
     ToolFailureDetailPayload,
@@ -62,6 +63,17 @@ export const api = {
         }),
     detail: (name: string): Promise<SkillDetailPayload> =>
         jsonFetch(`/api/skills/${encodeURIComponent(name)}/detail`),
+    skillSource: (name: string): Promise<SkillSourcePayload> =>
+        jsonFetch(`/api/skills/${encodeURIComponent(name)}/source`),
+    openSkill: (
+        name: string,
+        target: "finder" | "editor",
+    ): Promise<{ launched: string }> =>
+        jsonFetch(`/api/skills/${encodeURIComponent(name)}/open`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ target }),
+        }),
     decisions: (): Promise<{ decisions: ReadonlyArray<SkillTriageNote> }> =>
         jsonFetch("/api/decisions"),
     workflow: (): Promise<WorkflowResponse> => jsonFetch("/api/workflow"),

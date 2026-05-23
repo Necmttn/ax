@@ -5,7 +5,7 @@ import { RecordId, SurrealClient, filePointer } from "../lib/db.ts";
 import { AgentctlConfig } from "../lib/config.ts";
 import { surrealLiteral } from "../lib/json.ts";
 import { decodeJsonOrNull } from "../lib/decode.ts";
-import { skillRecordKey } from "../lib/skill-id.ts";
+import { resolveSkillName, skillRecordKey } from "../lib/skill-id.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
 import {
@@ -1227,6 +1227,21 @@ export const ingestTranscripts = (
 
         if (opts.onProgress) yield* opts.onProgress({ totalFiles: candidates.length });
 
+        // Snapshot the real skill/command catalog once. The skills + commands
+        // ingest stages run before this one, so it is complete and stable;
+        // `resolveSkillName` maps each invoked name back onto it so plugin
+        // skills invoked under a bare name attach to the real row instead of
+        // minting a ghost `scope='unknown'` placeholder.
+        const db = yield* SurrealClient;
+        const catalogRows = (yield* db.query<[Array<{ name?: string }>]>(
+            `SELECT name FROM skill WHERE dir_path != "(unknown)";`,
+        ))?.[0] ?? [];
+        const skillCatalog: ReadonlySet<string> = new Set(
+            catalogRows
+                .map((row) => row.name)
+                .filter((name): name is string => typeof name === "string" && name.length > 0),
+        );
+
         yield* Effect.forEach(candidates.map((candidate, index) => ({ candidate, index })), ({ candidate, index }) => Effect.gen(function* () {
             activeFiles += 1;
             if (opts.onProgress && (index < 5 || index % 10 === 0)) {
@@ -1265,9 +1280,19 @@ export const ingestTranscripts = (
             turnCount += extracted.turns.length;
             yield* writeToolCallStatements(extracted.toolCalls);
             toolCallCount += extracted.toolCalls.length;
-            yield* relateInvocations(extracted.invocations);
-            invCount += extracted.invocations.length;
-            yield* relateToolCallSkills(extracted.skillRelations);
+            // Resolve invoked names onto the catalog before writing so the
+            // `invoked` and `concerns` edges land on the real skill row.
+            const resolvedInvocations = extracted.invocations.map((inv) => ({
+                ...inv,
+                skill: resolveSkillName(inv.skill, skillCatalog) ?? inv.skill,
+            }));
+            yield* relateInvocations(resolvedInvocations);
+            invCount += resolvedInvocations.length;
+            const resolvedSkillRelations = extracted.skillRelations.map((rel) => ({
+                ...rel,
+                skillName: resolveSkillName(rel.skillName, skillCatalog) ?? rel.skillName,
+            }));
+            yield* relateToolCallSkills(resolvedSkillRelations);
             yield* writePlanSnapshots(extracted.planSnapshots);
             planSnapshotCount += extracted.planSnapshots.length;
             yield* writeHookEvidence(extracted.hookEvents, extracted.hookCommandInvocations);

@@ -618,6 +618,64 @@ tr.detail-row td {
     color: var(--muted);
 }
 
+/* --- Skill source panel -------------------------------------------------- */
+.skill-source {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.skill-source-head {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.skill-source-path {
+    font-size: 11px;
+    color: var(--muted);
+    word-break: break-all;
+}
+
+.skill-source-actions {
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.skill-source-actions small {
+    color: var(--muted);
+}
+
+.skill-source h4 {
+    margin: 6px 0 0;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+}
+
+.skill-source-block {
+    margin: 0;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow: auto;
+}
+
+.skill-source-frontmatter {
+    max-height: 180px;
+}
+
+.skill-source-body {
+    max-height: 360px;
+}
+
 .graph-explorer {
     min-height: calc(100vh - 118px);
 }

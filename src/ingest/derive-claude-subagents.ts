@@ -15,6 +15,7 @@ import {
     upsertEditsForSubagents,
     writePlanSnapshotsForSubagents,
 } from "./transcripts.ts";
+import { resolveSkillName } from "../lib/skill-id.ts";
 
 interface SubagentManifest {
     readonly agentId: string;
@@ -149,6 +150,18 @@ export const deriveClaudeSubagents = (
             });
         }
 
+        // Real skill/command catalog, snapshotted once - lets us resolve each
+        // invoked name onto the canonical row (see resolveSkillName) instead
+        // of minting ghost `scope='unknown'` rows for subagent invocations.
+        const catalogRows = (yield* db.query<[Array<{ name?: string }>]>(
+            `SELECT name FROM skill WHERE dir_path != "(unknown)";`,
+        ))?.[0] ?? [];
+        const skillCatalog: ReadonlySet<string> = new Set(
+            catalogRows
+                .map((row) => row.name)
+                .filter((name): name is string => typeof name === "string" && name.length > 0),
+        );
+
         let written = 0;
         let missingParent = 0;
         let skippedExisting = 0;
@@ -227,8 +240,16 @@ export const deriveClaudeSubagents = (
 
                 yield* upsertTurnsForSubagents(extracted.turns);
                 yield* writeToolCallStatementsForSubagents(extracted.toolCalls);
-                yield* relateInvocationsForSubagents(extracted.invocations);
-                yield* relateToolCallSkillsForSubagents(extracted.skillRelations);
+                const resolvedInvocations = extracted.invocations.map((inv) => ({
+                    ...inv,
+                    skill: resolveSkillName(inv.skill, skillCatalog) ?? inv.skill,
+                }));
+                yield* relateInvocationsForSubagents(resolvedInvocations);
+                const resolvedSkillRelations = extracted.skillRelations.map((rel) => ({
+                    ...rel,
+                    skillName: resolveSkillName(rel.skillName, skillCatalog) ?? rel.skillName,
+                }));
+                yield* relateToolCallSkillsForSubagents(resolvedSkillRelations);
                 yield* writePlanSnapshotsForSubagents(extracted.planSnapshots);
                 yield* upsertEditsForSubagents(extracted.edits);
 

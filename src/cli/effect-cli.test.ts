@@ -16,7 +16,8 @@ describe("effect cli", () => {
             "derive-intents",
             "insights",
             "interventions",
-            "dashboard",
+            "serve",
+            "report",
             "recall",
             "skills",
             "context",
@@ -36,7 +37,7 @@ describe("effect cli", () => {
     test("retired top-level commands are gone", () => {
         const names = topLevelNames();
 
-        for (const removed of ["onboarding", "ingest-insights", "search", "stats", "recent", "unused", "taste", "pairs", "recovery", "guidance", "session", "self-improve"]) {
+        for (const removed of ["onboarding", "ingest-insights", "search", "stats", "recent", "unused", "taste", "pairs", "recovery", "guidance", "session", "self-improve", "dashboard"]) {
             expect(names).not.toContain(removed);
         }
     });

@@ -8,6 +8,7 @@ import { SurrealClient } from "../lib/db.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
 import { upsertSkillByName } from "./skill-upsert.ts";
+import { discoverProjectRoots } from "./project-discovery.ts";
 
 // Slash commands live alongside skills but in `~/.claude/commands/` (and
 // per-project `<repo>/.claude/commands/`) and aren't indexed by ingestSkills.
@@ -215,14 +216,34 @@ function defaultCommandRoots(): { dir: string; scope: string }[] {
     return roots;
 }
 
+async function readProjectCommands(): Promise<CommandItem[]> {
+    // Per-project `<repo>/.claude/commands/` for every project the user has
+    // worked in. Re-namespaced under the project basename so two repos with
+    // the same bare command name don't collide and the resolver's `:bare`
+    // suffix rule routes invocations correctly.
+    const projects = await discoverProjectRoots();
+    const out: CommandItem[] = [];
+    for (const root of projects) {
+        const commandsDir = join(root.path, ".claude", "commands");
+        const items = await readCommandsRoot(
+            commandsDir,
+            `project-command:${root.name}`,
+            root.name,
+        );
+        out.push(...items);
+    }
+    return out;
+}
+
 const collectCommands = (): Effect.Effect<CommandItem[]> =>
     Effect.promise(async () => {
         const roots = defaultCommandRoots();
-        const fromBaseDirs = (
-            await Promise.all(roots.map(({ dir, scope }) => readCommandsRoot(dir, scope)))
-        ).flat();
-        const fromPlugins = await readPluginCommands();
-        const all = [...fromBaseDirs, ...fromPlugins];
+        const [fromBaseDirs, fromPlugins, fromProjects] = await Promise.all([
+            Promise.all(roots.map(({ dir, scope }) => readCommandsRoot(dir, scope))).then((xs) => xs.flat()),
+            readPluginCommands(),
+            readProjectCommands(),
+        ]);
+        const all = [...fromBaseDirs, ...fromPlugins, ...fromProjects];
 
         // Dedup by name. User-level dirs come first so they win over plugin
         // duplicates, mirroring how Claude resolves slash commands at runtime.

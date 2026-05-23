@@ -352,12 +352,32 @@ const cmdIngest = (args: string[]) => {
         console.error("axctl ingest: --stages and --derive-only are mutually exclusive");
         process.exit(2);
     }
+    // `--reset` clears the skill graph so a full re-ingest rebuilds it from
+    // scratch (drops ghost `scope=unknown` rows whose invocations now resolve
+    // onto real skills). It only makes sense with a complete ingest run.
+    const wantReset = args.includes("--reset");
+    if (wantReset && (hasStagesArg || hasDeriveOnly || setOnly.length > 0)) {
+        console.error(
+            "axctl ingest: --reset rebuilds the whole skill graph and cannot be combined with stage filters",
+        );
+        process.exit(2);
+    }
     // Single source of truth for which stages run; see resolveIngestStages.
     // Also prints deprecation warnings for legacy --X-only flags.
     const sel = resolveIngestStages(args);
     const stages = sel.map((k) => STAGE_PROGRESS[k]);
     return Effect.gen(function* () {
         const db = yield* SurrealClient;
+        if (wantReset) {
+            // Edges before nodes. `skill_triage_decision` is keyed by skill
+            // name (not a record link) so user keep/archive decisions survive.
+            yield* db.query(
+                "DELETE invoked; DELETE proposed; DELETE concerns; DELETE recovered_by; DELETE skill_paired; DELETE skill;",
+            );
+            console.log(
+                "reset: cleared skill graph (skill, invoked, proposed, concerns, recovered_by, skill_paired)",
+            );
+        }
         const runId = runIdFor("ingest");
         const progressMode = progressModeFor("ingest", args);
         const verbose = args.includes("--verbose");
@@ -635,12 +655,12 @@ const cmdInterventions = (args: string[]) =>
         }
     });
 
-const cmdDashboard = (args: string[]) =>
+const cmdReport = (args: string[]) =>
     Effect.gen(function* () {
-        const limit = parsePositiveIntFlag("dashboard", "limit", args, 12);
+        const limit = parsePositiveIntFlag("report", "limit", args, 12);
         const out = flag("out", args);
         const result = yield* writeDashboard({ out, limit });
-        console.log(`dashboard: ${result.url}`);
+        console.log(`report: ${result.url}`);
         console.log(
             `evidence: tools=${fmtCount(result.data.counts.toolCalls)} plans=${fmtCount(
                 result.data.counts.planSnapshots,
@@ -1538,12 +1558,18 @@ const ingestCommand = Command.make(
         // Shortcut: only the DB-derive stages (signals/outcomes/session-health/
         // closure/learning-registry) - skips the slow transcript + git parse.
         deriveOnly: Flag.boolean("derive-only").pipe(Flag.withDefault(false)),
+        // Wipe the skill graph before a full re-ingest so it rebuilds clean.
+        reset: Flag.boolean("reset").pipe(Flag.withDefault(false)),
         since: optionalSince,
         progress: progressFlag,
         verbose: verboseFlag,
     },
-    ({ skillsOnly, transcriptsOnly, codexOnly, gitOnly, claudeOnly, insightsOnly, stages, deriveOnly, since, progress, verbose }) => {
+    ({ skillsOnly, transcriptsOnly, codexOnly, gitOnly, claudeOnly, insightsOnly, stages, deriveOnly, reset, since, progress, verbose }) => {
         if (insightsOnly) {
+            if (reset) {
+                console.error("axctl ingest: --reset cannot be combined with --insights-only");
+                process.exit(2);
+            }
             const conflicts = insightsOnlyConflicts({
                 skillsOnly,
                 transcriptsOnly,
@@ -1571,6 +1597,7 @@ const ingestCommand = Command.make(
             ...boolArg("claude-only", claudeOnly),
             ...stringArg("stages", optionValue(stages)),
             ...boolArg("derive-only", deriveOnly),
+            ...boolArg("reset", reset),
             ...intArg("since", optionValue(since)),
             `--progress=${progress}`,
             ...boolArg("verbose", verbose),
@@ -1578,7 +1605,8 @@ const ingestCommand = Command.make(
     },
 ).pipe(Command.withDescription(
     "Ingest skills, transcripts, Codex sessions, git history, and insight artifacts. " +
-        "Use --stages=<a,b,c> or --derive-only to run a subset against an already-ingested DB.",
+        "Use --stages=<a,b,c> or --derive-only to run a subset against an already-ingested DB. " +
+        "Use --reset to wipe the skill graph first and rebuild it clean.",
 ));
 
 const deriveSignalsCommand = Command.make(
@@ -1641,23 +1669,20 @@ const interventionsCommand = Command.make(
     ({ action, limit, json }) => cmdInterventions([action, `--limit=${limit}`, ...boolArg("json", json)]),
 ).pipe(Command.withDescription("Inspect intervention lifecycle, impact, regressions, and candidates"));
 
-const dashboardServeCommand = Command.make(
+const serveCommand = Command.make(
     "serve",
     { port: Flag.integer("port").pipe(Flag.withDefault(1738)) },
     ({ port }) => Effect.sync(() => serveDashboard([`--port=${port}`])),
-).pipe(Command.withDescription("Serve the generated dashboard locally"));
+).pipe(Command.withDescription("Serve the live web dashboard locally"));
 
-const dashboardCommand = Command.make(
-    "dashboard",
+const reportCommand = Command.make(
+    "report",
     {
         limit: positiveLimit(12),
         out: Flag.string("out").pipe(Flag.optional),
     },
-    ({ limit, out }) => cmdDashboard([`--limit=${limit}`, ...stringArg("out", optionValue(out))]),
-).pipe(
-    Command.withDescription("Write a static evidence dashboard"),
-    Command.withSubcommands([dashboardServeCommand]),
-);
+    ({ limit, out }) => cmdReport([`--limit=${limit}`, ...stringArg("out", optionValue(out))]),
+).pipe(Command.withDescription("Write a static evidence report (one-shot HTML snapshot)"));
 
 const dogfoodTerminalCommand = Command.make(
     "terminal",
@@ -2192,7 +2217,8 @@ export const rootCommand = Command.make("axctl").pipe(
         deriveIntentsCommand,
         insightsCommand,
         interventionsCommand,
-        dashboardCommand,
+        serveCommand,
+        reportCommand,
         recallCommand,
         skillsCommand,
         contextCommand,
@@ -2259,7 +2285,7 @@ export const DB_COMMANDS: ReadonlySet<string> = new Set([
     "derive-intents",
     "insights",
     "interventions",
-    "dashboard",
+    "report",
     "recall",
     "skills",
     "project",

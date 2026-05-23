@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api.ts";
 import type {
     SkillDetailPayload,
+    SkillSourcePayload,
     SkillTriageEntry,
     SkillTriageNote,
     SkillTriageResponse,
@@ -136,6 +137,7 @@ export function SkillsRoute() {
     const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
     const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
     const [details, setDetails] = useState<Record<string, SkillDetailPayload>>({});
+    const [sources, setSources] = useState<Record<string, SkillSourcePayload>>({});
     const [detailLoading, setDetailLoading] = useState<ReadonlySet<string>>(new Set());
     // Start at -1 so no row reads as "pre-selected for keyboard nav". First
     // j/k press promotes to 0.
@@ -219,10 +221,29 @@ export function SkillsRoute() {
                 applyNote(note);
             }
             flashSaved(row.name);
+            // A decision can flip the skill's on-disk state (archive disables
+            // it, keep/review restores it). Refresh the open source panel so
+            // the "disabled on disk" badge stays honest.
+            if (expanded.has(row.name)) {
+                try {
+                    const s = await api.skillSource(row.name);
+                    setSources((curr) => ({ ...curr, [row.name]: s }));
+                } catch {
+                    /* disk-state refresh is best-effort */
+                }
+            }
         } catch (err) {
             setError(err instanceof Error ? err.message : String(err));
         } finally {
             setPending(null);
+        }
+    };
+
+    const openSkill = async (name: string, target: "finder" | "editor") => {
+        try {
+            await api.openSkill(name, target);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : String(err));
         }
     };
 
@@ -266,8 +287,12 @@ export function SkillsRoute() {
         if (!isOpen && !details[row.name]) {
             setDetailLoading((curr) => new Set(curr).add(row.name));
             try {
-                const d = await api.detail(row.name);
+                const [d, s] = await Promise.all([
+                    api.detail(row.name),
+                    api.skillSource(row.name),
+                ]);
                 setDetails((curr) => ({ ...curr, [row.name]: d }));
+                setSources((curr) => ({ ...curr, [row.name]: s }));
             } catch (err) {
                 setError(err instanceof Error ? err.message : String(err));
             } finally {
@@ -593,8 +618,10 @@ export function SkillsRoute() {
                                 selected={selected.has(row.name)}
                                 expanded={expanded.has(row.name)}
                                 detail={details[row.name] ?? null}
+                                source={sources[row.name] ?? null}
                                 detailLoading={detailLoading.has(row.name)}
                                 onDecide={(d) => decide(row, d)}
+                                onOpen={openSkill}
                                 onToggleSelect={() => toggleSelected(row.name)}
                                 onToggleExpand={() => toggleExpanded(row)}
                             />
@@ -645,8 +672,10 @@ function SkillRowView({
     selected,
     expanded,
     detail,
+    source,
     detailLoading,
     onDecide,
+    onOpen,
     onToggleSelect,
     onToggleExpand,
 }: {
@@ -657,8 +686,10 @@ function SkillRowView({
     selected: boolean;
     expanded: boolean;
     detail: SkillDetailPayload | null;
+    source: SkillSourcePayload | null;
     detailLoading: boolean;
     onDecide: (decision: TriageDecision) => void;
+    onOpen: (name: string, target: "finder" | "editor") => void;
     onToggleSelect: () => void;
     onToggleExpand: () => void;
 }) {
@@ -740,7 +771,12 @@ function SkillRowView({
                 <tr className="detail-row">
                     <td />
                     <td colSpan={8}>
-                        <DetailPanel detail={detail} loading={detailLoading} />
+                        <DetailPanel
+                            detail={detail}
+                            source={source}
+                            loading={detailLoading}
+                            onOpen={onOpen}
+                        />
                     </td>
                 </tr>
             ) : null}
@@ -750,10 +786,14 @@ function SkillRowView({
 
 function DetailPanel({
     detail,
+    source,
     loading,
+    onOpen,
 }: {
     detail: SkillDetailPayload | null;
+    source: SkillSourcePayload | null;
     loading: boolean;
+    onOpen: (name: string, target: "finder" | "editor") => void;
 }) {
     if (loading && !detail) return <div className="loading">Loading evidence…</div>;
     if (!detail) return <div className="empty">No evidence yet.</div>;
@@ -826,6 +866,105 @@ function DetailPanel({
                     </ul>
                 )}
             </div>
+            <div style={{ gridColumn: "1 / -1" }}>
+                <h3>Skill source</h3>
+                <SkillSourceView source={source} onOpen={onOpen} />
+            </div>
+        </div>
+    );
+}
+
+const SOURCE_STATE_LABEL: Record<string, string> = {
+    active: "active",
+    disabled: "disabled on disk",
+    missing: "no file",
+};
+
+function SkillSourceView({
+    source,
+    onOpen,
+}: {
+    source: SkillSourcePayload | null;
+    onOpen: (name: string, target: "finder" | "editor") => void;
+}) {
+    if (!source) return <div className="loading">Loading source…</div>;
+
+    const stateBadge =
+        source.state === "active" ? "keep"
+        : source.state === "disabled" ? "archive"
+        : "review";
+
+    return (
+        <div className="skill-source">
+            <div className="skill-source-head">
+                <span className={`badge ${stateBadge}`}>
+                    {SOURCE_STATE_LABEL[source.state] ?? source.state}
+                </span>
+                <span className="chip">{source.scope}</span>
+                {source.file_path ? (
+                    <code className="skill-source-path">{source.file_path}</code>
+                ) : (
+                    <small className="empty">
+                        no on-disk SKILL.md (synthetic / built-in skill)
+                    </small>
+                )}
+            </div>
+
+            {source.error ? (
+                <div className="error">Could not read file: {source.error}</div>
+            ) : null}
+
+            {source.file_path ? (
+                <div className="actions skill-source-actions">
+                    <button
+                        type="button"
+                        onClick={() => onOpen(source.name, "editor")}
+                    >
+                        Open in editor
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => onOpen(source.name, "finder")}
+                    >
+                        Reveal in Finder
+                    </button>
+                    {!source.editable ? (
+                        <small className="empty">
+                            read-only - {source.scope} skills are not disk-editable;
+                            decisions stay labels only
+                        </small>
+                    ) : source.state === "disabled" ? (
+                        <small className="empty">
+                            disabled - mark “keep” or “review” to restore it
+                        </small>
+                    ) : (
+                        <small className="empty">
+                            marking “archive” renames SKILL.md so the agent stops
+                            loading it
+                        </small>
+                    )}
+                </div>
+            ) : null}
+
+            {source.frontmatter ? (
+                <>
+                    <h4>Frontmatter</h4>
+                    <pre className="skill-source-block skill-source-frontmatter">
+                        {source.frontmatter}
+                    </pre>
+                </>
+            ) : null}
+
+            {source.body ? (
+                <>
+                    <h4>SKILL.md body</h4>
+                    <pre className="skill-source-block skill-source-body">
+                        {source.body}
+                    </pre>
+                </>
+            ) : source.file_path && !source.error ? (
+                <p className="empty">empty body</p>
+            ) : null}
         </div>
     );
 }

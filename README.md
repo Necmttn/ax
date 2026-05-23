@@ -43,13 +43,16 @@ Requirements for source/dev use: Bun >= 1.3 and SurrealDB >= 3.0.
 
 ## Daily Use
 
-Refresh the local graph and open the dashboard:
+Refresh the local graph and open the live dashboard:
 
 ```bash
 axctl ingest --since=7
 axctl ingest --insights-only
-axctl dashboard
+axctl serve
 ```
+
+`axctl serve` runs the live web dashboard; `axctl report` writes a one-shot
+static HTML snapshot instead.
 
 Check or update the installed release:
 
@@ -131,12 +134,12 @@ axctl interventions regressions --json
 ## CLI Reference
 
 ```text
-axctl ingest [--since=N] [--insights-only] [--skills-only|--transcripts-only|--codex-only|--git-only|--claude-only] [--progress=auto|pipeline|plain|json|off] [--verbose]
+axctl ingest [--since=N] [--reset] [--insights-only] [--skills-only|--transcripts-only|--codex-only|--git-only|--claude-only] [--progress=auto|pipeline|plain|json|off] [--verbose]
 axctl derive-signals [--since=N] [--progress=...] [--verbose]
 axctl insights <view> [--limit=N]
 axctl interventions <action> [--limit=N] [--json]
-axctl dashboard [--limit=N] [--out=path]
-axctl dashboard serve [--port=N]
+axctl serve [--port=N]
+axctl report [--limit=N] [--out=path]
 axctl recall <query> [--project=...] [--skill=...] [--since=...] [--json]
 axctl skills <search|stats|recent|unused|taste|pairs|recovery>
 axctl context file [--files=path,path] [--json] <query>
@@ -153,7 +156,7 @@ axctl uninstall
 
 ### Graph Explorer
 
-`axctl dashboard serve` exposes `/graph`, a typed graph explorer over agent
+`axctl serve` exposes `/graph`, a typed graph explorer over agent
 telemetry.
 
 Implemented mode:

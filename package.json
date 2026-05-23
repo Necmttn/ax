@@ -24,7 +24,7 @@
     "check:cli-reference": "bun scripts/check-cli-reference.ts",
     "dashboard:dev": "vite --config src/dashboard/web/vite.config.ts",
     "dashboard:build": "vite build --config src/dashboard/web/vite.config.ts",
-    "dashboard:serve": "bun src/cli/index.ts dashboard serve",
+    "serve": "bun src/cli/index.ts serve",
     "prototype:memory-context": "bun scripts/prototypes/ax-memory-context.ts",
     "prototype:file-context": "bun scripts/prototypes/ax-file-context.ts",
     "prototype:turn-references": "bun scripts/prototypes/ax-ingest-turn-references.ts"
