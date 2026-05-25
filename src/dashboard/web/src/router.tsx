@@ -20,6 +20,7 @@ import { SkillGraphRoute } from "./routes/skill-graph.tsx";
 import { GraphRoute } from "./routes/graph.tsx";
 import type { GraphExplorerMode } from "@shared/dashboard-types.ts";
 import { WrappedRoute } from "./routes/wrapped.tsx";
+import { ImproveRoute } from "./routes/improve.tsx";
 
 const rootRoute = createRootRoute({
     component: () => (
@@ -176,6 +177,12 @@ const wrappedRoute = createRoute({
     component: WrappedRoute,
 });
 
+const improveRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/improve",
+    component: ImproveRoute,
+});
+
 const routeTree = rootRoute.addChildren([
     indexRoute,
     skillsRoute,
@@ -191,6 +198,7 @@ const routeTree = rootRoute.addChildren([
     graphRoute,
     recallRoute,
     wrappedRoute,
+    improveRoute,
 ]);
 
 export const router = createRouter({ routeTree });

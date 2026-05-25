@@ -82,6 +82,15 @@ export function Shell({ children }: { children: ReactNode }) {
                 }),
         },
         {
+            to: "/improve",
+            label: "Improve",
+            prefetch: () =>
+                queryClient.prefetchQuery({
+                    queryKey: ["improve"],
+                    queryFn: () => api.improve(),
+                }),
+        },
+        {
             to: "/recall",
             label: "Recall",
             prefetch: () => Promise.resolve(undefined),

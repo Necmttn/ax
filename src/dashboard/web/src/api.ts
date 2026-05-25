@@ -2,6 +2,8 @@ import type {
     EpisodeTimelinePayload,
     GraphExplorerMode,
     GraphExplorerPayload,
+    ImproveActionResponse,
+    ImprovePayload,
     ProjectPagePayload,
     RecallResponse,
     SkillGraphPayload,
@@ -145,4 +147,26 @@ export const api = {
     wrapped: (): Promise<WrappedProfile> => jsonFetch("/api/wrapped"),
     wrappedPublicPreview: (): Promise<WrappedProfile> =>
         jsonFetch("/api/wrapped/public-preview"),
+
+    // Experiment loop - see
+    // docs/superpowers/plans/2026-05-25-experiment-loop-cleanup-and-rebuild.md
+    improve: (): Promise<ImprovePayload> => jsonFetch("/api/improve"),
+    improveAccept: (sig: string, force = false): Promise<ImproveActionResponse> =>
+        jsonFetch(`/api/improve/${encodeURIComponent(sig)}/accept`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ force }),
+        }),
+    improveReject: (sig: string, reason?: string | null): Promise<ImproveActionResponse> =>
+        jsonFetch(`/api/improve/${encodeURIComponent(sig)}/reject`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ reason: reason ?? null }),
+        }),
+    improveSetVerdict: (sig: string, verdict: string): Promise<ImproveActionResponse> =>
+        jsonFetch(`/api/improve/${encodeURIComponent(sig)}/verdict`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ verdict }),
+        }),
 };

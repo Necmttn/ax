@@ -714,3 +714,102 @@ export interface SessionInspectPayload {
      *  even when only a page worth has shipped. */
     readonly total_hook_fires: number;
 }
+
+// ============================================================================
+// Experiment loop (/improve route) - see
+// docs/superpowers/plans/2026-05-25-experiment-loop-cleanup-and-rebuild.md
+// ============================================================================
+
+export type ProposalForm = "skill" | "subagent" | "hook" | "guidance" | "automation";
+export type ProposalStatus = "open" | "accepted" | "rejected" | "superseded";
+export type CheckpointKindDto = "t+7" | "t+30" | "t+90";
+export type CheckpointVerdictDto =
+    | "adopted"
+    | "ignored"
+    | "regressed"
+    | "no_longer_needed"
+    | "partial";
+
+export interface SkillProposalPayload {
+    readonly trigger_pattern: string;
+    readonly suspected_gap: string;
+    readonly proposed_behavior: string;
+    readonly expected_impact: string | null;
+}
+
+export interface SubagentProposalPayload {
+    readonly bounded_role: string;
+    readonly delegation_trigger: string;
+    readonly example_task_patterns: ReadonlyArray<string>;
+}
+
+export interface HookProposalPayload {
+    readonly event_name: string;
+    readonly target_tool: string | null;
+    readonly hook_command: string;
+}
+
+export interface GuidanceProposalPayload {
+    readonly file_target: string;
+    readonly section: string | null;
+    readonly suggested_text: string;
+}
+
+export interface AutomationProposalPayload {
+    readonly trigger_signal: string;
+    readonly schedule: string | null;
+    readonly action: string;
+}
+
+export interface CheckpointSnapshotDto {
+    readonly kind: CheckpointKindDto | string;
+    readonly suggested: CheckpointVerdictDto | string | null;
+    readonly user_verdict: CheckpointVerdictDto | string | null;
+    readonly measured: {
+        readonly opportunities: number;
+        readonly addressed: number;
+        readonly ratio: number;
+        readonly built: boolean;
+    } | null;
+    readonly observed_at: string;
+}
+
+export interface ExperimentDto {
+    readonly id: string;
+    readonly artifact_path: string | null;
+    readonly locked_verdict: CheckpointVerdictDto | string | null;
+    readonly created_at: string;
+    readonly scaffolded_at: string | null;
+    readonly latest_checkpoint: CheckpointSnapshotDto | null;
+}
+
+export interface ProposalDto {
+    readonly id: string;
+    readonly form: ProposalForm | string;
+    readonly title: string;
+    readonly hypothesis: string;
+    readonly dedupe_sig: string;
+    readonly frequency: number;
+    readonly confidence: string;
+    readonly status: ProposalStatus | string;
+    readonly reject_reason: string | null;
+    readonly created_at: string;
+    readonly skill_payload?: SkillProposalPayload | null;
+    readonly subagent_payload?: SubagentProposalPayload | null;
+    readonly hook_payload?: HookProposalPayload | null;
+    readonly guidance_payload?: GuidanceProposalPayload | null;
+    readonly automation_payload?: AutomationProposalPayload | null;
+    readonly experiment?: ExperimentDto | null;
+}
+
+export interface ImprovePayload {
+    readonly proposals: ReadonlyArray<ProposalDto>;
+}
+
+export interface ImproveActionResponse {
+    readonly status: ProposalStatus;
+    readonly proposal_id?: string;
+    readonly experiment_id?: string;
+    readonly artifact_path?: string;
+    readonly message?: string;
+}
