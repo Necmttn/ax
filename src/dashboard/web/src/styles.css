@@ -355,24 +355,40 @@ table.skills th.num button.sort-header {
     color: var(--page);
 }
 
-button.reason-button {
+.reason-button {
     background: transparent;
     border: none;
     padding: 0;
-    cursor: pointer;
     text-align: left;
     color: inherit;
     width: 100%;
 }
 
-button.reason-button:hover small {
-    text-decoration: underline;
-}
-
-button.reason-button small {
+.reason-button small {
     display: block;
     color: var(--muted);
     margin-top: 4px;
+}
+
+/* Whole row is the expand affordance. Keep the cursor honest on the
+ * non-interactive cells; the checkbox + decision buttons + chips inside the
+ * row keep their native cursors via more-specific rules below. */
+tr.skill-row {
+    cursor: pointer;
+}
+
+tr.skill-row:hover td {
+    background: rgba(0, 0, 0, 0.025);
+}
+
+tr.skill-row:hover .reason-button small {
+    text-decoration: underline;
+}
+
+/* Interactive children opt back out of the row's pointer affordance. */
+tr.skill-row input[type="checkbox"],
+tr.skill-row .actions button {
+    cursor: pointer;
 }
 
 tr.row-highlighted td {

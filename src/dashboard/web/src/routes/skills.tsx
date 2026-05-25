@@ -695,21 +695,36 @@ function SkillRowView({
 }) {
     const decisionLabel = row.decision ? row.decision.decision : null;
     const trClasses = [
+        "skill-row",
         highlighted ? "row-highlighted" : "",
         decisionLabel ? `row-decided row-decision-${decisionLabel}` : "",
         justSaved ? "row-just-saved" : "",
     ]
         .filter(Boolean)
         .join(" ");
+    // Whole-row click toggles the accordion - but suppress when the user is
+    // dragging a selection (so they can copy a skill name without expanding).
+    const handleRowClick = () => {
+        if ((window.getSelection()?.toString().length ?? 0) > 0) return;
+        onToggleExpand();
+    };
+    // Anything with its own handler needs to stop the row click so the two
+    // don't fight (checkbox toggle, decision buttons, the reason badge).
+    const stop = (e: React.MouseEvent | React.ChangeEvent) => e.stopPropagation();
     return (
         <>
-            <tr className={trClasses || undefined}>
-                <td>
+            <tr
+                className={trClasses}
+                onClick={handleRowClick}
+                aria-expanded={expanded}
+            >
+                <td onClick={stop}>
                     <input
                         type="checkbox"
                         aria-label={`select ${row.name}`}
                         checked={selected}
                         onChange={onToggleSelect}
+                        onClick={stop}
                     />
                 </td>
                 <td className="skill-cell">
@@ -724,11 +739,9 @@ function SkillRowView({
                     </small>
                 </td>
                 <td>
-                    <button
-                        type="button"
+                    <div
                         className="reason-button"
-                        onClick={onToggleExpand}
-                        title={expanded ? "hide evidence" : "show evidence"}
+                        title={expanded ? "click row to hide evidence" : "click row to show evidence"}
                     >
                         <span className={`badge ${row.recommendation}`}>
                             {row.recommendation}
@@ -736,14 +749,14 @@ function SkillRowView({
                         <small>
                             {row.recommendation_reason} {expanded ? "▴" : "▾"}
                         </small>
-                    </button>
+                    </div>
                 </td>
                 <td className="num">{fmtScore(row.taste_score)}</td>
                 <td className="num">{fmtCount(row.inv_30d)}</td>
                 <td className="num">{fmtCount(row.inv_7d)}</td>
                 <td className="num">{fmtCount(row.total_inv)}</td>
                 <td className="num">{fmtLastUsed(row.last_used)}</td>
-                <td>
+                <td onClick={stop}>
                     <div className="actions">
                         {(["keep", "review", "archive"] as TriageDecision[]).map((d) => (
                             <button
@@ -751,7 +764,10 @@ function SkillRowView({
                                 type="button"
                                 disabled={pending}
                                 className={decisionLabel === d ? "is-active" : undefined}
-                                onClick={() => onDecide(d)}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onDecide(d);
+                                }}
                                 title={
                                     decisionLabel === d
                                         ? "click to clear decision"
