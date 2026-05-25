@@ -20,6 +20,18 @@ SurrealDB graph - then surfaces what's signal vs. noise on demand, for you
 > Which files change together? What did I tell the agent that it forgot?*
 > `ax` answers these by reading what already happened.
 
+![ax · agent experience layer](docs/images/og.png)
+
+## What is AX
+
+`AX` is what the agent perceives across sessions, remembers, and acts
+on. It is to AI coding agents what DX is to humans: the surface that
+turns capability into compounding skill. `ax` is the reference
+implementation - local, typed, MIT-licensed.
+
+A longer take: [`docs/manifesto.md`](docs/manifesto.md). Vocabulary:
+[`docs/language.md`](docs/language.md).
+
 ## How it fits together
 
 ```mermaid
@@ -168,6 +180,9 @@ Full reference: [`docs/insights-cli-reference.md`](docs/insights-cli-reference.m
 
 ## Docs
 
+- [`docs/manifesto.md`](docs/manifesto.md) - the missing layer in the agent stack
+- [`docs/language.md`](docs/language.md) - coined vocabulary, the AX glossary
+- [`docs/brand.md`](docs/brand.md) - design system + voice rules
 - [`docs/development.md`](docs/development.md) - local setup, schema, queries, benchmarks
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) - PR conventions, ground rules
 - [`CONTEXT.md`](CONTEXT.md) - domain glossary (Repository vs. Checkout vs. …)

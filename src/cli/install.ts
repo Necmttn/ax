@@ -695,12 +695,13 @@ export async function cmdInstall() {
     }
     await unlink(schemaPath).catch(() => undefined);
 
-    console.log();
-    console.log("Installed. Try:");
-    console.log("  axctl ingest          # initial fill");
-    console.log("  axctl serve           # live web dashboard");
-    console.log("  axctl tui             # interactive terminal dashboard");
-    console.log("  launchctl list | grep 'com.necmttn.ax'   # verify both LaunchAgents loaded");
+    const { BANNER } = await import("./banner.ts");
+    console.log(BANNER);
+    console.log("  installed. try:");
+    console.log("    axctl ingest          # initial fill");
+    console.log("    axctl serve           # live web dashboard");
+    console.log("    axctl tui             # interactive terminal dashboard");
+    console.log("    launchctl list | grep 'com.necmttn.ax'   # verify both LaunchAgents loaded");
     console.log();
     console.log(formatInstallOnboardingGuidance(buildOnboardingReport()));
 }

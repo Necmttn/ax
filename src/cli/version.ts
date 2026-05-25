@@ -137,12 +137,21 @@ export function formatVersionStatus(status: VersionStatus): string {
 export async function printVersion(args: string[], deps: VersionDeps): Promise<void> {
     const json = args.includes("--json");
     const check = args.includes("--check") || json;
+    const banner = args.includes("--banner");
     let latest: LatestRelease | null = null;
     if (check) {
         latest = await deps.fetchLatestRelease(DEFAULT_REPO);
     }
     const status = versionStatus(AX_VERSION, latest);
-    console.log(json ? JSON.stringify(status, null, 2) : formatVersionStatus(status));
+    if (json) {
+        console.log(JSON.stringify(status, null, 2));
+        return;
+    }
+    if (banner) {
+        const { BANNER } = await import("./banner.ts");
+        console.log(BANNER);
+    }
+    console.log(formatVersionStatus(status));
 }
 
 export async function updateAxctl(args: string[], deps: VersionDeps): Promise<void> {

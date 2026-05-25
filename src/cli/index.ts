@@ -2675,15 +2675,21 @@ const evidenceCommand = Command.make("evidence").pipe(
     ]),
 );
 
+const bannerFlag = Flag.boolean("banner").pipe(Flag.withDefault(false));
+
 const versionCommand = Command.make(
     "version",
     {
         check: checkFlag,
         json: jsonFlag,
+        banner: bannerFlag,
     },
-    ({ check, json }) =>
+    ({ check, json, banner }) =>
         Effect.promise(() =>
-            printVersion([...boolArg("check", check), ...boolArg("json", json)], liveVersionDeps),
+            printVersion(
+                [...boolArg("check", check), ...boolArg("json", json), ...boolArg("banner", banner)],
+                liveVersionDeps,
+            ),
         ),
 ).pipe(Command.withDescription("Print the installed version and optionally check GitHub releases"));
 
