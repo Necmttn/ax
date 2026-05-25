@@ -34,11 +34,126 @@ import {
 } from "../lib/shared/surql.ts";
 import { executeStatementsWith } from "../lib/shared/statement-exec.ts";
 import { safeKeyPart, recordKeyPart } from "../lib/shared/derive-keys.ts";
+import type { HarnessLearningCandidate } from "../project/types.ts";
 
 export interface DeriveProposalsStats {
     readonly skillProposals: number;
+    readonly guidanceProposals: number;
     readonly skipped: number;
 }
+
+/**
+ * Phase C11: convert each HarnessLearningCandidate into a guidance-form
+ * proposal. The harness report's learning candidates are the
+ * project-doctor-derived "you should add a guardrail" suggestions; under
+ * the old schema they were written to `harness_learning` (write-only
+ * orphan). Now they flow into the proposal pipeline as form='guidance',
+ * dedupe by hash of normalized title.
+ */
+export interface GuidanceProposalRow {
+    readonly proposalKey: string;
+    readonly title: string;
+    readonly hypothesis: string;
+    readonly fileTarget: string;
+    readonly section: string;
+    readonly suggestedText: string;
+    readonly confidence: string;
+    readonly frequency: number;
+    readonly sig: string;
+    readonly evidenceSummary: ReadonlyArray<string>;
+}
+
+export const deriveGuidanceProposalRows = (
+    candidates: ReadonlyArray<HarnessLearningCandidate>,
+): { readonly rows: GuidanceProposalRow[]; readonly skipped: number } => {
+    const rows: GuidanceProposalRow[] = [];
+    let skipped = 0;
+    const seenSigs = new Set<string>();
+    for (const c of candidates) {
+        if (!c.title || !c.problem) { skipped += 1; continue; }
+        const normTitle = normalizeTitle(c.title);
+        const sig = dedupeSig("guidance", normTitle);
+        if (seenSigs.has(sig)) { skipped += 1; continue; }
+        seenSigs.add(sig);
+        // Frequency proxy: evidence-summary count + risk-level boost.
+        // (Harness-derived candidates don't have a real recurrence count
+        // - they're snapshot signals - so we synthesize one.)
+        const riskBoost = c.risk.level === "high" ? 3 : c.risk.level === "medium" ? 2 : 1;
+        const frequency = Math.max(1, c.evidenceSummary.length) + riskBoost;
+        rows.push({
+            proposalKey: proposalKeyFor("guidance", c.title, sig),
+            title: c.title,
+            hypothesis: c.problem,
+            fileTarget: defaultGuidanceTargetFor(c.harnessLayer),
+            section: c.harnessLayer,
+            suggestedText: c.suggestedIntervention || c.pattern,
+            confidence: c.confidence,
+            frequency,
+            sig,
+            evidenceSummary: c.evidenceSummary,
+        });
+    }
+    return { rows, skipped };
+};
+
+const defaultGuidanceTargetFor = (layer: string): string => {
+    // Project-level harness candidates land in AGENTS.md / CLAUDE.md.
+    // The user can move them; this is just a hint for the scaffold.
+    if (layer === "boundary" || layer === "verification") return "CLAUDE.md";
+    return "AGENTS.md";
+};
+
+export const buildGuidanceProposalStatements = (
+    rows: readonly GuidanceProposalRow[],
+    existingSigs: ReadonlySet<string> = new Set(),
+): string[] => {
+    const stmts: string[] = [];
+    for (const row of rows) {
+        const proposalRef = recordRef("proposal", row.proposalKey);
+        const payloadRef = recordRef("guidance_proposal", row.proposalKey);
+        const baseline = JSON.stringify({
+            frequency: row.frequency,
+            evidence: row.evidenceSummary,
+        });
+        const isNew = !existingSigs.has(row.sig);
+
+        if (isNew) {
+            stmts.push(
+                `CREATE ${proposalRef} CONTENT ${surrealObject([
+                    ["form", surrealString("guidance")],
+                    ["title", surrealString(row.title)],
+                    ["hypothesis", surrealString(row.hypothesis)],
+                    ["dedupe_sig", surrealString(row.sig)],
+                    ["frequency", String(row.frequency)],
+                    ["confidence", surrealString(row.confidence)],
+                    ["status", surrealString("open")],
+                    ["baseline", surrealOptionString(baseline)],
+                    ["updated_at", "time::now()"],
+                ])};`,
+            );
+        } else {
+            stmts.push(
+                `UPDATE ${proposalRef} SET ${[
+                    ["title", surrealString(row.title)],
+                    ["hypothesis", surrealString(row.hypothesis)],
+                    ["frequency", String(row.frequency)],
+                    ["confidence", surrealString(row.confidence)],
+                    ["updated_at", "time::now()"],
+                ].map(([n, v]) => `${n} = ${v}`).join(", ")};`,
+            );
+        }
+
+        stmts.push(
+            `UPSERT ${payloadRef} MERGE ${surrealObject([
+                ["proposal", proposalRef],
+                ["file_target", surrealString(row.fileTarget)],
+                ["section", surrealOptionString(row.section)],
+                ["suggested_text", surrealString(row.suggestedText)],
+            ])};`,
+        );
+    }
+    return stmts;
+};
 
 export interface DeriveProposalsOpts {
     readonly minFrequency: number;
@@ -206,7 +321,7 @@ export const buildSkillProposalStatements = (
 
 export const deriveProposals = (
     opts: DeriveProposalsOpts = { minFrequency: 3 },
-): Effect.Effect<DeriveProposalsStats, DbError, SurrealClient> =>
+): Effect.Effect<DeriveProposalsStats, DbError, SurrealClient | import("../lib/process.ts").ProcessService> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         const [candidates, skills, existingProposals] = yield* Effect.all([
@@ -219,11 +334,29 @@ FROM skill_candidate;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
 
         const existingSkillNames = new Set(skills.map((s) => normalizeTitle(s.name)));
         const existingSigs = new Set(existingProposals.map((p) => p.dedupe_sig));
-        const { rows, skipped } = deriveSkillProposalRows(candidates, existingSkillNames, opts.minFrequency);
-        const stmts = buildSkillProposalStatements(rows, existingSigs);
+        const { rows: skillRows, skipped: skillSkipped } =
+            deriveSkillProposalRows(candidates, existingSkillNames, opts.minFrequency);
+        const skillStmts = buildSkillProposalStatements(skillRows, existingSigs);
 
-        yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
-        return { skillProposals: rows.length, skipped };
+        // Phase C11: also derive guidance-form proposals from the harness
+        // report. buildProjectHarnessReport is project-doctor logic that
+        // identifies "you should add a guardrail" candidates; we now route
+        // those into the proposal pipeline instead of the dead
+        // harness_learning table.
+        const { buildProjectHarnessReport } = yield* Effect.promise(() =>
+            import("../project/harness.ts"),
+        );
+        const harnessReport = yield* buildProjectHarnessReport();
+        const { rows: guidanceRows, skipped: guidanceSkipped } =
+            deriveGuidanceProposalRows(harnessReport.learningCandidates);
+        const guidanceStmts = buildGuidanceProposalStatements(guidanceRows, existingSigs);
+
+        yield* executeStatementsWith(db, [...skillStmts, ...guidanceStmts], { chunkSize: 500 });
+        return {
+            skillProposals: skillRows.length,
+            guidanceProposals: guidanceRows.length,
+            skipped: skillSkipped + guidanceSkipped,
+        };
     });
 
 if (import.meta.main) {

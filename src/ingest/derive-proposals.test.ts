@@ -1,12 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import {
+    buildGuidanceProposalStatements,
     buildSkillProposalStatements,
     dedupeSig,
+    deriveGuidanceProposalRows,
     deriveSkillProposalRows,
     normalizeTitle,
     parseMetrics,
     skillProposalFrequency,
 } from "./derive-proposals.ts";
+import type { HarnessLearningCandidate } from "../project/types.ts";
 
 describe("derive-proposals helpers", () => {
     test("normalizeTitle lowercases + collapses whitespace", () => {
@@ -118,5 +121,49 @@ describe("buildSkillProposalStatements", () => {
         expect(sql).toMatch(/\bfrequency\s*=\s*5/);
         expect(sql).toMatch(/\bconfidence\s*=\s*"high"/);
         expect(sql).toContain("UPSERT skill_proposal:");
+    });
+});
+
+describe("deriveGuidanceProposalRows + buildGuidanceProposalStatements (Phase C11)", () => {
+    const candidate: HarnessLearningCandidate = {
+        title: "Block main-branch edits in multi-agent projects",
+        problem: "Agents edited main directly.",
+        pattern: "Escalate guidance to workflow.",
+        harnessLayer: "boundary",
+        risk: { kind: "branch_safety", level: "high" },
+        appliesWhen: ["multi-agent work"],
+        avoidWhen: ["hotfix approval"],
+        evidenceSummary: ["current branch: main", "two recent commits from main"],
+        suggestedIntervention: "Confirm branch before writes.",
+        confidence: "medium",
+    };
+
+    test("converts harness candidate into a guidance_proposal row with dedupe_sig", () => {
+        const { rows, skipped } = deriveGuidanceProposalRows([candidate]);
+        expect(skipped).toBe(0);
+        expect(rows).toHaveLength(1);
+        const row = rows[0]!;
+        expect(row.title).toBe(candidate.title);
+        expect(row.hypothesis).toBe(candidate.problem);
+        expect(row.sig.startsWith("guidance__")).toBe(true);
+        expect(row.fileTarget).toBe("CLAUDE.md");
+        expect(row.frequency).toBeGreaterThanOrEqual(2);
+    });
+
+    test("CREATE statement for new sig + UPSERT guidance_proposal payload", () => {
+        const { rows } = deriveGuidanceProposalRows([candidate]);
+        const sql = buildGuidanceProposalStatements(rows, new Set()).join("\n");
+        expect(sql).toContain("CREATE proposal:");
+        expect(sql).toContain("form: \"guidance\"");
+        expect(sql).toContain("status: \"open\"");
+        expect(sql).toContain("UPSERT guidance_proposal:");
+        expect(sql).toContain("file_target: \"CLAUDE.md\"");
+        expect(sql).toContain("section: \"boundary\"");
+    });
+
+    test("dedupes within one batch", () => {
+        const { rows, skipped } = deriveGuidanceProposalRows([candidate, candidate]);
+        expect(rows).toHaveLength(1);
+        expect(skipped).toBe(1);
     });
 });
