@@ -2087,6 +2087,52 @@ const improveVerdictCommand = Command.make(
     },
 ).pipe(Command.withDescription("Show experiment verdict state; --set adopted|ignored|regressed|partial|no_longer_needed locks it"));
 
+/**
+ * `axctl improve reset --yes` - drop every experiment-loop row in DB.
+ *
+ * Destructive. Used by UAT to start from a clean slate before re-running
+ * the full propose -> accept -> verdict flow. Wipes the 9 experiment-loop
+ * tables in dependency order; underlying evidence (friction_event,
+ * skill_candidate, etc) is left alone so re-derivation can rebuild
+ * proposals against the same signal.
+ */
+const cmdImproveReset = (args: string[]) =>
+    Effect.gen(function* () {
+        if (!args.includes("--yes")) {
+            console.error("axctl improve reset: refusing to wipe without --yes");
+            console.error("  drops: checkpoint, opportunity, experiment, cites_evidence,");
+            console.error("         skill_proposal, subagent_proposal, hook_proposal,");
+            console.error("         guidance_proposal, automation_proposal, proposal");
+            process.exit(2);
+        }
+        const db = yield* SurrealClient;
+        // Dependency order: checkpoint -> opportunity -> experiment ->
+        // cites_evidence -> per-form payloads -> proposal. Relations cascade
+        // via REFERENCE ON DELETE CASCADE on the schema, but we delete
+        // bottom-up to keep this explicit + auditable.
+        yield* db.query(`
+            DELETE checkpoint;
+            DELETE opportunity;
+            DELETE experiment;
+            DELETE cites_evidence;
+            DELETE skill_proposal;
+            DELETE subagent_proposal;
+            DELETE hook_proposal;
+            DELETE guidance_proposal;
+            DELETE automation_proposal;
+            DELETE proposal;
+        `);
+        console.log("experiment-loop state cleared. Run \`ax ingest --stages=proposals,opportunities\` to rebuild.");
+    });
+
+const improveResetCommand = Command.make(
+    "reset",
+    {
+        yes: Flag.boolean("yes").pipe(Flag.withDefault(false)),
+    },
+    ({ yes }) => cmdImproveReset([...boolArg("yes", yes)]),
+).pipe(Command.withDescription("Wipe all experiment-loop state (proposals/experiments/checkpoints). Requires --yes."));
+
 const cmdImproveCheckpoint = (args: string[]) =>
     Effect.gen(function* () {
         const force = args.includes("--force");
@@ -2125,6 +2171,7 @@ const improveCommand = Command.make("improve").pipe(
         improveRejectCommand,
         improveCheckpointCommand,
         improveVerdictCommand,
+        improveResetCommand,
     ]),
 );
 
