@@ -17,6 +17,9 @@ import { deriveOutcomes } from "../ingest/outcomes.ts";
 import { deriveSessionHealth } from "../ingest/session-health.ts";
 import { deriveClosure } from "../ingest/closure.ts";
 import { deriveProposals } from "../ingest/derive-proposals.ts";
+import { scaffoldSkill } from "../improve/skill-scaffold.ts";
+import { recordKeyPart } from "../lib/shared/derive-keys.ts";
+import { recordRef } from "../lib/shared/surql.ts";
 import { ingestClaudeInsights } from "../ingest/claude-insights.ts";
 import { deriveSignals } from "../ingest/derive-signals.ts";
 import { deriveTurnIntents } from "../ingest/derive-intents.ts";
@@ -1780,9 +1783,128 @@ const improveShowCommand = Command.make(
     ({ id, json }) => cmdImproveShow([id, ...boolArg("json", json)]),
 ).pipe(Command.withDescription("Show a proposal + form payload + cited evidence"));
 
+const cmdImproveAccept = (args: string[]) =>
+    Effect.gen(function* () {
+        const positional = args.filter((a) => !a.startsWith("--"))[0];
+        if (positional === undefined) {
+            console.error("axctl improve accept: missing <id>");
+            process.exit(2);
+        }
+        const force = args.includes("--force");
+        const db = yield* SurrealClient;
+        const idLiteral = surrealLiteral(positional);
+        const sql = `
+            SELECT *, (SELECT * FROM skill_proposal WHERE proposal = $parent.id LIMIT 1)[0] AS skill_payload
+            FROM proposal WHERE dedupe_sig = ${idLiteral} OR id = ${idLiteral} LIMIT 1;
+        `;
+        const result = yield* db.query<[Array<Record<string, unknown>>]>(sql);
+        const row = (result?.[0] ?? [])[0];
+        if (!row) {
+            console.error(`no proposal matched ${positional}`);
+            process.exit(2);
+        }
+        const proposalKey = recordKeyPart(row.id, "proposal");
+        if (!proposalKey) {
+            console.error("internal: proposal.id has unexpected shape");
+            process.exit(2);
+        }
+        const status = String(row.status ?? "");
+        if (status !== "open") {
+            console.error(`proposal already ${status} (use \`axctl improve list --status=all\` to see)`);
+            process.exit(2);
+        }
+        const form = String(row.form ?? "");
+        if (form !== "skill") {
+            console.error(`accept currently supports form=skill only (got ${form}); subagent/hook/guidance/automation land in later phases`);
+            process.exit(2);
+        }
+        const payload = row.skill_payload as (Record<string, unknown> | null);
+        if (!payload) {
+            console.error("internal: skill_proposal payload missing for form=skill row");
+            process.exit(2);
+        }
+
+        const scaffold = scaffoldSkill({
+            input: {
+                title: String(row.title),
+                hypothesis: String(row.hypothesis),
+                proposedBehavior: String(payload.proposed_behavior ?? ""),
+                triggerPattern: payload.trigger_pattern == null ? null : String(payload.trigger_pattern),
+                expectedImpact: payload.expected_impact == null ? null : String(payload.expected_impact),
+                dedupeSig: String(row.dedupe_sig),
+                nowIso: new Date().toISOString(),
+            },
+            force,
+        });
+        if (scaffold.skipped) {
+            console.error(`refusing to clobber existing scaffold at ${scaffold.path} (use --force to overwrite)`);
+            process.exit(2);
+        }
+
+        const experimentKey = `${proposalKey}__${Date.now().toString(36)}`;
+        const update = `
+            UPDATE ${recordRef("proposal", proposalKey)} SET status = 'accepted', updated_at = time::now();
+            UPSERT ${recordRef("experiment", experimentKey)} MERGE {
+                proposal: ${recordRef("proposal", proposalKey)},
+                artifact_path: ${surrealLiteral(scaffold.path)},
+                scaffolded_at: time::now()
+            };
+        `;
+        yield* db.query(update);
+        console.log(`scaffolded ${scaffold.path}`);
+        console.log(`experiment ${recordRef("experiment", experimentKey)} created`);
+        console.log(`proposal status -> accepted`);
+    });
+
+const cmdImproveReject = (args: string[]) =>
+    Effect.gen(function* () {
+        const positional = args.filter((a) => !a.startsWith("--"))[0];
+        if (positional === undefined) {
+            console.error("axctl improve reject: missing <id>");
+            process.exit(2);
+        }
+        const reason = flag("reason", args) ?? "not_worth_packaging";
+        const db = yield* SurrealClient;
+        const idLiteral = surrealLiteral(positional);
+        const sel = yield* db.query<[Array<Record<string, unknown>>]>(
+            `SELECT id, status FROM proposal WHERE dedupe_sig = ${idLiteral} OR id = ${idLiteral} LIMIT 1;`,
+        );
+        const row = (sel?.[0] ?? [])[0];
+        if (!row) { console.error(`no proposal matched ${positional}`); process.exit(2); }
+        const status = String(row.status ?? "");
+        if (status !== "open") {
+            console.error(`proposal already ${status}`);
+            process.exit(2);
+        }
+        const proposalKey = recordKeyPart(row.id, "proposal");
+        if (!proposalKey) { console.error("internal: proposal.id unexpected"); process.exit(2); }
+        yield* db.query(
+            `UPDATE ${recordRef("proposal", proposalKey)} SET status = 'rejected', reject_reason = ${surrealLiteral(reason)}, updated_at = time::now();`,
+        );
+        console.log(`proposal status -> rejected (reason: ${reason})`);
+    });
+
+const improveAcceptCommand = Command.make(
+    "accept",
+    {
+        id: Argument.string("id"),
+        force: Flag.boolean("force").pipe(Flag.withDefault(false)),
+    },
+    ({ id, force }) => cmdImproveAccept([id, ...boolArg("force", force)]),
+).pipe(Command.withDescription("Accept a proposal: scaffold the artifact + create an experiment row"));
+
+const improveRejectCommand = Command.make(
+    "reject",
+    {
+        id: Argument.string("id"),
+        reason: Flag.string("reason").pipe(Flag.optional),
+    },
+    ({ id, reason }) => cmdImproveReject([id, ...stringArg("reason", optionValue(reason))]),
+).pipe(Command.withDescription("Reject a proposal (dedupe blocks future re-proposal of same trigger)"));
+
 const improveCommand = Command.make("improve").pipe(
     Command.withDescription("Experiment loop: review proposals, accept skills, track verdicts"),
-    Command.withSubcommands([improveListCommand, improveShowCommand]),
+    Command.withSubcommands([improveListCommand, improveShowCommand, improveAcceptCommand, improveRejectCommand]),
 );
 
 const serveCommand = Command.make(
