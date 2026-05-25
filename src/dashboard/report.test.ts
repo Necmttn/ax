@@ -30,8 +30,8 @@ const sampleData: DashboardData = {
     ],
     git: [
         {
-            name: "agentctl",
-            remote_url: "git@github.com:Necmttn/agentctl.git",
+            name: "ax",
+            remote_url: "git@github.com:Necmttn/ax.git",
             session_count: 12,
             checkout_linked_session_count: 12,
             produced_count: 4,
@@ -41,8 +41,8 @@ const sampleData: DashboardData = {
     ],
     checkoutActivity: [
         {
-            repository_name: "agentctl",
-            path: "/Users/necmttn/Projects/agentctl/.worktrees/evidence-graph-prototype",
+            repository_name: "ax",
+            path: "/Users/necmttn/Projects/ax/.worktrees/evidence-graph-prototype",
             branch: "feature/evidence-graph-prototype",
             worktree_name: "evidence-graph-prototype",
             session_count: 12,
@@ -55,10 +55,10 @@ const sampleData: DashboardData = {
     ],
     repositories: [
         {
-            id: "repository:agentctl",
-            name: "agentctl",
-            remote_url: "git@github.com:Necmttn/agentctl.git",
-            root_path: "/Users/necmttn/Projects/agentctl/.worktrees/evidence-graph-prototype",
+            id: "repository:ax",
+            name: "ax",
+            remote_url: "git@github.com:Necmttn/ax.git",
+            root_path: "/Users/necmttn/Projects/ax/.worktrees/evidence-graph-prototype",
             checkout_count: 2,
             checkout_branches: ["feature/evidence-graph-prototype"],
             default_branch: "main",
@@ -84,7 +84,7 @@ const sampleData: DashboardData = {
     sessions: [
         {
             id: "session:codex-1",
-            project: "agentctl",
+            project: "ax",
             tool_call_count: 42,
             tool_failure_count: 3,
             plan_snapshot_count: 2,

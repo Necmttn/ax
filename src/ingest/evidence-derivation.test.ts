@@ -74,29 +74,29 @@ describe("evidence derivation helpers", () => {
                 key: "correction-1",
                 kind: "user_correction",
                 text: "Actually use the current checkout before editing.",
-                labels: { repository: "repository:agentctl", scope: "repository" },
+                labels: { repository: "repository:ax", scope: "repository" },
                 ts: "2026-05-09T10:00:00.000Z",
             },
             {
                 key: "correction-2",
                 kind: "user_correction",
                 text: "Wrong checkout, this is the worktree for the branch.",
-                labels: { repository: "repository:agentctl", scope: "repository" },
+                labels: { repository: "repository:ax", scope: "repository" },
                 ts: "2026-05-09T10:05:00.000Z",
             },
             {
                 key: "correction-3",
                 kind: "user_correction",
                 text: "Stop and check the checkout path first.",
-                labels: { repository: "repository:agentctl", scope: "repository" },
+                labels: { repository: "repository:ax", scope: "repository" },
                 ts: "2026-05-09T10:10:00.000Z",
             },
         ]);
 
         expect(recommendation).toMatchObject({
-            key: "jit_checkout_guidance__repository__agentctl",
+            key: "jit_checkout_guidance__repository__ax",
             subjectType: "repository",
-            subjectId: "repository:agentctl",
+            subjectId: "repository:ax",
             status: "open",
         });
         expect(recommendation?.text).toContain("checkout");
@@ -117,14 +117,14 @@ describe("evidence derivation helpers", () => {
                 key: "correction-1",
                 kind: "user_correction",
                 text: "Actually check the checkout first.",
-                labels: { repository: "repository:agentctl", scope: "repository" },
+                labels: { repository: "repository:ax", scope: "repository" },
                 ts: "2026-05-09T10:00:00.000Z",
             },
             {
                 key: "correction-2",
                 kind: "user_correction",
                 text: "Wrong branch for this worktree.",
-                labels: { repository: "repository:agentctl", scope: "repository" },
+                labels: { repository: "repository:ax", scope: "repository" },
                 ts: "2026-05-09T10:05:00.000Z",
             },
         ]);

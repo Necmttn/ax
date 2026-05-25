@@ -41,7 +41,7 @@ export interface ProcessServiceShape {
 export class ProcessService extends Context.Service<
     ProcessService,
     ProcessServiceShape
->()("agentctl/ProcessService") {}
+>()("ax/ProcessService") {}
 
 const shellQuote = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
 

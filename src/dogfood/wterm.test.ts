@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
     createInteractiveDogfoodSession,
-    createAgentctlSetupDemoScript,
+    createAxctlSetupDemoScript,
     dogfoodStatusForTranscript,
     dogfoodClientJs,
     dogfoodHtml,
@@ -69,7 +69,7 @@ describe("wterm dogfood harness", () => {
     });
 
     test("setup script demonstrates scratch onboarding and tracking baseline", async () => {
-        const script = await createAgentctlSetupDemoScript("/repo/ax");
+        const script = await createAxctlSetupDemoScript("/repo/ax");
 
         expect(script.command).toContain("axctl wterm dogfood: fresh setup demo");
         expect(script.command).toContain("axctl doctor --json");

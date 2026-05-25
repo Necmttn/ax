@@ -98,7 +98,7 @@ describe("dissectTurn", () => {
     });
 
     test("AGENTS.md autoload prefix is captured as system_context", () => {
-        const text = "# AGENTS.md instructions for /Users/x/Projects/quera\n\n# CLAUDE.md\n\nrules";
+        const text = "# AGENTS.md instructions for /Users/x/Projects/myapp\n\n# CLAUDE.md\n\nrules";
         const spans = dissectTurn(text);
         expect(spans[0]!.kind).toBe("system_context");
         expect(spans[0]!.label).toBe("AGENTS.md");

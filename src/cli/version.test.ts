@@ -1,17 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import pkg from "../../package.json" with { type: "json" };
 import {
-    AGENTCTL_VERSION,
+    AX_VERSION,
     compareVersions,
     formatVersionStatus,
-    updateAgentctl,
+    updateAxctl,
     versionStatus,
     type VersionDeps,
 } from "./version.ts";
 
 describe("cli version", () => {
     test("embedded version matches package.json", () => {
-        expect(AGENTCTL_VERSION).toBe(pkg.version);
+        expect(AX_VERSION).toBe(pkg.version);
     });
 
     test("compares v-prefixed semantic versions", () => {
@@ -46,7 +46,7 @@ describe("cli version", () => {
             },
         };
 
-        await updateAgentctl(["--check"], deps);
+        await updateAxctl(["--check"], deps);
         expect(installRuns).toBe(0);
     });
 
@@ -62,7 +62,7 @@ describe("cli version", () => {
             env: {},
         };
 
-        await updateAgentctl([], deps);
+        await updateAxctl([], deps);
         expect(envVersion).toBe("latest");
     });
 });

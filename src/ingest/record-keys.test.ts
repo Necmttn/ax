@@ -17,12 +17,12 @@ const HASH = "[0-9a-f]{12,16}";
 describe("record keys", () => {
     test("repository key prefers normalized remote", () => {
         const key = repositoryRecordKey({
-            remoteUrlNormalized: "github.com/necmttn/agentctl",
+            remoteUrlNormalized: "github.com/necmttn/ax",
             initialCommit: "abc",
-            checkoutRoot: "/Users/necmttn/Projects/agentctl",
+            checkoutRoot: "/Users/necmttn/Projects/ax",
         });
 
-        expect(key).toMatch(new RegExp(`^remote__github_com_necmttn_agentctl__${HASH}$`));
+        expect(key).toMatch(new RegExp(`^remote__github_com_necmttn_ax__${HASH}$`));
     });
 
     test("repository key falls back to initial commit", () => {
@@ -40,15 +40,15 @@ describe("record keys", () => {
     });
 
     test("checkout key is tied to the local path", () => {
-        const key = checkoutRecordKey("/Users/necmttn/Projects/agentctl");
+        const key = checkoutRecordKey("/Users/necmttn/Projects/ax");
 
-        expect(key.startsWith("Users_necmttn_Projects_agentctl__")).toBe(true);
+        expect(key.startsWith("Users_necmttn_Projects_ax__")).toBe(true);
     });
 
     test("file key is repository scoped", () => {
-        expect(fileRecordKey("remote__github_com_necmttn_agentctl", "src/cli/index.ts")).toMatch(
+        expect(fileRecordKey("remote__github_com_necmttn_ax", "src/cli/index.ts")).toMatch(
             new RegExp(
-                `^remote_github_com_necmttn_agentctl__${HASH}__src_cli_index_ts__${HASH}$`,
+                `^remote_github_com_necmttn_ax__${HASH}__src_cli_index_ts__${HASH}$`,
             ),
         );
     });
@@ -120,9 +120,9 @@ describe("record keys", () => {
     });
 
     test("file key normalizes repository record id strings to raw repository keys", () => {
-        const rawKey = fileRecordKey("remote__github_com_necmttn_agentctl", "src/cli/index.ts");
+        const rawKey = fileRecordKey("remote__github_com_necmttn_ax", "src/cli/index.ts");
         const recordIdKey = fileRecordKey(
-            "repository:remote__github_com_necmttn_agentctl",
+            "repository:remote__github_com_necmttn_ax",
             "src/cli/index.ts",
         );
 

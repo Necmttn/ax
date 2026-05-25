@@ -14,7 +14,7 @@ import type { GitState } from "./types.ts";
 
 describe("scanGuidanceSources", () => {
     test("finds repo-local guidance and produces revisions", async () => {
-        const root = await mkdtemp(join(tmpdir(), "agentctl-harness-"));
+        const root = await mkdtemp(join(tmpdir(), "ax-harness-"));
         try {
             await writeFile(join(root, "AGENTS.md"), "Never edit main without approval.\n", "utf8");
             await mkdir(join(root, ".agents"), { recursive: true });

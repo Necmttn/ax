@@ -7,14 +7,14 @@ import {
 
 describe("repository identity", () => {
     test("normalizes ssh GitHub remotes", () => {
-        expect(normalizeGitRemoteUrl("git@github.com:Necmttn/agentctl.git")).toBe(
-            "github.com/necmttn/agentctl",
+        expect(normalizeGitRemoteUrl("git@github.com:Necmttn/ax.git")).toBe(
+            "github.com/necmttn/ax",
         );
     });
 
     test("normalizes https GitHub remotes", () => {
-        expect(normalizeGitRemoteUrl("https://github.com/Necmttn/agentctl.git")).toBe(
-            "github.com/necmttn/agentctl",
+        expect(normalizeGitRemoteUrl("https://github.com/Necmttn/ax.git")).toBe(
+            "github.com/necmttn/ax",
         );
     });
 
@@ -45,13 +45,13 @@ describe("repository identity", () => {
     test("chooses remote identity before initial commit and local path", () => {
         expect(
             chooseIdentity({
-                remoteUrlNormalized: "github.com/necmttn/agentctl",
+                remoteUrlNormalized: "github.com/necmttn/ax",
                 initialCommit: "a".repeat(40),
-                checkoutRoot: "/tmp/agentctl",
+                checkoutRoot: "/tmp/ax",
             }),
         ).toEqual({
             kind: "remote",
-            repositoryKey: expect.stringMatching(/^remote__github_com_necmttn_agentctl__/),
+            repositoryKey: expect.stringMatching(/^remote__github_com_necmttn_ax__/),
         });
     });
 
@@ -59,7 +59,7 @@ describe("repository identity", () => {
         expect(
             chooseIdentity({
                 initialCommit: "a".repeat(40),
-                checkoutRoot: "/tmp/agentctl",
+                checkoutRoot: "/tmp/ax",
             }),
         ).toEqual({
             kind: "initial_commit",
@@ -68,9 +68,9 @@ describe("repository identity", () => {
     });
 
     test("falls back to local path hash identity", () => {
-        expect(chooseIdentity({ checkoutRoot: "/tmp/agentctl" })).toEqual({
+        expect(chooseIdentity({ checkoutRoot: "/tmp/ax" })).toEqual({
             kind: "local_path_hash",
-            repositoryKey: expect.stringMatching(/^local__tmp_agentctl__/),
+            repositoryKey: expect.stringMatching(/^local__tmp_ax__/),
         });
     });
 });

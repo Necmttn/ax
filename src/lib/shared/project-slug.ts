@@ -2,7 +2,7 @@
  * Isomorphic - safe to import from server, CLI, TUI, or browser SPA.
  *
  * Cheap human-friendly project label from either a Claude-style cwd-slug like
- * `-Users-necmttn-Projects-quera` or a real path like `/Users/necmttn/quera`.
+ * `-Users-necmttn-Projects-myapp` or a real path like `/Users/necmttn/myapp`.
  * Falls back to the raw value when nothing else produces something useful.
  *
  * Container dirs (e.g. `Projects`, `workdir`) prettify to `(no repo)` because

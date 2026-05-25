@@ -14,7 +14,7 @@ const fixtureRun = (): LegacySelfImproveRunShape => ({
     events: [{
         id: "retry-1",
         sessionId: "session-1",
-        projectSlug: "-Users-necmttn-Projects-agentctl",
+        projectSlug: "-Users-necmttn-Projects-ax",
         turnIndex: 42,
         timestamp: "2026-05-05T00:00:00.000Z",
         type: "retry",
@@ -60,7 +60,7 @@ describe("legacy self-improve ingest", () => {
     });
 
     test("reads run directories and tolerates malformed event lines", async () => {
-        const root = join(tmpdir(), `agentctl-legacy-self-improve-${Date.now()}-${Math.random()}`);
+        const root = join(tmpdir(), `ax-legacy-self-improve-${Date.now()}-${Math.random()}`);
         const runDir = join(root, "runs", "2026-05-05");
         await mkdir(runDir, { recursive: true });
         await writeFile(

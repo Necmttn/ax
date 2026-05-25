@@ -180,7 +180,7 @@ function summarizeCounts(counts: Record<string, number>): string {
 
 function shouldUsePipeline(mode: ProgressMode, sink: ProgressSink, env: Record<string, string | undefined>): boolean {
     if (mode !== "auto" && mode !== "pipeline") return false;
-    if (env.AXCTL_PROGRESS_FORCE_PIPELINE === "1" || env.AGENTCTL_PROGRESS_FORCE_PIPELINE === "1") return true;
+    if (env.AXCTL_PROGRESS_FORCE_PIPELINE === "1") return true;
     if (!sink.isTTY) return false;
     if (env.CI === "true" || env.TERM === "dumb") return false;
     return true;

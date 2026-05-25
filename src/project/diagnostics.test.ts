@@ -101,7 +101,7 @@ describe("loadDiagnosticConfig", () => {
 });
 
 describe("normalizeDiagnosticIssue", () => {
-    test("normalizes Quera-devkit-style issue objects", () => {
+    test("normalizes Myapp-devkit-style issue objects", () => {
         expect(
             normalizeDiagnosticIssue({
                 severity: "critical",

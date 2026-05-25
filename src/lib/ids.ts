@@ -35,7 +35,7 @@ export type ToolFileRelationKeyInput = {
 };
 
 export function stableDigest(value: string, length = 16): string {
-    // Preserve existing Bun.hash behavior - agentctl's 89 baseline tests depend on these exact hashes.
+    // Preserve existing Bun.hash behavior - ax's 89 baseline tests depend on these exact hashes.
     return Bun.hash(value).toString(16).padStart(16, "0").slice(0, length);
 }
 

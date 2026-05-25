@@ -1,14 +1,14 @@
 import { Layer } from "effect";
-import { AgentctlConfigLive } from "./config.ts";
+import { AxConfigLive } from "./config.ts";
 import { SurrealClientLive } from "./db.ts";
 import { ProcessServiceLive } from "./process.ts";
 
 /**
- * Composed application layer. Provides `AgentctlConfig` (env snapshot),
+ * Composed application layer. Provides `AxConfig` (env snapshot),
  * `ProcessService` (Bun.spawn wrapper), and the `SurrealClient` (which
- * depends on AgentctlConfig). Future services merge in here.
+ * depends on AxConfig). Future services merge in here.
  */
-export const AppLayer = Layer.provide(SurrealClientLive, AgentctlConfigLive).pipe(
-    Layer.merge(AgentctlConfigLive),
+export const AppLayer = Layer.provide(SurrealClientLive, AxConfigLive).pipe(
+    Layer.merge(AxConfigLive),
     Layer.merge(ProcessServiceLive),
 );

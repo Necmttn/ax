@@ -40,7 +40,7 @@ query examples, integration-test expectations, and open implementation choices.
 
 ## Problem
 
-`agentctl` already ingests sessions, turns, skills, commits, edited files, and
+`ax` already ingests sessions, turns, skills, commits, edited files, and
 commit-touched files. The current file identity model is too path-shaped:
 
 - Claude/Codex tool edits can store machine-specific absolute paths.
@@ -116,7 +116,7 @@ Add a `repository` table for stable logical repositories.
 Candidate fields:
 
 - `key`: canonical identity, preferably normalized git remote such as
-  `github.com/Necmttn/agentctl`
+  `github.com/Necmttn/ax`
 - `name`: human-readable repo basename
 - `remote_url`: raw origin URL when available
 - `provider`: `github`, `gitlab`, `local`, etc. where parseable
@@ -338,12 +338,12 @@ Candidate fields:
 - `superseded_by`: `option<record<changeset>>`
 
 Commit evidence should be treated as the preferred durable outcome signal. Most
-useful `agentctl` memory should connect to commits, and session-only Change Sets
+useful `ax` memory should connect to commits, and session-only Change Sets
 should be marked provisional until a matching commit appears. The tool should
 make this visible to users and encourage commit practices that preserve useful
 signals.
 
-Commit Signal coaching should be diagnostic, not blocking. `agentctl project
+Commit Signal coaching should be diagnostic, not blocking. `ax project
 verify` and future memory commands can surface weak signals such as vague commit
 messages, edited files without nearby commits, huge mixed commits, or commits
 that do not match nearby agent session files.
@@ -404,7 +404,7 @@ Useful queries this unlocks:
   files/commits involved."
 - "Find mostly successful integration work and inspect the Files that moved
   together."
-- "Compare agentctl-derived Change Sets with Claude's `underlying_goal` and
+- "Compare ax-derived Change Sets with Claude's `underlying_goal` and
   `brief_summary` to validate the derivation quality."
 - "Rank repositories by friction, tool errors, and weak Commit Signal."
 
@@ -649,7 +649,7 @@ Candidate table: `artifact`
 Candidate fields:
 
 - `kind`: `transcript | report | screenshot | log | json | html | diff | patch | trace | tool_output | plan | other`
-- `source`: `claude | codex | agentctl | browser | cli | imported`
+- `source`: `claude | codex | ax | browser | cli | imported`
 - `uri`
 - `content_hash`: option<string>
 - `bytes`: option<int>
@@ -687,7 +687,7 @@ Candidate fields:
 - `created_at`
 - `updated_at`
 
-Guidance should be versioned so agentctl can measure before/after behavior for
+Guidance should be versioned so ax can measure before/after behavior for
 CLAUDE.md, AGENTS.md, hooks, settings, skills, and Codex instructions.
 
 Candidate table: `guidance`
@@ -799,12 +799,12 @@ Avoid a marketing landing page; the app itself is the first screen.
 
 ## Derivation Engine Boundary
 
-`agentctl` should own the Derivation Engine: the agent-neutral logic that turns
+`ax` should own the Derivation Engine: the agent-neutral logic that turns
 normalized sessions, edits, commits, and touched files into Change Sets and File
 Memories.
 
 Codex-specific Rust code from `codex-rs` can be useful as an adapter, reference,
-or helper for parsing Codex traces. It should not define the durable `agentctl`
+or helper for parsing Codex traces. It should not define the durable `ax`
 domain model.
 
 Target boundary:
@@ -816,7 +816,7 @@ Derivation Engine
 
 Codex Adapter
   input: Codex traces/sessions/rollouts
-  output: normalized agentctl session/turn/tool events
+  output: normalized ax session/turn/tool events
 ```
 
 ## Storage Backend Boundary
@@ -891,7 +891,7 @@ The useful ideas from Composto are:
 - context packing within a budget
 - tracing from a target file/symbol into relevant neighbors
 
-`agentctl` should persist the durable graph. Composto-style IR should be a
+`ax` should persist the durable graph. Composto-style IR should be a
 derived/enrichment layer on top of the Repository/File/change graph.
 
 Tracer Context should be activity-first and lazy. Generate IR/import context for
@@ -922,7 +922,7 @@ Candidate `code_ir` fields:
 - `file`: `record<file>`
 - `commit`: optional `record<commit>` or checkout head identity
 - `layer`: `L0 | L1 | L2 | L3`
-- `engine`: `agentctl | composto | fallow | other`
+- `engine`: `ax | composto | fallow | other`
 - `text`: compressed representation, except raw source should normally remain a
   pointer rather than duplicated full text
 - `raw_tokens`
@@ -939,8 +939,8 @@ Layer meanings:
 Future CLI direction:
 
 ```bash
-agentctl trace file src/ingest/git.ts --budget=4000
-agentctl trace query "why does repository detection duplicate worktrees?"
+ax trace file src/ingest/git.ts --budget=4000
+ax trace query "why does repository detection duplicate worktrees?"
 ```
 
 The trace output should pack target file evidence, import neighbors, recent

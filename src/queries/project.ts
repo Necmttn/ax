@@ -2,7 +2,7 @@
  * Project page: everything we know about a single `session.project` value.
  *
  * All queries take a `$project` binding (raw string, e.g.
- * `-Users-necmttn-Projects-quera`). SurrealDB string-equality bindings work
+ * `-Users-necmttn-Projects-myapp`). SurrealDB string-equality bindings work
  * fine here - no record-id binding pitfalls.
  *
  * Performance notes:

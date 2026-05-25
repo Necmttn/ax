@@ -24,7 +24,7 @@ import { prettyPrint } from "../lib/json.ts";
 import schemaSurql from "../../schema/schema.surql" with { type: "text" };
 
 const HOME = homedir();
-const DATA_DIR = process.env.AX_DATA_DIR ?? process.env.AGENTCTL_DATA_DIR ?? join(HOME, ".local", "share", "ax");
+const DATA_DIR = process.env.AX_DATA_DIR ?? join(HOME, ".local", "share", "ax");
 const LOG_DIR = join(DATA_DIR, "logs");
 const BUCKETS_DIR = join(DATA_DIR, "buckets");
 const LAUNCH_AGENTS_DIR = join(HOME, "Library", "LaunchAgents");
@@ -32,7 +32,7 @@ const BIN_DIR = join(HOME, ".local", "bin");
 const VENDOR_BIN_DIR = join(DATA_DIR, "bin");
 
 // Pin to a known-good SurrealDB. Override via env to test newer versions.
-const SURREAL_VERSION = process.env.AXCTL_SURREAL_VERSION ?? process.env.AGENTCTL_SURREAL_VERSION ?? "3.0.5";
+const SURREAL_VERSION = process.env.AXCTL_SURREAL_VERSION ?? "3.0.5";
 
 const DB_LABEL = "com.necmttn.ax-db";
 const WATCH_LABEL = "com.necmttn.ax-watch";
@@ -213,7 +213,7 @@ function isSupportedVersion(v: string | null): boolean {
  * Override via env: AXCTL_SURREAL_PATH (explicit path), AXCTL_FORCE_DOWNLOAD=1.
  */
 async function ensureSurreal(): Promise<string> {
-    const pinnedSurreal = process.env.AXCTL_SURREAL_PATH ?? process.env.AGENTCTL_SURREAL_PATH;
+    const pinnedSurreal = process.env.AXCTL_SURREAL_PATH;
     if (pinnedSurreal) {
         const v = surrealVersionString(pinnedSurreal);
         if (!v) throw new Error(`AXCTL_SURREAL_PATH is not executable`);
@@ -233,7 +233,7 @@ async function ensureSurreal(): Promise<string> {
     }
 
     // Prefer system install when present and version-compatible (any 3.x).
-    if (!process.env.AXCTL_FORCE_DOWNLOAD && !process.env.AGENTCTL_FORCE_DOWNLOAD) {
+    if (!process.env.AXCTL_FORCE_DOWNLOAD) {
         const sys = which("surreal");
         if (sys) {
             const v = surrealVersionString(sys);
@@ -534,7 +534,7 @@ export function formatDaemonStatus(status: DaemonStatus, json = false): string {
 
 export function collectDoctorReport(): DoctorReport {
     const binLink = join(BIN_DIR, "axctl");
-    const surrealPath = process.env.AXCTL_SURREAL_PATH ?? process.env.AGENTCTL_SURREAL_PATH ?? which("surreal") ?? join(VENDOR_BIN_DIR, "surreal");
+    const surrealPath = process.env.AXCTL_SURREAL_PATH ?? which("surreal") ?? join(VENDOR_BIN_DIR, "surreal");
     const surrealVersion = existsSync(surrealPath) ? surrealVersionString(surrealPath) : null;
     const daemon = collectDaemonStatus();
     const checks: DoctorCheck[] = [
@@ -610,7 +610,6 @@ export async function cmdInstall() {
     const binSource = resolveBinaryPath();
     const binLink = join(BIN_DIR, "axctl");
     const aliasBinLink = join(BIN_DIR, "ax");
-    const legacyBinLink = join(BIN_DIR, "agentctl");
     if (binSource !== binLink) {
         await ensureSymlink(binSource, binLink);
         console.log(`  symlink: ${binLink} → ${binSource}`);
@@ -618,10 +617,6 @@ export async function cmdInstall() {
     if (binSource !== aliasBinLink) {
         await ensureSymlink(binSource, aliasBinLink);
         console.log(`  alias symlink: ${aliasBinLink} → ${binSource}`);
-    }
-    if (binSource !== legacyBinLink) {
-        await ensureSymlink(binSource, legacyBinLink);
-        console.log(`  legacy symlink: ${legacyBinLink} → ${binSource}`);
     }
 
     const bind = chooseBindPort();
@@ -761,7 +756,7 @@ export async function cmdUninstall() {
         console.log(`  ${removed ? "removed" : "absent "}: ${plist}`);
     }
 
-    for (const binLink of [join(BIN_DIR, "axctl"), join(BIN_DIR, "ax"), join(BIN_DIR, "agentctl")]) {
+    for (const binLink of [join(BIN_DIR, "axctl"), join(BIN_DIR, "ax")]) {
         let symlinkStatus: "removed" | "absent" | "skipped" = "absent";
         try {
             const st = await lstat(binLink);

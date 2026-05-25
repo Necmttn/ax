@@ -17,7 +17,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { Effect, Layer } from "effect";
 import { SurrealClient, SurrealClientLive } from "/Users/necmttn/Projects/ax/src/lib/db.ts";
-import { AgentctlConfigLive } from "/Users/necmttn/Projects/ax/src/lib/config.ts";
+import { AxConfigLive } from "/Users/necmttn/Projects/ax/src/lib/config.ts";
 
 interface HookFireRow {
     readonly id: string;
@@ -270,5 +270,5 @@ const program = Effect.gen(function* () {
     console.log(`wrote ${normalized.length} fires -> ${outPath}`);
 });
 
-const AppLayer = SurrealClientLive.pipe(Layer.provide(AgentctlConfigLive));
+const AppLayer = SurrealClientLive.pipe(Layer.provide(AxConfigLive));
 await Effect.runPromise(program.pipe(Effect.provide(AppLayer), Effect.scoped));

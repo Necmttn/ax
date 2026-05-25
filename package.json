@@ -4,8 +4,7 @@
   "description": "ax is local memory and telemetry for coding agents. axctl ingests transcripts, skills, and git history into SurrealDB; surfaces what skills are worth keeping and what the user actually does on demand.",
   "type": "module",
   "bin": {
-    "axctl": "./bin/axctl",
-    "agentctl": "./bin/agentctl"
+    "axctl": "./bin/axctl"
   },
   "scripts": {
     "prepare": "effect-language-service patch",

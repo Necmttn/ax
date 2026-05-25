@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { Context, Effect, Layer } from "effect";
 import { dbUrlFromState, readRuntimeState, runtimeStatePath } from "./runtime-state.ts";
 
-export interface AgentctlConfigShape {
+export interface AxConfigShape {
     readonly db: {
         readonly url: string;
         readonly ns: string;
@@ -62,12 +62,11 @@ const nonNegativeInt = (raw: string | undefined, fallback: number): number => {
  * Read a fresh snapshot from process.env. Pure - safe to call from
  * synchronous module init (paths.ts, top-level CLI helpers) when service
  * injection is too disruptive. Effect callers should prefer the
- * `AgentctlConfig` service.
+ * `AxConfig` service.
  */
-export function envSnapshot(env: Record<string, string | undefined> = process.env): AgentctlConfigShape {
+export function envSnapshot(env: Record<string, string | undefined> = process.env): AxConfigShape {
     const home = env.HOME ?? HOME;
-    const dataDir =
-        env.AX_DATA_DIR ?? env.AGENTCTL_DATA_DIR ?? join(home, ".local", "share", "ax");
+    const dataDir = env.AX_DATA_DIR ?? join(home, ".local", "share", "ax");
     const runtime = readRuntimeState(runtimeStatePath(dataDir));
     return {
         db: {
@@ -75,55 +74,51 @@ export function envSnapshot(env: Record<string, string | undefined> = process.en
             // install writes runtime.json after a successful port pick, so a one-time
             // port fallback keeps every later CLI invocation pointed at the right
             // listener without the user needing to set env vars.
-            url: env.AX_DB_URL ?? env.AGENTCTL_DB_URL ?? dbUrlFromState(runtime),
-            ns: env.AX_DB_NS ?? env.AGENTCTL_DB_NS ?? "ax",
-            db: env.AX_DB_DB ?? env.AGENTCTL_DB_DB ?? "main",
-            user: env.AX_DB_USER ?? env.AGENTCTL_DB_USER ?? "root",
-            pass: env.AX_DB_PASS ?? env.AGENTCTL_DB_PASS ?? "root",
+            url: env.AX_DB_URL ?? dbUrlFromState(runtime),
+            ns: env.AX_DB_NS ?? "ax",
+            db: env.AX_DB_DB ?? "main",
+            user: env.AX_DB_USER ?? "root",
+            pass: env.AX_DB_PASS ?? "root",
         },
         paths: {
             home,
             transcriptsDir:
-                env.AX_TRANSCRIPTS_DIR ?? env.AGENTCTL_TRANSCRIPTS_DIR ?? join(home, ".claude", "projects"),
-            skillDirs: csv(env.AX_SKILLS_DIRS ?? env.AGENTCTL_SKILLS_DIRS),
-            commandDirs: csv(env.AX_COMMAND_DIRS ?? env.AGENTCTL_COMMAND_DIRS),
-            codexDir: env.AX_CODEX_DIR ?? env.AGENTCTL_CODEX_DIR ?? join(home, ".codex", "sessions"),
-            dataDir:
-                dataDir,
+                env.AX_TRANSCRIPTS_DIR ?? join(home, ".claude", "projects"),
+            skillDirs: csv(env.AX_SKILLS_DIRS),
+            commandDirs: csv(env.AX_COMMAND_DIRS),
+            codexDir: env.AX_CODEX_DIR ?? join(home, ".codex", "sessions"),
+            dataDir,
             claudeUsageDir:
-                env.AX_CLAUDE_USAGE_DIR ?? env.AGENTCTL_CLAUDE_USAGE_DIR ?? join(home, ".claude", "usage-data"),
+                env.AX_CLAUDE_USAGE_DIR ?? join(home, ".claude", "usage-data"),
             legacySelfImproveDir:
                 env.AX_LEGACY_SELF_IMPROVE_DIR ??
-                env.AGENTCTL_LEGACY_SELF_IMPROVE_DIR ??
                 join(home, ".dotfiles", "claude", ".claude", "self-improve"),
             repoListFile:
-                env.AX_REPO_LIST ??
-                env.AGENTCTL_REPO_LIST ??
-                join(dataDir, "ax-repos.txt"),
+                env.AX_REPO_LIST ?? join(dataDir, "ax-repos.txt"),
         },
         knobs: {
             claudeConcurrency: positiveInt(
-                env.AX_CLAUDE_CONCURRENCY ?? env.AGENTCTL_CLAUDE_CONCURRENCY,
+                env.AX_CLAUDE_CONCURRENCY,
                 DEFAULTS.claudeConcurrency,
             ),
             codexConcurrency: positiveInt(
-                env.AX_CODEX_CONCURRENCY ?? env.AGENTCTL_CODEX_CONCURRENCY,
+                env.AX_CODEX_CONCURRENCY,
                 DEFAULTS.codexConcurrency,
             ),
             codexProgressEvery: positiveInt(
-                env.AX_CODEX_PROGRESS_EVERY ?? env.AGENTCTL_CODEX_PROGRESS_EVERY,
+                env.AX_CODEX_PROGRESS_EVERY,
                 DEFAULTS.codexProgressEvery,
             ),
             codexFlushEvery: positiveInt(
-                env.AX_CODEX_FLUSH_EVERY ?? env.AGENTCTL_CODEX_FLUSH_EVERY,
+                env.AX_CODEX_FLUSH_EVERY,
                 DEFAULTS.codexFlushEvery,
             ),
             codexRawMaxBytes: nonNegativeInt(
-                env.AX_CODEX_RAW_MAX_BYTES ?? env.AGENTCTL_CODEX_RAW_MAX_BYTES,
+                env.AX_CODEX_RAW_MAX_BYTES,
                 DEFAULTS.codexRawMaxBytes,
             ),
             codexPayloadMaxBytes: nonNegativeInt(
-                env.AX_CODEX_PAYLOAD_MAX_BYTES ?? env.AGENTCTL_CODEX_PAYLOAD_MAX_BYTES,
+                env.AX_CODEX_PAYLOAD_MAX_BYTES,
                 DEFAULTS.codexPayloadMaxBytes,
             ),
         },
@@ -131,23 +126,23 @@ export function envSnapshot(env: Record<string, string | undefined> = process.en
 }
 
 /** Effect service exposing the typed config snapshot. */
-export class AgentctlConfig extends Context.Service<
-    AgentctlConfig,
-    AgentctlConfigShape
->()("agentctl/AgentctlConfig") {}
+export class AxConfig extends Context.Service<
+    AxConfig,
+    AxConfigShape
+>()("ax/AxConfig") {}
 
 /** Live layer reads from process.env once at acquisition. */
-export const AgentctlConfigLive: Layer.Layer<AgentctlConfig> = Layer.effect(
-    AgentctlConfig,
+export const AxConfigLive: Layer.Layer<AxConfig> = Layer.effect(
+    AxConfig,
 )(Effect.sync(() => envSnapshot()));
 
 /**
  * Test factory: deep-merge overrides into a default snapshot. Use as
- * `Layer.succeed(AgentctlConfig, makeTestConfig({ db: { url: ... } }))`.
+ * `Layer.succeed(AxConfig, makeTestConfig({ db: { url: ... } }))`.
  */
 export function makeTestConfig(
-    overrides: DeepPartial<AgentctlConfigShape> = {},
-): AgentctlConfigShape {
+    overrides: DeepPartial<AxConfigShape> = {},
+): AxConfigShape {
     const base = envSnapshot({});
     return {
         db: { ...base.db, ...(overrides.db ?? {}) },
@@ -156,10 +151,10 @@ export function makeTestConfig(
     };
 }
 
-export const AgentctlConfigTest = (
-    overrides: DeepPartial<AgentctlConfigShape> = {},
-): Layer.Layer<AgentctlConfig> =>
-    Layer.succeed(AgentctlConfig)(makeTestConfig(overrides));
+export const AxConfigTest = (
+    overrides: DeepPartial<AxConfigShape> = {},
+): Layer.Layer<AxConfig> =>
+    Layer.succeed(AxConfig)(makeTestConfig(overrides));
 
 type DeepPartial<T> = {
     [K in keyof T]?: T[K] extends ReadonlyArray<unknown> | string | number | boolean

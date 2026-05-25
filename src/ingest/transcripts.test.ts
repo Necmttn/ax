@@ -141,7 +141,7 @@ describe("Claude transcript extraction", () => {
                 JSON.stringify({
                     type: "assistant",
                     timestamp: "2026-05-09T10:00:00.000Z",
-                    cwd: "/Users/necmttn/Projects/agentctl",
+                    cwd: "/Users/necmttn/Projects/ax",
                     message: {
                         content: [
                             {
@@ -236,7 +236,7 @@ describe("Claude transcript extraction", () => {
                     },
                 }),
             ],
-            "-Users-necmttn-Projects-agentctl",
+            "-Users-necmttn-Projects-ax",
             "session-abc",
         );
 
@@ -249,8 +249,8 @@ describe("Claude transcript extraction", () => {
                 session: "session-abc",
                 seq: 1,
                 ts: "2026-05-09T10:00:00.000Z",
-                repo: "agentctl",
-                path: "/Users/necmttn/Projects/agentctl/src/ingest/transcripts.ts",
+                repo: "ax",
+                path: "/Users/necmttn/Projects/ax/src/ingest/transcripts.ts",
                 tool: "Edit",
             },
         ]);
@@ -263,7 +263,7 @@ describe("Claude transcript extraction", () => {
             seq: 1,
             turnKey: turnRecordKey("session-abc", 1),
             callId: "toolu_skill",
-            cwd: "/Users/necmttn/Projects/agentctl",
+            cwd: "/Users/necmttn/Projects/ax",
             hasError: false,
         });
         expect(skillCall?.inputJson).toEqual({
@@ -366,7 +366,7 @@ describe("Claude transcript extraction", () => {
                     },
                 }),
             ],
-            "-Users-necmttn-Projects-agentctl",
+            "-Users-necmttn-Projects-ax",
             "session-anonymous",
         );
 
@@ -396,7 +396,7 @@ describe("Claude transcript extraction", () => {
                 JSON.stringify({
                     type: "assistant",
                     timestamp: "2026-05-09T10:00:00.000Z",
-                    cwd: "/Users/necmttn/Projects/agentctl",
+                    cwd: "/Users/necmttn/Projects/ax",
                     message: {
                         content: [
                             {
@@ -409,7 +409,7 @@ describe("Claude transcript extraction", () => {
                     },
                 }),
             ],
-            "-Users-necmttn-Projects-agentctl",
+            "-Users-necmttn-Projects-ax",
             "session-id-check",
         );
 
@@ -427,27 +427,27 @@ describe("Claude transcript extraction", () => {
                 JSON.stringify({
                     type: "assistant",
                     timestamp: "2026-05-09T10:00:00.000Z",
-                    cwd: "/Users/necmttn/Projects/agentctl",
+                    cwd: "/Users/necmttn/Projects/ax",
                     message: {
                         content: [
                             {
                                 type: "tool_use",
                                 id: "toolu_edit_check",
                                 name: "Edit",
-                                input: { file_path: "/Users/necmttn/Projects/agentctl/src/a.ts" },
+                                input: { file_path: "/Users/necmttn/Projects/ax/src/a.ts" },
                             },
                         ],
                     },
                 }),
             ],
-            "-Users-necmttn-Projects-agentctl",
+            "-Users-necmttn-Projects-ax",
             "session-file-check",
         );
 
         expect(extracted).not.toBeNull();
         if (!extracted) return;
 
-        const expectedFileKey = fileRecordKey("_", "/Users/necmttn/Projects/agentctl/src/a.ts");
+        const expectedFileKey = fileRecordKey("_", "/Users/necmttn/Projects/ax/src/a.ts");
         expect(extracted.edits).toHaveLength(1);
         const edit = extracted.edits[0];
         expect(transcriptEditFileRecordKey(edit?.path ?? "")).toBe(expectedFileKey);
@@ -480,12 +480,12 @@ describe("Claude transcript extraction", () => {
                 JSON.stringify({
                     type: "assistant",
                     timestamp: "2026-05-09T10:00:00.000Z",
-                    cwd: "/Users/necmttn/Projects/quera",
+                    cwd: "/Users/necmttn/Projects/myapp",
                     message: {
                         content: [
                             {
                                 type: "tool_use",
-                                id: "toolu_edit_quera",
+                                id: "toolu_edit_myapp",
                                 name: "Edit",
                                 input: { file_path: "/Users/necmttn/.claude/hooks/block-em-dash.sh" },
                             },
@@ -493,12 +493,12 @@ describe("Claude transcript extraction", () => {
                     },
                 }),
             ],
-            "-Users-necmttn-Projects-quera",
-            "session-file-quera",
+            "-Users-necmttn-Projects-myapp",
+            "session-file-myapp",
         );
 
         expect(first?.edits[0]?.repo).toBe("apps");
-        expect(second?.edits[0]?.repo).toBe("quera");
+        expect(second?.edits[0]?.repo).toBe("myapp");
         expect(transcriptEditFileRecordKey(first?.edits[0]?.path ?? ""))
             .toBe(transcriptEditFileRecordKey(second?.edits[0]?.path ?? ""));
     });
@@ -549,7 +549,7 @@ describe("Claude transcript extraction", () => {
                     },
                 }),
             ],
-            "-Users-necmttn-Projects-agentctl",
+            "-Users-necmttn-Projects-ax",
             "claude-plan-session",
         );
 

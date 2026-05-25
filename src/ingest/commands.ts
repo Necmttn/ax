@@ -15,7 +15,7 @@ import { discoverProjectRoots } from "./project-discovery.ts";
 // Without ingesting them, every Skill tool invocation that targets a slash
 // command (simplify, review-all, /loop, ...) creates an orphan `invoked` edge
 // pointing at a skill row that never existed - which is what was hiding ~5300
-// invocations from `agentctl taste / unused / stats`. See issues #41 and #42.
+// invocations from `axctl taste / unused / stats`. See issues #41 and #42.
 
 interface ParsedCommand {
     name: string;
@@ -180,7 +180,7 @@ async function readPluginCommands(): Promise<CommandItem[]> {
                 const commandsDir = join(pluginDir, version, "commands");
                 // Plugin commands share the `command` scope so all slash
                 // commands - user-level or plugin-shipped - look the same to
-                // `agentctl taste / unused / stats`. The `dir_path` still
+                // `axctl taste / unused / stats`. The `dir_path` still
                 // disambiguates which plugin a command came from.
                 const items = await readCommandsRoot(
                     commandsDir,
@@ -194,7 +194,7 @@ async function readPluginCommands(): Promise<CommandItem[]> {
     return out;
 }
 
-const COMMAND_DIRS = (process.env.AGENTCTL_COMMAND_DIRS ?? "")
+const COMMAND_DIRS = (process.env.AX_COMMAND_DIRS ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);

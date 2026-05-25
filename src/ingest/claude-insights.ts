@@ -115,7 +115,7 @@ const numericMetaMapKeys = new Set([
 
 function defaultUsageDir(): string {
     return (
-        process.env.AGENTCTL_CLAUDE_USAGE_DIR ??
+        process.env.AX_CLAUDE_USAGE_DIR ??
         join(homedir(), ".claude", "usage-data")
     );
 }

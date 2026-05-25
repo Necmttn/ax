@@ -2,7 +2,7 @@ import { readdir, stat, open } from "node:fs/promises";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { RecordId, SurrealClient, filePointer } from "../lib/db.ts";
-import { AgentctlConfig } from "../lib/config.ts";
+import { AxConfig } from "../lib/config.ts";
 import { decodeJsonOrNull } from "../lib/decode.ts";
 import { skillRecordKey } from "../lib/skill-id.ts";
 import { surrealString } from "../lib/shared/surql.ts";
@@ -170,7 +170,7 @@ export function codexConcurrency(raw: string | undefined): number {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CODEX_CONCURRENCY;
 }
 
-export function codexPayloadMaxBytes(raw = process.env.AGENTCTL_CODEX_PAYLOAD_MAX_BYTES): number {
+export function codexPayloadMaxBytes(raw = process.env.AX_CODEX_PAYLOAD_MAX_BYTES): number {
     if (!raw) return DEFAULT_CODEX_PAYLOAD_MAX_BYTES;
     const parsed = Number.parseInt(raw, 10);
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_CODEX_PAYLOAD_MAX_BYTES;
@@ -788,9 +788,9 @@ export interface CodexStats {
 
 export const ingestCodex = (
     opts: Partial<CodexIngestOpts> = {},
-): Effect.Effect<CodexStats, DbError, SurrealClient | AgentctlConfig> =>
+): Effect.Effect<CodexStats, DbError, SurrealClient | AxConfig> =>
     Effect.gen(function* () {
-        const cfg = yield* AgentctlConfig;
+        const cfg = yield* AxConfig;
         const db = yield* SurrealClient;
         const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
         const files = yield* Effect.promise(() => walkJsonlFiles(cfg.paths.codexDir, cutoff));

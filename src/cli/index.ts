@@ -2,7 +2,7 @@
 import { Effect, Option, References } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
-import { AgentctlConfig } from "../lib/config.ts";
+import { AxConfig } from "../lib/config.ts";
 import { ProcessService } from "../lib/process.ts";
 import { prettyPrint, surrealLiteral } from "../lib/json.ts";
 import { prettifyProjectSlug } from "../lib/shared/project-slug.ts";
@@ -35,7 +35,7 @@ import {
     type ProgressStage,
 } from "./progress.ts";
 import { cmdProject } from "./project.ts";
-import { AGENTCTL_VERSION, liveVersionDeps, printVersion, updateAgentctl } from "./version.ts";
+import { AX_VERSION, liveVersionDeps, printVersion, updateAxctl } from "./version.ts";
 import { cmdDogfoodTerminal } from "../dogfood/wterm.ts";
 import { buildFileContextPack } from "../context/file-context.ts";
 import {
@@ -206,9 +206,9 @@ const telemetryStage = <A>(
     runId: string,
     source: string,
     stage: string,
-    program: Effect.Effect<A, DbError, SurrealClient | AgentctlConfig | ProcessService>,
+    program: Effect.Effect<A, DbError, SurrealClient | AxConfig | ProcessService>,
     progress?: ProgressReporter,
-): Effect.Effect<A, DbError, SurrealClient | AgentctlConfig | ProcessService> =>
+): Effect.Effect<A, DbError, SurrealClient | AxConfig | ProcessService> =>
     Effect.gen(function* () {
         progress?.start({ source, stage });
         yield* db.query(buildIngestStageStartStatement({ runId, source, stage }));
@@ -395,14 +395,14 @@ const cmdIngest = (args: string[]) => {
         });
         // Resolve services up front so stage lambdas can close over them and
         // return Effect.Effect<unknown, DbError, never> (matching StageSpec.run).
-        const config = yield* AgentctlConfig;
+        const config = yield* AxConfig;
         const proc = yield* ProcessService;
         const withServices = <A>(
-            eff: Effect.Effect<A, DbError, SurrealClient | AgentctlConfig | ProcessService>,
+            eff: Effect.Effect<A, DbError, SurrealClient | AxConfig | ProcessService>,
         ): Effect.Effect<A, DbError, never> =>
             eff.pipe(
                 Effect.provideService(SurrealClient, db),
-                Effect.provideService(AgentctlConfig, config),
+                Effect.provideService(AxConfig, config),
                 Effect.provideService(ProcessService, proc),
             );
 
@@ -2151,7 +2151,7 @@ const updateCommand = Command.make(
     },
     ({ check, json }) =>
         Effect.promise(() =>
-            updateAgentctl([...boolArg("check", check), ...boolArg("json", json)], liveVersionDeps),
+            updateAxctl([...boolArg("check", check), ...boolArg("json", json)], liveVersionDeps),
         ),
 ).pipe(Command.withDescription("Update axctl from the latest GitHub release"));
 
@@ -2246,13 +2246,13 @@ export const rootCommand = Command.make("axctl").pipe(
  * place the cast lives - callers stay type-safe.
  */
 export const runCli = (args: ReadonlyArray<string>): Effect.Effect<void, unknown, SurrealClient> =>
-    Command.runWith(rootCommand, { version: AGENTCTL_VERSION })(args) as unknown as Effect.Effect<void, unknown, SurrealClient>;
+    Command.runWith(rootCommand, { version: AX_VERSION })(args) as unknown as Effect.Effect<void, unknown, SurrealClient>;
 
 /** CLI invocation that has had its `SurrealClient` requirement satisfied. */
 type CliProgram = Effect.Effect<void, unknown, never>;
 
 /**
- * Provide AppLayer (SurrealClient + AgentctlConfig + ProcessService) and a
+ * Provide AppLayer (SurrealClient + AxConfig + ProcessService) and a
  * scope so handlers that allocate scoped resources work. Used by commands
  * whose handlers actually touch SurrealDB.
  */

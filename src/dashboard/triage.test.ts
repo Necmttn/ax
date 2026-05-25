@@ -148,11 +148,11 @@ describe("recommendForSkill", () => {
                 total_inv: 3,
                 inv_30d: 1,
                 taste_score: 4,
-                last_project: "-Users-necmttn-Projects-quera",
+                last_project: "-Users-necmttn-Projects-myapp",
                 last_used: new Date().toISOString(),
             }),
         );
-        expect(rec.reason).toContain("on quera");
+        expect(rec.reason).toContain("on myapp");
     });
 
     test("staple reason omits last_project when null", () => {

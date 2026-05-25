@@ -63,7 +63,7 @@ const sqlFloatOption = (value: number | null | undefined): string =>
 
 function defaultLegacySelfImproveDir(): string {
     return (
-        process.env.AGENTCTL_LEGACY_SELF_IMPROVE_DIR ??
+        process.env.AX_LEGACY_SELF_IMPROVE_DIR ??
         join(homedir(), ".dotfiles", "claude", ".claude", "self-improve")
     );
 }

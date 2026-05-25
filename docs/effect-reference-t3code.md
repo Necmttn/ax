@@ -8,7 +8,7 @@ Reference clone:
 
 The repo was cloned from `git@github.com:pingdotgg/t3code.git` at `b793401`
 for local study. `.references/` is gitignored, so this document preserves the
-patterns worth adapting into `agentctl`.
+patterns worth adapting into `ax`.
 
 ## What To Adapt
 
@@ -29,9 +29,9 @@ patterns worth adapting into `agentctl`.
 
 2. Move config into an Effect service.
 
-   `agentctl` still reads DB settings from `process.env` in `src/lib/db.ts`.
+   `ax` still reads DB settings from `process.env` in `src/lib/db.ts`.
    `t3code` uses `Config.*` and a config service for typed env/default
-   resolution. We should add `AgentctlConfig` and make `SurrealClientLive`,
+   resolution. We should add `AxConfig` and make `SurrealClientLive`,
    ingest services, dashboard generation, and future hooks depend on it.
 
    References:
@@ -51,7 +51,7 @@ patterns worth adapting into `agentctl`.
    - typed spawn, exit, timeout, and decode errors
    - scoped finalizers that kill child processes
 
-   `agentctl` currently has local `runGit` helpers. A shared `ProcessService`
+   `ax` currently has local `runGit` helpers. A shared `ProcessService`
    would make Git ingest, Surreal helpers, benchmarks, and tool evidence more
    consistent.
 
@@ -61,7 +61,7 @@ patterns worth adapting into `agentctl`.
    module scope, and maps schema failures into domain errors with formatted
    issues.
 
-   Adaptation for `agentctl`:
+   Adaptation for `ax`:
 
    - shared schemas for `SessionId`, `TurnId`, `SkillId`, `FileId`,
      `CommitSha`, `RepositoryKey`, `CheckoutKey`
@@ -83,7 +83,7 @@ patterns worth adapting into `agentctl`.
    wrappers because tests can assert exact command shape without invoking real
    tools.
 
-   Adaptation for `agentctl`:
+   Adaptation for `ax`:
 
    - add mock layers around `SurrealClient`
    - test Git ingest correlation without a live DB where possible
@@ -108,7 +108,7 @@ patterns worth adapting into `agentctl`.
 7. Add structured logs and diagnostics before adding a benchmark framework.
 
    `t3code` does not have a first-class benchmark framework. It leans on
-   structured Effect logging, traces, and diagnostics. For `agentctl`, the
+   structured Effect logging, traces, and diagnostics. For `ax`, the
    empty-DB benchmark script is useful, but long-term performance evidence
    should come from ingest stage timings and query diagnostics stored as graph
    evidence.
@@ -121,7 +121,7 @@ patterns worth adapting into `agentctl`.
 
 ## What Not To Copy Yet
 
-- Do not split the repo into a monorepo only because `t3code` does. `agentctl`
+- Do not split the repo into a monorepo only because `t3code` does. `ax`
   is still small enough for a single package.
 - Do not rewrite all existing services to `Effect.Service`; the reference repo
   does not justify that, and our current `Context.Service` style is compatible.
@@ -132,7 +132,7 @@ patterns worth adapting into `agentctl`.
 
 ## Suggested Sequence
 
-1. Add `AgentctlConfig` with typed DB/path settings.
+1. Add `AxConfig` with typed DB/path settings.
 2. Add `ProcessService` and move Git command execution onto it.
 3. Introduce shared branded schemas and boundary decoders.
 4. Add mock layers for `SurrealClient` and process execution.

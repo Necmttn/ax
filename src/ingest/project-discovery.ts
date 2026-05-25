@@ -16,7 +16,7 @@ import { homedir } from "node:os";
 
 export interface ProjectRoot {
     /** Namespace used when re-naming a project skill / command. The repo's
-     *  directory basename (`ax`, `quera`, `expo-tailwind-app`, ...). */
+     *  directory basename (`ax`, `myapp`, `expo-tailwind-app`, ...). */
     readonly name: string;
     /** Absolute path of the repo on disk. */
     readonly path: string;

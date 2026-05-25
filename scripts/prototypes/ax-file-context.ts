@@ -11,11 +11,11 @@ import { errorSignatureRecordKey, symbolRecordKey } from "../../src/ingest/recor
 import { normalizeErrorSignature } from "../../src/ingest/turn-references.ts";
 
 const cfg = {
-    url: process.env.AX_DB_URL ?? process.env.AGENTCTL_DB_URL ?? "ws://127.0.0.1:8521",
-    ns: process.env.AX_DB_NS ?? process.env.AGENTCTL_DB_NS ?? "ax",
-    db: process.env.AX_DB_DB ?? process.env.AGENTCTL_DB_DB ?? "main",
-    user: process.env.AX_DB_USER ?? process.env.AGENTCTL_DB_USER ?? "root",
-    pass: process.env.AX_DB_PASS ?? process.env.AGENTCTL_DB_PASS ?? "root",
+    url: process.env.AX_DB_URL ?? "ws://127.0.0.1:8521",
+    ns: process.env.AX_DB_NS ?? "ax",
+    db: process.env.AX_DB_DB ?? "main",
+    user: process.env.AX_DB_USER ?? "root",
+    pass: process.env.AX_DB_PASS ?? "root",
 };
 
 interface Args {

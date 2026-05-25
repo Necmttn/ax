@@ -25,8 +25,8 @@ import { executeStatementsWith } from "../lib/shared/statement-exec.ts";
  * '#' are ignored.
  */
 const REPO_LIST_FILE =
-    process.env.AGENTCTL_REPO_LIST ??
-    join(homedir(), ".local", "share", "agentctl", "agentctl-repos.txt");
+    process.env.AX_REPO_LIST ??
+    join(homedir(), ".local", "share", "ax", "ax-repos.txt");
 
 /** Hard cap on history depth so cold runs stay bounded. */
 const DEFAULT_SINCE_DAYS = 30;
@@ -228,11 +228,11 @@ const buildRepoInfo = (path: string): Effect.Effect<RepoInfo> =>
         };
     });
 
-const COMMIT_DELIM = "--AGENTCTL-END--";
+const COMMIT_DELIM = "--AX-END--";
 
 const parseCommitLog = (raw: string): CommitRow[] => {
     const out: CommitRow[] = [];
-    // Each record: %H<tab>%aI<tab>%an<tab>%s\n--AGENTCTL-END--\n
+    // Each record: %H<tab>%aI<tab>%an<tab>%s\n--AX-END--\n
     const records = raw.split(`\n${COMMIT_DELIM}\n`).filter((r) => r.trim().length > 0);
     for (const rec of records) {
         const cleaned = rec.replace(/^\n+/, "");

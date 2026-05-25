@@ -2,7 +2,7 @@
 /**
  * Deprecation candidate generator for ~/.claude/self-improve/ pipeline.
  *
- * Calls `agentctl unused --days=90`, parses the human-readable output, then
+ * Calls `axctl unused --days=90`, parses the human-readable output, then
  * cross-references against ~/.claude/self-improve/keep.txt to filter the
  * always-keep list out. Writes structured JSON to:
  *   <RUN_DIR>/deprecation-candidates.json
@@ -14,12 +14,12 @@
  *   {
  *     generated_at: string (ISO),
  *     days: number,
- *     source: "agentctl",
+ *     source: "ax",
  *     candidates: Array<{ slug: string; scope: string; total_invocations: number; last_used: string | null }>,
  *     kept: string[]   // slugs that would be candidates but are protected by keep.txt
  *   }
  *
- * Graceful fallback: if `agentctl` is not on PATH, writes an empty result
+ * Graceful fallback: if `axctl` is not on PATH, writes an empty result
  * with source: "unavailable" and exits 0.
  */
 
@@ -37,7 +37,7 @@ interface Candidate {
 interface Result {
     generated_at: string;
     days: number;
-    source: "agentctl" | "unavailable";
+    source: "ax" | "unavailable";
     candidates: Candidate[];
     kept: string[];
 }
@@ -61,9 +61,9 @@ async function which(cmd: string): Promise<string | null> {
     });
 }
 
-async function runUnused(agentctlPath: string, days: number): Promise<string> {
+async function runUnused(axctlPath: string, days: number): Promise<string> {
     return new Promise((resolve, reject) => {
-        const child = spawn(agentctlPath, ["unused", `--days=${days}`], {
+        const child = spawn(axctlPath, ["unused", `--days=${days}`], {
             stdio: ["ignore", "pipe", "pipe"],
             env: process.env,
         });
@@ -72,7 +72,7 @@ async function runUnused(agentctlPath: string, days: number): Promise<string> {
         child.stdout.on("data", (d) => { stdout += d.toString(); });
         child.stderr.on("data", (d) => { stderr += d.toString(); });
         child.on("close", (code) => {
-            if (code !== 0) reject(new Error(`agentctl unused exited ${code}: ${stderr}`));
+            if (code !== 0) reject(new Error(`axctl unused exited ${code}: ${stderr}`));
             else resolve(stdout);
         });
         child.on("error", (err) => reject(err));
@@ -80,7 +80,7 @@ async function runUnused(agentctlPath: string, days: number): Promise<string> {
 }
 
 /**
- * Parse the human output of `agentctl unused`. Each row looks like:
+ * Parse the human output of `axctl unused`. Each row looks like:
  *   "<name>  [<scope>]  total=<n>  last=<iso|never>"
  * The trailing summary line ("N skills unused in last D days.") is ignored.
  */
@@ -132,8 +132,8 @@ async function main(): Promise<void> {
     const keep = await loadKeepList(homeDirArg);
     const generated_at = new Date().toISOString();
 
-    const agentctlPath = await which("agentctl");
-    if (!agentctlPath) {
+    const axctlPath = await which("axctl");
+    if (!axctlPath) {
         const empty: Result = {
             generated_at,
             days,
@@ -142,16 +142,16 @@ async function main(): Promise<void> {
             kept: [],
         };
         await writeFile(outPath, JSON.stringify(empty, null, 2));
-        console.log(`[deprecate-helper] agentctl not on PATH; wrote empty result to ${outPath}`);
+        console.log(`[deprecate-helper] axctl not on PATH; wrote empty result to ${outPath}`);
         return;
     }
 
     let stdout: string;
     try {
-        stdout = await runUnused(agentctlPath, days);
+        stdout = await runUnused(axctlPath, days);
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error(`[deprecate-helper] agentctl unused failed: ${msg}`);
+        console.error(`[deprecate-helper] axctl unused failed: ${msg}`);
         process.exit(1);
     }
 
@@ -162,7 +162,7 @@ async function main(): Promise<void> {
         if (keep.has(row.slug)) kept.push(row.slug);
         else candidates.push(row);
     }
-    const result: Result = { generated_at, days, source: "agentctl", candidates, kept };
+    const result: Result = { generated_at, days, source: "ax", candidates, kept };
     await writeFile(outPath, JSON.stringify(result, null, 2));
     console.log(
         `[deprecate-helper] wrote ${outPath}: ${candidates.length} candidate(s), ${kept.length} kept (days=${days})`,

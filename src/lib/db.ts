@@ -6,19 +6,19 @@ import {
     type Table,
 } from "surrealdb";
 import { Context, Effect, Layer, Schedule } from "effect";
-import { AgentctlConfig, type AgentctlConfigShape } from "./config.ts";
+import { AxConfig, type AxConfigShape } from "./config.ts";
 import { DbError } from "./errors.ts";
 
-export type DbConfig = AgentctlConfigShape["db"];
+export type DbConfig = AxConfigShape["db"];
 
-/** Back-compat: read DB knobs straight from env. Prefer the AgentctlConfig service. */
+/** Back-compat: read DB knobs straight from env. Prefer the AxConfig service. */
 export function envConfig(): DbConfig {
     return {
-        url: process.env.AX_DB_URL ?? process.env.AGENTCTL_DB_URL ?? "ws://127.0.0.1:8521",
-        ns: process.env.AX_DB_NS ?? process.env.AGENTCTL_DB_NS ?? "ax",
-        db: process.env.AX_DB_DB ?? process.env.AGENTCTL_DB_DB ?? "main",
-        user: process.env.AX_DB_USER ?? process.env.AGENTCTL_DB_USER ?? "root",
-        pass: process.env.AX_DB_PASS ?? process.env.AGENTCTL_DB_PASS ?? "root",
+        url: process.env.AX_DB_URL ?? "ws://127.0.0.1:8521",
+        ns: process.env.AX_DB_NS ?? "ax",
+        db: process.env.AX_DB_DB ?? "main",
+        user: process.env.AX_DB_USER ?? "root",
+        pass: process.env.AX_DB_PASS ?? "root",
     };
 }
 
@@ -124,7 +124,7 @@ export const filePointer = (bucket: string, path: string): string =>
 export class SurrealClient extends Context.Service<
     SurrealClient,
     SurrealClientShape
->()("agentctl/SurrealClient") {}
+>()("ax/SurrealClient") {}
 
 const connectError = (url: string, reason: string): DbError =>
     new DbError({
@@ -252,10 +252,10 @@ const wrap = (db: Surreal): SurrealClientShape => ({
  * Layer that connects to SurrealDB on acquisition, exposes a `SurrealClient`
  * service, and closes the underlying connection on scope close.
  */
-export const SurrealClientLive: Layer.Layer<SurrealClient, DbError, AgentctlConfig> =
+export const SurrealClientLive: Layer.Layer<SurrealClient, DbError, AxConfig> =
     Layer.effect(SurrealClient)(
         Effect.gen(function* () {
-            const cfg = yield* AgentctlConfig;
+            const cfg = yield* AxConfig;
             const db = yield* Effect.acquireRelease(acquire(cfg.db), release);
             return wrap(db);
         }),

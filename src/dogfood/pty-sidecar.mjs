@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 import process from "node:process";
 
 const options = JSON.parse(process.argv[2] ?? "{}");
-const root = options.root ?? process.env.AX_REPO_ROOT ?? process.env.AGENTCTL_REPO_ROOT ?? process.cwd();
+const root = options.root ?? process.env.AX_REPO_ROOT ?? process.cwd();
 const require = createRequire(`${root}/package.json`);
 const pty = require("node-pty");
 

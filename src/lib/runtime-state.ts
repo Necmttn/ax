@@ -25,7 +25,6 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 export function runtimeStatePath(
     dataDir = process.env.AX_DATA_DIR ??
-        process.env.AGENTCTL_DATA_DIR ??
         join(homedir(), ".local", "share", "ax"),
 ): string {
     return join(dataDir, "runtime.json");

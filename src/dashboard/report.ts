@@ -52,7 +52,7 @@ interface DashboardOpts {
 }
 
 const DEFAULT_DASHBOARD_PATH = join(
-    process.env.AX_DATA_DIR ?? process.env.AGENTCTL_DATA_DIR ?? join(homedir(), ".local", "share", "ax"),
+    process.env.AX_DATA_DIR ?? join(homedir(), ".local", "share", "ax"),
     "dashboard.html",
 );
 

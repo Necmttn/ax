@@ -204,10 +204,10 @@ describe("git ingest relation statements", () => {
     test("derives repository display name from remote before checkout path", () => {
         expect(
             deriveRepositoryDisplayName(
-                "github.com/noktadev/quera",
-                "/Users/necmttn/Projects/quera/.claude/worktrees/fix-kg",
+                "github.com/acme/myapp",
+                "/Users/necmttn/Projects/myapp/.claude/worktrees/fix-kg",
             ),
-        ).toBe("quera");
+        ).toBe("myapp");
         expect(deriveRepositoryDisplayName(null, "/tmp/worktree-a")).toBe("worktree-a");
     });
 });

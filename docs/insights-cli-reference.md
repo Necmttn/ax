@@ -7,26 +7,26 @@ instead of embedding ad hoc SurrealQL that can drift from the schema.
 Example commands:
 
 ```bash
-agentctl insights
-agentctl insights schema
-agentctl insights repositories --limit=25
-agentctl insights checkouts --limit=25
-agentctl insights git --limit=25
-agentctl insights friction --limit=50
-agentctl insights tools --limit=20
-agentctl insights sessions --limit=20
-agentctl insights feedback-loops --limit=20
-agentctl insights verification-gaps --limit=20
-agentctl insights user-language --limit=20
-agentctl insights token-impact --limit=20
-agentctl insights cache-health --limit=20
-agentctl insights workflow-impact --limit=20
-agentctl insights codex-health --limit=20
-agentctl insights closure --limit=20
-agentctl insights post-feature-fixes --limit=20
-agentctl insights skill-candidates --limit=20
-agentctl insights graph-health --limit=10
-agentctl dashboard --limit=25
+axctl insights
+axctl insights schema
+axctl insights repositories --limit=25
+axctl insights checkouts --limit=25
+axctl insights git --limit=25
+axctl insights friction --limit=50
+axctl insights tools --limit=20
+axctl insights sessions --limit=20
+axctl insights feedback-loops --limit=20
+axctl insights verification-gaps --limit=20
+axctl insights user-language --limit=20
+axctl insights token-impact --limit=20
+axctl insights cache-health --limit=20
+axctl insights workflow-impact --limit=20
+axctl insights codex-health --limit=20
+axctl insights closure --limit=20
+axctl insights post-feature-fixes --limit=20
+axctl insights skill-candidates --limit=20
+axctl insights graph-health --limit=10
+axctl dashboard --limit=25
 ```
 
 The builders target the current schema fields directly:
@@ -80,24 +80,24 @@ The Harness Doctor slice adds schema support for these tables:
 
 Current implementation status:
 
-- `agentctl project harness` scans repo-local and global guidance sources at
+- `axctl project harness` scans repo-local and global guidance sources at
   report time.
-- `agentctl project harness --json` returns Guidance Sources, Guidance
+- `axctl project harness --json` returns Guidance Sources, Guidance
   Revisions, Stack signals, Agent Tooling signals, Harness Doctor findings, the
   first local Harness Learning candidate, an Intervention suggestion, and an
   Intervention Observation.
-- `agentctl project harness` also reads existing `tool_call`, `edited`, and
+- `axctl project harness` also reads existing `tool_call`, `edited`, and
   `produced` graph evidence so observed tooling and main-branch write-risk
   signals are grounded in the current database.
-- Default `agentctl ingest` persists the Harness Doctor report into the staged
+- Default `axctl ingest` persists the Harness Doctor report into the staged
   Harness Doctor tables via the `harness/doctor` ingest stage.
-- Default `agentctl ingest` also persists command outcome classifications and
+- Default `axctl ingest` also persists command outcome classifications and
   user-message n-grams via the `outcomes/derive` ingest stage.
-- Default `agentctl ingest` persists token/cache/workflow health via the
+- Default `axctl ingest` persists token/cache/workflow health via the
   `session-health/derive` ingest stage.
-- Default `agentctl ingest` persists commit lifecycle, post-feature fix-chain,
+- Default `axctl ingest` persists commit lifecycle, post-feature fix-chain,
   and skill-candidate records via the `closure/derive` ingest stage.
-- Default `agentctl ingest` persists gotchas, taste signals, workflows,
+- Default `axctl ingest` persists gotchas, taste signals, workflows,
   learning feedback, learning matches, and draft adoptions via the
   `learning-registry/derive` ingest stage.
 
@@ -112,8 +112,8 @@ The harness ingest stage is idempotent and:
 6. Upserts approval-gated `intervention` suggestions.
 7. Upserts `intervention_observation` rows with before/after metric fields.
 
-Use `agentctl project harness --json` as the canonical report surface and
-`agentctl insights schema` to verify durable table population after ingest.
+Use `axctl project harness --json` as the canonical report surface and
+`axctl insights schema` to verify durable table population after ingest.
 
 ## Command Outcome And User Language Tables
 
@@ -194,18 +194,18 @@ The learning-registry slice adds:
 learnings into draft-only local registry rows. Hosted sharing, public taste
 cards, and auto-publishing are intentionally disabled in these seed records.
 
-`agentctl onboarding --json` checks whether global Claude, Codex, and shared
+`axctl onboarding --json` checks whether global Claude, Codex, and shared
 agent guidance directories are git-tracked. This gives future guidance and
-skill experiments commit evidence before agentctl starts recommending harness
+skill experiments commit evidence before ax starts recommending harness
 changes.
 
-`agentctl interventions list|impact|regressions|candidates --json` is the first
+`axctl interventions list|impact|regressions|candidates --json` is the first
 read surface for intervention lifecycle work: proposed interventions, measured
 observations, high-risk regression sessions, and candidate skills.
 
 SurrealKit workflow takeaway: local development can keep importing the schema
 directly for now. Tests should prefer isolated databases or namespaces so
-query/integration runs do not mutate the user's main `agentctl/main` graph.
+query/integration runs do not mutate the user's main `ax/main` graph.
 A future schema sync and rollout workflow can be added once the evidence graph
 stabilizes.
 
@@ -317,30 +317,30 @@ Legacy self-improve importer behavior:
 
 Install onboarding dogfood:
 
-- `./dist/agentctl onboarding --json` and `bun src/cli/index.ts onboarding
+- `./dist/axctl onboarding --json` and `bun src/cli/index.ts onboarding
   --json` returned the same local harness tracking state.
 - Claude global guidance and shared agent skills were already git-tracked.
 - Codex global guidance was the only warning: `/Users/necmttn/.codex`.
 - The install onboarding formatter produced a host-agent checklist scoped to
-  that warning, with guidance to use `agentctl onboarding --json`, track only
+  that warning, with guidance to use `axctl onboarding --json`, track only
   guidance/hooks/skills/commands/settings, exclude transcripts/caches/logs/
   secrets/generated artifacts, commit `chore: track agent harness`, and rerun
   onboarding.
 
 wterm terminal dogfood:
 
-- `./dist/agentctl dogfood terminal --scenario=agentctl-setup --transport=pty
+- `./dist/axctl dogfood terminal --scenario=axctl-setup --transport=pty
   --port=1744 --json` served a browser-rendered wterm terminal backed by a
   Node `node-pty` sidecar.
 - `agent-browser open http://127.0.0.1:1742/` loaded the wterm DOM frontend and
   drove the scenario through the browser.
-- The scratch setup scenario demonstrated `agentctl --help`, initial
-  `agentctl onboarding --json` warnings for `.claude`, `.codex`, and
+- The scratch setup scenario demonstrated `axctl --help`, initial
+  `axctl onboarding --json` warnings for `.claude`, `.codex`, and
   `.agents`, host-agent-style git tracking of those harness dirs, and a second
   onboarding check returning all `ok`.
 - Latest passing run wrote
   `intervention_observation:dogfood_wterm_setup__bea19103cb17318a` with
-  `target=agentctl_setup_wterm_dogfood`, `status=passed`, and
+  `target=axctl_setup_wterm_dogfood`, `status=passed`, and
   `transport=pty`.
 - The transcript was stored as
   `artifact:dogfood_wterm_setup__bea19103cb17318a__transcript`.
@@ -349,7 +349,7 @@ wterm terminal dogfood:
   `--transport=process` as a fallback. Free-running Claude-driver automation
   remains the next driver slice.
 - Interactive mode now runs with
-  `./dist/agentctl dogfood terminal --scenario=interactive --transport=pty
+  `./dist/axctl dogfood terminal --scenario=interactive --transport=pty
   --command='bash -l' --port=1747 --json`. `agent-browser` drove the terminal
   by typing `echo AGENT_BROWSER_STEERED_INTERACTIVE`, then `exit`; the latest
   result was `status=completed`, `transport=pty`, and the transcript contained
@@ -375,30 +375,30 @@ wterm terminal dogfood:
   `metrics.marker_found=false`.
 
 Harness Doctor schema additions are populated by default ingest. If they are
-empty, run `agentctl ingest --since=1` and inspect the `harness/doctor` ingest
+empty, run `axctl ingest --since=1` and inspect the `harness/doctor` ingest
 stage.
 
 Dashboard generated at:
 
-`file:///Users/necmttn/.local/share/agentctl/dashboard.html`
+`file:///Users/necmttn/.local/share/ax/dashboard.html`
 
 ## Empty DB Benchmarks
 
 Use `scripts/bench-empty-db.sh` for cold ingest timing without mutating
-`agentctl/main`:
+`ax/main`:
 
 ```bash
 scripts/bench-empty-db.sh --since=90
 ```
 
-The script selects a unique `AGENTCTL_DB_DB=bench_<timestamp>`, applies the
+The script selects a unique `AX_DB_DB=bench_<timestamp>`, applies the
 schema, runs ingest, imports Claude insights, writes `schema.json`,
 `checkouts.json`, and `git.json`, and generates a static dashboard under
-`~/.local/share/agentctl/benchmarks/<db>/`.
+`~/.local/share/ax/benchmarks/<db>/`.
 
 Repo initialization is not per-project. Ingest discovers repositories from
 existing transcript `cwd` values and optionally from
-`~/.local/share/agentctl/agentctl-repos.txt`. The Git pass backfills
+`~/.local/share/ax/ax-repos.txt`. The Git pass backfills
 `session.repository` and `session.checkout`; `produced` edges are then tied to
 the checkout plus commit timestamp, while `touched` edges connect commits to
 canonical repository-relative files.

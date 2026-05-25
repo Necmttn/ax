@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { AgentctlConfig, AgentctlConfigTest, envSnapshot, makeTestConfig } from "./config.ts";
+import { AxConfig, AxConfigTest, envSnapshot, makeTestConfig } from "./config.ts";
 
-describe("AgentctlConfig", () => {
+describe("AxConfig", () => {
     test("envSnapshot honors env overrides", () => {
         const snap = envSnapshot({
             AX_DB_URL: "ws://example:9999",
@@ -35,14 +35,14 @@ describe("AgentctlConfig", () => {
         expect(snap.knobs.codexPayloadMaxBytes).toBe(1200);
     });
 
-    test("AgentctlConfigTest layer provides overridden values", async () => {
+    test("AxConfigTest layer provides overridden values", async () => {
         const program = Effect.gen(function* () {
-            const cfg = yield* AgentctlConfig;
+            const cfg = yield* AxConfig;
             return cfg.db.url;
         });
         const url = await Effect.runPromise(
             program.pipe(
-                Effect.provide(AgentctlConfigTest({ db: { url: "ws://test:1234" } as never })),
+                Effect.provide(AxConfigTest({ db: { url: "ws://test:1234" } as never })),
             ),
         );
         expect(url).toBe("ws://test:1234");

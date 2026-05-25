@@ -44,7 +44,7 @@ export const loadDiagnosticConfig = (root: string | null): Effect.Effect<Diagnos
         if (!root) return null;
         const path = existsSync(join(root, ".axctl", "config.json"))
             ? join(root, ".axctl", "config.json")
-            : join(root, ".agentctl", "config.json");
+            : join(root, ".ax", "config.json");
         if (!existsSync(path)) return null;
         const raw = yield* Effect.tryPromise({
             try: () => readFile(path, "utf8"),

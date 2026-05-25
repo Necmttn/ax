@@ -12,7 +12,7 @@ import {
 } from "./runtime-state.ts";
 
 function withTempDir<T>(fn: (dir: string) => T): T {
-    const dir = mkdtempSync(join(tmpdir(), "agentctl-runtime-"));
+    const dir = mkdtempSync(join(tmpdir(), "ax-runtime-"));
     try {
         return fn(dir);
     } finally {

@@ -26,7 +26,7 @@ for arg in "$@"; do
   esac
 done
 
-OUT_DIR="${AGENTCTL_BENCH_DIR:-$HOME/.local/share/ax/benchmarks/$DB}"
+OUT_DIR="${AX_BENCH_DIR:-$HOME/.local/share/ax/benchmarks/$DB}"
 mkdir -p "$OUT_DIR"
 
 run_step() {

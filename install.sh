@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="${AXCTL_REPO:-${AGENTCTL_REPO:-Necmttn/ax}}"
-VERSION="${AXCTL_VERSION:-${AGENTCTL_VERSION:-latest}}"
-INSTALL_ROOT="${AXCTL_INSTALL_ROOT:-${AGENTCTL_INSTALL_ROOT:-$HOME/.local/share/ax}}"
-BIN_DIR="${AXCTL_BIN_DIR:-${AGENTCTL_BIN_DIR:-$HOME/.local/bin}}"
-RUN_INSTALL="${AXCTL_RUN_INSTALL:-${AGENTCTL_RUN_INSTALL:-1}}"
+REPO="${AXCTL_REPO:-Necmttn/ax}"
+VERSION="${AXCTL_VERSION:-latest}"
+INSTALL_ROOT="${AXCTL_INSTALL_ROOT:-$HOME/.local/share/ax}"
+BIN_DIR="${AXCTL_BIN_DIR:-$HOME/.local/bin}"
+RUN_INSTALL="${AXCTL_RUN_INSTALL:-1}"
 BINARY_PATH=""
 MODIFY_PATH=1
 
@@ -140,9 +140,9 @@ download_with_curl() {
 platform="$(detect_platform)"
 artifact="axctl-${platform}.tar.gz"
 
-if [[ -z "$BINARY_PATH" && "$VERSION" != "latest" && "$(command -v axctl || command -v agentctl || true)" != "" ]]; then
-  installed="$({ axctl --version || agentctl --version; } 2>/dev/null || true)"
-  if [[ "$installed" == "${VERSION#v}" || "$installed" == *"axctl ${VERSION#v}"* || "$installed" == *"agentctl ${VERSION#v}"* || "$installed" == *"axctl v${VERSION#v}"* || "$installed" == *"agentctl v${VERSION#v}"* ]]; then
+if [[ -z "$BINARY_PATH" && "$VERSION" != "latest" && "$(command -v axctl || true)" != "" ]]; then
+  installed="$(axctl --version 2>/dev/null || true)"
+  if [[ "$installed" == "${VERSION#v}" || "$installed" == *"axctl ${VERSION#v}"* || "$installed" == *"axctl v${VERSION#v}"* ]]; then
     echo "[axctl] version ${VERSION#v} already installed"
     exit 0
   fi
@@ -207,12 +207,10 @@ else
 fi
 ln -sfn "$install_bin" "$BIN_DIR/axctl"
 ln -sfn "$install_bin" "$BIN_DIR/ax"
-ln -sfn "$install_bin" "$BIN_DIR/agentctl"
 
 echo "[axctl] installed binary: $install_bin"
 echo "[axctl] symlink: $BIN_DIR/axctl -> $install_bin"
 echo "[axctl] alias symlink: $BIN_DIR/ax -> $install_bin"
-echo "[axctl] legacy symlink: $BIN_DIR/agentctl -> $install_bin"
 
 if [[ "$MODIFY_PATH" == "1" && ":$PATH:" != *":$BIN_DIR:"* ]]; then
   echo "[axctl] add this to PATH if needed: export PATH=\"$BIN_DIR:\$PATH\""

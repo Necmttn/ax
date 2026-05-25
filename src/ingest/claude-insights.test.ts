@@ -110,7 +110,7 @@ describe("Claude insights conversion", () => {
             },
             meta: {
                 session_id: "session-3",
-                project_path: "/Users/necmttn/Projects/agentctl",
+                project_path: "/Users/necmttn/Projects/ax",
                 start_time: "2026-05-04T01:19:27.501Z",
                 duration_minutes: 2,
                 user_message_count: 4,
@@ -127,7 +127,7 @@ describe("Claude insights conversion", () => {
         });
 
         expect(converted.insight.labels).toMatchObject({
-            project_path: "/Users/necmttn/Projects/agentctl",
+            project_path: "/Users/necmttn/Projects/ax",
         });
         expect(converted.insight.metrics).toMatchObject({
             friction_counts: {
@@ -150,7 +150,7 @@ describe("Claude insights conversion", () => {
     });
 
     test("reads facets with matching session-meta and skips malformed JSON", async () => {
-        const root = await mkdtemp(join(tmpdir(), "agentctl-insights-"));
+        const root = await mkdtemp(join(tmpdir(), "ax-insights-"));
         try {
             await mkdir(join(root, "facets"));
             await mkdir(join(root, "session-meta"));

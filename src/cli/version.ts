@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 
-export const AGENTCTL_VERSION = "0.1.1";
+export const AX_VERSION = "0.1.1";
 export const DEFAULT_REPO = "Necmttn/ax";
 
 export interface LatestRelease {
@@ -73,7 +73,7 @@ async function githubFetch(path: string, accept: string): Promise<Response> {
     const token = githubToken();
     const headers: Record<string, string> = {
         accept,
-        "user-agent": `axctl/${AGENTCTL_VERSION}`,
+        "user-agent": `axctl/${AX_VERSION}`,
     };
     if (token) headers.authorization = `Bearer ${token}`;
     return fetch(`https://api.github.com/${path}`, { headers });
@@ -141,15 +141,15 @@ export async function printVersion(args: string[], deps: VersionDeps): Promise<v
     if (check) {
         latest = await deps.fetchLatestRelease(DEFAULT_REPO);
     }
-    const status = versionStatus(AGENTCTL_VERSION, latest);
+    const status = versionStatus(AX_VERSION, latest);
     console.log(json ? JSON.stringify(status, null, 2) : formatVersionStatus(status));
 }
 
-export async function updateAgentctl(args: string[], deps: VersionDeps): Promise<void> {
+export async function updateAxctl(args: string[], deps: VersionDeps): Promise<void> {
     const checkOnly = args.includes("--check");
     const json = args.includes("--json");
     const latest = await deps.fetchLatestRelease(DEFAULT_REPO);
-    const status = versionStatus(AGENTCTL_VERSION, latest);
+    const status = versionStatus(AX_VERSION, latest);
     if (checkOnly) {
         console.log(json ? JSON.stringify(status, null, 2) : formatVersionStatus(status));
         return;
@@ -159,7 +159,7 @@ export async function updateAgentctl(args: string[], deps: VersionDeps): Promise
         return;
     }
 
-    console.log(`updating axctl ${AGENTCTL_VERSION} -> ${latest.tagName}`);
+    console.log(`updating axctl ${AX_VERSION} -> ${latest.tagName}`);
     const script = await deps.fetchInstallScript(DEFAULT_REPO);
     const env = {
         ...(deps.env ?? process.env),

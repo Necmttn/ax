@@ -178,7 +178,7 @@ export function resolveDogfoodAgentPreset(agent: DogfoodAgent = "shell"): Dogfoo
     }
 }
 
-export async function createAgentctlSetupDemoScript(root = repoRoot()): Promise<DogfoodTerminalSession> {
+export async function createAxctlSetupDemoScript(root = repoRoot()): Promise<DogfoodTerminalSession> {
     const workRoot = await mkdtemp(join(tmpdir(), "axctl-wterm-dogfood-"));
     const home = join(workRoot, "home");
     const scratch = join(workRoot, "scratch");
@@ -272,7 +272,7 @@ async function createDogfoodSession(args: DogfoodTerminalArgs, root: string): Pr
             ...(args.successMarker ? { successMarker: args.successMarker } : {}),
         });
     }
-    return createAgentctlSetupDemoScript(root);
+    return createAxctlSetupDemoScript(root);
 }
 
 export function dogfoodHtml(

@@ -2,7 +2,7 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { SurrealClient, RecordId } from "../lib/db.ts";
-import { AgentctlConfig } from "../lib/config.ts";
+import { AxConfig } from "../lib/config.ts";
 import type { DbError } from "../lib/errors.ts";
 import { surrealLiteral } from "../lib/json.ts";
 import { decodeJsonOrNull } from "../lib/decode.ts";
@@ -136,10 +136,10 @@ export const deriveClaudeSubagents = (
 ): Effect.Effect<
     DeriveClaudeSubagentsStats,
     DbError,
-    SurrealClient | AgentctlConfig
+    SurrealClient | AxConfig
 > =>
     Effect.gen(function* () {
-        const cfg = yield* AgentctlConfig;
+        const cfg = yield* AxConfig;
         const db = yield* SurrealClient;
         if (opts.onProgress) yield* opts.onProgress({ phase: 1 });
         const manifests = yield* Effect.promise(() => discover(cfg.paths.transcriptsDir));

@@ -6,7 +6,7 @@ import {
 } from "./signals.ts";
 
 const base: SignalInput = {
-    sessions: [{ id: "session:one", project: "agentctl", startedAt: "2026-05-10T00:00:00.000Z" }],
+    sessions: [{ id: "session:one", project: "ax", startedAt: "2026-05-10T00:00:00.000Z" }],
     toolCalls: [],
     planSnapshots: [],
 };

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
-PORT="${AX_DB_PORT:-${AGENTCTL_DB_PORT:-8521}}"
-USER="${AX_DB_USER:-${AGENTCTL_DB_USER:-root}}"
-PASS="${AX_DB_PASS:-${AGENTCTL_DB_PASS:-root}}"
+PORT="${AX_DB_PORT:-8521}"
+USER="${AX_DB_USER:-root}"
+PASS="${AX_DB_PASS:-root}"
 NS="${AX_DB_NS:-ax}"
 DB="${AX_DB_DB:-main}"
 SCHEMA="$(dirname "$0")/../schema/schema.surql"

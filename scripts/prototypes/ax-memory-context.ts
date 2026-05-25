@@ -16,11 +16,11 @@ import {
 } from "./ax-memory-context-logic.ts";
 
 const cfg = {
-    url: process.env.AX_DB_URL ?? process.env.AGENTCTL_DB_URL ?? "ws://127.0.0.1:8521",
-    ns: process.env.AX_DB_NS ?? process.env.AGENTCTL_DB_NS ?? "ax",
-    db: process.env.AX_DB_DB ?? process.env.AGENTCTL_DB_DB ?? "main",
-    user: process.env.AX_DB_USER ?? process.env.AGENTCTL_DB_USER ?? "root",
-    pass: process.env.AX_DB_PASS ?? process.env.AGENTCTL_DB_PASS ?? "root",
+    url: process.env.AX_DB_URL ?? "ws://127.0.0.1:8521",
+    ns: process.env.AX_DB_NS ?? "ax",
+    db: process.env.AX_DB_DB ?? "main",
+    user: process.env.AX_DB_USER ?? "root",
+    pass: process.env.AX_DB_PASS ?? "root",
 };
 
 const htmlArgIndex = process.argv.findIndex((arg) => arg === "--html" || arg.startsWith("--html="));
@@ -82,7 +82,7 @@ async function loadTaskTurns(db: Surreal): Promise<TaskTurn[]> {
         if (text.startsWith("<subagent_notification>")) return false;
         if (text.startsWith("This session is being continued from a previous conversation")) return false;
         if (text.startsWith("Implementer subagent in SDD workflow")) return false;
-        if (text.startsWith("You are dogfooding `agentctl`")) return false;
+        if (text.startsWith("You are dogfooding `ax`")) return false;
         if (text.startsWith("You are reconnoitering")) return false;
         if (/dogfood v2|dogfood run complete|prompts tested/i.test(text)) return false;
         return true;

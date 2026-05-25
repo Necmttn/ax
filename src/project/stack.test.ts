@@ -7,7 +7,7 @@ import { extractInstructionMatches, loadPackageInfo, packageSignals } from "./st
 
 describe("loadPackageInfo", () => {
     test("invalid package.json returns empty dependencies/scripts instead of throwing", async () => {
-        const root = await mkdtemp(join(tmpdir(), "agentctl-stack-"));
+        const root = await mkdtemp(join(tmpdir(), "ax-stack-"));
         try {
             await writeFile(join(root, "package.json"), "{invalid json", "utf8");
 

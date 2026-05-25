@@ -93,7 +93,7 @@ describe("Codex transcript extraction", () => {
                 timestamp: "2026-05-09T10:00:00.000Z",
                 payload: {
                     id: "codex-user-text",
-                    cwd: "/Users/necmttn/Projects/agentctl",
+                    cwd: "/Users/necmttn/Projects/ax",
                     timestamp: "2026-05-09T10:00:00.000Z",
                 },
             }),
@@ -186,7 +186,7 @@ describe("Codex transcript extraction", () => {
                 timestamp: "2026-05-09T10:00:00.000Z",
                 payload: {
                     id: "codex-session",
-                    cwd: "/Users/necmttn/Projects/agentctl",
+                    cwd: "/Users/necmttn/Projects/ax",
                     cli_version: "0.1.0",
                     model_provider: "openai",
                     timestamp: "2026-05-09T10:00:00.000Z",
@@ -201,7 +201,7 @@ describe("Codex transcript extraction", () => {
                     call_id: "call_exec",
                     arguments: JSON.stringify({
                         cmd: "git status --short",
-                        workdir: "/Users/necmttn/Projects/agentctl",
+                        workdir: "/Users/necmttn/Projects/ax",
                     }),
                 },
             }),
@@ -249,7 +249,7 @@ describe("Codex transcript extraction", () => {
                 skill: "codex:exec_command",
                 args: JSON.stringify({
                     cmd: "git status --short",
-                    workdir: "/Users/necmttn/Projects/agentctl",
+                    workdir: "/Users/necmttn/Projects/ax",
                 }),
             },
             {
@@ -277,10 +277,10 @@ describe("Codex transcript extraction", () => {
             turnKey: turnRecordKey("codex-session", 1),
             callId: "call_exec",
             ts: "2026-05-09T10:00:01.000Z",
-            cwd: "/Users/necmttn/Projects/agentctl",
+            cwd: "/Users/necmttn/Projects/ax",
             inputJson: {
                 cmd: "git status --short",
-                workdir: "/Users/necmttn/Projects/agentctl",
+                workdir: "/Users/necmttn/Projects/ax",
             },
             commandText: "git status --short",
             commandToolName: "git",
@@ -368,7 +368,7 @@ describe("Codex transcript extraction", () => {
                 timestamp: "2026-05-09T10:00:00.000Z",
                 payload: {
                     id: "codex-stream-session",
-                    cwd: "/Users/necmttn/Projects/agentctl",
+                    cwd: "/Users/necmttn/Projects/ax",
                     timestamp: "2026-05-09T10:00:00.000Z",
                 },
             }),
@@ -398,7 +398,7 @@ describe("Codex transcript extraction", () => {
                 payload: {
                     type: "function_call_output",
                     call_id: "call_one",
-                    output: "Chunk ID: one\nProcess exited with code 0\nOutput:\n/Users/necmttn/Projects/agentctl\n",
+                    output: "Chunk ID: one\nProcess exited with code 0\nOutput:\n/Users/necmttn/Projects/ax\n",
                 },
             }),
         ], 2);
@@ -408,7 +408,7 @@ describe("Codex transcript extraction", () => {
         expect(batches[0]?.toolCalls).toHaveLength(0);
         expect(batches[1]?.turns).toHaveLength(2);
         expect(batches[1]?.toolCalls.map((call) => call.callId)).toEqual(["call_one"]);
-        expect(batches[1]?.toolCalls[0]?.outputExcerpt).toBe("/Users/necmttn/Projects/agentctl");
+        expect(batches[1]?.toolCalls[0]?.outputExcerpt).toBe("/Users/necmttn/Projects/ax");
         expect(batches[2]?.turns).toHaveLength(0);
         expect(batches[2]?.toolCalls.map((call) => call.callId)).toEqual(["call_two"]);
         expect(batches[2]?.toolCalls[0]?.outputExcerpt).toBeUndefined();
@@ -421,7 +421,7 @@ describe("Codex transcript extraction", () => {
                 timestamp: "2026-05-09T10:00:00.000Z",
                 payload: {
                     id: "codex-id-check",
-                    cwd: "/Users/necmttn/Projects/agentctl",
+                    cwd: "/Users/necmttn/Projects/ax",
                     timestamp: "2026-05-09T10:00:00.000Z",
                 },
             }),
@@ -452,7 +452,7 @@ describe("Codex transcript extraction", () => {
                 timestamp: "2026-05-09T10:00:00.000Z",
                 payload: {
                     id: "codex-plan-session",
-                    cwd: "/Users/necmttn/Projects/agentctl",
+                    cwd: "/Users/necmttn/Projects/ax",
                     timestamp: "2026-05-09T10:00:00.000Z",
                 },
             }),

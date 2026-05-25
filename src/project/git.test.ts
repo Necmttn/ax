@@ -10,7 +10,7 @@ const STATUS_OUTPUT = ["## main", "M  src/a.ts", " M src/b.ts", "?? new.md", ""]
 
 describe("getGitState", () => {
     test("returns parsed branch and changes with mocked git", async () => {
-        const root = await mkdtemp(join(tmpdir(), "agentctl-git-"));
+        const root = await mkdtemp(join(tmpdir(), "ax-git-"));
         try {
             await mkdir(join(root, ".git"));
 
@@ -41,7 +41,7 @@ describe("getGitState", () => {
     });
 
     test("returns empty state when not in a git repo", async () => {
-        const root = await mkdtemp(join(tmpdir(), "agentctl-git-nogit-"));
+        const root = await mkdtemp(join(tmpdir(), "ax-git-nogit-"));
         try {
             const layer = ProcessServiceTest({ route: () => new Error("should not run") });
             const state = await Effect.runPromise(getGitState(root).pipe(Effect.provide(layer)));

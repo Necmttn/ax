@@ -4,7 +4,7 @@ Date: 2026-05-11
 
 ## Context
 
-We explored the current `agentctl` graph to find useful insight patterns. The first obvious metrics, such as "most touched files" and raw command failure counts, were not useful enough:
+We explored the current `ax` graph to find useful insight patterns. The first obvious metrics, such as "most touched files" and raw command failure counts, were not useful enough:
 
 - Most-touched files surfaced noisy artifacts such as lockfiles and deployment config.
 - Raw `tool_call.has_error = true` treated expected feedback loops as friction.
@@ -87,9 +87,9 @@ Success criteria:
 - Keep expected TDD/test/search failures out of generic friction.
 - Surface repeated unresolved failures and user corrections as high-signal friction.
 - Provide 3 CLI views:
-  - `agentctl insights feedback-loops`
-  - `agentctl insights verification-gaps`
-  - `agentctl insights user-language`
+  - `ax insights feedback-loops`
+  - `ax insights verification-gaps`
+  - `ax insights user-language`
 
 ## Candidate Queries
 
@@ -281,7 +281,7 @@ Compare before/after:
 Potential CLI:
 
 ```bash
-agentctl insights workflow-impact gsd superpowers
+ax insights workflow-impact gsd superpowers
 ```
 
 Output should include:
@@ -339,9 +339,9 @@ Questions this should answer:
 Potential CLI:
 
 ```bash
-agentctl insights token-impact
-agentctl insights cache-health
-agentctl insights workflow-impact gsd superpowers --tokens
+ax insights token-impact
+ax insights cache-health
+ax insights workflow-impact gsd superpowers --tokens
 ```
 
 ## Post-Closure Quality From Git
@@ -394,9 +394,9 @@ Why this matters:
 Potential CLI:
 
 ```bash
-agentctl insights closure
-agentctl insights post-feature-fixes
-agentctl insights commit-quality <sha>
+ax insights closure
+ax insights post-feature-fixes
+ax insights commit-quality <sha>
 ```
 
 ## Skill Candidate Discovery
@@ -455,7 +455,7 @@ There are two related but distinct data sources:
 - Claude insights usage data in `~/.claude/usage-data/facets` and `~/.claude/usage-data/session-meta`.
 - The older dotfiles self-improve pipeline in `~/.dotfiles/claude/.claude/self-improve`.
 
-Current `agentctl` Claude insights import reads Claude usage-data facets/session metadata and converts them into:
+Current `ax` Claude insights import reads Claude usage-data facets/session metadata and converts them into:
 
 - `insight` rows with `kind = "claude_insights"`
 - `friction_event` rows from `facet.friction_counts`
@@ -507,10 +507,10 @@ Recommended unification:
 - Keep Claude usage-data import as the source of session-level classifications and metrics.
 - Add a legacy self-improve artifact importer for `runs/*/events.jsonl`, `clusters.json`, `proposed-claudemd.md`, and `_spend.log`.
   Implemented in `src/ingest/legacy-self-improve.ts` and wired into
-  `agentctl ingest-insights`; imported rows are modeled as evidence artifacts
+  `ax ingest-insights`; imported rows are modeled as evidence artifacts
   with `self_improve_run`, `artifact`, `friction_event`, `insight`,
   `has_artifact`, and `derived_from`.
-- Move reusable detectors from dotfiles into `agentctl` signal derivation or a shared package.
+- Move reusable detectors from dotfiles into `ax` signal derivation or a shared package.
 - Model both sources as evidence, not final truth, so graph insights can compare Claude's classification against local transcript-derived signals.
 
 This gives one graph view over:
@@ -561,7 +561,7 @@ So the product answer is:
 
 - Claude has first-party generated insight artifacts.
 - Codex has better raw telemetry and lifecycle events.
-- `agentctl` should derive Codex insights itself from Codex event logs and SQLite state.
+- `ax` should derive Codex insights itself from Codex event logs and SQLite state.
 
 Potential Codex-derived insight types:
 
@@ -780,7 +780,7 @@ The report works because it mixes:
 - actionable artifacts: copyable CLAUDE.md snippets, prompts, hooks, skills
 - future roadmap: ambitious workflows
 
-`agentctl insights report` should do the same, but with graph evidence links and provider comparison across Claude and Codex.
+`ax insights report` should do the same, but with graph evidence links and provider comparison across Claude and Codex.
 
 ## Intervention Lifecycle: Skills, Hooks, And Instruction Changes
 
@@ -890,11 +890,11 @@ Important side-effect tracking:
 Report shape:
 
 ```bash
-agentctl interventions list
-agentctl interventions show qa-verify
-agentctl interventions impact --since=30
-agentctl interventions regressions
-agentctl interventions candidates
+ax interventions list
+ax interventions show qa-verify
+ax interventions impact --since=30
+ax interventions regressions
+ax interventions candidates
 ```
 
 Output should classify each intervention:
@@ -905,7 +905,7 @@ Output should classify each intervention:
 - `regressed`: target worsened or new friction increased.
 - `insufficient_data`: not enough sessions/events yet.
 
-This turns `agentctl` into a closed-loop self-improvement system:
+This turns `ax` into a closed-loop self-improvement system:
 
 1. Discover repeated friction.
 2. Suggest a concrete skill/hook/instruction.
@@ -937,9 +937,9 @@ If global guidance is not Git-tracked:
 Desired installer/onboarding behavior:
 
 ```bash
-npx agentctl install
-agentctl onboarding check
-agentctl guidance doctor
+npx ax install
+ax onboarding check
+ax guidance doctor
 ```
 
 Expected output style:
@@ -1067,9 +1067,9 @@ Track which agent/provider/model works best for which work:
 Potential CLI:
 
 ```bash
-agentctl insights routing
-agentctl insights model-fit
-agentctl insights provider-compare
+ax insights routing
+ax insights model-fit
+ax insights provider-compare
 ```
 
 Output: "Codex review catches React stale-closure bugs; Claude browser QA catches layout regressions; main agent should own orchestration."
@@ -1146,7 +1146,7 @@ Every recommendation should answer:
 - What side effects should we watch?
 - When should we remove it?
 
-This avoids turning `agentctl` into another vague analytics dashboard.
+This avoids turning `ax` into another vague analytics dashboard.
 
 ## Harness Layers From 10x Coding Agent Framing
 
@@ -1169,17 +1169,17 @@ Examples:
 Why this matters:
 
 - It avoids reducing agent improvement to prompt/guidance changes.
-- It lets `agentctl` recommend environmental fixes, not just CLAUDE.md edits.
+- It lets `ax` recommend environmental fixes, not just CLAUDE.md edits.
 - It makes onboarding more concrete: install/check tools by layer.
 - It gives proactive optimization a stable lens: identify weak layers in a repo/harness.
 
 Potential CLI views:
 
 ```bash
-agentctl harness doctor
-agentctl harness layers
-agentctl harness recommend --layer=verification
-agentctl insights harness-impact
+ax harness doctor
+ax harness layers
+ax harness recommend --layer=verification
+ax insights harness-impact
 ```
 
 Potential report section:
@@ -1192,7 +1192,7 @@ Harness Health
 - Boundary: weak, worktree/dev-server conflicts recurring.
 ```
 
-This bridges the insight system with setup/onboarding. `agentctl` can observe repeated friction and say which Harness Layer is likely weak.
+This bridges the insight system with setup/onboarding. `ax` can observe repeated friction and say which Harness Layer is likely weak.
 
 ## Terminal Automation As Agent Tooling
 
@@ -1243,10 +1243,10 @@ Local note:
 
 Implemented tracer bullet:
 
-- `agentctl dogfood terminal --scenario=agentctl-setup` serves a local wterm DOM terminal.
+- `ax dogfood terminal --scenario=ax-setup` serves a local wterm DOM terminal.
 - The server supports `--transport=auto|pty|process`; PTY runs through a Node `node-pty` sidecar because Bun 1.3.10 does not reliably run `node-pty` directly.
 - The server streams the scripted terminal session to the browser over WebSocket and runs a scratch-HOME setup demo.
-- The scenario demonstrates `agentctl --help`, `agentctl onboarding --json`, host-agent git tracking of `.claude`, `.codex`, and `.agents`, then a second onboarding check.
+- The scenario demonstrates `ax --help`, `ax onboarding --json`, host-agent git tracking of `.claude`, `.codex`, and `.agents`, then a second onboarding check.
 - The terminal transcript is persisted as `artifact` and the pass/fail result is persisted as `intervention_observation` when the local DB is reachable.
 - This is intentionally not yet a free-running Claude driver; it proves the PTY-backed wterm/browser evidence path before recursive agent control.
 - `--scenario=interactive --command="bash -l"` opens a steerable PTY shell in a scratch HOME. A human or another agent can drive it through the browser; transcript evidence is persisted with `status=completed`.
@@ -1255,7 +1255,7 @@ Implemented tracer bullet:
 
 ## Hosted Taste / Skill Hub Monetization Sketch
 
-Command Code validates the market framing around "coding taste": agents that learn preferences, auto-generate project skills, and share taste across teams. The opportunity for `agentctl` should not be "another coding agent." It can be the evidence layer and registry behind taste:
+Command Code validates the market framing around "coding taste": agents that learn preferences, auto-generate project skills, and share taste across teams. The opportunity for `ax` should not be "another coding agent." It can be the evidence layer and registry behind taste:
 
 - observe agent behavior across Claude, Codex, and other harnesses
 - extract Taste Signals from corrections, accept/reject/edit patterns, interventions, and outcomes
@@ -1274,7 +1274,7 @@ Differentiation:
 Potential monetizable product:
 
 ```text
-Local agentctl: private graph, harness doctor, local learning registry
+Local ax: private graph, harness doctor, local learning registry
 Hosted hub: shared Harness Learnings, Gotchas, Stack guides, skill packs, adoption telemetry, team registry
 ```
 
@@ -1343,7 +1343,7 @@ Out of scope for tracer bullet:
 
 Success criterion:
 
-`agentctl` can inspect a real repo/harness, identify one weak Harness Layer, suggest one evidence-backed local learning, and later measure whether the applied intervention changed observed agent behavior.
+`ax` can inspect a real repo/harness, identify one weak Harness Layer, suggest one evidence-backed local learning, and later measure whether the applied intervention changed observed agent behavior.
 
 First seeded follow-up loop:
 
@@ -1446,7 +1446,7 @@ Do not count as violations:
 
 ## Intervention Strength And Escalation
 
-Agents should not blindly choose AGENTS.md vs skill vs hook. `agentctl` should recommend the least forceful intervention likely to work, then escalate only when observations show the behavior persists.
+Agents should not blindly choose AGENTS.md vs skill vs hook. `ax` should recommend the least forceful intervention likely to work, then escalate only when observations show the behavior persists.
 
 Intervention Strength levels:
 
