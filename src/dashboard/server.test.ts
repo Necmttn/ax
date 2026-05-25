@@ -45,4 +45,9 @@ describe("dashboard server", () => {
     test("dashboardApiKind recognizes self improve route", () => {
         expect(dashboardApiKind("/api/self-improve")).toBe("self-improve");
     });
+
+    test("dashboardApiKind recognizes experiment-loop improve route", () => {
+        expect(dashboardApiKind("/api/improve")).toBe("improve");
+        expect(dashboardApiKind("/api/improve/extra")).toBe("unknown");
+    });
 });

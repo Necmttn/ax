@@ -325,8 +325,8 @@ Each sub-step shippable independently.
 | C6 | done | 785c395 |
 | C7 | done | 785c395 |
 | C8 | done | 785c395 |
-| C9 | done | (pending commit) |
-| C10 | pending | - |
+| C9 | done | a984e15 |
+| C10 | api-done; react-followup | (pending commit) |
 | C11 | pending | - |
 | C12 | pending | - |
 | D1 | done | 4027070 |

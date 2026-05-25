@@ -170,10 +170,11 @@ ORDER BY ts ASC
 LIMIT ${safeLimit};`.trim();
 }
 
-export function dashboardApiKind(pathname: string): "graph-health" | "worktrees" | "self-improve" | "unknown" {
+export function dashboardApiKind(pathname: string): "graph-health" | "worktrees" | "self-improve" | "improve" | "unknown" {
     if (pathname === "/api/graph-health") return "graph-health";
     if (pathname === "/api/worktrees") return "worktrees";
     if (pathname === "/api/self-improve") return "self-improve";
+    if (pathname === "/api/improve") return "improve";
     return "unknown";
 }
 
@@ -199,6 +200,29 @@ SELECT id, guidance, version, text, status, scope, risk, evidence, metrics_befor
 FROM guidance_version
 ORDER BY created_at DESC
 LIMIT 50;`);
+        }
+        if (pathname === "/api/improve") {
+            // Experiment-loop shortlist + verdict state. Reads proposal +
+            // per-form payloads + the active experiment + newest checkpoint.
+            // See docs/superpowers/plans/2026-05-25-experiment-loop-cleanup-and-rebuild.md
+            // (Phase C10).
+            const proposals = yield* db.query(`
+SELECT id, form, title, hypothesis, dedupe_sig, frequency, confidence, status, reject_reason,
+    type::string(created_at) AS created_at,
+    (SELECT * FROM skill_proposal      WHERE proposal = $parent.id LIMIT 1)[0] AS skill_payload,
+    (SELECT * FROM subagent_proposal   WHERE proposal = $parent.id LIMIT 1)[0] AS subagent_payload,
+    (SELECT * FROM hook_proposal       WHERE proposal = $parent.id LIMIT 1)[0] AS hook_payload,
+    (SELECT * FROM guidance_proposal   WHERE proposal = $parent.id LIMIT 1)[0] AS guidance_payload,
+    (SELECT * FROM automation_proposal WHERE proposal = $parent.id LIMIT 1)[0] AS automation_payload,
+    (SELECT id, artifact_path, locked_verdict,
+        type::string(created_at) AS created_at,
+        type::string(scaffolded_at) AS scaffolded_at,
+        (SELECT kind, suggested, user_verdict, measured, type::string(observed_at) AS observed_at FROM checkpoint WHERE experiment = $parent.id ORDER BY observed_at DESC LIMIT 1)[0] AS latest_checkpoint
+        FROM experiment WHERE proposal = $parent.id LIMIT 1)[0] AS experiment
+FROM proposal
+ORDER BY frequency DESC, created_at DESC
+LIMIT 100;`);
+            return { proposals };
         }
         return { error: "not_found" };
     }).pipe(Effect.provide(AppLayer), Effect.scoped);
