@@ -35,13 +35,35 @@ import { safeKeyPart, recordKeyPart } from "../lib/shared/derive-keys.ts";
 export interface DeriveOpportunitiesStats {
     readonly experimentsScanned: number;
     readonly opportunities: number;
+    readonly addressed: number;
 }
+
+/**
+ * Phase C5a (was_addressed detector): resolve the experiment's
+ * scaffolded SKILL.md path back to a skill row via the kebab-name in
+ * its parent directory, then flip opportunity.was_addressed=true for
+ * any opportunity whose matched_at falls within ±1h of an `invoked`
+ * edge to that skill. The window is generous because the harness logs
+ * tool calls at coarse timestamps and the underlying fix-chain edges
+ * land asynchronously.
+ */
+export const ADDRESSED_WINDOW_MS = 60 * 60 * 1000;
+
+export const kebabNameFromArtifactPath = (path: string | null): string | null => {
+    if (!path) return null;
+    const parts = path.split("/").filter(Boolean);
+    if (parts.length < 2) return null;
+    // .../<kebab-name>/SKILL.md
+    const dir = parts[parts.length - 2];
+    return dir ?? null;
+};
 
 interface ActiveExperimentRow {
     readonly id: string | { tb: string; id: string };
     readonly created_at: string;
     readonly form: string;
     readonly candidate_id: string | { tb: string; id: string } | null;
+    readonly artifact_path: string | null;
 }
 
 interface LaterFixedByRow {
@@ -88,7 +110,12 @@ export const overlapFilesMatch = (
 
 export const buildOpportunityStatements = (
     experimentKey: string,
-    matches: ReadonlyArray<{ readonly evidenceTable: string; readonly evidenceKey: string; readonly ts: string }>,
+    matches: ReadonlyArray<{
+        readonly evidenceTable: string;
+        readonly evidenceKey: string;
+        readonly ts: string;
+        readonly addressed?: boolean;
+    }>,
 ): string[] => {
     const stmts: string[] = [];
     for (const m of matches) {
@@ -97,11 +124,19 @@ export const buildOpportunityStatements = (
         const evRef = recordRef(m.evidenceTable, m.evidenceKey);
         stmts.push(
             `DELETE ${recordRef("opportunity", edgeKey)};`,
-            `RELATE ${expRef}->opportunity:\`${edgeKey}\`->${evRef} SET matched_at = ${surrealDate(m.ts)}, was_addressed = false;`,
+            `RELATE ${expRef}->opportunity:\`${edgeKey}\`->${evRef} SET matched_at = ${surrealDate(m.ts)}, was_addressed = ${m.addressed ? "true" : "false"};`,
         );
     }
     return stmts;
 };
+
+interface SkillIdRow {
+    readonly id: string | { tb: string; id: string };
+}
+
+interface InvokedTsRow {
+    readonly ts: string;
+}
 
 export const deriveOpportunities = (): Effect.Effect<DeriveOpportunitiesStats, DbError, SurrealClient> =>
     Effect.gen(function* () {
@@ -113,6 +148,7 @@ export const deriveOpportunities = (): Effect.Effect<DeriveOpportunitiesStats, D
             SELECT
                 id,
                 type::string(created_at) AS created_at,
+                artifact_path,
                 proposal.form AS form,
                 (SELECT out FROM cites_evidence WHERE in = $parent.proposal LIMIT 1)[0].out AS candidate_id
             FROM experiment
@@ -123,6 +159,7 @@ export const deriveOpportunities = (): Effect.Effect<DeriveOpportunitiesStats, D
         const experiments = experimentsResult?.[0] ?? [];
 
         let totalOpportunities = 0;
+        let totalAddressed = 0;
         const allStatements: string[] = [];
         for (const exp of experiments) {
             const experimentKey = recordKeyPart(exp.id, "experiment");
@@ -147,12 +184,49 @@ export const deriveOpportunities = (): Effect.Effect<DeriveOpportunitiesStats, D
                 if (!evidenceKey) continue;
                 matches.push({ evidenceTable: "later_fixed_by", evidenceKey, ts: fix.ts });
             }
+            if (matches.length === 0) continue;
+
+            // C5a: resolve the scaffolded skill and pre-compute its invoked
+            // edge timestamps once, then mark opportunities whose matched_at
+            // is within ±ADDRESSED_WINDOW_MS of any invoked event.
+            const kebab = kebabNameFromArtifactPath(exp.artifact_path);
+            let invokedTimestamps: number[] = [];
+            if (kebab) {
+                const skillResult = yield* db.query<[SkillIdRow[]]>(
+                    `SELECT id FROM skill WHERE name = ${surrealLiteral(kebab)} LIMIT 1;`,
+                );
+                const skillRow = (skillResult?.[0] ?? [])[0];
+                if (skillRow?.id) {
+                    const skillKey = recordKeyPart(skillRow.id, "skill");
+                    if (skillKey) {
+                        const invokedResult = yield* db.query<[InvokedTsRow[]]>(
+                            `SELECT type::string(ts) AS ts FROM invoked WHERE out = ${recordRef("skill", skillKey)} AND ts > d${sinceLiteral};`,
+                        );
+                        invokedTimestamps = (invokedResult?.[0] ?? [])
+                            .map((r) => new Date(r.ts).getTime())
+                            .filter((t) => Number.isFinite(t));
+                    }
+                }
+            }
+            const enriched = matches.map((m) => {
+                const matchedMs = new Date(m.ts).getTime();
+                const addressed = invokedTimestamps.some(
+                    (t) => Math.abs(t - matchedMs) <= ADDRESSED_WINDOW_MS,
+                );
+                if (addressed) totalAddressed += 1;
+                return { ...m, addressed };
+            });
+
             totalOpportunities += matches.length;
-            allStatements.push(...buildOpportunityStatements(experimentKey, matches));
+            allStatements.push(...buildOpportunityStatements(experimentKey, enriched));
         }
 
         yield* executeStatementsWith(db, allStatements, { chunkSize: 500 });
-        return { experimentsScanned: experiments.length, opportunities: totalOpportunities };
+        return {
+            experimentsScanned: experiments.length,
+            opportunities: totalOpportunities,
+            addressed: totalAddressed,
+        };
     });
 
 if (import.meta.main) {

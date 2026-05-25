@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
     buildOpportunityStatements,
+    kebabNameFromArtifactPath,
     opportunityKey,
     overlapFilesMatch,
     parseOverlapFiles,
@@ -75,5 +76,28 @@ describe("buildOpportunityStatements", () => {
 
     test("no matches -> no statements", () => {
         expect(buildOpportunityStatements("exp_1", [])).toEqual([]);
+    });
+
+    test("addressed=true serializes was_addressed = true", () => {
+        const stmts = buildOpportunityStatements("exp_1", [
+            { evidenceTable: "later_fixed_by", evidenceKey: "edge_a", ts: "2026-05-25T00:00:00.000Z", addressed: true },
+        ]);
+        const sql = stmts.join("\n");
+        expect(sql).toContain("was_addressed = true");
+        expect(sql).not.toContain("was_addressed = false");
+    });
+});
+
+describe("kebabNameFromArtifactPath (C5a addressed-detector helper)", () => {
+    test("extracts the parent-dir kebab name", () => {
+        expect(kebabNameFromArtifactPath("/Users/n/.claude/skills/schema-change-guardrail/SKILL.md"))
+            .toBe("schema-change-guardrail");
+        expect(kebabNameFromArtifactPath("./skills/x/SKILL.md")).toBe("x");
+    });
+
+    test("returns null for null/empty/single-segment", () => {
+        expect(kebabNameFromArtifactPath(null)).toBeNull();
+        expect(kebabNameFromArtifactPath("")).toBeNull();
+        expect(kebabNameFromArtifactPath("/SKILL.md")).toBeNull();
     });
 });
