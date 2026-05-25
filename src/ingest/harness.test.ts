@@ -1,12 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
-    agentToolingKey,
     buildHarnessIngestStatements,
     guidanceRevisionKey,
     guidanceSourceKey,
-    harnessLearningKey,
-    interventionKey,
-    interventionObservationKey,
+    stackKey,
 } from "./harness.ts";
 import type { ProjectHarnessReport } from "../project/types.ts";
 
@@ -89,27 +86,23 @@ describe("harness ingest statement builders", () => {
     test("keys are deterministic and scoped by semantic identity", () => {
         expect(guidanceSourceKey(report.guidanceSources[0])).toBe(guidanceSourceKey(report.guidanceSources[0]));
         expect(guidanceRevisionKey(report.guidanceRevisions[0])).toContain("abcdef1234567890");
-        expect(agentToolingKey(report.agentTooling[0])).toContain("verification");
-        expect(harnessLearningKey(report.learningCandidates[0])).toContain("boundary");
-        expect(interventionKey(report.interventions[0])).toContain("workflow");
-        expect(interventionObservationKey(report.observations[0], report.generatedAt)).toBe(
-            interventionObservationKey(report.observations[0], report.generatedAt),
-        );
+        expect(stackKey(report.stacks[0])).toBe("typescript");
     });
 
-    test("writes every harness report section to the matching schema table", () => {
+    test("writes guidance + stack sections; skips superseded learning/intervention writers", () => {
         const sql = buildHarnessIngestStatements(report).join("\n");
 
         expect(sql).toContain("UPSERT guidance_source:");
         expect(sql).toContain("UPSERT guidance_revision:");
         expect(sql).toContain("UPSERT stack:");
-        expect(sql).toContain("UPSERT agent_tooling:");
-        expect(sql).toContain("UPSERT harness_learning:");
-        expect(sql).toContain("UPSERT intervention:");
-        expect(sql).toContain("UPSERT intervention_observation:");
         expect(sql).toContain("evidence_strength: \"tracked\"");
         expect(sql).toContain("content_hash: \"abcdef1234567890\"");
-        expect(sql).toContain("metrics_before: \"{\\\"graphCommitsFromMain\\\":3}\"");
-        expect(sql).toContain("metrics_after: NONE");
+
+        // Phase A6: these writers were removed; learning/intervention concerns
+        // now flow through the proposal pipeline.
+        expect(sql).not.toContain("UPSERT agent_tooling:");
+        expect(sql).not.toContain("UPSERT harness_learning:");
+        expect(sql).not.toContain("UPSERT intervention:");
+        expect(sql).not.toContain("UPSERT intervention_observation:");
     });
 });
