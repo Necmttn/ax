@@ -308,8 +308,8 @@ Each sub-step shippable independently.
 
 | Phase | Status | Commit/PR |
 |---|---|---|
-| A1 | pending | - |
-| A2 | pending | - |
+| A1 | done | 892b877 |
+| A2 | done | 892b877 |
 | A3 | pending | - |
 | A4 | pending | - |
 | A5 | pending | - |
