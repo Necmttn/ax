@@ -1,31 +1,50 @@
 # ax
 
-Local evidence graph for AI coding agents.
+**Local evidence graph for AI coding agents.**
 
-`ax` turns Claude Code and Codex history into a queryable SurrealDB graph:
-sessions, turns, tool calls, plans, skills, repositories, checkouts, commits,
-files, friction, diagnostics, and derived signals.
+Every session, your AI coding agent starts from zero. It re-reads the same
+files, re-discovers the same patterns, re-invokes the same broken tools, and
+re-learns the same lessons you taught it last week.
 
-Use it when you want the next agent to know what happened before:
+`ax` is the memory layer underneath. It ingests transcripts from Claude Code
+and Codex, plus your installed skills and local git history, into a local
+SurrealDB graph - then surfaces what's signal vs. noise on demand.
 
-- which commands failed and what fixed them
-- which files changed together
-- which worktree produced which commits
-- which skills, slash commands, and tools are actually useful
-- which verification checks fit the current diff
+> *Which skills did I actually use this month? Which tool calls keep failing?
+> Which files change together? What did I tell the agent that it forgot?*
+> `ax` answers these by reading what already happened.
+
+<!-- TODO: add docs/images/dashboard.png hero after capture -->
+
+## Why
+
+LLM agents are good at tasks. They're bad at remembering what happened.
+Memory tooling today is either a giant rolling context window (expensive,
+slow, lossy) or vague vector retrieval (no structure, no grounding in real
+events).
+
+`ax` takes a different shape: a **typed graph of evidence** built from the
+agent's own logs. Sessions, turns, tool calls, plans, skills, commits, files,
+friction, and derived signals - all queryable in SurrealDB, all local, no
+network round-trip, no third party.
+
+Three things fall out of that:
+
+1. **Skill triage** - see which of your installed skills get used, which
+   never fire, which correlate with stuck sessions. Decide what to keep.
+2. **Pre-flight grounding** - `axctl project context` gives the next agent
+   stack info, recent friction, and verification commands before it touches
+   the repo.
+3. **Retro signal** - query the graph after a hard session to see what
+   actually happened: tool retries, plan churn, file edit pairings.
 
 ## Install
 
-Current private-repo install:
+Public install (post-publication):
 
 ```bash
-GH_TOKEN="$(gh auth token)" bash -c 'curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github.raw" https://api.github.com/repos/Necmttn/ax/contents/install.sh | bash && PATH="$HOME/.local/bin:$PATH" axctl ingest --since=7'
-```
-
-Public-repo form, if the repo is public:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Necmttn/ax/main/install.sh | bash && PATH="$HOME/.local/bin:$PATH" axctl ingest --since=7
+curl -fsSL https://raw.githubusercontent.com/Necmttn/ax/main/install.sh | bash
+PATH="$HOME/.local/bin:$PATH" axctl ingest --since=7
 ```
 
 From source:
@@ -39,257 +58,147 @@ bun run build
 axctl ingest --since=7
 ```
 
-Requirements for source/dev use: Bun >= 1.3 and SurrealDB >= 3.0.
+Requires Bun ≥ 1.3 and SurrealDB ≥ 3.0. macOS-first; Linux works for ingest
++ CLI (no launchd reactivity).
 
-## Daily Use
-
-Refresh the local graph and open the live dashboard:
-
-```bash
-axctl ingest --since=7
-axctl ingest --insights-only
-axctl serve
-```
-
-`axctl serve` runs the live web dashboard; `axctl report` writes a one-shot
-static HTML snapshot instead.
-
-Check or update the installed release:
+## Quickstart
 
 ```bash
-axctl version --check
-axctl update --check
-axctl update
+axctl ingest --since=7     # backfill last 7 days of transcripts + skills + git
+axctl serve                # open the live dashboard at http://127.0.0.1:8520
+axctl skills taste         # CLI view: which skills earned their keep
+axctl recall "auth bug"    # full-text recall across past sessions
 ```
 
-Check local services:
+## What gets stored
 
-```bash
-axctl daemon status --json
-axctl doctor --json
-```
-
-`axctl install` also creates an `ax` convenience alias that points at the same binary.
-
-Ground an agent before and after repo work:
-
-```bash
-axctl project context --json
-axctl project verify --json
-axctl project harness --json
-axctl doctor --json
-```
-
-Inspect the graph:
-
-```bash
-axctl insights schema
-axctl insights repositories
-axctl insights checkouts
-axctl insights git
-axctl insights friction
-axctl insights tools
-axctl insights sessions
-axctl insights feedback-loops
-axctl insights verification-gaps
-axctl insights user-language
-axctl insights token-impact
-axctl insights cache-health
-axctl insights workflow-impact
-axctl insights codex-health
-axctl insights closure
-axctl insights post-feature-fixes
-axctl insights skill-candidates
-```
-
-Recall past work with full-text search across user and assistant turns:
-
-```bash
-axctl recall "auth middleware" --skill=tdd --json
-```
-
-Skill and command hygiene:
-
-```bash
-axctl skills search "<keywords>"
-axctl skills stats <skill>
-axctl skills recent --limit=25
-axctl skills unused --days=90
-axctl skills taste --limit=50
-axctl skills pairs <skill>
-axctl skills recovery
-```
-
-Self-improve queries:
-
-```bash
-axctl evidence guidance-next --json
-axctl evidence session-summary --json
-axctl evidence weekly --json
-axctl interventions list --json
-axctl interventions candidates --json
-axctl interventions regressions --json
-```
-
-## CLI Reference
+Core tables:
 
 ```text
-axctl ingest [--since=N] [--reset] [--insights-only] [--skills-only|--transcripts-only|--codex-only|--git-only|--claude-only] [--progress=auto|pipeline|plain|json|off] [--verbose]
-axctl derive-signals [--since=N] [--progress=...] [--verbose]
-axctl insights <view> [--limit=N]
-axctl interventions <action> [--limit=N] [--json]
-axctl serve [--port=N]
-axctl report [--limit=N] [--out=path]
-axctl recall <query> [--project=...] [--skill=...] [--since=...] [--json]
-axctl skills <search|stats|recent|unused|taste|pairs|recovery>
-axctl context file [--files=path,path] [--json] <query>
-axctl project <context|verify|harness> [--json]
-axctl evidence <guidance-next|session-summary|weekly> [--json]
-axctl version [--check] [--json]
-axctl update [--check] [--json]
-axctl tui
-axctl install
-axctl daemon <status|start|stop|restart>
-axctl doctor [--json]
-axctl uninstall
+session, turn, tool_call, plan, plan_snapshot
+skill, tool, repository, checkout, commit, file
+insight, friction_event, diagnostic_event, recommendation
 ```
-
-### Graph Explorer
-
-`axctl serve` exposes `/graph`, a typed graph explorer over agent
-telemetry.
-
-Implemented mode:
-
-- `File attention`: files connected to sessions through existing edited-file
-  evidence. This is the first concrete `/graph` query.
-
-Staged/planned modes:
-
-- `Ask -> Outcome`: planned user asks connected to sessions, phase spans,
-  delivery outcomes, and feedback.
-- `Phase balance`: planned planning, implementation, verification, review, and
-  hands-free work duration view.
-- `Delivery`: planned branches, commits, PRs, reviews, checks, and mainline
-  promotion view.
-- `Patterns`: planned cross-session pattern candidates backed by messages,
-  files, sessions, and outcomes.
-- `Skill pairs`: planned compatibility mode for the existing skill
-  co-occurrence graph.
-
-The new delivery, phase, and ask/outcome tables and classifiers are groundwork
-for these views. User-message mentions, read/search references, touched
-outcomes, ingestion writers/population, and backing graph queries are follow-on
-work; staged modes stay disabled/empty until those pieces exist. The delivery
-classifier distinguishes local-only work, open PRs, closed-unmerged PRs, merged
-PRs without mainline evidence, promoted-without-PR work, and merged-to-main
-work.
-
-### Development (AX_DEV=1)
-
-These subcommands are only exposed when `AX_DEV=1` is set in the environment.
-Run `AX_DEV=1 axctl dogfood terminal --help` for the full flag list.
-
-```text
-axctl dogfood terminal [--scenario=...] [--agent=...] [--transport=...] [--command=...] [--success-marker=...] [--timeout=...] [--port=...] [--json]
-```
-
-## What Gets Stored
-
-Core records:
-
-- `session`, `turn`, `tool_call`, `plan`, `plan_snapshot`
-- `skill`, `tool`, `repository`, `checkout`, `commit`, `file`
-- `insight`, `friction_event`, `diagnostic_event`, `recommendation`
-- staged Harness Doctor records: `guidance_source`, `guidance_revision`,
-  `stack`, `agent_tooling`, `harness_learning`, `intervention`,
-  `intervention_observation`
 
 Core relations:
 
 ```text
 repository -> has_checkout -> checkout
-session    -> produced      -> commit
-commit     -> touched       -> file
-turn       -> edited        -> file
-turn       -> invoked       -> skill
-tool_call  -> concerns      -> skill
-insight    -> concerns      -> session
+session    -> produced     -> commit
+commit     -> touched      -> file
+turn       -> edited       -> file
+turn       -> invoked      -> skill
+tool_call  -> concerns     -> skill
+insight    -> concerns     -> session
 ```
 
-Files are canonicalized by repository-relative path when possible, so worktrees
-and machine-specific checkout paths do not split the same file history.
+Files are canonicalized by repository-relative path, so worktrees and
+machine-specific checkout paths don't fragment the same file history.
 
-`axctl project harness --json` computes the Harness Doctor report at read
-time. Default `axctl ingest` also persists the report into the staged Harness
-Doctor tables through the `harness/doctor` ingest stage.
+## Agent integration
 
-## Agent Integration
-
-This repo ships installable agent skills:
-
-- `axctl` at `skill/SKILL.md` for day-to-day project grounding.
-- `ax-retro` at `skills/ax-retro/SKILL.md` for evidence-backed retrospectives.
-
-Install them for Claude Code and Codex:
+`ax` ships two installable skills so a Claude Code / Codex agent can query
+its own evidence graph mid-session:
 
 ```bash
-npx skills add git@github.com:Necmttn/ax.git --skill axctl -g -a claude-code -a codex -y
+npx skills add git@github.com:Necmttn/ax.git --skill axctl   -g -a claude-code -a codex -y
 npx skills add git@github.com:Necmttn/ax.git --skill ax-retro -g -a claude-code -a codex -y
 ```
 
-Local development symlink:
+The recommended agent loop:
 
-```bash
-mkdir -p ~/.claude/skills ~/.agents/skills
-ln -sfn "$PWD/skill" ~/.claude/skills/axctl
-ln -sfn "$PWD/skill" ~/.agents/skills/axctl
-ln -sfn "$PWD/skills/ax-retro" ~/.claude/skills/ax-retro
-ln -sfn "$PWD/skills/ax-retro" ~/.agents/skills/ax-retro
-```
-
-Agent checklist:
-
-1. Run `axctl project context --json` before work.
-2. Use the returned stack, instructions, git state, and checks.
-3. Run `axctl project verify --json` before reporting completion.
-4. Run the recommended verification commands.
-5. Use `axctl project harness --json` when changing agent guidance,
-   verification tooling, branch/worktree policy, or local harness setup.
+1. `axctl project context --json` before work - stack, recent friction,
+   verification commands.
+2. Do the work.
+3. `axctl project verify --json` before reporting done - runs the checks
+   the project actually expects.
 
 ## Reactivity
 
 `axctl install` sets up local automation on macOS:
 
 - SurrealDB daemon on `127.0.0.1:8521`
-- watcher for `~/.claude/projects/` and `~/.codex/sessions/`
-- `axctl ingest --since=1` after recent transcript changes
-- onboarding guidance for git-tracking global Claude/Codex/shared harness dirs
+- launchd watcher on `~/.claude/projects/` and `~/.codex/sessions/`
+- background `axctl ingest --since=1` after recent transcript changes
+- onboarding for git-tracking your global Claude/Codex/skill dirs
 
-Manual watcher commands for source checkouts:
+Logs land in `~/.local/share/ax/logs/`.
 
-```bash
-bun run watcher:install
-bun run watcher:uninstall
+## CLI reference
+
+The full surface is documented in [`docs/insights-cli-reference.md`](docs/insights-cli-reference.md).
+The shape:
+
+```text
+axctl ingest [--since=N] [--reset] [--insights-only] [--skills-only|--transcripts-only|--codex-only|--git-only|--claude-only]
+axctl serve [--port=N]              # live dashboard
+axctl report [--limit=N]            # one-shot static HTML
+axctl recall <query> [--json]       # full-text search across turns
+axctl skills <search|stats|recent|unused|taste|pairs|recovery>
+axctl insights <view>               # 16 read-only graph views
+axctl project <context|verify|harness> [--json]
+axctl evidence <guidance-next|session-summary|weekly> [--json]
+axctl daemon <status|start|stop|restart>
+axctl doctor [--json]
+axctl install | uninstall | update | version
 ```
 
-Logs are written to `~/.local/share/ax/logs/`.
+`axctl serve` exposes the live dashboard and `/graph`, a typed graph
+explorer. Today the implemented mode is **File attention** - files connected
+to sessions through edited-file evidence. Planned modes: Ask→Outcome,
+Phase balance, Delivery, Patterns, Skill pairs.
+
+## SurrealDB
+
+Local connection defaults:
+
+- endpoint: `ws://127.0.0.1:8521`
+- namespace: `ax`, database: `main`
+- credentials: `root` / `root` (loopback only)
+
+Inspect the graph directly with [Surrealist](https://surrealdb.com/surrealist):
+
+```sql
+SELECT name, command_norm, exit_code, count() AS failures
+FROM tool_call
+WHERE has_error = true
+GROUP BY name, command_norm, exit_code
+ORDER BY failures DESC
+LIMIT 20;
+```
+
+## Status
+
+Working today:
+
+- Claude + Codex transcript ingest
+- Skill and slash-command ingest
+- Git repository / checkout / commit / touched-file ingest
+- Derived friction, diagnostics, skill-pair, recovery, recommendation signals
+- Project context + verification JSON commands
+- Live dashboard server + static HTML report
+- Self-improve guidance queries
+- Local launchd reactivity (macOS)
+
+Tracked next:
+
+- Project memory: `changeset` and `file_memory`
+- Concept/entity resolution
+- Guidance lifecycle and outcome tracking
+- Richer live dashboard views
+- Activity-first code tracing
+- OTEL / dev-run diagnostics
+- Effect service-boundary cleanup
 
 ## Dev
-
-Run from source:
 
 ```bash
 bun install
 bun scripts/db-start.sh
 bun scripts/apply-schema.sh
 bun src/cli/index.ts ingest --since=7
-```
 
-Verify:
-
-```bash
-bun test
+bun test                 # full suite
 bun run typecheck
 ```
 
@@ -299,68 +208,12 @@ Benchmark a clean DB without touching `ax/main`:
 scripts/bench-empty-db.sh --since=90
 ```
 
-The benchmark writes artifacts under:
+Artifacts land under `~/.local/share/ax/benchmarks/<db>/`.
 
-```text
-~/.local/share/ax/benchmarks/<db>/
-```
-
-## SurrealDB
-
-Local connection:
-
-- endpoint: `ws://127.0.0.1:8521`
-- namespace: `ax`
-- database: `main`
-- user/password: `root` / `root`
-
-Open those settings in Surrealist to inspect the graph directly.
-
-Example queries:
-
-```sql
-SELECT name, remote_url, array::len(->has_checkout->checkout) AS checkouts
-FROM repository
-ORDER BY updated_at DESC
-LIMIT 20;
-
-SELECT name, command_norm, exit_code, count() AS failures
-FROM tool_call
-WHERE has_error = true
-GROUP BY name, command_norm, exit_code
-ORDER BY failures DESC
-LIMIT 20;
-
-SELECT kind, text, session.project AS project, ts
-FROM friction_event
-ORDER BY ts DESC
-LIMIT 20;
-```
-
-## Status
-
-Working today:
-
-- Claude and Codex transcript ingest
-- skill and slash-command ingest
-- Git repository, checkout, commit, and touched-file ingest
-- derived friction, diagnostics, skill-pair, recovery, and recommendation signals
-- project context and verification JSON commands
-- static dashboard and local dashboard server
-- self-improve guidance query primitives
-
-Tracked next:
-
-- project memory: `changeset` and `file_memory`
-- concept/entity resolution
-- guidance lifecycle and outcome tracking
-- richer live dashboard views
-- activity-first code tracing
-- OTEL/dev-run diagnostics
-- Effect service-boundary cleanup
-
-See the `Original inspiration completion` milestone for the active roadmap.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the contribution flow,
+[`CONTEXT.md`](CONTEXT.md) for the domain glossary, and
+[`docs/adr/`](docs/adr/) for architecture decisions.
 
 ## License
 
-MIT
+[MIT](LICENSE) © 2025 Necmettin Karakaya
