@@ -4,7 +4,7 @@ import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
 import { AxConfig } from "../lib/config.ts";
 import { ProcessService } from "../lib/process.ts";
-import { prettyPrint, surrealLiteral } from "../lib/json.ts";
+import { prettyPrint } from "../lib/json.ts";
 import { prettifyProjectSlug } from "../lib/shared/project-slug.ts";
 import { AppLayer } from "../lib/layers.ts";
 import { ingestSkills } from "../ingest/skills.ts";
@@ -617,29 +617,6 @@ const cmdInsights = (args: string[]) =>
             insightSqlForView(rawView, limit),
         );
         console.log(prettyPrint(result?.[0] ?? []));
-    });
-
-const cmdInterventions = (args: string[]) =>
-    Effect.gen(function* () {
-        const subcommand = args.filter((a) => !a.startsWith("--"))[0] ?? "list";
-        const json = args.includes("--json");
-        const limit = parsePositiveIntFlag("interventions", "limit", args, 20);
-        const db = yield* SurrealClient;
-        const sql =
-            subcommand === "candidates" ? `SELECT id, name, confidence, IF confidence = "high" THEN 3 ELSE IF confidence = "medium" THEN 2 ELSE 1 END AS confidence_score, expected_impact, proposed_behavior, metrics, created_at FROM skill_candidate ORDER BY confidence_score DESC, created_at DESC LIMIT ${limit};` :
-            subcommand === "impact" ? `SELECT id, target, metric, baseline_value, observed_value, delta, confidence, observed_at FROM intervention_observation ORDER BY observed_at DESC LIMIT ${limit};` :
-            subcommand === "regressions" ? `SELECT session, source, tool_errors, interruptions, context_pressure, estimated_tokens, ts FROM session_health WHERE context_pressure = "high" OR tool_errors >= 5 OR interruptions > 0 ORDER BY estimated_tokens DESC, tool_errors DESC LIMIT ${limit};` :
-            subcommand === "show" ? `SELECT id, name, kind, status, expected_effect, target_metrics, owner_notes, created_at FROM intervention ORDER BY created_at DESC LIMIT ${limit};` :
-            subcommand === "list" ? `SELECT id, name, kind, status, expected_effect, target_metrics, created_at FROM intervention ORDER BY created_at DESC LIMIT ${limit};` :
-            `SELECT id, name, kind, status, expected_effect, target_metrics, owner_notes, created_at FROM intervention WHERE string::lowercase(name ?? "") CONTAINS ${surrealLiteral(subcommand.toLowerCase())} LIMIT ${limit};`;
-        const result = yield* db.query<[Array<Record<string, unknown>>]>(sql);
-        if (json) {
-            console.log(prettyPrint(result?.[0] ?? []));
-            return;
-        }
-        for (const row of result?.[0] ?? []) {
-            console.log(`${row.name ?? row.id}  ${row.status ?? row.confidence ?? ""}`);
-        }
     });
 
 const cmdReport = (args: string[]) =>
@@ -1644,18 +1621,6 @@ const insightsCommand = Command.make(
     ({ view, limit }) => cmdInsights([view, `--limit=${limit}`]),
 ).pipe(Command.withDescription("Run built-in graph insight queries"));
 
-const interventionAction = Argument.choice("action", ["list", "show", "impact", "regressions", "candidates"] as const).pipe(Argument.withDefault("list"));
-
-const interventionsCommand = Command.make(
-    "interventions",
-    {
-        action: interventionAction,
-        limit: positiveLimit(20),
-        json: jsonFlag,
-    },
-    ({ action, limit, json }) => cmdInterventions([action, `--limit=${limit}`, ...boolArg("json", json)]),
-).pipe(Command.withDescription("Inspect intervention lifecycle, impact, regressions, and candidates"));
-
 const serveCommand = Command.make(
     "serve",
     { port: Flag.integer("port").pipe(Flag.withDefault(1738)) },
@@ -2203,7 +2168,6 @@ export const rootCommand = Command.make("axctl").pipe(
         deriveSignalsCommand,
         deriveIntentsCommand,
         insightsCommand,
-        interventionsCommand,
         serveCommand,
         reportCommand,
         recallCommand,
@@ -2271,7 +2235,6 @@ export const DB_COMMANDS: ReadonlySet<string> = new Set([
     "derive-signals",
     "derive-intents",
     "insights",
-    "interventions",
     "report",
     "recall",
     "skills",
