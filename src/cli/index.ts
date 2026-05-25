@@ -17,6 +17,7 @@ import { deriveOutcomes } from "../ingest/outcomes.ts";
 import { deriveSessionHealth } from "../ingest/session-health.ts";
 import { deriveClosure } from "../ingest/closure.ts";
 import { deriveProposals } from "../ingest/derive-proposals.ts";
+import { deriveOpportunities } from "../ingest/derive-opportunities.ts";
 import { scaffoldSkill } from "../improve/skill-scaffold.ts";
 import { recordKeyPart } from "../lib/shared/derive-keys.ts";
 import { recordRef } from "../lib/shared/surql.ts";
@@ -294,6 +295,7 @@ const STAGE_PROGRESS: Record<IngestStageKey, ProgressStage> = {
     "session-health": { source: "session-health", stage: "derive" },
     closure: { source: "closure", stage: "derive" },
     proposals: { source: "proposals", stage: "derive" },
+    opportunities: { source: "opportunities", stage: "derive" },
     harness: { source: "harness", stage: "doctor" },
 };
 
@@ -501,6 +503,14 @@ const cmdIngest = (args: string[]) => {
                 "proposals",
                 "derive",
                 deriveProposals(),
+                progress,
+            )),
+            opportunities: () => withServices(telemetryStage(
+                db,
+                runId,
+                "opportunities",
+                "derive",
+                deriveOpportunities(),
                 progress,
             )),
             harness: () => withServices(telemetryStage(db, runId, "harness", "doctor", ingestHarness(), progress)),
