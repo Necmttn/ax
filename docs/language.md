@@ -10,13 +10,25 @@ Workspace), see [`CONTEXT.md`](../CONTEXT.md). This file is about the
 
 ## The category
 
-### Agent Experience (AX)
+### The four layers
 
-The discipline of measuring, shaping, and improving what an AI coding
-agent perceives, remembers, and acts on across sessions. Direct analog
-of Developer Experience (DX) for human engineers.
+The layers that govern coding-agent quality **inside one session**:
+**perception**, **representation**, **verification**, **boundary**.
+Source: [10× Your Coding Agent by Fixing Its Environment](https://necmttn.com/blog/10x-coding-agent).
 
-> *Use:* "AX is to AI agents what DX is to humans."
+> *Use:* "Verification is one of the four layers - the codebase has
+> to disagree quickly."
+> *Don't say:* "context layers" - too vague.
+
+### The fifth layer
+
+**Agent experience (AX).** What carries the four layers **across
+sessions** - what was perceived, how it was represented, what
+verification said, where the boundary was, retained and queryable.
+Direct analog of Developer Experience (DX) for human engineers.
+
+> *Use:* "AX is the fifth layer - what governs every session, not
+> just one." / "AX is to AI agents what DX is to humans."
 > *Don't say:* "agentic UX", "agent UX", "AI experience" - those mean
 > different things in adjacent communities.
 

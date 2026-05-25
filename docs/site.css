@@ -306,6 +306,15 @@ p code, li code {
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 }
 
+.principles.four {
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+.principles.four li strong {
+  font-size: 20px;
+  letter-spacing: -0.5px;
+}
+
 .principles li {
   padding: 20px;
   background: var(--panel);

@@ -23,7 +23,8 @@
   </div>
   <span class="live" title="agent experience layer is alive">live</span>
   <nav class="top-nav">
-    <a href="#what">What</a>
+    <a href="#layers">Layers</a>
+    <a href="#what">AX</a>
     <a href="#how">How</a>
     <a href="#demo">Demo</a>
     <a href="#install">Install</a>
@@ -35,19 +36,18 @@
 <main>
 
 <section class="hero">
-  <p class="eyebrow">The missing layer</p>
-  <h1>An <em>experience layer</em><br>for AI coding agents.</h1>
+  <p class="eyebrow">The fifth layer</p>
+  <h1>Four layers govern your agent<br>in one session. <em>ax is the fifth.</em></h1>
   <p class="lede">
-    Observability and memory for self-improving AI agents.
-    Local-first. Typed. Yours.
+    Coding-agent quality comes from four layers - perception, representation,
+    verification, boundary. <strong>ax</strong> is the layer that remembers
+    them, across every session.
   </p>
   <p class="muted">
-    Every session, your agent starts from zero. Re-reads the same files.
-    Re-invokes the same broken tools. Re-learns the same lessons.
-    <strong>ax</strong> is the layer underneath - a typed graph of evidence
-    built from Claude Code and Codex transcripts, your installed skills,
-    and local git history. Local SurrealDB, no network round-trip, no
-    third party.
+    Local-first observability + memory for AI coding agents. Ingests Claude
+    Code and Codex transcripts, your installed skills, and git history into
+    a typed SurrealDB graph. No network round-trip. No third party.
+    MIT-licensed.
   </p>
   <div class="cta">
     <a class="btn" href="#install">Install in 30 seconds &nbsp;→</a>
@@ -55,26 +55,61 @@
   </div>
 </section>
 
+<section id="layers">
+  <p class="eyebrow">The four layers</p>
+  <h2>Most coding-agent failures are<br>not model failures. They're <em>environment</em> failures.</h2>
+  <p class="muted">
+    From <a href="https://necmttn.com/blog/10x-coding-agent" rel="noopener">10× Your Coding Agent by Fixing Its Environment</a>
+    - the same model can look brilliant in one repo and incompetent in
+    another. The difference isn't the prompt. It's the environment.
+  </p>
+  <ul class="principles four">
+    <li>
+      <strong>Perception</strong>
+      <p>What the agent can search and notice. <code>ripgrep</code>, <code>fd</code>, gitignore-aware retrieval.</p>
+    </li>
+    <li>
+      <strong>Representation</strong>
+      <p>How legible code, diffs, and outputs are. <code>bat</code>, <code>delta</code>, <code>jq</code>, structured small inputs.</p>
+    </li>
+    <li>
+      <strong>Verification</strong>
+      <p>How fast the codebase pushes back. <code>tsc</code>, <code>oxlint</code>, typed interfaces.</p>
+    </li>
+    <li>
+      <strong>Boundary</strong>
+      <p>What the agent can safely touch. <code>zdiff3</code>, worktrees, <code>lazygit</code> hunk staging.</p>
+    </li>
+  </ul>
+</section>
+
 <section id="what">
-  <p class="eyebrow">What is AX</p>
-  <h2>Agent experience is what the<br>agent perceives, remembers, and acts on.</h2>
+  <p class="eyebrow">The fifth layer</p>
+  <h2>Four layers govern <em>one session</em>.<br>Agent experience governs <em>every session</em>.</h2>
   <p>
-    It is to AI coding agents what <strong>DX</strong> is to humans: the
-    surface that turns raw capability into compounding skill. <code>ax</code>
-    is the reference implementation of that surface - open, local, MIT.
+    The four layers describe what's true inside one run. Reset the
+    conversation and you lose all of it. Your agent re-discovers the same
+    broken commands, re-invokes the same dead skills, re-learns the same
+    lessons you taught it last week.
+  </p>
+  <p>
+    <strong>AX</strong> - the agent experience layer - is what carries
+    forward. It is to AI coding agents what <strong>DX</strong> is to
+    humans: the surface that turns raw capability into compounding skill.
+    <code>ax</code> is the reference implementation.
   </p>
   <ul class="principles">
     <li>
       <strong>Skill triage</strong>
-      <p>Which of your installed skills get used, which never fire, which correlate with stuck sessions.</p>
+      <p>Which installed skills get used, which never fire, which correlate with stuck sessions. Feeds boundary decisions across sessions.</p>
     </li>
     <li>
       <strong>Pre-flight grounding</strong>
-      <p><code>axctl project context</code> hands the next agent stack info, recent friction, and verification commands.</p>
+      <p><code>axctl project context</code> hands the next agent stack info, recent friction, and verification commands. Closes the perception gap on session start.</p>
     </li>
     <li>
       <strong>Retro signal</strong>
-      <p>Query the graph after a hard session: tool retries, plan churn, file edit pairings. Feed it back into the next run.</p>
+      <p>Query the graph after a hard session: tool retries, plan churn, file edit pairings. Turns last session's friction into next session's verification.</p>
     </li>
   </ul>
 </section>
