@@ -1156,3 +1156,157 @@ DEFINE INDEX hook_fire_by_ts      ON hook_fire FIELDS ts;
 DEFINE INDEX hook_fire_by_session ON hook_fire FIELDS session;
 DEFINE INDEX hook_fire_by_file    ON hook_fire FIELDS file;
 DEFINE INDEX hook_fire_by_reason  ON hook_fire FIELDS reason;
+
+-- =====================================================================
+-- Phase B: experiment-loop schema migration (2026-05-25)
+-- See docs/superpowers/plans/2026-05-25-experiment-loop-cleanup-and-rebuild.md
+-- =====================================================================
+
+-- Drop superseded write-only orphan tables. Data was never read by any
+-- consumer; safe to drop. See the plan doc + archaeology agent output
+-- for cluster-by-cluster justification.
+REMOVE TABLE IF EXISTS pattern_candidate;
+REMOVE TABLE IF EXISTS feedback_event;
+REMOVE TABLE IF EXISTS ask_outcome;
+REMOVE TABLE IF EXISTS adoption;
+REMOVE TABLE IF EXISTS gotcha;
+REMOVE TABLE IF EXISTS learning_match;
+REMOVE TABLE IF EXISTS learning_feedback;
+REMOVE TABLE IF EXISTS taste_signal;
+REMOVE TABLE IF EXISTS workflow;
+REMOVE TABLE IF EXISTS agent_tooling;
+REMOVE TABLE IF EXISTS recommendation;
+REMOVE TABLE IF EXISTS self_improve_run;
+REMOVE TABLE IF EXISTS harness_learning;
+REMOVE TABLE IF EXISTS intervention;
+REMOVE TABLE IF EXISTS intervention_observation;
+
+-- ==== Proposal (polymorphic shortlist) ====
+-- One row per repeated workflow we might package. `form` selects which
+-- per-form payload table carries the typed details. `dedupe_sig` is a
+-- hash of the normalized trigger pattern so re-derivation never produces
+-- duplicate proposals. `baseline` is a JSON snapshot frozen at
+-- created_at (NOT accept-time) to avoid Hawthorne bias on verdicts.
+DEFINE TABLE proposal SCHEMAFULL;
+DEFINE FIELD form          ON proposal TYPE string;
+    -- skill | subagent | hook | guidance | automation
+DEFINE FIELD title         ON proposal TYPE string;
+DEFINE FIELD hypothesis    ON proposal TYPE string;
+DEFINE FIELD dedupe_sig    ON proposal TYPE string;
+DEFINE FIELD frequency     ON proposal TYPE int DEFAULT 0;
+DEFINE FIELD confidence    ON proposal TYPE string;
+    -- low | medium | high
+DEFINE FIELD status        ON proposal TYPE string DEFAULT 'open';
+    -- open | accepted | rejected | superseded
+DEFINE FIELD reject_reason ON proposal TYPE option<string>;
+DEFINE FIELD baseline      ON proposal TYPE option<string>;
+DEFINE FIELD created_at    ON proposal TYPE datetime DEFAULT time::now();
+DEFINE FIELD updated_at    ON proposal TYPE option<datetime>;
+DEFINE INDEX proposal_dedupe_uq    ON proposal FIELDS dedupe_sig UNIQUE;
+DEFINE INDEX proposal_status_freq  ON proposal FIELDS status, frequency;
+DEFINE INDEX proposal_form_status  ON proposal FIELDS form, status, created_at;
+
+-- ==== Per-form payload tables ====
+-- One row per proposal of the matching form. Typed fields per form avoid
+-- the JSON-blob trap that killed the prior orphan tables.
+
+DEFINE TABLE skill_proposal SCHEMAFULL;
+DEFINE FIELD proposal           ON skill_proposal TYPE record<proposal> REFERENCE ON DELETE CASCADE;
+DEFINE FIELD trigger_pattern    ON skill_proposal TYPE string;
+DEFINE FIELD suspected_gap      ON skill_proposal TYPE string;
+DEFINE FIELD proposed_behavior  ON skill_proposal TYPE string;
+DEFINE FIELD expected_impact    ON skill_proposal TYPE option<string>;
+DEFINE INDEX skill_proposal_uq  ON skill_proposal FIELDS proposal UNIQUE;
+
+DEFINE TABLE subagent_proposal SCHEMAFULL;
+DEFINE FIELD proposal              ON subagent_proposal TYPE record<proposal> REFERENCE ON DELETE CASCADE;
+DEFINE FIELD bounded_role          ON subagent_proposal TYPE string;
+DEFINE FIELD delegation_trigger    ON subagent_proposal TYPE string;
+    -- pattern matched against Task tool calls (see opportunity definition below)
+DEFINE FIELD example_task_patterns ON subagent_proposal TYPE array<string> DEFAULT [];
+DEFINE INDEX subagent_proposal_uq  ON subagent_proposal FIELDS proposal UNIQUE;
+
+DEFINE TABLE hook_proposal SCHEMAFULL;
+DEFINE FIELD proposal       ON hook_proposal TYPE record<proposal> REFERENCE ON DELETE CASCADE;
+DEFINE FIELD event_name     ON hook_proposal TYPE string;
+    -- PreToolUse | PostToolUse | SessionStart | ...
+DEFINE FIELD target_tool    ON hook_proposal TYPE option<string>;
+DEFINE FIELD hook_command   ON hook_proposal TYPE string;
+DEFINE INDEX hook_proposal_uq ON hook_proposal FIELDS proposal UNIQUE;
+
+DEFINE TABLE guidance_proposal SCHEMAFULL;
+DEFINE FIELD proposal        ON guidance_proposal TYPE record<proposal> REFERENCE ON DELETE CASCADE;
+DEFINE FIELD file_target     ON guidance_proposal TYPE string;
+    -- e.g. "CLAUDE.md", "~/.claude/CLAUDE.md"
+DEFINE FIELD section         ON guidance_proposal TYPE option<string>;
+DEFINE FIELD suggested_text  ON guidance_proposal TYPE string;
+DEFINE INDEX guidance_proposal_uq ON guidance_proposal FIELDS proposal UNIQUE;
+
+DEFINE TABLE automation_proposal SCHEMAFULL;
+DEFINE FIELD proposal        ON automation_proposal TYPE record<proposal> REFERENCE ON DELETE CASCADE;
+DEFINE FIELD trigger_signal  ON automation_proposal TYPE string;
+DEFINE FIELD schedule        ON automation_proposal TYPE option<string>;
+    -- cron expression, "weekly", etc; null = event-driven
+DEFINE FIELD action          ON automation_proposal TYPE string;
+DEFINE INDEX automation_proposal_uq ON automation_proposal FIELDS proposal UNIQUE;
+
+-- ==== Typed evidence edges ====
+-- Replaces the JSON-blob `evidence_refs` design that codex review flagged
+-- as foreclosing the most important query: "which friction events have
+-- not yet produced a proposal?" Heterogeneous source/target follows the
+-- existing `derived_from` / `concerns` pattern (RELATION SCHEMAFULL).
+-- `in` = proposal, `out` = the cited evidence record
+-- (friction_event | command_outcome | skill_candidate |
+--  hook_command_invocation | spawned | ...).
+DEFINE TABLE cites_evidence TYPE RELATION SCHEMAFULL;
+DEFINE FIELD count ON cites_evidence TYPE int DEFAULT 1;
+DEFINE FIELD ts    ON cites_evidence TYPE datetime DEFAULT time::now();
+DEFINE INDEX cites_evidence_in     ON cites_evidence FIELDS in;
+DEFINE INDEX cites_evidence_out    ON cites_evidence FIELDS out;
+DEFINE INDEX cites_evidence_in_out ON cites_evidence FIELDS in, out;
+
+-- ==== Experiment (created on accept) ====
+-- One row per accepted proposal. `artifact` is a typed link to the
+-- created skill row when form=skill; `artifact_path` carries the
+-- on-disk path for hook/guidance/automation forms. `scaffolded_at`
+-- records when the CLI wrote the stub file (Phase C3 scaffold-on-accept
+-- fix for the manual-step dropout problem).
+DEFINE TABLE experiment SCHEMAFULL;
+DEFINE FIELD proposal        ON experiment TYPE record<proposal> REFERENCE ON DELETE CASCADE;
+DEFINE FIELD artifact        ON experiment TYPE option<record<skill>>;
+DEFINE FIELD artifact_path   ON experiment TYPE option<string>;
+DEFINE FIELD scaffolded_at   ON experiment TYPE option<datetime>;
+DEFINE FIELD created_at      ON experiment TYPE datetime DEFAULT time::now();
+DEFINE FIELD locked_verdict  ON experiment TYPE option<string>;
+DEFINE INDEX experiment_proposal_uq ON experiment FIELDS proposal UNIQUE;
+DEFINE INDEX experiment_created     ON experiment FIELDS created_at;
+
+-- ==== Opportunity (verdict denominator) ====
+-- Each time a proposal's trigger pattern recurs after experiment.created_at,
+-- emit one row. `was_addressed` flips true when the experiment's artifact
+-- was invoked/applied near the match (per-form definition in the plan doc).
+-- Verdict math at checkpoint time is `addressed / opportunities` per window.
+-- Modeled as a RELATION (in = experiment, out = matched evidence record)
+-- so the heterogeneous evidence target works the same way as cites_evidence.
+DEFINE TABLE opportunity TYPE RELATION SCHEMAFULL;
+DEFINE FIELD matched_at    ON opportunity TYPE datetime;
+DEFINE FIELD was_addressed ON opportunity TYPE bool DEFAULT false;
+DEFINE INDEX opportunity_in_ts  ON opportunity FIELDS in, matched_at;
+DEFINE INDEX opportunity_out    ON opportunity FIELDS out;
+
+-- ==== Checkpoint (decision support, never auto-verdict) ====
+-- One row per (experiment, kind) snapshot at t+7 / t+30 / t+90.
+-- `measured` is the aggregate {built, invoked, opportunities, addressed,
+-- friction_delta}. `suggested` is the algorithm's verdict guess. The
+-- human-confirmed `user_verdict` is what gets locked into experiment.
+-- locked_verdict at t+30. Algorithm proposes, human decides.
+DEFINE TABLE checkpoint SCHEMAFULL;
+DEFINE FIELD experiment   ON checkpoint TYPE record<experiment> REFERENCE ON DELETE CASCADE;
+DEFINE FIELD kind         ON checkpoint TYPE string;
+    -- t+7 | t+30 | t+90 | adhoc
+DEFINE FIELD measured     ON checkpoint TYPE object;
+DEFINE FIELD suggested    ON checkpoint TYPE option<string>;
+    -- adopted | ignored | regressed | no_longer_needed | partial
+DEFINE FIELD user_verdict ON checkpoint TYPE option<string>;
+DEFINE FIELD observed_at  ON checkpoint TYPE datetime DEFAULT time::now();
+DEFINE INDEX checkpoint_experiment_kind ON checkpoint FIELDS experiment, kind, observed_at;
