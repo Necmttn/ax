@@ -4,53 +4,25 @@
 
 ---
 
-## Four layers govern one session
+The AI coding agent stack has a hole in it.
 
-Coding-agent quality mostly comes from four layers. I made that case
-elsewhere ([10× Your Coding Agent by Fixing Its Environment](https://necmttn.com/blog/10x-coding-agent)),
-the short version is:
-
-- **Perception** - what the agent can search and notice. Gitignore-aware
-  retrieval, scoped greps, structured tool results.
-- **Representation** - how legible the code, diffs, and outputs are.
-  `bat`, `delta`, `jq` instead of giant blobs.
-- **Verification** - how fast the codebase pushes back. Typed
-  interfaces, fast linters, sub-second feedback.
-- **Boundary** - what the agent can safely touch. Worktrees, hunk
-  staging, three-way merge markers.
-
-*Most coding-agent failures are not model failures. They are context
-failures created by the environment the agent operates in.* Get those
-four right and the same model that looks incompetent in one repo
-looks brilliant in another.
-
-## What governs *every* session?
-
-Nothing, today. That is the hole.
-
-The four layers describe what is true inside one run. Reset the
-conversation and you lose all of it. Your agent re-reads the same
-files. Re-discovers the same broken commands. Re-invokes the same
-skills you told it to stop using last week. Re-learns the
-verification recipe for your project. Every single time.
-
-Look at any production agent setup in 2026. You have models -
-Claude 4.7, GPT-5, the open-weights crowd. You have inference
-platforms. You have a tool layer: shells, editors, MCP servers, IDEs.
-You have memory bolt-ons: a vector store, maybe Letta, maybe a long
-context window. You have observability - LangSmith, Langfuse, Phoenix
-- telling you what the agent did at the API level.
+Look at any production agent setup in 2026. You have models - Claude
+4.7, GPT-5, the open-weights crowd. You have inference platforms.
+You have a tool layer: shells, editors, MCP servers, IDEs. You have
+some flavor of memory bolt-on: a vector store, maybe Letta, maybe
+just a long context window. You have observability - LangSmith,
+Langfuse, Phoenix - telling you what the agent did at the API level.
 
 Now ask: **what does the agent *know about itself* the second time
 you open a session?**
 
+Nothing. It starts from zero. Re-reads the same files. Re-discovers
+the same broken commands. Re-invokes the same skills you told it to
+stop using last week. Re-learns the verification recipe for your
+project. Every single time.
+
 The stack has compute. It has memory in the rolling-context sense.
 It has tools. It has logs. It does not have an **experience layer**.
-
-A fifth layer needs to exist - one that carries the four across
-sessions, captures what the environment said the last hundred times
-the agent worked in this repo, and surfaces that back when it matters.
-That layer is **agent experience**.
 
 ## A note on the term
 

@@ -22,29 +22,14 @@ SurrealDB graph - then surfaces what's signal vs. noise on demand, for you
 
 ![ax · agent experience layer](docs/images/og.png)
 
-## The four layers, and the fifth
+## What is AX
 
-Coding-agent quality comes from four layers - **perception**,
-**representation**, **verification**, **boundary**.
-[(10× Your Coding Agent by Fixing Its Environment)](https://necmttn.com/blog/10x-coding-agent)
+`AX` is what the agent perceives across sessions, remembers, and acts
+on. It is to AI coding agents what DX is to humans: the surface that
+turns capability into compounding skill. `ax` is the reference
+implementation - local, typed, MIT-licensed.
 
-| Layer | Inside one session |
-|---|---|
-| **Perception** | What the agent can search and notice (`rg`, `fd`, gitignore-aware retrieval) |
-| **Representation** | How legible code, diffs, and outputs are (`bat`, `delta`, `jq`) |
-| **Verification** | How fast the codebase pushes back (`tsc`, `oxlint`, typed interfaces) |
-| **Boundary** | What the agent can safely touch (`zdiff3`, worktrees, hunk staging) |
-
-The four layers govern quality **inside one session**. Reset the
-conversation and you lose all of it.
-
-**AX - agent experience - is the fifth layer.** What the agent
-perceived, how it was represented, what verification said, where the
-boundary was - *across every session*. It is to AI coding agents what
-DX is to humans.
-
-`ax` is the reference implementation. A longer take:
-[`docs/manifesto.md`](docs/manifesto.md). Vocabulary:
+A longer take: [`docs/manifesto.md`](docs/manifesto.md). Vocabulary:
 [`docs/language.md`](docs/language.md).
 
 ## How it fits together
