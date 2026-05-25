@@ -17,6 +17,8 @@
     "refs:setup": "scripts/setup-references.sh",
     "watcher:install": "bash scripts/install-watcher.sh",
     "watcher:uninstall": "bash scripts/uninstall-watcher.sh",
+    "checkpoint:install": "bash scripts/install-checkpoint.sh",
+    "checkpoint:uninstall": "bash scripts/uninstall-checkpoint.sh",
     "daemon:install": "bash scripts/install-daemon.sh",
     "daemon:uninstall": "bash scripts/uninstall-daemon.sh",
     "build": "bun build --compile --outfile=dist/axctl src/cli/index.ts",

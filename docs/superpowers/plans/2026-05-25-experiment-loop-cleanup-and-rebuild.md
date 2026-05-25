@@ -322,10 +322,10 @@ Each sub-step shippable independently.
 | C3 | done | f96d181 |
 | C4 | done | f96d181 |
 | C5 | done | c44cca9 |
-| C6 | done | (pending commit) |
-| C7 | done | (pending commit) |
-| C8 | done | (pending commit) |
-| C9 | pending | - |
+| C6 | done | 785c395 |
+| C7 | done | 785c395 |
+| C8 | done | 785c395 |
+| C9 | done | (pending commit) |
 | C10 | pending | - |
 | C11 | pending | - |
 | C12 | pending | - |
