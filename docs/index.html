@@ -99,8 +99,33 @@
     read the same graph; the dashboard is a thin React view over the same
     queries. SurrealDB + Bun + Effect underneath. MIT all the way.
   </p>
-  <div class="diagram">
-    <div class="mermaid">
+
+  <div class="pipeline-viz">
+    <canvas data-anim="pipeline" data-autoplay="true" class="pipeline-canvas" aria-hidden="true"></canvas>
+    <div class="pipeline-labels">
+      <ul class="pipeline-sources">
+        <li>~/.claude/projects/</li>
+        <li>~/.codex/sessions/</li>
+        <li>~/.claude/skills/</li>
+        <li>local git history</li>
+      </ul>
+      <div class="pipeline-middle">
+        <small>axctl ingest</small>
+        <strong>SurrealDB graph</strong>
+        <small>session · turn · tool_call · skill · file · friction · insight</small>
+      </div>
+      <ul class="pipeline-readers">
+        <li>axctl CLI</li>
+        <li>ax studio</li>
+        <li>agent skills</li>
+      </ul>
+    </div>
+  </div>
+
+  <details class="mermaid-fallback">
+    <summary>see as a static diagram</summary>
+    <div class="diagram">
+      <div class="mermaid">
 flowchart LR
   cc["~/.claude/projects/<br/>Claude transcripts"]
   cx["~/.codex/sessions/<br/>Codex transcripts"]
@@ -118,8 +143,9 @@ flowchart LR
   db --> cli["axctl CLI<br/>recall · skills · insights · evidence"]
   db --> dash["axctl serve<br/>live dashboard"]
   db --> agent["agent skill<br/>project context · verify · harness"]
+      </div>
     </div>
-  </div>
+  </details>
 </section>
 
 <section id="demo">
@@ -213,6 +239,8 @@ Bash           318             1           2026-05-21T22:12</code></pre>
     <div class="right">the missing layer</div>
   </div>
 </footer>
+
+<script type="module" src="animations.js"></script>
 
 <script type="module">
   import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
