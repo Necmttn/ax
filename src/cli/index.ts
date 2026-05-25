@@ -16,6 +16,7 @@ import { ingestHarness } from "../ingest/harness.ts";
 import { deriveOutcomes } from "../ingest/outcomes.ts";
 import { deriveSessionHealth } from "../ingest/session-health.ts";
 import { deriveClosure } from "../ingest/closure.ts";
+import { deriveProposals } from "../ingest/derive-proposals.ts";
 import { ingestClaudeInsights } from "../ingest/claude-insights.ts";
 import { deriveSignals } from "../ingest/derive-signals.ts";
 import { deriveTurnIntents } from "../ingest/derive-intents.ts";
@@ -289,6 +290,7 @@ const STAGE_PROGRESS: Record<IngestStageKey, ProgressStage> = {
     outcomes: { source: "outcomes", stage: "derive" },
     "session-health": { source: "session-health", stage: "derive" },
     closure: { source: "closure", stage: "derive" },
+    proposals: { source: "proposals", stage: "derive" },
     harness: { source: "harness", stage: "doctor" },
 };
 
@@ -488,6 +490,14 @@ const cmdIngest = (args: string[]) => {
                 "closure",
                 "derive",
                 deriveClosure(),
+                progress,
+            )),
+            proposals: () => withServices(telemetryStage(
+                db,
+                runId,
+                "proposals",
+                "derive",
+                deriveProposals(),
                 progress,
             )),
             harness: () => withServices(telemetryStage(db, runId, "harness", "doctor", ingestHarness(), progress)),
