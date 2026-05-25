@@ -1,11 +1,14 @@
 ---
 name: ax-retro
-description: Run an evidence-backed axctl retrospective over recent AI-agent behavior. Use when the user asks for an agent retro, weekly retrospective, ax doctor, ax-doctor, ax-retro, hook effectiveness review, intervention review, self-improvement report, or wants to understand what hooks, skills, context, and interventions helped or hurt.
+description: Run an evidence-backed retrospective over the ax agent-experience graph - recent transcripts, native harness hooks, feedback cases, and interventions. Closes the self-improvement loop by turning observed agent behavior into concrete experiment candidates. Use when the user asks for an agent retro, weekly retrospective, ax doctor, ax-doctor, ax-retro, hook effectiveness review, intervention review, self-improvement report, or wants to understand what hooks, skills, context, and interventions helped or hurt.
 ---
 
-# Ax Retro
+# ax retro
 
-Run a read-only retrospective over recent ax evidence: transcripts, native harness hooks, feedback cases, and interventions. The goal is to produce pragmatic experiment candidates, not to praise or condemn hooks from isolated events.
+Read-only retrospective over the ax agent-experience graph: recent
+transcripts, native harness hooks, feedback cases, and interventions. The
+goal is to produce pragmatic experiment candidates from real evidence, not
+to praise or condemn hooks from isolated events.
 
 ## Defaults
 

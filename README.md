@@ -1,14 +1,20 @@
 # ax
 
-**Local evidence graph for AI coding agents.**
+###### the agent experience layer
+
+**Observability and memory for self-improving AI coding agents.**
+Local-first. Typed. Yours.
+
+---
 
 Every session, your AI coding agent starts from zero. It re-reads the same
 files, re-discovers the same patterns, re-invokes the same broken tools, and
 re-learns the same lessons you taught it last week.
 
-`ax` is the memory layer underneath. It ingests transcripts from Claude Code
-and Codex, plus your installed skills and local git history, into a local
-SurrealDB graph - then surfaces what's signal vs. noise on demand.
+`ax` is the layer underneath. It ingests transcripts from Claude Code and
+Codex, plus your installed skills and local git history, into a local
+SurrealDB graph - then surfaces what's signal vs. noise on demand, for you
+*and* for the next agent session.
 
 > *Which skills did I actually use this month? Which tool calls keep failing?
 > Which files change together? What did I tell the agent that it forgot?*
@@ -82,7 +88,7 @@ exec_command   421             1           2026-05-22T18:50
 Bash           318             1           2026-05-21T22:12
 ```
 
-## Why
+## Why an experience layer
 
 LLM agents are good at tasks. They're bad at remembering what happened.
 Memory tooling today is either a giant rolling context window (expensive,
@@ -94,14 +100,15 @@ agent's own logs. Sessions, turns, tool calls, plans, skills, commits, files,
 friction, and derived signals - all queryable in SurrealDB, all local, no
 network round-trip, no third party.
 
-Three things fall out of that:
+Three things fall out of that, and they're the three things "agent
+experience" actually means in practice:
 
 1. **Skill triage** - which of your installed skills get used, which never
    fire, which correlate with stuck sessions.
 2. **Pre-flight grounding** - `axctl project context` hands the next agent
    stack info, recent friction, and verification commands.
 3. **Retro signal** - query the graph after a hard session: tool retries,
-   plan churn, file edit pairings.
+   plan churn, file edit pairings. Feed it back into the next run.
 
 ## Install
 

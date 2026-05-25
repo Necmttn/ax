@@ -59,10 +59,28 @@ a {
     padding-bottom: 12px;
 }
 
+.masthead .brand {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    min-width: 0;
+}
+
 .masthead h1 {
     font-family: Georgia, serif;
     font-size: 32px;
     margin: 0;
+    line-height: 1;
+}
+
+.masthead .brand-tag {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--muted);
+    padding-bottom: 4px;
+    white-space: nowrap;
 }
 
 nav.tabs {

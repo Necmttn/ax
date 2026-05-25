@@ -106,7 +106,10 @@ export function Shell({ children }: { children: ReactNode }) {
     return (
         <div className="shell">
             <header className="masthead">
-                <h1>ax</h1>
+                <div className="brand">
+                    <h1>ax</h1>
+                    <span className="brand-tag">agent experience</span>
+                </div>
                 <span
                     className={`live-indicator ${live.connected ? "on" : "off"}`}
                     title={

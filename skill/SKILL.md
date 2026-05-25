@@ -1,11 +1,15 @@
 ---
 name: axctl
-description: Use the local axctl CLI for AI-agent grounding. Query the user's skill+transcript graph before assuming a skill exists, and run project context/verify before or after repo work. Use when the user asks "is there a skill for X", "what skills do I use most", "find a skill that does Y", "show recent skill invocations", "which skills are unused", or when project-local git, stack, instruction, verification, or diagnostics context would help.
+description: Query the user's ax - the agent experience layer - for grounding, recall, and skill triage. ax is a local typed graph of every prior session, tool call, skill invocation, edit, and commit. Use BEFORE assuming a skill exists, BEFORE starting non-trivial repo work, and BEFORE claiming work is done. Triggers on questions like "is there a skill for X", "what skills do I use most", "find a skill that does Y", "show recent skill invocations", "which skills are unused", or whenever project-local git, stack, instruction, verification, or diagnostics context would change the next action.
 ---
 
-# ax
+# ax - agent experience layer
 
-`axctl` is the user's local taste+telemetry graph and project-grounding CLI. It indexes:
+`axctl` is the CLI into ax, the user's local agent-experience graph:
+observability, memory, and skill-triage signal built from every prior Claude
+Code and Codex session.
+
+It indexes:
 - All installed skills (name, scope, description, body)
 - Every `Skill` tool invocation across all Claude Code transcripts
 - Every Edit/Write tool invocation + which file it touched
