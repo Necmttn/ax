@@ -15,6 +15,7 @@ describe("effect cli", () => {
             "derive-signals",
             "derive-intents",
             "insights",
+            "improve",
             "serve",
             "report",
             "recall",

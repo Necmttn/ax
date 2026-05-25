@@ -4,7 +4,7 @@ import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
 import { AxConfig } from "../lib/config.ts";
 import { ProcessService } from "../lib/process.ts";
-import { prettyPrint } from "../lib/json.ts";
+import { prettyPrint, surrealLiteral } from "../lib/json.ts";
 import { prettifyProjectSlug } from "../lib/shared/project-slug.ts";
 import { AppLayer } from "../lib/layers.ts";
 import { ingestSkills } from "../ingest/skills.ts";
@@ -1631,6 +1631,160 @@ const insightsCommand = Command.make(
     ({ view, limit }) => cmdInsights([view, `--limit=${limit}`]),
 ).pipe(Command.withDescription("Run built-in graph insight queries"));
 
+/**
+ * axctl improve - surface the experiment-loop proposal shortlist.
+ * Phase C2 ships read-only `list` + `show`. accept/reject/verdict land in
+ * C3/C4/C8 with the scaffold-on-accept fix that closes the
+ * manual-step-dropout problem the adversarial review flagged.
+ */
+interface ProposalRow {
+    readonly id: { tb: string; id: string } | string;
+    readonly form: string;
+    readonly title: string;
+    readonly hypothesis: string;
+    readonly dedupe_sig: string;
+    readonly frequency: number;
+    readonly confidence: string;
+    readonly status: string;
+    readonly created_at?: string;
+}
+
+interface SkillProposalRow {
+    readonly trigger_pattern: string;
+    readonly suspected_gap: string;
+    readonly proposed_behavior: string;
+    readonly expected_impact: string | null;
+}
+
+const formatProposalLine = (row: ProposalRow): string => {
+    const freq = String(row.frequency).padStart(6);
+    const conf = (row.confidence ?? "").padEnd(6);
+    const status = (row.status ?? "").padEnd(10);
+    const form = (row.form ?? "").padEnd(11);
+    const sig = (row.dedupe_sig ?? "").padEnd(24);
+    return `${freq}  ${conf}  ${status}  ${form}  ${sig}  ${row.title}`;
+};
+
+const cmdImproveList = (args: string[]) =>
+    Effect.gen(function* () {
+        const json = args.includes("--json");
+        const limit = parsePositiveIntFlag("improve list", "limit", args, 30);
+        const formFilter = flag("form", args);
+        const statusFilter = flag("status", args) ?? "open";
+        const db = yield* SurrealClient;
+        const where: string[] = [];
+        if (statusFilter !== "all") {
+            where.push(`status = ${surrealLiteral(statusFilter)}`);
+        }
+        if (formFilter !== undefined) {
+            where.push(`form = ${surrealLiteral(formFilter)}`);
+        }
+        const whereClause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+        const sql = `SELECT id, form, title, hypothesis, dedupe_sig, frequency, confidence, status, type::string(created_at) AS created_at FROM proposal ${whereClause} ORDER BY frequency DESC, created_at DESC LIMIT ${limit};`;
+        const result = yield* db.query<[ProposalRow[]]>(sql);
+        const rows = result?.[0] ?? [];
+        if (json) {
+            console.log(prettyPrint(rows));
+            return;
+        }
+        if (rows.length === 0) {
+            console.log("(no proposals match filter)");
+            return;
+        }
+        console.log(`  freq  conf    status      form         dedupe_sig                title`);
+        for (const row of rows) console.log(formatProposalLine(row));
+    });
+
+const cmdImproveShow = (args: string[]) =>
+    Effect.gen(function* () {
+        const json = args.includes("--json");
+        const positional = args.filter((a) => !a.startsWith("--"))[0];
+        if (positional === undefined) {
+            console.error("axctl improve show: missing <id> (use a dedupe_sig from `axctl improve list`)");
+            process.exit(2);
+        }
+        const db = yield* SurrealClient;
+        // Accept dedupe_sig (preferred) or full record id (proposal:`key`)
+        const idLiteral = surrealLiteral(positional);
+        const sql = `
+            SELECT *,
+                (SELECT * FROM skill_proposal      WHERE proposal = $parent.id LIMIT 1)[0] AS skill_payload,
+                (SELECT * FROM subagent_proposal   WHERE proposal = $parent.id LIMIT 1)[0] AS subagent_payload,
+                (SELECT * FROM hook_proposal       WHERE proposal = $parent.id LIMIT 1)[0] AS hook_payload,
+                (SELECT * FROM guidance_proposal   WHERE proposal = $parent.id LIMIT 1)[0] AS guidance_payload,
+                (SELECT * FROM automation_proposal WHERE proposal = $parent.id LIMIT 1)[0] AS automation_payload,
+                (SELECT out, count, type::string(ts) AS ts FROM cites_evidence WHERE in = $parent.id) AS evidence
+            FROM proposal WHERE dedupe_sig = ${idLiteral} OR id = ${idLiteral} LIMIT 1;
+        `;
+        const result = yield* db.query<[Array<Record<string, unknown>>]>(sql);
+        const rows = result?.[0] ?? [];
+        const detail = rows[0] ?? null;
+        if (json) {
+            console.log(prettyPrint(detail));
+            return;
+        }
+        if (!detail) {
+            console.error("no proposal matched");
+            process.exit(2);
+        }
+        const row = detail as unknown as ProposalRow & {
+            skill_payload?: SkillProposalRow | null;
+            evidence?: Array<{ out: string; count: number; ts: string }>;
+        };
+        console.log(`${row.title}`);
+        console.log(`  form        ${row.form}`);
+        console.log(`  status      ${row.status}`);
+        console.log(`  confidence  ${row.confidence}`);
+        console.log(`  frequency   ${row.frequency}`);
+        console.log(`  dedupe_sig  ${row.dedupe_sig}`);
+        console.log(`  hypothesis  ${row.hypothesis}`);
+        if (row.skill_payload && row.form === "skill") {
+            console.log(`  trigger     ${row.skill_payload.trigger_pattern}`);
+            console.log(`  gap         ${row.skill_payload.suspected_gap}`);
+            console.log(`  behavior    ${row.skill_payload.proposed_behavior}`);
+            if (row.skill_payload.expected_impact) {
+                console.log(`  impact      ${row.skill_payload.expected_impact}`);
+            }
+        }
+        if (row.evidence?.length) {
+            console.log(`  evidence    ${row.evidence.length} cited`);
+            for (const e of row.evidence.slice(0, 5)) {
+                console.log(`    - ${String(e.out)} (count=${e.count})`);
+            }
+        }
+    });
+
+const improveListCommand = Command.make(
+    "list",
+    {
+        limit: positiveLimit(30),
+        form: Flag.string("form").pipe(Flag.optional),
+        status: Flag.string("status").pipe(Flag.optional),
+        json: jsonFlag,
+    },
+    ({ limit, form, status, json }) =>
+        cmdImproveList([
+            `--limit=${limit}`,
+            ...stringArg("form", optionValue(form)),
+            ...stringArg("status", optionValue(status)),
+            ...boolArg("json", json),
+        ]),
+).pipe(Command.withDescription("List open experiment-loop proposals (ranked by frequency)"));
+
+const improveShowCommand = Command.make(
+    "show",
+    {
+        id: Argument.string("id"),
+        json: jsonFlag,
+    },
+    ({ id, json }) => cmdImproveShow([id, ...boolArg("json", json)]),
+).pipe(Command.withDescription("Show a proposal + form payload + cited evidence"));
+
+const improveCommand = Command.make("improve").pipe(
+    Command.withDescription("Experiment loop: review proposals, accept skills, track verdicts"),
+    Command.withSubcommands([improveListCommand, improveShowCommand]),
+);
+
 const serveCommand = Command.make(
     "serve",
     { port: Flag.integer("port").pipe(Flag.withDefault(1738)) },
@@ -2178,6 +2332,7 @@ export const rootCommand = Command.make("axctl").pipe(
         deriveSignalsCommand,
         deriveIntentsCommand,
         insightsCommand,
+        improveCommand,
         serveCommand,
         reportCommand,
         recallCommand,
@@ -2245,6 +2400,7 @@ export const DB_COMMANDS: ReadonlySet<string> = new Set([
     "derive-signals",
     "derive-intents",
     "insights",
+    "improve",
     "report",
     "recall",
     "skills",
