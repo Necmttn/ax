@@ -14,11 +14,12 @@
  * proposal.dedupe_sig prevents the same trigger pattern producing two
  * proposals across re-derive runs.
  *
- * Baseline freezing: C1 writes the baseline JSON snapshot on every run.
- * This is acceptable for `status='open'` proposals because their experiment
- * row (Phase C3) will capture its OWN frozen baseline at accept-time from
- * the proposal's then-current snapshot. Refinement to skip baseline merge
- * on accepted proposals is deferred.
+ * Baseline freezing (post-review fix): the proposal's `baseline` JSON is
+ * captured ONLY on first creation. Subsequent re-derive runs UPDATE the
+ * mutable fields (frequency, confidence, hypothesis, updated_at) but never
+ * touch `baseline` or `status`. This honors the plan's "frozen at
+ * created_at, not accept-time" decision so the verdict layer (C6) can
+ * compute friction_delta against a stable reference point.
  */
 
 import { Effect } from "effect";
@@ -138,7 +139,20 @@ export const deriveSkillProposalRows = (
     return { rows, skipped };
 };
 
-export const buildSkillProposalStatements = (rows: readonly SkillProposalRow[]): string[] => {
+/**
+ * Build the SurrealQL statements for a batch of derived rows. The proposal
+ * row is partitioned by whether its dedupe_sig already exists in the DB:
+ *  - new sig  : insert a fresh proposal row (baseline captured here).
+ *  - existing : refresh the mutable fields; baseline and status untouched.
+ *
+ * `existingSigs` is the set of dedupe_sig values currently in the proposal
+ * table. The caller (`deriveProposals`) fetches it once before computing
+ * rows so the partition is consistent within one ingest pass.
+ */
+export const buildSkillProposalStatements = (
+    rows: readonly SkillProposalRow[],
+    existingSigs: ReadonlySet<string> = new Set(),
+): string[] => {
     const stmts: string[] = [];
     for (const row of rows) {
         const proposalRef = recordRef("proposal", row.proposalKey);
@@ -146,18 +160,36 @@ export const buildSkillProposalStatements = (rows: readonly SkillProposalRow[]):
         const candidateRef = recordRef("skill_candidate", row.candidateKey);
         const edgeKey = `${row.proposalKey}__${row.candidateKey}`;
         const baseline = JSON.stringify({ frequency: row.frequency, metrics: row.metrics });
+        const isNew = !existingSigs.has(row.sig);
+
+        if (isNew) {
+            stmts.push(
+                `CREATE ${proposalRef} CONTENT ${surrealObject([
+                    ["form", surrealString("skill")],
+                    ["title", surrealString(row.title)],
+                    ["hypothesis", surrealString(row.hypothesis)],
+                    ["dedupe_sig", surrealString(row.sig)],
+                    ["frequency", String(row.frequency)],
+                    ["confidence", surrealString(row.confidence)],
+                    ["status", surrealString("open")],
+                    ["baseline", surrealOptionString(baseline)],
+                    ["updated_at", "time::now()"],
+                ])};`,
+            );
+        } else {
+            // Refresh mutable fields. Intentionally omits status + baseline.
+            stmts.push(
+                `UPDATE ${proposalRef} SET ${[
+                    ["title", surrealString(row.title)],
+                    ["hypothesis", surrealString(row.hypothesis)],
+                    ["frequency", String(row.frequency)],
+                    ["confidence", surrealString(row.confidence)],
+                    ["updated_at", "time::now()"],
+                ].map(([name, value]) => `${name} = ${value}`).join(", ")};`,
+            );
+        }
 
         stmts.push(
-            `UPSERT ${proposalRef} MERGE ${surrealObject([
-                ["form", surrealString("skill")],
-                ["title", surrealString(row.title)],
-                ["hypothesis", surrealString(row.hypothesis)],
-                ["dedupe_sig", surrealString(row.sig)],
-                ["frequency", String(row.frequency)],
-                ["confidence", surrealString(row.confidence)],
-                ["baseline", surrealOptionString(baseline)],
-                ["updated_at", "time::now()"],
-            ])};`,
             `UPSERT ${payloadRef} MERGE ${surrealObject([
                 ["proposal", proposalRef],
                 ["trigger_pattern", surrealString(row.triggerPattern)],
@@ -177,16 +209,18 @@ export const deriveProposals = (
 ): Effect.Effect<DeriveProposalsStats, DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
-        const [candidates, skills] = yield* Effect.all([
+        const [candidates, skills, existingProposals] = yield* Effect.all([
             db.query<[SkillCandidateRow[]]>(`
 SELECT id, name, trigger_pattern, suspected_gap, proposed_behavior, confidence, expected_impact, metrics
 FROM skill_candidate;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
             db.query<[SkillRow[]]>(`SELECT name FROM skill;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
-        ], { concurrency: 2 });
+            db.query<[Array<{ dedupe_sig: string }>]>(`SELECT dedupe_sig FROM proposal;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
+        ], { concurrency: 3 });
 
         const existingSkillNames = new Set(skills.map((s) => normalizeTitle(s.name)));
+        const existingSigs = new Set(existingProposals.map((p) => p.dedupe_sig));
         const { rows, skipped } = deriveSkillProposalRows(candidates, existingSkillNames, opts.minFrequency);
-        const stmts = buildSkillProposalStatements(rows);
+        const stmts = buildSkillProposalStatements(rows, existingSigs);
 
         yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
         return { skillProposals: rows.length, skipped };

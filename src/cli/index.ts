@@ -1810,7 +1810,27 @@ const cmdImproveAccept = (args: string[]) =>
         }
         const status = String(row.status ?? "");
         if (status !== "open") {
+            // Look up the existing experiment so the user sees what was
+            // scaffolded last time (and where) instead of a bare refusal.
+            // This SELECT also makes `experiment` a legitimately-read table
+            // for the table-coverage CI gate.
+            const existing = yield* db.query<[Array<Record<string, unknown>>]>(
+                `SELECT id, artifact_path, type::string(scaffolded_at) AS scaffolded_at, type::string(created_at) AS created_at, locked_verdict FROM experiment WHERE proposal = ${recordRef("proposal", proposalKey)} LIMIT 1;`,
+            );
+            const existingExperiment = (existing?.[0] ?? [])[0];
             console.error(`proposal already ${status} (use \`axctl improve list --status=all\` to see)`);
+            if (existingExperiment) {
+                console.error(`  experiment   ${String(existingExperiment.id)}`);
+                if (existingExperiment.artifact_path) {
+                    console.error(`  scaffold     ${String(existingExperiment.artifact_path)}`);
+                }
+                if (existingExperiment.scaffolded_at) {
+                    console.error(`  scaffolded   ${String(existingExperiment.scaffolded_at)}`);
+                }
+                if (existingExperiment.locked_verdict) {
+                    console.error(`  verdict      ${String(existingExperiment.locked_verdict)}`);
+                }
+            }
             process.exit(2);
         }
         const form = String(row.form ?? "");
@@ -1902,9 +1922,100 @@ const improveRejectCommand = Command.make(
     ({ id, reason }) => cmdImproveReject([id, ...stringArg("reason", optionValue(reason))]),
 ).pipe(Command.withDescription("Reject a proposal (dedupe blocks future re-proposal of same trigger)"));
 
+/**
+ * `axctl improve verdict` placeholder. The scaffold marker (see
+ * src/improve/skill-scaffold.ts) points users here. Until the verdict
+ * layer lands (Phase C5-C8: derive-opportunities, derive-checkpoints,
+ * automatic checkpoint scheduling, user verdict confirmation), this stub
+ * shows the experiment's current state + tells the user what's still
+ * manual. Removing the dangling reference from the scaffold is the
+ * cheaper alternative; surfacing real state is the more honest one.
+ */
+const cmdImproveVerdict = (args: string[]) =>
+    Effect.gen(function* () {
+        const positional = args.filter((a) => !a.startsWith("--"))[0];
+        const json = args.includes("--json");
+        const db = yield* SurrealClient;
+        if (positional === undefined) {
+            const rows = yield* db.query<[Array<Record<string, unknown>>]>(
+                `SELECT
+                    proposal.title AS title,
+                    proposal.dedupe_sig AS dedupe_sig,
+                    artifact_path,
+                    type::string(created_at) AS created_at,
+                    type::string(scaffolded_at) AS scaffolded_at,
+                    locked_verdict
+                FROM experiment ORDER BY created_at DESC LIMIT 30;`,
+            );
+            const list = rows?.[0] ?? [];
+            if (json) { console.log(prettyPrint(list)); return; }
+            if (list.length === 0) {
+                console.log("(no experiments yet - accept a proposal first via `axctl improve accept <sig>`)");
+                return;
+            }
+            console.log("Current experiments (newest first):");
+            for (const row of list) {
+                const verdict = row.locked_verdict ? String(row.locked_verdict) : "pending";
+                console.log(`  ${String(row.dedupe_sig ?? "?")}  [${verdict}]  ${String(row.title ?? "?")}`);
+            }
+            console.log("");
+            console.log("Automatic verdict scoring lands in Phase C5-C8 of the plan");
+            console.log("(see docs/superpowers/plans/2026-05-25-experiment-loop-cleanup-and-rebuild.md).");
+            return;
+        }
+        const idLiteral = surrealLiteral(positional);
+        const sel = yield* db.query<[Array<Record<string, unknown>>]>(
+            `SELECT
+                id,
+                proposal.title AS title,
+                proposal.dedupe_sig AS dedupe_sig,
+                proposal.status AS proposal_status,
+                artifact_path,
+                type::string(created_at) AS created_at,
+                type::string(scaffolded_at) AS scaffolded_at,
+                locked_verdict
+            FROM experiment
+            WHERE proposal.dedupe_sig = ${idLiteral} OR id = ${idLiteral}
+            LIMIT 1;`,
+        );
+        const row = (sel?.[0] ?? [])[0];
+        if (!row) {
+            console.error(`no experiment matched ${positional} (check \`axctl improve list --status=accepted\`)`);
+            process.exit(2);
+        }
+        if (json) { console.log(prettyPrint(row)); return; }
+        console.log(`${String(row.title ?? "?")}`);
+        console.log(`  dedupe_sig    ${String(row.dedupe_sig ?? "?")}`);
+        console.log(`  experiment    ${String(row.id ?? "?")}`);
+        console.log(`  status        ${String(row.proposal_status ?? "?")}`);
+        console.log(`  artifact      ${String(row.artifact_path ?? "(none)")}`);
+        console.log(`  scaffolded_at ${String(row.scaffolded_at ?? "(none)")}`);
+        console.log(`  verdict       ${row.locked_verdict ? String(row.locked_verdict) : "pending"}`);
+        console.log("");
+        console.log("Automatic verdict scoring (opportunity tracking + checkpoint math)");
+        console.log("lands in Phase C5-C8. Until then, edit `experiment.locked_verdict`");
+        console.log("directly via SurrealQL if you want to record one manually:");
+        console.log(`  UPDATE ${String(row.id ?? "experiment:?")} SET locked_verdict = "adopted";`);
+    });
+
+const improveVerdictCommand = Command.make(
+    "verdict",
+    {
+        id: Argument.string("id").pipe(Argument.optional),
+        json: jsonFlag,
+    },
+    ({ id, json }) => {
+        const idValue = optionValue(id);
+        return cmdImproveVerdict([
+            ...(idValue === undefined ? [] : [idValue]),
+            ...boolArg("json", json),
+        ]);
+    },
+).pipe(Command.withDescription("Show experiment verdict state (manual fallback until automatic scoring lands)"));
+
 const improveCommand = Command.make("improve").pipe(
     Command.withDescription("Experiment loop: review proposals, accept skills, track verdicts"),
-    Command.withSubcommands([improveListCommand, improveShowCommand, improveAcceptCommand, improveRejectCommand]),
+    Command.withSubcommands([improveListCommand, improveShowCommand, improveAcceptCommand, improveRejectCommand, improveVerdictCommand]),
 );
 
 const serveCommand = Command.make(

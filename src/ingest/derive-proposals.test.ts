@@ -83,29 +83,40 @@ describe("deriveSkillProposalRows", () => {
 });
 
 describe("buildSkillProposalStatements", () => {
-    test("emits proposal + skill_proposal upserts + cites_evidence RELATE for each row", () => {
-        const rows = [{
-            proposalKey: "skill__schema_change_guardrail__abcdef123456",
-            candidateKey: "schema_change_guardrail",
-            title: "Schema change guardrail",
-            hypothesis: "gap",
-            triggerPattern: "schema file edit",
-            suspectedGap: "no pre-edit validation",
-            proposedBehavior: "run schema lint",
-            expectedImpact: "fewer breaks",
-            confidence: "high",
-            frequency: 5,
-            sig: "skill__abcdef123456",
-            metrics: { fix_chain_count: 5 },
-        }];
-        const sql = buildSkillProposalStatements(rows).join("\n");
-        expect(sql).toContain("UPSERT proposal:");
+    const baseRow = {
+        proposalKey: "skill__schema_change_guardrail__abcdef123456",
+        candidateKey: "schema_change_guardrail",
+        title: "Schema change guardrail",
+        hypothesis: "gap",
+        triggerPattern: "schema file edit",
+        suspectedGap: "no pre-edit validation",
+        proposedBehavior: "run schema lint",
+        expectedImpact: "fewer breaks",
+        confidence: "high",
+        frequency: 5,
+        sig: "skill__abcdef123456",
+        metrics: { fix_chain_count: 5 },
+    };
+
+    test("new sig: CREATE proposal with baseline + status='open'", () => {
+        const sql = buildSkillProposalStatements([baseRow], new Set()).join("\n");
+        expect(sql).toContain("CREATE proposal:");
+        expect(sql).toContain("status: \"open\"");
+        expect(sql).toContain("baseline:");
+        expect(sql).toContain("dedupe_sig: \"skill__abcdef123456\"");
         expect(sql).toContain("UPSERT skill_proposal:");
         expect(sql).toContain("RELATE proposal:");
         expect(sql).toContain("->cites_evidence:");
-        expect(sql).toContain("->skill_candidate:");
-        expect(sql).toContain("form: \"skill\"");
-        expect(sql).toContain("dedupe_sig: \"skill__abcdef123456\"");
-        expect(sql).toContain("frequency: 5");
+    });
+
+    test("existing sig: UPDATE refresh-able fields ONLY, no baseline/status touch", () => {
+        const sql = buildSkillProposalStatements([baseRow], new Set([baseRow.sig])).join("\n");
+        expect(sql).toContain("UPDATE proposal:");
+        expect(sql).not.toContain("CREATE proposal:");
+        expect(sql).not.toMatch(/\bstatus\s*=/);
+        expect(sql).not.toMatch(/\bbaseline\s*=/);
+        expect(sql).toMatch(/\bfrequency\s*=\s*5/);
+        expect(sql).toMatch(/\bconfidence\s*=\s*"high"/);
+        expect(sql).toContain("UPSERT skill_proposal:");
     });
 });

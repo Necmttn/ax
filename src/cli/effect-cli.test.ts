@@ -58,6 +58,17 @@ describe("effect cli", () => {
         ]));
     });
 
+    test("improve group exposes the experiment-loop subcommands", () => {
+        const improve = rootCommand.subcommands
+            .flatMap((g) => g.commands)
+            .find((c) => c.name === "improve");
+        expect(improve).toBeDefined();
+        const subNames = improve!.subcommands.flatMap((g) => g.commands.map((c) => c.name));
+        expect(subNames).toEqual(expect.arrayContaining([
+            "list", "show", "accept", "reject", "verdict",
+        ]));
+    });
+
     test("--insights-only rejects other --*-only flags and --since", () => {
         const base = {
             skillsOnly: false,
