@@ -329,7 +329,7 @@ Each sub-step shippable independently.
 | C10 | pending | - |
 | C11 | pending | - |
 | C12 | pending | - |
-| D1 | done | (pending commit) |
-| D2 | done | (pending commit) |
-| D3 | done | (pending commit) |
-| D4 | done | (pending commit) |
+| D1 | done | 4027070 |
+| D2 | done | 4027070 |
+| D3 | done | 4027070 |
+| D4 | done | 4027070 |

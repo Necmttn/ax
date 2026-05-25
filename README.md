@@ -14,7 +14,73 @@ SurrealDB graph - then surfaces what's signal vs. noise on demand.
 > Which files change together? What did I tell the agent that it forgot?*
 > `ax` answers these by reading what already happened.
 
-<!-- TODO: add docs/images/dashboard.png hero after capture -->
+## How it fits together
+
+```mermaid
+flowchart LR
+  cc["~/.claude/projects/<br/>Claude transcripts"]
+  cx["~/.codex/sessions/<br/>Codex transcripts"]
+  sk["~/.claude/skills/<br/>installed skills"]
+  g[("local git history")]
+
+  cc --> ingest
+  cx --> ingest
+  sk --> ingest
+  g  --> ingest
+
+  ingest["axctl ingest<br/>(Effect pipelines)"] --> db
+  db[("SurrealDB graph<br/>session · turn · tool_call · skill<br/>repository · checkout · commit · file<br/>friction · diagnostic · insight")]
+
+  db --> cli["axctl CLI<br/>recall · skills · insights · evidence"]
+  db --> dash["axctl serve<br/>live dashboard"]
+  db --> agent["agent skill<br/>project context · verify · harness"]
+```
+
+Everything runs on `127.0.0.1`. The agent and the CLI both read the same
+graph; the dashboard is a thin React view over the same queries.
+
+## A taste of the output
+
+Which skills earned their keep, by composite score over the last 30 days:
+
+```text
+$ axctl skills taste --limit=8
+skill                              scope        score    7d     30d    total
+codex:exec_command                 codex-tool  40902.5  1,124  30,500  40,389
+codex:write_stdin                  codex-tool   6,957     166   4,932   6,451
+codex:rescue                       command        781       0     389     605
+codex:update_plan                  codex-tool   766.5      14     338     391
+simplify                           user         718.5       5      89     101
+codex:wait_agent                   codex-tool     713       3     497     507
+codex:spawn_agent                  codex-tool     647       2     439     442
+superpowers:systematic-debugging   plugin        26.5       0       6       6
+
+(8 / 288 skills shown)
+```
+
+Recall past work across every session, in milliseconds:
+
+```text
+$ axctl recall "auth middleware"
+4 matches
+
+2026-05-23T15:19  codex      user       acme-app   alright lets commit auth related work for now
+2026-05-23T14:51  codex      assistant  acme-app   Added the HealthOS just setup. You can now run from repo root: just health dev …
+2026-05-23T14:41  codex      assistant  acme-app   Findings: apple-auth.service.ts accepts extra Apple audiences from ambient env …
+2026-05-19T11:08  claude     user       ax         the auth middleware retry loop - we still see exit-code 1 from bun check after …
+```
+
+Which tools fail most often, so you know what to skill-up around:
+
+```text
+$ axctl insights tools --limit=5
+name           failure_count   exit_code   last_seen
+write_stdin    647             1           2026-05-23T14:34
+Edit           483             -           2026-05-23T05:14
+Skill          475             -           2026-05-05T13:34
+exec_command   421             1           2026-05-22T18:50
+Bash           318             1           2026-05-21T22:12
+```
 
 ## Why
 
