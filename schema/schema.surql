@@ -1310,3 +1310,30 @@ DEFINE FIELD suggested    ON checkpoint TYPE option<string>;
 DEFINE FIELD user_verdict ON checkpoint TYPE option<string>;
 DEFINE FIELD observed_at  ON checkpoint TYPE datetime DEFAULT time::now();
 DEFINE INDEX checkpoint_experiment_kind ON checkpoint FIELDS experiment, kind, observed_at;
+
+-- ==== dogfood_run (Phase C12) ====
+-- Replaces the intervention_observation overload that wterm previously used
+-- to record test-scenario results (intervention=NONE was the smell). One row
+-- per dogfood scenario invocation. Owned by src/dogfood/wterm.ts.
+DEFINE TABLE dogfood_run SCHEMAFULL;
+DEFINE FIELD run_id           ON dogfood_run TYPE string;
+DEFINE FIELD scenario         ON dogfood_run TYPE string;
+DEFINE FIELD driver           ON dogfood_run TYPE string;       -- wterm | future drivers
+DEFINE FIELD status           ON dogfood_run TYPE string;       -- passed | failed | error
+DEFINE FIELD agent            ON dogfood_run TYPE option<string>;
+DEFINE FIELD command          ON dogfood_run TYPE option<string>;
+DEFINE FIELD command_source   ON dogfood_run TYPE option<string>;
+DEFINE FIELD transport        ON dogfood_run TYPE option<string>;
+DEFINE FIELD requested_transport ON dogfood_run TYPE option<string>;
+DEFINE FIELD transport_fallback_reason ON dogfood_run TYPE option<string>;
+DEFINE FIELD success_marker   ON dogfood_run TYPE option<string>;
+DEFINE FIELD marker_found     ON dogfood_run TYPE bool DEFAULT false;
+DEFINE FIELD timed_out        ON dogfood_run TYPE bool DEFAULT false;
+DEFINE FIELD timeout_seconds  ON dogfood_run TYPE option<int>;
+DEFINE FIELD transcript_artifact ON dogfood_run TYPE option<record<artifact>>;
+DEFINE FIELD cwd              ON dogfood_run TYPE option<string>;
+DEFINE FIELD started_at       ON dogfood_run TYPE datetime;
+DEFINE FIELD ended_at         ON dogfood_run TYPE datetime;
+DEFINE INDEX dogfood_run_id_uq      ON dogfood_run FIELDS run_id UNIQUE;
+DEFINE INDEX dogfood_run_status_ts  ON dogfood_run FIELDS status, ended_at;
+DEFINE INDEX dogfood_run_scenario   ON dogfood_run FIELDS scenario, ended_at;

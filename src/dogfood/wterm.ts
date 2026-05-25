@@ -352,10 +352,11 @@ window.__axctlDogfood = { term, transport };
 async function persistDogfoodResult(result: DogfoodResult): Promise<boolean> {
     const scenarioKey = result.scenario.replaceAll("-", "_");
     const transcriptKey = `dogfood_wterm_${scenarioKey}__${result.runId}__transcript`;
+    const runKey = `wterm_${scenarioKey}__${result.runId}`;
     const artifactRef = recordRef("artifact", transcriptKey);
-    // Phase A7: intervention_observation write removed - wterm's "test run"
-    // semantics never fit that table. dogfood_run is the proper home (Phase C12).
-    // Until then, the transcript artifact alone is the persisted evidence.
+    const runRef = recordRef("dogfood_run", runKey);
+    // Phase C12: dogfood_run is the proper home for test-scenario results.
+    // Replaces the intervention_observation overload from before A7.
     const statements = [
         `UPSERT ${artifactRef} MERGE ${sqlObject([
             ["kind", sqlString("dogfood_wterm_transcript")],
@@ -379,6 +380,26 @@ async function persistDogfoodResult(result: DogfoodResult): Promise<boolean> {
                 requested_transport: result.requestedTransport,
             })],
             ["updated_at", "time::now()"],
+        ])};`,
+        `UPSERT ${runRef} MERGE ${sqlObject([
+            ["run_id", sqlString(result.runId)],
+            ["scenario", sqlString(result.scenario)],
+            ["driver", sqlString("wterm")],
+            ["status", sqlString(result.status)],
+            ["agent", result.agent ? sqlString(result.agent) : "NONE"],
+            ["command", sqlString(result.command)],
+            ["command_source", sqlString(result.commandSource)],
+            ["transport", sqlString(result.transport)],
+            ["requested_transport", sqlString(result.requestedTransport)],
+            ["transport_fallback_reason", result.transportFallbackReason ? sqlString(result.transportFallbackReason) : "NONE"],
+            ["success_marker", result.successMarker ? sqlString(result.successMarker) : "NONE"],
+            ["marker_found", result.markerFound ? "true" : "false"],
+            ["timed_out", result.timedOut ? "true" : "false"],
+            ["timeout_seconds", String(result.timeoutSeconds)],
+            ["transcript_artifact", artifactRef],
+            ["cwd", sqlString(result.cwd)],
+            ["started_at", `d${JSON.stringify(result.startedAt)}`],
+            ["ended_at", `d${JSON.stringify(result.endedAt)}`],
         ])};`,
     ];
 

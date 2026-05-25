@@ -2170,9 +2170,47 @@ const dogfoodTerminalCommand = Command.make(
         ),
 ).pipe(Command.withDescription("Serve a wterm browser terminal dogfood scenario"));
 
+const cmdDogfoodRuns = (args: string[]) =>
+    Effect.gen(function* () {
+        const json = args.includes("--json");
+        const limit = parsePositiveIntFlag("dogfood runs", "limit", args, 30);
+        const db = yield* SurrealClient;
+        const rows = yield* db.query<[Array<Record<string, unknown>>]>(
+            `SELECT id, run_id, scenario, driver, status, agent, command, transport,
+                marker_found, timed_out, timeout_seconds,
+                type::string(started_at) AS started_at,
+                type::string(ended_at) AS ended_at
+            FROM dogfood_run
+            ORDER BY ended_at DESC
+            LIMIT ${limit};`,
+        );
+        const list = rows?.[0] ?? [];
+        if (json) { console.log(prettyPrint(list)); return; }
+        if (list.length === 0) {
+            console.log("(no dogfood runs persisted yet)");
+            return;
+        }
+        for (const row of list) {
+            console.log(
+                `${String(row.ended_at ?? "?")}  [${String(row.status ?? "?")}]  ` +
+                `${String(row.scenario ?? "?")}  ${String(row.driver ?? "?")}  ` +
+                `run_id=${String(row.run_id ?? "?")}`,
+            );
+        }
+    });
+
+const dogfoodRunsCommand = Command.make(
+    "runs",
+    {
+        limit: positiveLimit(30),
+        json: jsonFlag,
+    },
+    ({ limit, json }) => cmdDogfoodRuns([`--limit=${limit}`, ...boolArg("json", json)]),
+).pipe(Command.withDescription("List recent dogfood scenario runs (passed/failed/error)"));
+
 const dogfoodCommand = Command.make("dogfood").pipe(
     Command.withDescription("Run local dogfood harnesses"),
-    Command.withSubcommands([dogfoodTerminalCommand]),
+    Command.withSubcommands([dogfoodTerminalCommand, dogfoodRunsCommand]),
 );
 
 const searchCommand = Command.make(
