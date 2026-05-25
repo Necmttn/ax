@@ -280,6 +280,16 @@ Each sub-step shippable independently.
 
 ---
 
+## Followups landed post-plan-tracker
+
+| Item | Commit | Note |
+|---|---|---|
+| C5a was_addressed detector | 7bb187b | Resolves experiment.artifact_path -> skill row -> invoked-edge window |
+| CI gate self-test | 7bb187b | Positive + negative case; fixture writes a synthetic orphan and expects fail |
+| C10 React route + accept/reject/verdict HTTP | ca0e456 | Replaces the api-only checkpoint with full UI + shared actions.ts module |
+| CLI verdict --set + show alignment | ce8ce77 | Resolves dangling scaffold marker |
+| Baseline-freezing (CREATE-new vs UPDATE-existing) | ce8ce77 | Hawthorne fix the plan locked |
+
 ## Open / deferred
 
 - **`dogfood_run` table shape** (Phase C12) - wterm currently jams test results into intervention_observation with `intervention=NONE`. New table needs: `scenario`, `driver`, `status`, `setup_verified`, `timed_out`, `notes`. Defer details until C12.
