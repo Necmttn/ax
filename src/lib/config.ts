@@ -19,7 +19,6 @@ export interface AxConfigShape {
         readonly codexDir: string;
         readonly dataDir: string;
         readonly claudeUsageDir: string;
-        readonly legacySelfImproveDir: string;
         readonly repoListFile: string;
     };
     readonly knobs: {
@@ -90,9 +89,6 @@ export function envSnapshot(env: Record<string, string | undefined> = process.en
             dataDir,
             claudeUsageDir:
                 env.AX_CLAUDE_USAGE_DIR ?? join(home, ".claude", "usage-data"),
-            legacySelfImproveDir:
-                env.AX_LEGACY_SELF_IMPROVE_DIR ??
-                join(home, ".dotfiles", "claude", ".claude", "self-improve"),
             repoListFile:
                 env.AX_REPO_LIST ?? join(dataDir, "ax-repos.txt"),
         },

@@ -17,7 +17,6 @@ import { deriveOutcomes } from "../ingest/outcomes.ts";
 import { deriveSessionHealth } from "../ingest/session-health.ts";
 import { deriveClosure } from "../ingest/closure.ts";
 import { ingestClaudeInsights } from "../ingest/claude-insights.ts";
-import { ingestLegacySelfImprove } from "../ingest/legacy-self-improve.ts";
 import { deriveSignals } from "../ingest/derive-signals.ts";
 import { deriveTurnIntents } from "../ingest/derive-intents.ts";
 import { deriveSpawned } from "../ingest/derive-spawned.ts";
@@ -580,12 +579,10 @@ const cmdIngestInsights = (args: string[] = []) =>
             runId,
             stages: [
                 { source: "claude", stage: "insights" },
-                { source: "legacy-self-improve", stage: "artifacts" },
             ],
         });
         const program = Effect.gen(function* () {
             yield* telemetryStage(db, runId, "claude", "insights", ingestClaudeInsights(), progress);
-            yield* telemetryStage(db, runId, "legacy-self-improve", "artifacts", ingestLegacySelfImprove(), progress);
         });
         yield* program.pipe(
             Effect.tap(() => db.query(buildIngestRunFinishStatement({ runId, status: "ok" })).pipe(Effect.asVoid)),
