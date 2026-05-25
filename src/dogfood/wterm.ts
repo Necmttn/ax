@@ -83,7 +83,6 @@ const SUCCESS_MARKER = "AXCTL_DOGFOOD_SETUP_OK";
 
 const sqlString = surrealString;
 const sqlJson = surrealJson;
-const sqlDate = (value: string): string => `d${JSON.stringify(value)}`;
 const sqlObject = (fields: readonly (readonly [string, string])[]): string =>
     `{ ${fields.map(([name, value]) => `${name}: ${value}`).join(", ")} }`;
 
@@ -353,8 +352,10 @@ window.__axctlDogfood = { term, transport };
 async function persistDogfoodResult(result: DogfoodResult): Promise<boolean> {
     const scenarioKey = result.scenario.replaceAll("-", "_");
     const transcriptKey = `dogfood_wterm_${scenarioKey}__${result.runId}__transcript`;
-    const observationKey = `dogfood_wterm_${scenarioKey}__${result.runId}`;
     const artifactRef = recordRef("artifact", transcriptKey);
+    // Phase A7: intervention_observation write removed - wterm's "test run"
+    // semantics never fit that table. dogfood_run is the proper home (Phase C12).
+    // Until then, the transcript artifact alone is the persisted evidence.
     const statements = [
         `UPSERT ${artifactRef} MERGE ${sqlObject([
             ["kind", sqlString("dogfood_wterm_transcript")],
@@ -378,35 +379,6 @@ async function persistDogfoodResult(result: DogfoodResult): Promise<boolean> {
                 requested_transport: result.requestedTransport,
             })],
             ["updated_at", "time::now()"],
-        ])};`,
-        `UPSERT ${recordRef("intervention_observation", observationKey)} MERGE ${sqlObject([
-            ["intervention", "NONE"],
-            ["target", sqlString(`axctl_${scenarioKey}_wterm_dogfood`)],
-            ["status", sqlString(result.status)],
-            ["metrics_before", sqlJson({ setup_verified: 0 })],
-            ["metrics_after", sqlJson({ setup_verified: result.status === "passed" ? 1 : 0 })],
-            ["metrics", sqlJson({
-                scenario: result.scenario,
-                driver: "wterm",
-                agent: result.agent,
-                command: result.command,
-                command_source: result.commandSource,
-                success_marker: result.successMarker,
-                timed_out: result.timedOut,
-                timeout_seconds: result.timeoutSeconds,
-                transport: result.transport,
-                requested_transport: result.requestedTransport,
-                transport_fallback_reason: result.transportFallbackReason,
-                marker_found: result.markerFound,
-                transcript_artifact: transcriptKey,
-            })],
-            ["notes", sqlJson([
-                `wterm rendered a browser terminal connected to ${result.transport} transport`,
-                result.scenario === "interactive"
-                    ? "scenario opened a steerable terminal in a scratch HOME"
-                    : "scenario demonstrated axctl doctor from a scratch HOME",
-            ])],
-            ["observed_at", sqlDate(result.endedAt)],
         ])};`,
     ];
 
