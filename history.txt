@@ -1,2 +1,0 @@
-#V2
-SELECT command, status, metrics, started_at FROM ingest_run ORDER BY started_at DESC LIMIT 5; SELECT source, stage, level, message, counts, ts FROM ingest_event ORDER BY ts DESC LIMIT 5;

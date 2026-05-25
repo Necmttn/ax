@@ -12,3 +12,9 @@ dist/
 
 # local dogfood outputs (HTML reports, profiling scratch)
 dogfood-output/
+
+# generated preview HTML from prototype scripts - contains real transcript text
+scripts/prototypes/*-preview.html
+
+# SurrealDB CLI scratch
+history.txt
