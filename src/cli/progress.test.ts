@@ -137,7 +137,10 @@ describe("cli progress", () => {
 
         const output = sink.chunks.join("");
         expect(output).toContain("axctl ingest");
-        expect(output).toContain("stage       progress");
+        expect(output).toContain("stage");
+        expect(output).toContain("progress");
+        expect(output).toContain("skills/upsert");
+        expect(output).toContain("codex/sessions");
         expect(output).toContain("skills");
         expect(output).toContain("files=50 sessions=49 turns=500");
         expect(output).toContain("205");

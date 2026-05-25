@@ -72,6 +72,44 @@ describe("runPipeline", () => {
     });
 });
 
+describe("runPipeline DAG scheduling", () => {
+    test("a dep-free long stage does not block downstream stages whose deps are met", async () => {
+        // Models the real bug: git (deps=[]) ran in layer 0 with skills+commands
+        // and blocked claude/codex (layer 1) until git finished. With DAG
+        // scheduling, claude starts as soon as skills+commands complete, even
+        // while git is still running.
+        const started: string[] = [];
+        const finished: string[] = [];
+        let releaseGit: () => void = () => {};
+        const gitDone = new Promise<void>((resolve) => { releaseGit = resolve; });
+
+        const mk = (key: string, deps: string[], run: () => Promise<void>): StageSpec => ({
+            key,
+            deps,
+            run: () => Effect.promise(async () => {
+                started.push(key);
+                await run();
+                finished.push(key);
+            }),
+        });
+
+        const program = runPipeline([
+            mk("skills", [], async () => {}),
+            mk("commands", [], async () => {}),
+            mk("git", [], async () => { await gitDone; }),
+            mk("claude", ["skills", "commands"], async () => {}),
+        ]);
+        const promise = Effect.runPromise(program);
+        // Let claude run once its deps clear, even though git is still pending.
+        await new Promise((r) => setTimeout(r, 50));
+        expect(finished).toContain("claude");
+        expect(finished).not.toContain("git");
+        releaseGit();
+        await promise;
+        expect(new Set(finished)).toEqual(new Set(["skills", "commands", "git", "claude"]));
+    });
+});
+
 describe("INGEST_STAGE_DEPS", () => {
     test("has all 14 canonical stages", () => {
         expect(Object.keys(INGEST_STAGE_DEPS).sort()).toEqual(

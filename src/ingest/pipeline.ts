@@ -12,7 +12,7 @@
  * layer automatically.
  */
 
-import { Effect } from "effect";
+import { Deferred, Effect, Semaphore } from "effect";
 import type { DbError } from "../lib/errors.ts";
 
 /** A single Ingest Stage. `run` is the stage's Effect; `deps` are the keys of
@@ -59,22 +59,43 @@ export const topoLayers = (specs: readonly StageSpec[]): string[][] => {
 };
 
 /**
- * Run the selected stages in dependency order. Stages within a layer run
- * concurrently (capped at {@link LAYER_CONCURRENCY}); layers run sequentially.
- * The first failing stage fails the pipeline.
+ * Run stages in dependency order with DAG scheduling: each stage starts as
+ * soon as its in-graph deps complete (no layer barriers). A semaphore caps
+ * concurrent actual work at {@link LAYER_CONCURRENCY} while dep-waiting holds
+ * no permit. The first failing stage fails the pipeline; downstream stages
+ * fail-fast via failed Deferreds.
  */
 export const runPipeline = (
     specs: readonly StageSpec[],
 ): Effect.Effect<void, DbError, never> =>
     Effect.gen(function* () {
-        const byKey = new Map(specs.map((s) => [s.key, s]));
-        for (const layer of topoLayers(specs)) {
-            yield* Effect.forEach(
-                layer,
-                (key) => byKey.get(key)!.run(),
-                { concurrency: LAYER_CONCURRENCY, discard: true },
-            );
+        // Cycle detection (also validates the graph) - same algorithm tests use.
+        topoLayers(specs);
+
+        const deferreds = new Map<string, Deferred.Deferred<void, DbError>>();
+        for (const s of specs) {
+            deferreds.set(s.key, yield* Deferred.make<void, DbError>());
         }
+        const sem = yield* Semaphore.make(LAYER_CONCURRENCY);
+
+        const runStage = (s: StageSpec) =>
+            Effect.gen(function* () {
+                for (const dep of s.deps) {
+                    const d = deferreds.get(dep);
+                    if (d) yield* Deferred.await(d);
+                }
+                yield* sem.withPermits(1)(s.run() as Effect.Effect<unknown, DbError>);
+            }).pipe(
+                Effect.tap(() => Deferred.succeed(deferreds.get(s.key)!, undefined)),
+                Effect.tapCause((cause) =>
+                    Deferred.failCause(deferreds.get(s.key)!, cause as never),
+                ),
+            );
+
+        yield* Effect.forEach(specs, runStage, {
+            concurrency: "unbounded",
+            discard: true,
+        });
     });
 
 /** Canonical Ingest Stage keys → the stages they depend on.

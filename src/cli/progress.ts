@@ -345,6 +345,15 @@ class PipelineProgress implements ProgressReporter {
         this.frame = (this.frame + 1) % spinnerFrames.length;
     }
 
+    private labelWidth(): number {
+        let width = 12;
+        for (const state of this.states) {
+            const len = stageKey(state).length;
+            if (len > width) width = len;
+        }
+        return width;
+    }
+
     private lines(): string[] {
         const now = this.options.now();
         const elapsed = now - this.startedAt;
@@ -355,14 +364,16 @@ class PipelineProgress implements ProgressReporter {
         const observedRows = this.states.reduce((sum, state) => sum + totalRows(state.counts), 0);
         const speed = elapsed > 0 ? observedRows / (elapsed / 1000) : 0;
         const eta = done > 0 && done < total ? formatDuration((elapsed / done) * (total - done)) : "--";
+        const labelW = this.labelWidth();
+        const header = `  ${"stage".padEnd(labelW)}  progress              ${"rows".padStart(8)}  ${"speed".padStart(10)}  ${"time".padStart(7)}`;
         const rows = [
             `axctl ${this.options.command}  run=${this.options.runId.slice(0, 8)}  elapsed=${formatDuration(elapsed)}  eta=${eta}`,
             `speed ${speed > 0 ? `${formatCount(speed)}/s` : "--"}  current=${currentLabel}`,
             "",
-            "stage       progress              rows       speed       time",
+            header,
         ];
         for (const state of this.states) {
-            rows.push(this.stageLine(state, now));
+            rows.push(this.stageLine(state, now, labelW));
         }
         for (const current of running) {
             rows.push("");
@@ -373,7 +384,7 @@ class PipelineProgress implements ProgressReporter {
         return rows;
     }
 
-    private stageLine(state: StageState, now: number): string {
+    private stageLine(state: StageState, now: number, labelW: number): string {
         const elapsed = state.startedAt ? (state.finishedAt ?? now) - state.startedAt : 0;
         const rows = totalRows(state.counts);
         const speed = elapsed > 0 && rows > 0 ? rows / (elapsed / 1000) : 0;
@@ -386,13 +397,13 @@ class PipelineProgress implements ProgressReporter {
             state.status === "done" ? "████████████████████" :
             state.status === "failed" ? "██████░░░░░░░░░░░░░░" :
             state.status === "running" ? this.activeBar() :
-            "░░░░░░░░░░░░░░░░░░░░";
-        const label = `${state.source}`.padEnd(10);
-        const rowText = rows > 0 ? formatCount(rows) : state.status === "pending" ? "pending" : "--";
+            "                    ";
+        const label = stageKey(state).padEnd(labelW);
+        const rowText = rows > 0 ? formatCount(rows) : "--";
         const speedText = speed > 0 ? `${formatCount(speed)}/s` : "--";
         const timeText = state.startedAt ? formatDuration(elapsed) : "--";
         const suffix = state.error ? `  ${state.error}` : "";
-        return `${icon} ${label} ${bar}  ${rowText.padStart(8)}  ${speedText.padStart(10)}  ${timeText.padStart(7)}${suffix}`;
+        return `${icon} ${label}  ${bar}  ${rowText.padStart(8)}  ${speedText.padStart(10)}  ${timeText.padStart(7)}${suffix}`;
     }
 
     private activeBar(): string {
