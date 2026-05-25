@@ -16,7 +16,6 @@ import { ingestHarness } from "../ingest/harness.ts";
 import { deriveOutcomes } from "../ingest/outcomes.ts";
 import { deriveSessionHealth } from "../ingest/session-health.ts";
 import { deriveClosure } from "../ingest/closure.ts";
-import { deriveLearningRegistry } from "../ingest/learning-registry.ts";
 import { ingestClaudeInsights } from "../ingest/claude-insights.ts";
 import { ingestLegacySelfImprove } from "../ingest/legacy-self-improve.ts";
 import { deriveSignals } from "../ingest/derive-signals.ts";
@@ -291,7 +290,6 @@ const STAGE_PROGRESS: Record<IngestStageKey, ProgressStage> = {
     outcomes: { source: "outcomes", stage: "derive" },
     "session-health": { source: "session-health", stage: "derive" },
     closure: { source: "closure", stage: "derive" },
-    "learning-registry": { source: "learning-registry", stage: "derive" },
     harness: { source: "harness", stage: "doctor" },
 };
 
@@ -491,14 +489,6 @@ const cmdIngest = (args: string[]) => {
                 "closure",
                 "derive",
                 deriveClosure(),
-                progress,
-            )),
-            "learning-registry": () => withServices(telemetryStage(
-                db,
-                runId,
-                "learning-registry",
-                "derive",
-                deriveLearningRegistry(),
                 progress,
             )),
             harness: () => withServices(telemetryStage(db, runId, "harness", "doctor", ingestHarness(), progress)),
@@ -1556,7 +1546,7 @@ const ingestCommand = Command.make(
         // Run a chosen subset of stages, e.g. --stages=signals,outcomes.
         stages: Flag.string("stages").pipe(Flag.optional),
         // Shortcut: only the DB-derive stages (signals/outcomes/session-health/
-        // closure/learning-registry) - skips the slow transcript + git parse.
+        // closure) - skips the slow transcript + git parse.
         deriveOnly: Flag.boolean("derive-only").pipe(Flag.withDefault(false)),
         // Wipe the skill graph before a full re-ingest so it rebuilds clean.
         reset: Flag.boolean("reset").pipe(Flag.withDefault(false)),

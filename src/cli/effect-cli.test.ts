@@ -85,7 +85,7 @@ describe("effect cli", () => {
     });
 
     test("resolveIngestStages: default runs every stage", () => {
-        expect(resolveIngestStages([])).toHaveLength(13);
+        expect(resolveIngestStages([])).toHaveLength(12);
     });
 
     test("resolveIngestStages: --stages= runs exactly the listed stages", () => {
@@ -98,7 +98,6 @@ describe("effect cli", () => {
     test("resolveIngestStages: --derive-only runs only the DB-derive stages", () => {
         expect([...resolveIngestStages(["--derive-only"])].sort()).toEqual([
             "closure",
-            "learning-registry",
             "outcomes",
             "session-health",
             "signals",

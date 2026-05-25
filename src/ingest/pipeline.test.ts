@@ -73,11 +73,11 @@ describe("runPipeline", () => {
 });
 
 describe("INGEST_STAGE_DEPS", () => {
-    test("has all 13 canonical stages", () => {
+    test("has all 12 canonical stages", () => {
         expect(Object.keys(INGEST_STAGE_DEPS).sort()).toEqual(
             [
                 "claude", "closure", "codex", "commands", "git", "harness",
-                "learning-registry", "outcomes", "session-health", "signals",
+                "outcomes", "session-health", "signals",
                 "skills", "spawned", "subagents",
             ].sort(),
         );
@@ -90,8 +90,7 @@ describe("INGEST_STAGE_DEPS", () => {
     test("deriveOnlyKeys are the DB-only re-derive stages", () => {
         expect(new Set(deriveOnlyKeys())).toEqual(
             new Set([
-                "signals", "outcomes", "session-health",
-                "closure", "learning-registry",
+                "signals", "outcomes", "session-health", "closure",
             ]),
         );
     });

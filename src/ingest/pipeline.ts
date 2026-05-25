@@ -101,8 +101,7 @@ export const INGEST_STAGE_DEPS: Record<string, readonly string[]> = {
     outcomes: ["signals"],
     "session-health": ["signals"],
     closure: ["signals"],
-    "learning-registry": ["signals"],
-    harness: ["outcomes", "session-health", "closure", "learning-registry"],
+    harness: ["outcomes", "session-health", "closure"],
 };
 
 export type IngestStageKey = keyof typeof INGEST_STAGE_DEPS;
@@ -110,7 +109,7 @@ export type IngestStageKey = keyof typeof INGEST_STAGE_DEPS;
 /** Stages that re-derive purely from already-ingested DB rows - the
  *  `--derive-only` set. Defined as "no dep on a transcript/git parse stage". */
 export const deriveOnlyKeys = (): IngestStageKey[] =>
-    ["signals", "outcomes", "session-health", "closure", "learning-registry"];
+    ["signals", "outcomes", "session-health", "closure"];
 
 /** Canonical Ingest Stage keys in execution order. Single source of truth. */
 export const ALL_STAGE_KEYS = Object.keys(INGEST_STAGE_DEPS) as IngestStageKey[];
