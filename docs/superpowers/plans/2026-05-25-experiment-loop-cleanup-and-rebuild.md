@@ -319,8 +319,8 @@ Each sub-step shippable independently.
 | B1-B4 | done | 1f8fec6 |
 | C1 | done | 0eebefc |
 | C2 | done | aae9bc9 |
-| C3 | done | (pending commit) |
-| C4 | done | (pending commit) |
+| C3 | done | f96d181 |
+| C4 | done | f96d181 |
 | C5 | pending | - |
 | C6 | pending | - |
 | C7 | pending | - |
@@ -329,7 +329,7 @@ Each sub-step shippable independently.
 | C10 | pending | - |
 | C11 | pending | - |
 | C12 | pending | - |
-| D1 | pending | - |
-| D2 | pending | - |
-| D3 | pending | - |
-| D4 | pending | - |
+| D1 | done | (pending commit) |
+| D2 | done | (pending commit) |
+| D3 | done | (pending commit) |
+| D4 | done | (pending commit) |

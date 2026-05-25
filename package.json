@@ -21,6 +21,7 @@
     "daemon:uninstall": "bash scripts/uninstall-daemon.sh",
     "build": "bun build --compile --outfile=dist/axctl src/cli/index.ts",
     "check:cli-reference": "bun scripts/check-cli-reference.ts",
+    "check:table-coverage": "bun scripts/check-table-coverage.ts",
     "dashboard:dev": "vite --config src/dashboard/web/vite.config.ts",
     "dashboard:build": "vite build --config src/dashboard/web/vite.config.ts",
     "serve": "bun src/cli/index.ts serve",
