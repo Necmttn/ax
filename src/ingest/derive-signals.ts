@@ -4,7 +4,7 @@ import { skillRecordKey } from "../lib/skill-id.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
 import { recordRef } from "./evidence-writers.ts";
-import { surrealDate, surrealJsonTextOption, surrealObject, surrealOptionDate, surrealOptionRecord, surrealOptionString, surrealString } from "../lib/shared/surql.ts";
+import { surrealDate, surrealJsonTextOption, surrealObject, surrealOptionRecord, surrealOptionString, surrealString } from "../lib/shared/surql.ts";
 import { executeStatementsWith } from "../lib/shared/statement-exec.ts";
 import { isoTimestamp, nonEmptyString, recordKeyPart, safeKeyPart, type TimestampInput } from "../lib/shared/derive-keys.ts";
 
@@ -142,22 +142,8 @@ export interface DerivedDiagnosticEvent {
     readonly ts: string;
 }
 
-export interface DerivedRecommendation {
-    readonly key: string;
-    readonly subjectType: string | null;
-    readonly subjectId: string | null;
-    readonly status: string;
-    readonly text: string;
-    readonly rationale: string;
-    readonly labels: JsonRecord;
-    readonly metrics: JsonRecord;
-    readonly createdAt: string;
-    readonly updatedAt: string | null;
-}
-
 const PAIR_WINDOW = 3;
 const RECOVERY_WINDOW = 3;
-const CHECKOUT_GUIDANCE_THRESHOLD = 3;
 
 export function shouldDeriveAllTimeSkillPairs(
     sinceDays: number | undefined,
@@ -354,111 +340,6 @@ export function deriveDiagnosticsFromToolCalls(
         });
     });
     return out;
-}
-
-const CHECKOUT_TEXT_RE =
-    /\b(checkout|worktree|wrong\s+repo(?:sitory)?|branch|git\s+(?:status|checkout|worktree|switch))\b/i;
-
-const isUserCorrectionFriction = (event: Pick<DerivedFrictionEvent, "kind" | "labels">): boolean => {
-    const kind = event.kind.toLowerCase();
-    if (kind === "user_correction" || kind === "correction") return true;
-    return event.labels.kind === "user_correction" || event.labels.source === "corrected_by";
-};
-
-const labelString = (labels: JsonRecord, key: string): string | null =>
-    nonEmptyString(labels[key]);
-
-const checkoutCorrectionScope = (
-    event: Pick<DerivedFrictionEvent, "labels">,
-): { subjectType: string; subjectId: string } => {
-    const labels = event.labels;
-    const repository = labelString(labels, "repository") ?? labelString(labels, "repositoryId");
-    if (repository) return { subjectType: "repository", subjectId: repository };
-
-    const checkout = labelString(labels, "checkout") ?? labelString(labels, "checkoutId");
-    if (checkout) return { subjectType: "checkout", subjectId: checkout };
-
-    const scopeId = labelString(labels, "scopeId") ?? labelString(labels, "cwd");
-    const scope = labelString(labels, "scope") ?? "scope";
-    return { subjectType: scope, subjectId: scopeId ?? scope };
-};
-
-export function deriveRecommendationFromFriction(
-    events: readonly Pick<DerivedFrictionEvent, "key" | "kind" | "text" | "labels" | "ts">[],
-): DerivedRecommendation | null {
-    const groups = new Map<
-        string,
-        {
-            subjectType: string;
-            subjectId: string;
-            count: number;
-            firstSeen: string;
-            lastSeen: string;
-            eventKeys: string[];
-        }
-    >();
-
-    for (const event of events) {
-        if (!isUserCorrectionFriction(event)) continue;
-        if (!CHECKOUT_TEXT_RE.test(event.text ?? "")) continue;
-
-        const scope = checkoutCorrectionScope(event);
-        const groupKey = `${scope.subjectType}:${scope.subjectId}`;
-        const ts = isoTimestamp(event.ts);
-        const existing = groups.get(groupKey);
-        if (existing) {
-            existing.count += 1;
-            existing.eventKeys.push(event.key);
-            if (ts < existing.firstSeen) existing.firstSeen = ts;
-            if (ts > existing.lastSeen) existing.lastSeen = ts;
-        } else {
-            groups.set(groupKey, {
-                ...scope,
-                count: 1,
-                firstSeen: ts,
-                lastSeen: ts,
-                eventKeys: [event.key],
-            });
-        }
-    }
-
-    const winner = [...groups.values()]
-        .filter((group) => group.count >= CHECKOUT_GUIDANCE_THRESHOLD)
-        .sort((a, b) => b.count - a.count || b.lastSeen.localeCompare(a.lastSeen))[0];
-    if (!winner) return null;
-
-    const text =
-        winner.subjectType === "repository"
-            ? "Show just-in-time checkout guidance for this repository before edits, tests, or git commands."
-            : "Show just-in-time checkout guidance for this scope before edits, tests, or git commands.";
-    const rationale = `Observed ${winner.count} checkout-related user corrections for ${winner.subjectId}. Remind the agent to confirm checkout path, branch, and worktree before acting.`;
-    const labels = compactRecord({
-        source: "derive_signals",
-        kind: "jit_checkout_guidance",
-        trigger: "checkout_user_corrections",
-        subjectType: winner.subjectType,
-        subjectId: winner.subjectId,
-        repository: winner.subjectType === "repository" ? winner.subjectId : null,
-    });
-
-    return {
-        key: `jit_checkout_guidance__${safeKeyPart(winner.subjectId)}`,
-        subjectType: winner.subjectType,
-        subjectId: winner.subjectId,
-        status: "open",
-        text,
-        rationale,
-        labels,
-        metrics: {
-            correctionCount: winner.count,
-            threshold: CHECKOUT_GUIDANCE_THRESHOLD,
-            firstSeen: winner.firstSeen,
-            lastSeen: winner.lastSeen,
-            evidenceCount: winner.eventKeys.length,
-        },
-        createdAt: winner.firstSeen,
-        updatedAt: winner.lastSeen,
-    };
 }
 
 /**
@@ -961,27 +842,6 @@ const upsertDiagnosticEvents = (events: readonly DerivedDiagnosticEvent[]) =>
         yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
     });
 
-const upsertRecommendations = (recommendations: readonly DerivedRecommendation[]) =>
-    Effect.gen(function* () {
-        if (recommendations.length === 0) return;
-        const db = yield* SurrealClient;
-        const stmts = recommendations.map(
-            (recommendation) =>
-                `UPSERT ${recordRef("recommendation", recommendation.key)} MERGE ${surrealObject([
-                    ["subject_type", surrealOptionString(recommendation.subjectType)],
-                    ["subject_id", surrealOptionString(recommendation.subjectId)],
-                    ["status", surrealString(recommendation.status)],
-                    ["text", surrealString(recommendation.text)],
-                    ["rationale", surrealOptionString(recommendation.rationale)],
-                    ["labels", surrealJsonTextOption(recommendation.labels)],
-                    ["metrics", surrealJsonTextOption(recommendation.metrics)],
-                    ["created_at", surrealDate(recommendation.createdAt)],
-                    ["updated_at", surrealOptionDate(recommendation.updatedAt)],
-                ])};`,
-        );
-        yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
-    });
-
 export interface DeriveStats {
     sessions: number;
     turns: number;
@@ -991,7 +851,6 @@ export interface DeriveStats {
     recoveries: number;
     frictionEvents: number;
     diagnosticEvents: number;
-    recommendations: number;
 }
 
 export interface DeriveOpts {
@@ -1061,8 +920,6 @@ export const deriveSignals = (
         const correctionFrictionBatch = deriveFrictionFromCorrections(correctionBatch);
         const frictionBatch = [...toolFrictionBatch, ...correctionFrictionBatch];
         const diagnosticBatch = deriveDiagnosticsFromToolCalls(failedToolCalls);
-        const recommendation = deriveRecommendationFromFriction(correctionFrictionBatch);
-        const recommendationBatch = recommendation === null ? [] : [recommendation];
         if (opts.onProgress) {
             yield* opts.onProgress({
                 sessions: bundles.length,
@@ -1073,7 +930,6 @@ export const deriveSignals = (
                 skillPairs: pairsList.length,
                 frictionEvents: frictionBatch.length,
                 diagnosticEvents: diagnosticBatch.length,
-                recommendations: recommendationBatch.length,
             });
         }
 
@@ -1088,7 +944,6 @@ export const deriveSignals = (
         yield* upsertRecovered(recoveryBatch);
         yield* upsertFrictionEvents(frictionBatch);
         yield* upsertDiagnosticEvents(diagnosticBatch);
-        yield* upsertRecommendations(recommendationBatch);
 
         yield* Effect.logDebug("signals derived", {
             sessions: bundles.length,
@@ -1099,7 +954,6 @@ export const deriveSignals = (
             recoveries,
             frictionEvents: frictionBatch.length,
             diagnosticEvents: diagnosticBatch.length,
-            recommendations: recommendationBatch.length,
         });
         return {
             sessions: bundles.length,
@@ -1110,7 +964,6 @@ export const deriveSignals = (
             recoveries,
             frictionEvents: frictionBatch.length,
             diagnosticEvents: diagnosticBatch.length,
-            recommendations: recommendationBatch.length,
         };
     });
 

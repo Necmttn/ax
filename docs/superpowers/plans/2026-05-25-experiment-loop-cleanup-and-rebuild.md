@@ -310,9 +310,9 @@ Each sub-step shippable independently.
 |---|---|---|
 | A1 | done | 892b877 |
 | A2 | done | 892b877 |
-| A3 | done | (pending commit) |
-| A4 | done | (pending commit) |
-| A5 | pending | - |
+| A3 | done | 086a6bc |
+| A4 | done | 086a6bc |
+| A5 | done | (pending commit) |
 | A6 | pending | - |
 | A7 | pending | - |
 | A8 | pending | - |
