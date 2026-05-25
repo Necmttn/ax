@@ -18,9 +18,10 @@ import { deriveSessionHealth } from "../ingest/session-health.ts";
 import { deriveClosure } from "../ingest/closure.ts";
 import { deriveProposals } from "../ingest/derive-proposals.ts";
 import { deriveOpportunities } from "../ingest/derive-opportunities.ts";
+import { deriveCheckpoints } from "../ingest/derive-checkpoints.ts";
 import { scaffoldSkill } from "../improve/skill-scaffold.ts";
 import { recordKeyPart } from "../lib/shared/derive-keys.ts";
-import { recordRef } from "../lib/shared/surql.ts";
+import { recordRef, surrealString } from "../lib/shared/surql.ts";
 import { ingestClaudeInsights } from "../ingest/claude-insights.ts";
 import { deriveSignals } from "../ingest/derive-signals.ts";
 import { deriveTurnIntents } from "../ingest/derive-intents.ts";
@@ -1932,18 +1933,34 @@ const improveRejectCommand = Command.make(
     ({ id, reason }) => cmdImproveReject([id, ...stringArg("reason", optionValue(reason))]),
 ).pipe(Command.withDescription("Reject a proposal (dedupe blocks future re-proposal of same trigger)"));
 
+const ALLOWED_VERDICTS: ReadonlySet<string> = new Set([
+    "adopted", "ignored", "regressed", "partial", "no_longer_needed",
+]);
+
 /**
- * `axctl improve verdict` placeholder. The scaffold marker (see
- * src/improve/skill-scaffold.ts) points users here. Until the verdict
- * layer lands (Phase C5-C8: derive-opportunities, derive-checkpoints,
- * automatic checkpoint scheduling, user verdict confirmation), this stub
- * shows the experiment's current state + tells the user what's still
- * manual. Removing the dangling reference from the scaffold is the
- * cheaper alternative; surfacing real state is the more honest one.
+ * `axctl improve verdict` - surface checkpoint-derived suggested verdicts
+ * for each active experiment, let the human lock the final one. Three modes:
+ *
+ *   axctl improve verdict
+ *     -> tabular listing of every experiment with its newest suggested verdict
+ *
+ *   axctl improve verdict <id>
+ *     -> drill-down for one experiment + each checkpoint snapshot
+ *
+ *   axctl improve verdict <id> --set <verdict>
+ *     -> writes user_verdict on the most recent checkpoint AND
+ *        locks experiment.locked_verdict so future derive runs stop scoring
  */
 const cmdImproveVerdict = (args: string[]) =>
     Effect.gen(function* () {
         const positional = args.filter((a) => !a.startsWith("--"))[0];
+        const setIdx = args.findIndex((a) => a === "--set" || a.startsWith("--set="));
+        let setValue: string | undefined;
+        if (setIdx >= 0) {
+            const raw = args[setIdx];
+            if (raw.startsWith("--set=")) setValue = raw.slice("--set=".length);
+            else setValue = args[setIdx + 1];
+        }
         const json = args.includes("--json");
         const db = yield* SurrealClient;
         if (positional === undefined) {
@@ -1954,7 +1971,8 @@ const cmdImproveVerdict = (args: string[]) =>
                     artifact_path,
                     type::string(created_at) AS created_at,
                     type::string(scaffolded_at) AS scaffolded_at,
-                    locked_verdict
+                    locked_verdict,
+                    (SELECT kind, suggested, user_verdict, type::string(observed_at) AS observed_at FROM checkpoint WHERE experiment = $parent.id ORDER BY observed_at DESC LIMIT 1)[0] AS latest_checkpoint
                 FROM experiment ORDER BY created_at DESC LIMIT 30;`,
             );
             const list = rows?.[0] ?? [];
@@ -1965,12 +1983,17 @@ const cmdImproveVerdict = (args: string[]) =>
             }
             console.log("Current experiments (newest first):");
             for (const row of list) {
-                const verdict = row.locked_verdict ? String(row.locked_verdict) : "pending";
-                console.log(`  ${String(row.dedupe_sig ?? "?")}  [${verdict}]  ${String(row.title ?? "?")}`);
+                const cp = row.latest_checkpoint as Record<string, unknown> | null;
+                const verdict = row.locked_verdict
+                    ? `[locked: ${String(row.locked_verdict)}]`
+                    : cp
+                        ? `[${String(cp.kind ?? "?")} suggested: ${String(cp.suggested ?? "?")}]`
+                        : "[no checkpoint yet]";
+                console.log(`  ${String(row.dedupe_sig ?? "?")}  ${verdict}  ${String(row.title ?? "?")}`);
             }
             console.log("");
-            console.log("Automatic verdict scoring lands in Phase C5-C8 of the plan");
-            console.log("(see docs/superpowers/plans/2026-05-25-experiment-loop-cleanup-and-rebuild.md).");
+            console.log("Run `axctl improve checkpoint` to refresh due windows.");
+            console.log("Run `axctl improve verdict <sig> --set <verdict>` to lock.");
             return;
         }
         const idLiteral = surrealLiteral(positional);
@@ -1983,7 +2006,8 @@ const cmdImproveVerdict = (args: string[]) =>
                 artifact_path,
                 type::string(created_at) AS created_at,
                 type::string(scaffolded_at) AS scaffolded_at,
-                locked_verdict
+                locked_verdict,
+                (SELECT id, kind, suggested, user_verdict, measured, type::string(observed_at) AS observed_at FROM checkpoint WHERE experiment = $parent.id ORDER BY observed_at DESC) AS checkpoints
             FROM experiment
             WHERE proposal.dedupe_sig = ${idLiteral} OR id = ${idLiteral}
             LIMIT 1;`,
@@ -1993,6 +2017,30 @@ const cmdImproveVerdict = (args: string[]) =>
             console.error(`no experiment matched ${positional} (check \`axctl improve list --status=accepted\`)`);
             process.exit(2);
         }
+        const checkpoints = (row.checkpoints as Array<Record<string, unknown>> | undefined) ?? [];
+
+        if (setValue !== undefined) {
+            if (!ALLOWED_VERDICTS.has(setValue)) {
+                console.error(`--set must be one of: ${[...ALLOWED_VERDICTS].sort().join(", ")}`);
+                process.exit(2);
+            }
+            if (row.locked_verdict) {
+                console.error(`experiment already locked: ${String(row.locked_verdict)}`);
+                process.exit(2);
+            }
+            const experimentId = String(row.id ?? "");
+            const latestCp = checkpoints[0];
+            const stmts: string[] = [
+                `UPDATE ${experimentId} SET locked_verdict = ${surrealString(setValue)};`,
+            ];
+            if (latestCp?.id) {
+                stmts.push(`UPDATE ${String(latestCp.id)} SET user_verdict = ${surrealString(setValue)};`);
+            }
+            yield* db.query(stmts.join(""));
+            console.log(`verdict locked: ${setValue}`);
+            return;
+        }
+
         if (json) { console.log(prettyPrint(row)); return; }
         console.log(`${String(row.title ?? "?")}`);
         console.log(`  dedupe_sig    ${String(row.dedupe_sig ?? "?")}`);
@@ -2000,32 +2048,84 @@ const cmdImproveVerdict = (args: string[]) =>
         console.log(`  status        ${String(row.proposal_status ?? "?")}`);
         console.log(`  artifact      ${String(row.artifact_path ?? "(none)")}`);
         console.log(`  scaffolded_at ${String(row.scaffolded_at ?? "(none)")}`);
-        console.log(`  verdict       ${row.locked_verdict ? String(row.locked_verdict) : "pending"}`);
+        console.log(`  verdict       ${row.locked_verdict ? String(row.locked_verdict) + " (locked)" : "pending"}`);
+        if (checkpoints.length === 0) {
+            console.log(`  checkpoints   none (run \`axctl improve checkpoint\` once due windows pass)`);
+        } else {
+            console.log(`  checkpoints:`);
+            for (const cp of checkpoints) {
+                const measured = cp.measured as Record<string, unknown> | string | undefined;
+                const opp = (typeof measured === "object" && measured) ? Number(measured.opportunities ?? 0) : 0;
+                const add = (typeof measured === "object" && measured) ? Number(measured.addressed ?? 0) : 0;
+                console.log(
+                    `    ${String(cp.kind ?? "?")}  observed=${String(cp.observed_at ?? "?")}  ` +
+                    `opportunities=${opp} addressed=${add}  suggested=${String(cp.suggested ?? "?")}  ` +
+                    `user_verdict=${cp.user_verdict ? String(cp.user_verdict) : "(none)"}`,
+                );
+            }
+        }
         console.log("");
-        console.log("Automatic verdict scoring (opportunity tracking + checkpoint math)");
-        console.log("lands in Phase C5-C8. Until then, edit `experiment.locked_verdict`");
-        console.log("directly via SurrealQL if you want to record one manually:");
-        console.log(`  UPDATE ${String(row.id ?? "experiment:?")} SET locked_verdict = "adopted";`);
+        console.log(`Lock the verdict: \`axctl improve verdict ${String(row.dedupe_sig ?? "<sig>")} --set <verdict>\``);
+        console.log(`  verdicts: ${[...ALLOWED_VERDICTS].sort().join(", ")}`);
     });
 
 const improveVerdictCommand = Command.make(
     "verdict",
     {
         id: Argument.string("id").pipe(Argument.optional),
+        set: Flag.string("set").pipe(Flag.optional),
         json: jsonFlag,
     },
-    ({ id, json }) => {
+    ({ id, set, json }) => {
         const idValue = optionValue(id);
+        const setValue = optionValue(set);
         return cmdImproveVerdict([
             ...(idValue === undefined ? [] : [idValue]),
+            ...stringArg("set", setValue),
             ...boolArg("json", json),
         ]);
     },
-).pipe(Command.withDescription("Show experiment verdict state (manual fallback until automatic scoring lands)"));
+).pipe(Command.withDescription("Show experiment verdict state; --set adopted|ignored|regressed|partial|no_longer_needed locks it"));
+
+const cmdImproveCheckpoint = (args: string[]) =>
+    Effect.gen(function* () {
+        const force = args.includes("--force");
+        const json = args.includes("--json");
+        const stats = yield* deriveCheckpoints({ force });
+        if (json) {
+            console.log(prettyPrint(stats));
+            return;
+        }
+        console.log(`checkpoints scanned: ${stats.experimentsScanned} experiments`);
+        console.log(`checkpoints inserted: ${stats.checkpointsInserted}`);
+        console.log(`checkpoints skipped: ${stats.checkpointsSkipped}`);
+        if (stats.checkpointsInserted === 0) {
+            console.log("");
+            console.log("No new windows due. Re-run with --force to refresh existing checkpoints");
+            console.log("(use `axctl improve verdict <id>` to see suggested verdicts).");
+        }
+    });
+
+const improveCheckpointCommand = Command.make(
+    "checkpoint",
+    {
+        force: Flag.boolean("force").pipe(Flag.withDefault(false)),
+        json: jsonFlag,
+    },
+    ({ force, json }) =>
+        cmdImproveCheckpoint([...boolArg("force", force), ...boolArg("json", json)]),
+).pipe(Command.withDescription("Compute checkpoint snapshots at t+7/t+30/t+90 for active experiments"));
 
 const improveCommand = Command.make("improve").pipe(
     Command.withDescription("Experiment loop: review proposals, accept skills, track verdicts"),
-    Command.withSubcommands([improveListCommand, improveShowCommand, improveAcceptCommand, improveRejectCommand, improveVerdictCommand]),
+    Command.withSubcommands([
+        improveListCommand,
+        improveShowCommand,
+        improveAcceptCommand,
+        improveRejectCommand,
+        improveCheckpointCommand,
+        improveVerdictCommand,
+    ]),
 );
 
 const serveCommand = Command.make(

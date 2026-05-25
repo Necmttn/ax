@@ -321,10 +321,10 @@ Each sub-step shippable independently.
 | C2 | done | aae9bc9 |
 | C3 | done | f96d181 |
 | C4 | done | f96d181 |
-| C5 | done | (pending commit) |
-| C6 | pending | - |
-| C7 | pending | - |
-| C8 | pending | - |
+| C5 | done | c44cca9 |
+| C6 | done | (pending commit) |
+| C7 | done | (pending commit) |
+| C8 | done | (pending commit) |
 | C9 | pending | - |
 | C10 | pending | - |
 | C11 | pending | - |

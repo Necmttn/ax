@@ -65,7 +65,7 @@ describe("effect cli", () => {
         expect(improve).toBeDefined();
         const subNames = improve!.subcommands.flatMap((g) => g.commands.map((c) => c.name));
         expect(subNames).toEqual(expect.arrayContaining([
-            "list", "show", "accept", "reject", "verdict",
+            "list", "show", "accept", "reject", "checkpoint", "verdict",
         ]));
     });
 
