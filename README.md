@@ -2,8 +2,8 @@
 
 ###### the agent experience layer
 
-**Observability and memory for self-improving AI coding agents.**
-Local-first. Typed. Yours.
+**Make your agent remember.**
+Ingests. Indexes. Surfaces. Local. Typed. Yours.
 
 ---
 

@@ -35,38 +35,50 @@
 <main>
 
 <section class="hero">
-  <p class="eyebrow">The missing layer</p>
-  <h1>An <em>experience layer</em><br>for AI coding agents.</h1>
+  <p class="eyebrow">Agent experience · the missing layer</p>
+  <h1>Make your agent<br><em>remember.</em></h1>
   <p class="lede">
-    Observability and memory for self-improving AI agents.
-    Local-first. Typed. Yours.
+    Ingests. Indexes. Surfaces.
+    <code>ax</code> is the local memory layer underneath your AI coding agent -
+    every Claude Code and Codex session, every tool call, every fix,
+    captured in a typed SurrealDB graph.
   </p>
-  <p class="muted">
-    Every session, your agent starts from zero. Re-reads the same files.
-    Re-invokes the same broken tools. Re-learns the same lessons.
-    <strong>ax</strong> is the layer underneath - a typed graph of evidence
-    built from Claude Code and Codex transcripts, your installed skills,
-    and local git history. Local SurrealDB, no network round-trip, no
-    third party.
-  </p>
+
+  <div class="claims">
+    <span>Compound every session</span>
+    <span>Never start from zero</span>
+    <span>100% local</span>
+  </div>
+
+  <div class="install-block">
+    <p class="install-label">Install in 30 seconds</p>
+    <pre class="install"><code><span class="prompt">$</span> curl -fsSL https://raw.githubusercontent.com/Necmttn/ax/main/install.sh | bash</code></pre>
+    <p class="install-meta">
+      macOS-first · Linux works for CLI · requires
+      <a href="https://bun.sh">Bun ≥ 1.3</a> and
+      <a href="https://surrealdb.com">SurrealDB ≥ 3.0</a>
+    </p>
+  </div>
+
   <div class="cta">
-    <a class="btn" href="#install">Install in 30 seconds &nbsp;→</a>
-    <a class="btn-secondary" href="manifesto.md">Read the manifesto</a>
+    <a class="btn-secondary" href="manifesto.md">Read the manifesto &nbsp;→</a>
+    <a class="btn-secondary" href="https://github.com/Necmttn/ax">View on GitHub</a>
   </div>
 </section>
 
 <section id="what">
-  <p class="eyebrow">What is AX</p>
-  <h2>Agent experience is what the<br>agent perceives, remembers, and acts on.</h2>
+  <p class="eyebrow">It remembers.</p>
+  <h2>So you don't have to.</h2>
   <p>
-    It is to AI coding agents what <strong>DX</strong> is to humans: the
-    surface that turns raw capability into compounding skill. <code>ax</code>
-    is the reference implementation of that surface - open, local, MIT.
+    Every session, your agent starts from zero. Re-reads the same files.
+    Re-invokes the same broken tools. Re-learns the lessons you taught
+    it last week. <code>ax</code> is the layer that carries forward -
+    typed, queryable, agent-readable, yours.
   </p>
   <ul class="principles">
     <li>
       <strong>Skill triage</strong>
-      <p>Which of your installed skills get used, which never fire, which correlate with stuck sessions.</p>
+      <p>Which installed skills get used, which never fire, which correlate with stuck sessions.</p>
     </li>
     <li>
       <strong>Pre-flight grounding</strong>
@@ -80,12 +92,12 @@
 </section>
 
 <section id="how">
-  <p class="eyebrow">How it fits together</p>
-  <h2>Multi-agent ingest, typed graph, agent-readable interface.</h2>
+  <p class="eyebrow">Hackable. Out of the box.</p>
+  <h2>One graph. Two readers.<br>Zero network round-trips.</h2>
   <p>
     Everything runs on <code>127.0.0.1</code>. The agent and the CLI both
     read the same graph; the dashboard is a thin React view over the same
-    queries.
+    queries. SurrealDB + Bun + Effect underneath. MIT all the way.
   </p>
   <div class="diagram">
     <div class="mermaid">
@@ -111,8 +123,8 @@ flowchart LR
 </section>
 
 <section id="demo">
-  <p class="eyebrow">A taste of the output</p>
-  <h2>Real CLI, real data,<br>real signal you can act on.</h2>
+  <p class="eyebrow">Real CLI. Real data.</p>
+  <h2>Signal you can act on.</h2>
 
   <div class="demo-grid">
 
@@ -159,8 +171,8 @@ Bash           318             1           2026-05-21T22:12</code></pre>
 
 <section id="install">
   <p class="eyebrow">Install</p>
-  <h2>30 seconds. macOS-first.<br>Linux works for ingest + CLI.</h2>
-  <p>Requires <a href="https://bun.sh">Bun</a> ≥ 1.3 and <a href="https://surrealdb.com">SurrealDB</a> ≥ 3.0.</p>
+  <h2>30 seconds. Then you're indexing.</h2>
+  <p>Requires <a href="https://bun.sh">Bun</a> ≥ 1.3 and <a href="https://surrealdb.com">SurrealDB</a> ≥ 3.0. macOS-first; Linux works for ingest + CLI.</p>
 <pre><code><span class="prompt">$</span> curl -fsSL https://raw.githubusercontent.com/Necmttn/ax/main/install.sh | bash
 <span class="prompt">$</span> PATH="$HOME/.local/bin:$PATH" axctl ingest --since=7
 <span class="prompt">$</span> axctl serve   <span class="comment"># live dashboard at http://127.0.0.1:8520</span></code></pre>
@@ -170,7 +182,7 @@ Bash           318             1           2026-05-21T22:12</code></pre>
 </section>
 
 <section id="why">
-  <p class="eyebrow">Why this matters</p>
+  <p class="eyebrow">Why it compounds</p>
   <h2>The agent stack has a hole in it.</h2>
   <blockquote class="pull">
     Look at any production agent setup in 2026. You have models. You have

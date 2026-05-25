@@ -188,6 +188,83 @@ p.lede {
   color: var(--muted);
 }
 
+.claims {
+  display: flex;
+  gap: 0;
+  flex-wrap: wrap;
+  margin: 28px 0 32px;
+  font-family: var(--mono);
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+.claims span {
+  padding: 6px 18px 6px 0;
+  display: inline-flex;
+  align-items: center;
+}
+
+.claims span + span {
+  padding-left: 18px;
+  border-left: 1px solid var(--line);
+}
+
+.claims span::before {
+  content: "›";
+  color: var(--green);
+  margin-right: 8px;
+  font-weight: 700;
+}
+
+.install-block {
+  margin: 0 0 28px;
+}
+
+.install-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+
+pre.install {
+  background: var(--ink);
+  color: var(--page);
+  border: 1px solid var(--ink);
+  padding: 18px 22px;
+  font-size: 14px;
+  margin: 0 0 10px;
+  font-weight: 500;
+}
+
+pre.install code {
+  color: var(--page);
+}
+
+pre.install .prompt {
+  color: var(--green);
+}
+
+.install-meta {
+  font-size: 14px;
+  color: var(--muted);
+  margin: 0;
+}
+
+.install-meta a {
+  color: var(--muted);
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+}
+
+.install-meta a:hover {
+  color: var(--ink);
+}
+
 .cta {
   display: flex;
   gap: 12px;
