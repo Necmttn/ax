@@ -22,6 +22,9 @@ import { deriveRetroProposals } from "../ingest/derive-retro-proposals.ts";
 import { deriveCheckpoints } from "../ingest/derive-checkpoints.ts";
 import { retroFromSession, upsertRetro, type RetroSource } from "../ingest/retro.ts";
 import { scaffoldSkill } from "../improve/skill-scaffold.ts";
+import { runAgentAccept } from "../improve/agent-accept.ts";
+import { cmdRetroReflect } from "./retro-reflect.ts";
+import { homedir } from "node:os";
 import { recordKeyPart } from "../lib/shared/derive-keys.ts";
 import { recordRef, surrealString } from "../lib/shared/surql.ts";
 import { ingestClaudeInsights } from "../ingest/claude-insights.ts";
@@ -1825,6 +1828,7 @@ const cmdImproveAccept = (args: string[]) =>
             process.exit(2);
         }
         const force = args.includes("--force");
+        const withAgent = args.includes("--with-agent");
         const db = yield* SurrealClient;
         const idLiteral = surrealLiteral(positional);
         const sql = `
@@ -1908,6 +1912,54 @@ const cmdImproveAccept = (args: string[]) =>
         console.log(`scaffolded ${scaffold.path}`);
         console.log(`experiment ${recordRef("experiment", experimentKey)} created`);
         console.log(`proposal status -> accepted`);
+
+        if (withAgent) {
+            // Reach back into proposal.baseline (set by derive-retro-proposals)
+            // for retro session summaries. For non-retro proposals it's null
+            // and we just pass an empty list.
+            let retroSummaries: readonly string[] = [];
+            const baselineRaw = row.baseline;
+            if (typeof baselineRaw === "string" && baselineRaw.length > 0) {
+                try {
+                    const parsed = JSON.parse(baselineRaw) as {
+                        tool?: string;
+                        sessionKeys?: unknown;
+                        frequency?: number;
+                    };
+                    if (Array.isArray(parsed.sessionKeys)) {
+                        const tool = parsed.tool ?? "tool";
+                        retroSummaries = parsed.sessionKeys
+                            .filter((s): s is string => typeof s === "string")
+                            .slice(0, 5)
+                            .map((s) => `session ${s}: top tool ${tool} failed (cluster freq=${parsed.frequency ?? "?"})`);
+                    }
+                } catch {
+                    // ignore - baseline shape may evolve
+                }
+            }
+            console.log("");
+            console.log("spawning claude subagent to enrich the stub…");
+            const result = yield* Effect.promise(() =>
+                runAgentAccept({
+                    skillPath: scaffold.path,
+                    proposalTitle: String(row.title),
+                    hypothesis: String(row.hypothesis),
+                    triggerPattern: payload.trigger_pattern == null ? "" : String(payload.trigger_pattern),
+                    proposedBehavior: String(payload.proposed_behavior ?? ""),
+                    retroSummaries,
+                    relatedSkillsDir: process.env.AX_SKILLS_SCAFFOLD_DIR ?? `${homedir()}/.claude/skills`,
+                }),
+            );
+            if (result.skillEnriched) {
+                console.log(`agent enriched ${scaffold.path}`);
+            }
+            if (result.planWritten && result.planPath) {
+                console.log(`agent wrote plan ${result.planPath}`);
+            }
+            if (result.exitCode !== 0) {
+                console.log(`agent exit code ${result.exitCode} (stub still scaffolded; experiment row unchanged)`);
+            }
+        }
     });
 
 const cmdImproveReject = (args: string[]) =>
@@ -1943,9 +1995,14 @@ const improveAcceptCommand = Command.make(
     {
         id: Argument.string("id"),
         force: Flag.boolean("force").pipe(Flag.withDefault(false)),
+        withAgent: Flag.boolean("with-agent").pipe(Flag.withDefault(false)),
     },
-    ({ id, force }) => cmdImproveAccept([id, ...boolArg("force", force)]),
-).pipe(Command.withDescription("Accept a proposal: scaffold the artifact + create an experiment row"));
+    ({ id, force, withAgent }) => cmdImproveAccept([
+        id,
+        ...boolArg("force", force),
+        ...boolArg("with-agent", withAgent),
+    ]),
+).pipe(Command.withDescription("Accept a proposal: scaffold the artifact + create an experiment row (pass --with-agent to spawn a claude subagent that enriches the stub)"));
 
 const improveRejectCommand = Command.make(
     "reject",
@@ -2341,9 +2398,25 @@ const retroListCommand = Command.make(
     ]),
 ).pipe(Command.withDescription("List recent retros (tried · failed · next)"));
 
+const retroReflectCommand = Command.make(
+    "reflect",
+    {
+        since: Flag.integer("since").pipe(Flag.withDefault(30)),
+        status: Flag.choice("status", ["open", "all"] as const).pipe(Flag.withDefault("open")),
+        json: jsonFlag,
+        yes: Flag.boolean("yes").pipe(Flag.withDefault(false)),
+    },
+    ({ since, status, json, yes }) => cmdRetroReflect([
+        `--since=${since}`,
+        `--status=${status}`,
+        ...boolArg("json", json),
+        ...boolArg("yes", yes),
+    ]),
+).pipe(Command.withDescription("Walk clustered retro-derived proposals interactively (accept/reject/skip each pattern)"));
+
 const retroCommand = Command.make("retro").pipe(
     Command.withDescription("Session retros: structured reflections (tried · worked · failed · next) that drive the experiment loop"),
-    Command.withSubcommands([retroEmitCommand, retroListCommand]),
+    Command.withSubcommands([retroEmitCommand, retroListCommand, retroReflectCommand]),
 );
 
 const serveCommand = Command.make(
