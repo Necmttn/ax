@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ax studio · improve</title>
+  <meta name="description" content="ax studio - mock dashboard preview. The experiment loop: proposals, accepted experiments, locked verdicts.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="shell">
+
+<header class="masthead">
+  <div class="brand">
+    <span class="wordmark">ax</span>
+    <span class="brand-tag">studio · mock data</span>
+  </div>
+  <span class="live-indicator">
+    <span class="live-dot"></span> mock
+  </span>
+  <nav class="tabs">
+    <a href="workflows.html">Workflows</a>
+    <a href="index.html">Skills</a>
+    <a href="improve.html" class="active">Improve</a>
+    <a href="https://github.com/Necmttn/ax">GitHub →</a>
+  </nav>
+</header>
+
+<div class="studio-banner">
+  <strong>Mock-mode preview.</strong>
+  The experiment loop end-to-end: retros become proposals, proposals you accept become experiments, experiments get verdicts.
+  <a href="https://github.com/Necmttn/ax#install">Install ax →</a>
+</div>
+
+<div class="stat-row">
+  <div class="stat">
+    <div class="label">Open proposals</div>
+    <div class="value">6</div>
+    <div class="delta">3 new this week</div>
+  </div>
+  <div class="stat">
+    <div class="label">Live experiments</div>
+    <div class="value">4</div>
+    <div class="delta">2 awaiting t+7</div>
+  </div>
+  <div class="stat">
+    <div class="label">Locked verdicts</div>
+    <div class="value">11</div>
+    <div class="delta">7 adopted · 3 ignored · 1 regressed</div>
+  </div>
+  <div class="stat">
+    <div class="label">Retros captured · 7d</div>
+    <div class="value">47</div>
+    <div class="delta">+12 from last week</div>
+  </div>
+</div>
+
+<section class="panel">
+  <header>
+    <h2>Open proposals</h2>
+    <span class="meta">friction patterns derived from accumulated retros - triage one row at a time</span>
+  </header>
+  <div class="filters">
+    <button class="is-active">All forms</button>
+    <button>Skill</button>
+    <button>Hook</button>
+    <button>Guidance</button>
+    <button>Automation</button>
+    <button>Subagent</button>
+  </div>
+
+  <div class="proposal-row">
+    <div class="freq">1072</div>
+    <div><span class="conf-pill high">High</span></div>
+    <div><span class="form-pill">skill</span></div>
+    <div>
+      <div class="title">Session closure quality guardrail</div>
+      <small>Trigger: session-end without commit + plan still open. Behavior: warn the agent before stop.</small>
+    </div>
+    <div class="actions"><button>accept</button><button>reject</button><button>show</button></div>
+  </div>
+
+  <div class="proposal-row">
+    <div class="freq">26</div>
+    <div><span class="conf-pill high">High</span></div>
+    <div><span class="form-pill">skill</span></div>
+    <div>
+      <div class="title">Post-feature verification checklist</div>
+      <small>Trigger: feature commits without follow-up verify. Behavior: scaffold a verify pass before reporting done.</small>
+    </div>
+    <div class="actions"><button>accept</button><button>reject</button><button>show</button></div>
+  </div>
+
+  <div class="proposal-row">
+    <div class="freq">26</div>
+    <div><span class="conf-pill high">High</span></div>
+    <div><span class="form-pill">skill</span></div>
+    <div>
+      <div class="title">Ingest pipeline regression checklist</div>
+      <small>Trigger: edits to src/ingest/* without a paired test edit. Behavior: surface known regressions before commit.</small>
+    </div>
+    <div class="actions"><button>accept</button><button>reject</button><button>show</button></div>
+  </div>
+
+  <div class="proposal-row">
+    <div class="freq">12</div>
+    <div><span class="conf-pill high">High</span></div>
+    <div><span class="form-pill">skill</span></div>
+    <div>
+      <div class="title">Schema change guardrail</div>
+      <small>Trigger: edits to schema.surql + table definitions. Behavior: run schema lint + one read/write smoke.</small>
+    </div>
+    <div class="actions"><button>accept</button><button>reject</button><button>show</button></div>
+  </div>
+
+  <div class="proposal-row">
+    <div class="freq">7</div>
+    <div><span class="conf-pill low">Low</span></div>
+    <div><span class="form-pill">guidance</span></div>
+    <div>
+      <div class="title">Block main-branch edits in multi-agent projects</div>
+      <small>Trigger: edit to main branch while another agent holds a worktree. Behavior: hard refuse, suggest worktree.</small>
+    </div>
+    <div class="actions"><button>accept</button><button>reject</button><button>show</button></div>
+  </div>
+
+  <div class="proposal-row">
+    <div class="freq">7</div>
+    <div><span class="conf-pill high">High</span></div>
+    <div><span class="form-pill">skill</span></div>
+    <div>
+      <div class="title">Graph query dogfood checklist</div>
+      <small>Trigger: new SurrealQL query in src/queries/. Behavior: require an `axctl recall` smoke before commit.</small>
+    </div>
+    <div class="actions"><button>accept</button><button>reject</button><button>show</button></div>
+  </div>
+</section>
+
+<div class="two-col" style="margin-top: 16px;">
+
+  <section class="panel">
+    <header>
+      <h2>Pending verdicts</h2>
+      <span class="meta">2 checkpoints due</span>
+    </header>
+    <div class="verdict-row">
+      <div>
+        <div class="title">Schema change guardrail</div>
+        <div class="checkpoint">accepted 2026-05-19 · t+7 due 2026-05-26</div>
+      </div>
+      <div class="checkpoint">12 / 8</div>
+      <div class="ratio">66.7%</div>
+      <div class="verdict">
+        <button class="suggested">adopted</button>
+        <button>ignored</button>
+        <button>partial</button>
+      </div>
+    </div>
+    <div class="verdict-row">
+      <div>
+        <div class="title">Stop-hook telemetry coverage</div>
+        <div class="checkpoint">accepted 2026-05-12 · t+14 due 2026-05-26</div>
+      </div>
+      <div class="checkpoint">9 / 9</div>
+      <div class="ratio">100%</div>
+      <div class="verdict">
+        <button class="suggested">adopted</button>
+        <button>ignored</button>
+        <button>partial</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <header>
+      <h2>Recently locked</h2>
+      <span class="meta">7-day history</span>
+    </header>
+    <div class="timeline-row">
+      <div class="when">2026-05-25</div>
+      <div class="what"><strong>Whole-row click affordance</strong> · t+30</div>
+      <div class="outcome"><span class="badge keep">ADOPTED</span></div>
+    </div>
+    <div class="timeline-row">
+      <div class="when">2026-05-24</div>
+      <div class="what"><strong>Subagent retro Stop hook</strong> · t+7</div>
+      <div class="outcome"><span class="badge keep">ADOPTED</span></div>
+    </div>
+    <div class="timeline-row">
+      <div class="when">2026-05-22</div>
+      <div class="what"><strong>Empty-search-result guard</strong> · t+90</div>
+      <div class="outcome"><span class="badge review">PARTIAL</span></div>
+    </div>
+    <div class="timeline-row">
+      <div class="when">2026-05-21</div>
+      <div class="what"><strong>Auto-derive of pair-skill suggestions</strong> · t+30</div>
+      <div class="outcome"><span class="badge archive">IGNORED</span></div>
+    </div>
+    <div class="timeline-row">
+      <div class="when">2026-05-19</div>
+      <div class="what"><strong>Pre-commit oxlint pass</strong> · t+7</div>
+      <div class="outcome"><span class="badge keep">ADOPTED</span></div>
+    </div>
+  </section>
+
+</div>
+
+<footer>
+  <div><a href="https://github.com/Necmttn/ax">github.com/Necmttn/ax</a> · MIT · 2026 · mock data</div>
+  <div class="right">ax studio · preview</div>
+</footer>
+
+</div>
+
+</body>
+</html>
