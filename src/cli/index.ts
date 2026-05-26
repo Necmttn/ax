@@ -24,6 +24,8 @@ import { retroFromSession, upsertRetro, type RetroSource } from "../ingest/retro
 import { scaffoldSkill } from "../improve/skill-scaffold.ts";
 import { runAgentAccept } from "../improve/agent-accept.ts";
 import { cmdRetroReflect } from "./retro-reflect.ts";
+import { cmdRetroMeta } from "./retro-meta.ts";
+import { cmdRetroPlan } from "./retro-plan.ts";
 import { homedir } from "node:os";
 import { recordKeyPart } from "../lib/shared/derive-keys.ts";
 import { recordRef, surrealString } from "../lib/shared/surql.ts";
@@ -2414,9 +2416,52 @@ const retroReflectCommand = Command.make(
     ]),
 ).pipe(Command.withDescription("Walk clustered retro-derived proposals interactively (accept/reject/skip each pattern)"));
 
+const retroMetaCommand = Command.make(
+    "meta",
+    {
+        since: Flag.integer("since").pipe(Flag.withDefault(30)),
+        limitRetros: Flag.integer("limit-retros").pipe(Flag.withDefault(50)),
+        pretty: Flag.boolean("pretty").pipe(Flag.withDefault(false)),
+    },
+    ({ since, limitRetros, pretty }) => cmdRetroMeta([
+        `--since=${since}`,
+        `--limit-retros=${limitRetros}`,
+        ...boolArg("pretty", pretty),
+    ]),
+).pipe(Command.withDescription("Emit a read-only investigation snapshot (JSON) for an external AI agent to drive a deep retro of retros"));
+
+const retroPlanCommand = Command.make(
+    "plan",
+    {
+        slug: Flag.string("slug"),
+        form: Flag.choice("form", ["skill", "hook", "guidance", "automation"] as const),
+        title: Flag.string("title"),
+        hypothesis: Flag.string("hypothesis"),
+        planPath: Flag.string("plan-path"),
+        evidenceRetros: Flag.string("evidence-retros").pipe(Flag.optional),
+        artifactPath: Flag.string("artifact-path").pipe(Flag.optional),
+        confidence: Flag.choice("confidence", ["low", "medium", "high"] as const).pipe(Flag.withDefault("medium")),
+        frequency: Flag.integer("frequency").pipe(Flag.withDefault(1)),
+        json: jsonFlag,
+    },
+    ({ slug, form, title, hypothesis, planPath, evidenceRetros, artifactPath, confidence, frequency, json }) =>
+        cmdRetroPlan([
+            `--slug=${slug}`,
+            `--form=${form}`,
+            `--title=${title}`,
+            `--hypothesis=${hypothesis}`,
+            `--plan-path=${planPath}`,
+            ...stringArg("evidence-retros", optionValue(evidenceRetros)),
+            ...stringArg("artifact-path", optionValue(artifactPath)),
+            `--confidence=${confidence}`,
+            `--frequency=${frequency}`,
+            ...boolArg("json", json),
+        ]),
+).pipe(Command.withDescription("Register an externally-drafted plan as accepted proposal + experiment (external agent calls this after user yes)"));
+
 const retroCommand = Command.make("retro").pipe(
     Command.withDescription("Session retros: structured reflections (tried · worked · failed · next) that drive the experiment loop"),
-    Command.withSubcommands([retroEmitCommand, retroListCommand, retroReflectCommand]),
+    Command.withSubcommands([retroEmitCommand, retroListCommand, retroReflectCommand, retroMetaCommand, retroPlanCommand]),
 );
 
 const serveCommand = Command.make(
