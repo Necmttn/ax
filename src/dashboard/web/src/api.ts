@@ -22,14 +22,82 @@ import type {
     WrappedProfile,
 } from "@shared/dashboard-types.ts";
 
-// Studio mock-mode: when built with VITE_STUDIO_MOCK=true, intercept every
-// jsonFetch and return canned fixtures. See mock-fixtures.ts.
+// Studio mock-mode build flag. When true (set at build time for the public
+// studio bundle), every fetch is either:
+//   (a) served from local mock fixtures, OR
+//   (b) re-pointed at a user-specified local axctl serve endpoint.
+//
+// The runtime "connect" mode (b) is set via localStorage and reflected
+// across the app via `studioConnection`. See live-connection.ts for the
+// probe + set/clear surface.
 const STUDIO_MOCK = import.meta.env.VITE_STUDIO_MOCK === "true";
+
+const ENDPOINT_KEY = "ax-studio-endpoint";
+
+// Allow auto-connect via ?endpoint=<url> query param. When ax serve prints
+// "open in studio    https://ax.necmttn.com/studio/?endpoint=http://...",
+// clicking the link writes the endpoint to localStorage and strips the
+// query so reloads don't re-trigger the path.
+if (typeof window !== "undefined" && STUDIO_MOCK) {
+    const params = new URLSearchParams(window.location.search);
+    const ep = params.get("endpoint");
+    if (ep && /^https?:\/\//.test(ep)) {
+        try {
+            window.localStorage.setItem(ENDPOINT_KEY, ep.replace(/\/$/, ""));
+        } catch { /* ignore */ }
+        params.delete("endpoint");
+        const qs = params.toString();
+        const cleanUrl = window.location.pathname + (qs ? "?" + qs : "");
+        window.history.replaceState({}, "", cleanUrl);
+    }
+}
+
+function readEndpoint(): string | null {
+    if (typeof window === "undefined") return null;
+    try {
+        const v = window.localStorage.getItem(ENDPOINT_KEY);
+        if (v && /^https?:\/\//.test(v)) return v.replace(/\/$/, "");
+        return null;
+    } catch {
+        return null;
+    }
+}
+
+export const studioConnection = {
+    get endpoint(): string | null { return readEndpoint(); },
+    isLive(): boolean { return readEndpoint() !== null; },
+    set(endpoint: string): void {
+        window.localStorage.setItem(ENDPOINT_KEY, endpoint.replace(/\/$/, ""));
+    },
+    clear(): void {
+        window.localStorage.removeItem(ENDPOINT_KEY);
+    },
+    /** Try a HEAD-equivalent on /api/skills against the endpoint.
+     *  Returns true if reachable + CORS-permitted. */
+    async probe(endpoint: string): Promise<boolean> {
+        const url = endpoint.replace(/\/$/, "") + "/api/skills";
+        try {
+            const res = await fetch(url, { method: "GET", cache: "no-store" });
+            return res.ok;
+        } catch {
+            return false;
+        }
+    },
+};
 
 async function jsonFetch<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
     if (STUDIO_MOCK) {
-        const { mockFetch } = await import("./mock-fixtures.ts");
-        return mockFetch<T>(input, init);
+        const endpoint = readEndpoint();
+        if (!endpoint) {
+            const { mockFetch } = await import("./mock-fixtures.ts");
+            return mockFetch<T>(input, init);
+        }
+        // Live mode: rewrite same-origin /api/* paths to the user's daemon.
+        const path = typeof input === "string" ? input : (input as Request).url;
+        const rewritten = path.startsWith("/api/")
+            ? endpoint + path
+            : path;
+        input = rewritten;
     }
     const res = await fetch(input, init);
     if (!res.ok) {
@@ -45,7 +113,14 @@ async function jsonFetch<T>(input: RequestInfo, init?: RequestInit): Promise<T> 
     return (await res.json()) as T;
 }
 
+export interface DaemonVersion {
+    readonly version: string;
+    readonly api_version: number;
+    readonly capabilities: ReadonlyArray<string>;
+}
+
 export const api = {
+    version: (): Promise<DaemonVersion> => jsonFetch("/api/version"),
     skills: (): Promise<SkillTriageResponse> => jsonFetch("/api/skills"),
     decide: (
         name: string,

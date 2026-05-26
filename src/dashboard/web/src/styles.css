@@ -41,6 +41,44 @@ a {
     color: inherit;
 }
 
+/* studio banner - shown only in the public mock build at ax.necmttn.com */
+.studio-banner {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
+    padding: 10px 14px; margin: 0 0 12px;
+    background: color-mix(in srgb, var(--blue) 8%, var(--page));
+    border: 1px solid var(--blue); border-left-width: 3px;
+    font-size: 13px;
+}
+.studio-banner strong { font-weight: 600; }
+.studio-banner code {
+    font-family: ui-monospace, Menlo, monospace; font-size: 12px;
+    background: var(--page); padding: 1px 6px; border: 1px solid var(--line);
+}
+.studio-banner .banner-input {
+    flex: 1 1 240px; min-width: 180px;
+    padding: 4px 8px; font-family: ui-monospace, Menlo, monospace; font-size: 12px;
+    border: 1px solid var(--line); background: var(--page);
+}
+.studio-banner .banner-btn {
+    padding: 4px 12px; font-family: ui-monospace, Menlo, monospace; font-size: 12px;
+    border: 1px solid var(--line); background: var(--page); cursor: pointer;
+}
+.studio-banner .banner-btn:hover { background: var(--panel); }
+.studio-banner .banner-btn.primary { background: var(--ink); color: var(--page); border-color: var(--ink); }
+.studio-banner .banner-btn.primary:hover { background: #222; }
+.studio-banner .banner-btn:disabled { opacity: 0.5; cursor: wait; }
+.studio-banner .banner-error {
+    flex-basis: 100%; color: var(--red); font-size: 12px; font-family: ui-monospace, Menlo, monospace;
+}
+.studio-banner-live {
+    background: color-mix(in srgb, var(--green) 8%, var(--page));
+    border-color: var(--green);
+}
+.studio-banner-warn {
+    background: color-mix(in srgb, var(--orange) 8%, var(--page));
+    border-color: var(--orange);
+}
+
 .shell {
     max-width: 1480px;
     margin: 0 auto;

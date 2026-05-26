@@ -466,8 +466,42 @@ async function handleSkillBulkDecision(req: Request): Promise<Response> {
     }
 }
 
+/**
+ * API version contract. Bump api_version when removing or renaming
+ * endpoints / fields (breaking change). Adding endpoints / optional
+ * fields is forward-compatible - keep api_version, append to capabilities.
+ *
+ * The hosted studio at ax.necmttn.com reads this and uses it to:
+ *   - display the connected daemon's version in the banner
+ *   - feature-gate UI for missing capabilities
+ *   - nag the user to `axctl update` when their daemon is behind
+ */
+const API_VERSION = 1;
+const API_CAPABILITIES = [
+    "skills",      // /api/skills + decide/detail/source/open
+    "decisions",   // /api/decisions
+    "workflow",    // /api/workflow
+    "sessions",    // /api/sessions + detail/children/inspect
+    "episodes",    // /api/episodes/:parentId
+    "projects",    // /api/projects/:slug
+    "graph",       // /api/graph-explorer + /api/skill-graph
+    "recall",      // /api/recall
+    "tools",       // /api/tool-failures
+    "wrapped",     // /api/wrapped + public-preview
+    "improve",     // /api/improve + accept/reject/verdict
+    "events",      // /api/events (SSE)
+] as const;
+
 export async function handleDashboardRequest(req: Request): Promise<Response> {
     const url = new URL(req.url);
+    if (url.pathname === "/api/version") {
+        const { AX_VERSION } = await import("../cli/version.ts");
+        return jsonResponse({
+            version: AX_VERSION,
+            api_version: API_VERSION,
+            capabilities: API_CAPABILITIES,
+        });
+    }
     if (url.pathname === "/api/query" && req.method === "POST") {
         try {
             const { sql } = await parseQueryRequest(req);
@@ -890,43 +924,112 @@ export async function handleDashboardRequest(req: Request): Promise<Response> {
         return handleImproveAction(sig, action, req);
     }
     if (url.pathname.startsWith("/api/")) return queryApi(url.pathname);
-    const asset = routeStaticAsset(url);
-    if (asset) {
-        try {
-            return new Response(await readFirstAvailable(staticPathCandidates(asset.path)), {
-                headers: staticHeaders(asset.contentType),
-            });
-        } catch {
-            if (url.pathname === "/" || url.pathname === "/index.html" || url.pathname.startsWith("/assets/")) {
-                return new Response("asset not found", {
-                    status: 404,
-                    headers: staticHeaders("text/plain; charset=utf-8"),
-                });
-            }
-            // Extensionless SPA routes like /skills are asset-like only
-            // because / maps to index.html. Let the SPA fallback serve them.
-        }
-    }
-    // SPA fallback: serve index.html for any non-asset, non-API path so
-    // TanStack Router can take over client-side. 404 only if dist is missing.
-    if (req.method === "GET" && !url.pathname.startsWith("/api/")) {
-        try {
-            return new Response(await readFirstAvailable(spaIndexCandidates()), {
-                headers: staticHeaders("text/html; charset=utf-8"),
-            });
-        } catch {
-            return new Response("dashboard not built - run `bun run dashboard:build`", {
-                status: 503,
-            });
-        }
+
+    // Non-API GET: serve a tiny landing pointing the user at the hosted
+    // studio. The CLI is API-only now; the dashboard UI lives at
+    // https://ax.necmttn.com/studio/ and CORS-fetches this daemon.
+    if (req.method === "GET") {
+        return serveRootLanding(url.port || "1738");
     }
     return new Response("not found", { status: 404 });
 }
 
-export function serveDashboard(args: string[]): void {
+/**
+ * Tiny HTML response at /. ax serve is API-only; the dashboard lives at
+ * the hosted studio. This page is what someone sees if they curl the
+ * daemon root or accidentally open http://localhost:1738/ in a browser.
+ */
+function serveRootLanding(port: string): Response {
+    const studioUrl = `https://ax.necmttn.com/studio/?endpoint=${encodeURIComponent(`http://127.0.0.1:${port}`)}`;
+    const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>ax · daemon</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { margin: 0; padding: 64px 32px; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+           background: #f6f5f0; color: #0a0a0a; line-height: 1.55; }
+    main { max-width: 720px; margin: 0 auto; }
+    h1 { font-family: Georgia, serif; font-size: 56px; line-height: 1; margin: 0 0 8px; letter-spacing: -1px; }
+    p { font-size: 18px; max-width: 56ch; }
+    .tag { font-family: ui-monospace, Menlo, monospace; font-size: 11px; text-transform: uppercase;
+           letter-spacing: 0.14em; color: #6b6b66; }
+    .cta { display: inline-block; margin-top: 16px; padding: 12px 22px; background: #0a0a0a; color: #f6f5f0;
+           font-family: ui-monospace, Menlo, monospace; font-size: 14px; text-decoration: none;
+           border: 1px solid #0a0a0a; }
+    .cta:hover { background: #222; }
+    code { font-family: ui-monospace, Menlo, monospace; font-size: 14px; background: #fbfaf5;
+           padding: 1px 6px; border: 1px solid #d8d6cf; }
+    hr { border: none; border-top: 2px solid #0a0a0a; margin: 32px 0; }
+    .api { color: #6b6b66; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="tag">ax · agent experience layer</p>
+    <h1>ax serve</h1>
+    <p>API-only daemon. The dashboard UI lives at the hosted studio &mdash; click below to open it with this daemon as the source.</p>
+    <a class="cta" href="${studioUrl}">Open studio &nbsp;→</a>
+    <hr>
+    <p class="api">
+      API endpoints: <code>/api/skills</code>, <code>/api/workflow</code>, <code>/api/improve</code>, <code>/api/version</code> &hellip;<br>
+      Listening on port <code>${port}</code>.<br>
+      Studio source: <a href="https://github.com/Necmttn/ax">github.com/Necmttn/ax</a> &mdash; MIT, host your own anytime.
+    </p>
+  </main>
+</body>
+</html>`;
+    return new Response(html, {
+        headers: { "content-type": "text/html; charset=utf-8" },
+    });
+}
+
+/**
+ * CORS so the public studio at https://ax.necmttn.com/studio/ can read
+ * a user's local `axctl serve` daemon. Local-only loopback, no cookies/
+ * credentials needed, so we echo the requesting origin and allow the
+ * standard methods + content-type.
+ */
+const STUDIO_ORIGINS = new Set([
+    "https://ax.necmttn.com",
+    "http://ax.necmttn.com",
+]);
+
+function isLocalDevOrigin(origin: string): boolean {
+    return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+}
+
+function corsHeadersFor(origin: string | null): Record<string, string> {
+    if (!origin) return {};
+    if (!STUDIO_ORIGINS.has(origin) && !isLocalDevOrigin(origin)) return {};
+    return {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+        "Access-Control-Allow-Headers": "content-type",
+        "Access-Control-Max-Age": "600",
+        "Vary": "Origin",
+    };
+}
+
+export async function handleDashboardRequestWithCors(req: Request): Promise<Response> {
+    const origin = req.headers.get("origin");
+    const cors = corsHeadersFor(origin);
+
+    if (req.method === "OPTIONS") {
+        return new Response(null, { status: 204, headers: cors });
+    }
+
+    const response = await handleDashboardRequest(req);
+    for (const [k, v] of Object.entries(cors)) response.headers.set(k, v);
+    return response;
+}
+
+export async function serveDashboard(args: string[]): Promise<void> {
     const { port } = parseDashboardServeArgs(args);
     // 60s idle timeout - recall queries currently full-scan turn excerpts
     // (no full-text index yet) and can take 5-15s on a year-old graph.
-    Bun.serve({ port, fetch: handleDashboardRequest, idleTimeout: 60 });
-    console.log(`dashboard: http://localhost:${port}`);
+    Bun.serve({ port, fetch: handleDashboardRequestWithCors, idleTimeout: 60 });
+    const { formatServeBanner } = await import("../cli/banner.ts");
+    console.log(formatServeBanner(port));
 }

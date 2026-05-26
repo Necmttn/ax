@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { studioConnection } from "./api.ts";
 
 interface IngestEvent {
     readonly source?: string;
@@ -64,7 +65,9 @@ export function useIngestEvents(): LiveStatus {
     const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     useEffect(() => {
-        const source = new EventSource("/api/events");
+        const endpoint = studioConnection.endpoint;
+        const eventsUrl = endpoint ? `${endpoint}/api/events` : "/api/events";
+        const source = new EventSource(eventsUrl);
         const scheduleFlush = () => {
             if (timerRef.current) return;
             timerRef.current = setTimeout(() => {
