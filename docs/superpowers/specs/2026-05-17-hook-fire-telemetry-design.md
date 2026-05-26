@@ -109,7 +109,7 @@ hook_fire:`{sha1(harness | session_id | file_path | ts_ms | event).slice(0,16)}`
 3. `src/hooks/telemetry.ts` - `HookTelemetry` Effect service exposing `recordFire(input, decision, ctx)`; resolves harness, file record id, session id, clips `task_excerpt` to 240 chars, picks top 3 prior session ids; `Effect.catchAll` to stderr.
 4. CLI wiring in `hookFileContextCommand` - measure `performance.now()`, call `recordFire` via `Effect.forkDaemon` after stdout flush.
 5. `axctl hook log` subcommand - flags: `--tail`, `--since`, `--reason`, `--file`, `--inject`, `--harness`, `--json`; default output is TSV.
-6. Claude Code wiring docs - PreToolUse hook entry in `~/.claude/settings.json` matching `Edit|Write|MultiEdit|Read`; settings recipe lives in `docs/HOOKS.md` (new) or extends `skill/SKILL.md`.
+6. Claude Code wiring docs - PreToolUse hook entry in `~/.claude/settings.json` matching `Edit|Write|MultiEdit|Read`; settings recipe lives in `docs/HOOKS.md` (new) or extends `skills/axctl/SKILL.md`.
 7. Claude payload adapter - extend `parseFileContextHookStdin` to map `{ hook_event_name, tool_name, tool_input.file_path, session_id }` to our `FileContextHookInput`. Event mapping: `PreToolUse + (Edit|Write|MultiEdit) → pre-edit`; `PreToolUse + Read → read`; `PreToolUse + (Grep|Glob) → search`; else `unknown`. `task` left empty when not provided.
 
 **Exit criteria:**

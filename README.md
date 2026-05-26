@@ -129,6 +129,14 @@ curl -fsSL https://raw.githubusercontent.com/Necmttn/ax/main/install.sh | bash
 PATH="$HOME/.local/bin:$PATH" axctl ingest --since=7
 ```
 
+Skills are distributed via the [skills.sh](https://skills.sh) marketplace.
+After the CLI is installed, drop the agent skills into your Claude Code
+session with:
+
+```bash
+npx skills add Necmttn/ax           # installs axctl + ax-retro skills
+```
+
 Requires Bun ≥ 1.3 and SurrealDB ≥ 3.0. macOS-first; Linux works for ingest
 and CLI (no launchd reactivity).
 

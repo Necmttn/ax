@@ -50,7 +50,7 @@ instructions (`axctl serve --port=8520`).
 
 ### ax pilot
 
-The installable agent skill (`skill/SKILL.md`). What runs inside Claude
+The installable agent skill (`skills/axctl/SKILL.md`). What runs inside Claude
 Code / Codex to query the graph mid-session.
 
 ### ax retro
