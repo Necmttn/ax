@@ -8,6 +8,7 @@
   },
   "scripts": {
     "prepare": "effect-language-service patch",
+    "postinstall": "bun2nix -o bun.nix || true",
     "typecheck": "tsc --noEmit",
     "ingest": "bun src/cli/index.ts ingest",
     "search": "bun src/cli/index.ts search",
@@ -52,6 +53,7 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^6",
+    "bun2nix": "^2.1.0",
     "typescript": "^5.5.0",
     "vite": "^8"
   }
