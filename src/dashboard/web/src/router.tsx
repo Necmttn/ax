@@ -201,7 +201,12 @@ const routeTree = rootRoute.addChildren([
     improveRoute,
 ]);
 
-export const router = createRouter({ routeTree });
+// Studio build serves at /studio/; mount router under that basepath so
+// `/studio/` resolves to the index route. Production `axctl serve` keeps
+// basepath = "" (root mount).
+const STUDIO_BASEPATH = import.meta.env.VITE_STUDIO_MOCK === "true" ? "/studio" : "";
+
+export const router = createRouter({ routeTree, basepath: STUDIO_BASEPATH });
 
 declare module "@tanstack/react-router" {
     interface Register {

@@ -22,7 +22,15 @@ import type {
     WrappedProfile,
 } from "@shared/dashboard-types.ts";
 
+// Studio mock-mode: when built with VITE_STUDIO_MOCK=true, intercept every
+// jsonFetch and return canned fixtures. See mock-fixtures.ts.
+const STUDIO_MOCK = import.meta.env.VITE_STUDIO_MOCK === "true";
+
 async function jsonFetch<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
+    if (STUDIO_MOCK) {
+        const { mockFetch } = await import("./mock-fixtures.ts");
+        return mockFetch<T>(input, init);
+    }
     const res = await fetch(input, init);
     if (!res.ok) {
         let detail = `${res.status} ${res.statusText}`;
