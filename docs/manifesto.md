@@ -94,8 +94,8 @@ That's the spec. Five lines. Nobody is shipping all of it.
 
 ## What ax is
 
-`ax` is the reference implementation. Bun runtime. SurrealDB graph.
-Effect pipelines. React dashboard. MIT licensed. Runs on your laptop.
+`ax` is the reference implementation. Local graph, agent-readable
+queries, React dashboard, MIT licensed. Runs on your laptop.
 160 skills indexed, 1,100+ sessions, 40k tool invocations on my
 machine right now. Eight commands cover the surface. The agent skill
 plugs into Claude Code and Codex.

@@ -13,7 +13,7 @@ re-learns the same lessons you taught it last week.
 
 `ax` is the layer underneath. It ingests transcripts from Claude Code and
 Codex, plus your installed skills and local git history, into a local
-SurrealDB graph - then surfaces what's signal vs. noise on demand, for you
+typed graph - then surfaces what's signal vs. noise on demand, for you
 *and* for the next agent session.
 
 > *Which skills did I actually use this month? Which tool calls keep failing?
@@ -47,7 +47,7 @@ flowchart LR
   g  --> ingest
 
   ingest["axctl ingest<br/>(Effect pipelines)"] --> db
-  db[("SurrealDB graph<br/>session · turn · tool_call · skill<br/>repository · checkout · commit · file<br/>friction · diagnostic · insight")]
+  db[("the ax graph<br/>session · turn · tool_call · skill<br/>repository · checkout · commit · file<br/>friction · diagnostic · insight")]
 
   db --> cli["axctl CLI<br/>recall · skills · insights · evidence"]
   db --> dash["axctl serve<br/>live dashboard"]
@@ -109,7 +109,7 @@ events).
 
 `ax` takes a different shape: a **typed graph of evidence** built from the
 agent's own logs. Sessions, turns, tool calls, plans, skills, commits, files,
-friction, and derived signals - all queryable in SurrealDB, all local, no
+friction, and derived signals - all queryable, all local, no
 network round-trip, no third party.
 
 Three things fall out of that, and they're the three things "agent

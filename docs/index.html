@@ -41,7 +41,7 @@
     Ingests. Indexes. Surfaces.
     <code>ax</code> is the local memory layer underneath your AI coding agent -
     every Claude Code and Codex session, every tool call, every fix,
-    captured in a typed SurrealDB graph.
+    captured in a typed graph you own.
   </p>
 
   <div class="claims">
@@ -97,7 +97,7 @@
   <p>
     Everything runs on <code>127.0.0.1</code>. The agent and the CLI both
     read the same graph; the dashboard is a thin React view over the same
-    queries. SurrealDB + Bun + Effect underneath. MIT all the way.
+    queries. Local DB underneath, MIT all the way.
   </p>
 
   <div class="pipeline-viz">
@@ -111,7 +111,7 @@
       </ul>
       <div class="pipeline-middle">
         <small>axctl ingest</small>
-        <strong>SurrealDB graph</strong>
+        <strong>the ax graph</strong>
         <small>session · turn · tool_call · skill · file · friction · insight</small>
       </div>
       <ul class="pipeline-readers">
@@ -138,7 +138,7 @@ flowchart LR
   g  --> ingest
 
   ingest["axctl ingest<br/>(Effect pipelines)"] --> db
-  db[("SurrealDB graph<br/>session · turn · tool_call · skill<br/>repository · checkout · commit · file<br/>friction · diagnostic · insight")]
+  db[("the ax graph<br/>session · turn · tool_call · skill<br/>repository · checkout · commit · file<br/>friction · diagnostic · insight")]
 
   db --> cli["axctl CLI<br/>recall · skills · insights · evidence"]
   db --> dash["axctl serve<br/>live dashboard"]

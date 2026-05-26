@@ -388,6 +388,11 @@ class PipelineProgress implements ProgressReporter {
         const elapsed = state.startedAt ? (state.finishedAt ?? now) - state.startedAt : 0;
         const rows = totalRows(state.counts);
         const speed = elapsed > 0 && rows > 0 ? rows / (elapsed / 1000) : 0;
+        const cur = state.counts.currentFile ?? state.counts.currentSubagent;
+        const tot = state.counts.totalFiles ?? state.counts.totalSubagents;
+        const ratio = typeof cur === "number" && typeof tot === "number" && tot > 0
+            ? Math.min(1, cur / tot)
+            : undefined;
         const icon =
             state.status === "done" ? "✓" :
             state.status === "failed" ? "✗" :
@@ -396,18 +401,28 @@ class PipelineProgress implements ProgressReporter {
         const bar =
             state.status === "done" ? "████████████████████" :
             state.status === "failed" ? "██████░░░░░░░░░░░░░░" :
-            state.status === "running" ? this.activeBar() :
+            state.status === "running" ? this.runningBar(ratio) :
             "                    ";
         const label = stageKey(state).padEnd(labelW);
-        const rowText = rows > 0 ? formatCount(rows) : "--";
+        const rowText = rows > 0
+            ? formatCount(rows)
+            : state.status === "running" && typeof cur === "number" && typeof tot === "number"
+                ? `${formatCount(cur)}/${formatCount(tot)}`
+                : "--";
         const speedText = speed > 0 ? `${formatCount(speed)}/s` : "--";
         const timeText = state.startedAt ? formatDuration(elapsed) : "--";
         const suffix = state.error ? `  ${state.error}` : "";
         return `${icon} ${label}  ${bar}  ${rowText.padStart(8)}  ${speedText.padStart(10)}  ${timeText.padStart(7)}${suffix}`;
     }
 
-    private activeBar(): string {
+    /** Bar for a running stage. When we know `currentFile / totalFiles`, fill
+     *  proportionally; otherwise fall back to a bouncing indicator. */
+    private runningBar(ratio: number | undefined): string {
         const width = 20;
+        if (ratio !== undefined) {
+            const filled = Math.max(1, Math.round(ratio * width));
+            return "█".repeat(filled) + "░".repeat(width - filled);
+        }
         const position = this.frame % width;
         return Array.from({ length: width }, (_, index) =>
             Math.abs(index - position) <= 1 ? "█" : "░",

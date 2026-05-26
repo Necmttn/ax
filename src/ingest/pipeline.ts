@@ -23,8 +23,10 @@ export interface StageSpec {
     readonly run: () => Effect.Effect<unknown, DbError, never>;
 }
 
-/** Max stages run concurrently within one layer. Caps DB write pressure even
- *  if a layer is wide. */
+/** Max stages running actual work concurrently. With DAG scheduling there's no
+ *  layer barrier, so this is the only cap on parallel work. Each stage has its
+ *  own internal concurrency (claude=8, codex=4 files) that hits SurrealDB; 2
+ *  stages × internal fan-out is already heavy. */
 export const LAYER_CONCURRENCY = 2;
 
 /**

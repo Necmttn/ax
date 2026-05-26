@@ -38,6 +38,7 @@ import {
     type ProgressReporter,
     type ProgressStage,
 } from "./progress.ts";
+import { initTuiProgress, shouldUseTui } from "./progress-tui.tsx";
 import { cmdProject } from "./project.ts";
 import { AX_VERSION, liveVersionDeps, printVersion, updateAxctl } from "./version.ts";
 import { cmdDogfoodTerminal } from "../dogfood/wterm.ts";
@@ -392,7 +393,14 @@ const cmdIngest = (args: string[]) => {
             command: "ingest",
             ...(sinceDays === undefined ? {} : { sinceDays }),
         }));
-        const progress = createProgressReporter({
+        const useTui = shouldUseTui(process.stdout.isTTY ?? false, progressMode);
+        const tuiHandle = useTui
+            ? yield* Effect.tryPromise({
+                try: () => initTuiProgress({ command: "ingest", runId, stages }),
+                catch: () => undefined,
+              }).pipe(Effect.catch(() => Effect.succeed(undefined)))
+            : undefined;
+        const progress: ProgressReporter = tuiHandle?.progress ?? createProgressReporter({
             command: "ingest",
             mode: progressMode,
             runId,
@@ -538,7 +546,11 @@ const cmdIngest = (args: string[]) => {
                 }),
             ),
             Effect.provideService(References.MinimumLogLevel, verbose ? "Debug" : "Info"),
-            Effect.ensuring(Effect.sync(() => progress.stop())),
+            Effect.ensuring(
+                tuiHandle
+                    ? Effect.promise(() => tuiHandle.teardown())
+                    : Effect.sync(() => progress.stop()),
+            ),
         );
         yield* program;
     });

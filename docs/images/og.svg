@@ -52,7 +52,7 @@
   <!-- sub line -->
   <text x="80" y="503" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif"
         font-size="20" fill="#555" font-weight="400">
-    local-first · typed · MIT-licensed · Bun + Effect + SurrealDB
+    local-first · typed · MIT-licensed · runs on your laptop
   </text>
 
   <!-- bottom hairline + url -->
