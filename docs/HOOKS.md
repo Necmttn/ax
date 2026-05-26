@@ -75,3 +75,89 @@ The hook never injects when:
 - the only prior sessions are low-signal (no corrections, no commits, weight < 3, not merged, no review pain).
 
 These rules will move from hardcoded to data-driven as the `hook_fire` log accumulates.
+
+---
+
+# Session-end retros (Stop hook)
+
+`ax retro emit` writes a structured reflection - **tried · worked · failed · next** - to the `retro` table for one session. Wiring it to a Stop hook turns every session-end into a row that downstream `derive-proposals` clusters into actionable proposals.
+
+Two recipes, increasing in signal sharpness:
+
+## Recipe A - heuristic-only (zero agent involvement)
+
+The Stop hook just calls `ax retro emit` with no args. ax computes the retro from session telemetry (turn counts, tool calls, errors, edits, commits, friction kinds). No LLM call, free, runs in milliseconds.
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "ax retro emit --session $CLAUDE_SESSION_ID" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+When this is enough:
+- High volume - you don't want to budget LLM cost per session.
+- Heuristics are sharp enough - friction kinds + tool-failure counts catch the obvious recurring patterns.
+- Onboarding - start here, upgrade later.
+
+## Recipe B - agent-driven (sharper signal, opt-in)
+
+The Stop hook asks the agent for a structured retro first, then ingests it. The agent reflects on its own session before exiting; the JSON it produces overrides the heuristic.
+
+Two files: the agent prompt and the hook wrapper.
+
+`~/.claude/ax-retro-prompt.md`:
+
+```
+Before stopping, emit your session retro as JSON to
+/tmp/ax-retro-$CLAUDE_SESSION_ID.json with shape:
+
+{
+  "tried":  "<1-2 sentence summary of what you attempted>",
+  "worked": "<what landed, or null>",
+  "failed": "<what didn't, or null>",
+  "next":   "<the next experiment to run, or null>"
+}
+
+Be specific about which tools failed, which files you got stuck on,
+which approaches you abandoned. Skip pleasantries.
+```
+
+`~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "if [ -f /tmp/ax-retro-$CLAUDE_SESSION_ID.json ]; then ax retro emit --session $CLAUDE_SESSION_ID --from-file /tmp/ax-retro-$CLAUDE_SESSION_ID.json --source claude_stop_hook; rm /tmp/ax-retro-$CLAUDE_SESSION_ID.json; else ax retro emit --session $CLAUDE_SESSION_ID; fi" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+If the agent wrote the file → ingest agent JSON. If it didn't → fall back to heuristics. Idempotent: the `retro` table is UNIQUE on session; re-emitting overwrites.
+
+## Inspect
+
+```bash
+ax retro list                    # 20 most recent
+ax retro list --since=7 --json   # last 7 days, machine-readable
+```
+
+## How retros feed the loop
+
+`derive-proposals` (when wired to retros, on roadmap) groups retros by repo + week, clusters `failed` strings (n-gram + file overlap), and emits a `proposal` when N retros mention the same failure. This replaces the path-categorization heuristic - proposals become evidence-backed rather than file-pattern guesses.
+
+Until that's wired, `ax retro list` is a manual surface: skim recent retros, see what's repeating, propose work yourself.
+

@@ -19,6 +19,7 @@ import { deriveClosure } from "../ingest/closure.ts";
 import { deriveProposals } from "../ingest/derive-proposals.ts";
 import { deriveOpportunities } from "../ingest/derive-opportunities.ts";
 import { deriveCheckpoints } from "../ingest/derive-checkpoints.ts";
+import { retroFromSession, upsertRetro, type RetroSource } from "../ingest/retro.ts";
 import { scaffoldSkill } from "../improve/skill-scaffold.ts";
 import { recordKeyPart } from "../lib/shared/derive-keys.ts";
 import { recordRef, surrealString } from "../lib/shared/surql.ts";
@@ -2187,6 +2188,154 @@ const improveCommand = Command.make("improve").pipe(
     ]),
 );
 
+/**
+ * `ax retro emit [--session=<id>] [--from-file=<path>]` - write a retro row.
+ *
+ * Two paths:
+ *   - With no --from-file: run the heuristic emitter on the named session
+ *     (defaults to the current $AX_SESSION_ID env, then most recent
+ *     session). Deterministic, no LLM.
+ *   - With --from-file=<path>: parse `{tried, worked, failed, next}` JSON
+ *     from the file. Source defaults to claude_stop_hook unless
+ *     --source=<value> overrides. The Stop hook recipe in docs/HOOKS.md
+ *     uses this path.
+ */
+const cmdRetroEmit = (args: string[]) =>
+    Effect.gen(function* () {
+        const fromFile = flag("from-file", args);
+        const sessionFlag = flag("session", args) ?? process.env.AX_SESSION_ID;
+        const sourceFlag = (flag("source", args) ?? (fromFile ? "claude_stop_hook" : "heuristic")) as RetroSource;
+        const json = args.includes("--json");
+        const db = yield* SurrealClient;
+
+        let sessionRecordId = sessionFlag;
+        if (!sessionRecordId) {
+            const latest = yield* db.query<[Array<{ id: string | { tb: string; id: string } }>]>(
+                "SELECT id, started_at FROM session ORDER BY started_at DESC LIMIT 1;",
+            );
+            const row = (latest?.[0] ?? [])[0];
+            if (!row) {
+                console.error("ax retro emit: no session to retro on (no --session and no rows in DB)");
+                process.exit(2);
+            }
+            const idStr = typeof row.id === "string" ? row.id : `session:${row.id.id}`;
+            sessionRecordId = idStr;
+        }
+        if (!sessionRecordId.includes(":")) sessionRecordId = `session:${sessionRecordId}`;
+
+        if (fromFile) {
+            const raw = yield* Effect.promise(() => Bun.file(fromFile).text().catch((e) => {
+                console.error(`ax retro emit: could not read --from-file=${fromFile}: ${e}`);
+                process.exit(2);
+                return "";
+            }));
+            let parsed: { tried?: string; worked?: string; failed?: string; next?: string };
+            try {
+                parsed = JSON.parse(raw);
+            } catch (e) {
+                console.error(`ax retro emit: --from-file is not valid JSON: ${e}`);
+                process.exit(2);
+                return;
+            }
+            if (!parsed.tried) {
+                console.error("ax retro emit: payload missing required `tried` field");
+                process.exit(2);
+            }
+            const sessionKey = sessionRecordId.split(":").slice(1).join(":").replace(/`/g, "");
+            yield* upsertRetro({
+                sessionId: sessionKey,
+                source: sourceFlag,
+                payload: {
+                    tried: String(parsed.tried),
+                    worked: parsed.worked ?? null,
+                    failed: parsed.failed ?? null,
+                    next: parsed.next ?? null,
+                },
+                raw,
+            });
+            if (json) {
+                console.log(prettyPrint({ session: sessionRecordId, source: sourceFlag, payload: parsed }));
+            } else {
+                console.log(`retro ${sourceFlag} for ${sessionRecordId}: ${parsed.tried.slice(0, 80)}…`);
+            }
+            return;
+        }
+
+        const input = yield* retroFromSession(sessionRecordId);
+        if (!input) {
+            console.error(`ax retro emit: session ${sessionRecordId} not found`);
+            process.exit(2);
+        }
+        yield* upsertRetro(input);
+        if (json) {
+            console.log(prettyPrint({ session: sessionRecordId, source: input.source, payload: input.payload }));
+            return;
+        }
+        console.log(`retro ${input.source} for ${sessionRecordId}`);
+        console.log(`  tried   ${input.payload.tried}`);
+        if (input.payload.worked) console.log(`  worked  ${input.payload.worked}`);
+        if (input.payload.failed) console.log(`  failed  ${input.payload.failed}`);
+        if (input.payload.next) console.log(`  next    ${input.payload.next}`);
+    });
+
+const cmdRetroList = (args: string[]) =>
+    Effect.gen(function* () {
+        const json = args.includes("--json");
+        const limit = parsePositiveIntFlag("retro list", "limit", args, 20);
+        const since = flag("since", args);
+        const db = yield* SurrealClient;
+        const where = since ? `WHERE created_at > time::now() - ${parseInt(since, 10) || 7}d` : "";
+        const rows = yield* db.query<[Array<Record<string, unknown>>]>(
+            `SELECT id, session, source, tried, failed, next, type::string(created_at) AS created_at
+             FROM retro ${where} ORDER BY created_at DESC LIMIT ${limit};`,
+        );
+        const list = rows?.[0] ?? [];
+        if (json) { console.log(prettyPrint(list)); return; }
+        if (list.length === 0) { console.log("(no retros yet - try `ax retro emit`)"); return; }
+        for (const row of list) {
+            const tried = String(row.tried ?? "").slice(0, 60);
+            console.log(`${String(row.created_at ?? "?")}  [${String(row.source ?? "?")}]  ${String(row.session ?? "?")}`);
+            console.log(`  ${tried}${tried.length >= 60 ? "…" : ""}`);
+            if (row.failed) console.log(`  ! ${String(row.failed).slice(0, 60)}`);
+            if (row.next) console.log(`  → ${String(row.next).slice(0, 60)}`);
+        }
+    });
+
+const retroEmitCommand = Command.make(
+    "emit",
+    {
+        session: Flag.string("session").pipe(Flag.optional),
+        fromFile: Flag.string("from-file").pipe(Flag.optional),
+        source: Flag.string("source").pipe(Flag.optional),
+        json: jsonFlag,
+    },
+    ({ session, fromFile, source, json }) => cmdRetroEmit([
+        ...stringArg("session", optionValue(session)),
+        ...stringArg("from-file", optionValue(fromFile)),
+        ...stringArg("source", optionValue(source)),
+        ...boolArg("json", json),
+    ]),
+).pipe(Command.withDescription("Emit a retro for one session - heuristic by default, or --from-file=<path> to ingest agent JSON"));
+
+const retroListCommand = Command.make(
+    "list",
+    {
+        limit: positiveLimit(20),
+        since: Flag.string("since").pipe(Flag.optional),
+        json: jsonFlag,
+    },
+    ({ limit, since, json }) => cmdRetroList([
+        `--limit=${limit}`,
+        ...stringArg("since", optionValue(since)),
+        ...boolArg("json", json),
+    ]),
+).pipe(Command.withDescription("List recent retros (tried · failed · next)"));
+
+const retroCommand = Command.make("retro").pipe(
+    Command.withDescription("Session retros: structured reflections (tried · worked · failed · next) that drive the experiment loop"),
+    Command.withSubcommands([retroEmitCommand, retroListCommand]),
+);
+
 const serveCommand = Command.make(
     "serve",
     { port: Flag.integer("port").pipe(Flag.withDefault(1738)) },
@@ -2779,6 +2928,7 @@ export const rootCommand = Command.make("axctl").pipe(
         deriveIntentsCommand,
         insightsCommand,
         improveCommand,
+        retroCommand,
         serveCommand,
         reportCommand,
         recallCommand,
@@ -2847,6 +2997,7 @@ export const DB_COMMANDS: ReadonlySet<string> = new Set([
     "derive-intents",
     "insights",
     "improve",
+    "retro",
     "report",
     "recall",
     "skills",
