@@ -16,5 +16,10 @@ dogfood-output/
 # generated preview HTML from prototype scripts - contains real transcript text
 scripts/prototypes/*-preview.html
 
+# nix
+result
+result-*
+.direnv/
+
 # SurrealDB CLI scratch
 history.txt
