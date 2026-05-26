@@ -134,7 +134,7 @@ After the CLI is installed, drop the agent skills into your Claude Code
 session with:
 
 ```bash
-npx skills add Necmttn/ax           # installs axctl + ax-retro skills
+npx skills add Necmttn/ax           # installs ax:setup + ax:retro skills
 ```
 
 Requires Bun ≥ 1.3 and SurrealDB ≥ 3.0. macOS-first; Linux works for ingest
@@ -159,7 +159,7 @@ its own evidence graph mid-session:
 
 ```bash
 npx skills add git@github.com:Necmttn/ax.git --skill axctl    -g -a claude-code -a codex -y
-npx skills add git@github.com:Necmttn/ax.git --skill ax-retro -g -a claude-code -a codex -y
+npx skills add git@github.com:Necmttn/ax.git --skill retro -g -a claude-code -a codex -y
 ```
 
 Recommended agent loop:

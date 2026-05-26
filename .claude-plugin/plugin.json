@@ -1,0 +1,7 @@
+{
+  "name": "ax",
+  "description": "ax - the agent experience layer. Local graph of every Claude Code + Codex session, skill invocation, edit, and commit. Surfaces what to use, what to ground on, and which experiments to package next.",
+  "version": "0.1.1",
+  "homepage": "https://github.com/Necmttn/ax",
+  "author": "Necmttn"
+}

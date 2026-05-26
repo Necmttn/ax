@@ -50,12 +50,14 @@ instructions (`axctl serve --port=8520`).
 
 ### ax pilot
 
-The installable agent skill (`skills/axctl/SKILL.md`). What runs inside Claude
-Code / Codex to query the graph mid-session.
+The install + verify skill (`skills/setup/SKILL.md`, displayed as
+`ax:setup`). What runs inside Claude Code / Codex to bring a new machine
+up to speed.
 
 ### ax retro
 
-The retrospective workflow (`skills/ax-retro/SKILL.md`). What closes
+The retrospective workflow (`skills/retro/SKILL.md`, displayed as
+`ax:retro`). What closes
 the self-improvement loop on observed evidence.
 
 ### ax doctor

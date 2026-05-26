@@ -1,9 +1,9 @@
 ---
-name: ax-retro
-description: Guided experiment-loop retrospective over the ax agent-experience graph. Walks the user through their open proposals (accept-with-scaffold or reject), pending verdicts (confirm the suggested verdict or override), and recent harness-hook effectiveness signal. Triggers when the user says "let's do an ax retro", "ax retrospective", "review my ax proposals", "triage proposals", "experiment loop status", "lock pending verdicts", "hook effectiveness review", "intervention review", "self-improvement session", or invokes /ax-retro. Reads/writes via the local `ax improve` and `ax hooks` CLIs. Do NOT auto-trigger on unrelated work.
+name: retro
+description: Guided experiment-loop retrospective over the ax agent-experience graph. Walks the user through their open proposals (accept-with-scaffold or reject), pending verdicts (confirm the suggested verdict or override), and recent harness-hook effectiveness signal. Triggers when the user says "let's do an ax retro", "ax retrospective", "review my ax proposals", "triage proposals", "experiment loop status", "lock pending verdicts", "hook effectiveness review", "intervention review", "self-improvement session", or invokes /ax:retro. Reads/writes via the local `ax improve` and `ax hooks` CLIs. Do NOT auto-trigger on unrelated work.
 ---
 
-# ax retro - guided experiment-loop session
+# ax:retro - guided experiment-loop session
 
 Closes the self-improvement loop. Claude orchestrates `ax improve …`
 commands; the user decides each row.
@@ -20,7 +20,7 @@ ONLY fire on explicit triggers:
 - "what's my experiment loop status" / "lock pending verdicts"
 - "hook effectiveness review" / "intervention review"
 - "self-improvement session"
-- `/ax-retro` slash command
+- `/ax:retro` slash command (if the plugin marketplace publishes one)
 
 Do NOT fire on a generic "look at my recent work" - that risks dragging
 unrelated context into the loop.
