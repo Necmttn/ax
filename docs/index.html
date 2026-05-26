@@ -95,155 +95,166 @@
 </section>
 
 <section id="how">
-  <p class="eyebrow">enforcement.</p>
-  <h2>Prose drifts. The hook does not.</h2>
+  <p class="eyebrow">the loop closes.</p>
+  <h2>One cycle. Every session.</h2>
   <p>
-    A line in <code>CLAUDE.md</code> is a suggestion. The model loses
-    it under context pressure and finds itself back on
-    <code>main</code>, the same correction scattered across weeks of
-    sessions. <code>ax</code> moves the rule down the stack -
-    out of prose, into a tool-time hook the agent cannot skip.
+    The retro is iter zero, not the finish line. What one session
+    notices becomes the next session's proposal; what the experiment
+    earns becomes the verdict the graph remembers. The shape below is
+    the shape of the work &mdash; not a funnel, a loop.
   </p>
   <p>
-    The figure below is the boundary. Watch the agent's tool stream
-    drift right. In <code>prose rule</code> mode every call crosses
-    and incidents accumulate. In <code>tool hook</code> mode the
-    dangerous ones stop at the line. Same intent, different layer.
+    Run a session, end with a retro, accept the proposal worth
+    trying, and let the experiment ride to its checkpoint. The next
+    session opens with that verdict already on the table. Nothing
+    you wrote yesterday gets thrown out.
   </p>
 
   <div class="fig-shell">
-    <figure class="fig-enforce" aria-label="Interactive scene: agent tool calls drift right toward a vertical boundary; in prose mode dangerous calls cross, in hook mode they are blocked">
+    <figure class="fig-loop" aria-label="Animated ring: a token travels clockwise through retro, proposal, experiment, verdict, completing the loop">
       <div class="fig-head">
-        <span class="fig-id">Exhibit F</span>
-        <span>enforcement boundary &middot; prose vs. hook</span>
+        <span class="fig-id">Loop</span>
+        <span>retro &rarr; proposal &rarr; experiment &rarr; verdict &rarr;</span>
+        <button type="button" class="auto-pill" data-loop-pill data-state="idle" aria-label="autoplay status">
+          <span class="auto-dot" aria-hidden="true"></span><span class="auto-label" data-loop-label>auto &middot; idle</span>
+        </button>
+        <button type="button" class="reset" data-loop-reset aria-label="reset loop">reset</button>
       </div>
 
-      <div class="enforce-controls" role="tablist" aria-label="enforcement mode">
-        <span class="enforce-controls-label">enforcement</span>
-        <button type="button" class="enforce-pill" data-mode-toggle data-mode="prose" aria-pressed="true">prose rule</button>
-        <button type="button" class="enforce-pill" data-mode-toggle data-mode="hook" aria-pressed="false">tool hook</button>
-        <span class="enforce-hint" data-enforce-hint>click the boundary or a pill to toggle</span>
-      </div>
+      <div class="loop-stage" data-loop-stage>
+        <svg class="loop-svg" viewBox="0 0 480 480" role="img" aria-hidden="true">
+          <defs>
+            <marker id="loopArrow" viewBox="0 0 10 10" refX="6" refY="5"
+                    markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--ink)"/>
+            </marker>
+          </defs>
 
-      <div class="enforce-scene" data-enforce-scene>
-        <svg class="enforce-svg"
-             viewBox="0 0 1000 280"
-             preserveAspectRatio="none"
-             role="img"
-             aria-hidden="true"
-             data-enforce-svg>
+          <!-- ring: 4 arcs with arrowheads in the middle of each segment.
+               cx=240 cy=240 r=160. Arc endpoints at the 12/3/6/9 nodes are
+               offset slightly so they tuck behind the node cards. -->
+          <circle class="loop-ring" cx="240" cy="240" r="160"
+                  fill="none" stroke="var(--line)" stroke-width="1"/>
 
-          <line class="lane-rail" x1="0" y1="140" x2="1000" y2="140"/>
-          <line class="lane-edge" x1="0" y1="60"  x2="1000" y2="60"/>
-          <line class="lane-edge" x1="0" y1="220" x2="1000" y2="220"/>
-
-          <text class="lane-label" x="14" y="42">tool calls &middot; agent stream</text>
-          <text class="lane-label dim" x="14" y="252">left = recent, right = executed</text>
-
-          <g data-boundary>
-            <line class="boundary-line" x1="700" y1="20" x2="700" y2="260" data-boundary-line/>
-            <text class="boundary-label top"    x="700" y="14" text-anchor="middle">main branch</text>
-            <text class="boundary-label bottom" x="700" y="276" text-anchor="middle">production</text>
-            <rect class="boundary-hit" x="688" y="0" width="24" height="280"
-                  data-boundary-hit
-                  tabindex="0"
-                  role="button"
-                  aria-label="toggle enforcement mode"></rect>
+          <!-- four arrow-bearing tick marks at midpoints of each quadrant
+               (1:30, 4:30, 7:30, 10:30 positions). short tangent lines
+               with arrow markers, drawn at the ring radius. -->
+          <g class="loop-arrows" stroke="var(--ink)" stroke-width="1" fill="none">
+            <!-- top-right midpoint (45deg from top): tangent points clockwise -->
+            <line x1="350.7" y1="111.5" x2="358.7" y2="119.5" marker-end="url(#loopArrow)"/>
+            <!-- bottom-right midpoint -->
+            <line x1="358.7" y1="360.5" x2="350.7" y2="368.5" marker-end="url(#loopArrow)"/>
+            <!-- bottom-left midpoint -->
+            <line x1="129.3" y1="368.5" x2="121.3" y2="360.5" marker-end="url(#loopArrow)"/>
+            <!-- top-left midpoint -->
+            <line x1="121.3" y1="119.5" x2="129.3" y2="111.5" marker-end="url(#loopArrow)"/>
           </g>
 
-          <g class="incidents" data-incidents>
-            <text class="incidents-label" x="720" y="42">incidents</text>
-            <text class="incidents-count" x="720" y="64" data-incidents-count>0</text>
-          </g>
-
-          <g data-dot-layer></g>
+          <!-- the traveling token (square) -->
+          <rect class="loop-token" data-loop-token
+                x="-5" y="-5" width="10" height="10"
+                transform="translate(240,80)"/>
         </svg>
 
-        <div class="enforce-tip" data-enforce-tip hidden></div>
-      </div>
-
-      <figcaption>
-        <strong><em>Prose drifts. The hook does not.</em></strong>
-        Toggle the rule. Watch what changes. Hover a dot to read the
-        synthetic tool call. Hover the boundary to see the active rule.
-      </figcaption>
-    </figure>
-  </div>
-
-  <p>
-    <a class="fig-link" href="origin.html#enforce">read: enforced at runtime, not by prompt <span class="arr">→</span></a>
-  </p>
-</section>
-
-<section id="demo">
-  <p class="eyebrow">the loop, end to end.</p>
-  <h2>Retro. Propose. Verdict.</h2>
-  <p>
-    Drag a retro across. Click <code>start experiment</code>. Drive
-    time forward and watch what the session actually earned, three
-    months on. <em>Kept</em> means no regressions. <em>Regressed</em>
-    means the PRs came back. <em>Self-resolved</em> means the pattern
-    stopped showing up before the fix mattered.
-  </p>
-
-  <div class="fig-shell">
-    <figure class="fig-pipeline" aria-label="Interactive four-column pipeline: drag a retro into proposals, start an experiment, then drag the scrubber to t+90 to lock a verdict">
-      <div class="fig-head">
-        <span class="fig-id">Exhibit E</span>
-        <span>retro &rarr; proposal &rarr; experiment &rarr; verdict</span>
-        <button type="button" class="auto-pill" data-auto-pill data-state="idle" aria-label="autoplay status">
-          <span class="auto-dot" aria-hidden="true"></span><span class="auto-label" data-auto-label>auto &middot; idle</span>
+        <!-- four node cards positioned around the ring via CSS -->
+        <button type="button" class="loop-node" data-node="retro" aria-label="retro node">
+          <span class="node-num">01</span>
+          <span class="node-name">retro</span>
+          <span class="node-cap">what failed, what's next</span>
         </button>
-        <button type="button" class="reset" data-pipeline-reset aria-label="reset pipeline">reset</button>
-      </div>
+        <button type="button" class="loop-node" data-node="proposal" aria-label="proposal node">
+          <span class="node-num">02</span>
+          <span class="node-name">proposal</span>
+          <span class="node-cap">the bet worth trying</span>
+        </button>
+        <button type="button" class="loop-node" data-node="experiment" aria-label="experiment node">
+          <span class="node-num">03</span>
+          <span class="node-name">experiment</span>
+          <span class="node-cap">t+7 / t+30 / t+90</span>
+        </button>
+        <button type="button" class="loop-node" data-node="verdict" aria-label="verdict node">
+          <span class="node-num">04</span>
+          <span class="node-name">verdict</span>
+          <span class="node-cap">kept · regressed · self-resolved</span>
+        </button>
 
-      <div class="pipeline-grid" data-pipeline-grid>
-        <div class="pipeline-col" data-col="retros">
-          <div class="col-head"><span class="col-num">01</span>retros<span class="col-meta" data-count-retros>3 / week</span></div>
-          <div class="col-body" data-drop="retros"></div>
+        <!-- center detail panel -->
+        <div class="loop-detail" data-loop-detail>
+          <div class="ld-eyebrow" data-ld-eyebrow>session 4129 &middot; iter 0</div>
+          <div class="ld-line" data-ld-line>failed=<span class="ld-err">"ran on main"</span></div>
+          <div class="ld-next" data-ld-next>next=use-hook</div>
         </div>
-        <div class="pipeline-col" data-col="proposals">
-          <div class="col-head"><span class="col-num">02</span>proposals<span class="col-meta">queued</span></div>
-          <div class="col-body" data-drop="proposals">
-            <div class="col-empty" data-empty="proposals">drag a retro here</div>
-          </div>
-        </div>
-        <div class="pipeline-col" data-col="experiments">
-          <div class="col-head"><span class="col-num">03</span>experiments<span class="col-meta">running</span></div>
-          <div class="col-body" data-drop="experiments">
-            <div class="col-empty" data-empty="experiments">start an experiment</div>
-          </div>
-        </div>
-        <div class="pipeline-col" data-col="verdicts">
-          <div class="col-head"><span class="col-num">04</span>verdicts<span class="col-meta" data-count-rejected>locked</span></div>
-          <div class="col-body" data-drop="verdicts">
-            <div class="col-empty" data-empty="verdicts">resolve at t+90</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="pipeline-scrubber" data-pipeline-scrubber data-position="0" aria-label="scrubber: drag from now to t+90">
-        <div class="scrubber-rail" data-scrubber-rail>
-          <div class="scrubber-fill" data-scrubber-fill></div>
-          <button type="button" class="scrubber-tick" data-tick="0"  style="left: 0%;"  aria-label="now"><span>t+0</span></button>
-          <button type="button" class="scrubber-tick" data-tick="7"  style="left: 33.333%;" aria-label="t plus 7 days"><span>t+7</span></button>
-          <button type="button" class="scrubber-tick" data-tick="30" style="left: 66.666%;" aria-label="t plus 30 days"><span>t+30</span></button>
-          <button type="button" class="scrubber-tick" data-tick="90" style="left: 100%;" aria-label="t plus 90 days"><span>t+90</span></button>
-          <div class="scrubber-handle" data-scrubber-handle style="left: 0%;" tabindex="0" role="slider" aria-valuemin="0" aria-valuemax="90" aria-valuenow="0" aria-label="time scrubber"></div>
-        </div>
-        <div class="scrubber-readout" data-scrubber-readout>t+0 &middot; now</div>
       </div>
 
       <figcaption>
-        <strong>The loop only closes when the graph can tell you, from backing data, that the change earned its place.</strong>
-        The user still decides &mdash; drag a retro into proposals or off the board entirely. Then drive time forward
-        and watch what the evidence says.
+        <strong>The retro is the start of the next session, not the
+        end of the last one.</strong>
+        The token closes the ring once per cycle. Click a node to jump
+        the inspector. Hover to peek without breaking the flow.
       </figcaption>
     </figure>
   </div>
 
   <p>
     <a class="fig-link" href="origin.html#pipeline">read: retro is only the first step <span class="arr">→</span></a>
+  </p>
+</section>
+
+<section id="demo">
+  <p class="eyebrow">what you actually use.</p>
+  <h2>Installed isn't used.</h2>
+  <p>
+    You have twenty skills wired into your agent. Eleven of them
+    fired this week. Nine sat there. <code>ax</code> tells you which
+    is which &mdash; from your real session log, not from the
+    <code>plugins.json</code> you forgot you edited.
+  </p>
+  <p>
+    The heatmap below is a synthetic week. Dim tiles are dead
+    weight. Lit tiles are the ones the agent actually reached for.
+    The count on the right is the answer to "what's earning its
+    place in my <code>CLAUDE.md</code>."
+  </p>
+
+  <div class="fig-shell">
+    <figure class="fig-heatmap" aria-label="Animated heatmap: 20 skill tiles, 11 light up as ax sweeps the week's usage">
+      <div class="fig-head">
+        <span class="fig-id">Heatmap</span>
+        <span>installed skills &middot; fires this week</span>
+        <button type="button" class="auto-pill" data-heat-pill data-state="idle" aria-label="autoplay status">
+          <span class="auto-dot" aria-hidden="true"></span><span class="auto-label" data-heat-label>auto &middot; idle</span>
+        </button>
+        <button type="button" class="reset" data-heat-reset aria-label="reset heatmap">reset</button>
+      </div>
+
+      <div class="heat-grid" data-heat-grid role="grid" aria-label="skill usage grid">
+        <!-- Tiles built by JS to keep markup tight; this is the static
+             fallback (also serves reduced-motion + no-JS). -->
+      </div>
+
+      <div class="heat-summary">
+        <div class="heat-counter" data-heat-counter data-current="0" data-total="20">
+          <span class="hc-label">fires this week</span>
+          <span class="hc-num"><span data-heat-current>0</span> / <span data-heat-total>20</span></span>
+        </div>
+        <div class="heat-dead" data-heat-dead>
+          <span class="hd-label">dead weight</span>
+          <span class="hd-num" data-heat-dead-num>0</span>
+        </div>
+        <div class="heat-tip" data-heat-tip hidden></div>
+      </div>
+
+      <figcaption>
+        <strong>Installed isn't used. The graph knows which is which.</strong>
+        Hover any tile for last-fire timestamp. Skills that never fired
+        across the week are dead weight &mdash; candidates for the
+        chopping block.
+      </figcaption>
+    </figure>
+  </div>
+
+  <p>
+    <a class="fig-link" href="origin.html">read: the origin behind the layer <span class="arr">→</span></a>
   </p>
 </section>
 
@@ -285,6 +296,538 @@
 
 </main>
 
+<script>
+/* ============================================================
+   Landing Exhibit 1 - closed-loop ring
+   ============================================================ */
+(function () {
+  var root = document.querySelector('.fig-loop');
+  if (!root) return;
+
+  var stage   = root.querySelector('[data-loop-stage]');
+  var token   = root.querySelector('[data-loop-token]');
+  var detail  = root.querySelector('[data-loop-detail]');
+  var ldEye   = root.querySelector('[data-ld-eyebrow]');
+  var ldLine  = root.querySelector('[data-ld-line]');
+  var ldNext  = root.querySelector('[data-ld-next]');
+  var pill    = root.querySelector('[data-loop-pill]');
+  var pillLbl = root.querySelector('[data-loop-label]');
+  var resetBt = root.querySelector('[data-loop-reset]');
+  var nodes   = root.querySelectorAll('.loop-node');
+
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* node positions in the SVG viewBox (cx=240 cy=240 r=160) */
+  var POS = {
+    retro:      { angle: -90, x: 240, y:  80 },
+    proposal:   { angle:   0, x: 400, y: 240 },
+    experiment: { angle:  90, x: 240, y: 400 },
+    verdict:    { angle: 180, x:  80, y: 240 }
+  };
+
+  var ORDER = ['retro', 'proposal', 'experiment', 'verdict'];
+
+  var DETAIL = {
+    retro: {
+      eye:  'session 4129 &middot; iter 0',
+      line: 'failed=<span class="ld-err">"ran on main"</span>',
+      next: 'next=use-hook'
+    },
+    proposal: {
+      eye:  'pre-tool hook &middot; bash',
+      line: 'add pre-tool hook: block writes on main',
+      next: 'queued &middot; bet=high'
+    },
+    experiment: {
+      eye:  'main-branch-hook &middot; running',
+      line: 'lane open @ t+0',
+      next: 'checkpoints t+7 / t+30 / t+90'
+    },
+    verdict: {
+      eye:  't+90 &middot; locked',
+      line: '<span class="ld-kept">KEPT</span> &middot; 0 incidents',
+      next: 'merged 2026-05-22'
+    }
+  };
+
+  var current = 'retro';
+  var userTookOver = false;
+  var rafId = 0;
+  var pendingTimers = [];
+
+  function setPill(state) {
+    if (!pill) return;
+    pill.setAttribute('data-state', state);
+    var text = 'auto &middot; idle';
+    if (state === 'playing') text = 'auto &middot; playing';
+    else if (state === 'manual') text = 'manual';
+    else if (state === 'done')   text = 'auto &middot; done';
+    else if (state === 'reduce') text = 'motion paused';
+    pillLbl.innerHTML = text;
+  }
+
+  function renderDetail(node) {
+    var d = DETAIL[node];
+    if (!d) return;
+    ldEye.innerHTML  = d.eye;
+    ldLine.innerHTML = d.line;
+    ldNext.innerHTML = d.next;
+    nodes.forEach(function (n) {
+      n.classList.toggle('is-active', n.getAttribute('data-node') === node);
+    });
+  }
+
+  function moveToken(x, y) {
+    token.setAttribute('transform', 'translate(' + x + ',' + y + ')');
+  }
+
+  function jumpTo(node) {
+    var p = POS[node];
+    if (!p) return;
+    current = node;
+    moveToken(p.x, p.y);
+    renderDetail(node);
+  }
+
+  /* angle-based positioning so we can sweep smoothly */
+  function setAngle(angleDeg) {
+    var rad = angleDeg * Math.PI / 180;
+    var cx = 240, cy = 240, r = 160;
+    moveToken(cx + r * Math.cos(rad), cy + r * Math.sin(rad));
+  }
+
+  function clearPending() {
+    pendingTimers.forEach(function (id) { clearTimeout(id); });
+    pendingTimers = [];
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = 0;
+  }
+
+  function takeover() {
+    if (userTookOver) return;
+    userTookOver = true;
+    clearPending();
+    setPill('manual');
+  }
+
+  /* autoplay: sweep clockwise, pause briefly at each node */
+  function runSequence() {
+    if (userTookOver || reduce) return;
+    setPill('playing');
+
+    var SEG_MS   = 1400;  /* travel time per arc */
+    var HOLD_MS  =  800;  /* hold at each node */
+    var startAngle = -90; /* retro */
+
+    function segment(idx) {
+      if (userTookOver) return;
+      var fromName = ORDER[idx];
+      var toName   = ORDER[(idx + 1) % 4];
+      jumpTo(fromName);
+
+      var fromAng = POS[fromName].angle;
+      var toAng   = POS[toName].angle;
+      /* always go clockwise: ensure toAng > fromAng */
+      if (toAng < fromAng) toAng += 360;
+
+      var t0 = performance.now();
+
+      function frame(now) {
+        if (userTookOver) return;
+        var t = (now - t0) / SEG_MS;
+        if (t >= 1) t = 1;
+        var eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+        var ang = fromAng + (toAng - fromAng) * eased;
+        setAngle(ang);
+        if (t < 1) {
+          rafId = requestAnimationFrame(frame);
+        } else {
+          jumpTo(toName);
+          var nextIdx = (idx + 1) % 4;
+          var tid = setTimeout(function () {
+            segment(nextIdx);
+          }, HOLD_MS);
+          pendingTimers.push(tid);
+        }
+      }
+      rafId = requestAnimationFrame(frame);
+    }
+
+    /* start by holding on retro for the first beat, then run */
+    jumpTo('retro');
+    var tid = setTimeout(function () { segment(0); }, HOLD_MS);
+    pendingTimers.push(tid);
+  }
+
+  /* listeners */
+  nodes.forEach(function (n) {
+    n.addEventListener('click', function () {
+      takeover();
+      jumpTo(n.getAttribute('data-node'));
+    });
+    n.addEventListener('mouseenter', function () {
+      if (!userTookOver) return; /* preview only in manual */
+      var nm = n.getAttribute('data-node');
+      renderDetail(nm);
+    });
+    n.addEventListener('mouseleave', function () {
+      if (!userTookOver) return;
+      renderDetail(current);
+    });
+  });
+
+  root.addEventListener('pointerdown', function (ev) {
+    if (ev.target.closest('[data-loop-reset]')) return;
+    takeover();
+  }, true);
+
+  resetBt.addEventListener('click', function () {
+    userTookOver = false;
+    clearPending();
+    jumpTo('retro');
+    setPill('idle');
+    if (!reduce) {
+      var tid = setTimeout(function () {
+        if (!userTookOver) runSequence();
+      }, 1500);
+      pendingTimers.push(tid);
+    } else {
+      staticEnd();
+      setPill('reduce');
+    }
+  });
+
+  /* public test hook */
+  window.__axLoopJumpTo = function (node) {
+    takeover();
+    jumpTo(node);
+  };
+
+  function staticEnd() {
+    jumpTo('retro');
+    var cap = root.querySelector('.loop-static-cap');
+    if (!cap) {
+      cap = document.createElement('div');
+      cap.className = 'loop-static-cap';
+      cap.textContent = 'motion paused - the loop runs in your terminal';
+      stage.appendChild(cap);
+    }
+  }
+
+  /* intersection observer */
+  function arm() {
+    if (reduce) { setPill('reduce'); staticEnd(); return; }
+    if (!('IntersectionObserver' in window)) {
+      var tid = setTimeout(function () { if (!userTookOver) runSequence(); }, 1500);
+      pendingTimers.push(tid);
+      return;
+    }
+    var fired = false;
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting && !fired && !userTookOver) {
+          fired = true;
+          io.disconnect();
+          var tid = setTimeout(function () { if (!userTookOver) runSequence(); }, 1500);
+          pendingTimers.push(tid);
+        }
+      });
+    }, { threshold: 0.4 });
+    io.observe(root);
+  }
+
+  /* boot */
+  jumpTo('retro');
+  setPill('idle');
+  arm();
+})();
+
+/* ============================================================
+   Landing Exhibit 2 - skill heatmap
+   ============================================================ */
+(function () {
+  var root = document.querySelector('.fig-heatmap');
+  if (!root) return;
+
+  var grid    = root.querySelector('[data-heat-grid]');
+  var counter = root.querySelector('[data-heat-counter]');
+  var curEl   = root.querySelector('[data-heat-current]');
+  var totEl   = root.querySelector('[data-heat-total]');
+  var deadEl  = root.querySelector('[data-heat-dead-num]');
+  var tip     = root.querySelector('[data-heat-tip]');
+  var pill    = root.querySelector('[data-heat-pill]');
+  var pillLbl = root.querySelector('[data-heat-label]');
+  var resetBt = root.querySelector('[data-heat-reset]');
+
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* 20 skills. lit:true means it fired this week. order = visual grid order
+     (row by row, 4 wide). lit pattern: 1,4,6,9,11,13,15,17,18,19 -> 10 lit.
+     We want 11 lit -> add position 8 to mix it up.
+     Lit count = 11. */
+  var SKILLS = [
+    /* row 1 */
+    { name: 'superpowers',           lit: true,  fires: 14, last: '05-26' },
+    { name: 'gsd',                   lit: false, fires:  0, last: '-'     },
+    { name: 'multica',               lit: false, fires:  0, last: '-'     },
+    { name: 'worktree-first',        lit: true,  fires:  9, last: '05-25' },
+    /* row 2 */
+    { name: 'tdd-first',             lit: false, fires:  0, last: '-'     },
+    { name: 'ax-retro',              lit: true,  fires: 23, last: '05-26' },
+    { name: 'codex-companion',       lit: false, fires:  0, last: '-'     },
+    { name: 'retro-emit',            lit: false, fires:  0, last: '-'     },
+    /* row 3 */
+    { name: 'grillme',               lit: true,  fires:  4, last: '05-24' },
+    { name: 'spec-ops',              lit: false, fires:  0, last: '-'     },
+    { name: 'parallel-task-helper',  lit: true,  fires:  7, last: '05-25' },
+    { name: 'scope-bot',             lit: false, fires:  0, last: '-'     },
+    /* row 4 */
+    { name: 'brainstorming',         lit: true,  fires:  3, last: '05-23' },
+    { name: 'debugging',             lit: false, fires:  0, last: '-'     },
+    { name: 'write-a-skill',         lit: true,  fires:  2, last: '05-22' },
+    { name: 'ralph',                 lit: false, fires:  0, last: '-'     },
+    /* row 5 */
+    { name: 'executing-plans',       lit: true,  fires: 11, last: '05-26' },
+    { name: 'dispatching-parallel',  lit: true,  fires:  6, last: '05-25' },
+    { name: 'retro-meta',            lit: true,  fires:  5, last: '05-24' },
+    { name: 'verify',                lit: true,  fires:  8, last: '05-25' }
+  ];
+
+  /* sweep order (visually scattered). brief positions 1,4,6,9,11,13,15,17,18,19
+     -> 0-indexed: 0,3,5,8,10,12,14,16,17,18. Ten tiles, plus FINAL_FLUSH. */
+  var SWEEP = [0, 3, 5, 8, 10, 12, 14, 16, 17, 18];
+  /* eleventh lit tile (verify @ idx 19) snaps on at the very end */
+  var FINAL_FLUSH = [19];
+
+  /* state */
+  var litCount = 0;
+  var userTookOver = false;
+  var rafId = 0;
+  var pendingTimers = [];
+
+  /* build tiles */
+  SKILLS.forEach(function (s, i) {
+    var t = document.createElement('button');
+    t.type = 'button';
+    t.className = 'heat-tile';
+    t.setAttribute('data-skill', s.name);
+    t.setAttribute('data-idx', String(i));
+    t.setAttribute('data-fires', '0');
+    t.setAttribute('data-final', String(s.fires));
+    t.setAttribute('data-last', s.last);
+    t.setAttribute('data-lit', 'false');
+    t.setAttribute('aria-label', s.name + ' skill tile');
+
+    var dot = document.createElement('span');
+    dot.className = 'tile-dot';
+    t.appendChild(dot);
+
+    var name = document.createElement('span');
+    name.className = 'tile-name';
+    name.textContent = s.name;
+    t.appendChild(name);
+
+    var fires = document.createElement('span');
+    fires.className = 'tile-fires';
+    fires.setAttribute('data-tile-fires', '');
+    fires.textContent = '0×';
+    t.appendChild(fires);
+
+    grid.appendChild(t);
+  });
+
+  var tiles = grid.querySelectorAll('.heat-tile');
+  var totalLit = SWEEP.length + FINAL_FLUSH.length;
+  if (totEl) totEl.textContent = String(SKILLS.length);
+
+  function setPill(state) {
+    if (!pill) return;
+    pill.setAttribute('data-state', state);
+    var text = 'auto &middot; idle';
+    if (state === 'playing') text = 'auto &middot; playing';
+    else if (state === 'manual') text = 'manual';
+    else if (state === 'done')   text = 'auto &middot; done';
+    else if (state === 'reduce') text = 'motion paused';
+    pillLbl.innerHTML = text;
+  }
+
+  function clearPending() {
+    pendingTimers.forEach(function (id) { clearTimeout(id); });
+    pendingTimers = [];
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = 0;
+  }
+
+  function lightTile(idx, animate) {
+    var s = SKILLS[idx];
+    var tile = tiles[idx];
+    if (!s || !tile) return;
+    if (tile.getAttribute('data-lit') === 'true') return;
+    tile.setAttribute('data-lit', 'true');
+    /* roll the fire count */
+    var fireEl = tile.querySelector('[data-tile-fires]');
+    var final = s.fires;
+    if (animate) {
+      var start = performance.now();
+      var dur = 380;
+      function step(now) {
+        var t = (now - start) / dur;
+        if (t > 1) t = 1;
+        var v = Math.round(final * t);
+        fireEl.textContent = v + '×';
+        tile.setAttribute('data-fires', String(v));
+        if (t < 1) requestAnimationFrame(step);
+        else { fireEl.textContent = final + '×'; tile.setAttribute('data-fires', String(final)); }
+      }
+      requestAnimationFrame(step);
+    } else {
+      fireEl.textContent = final + '×';
+      tile.setAttribute('data-fires', String(final));
+    }
+    litCount++;
+    if (curEl) curEl.textContent = String(litCount);
+    if (counter) counter.setAttribute('data-current', String(litCount));
+  }
+
+  function unlightAll() {
+    tiles.forEach(function (tile, idx) {
+      tile.setAttribute('data-lit', 'false');
+      tile.setAttribute('data-fires', '0');
+      var fireEl = tile.querySelector('[data-tile-fires]');
+      if (fireEl) fireEl.textContent = '0×';
+    });
+    litCount = 0;
+    if (curEl) curEl.textContent = '0';
+    if (counter) counter.setAttribute('data-current', '0');
+    if (deadEl) deadEl.textContent = '0';
+  }
+
+  function finishDeadCount() {
+    var dead = 0;
+    SKILLS.forEach(function (s) { if (!s.lit) dead++; });
+    if (deadEl) deadEl.textContent = String(dead);
+  }
+
+  /* autoplay: light up SWEEP order over ~6s, then FINAL_FLUSH at the end */
+  function runSequence() {
+    if (userTookOver || reduce) return;
+    setPill('playing');
+
+    var step = 500; /* ms between lights */
+    var allOrder = SWEEP.concat(FINAL_FLUSH);
+    allOrder.forEach(function (idx, i) {
+      var tid = setTimeout(function () {
+        if (userTookOver) return;
+        lightTile(idx, true);
+        if (i === allOrder.length - 1) {
+          var endTid = setTimeout(function () {
+            if (userTookOver) return;
+            finishDeadCount();
+            setPill('done');
+          }, 800);
+          pendingTimers.push(endTid);
+        }
+      }, step * i);
+      pendingTimers.push(tid);
+    });
+  }
+
+  function takeover() {
+    if (userTookOver) return;
+    userTookOver = true;
+    clearPending();
+    setPill('manual');
+  }
+
+  /* listeners */
+  tiles.forEach(function (tile) {
+    tile.addEventListener('click', function () {
+      takeover();
+    });
+    tile.addEventListener('mouseenter', function (ev) {
+      var name = tile.getAttribute('data-skill');
+      var fires = tile.getAttribute('data-final');
+      var last  = tile.getAttribute('data-last');
+      tip.innerHTML = '<span class="tip-mono">' + name + '</span><span class="tip-meta">fires: ' + fires + ' &middot; last: ' + last + '</span>';
+      tip.hidden = false;
+      var hostRect = root.getBoundingClientRect();
+      var r = tile.getBoundingClientRect();
+      var x = (r.left - hostRect.left) + r.width / 2;
+      var y = (r.top  - hostRect.top) - 8;
+      tip.style.transform = 'translate(' + x + 'px,' + y + 'px)';
+    });
+    tile.addEventListener('mouseleave', function () { tip.hidden = true; });
+  });
+
+  root.addEventListener('pointerdown', function (ev) {
+    if (ev.target.closest('[data-heat-reset]')) return;
+    takeover();
+  }, true);
+
+  resetBt.addEventListener('click', function () {
+    userTookOver = false;
+    clearPending();
+    unlightAll();
+    tip.hidden = true;
+    setPill('idle');
+    if (!reduce) {
+      var tid = setTimeout(function () { if (!userTookOver) runSequence(); }, 1500);
+      pendingTimers.push(tid);
+    } else {
+      staticEnd();
+      setPill('reduce');
+    }
+  });
+
+  function staticEnd() {
+    SWEEP.concat(FINAL_FLUSH).forEach(function (idx) { lightTile(idx, false); });
+    finishDeadCount();
+    var cap = root.querySelector('.heat-static-cap');
+    if (!cap) {
+      cap = document.createElement('div');
+      cap.className = 'heat-static-cap';
+      cap.textContent = 'motion paused - your actual skill usage, last 7 days';
+      root.appendChild(cap);
+    }
+  }
+
+  /* public test hook */
+  window.__axHeatmapAdvance = function (n) {
+    takeover();
+    unlightAll();
+    var order = SWEEP.concat(FINAL_FLUSH);
+    var lim = Math.max(0, Math.min(order.length, n|0));
+    for (var i = 0; i < lim; i++) lightTile(order[i], false);
+    if (lim === order.length) finishDeadCount();
+  };
+
+  /* intersection observer */
+  function arm() {
+    if (reduce) { setPill('reduce'); staticEnd(); return; }
+    if (!('IntersectionObserver' in window)) {
+      var tid = setTimeout(function () { if (!userTookOver) runSequence(); }, 1500);
+      pendingTimers.push(tid);
+      return;
+    }
+    var fired = false;
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting && !fired && !userTookOver) {
+          fired = true;
+          io.disconnect();
+          var tid = setTimeout(function () { if (!userTookOver) runSequence(); }, 1500);
+          pendingTimers.push(tid);
+        }
+      });
+    }, { threshold: 0.4 });
+    io.observe(root);
+  }
+
+  setPill('idle');
+  arm();
+})();
+</script>
+
 <footer>
   <div class="row">
     <div>
@@ -295,8 +838,6 @@
     <div class="right">the missing layer</div>
   </div>
 </footer>
-
-<script src="exhibits.js"></script>
 
 </body>
 </html>
