@@ -38,9 +38,11 @@ import { safeKeyPart, recordKeyPart } from "../lib/shared/derive-keys.ts";
 import { dedupeSig, normalizeTitle } from "./derive-proposals.ts";
 
 export interface DeriveRetroProposalsStats {
-    readonly proposals: number;
-    readonly skipped: number;
+    readonly toolFailureProposals: number;
+    readonly correctionProposals: number;
+    readonly frictionProposals: number;
     readonly clusters: number;
+    readonly skipped: number;
 }
 
 /** A single failure mention parsed out of `retro.failed`. */
@@ -83,7 +85,54 @@ export interface RetroFailureRow {
     readonly retroKey: string;
     readonly sessionKey: string;
     readonly failed: string | null;
+    /** Pre-parsed user-correction count from {@link parseRetroCorrections}. */
+    readonly corrections?: number;
+    /** Pre-parsed friction kinds from {@link parseRetroFrictionKinds}. */
+    readonly frictionKinds?: readonly string[];
 }
+
+/**
+ * Extract the leading "<N> user correction(s)" count from a `retro.failed`
+ * string. Returns 0 if the pattern isn't present.
+ *
+ * Picks the FIRST `<N> user correction` match (the retro emitter only ever
+ * writes one such phrase per session, but be defensive). Plural "(s)" is
+ * optional - we accept both "1 user correction" and "5 user correction(s)".
+ */
+const CORRECTIONS_RE = /(\d+)\s+user\s+correction(?:\(s\)|s)?\b/i;
+
+export const parseRetroCorrections = (failed: string | null): number => {
+    if (failed === null || failed === undefined) return 0;
+    const m = CORRECTIONS_RE.exec(failed);
+    if (!m) return 0;
+    const n = Number(m[1] ?? 0);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+};
+
+/**
+ * Extract friction-kind tokens from the "friction kinds: a, b, c" segment
+ * of `retro.failed`. Each kind is lower-snake (e.g. "tool_error",
+ * "user_correction") and any trailing `·`-separated segment is dropped.
+ * Returns [] when the pattern isn't present.
+ */
+const FRICTION_KINDS_RE = /friction\s+kinds?\s*:\s*([^·]*)/i;
+const FRICTION_KIND_TOKEN_RE = /^[a-z][a-z0-9_]*$/;
+
+export const parseRetroFrictionKinds = (failed: string | null): string[] => {
+    if (failed === null || failed === undefined) return [];
+    const m = FRICTION_KINDS_RE.exec(failed);
+    if (!m) return [];
+    const raw = (m[1] ?? "").trim();
+    if (raw.length === 0) return [];
+    const out: string[] = [];
+    for (const part of raw.split(",")) {
+        const tok = part.trim().toLowerCase();
+        if (tok.length === 0) continue;
+        if (!FRICTION_KIND_TOKEN_RE.test(tok)) continue;
+        out.push(tok);
+    }
+    return out;
+};
 
 export interface RetroCluster {
     readonly tool: string;
@@ -154,6 +203,113 @@ export const clusterRetroToolFailures = (
             totalCount: cluster.totalCount,
             retroKeys: [...cluster.retroKeys],
             sessionKeys: [...cluster.sessionKeys],
+        });
+    }
+    out.sort((a, b) => b.totalCount - a.totalCount);
+    return out;
+};
+
+export interface RetroCorrectionCluster {
+    readonly totalCorrections: number;
+    readonly retroKeys: readonly string[];
+    readonly sessionKeys: readonly string[];
+}
+
+export interface RetroFrictionCluster {
+    readonly kind: string;
+    /** Distinct retros mentioning this kind. */
+    readonly totalCount: number;
+    readonly retroKeys: readonly string[];
+    readonly sessionKeys: readonly string[];
+}
+
+export interface ClusterRetroCorrectionsOpts {
+    readonly minSessions: number;
+    readonly minTotalCorrections: number;
+}
+
+/**
+ * Aggregate the per-row `corrections` count across distinct sessions.
+ * Returns a single cluster (or null) - we don't try to cluster by topic
+ * here, just by recurrence.
+ *
+ * Threshold: ≥minSessions distinct sessions and ≥minTotalCorrections summed
+ * corrections. The caller pre-parses `corrections` via
+ * {@link parseRetroCorrections} so this stays pure.
+ */
+export const clusterRetroCorrections = (
+    rows: readonly RetroFailureRow[],
+    opts: ClusterRetroCorrectionsOpts,
+): RetroCorrectionCluster | null => {
+    let totalCorrections = 0;
+    const retroKeys = new Set<string>();
+    const sessionKeys = new Set<string>();
+    for (const row of rows) {
+        const n = row.corrections ?? parseRetroCorrections(row.failed);
+        if (n <= 0) continue;
+        totalCorrections += n;
+        retroKeys.add(row.retroKey);
+        sessionKeys.add(row.sessionKey);
+    }
+    if (sessionKeys.size < opts.minSessions) return null;
+    if (totalCorrections < opts.minTotalCorrections) return null;
+    return {
+        totalCorrections,
+        retroKeys: [...retroKeys],
+        sessionKeys: [...sessionKeys],
+    };
+};
+
+interface MutableFrictionCluster {
+    kind: string;
+    retroKeys: Set<string>;
+    sessionKeys: Set<string>;
+}
+
+export interface ClusterRetroFrictionKindsOpts {
+    readonly minSessions: number;
+    readonly minRetros: number;
+}
+
+/**
+ * Group rows by friction-kind token. One cluster per kind, sorted by
+ * descending totalCount (== distinct retros mentioning the kind). Each
+ * kind must hit both thresholds (sessions, retros) to survive.
+ *
+ * `totalCount` is intentionally `retroKeys.size`, not a sum of mentions -
+ * the retro emitter only emits one friction-kinds string per session, so
+ * "how many retros mentioned this" is the right ranking signal.
+ */
+export const clusterRetroFrictionKinds = (
+    rows: readonly RetroFailureRow[],
+    opts: ClusterRetroFrictionKindsOpts,
+): RetroFrictionCluster[] => {
+    const byKind = new Map<string, MutableFrictionCluster>();
+    for (const row of rows) {
+        const kinds = row.frictionKinds ?? parseRetroFrictionKinds(row.failed);
+        for (const kind of kinds) {
+            let cluster = byKind.get(kind);
+            if (!cluster) {
+                cluster = {
+                    kind,
+                    retroKeys: new Set<string>(),
+                    sessionKeys: new Set<string>(),
+                };
+                byKind.set(kind, cluster);
+            }
+            cluster.retroKeys.add(row.retroKey);
+            cluster.sessionKeys.add(row.sessionKey);
+        }
+    }
+    const out: RetroFrictionCluster[] = [];
+    for (const c of byKind.values()) {
+        if (c.sessionKeys.size < opts.minSessions) continue;
+        if (c.retroKeys.size < opts.minRetros) continue;
+        out.push({
+            kind: c.kind,
+            totalCount: c.retroKeys.size,
+            retroKeys: [...c.retroKeys],
+            sessionKeys: [...c.sessionKeys],
         });
     }
     out.sort((a, b) => b.totalCount - a.totalCount);
@@ -286,11 +442,233 @@ export const buildRetroSkillProposalStatements = (
     return stmts;
 };
 
+/**
+ * Correction-pressure guidance proposal: when a user keeps correcting
+ * Claude across multiple sessions, that's signal of a missing rule in
+ * CLAUDE.md / AGENTS.md. The proposal's `fileTarget` is hardcoded to
+ * CLAUDE.md (the project-level guidance file); the user can move it.
+ */
+export interface RetroGuidanceProposalRow {
+    readonly proposalKey: string;
+    readonly title: string;
+    readonly hypothesis: string;
+    readonly fileTarget: string;
+    readonly section: string;
+    readonly suggestedText: string;
+    readonly confidence: string;
+    readonly frequency: number;
+    readonly sig: string;
+    readonly retroKeys: readonly string[];
+    readonly sessionKeys: readonly string[];
+}
+
+const correctionConfidenceFor = (totalCorrections: number): string =>
+    totalCorrections >= 10 ? "high" : totalCorrections >= 5 ? "medium" : "low";
+
+const correctionProposalKey = (sig: string): string =>
+    `guidance__retro_corrections__${sig.slice(-12)}`;
+
+export const deriveRetroCorrectionProposalRows = (
+    cluster: RetroCorrectionCluster | null,
+): {
+    readonly rows: RetroGuidanceProposalRow[];
+    readonly skipped: number;
+} => {
+    if (cluster === null) return { rows: [], skipped: 0 };
+    const title = "Reduce recurring user corrections";
+    const normTitle = normalizeTitle(title);
+    const sig = dedupeSig("guidance", normTitle);
+    return {
+        rows: [{
+            proposalKey: correctionProposalKey(sig),
+            title,
+            hypothesis: `${cluster.totalCorrections} corrections across ${cluster.sessionKeys.length} sessions; gap in CLAUDE.md likely.`,
+            fileTarget: "CLAUDE.md",
+            section: "Corrections",
+            suggestedText: `Address recurring user corrections (${cluster.totalCorrections} across ${cluster.sessionKeys.length} sessions) - review recent transcripts and codify the missing rule.`,
+            confidence: correctionConfidenceFor(cluster.totalCorrections),
+            frequency: cluster.totalCorrections,
+            sig,
+            retroKeys: cluster.retroKeys,
+            sessionKeys: cluster.sessionKeys,
+        }],
+        skipped: 0,
+    };
+};
+
+/**
+ * Mirror of {@link buildRetroSkillProposalStatements} but emits `form="guidance"`
+ * + `guidance_proposal` payload. Baseline JSON encodes
+ * `kind:"corrections"` so the verdict layer can recognize the source.
+ */
+export const buildRetroCorrectionGuidanceStatements = (
+    rows: readonly RetroGuidanceProposalRow[],
+    existingSigs: ReadonlySet<string> = new Set(),
+): string[] => {
+    const stmts: string[] = [];
+    for (const row of rows) {
+        const proposalRef = recordRef("proposal", row.proposalKey);
+        const payloadRef = recordRef("guidance_proposal", row.proposalKey);
+        const baseline = JSON.stringify({
+            kind: "corrections",
+            totalCorrections: row.frequency,
+            retroKeys: row.retroKeys,
+            sessionKeys: row.sessionKeys,
+        });
+        const isNew = !existingSigs.has(row.sig);
+        if (isNew) {
+            stmts.push(
+                `CREATE ${proposalRef} CONTENT ${surrealObject([
+                    ["form", surrealString("guidance")],
+                    ["title", surrealString(row.title)],
+                    ["hypothesis", surrealString(row.hypothesis)],
+                    ["dedupe_sig", surrealString(row.sig)],
+                    ["frequency", String(row.frequency)],
+                    ["confidence", surrealString(row.confidence)],
+                    ["status", surrealString("open")],
+                    ["baseline", surrealOptionString(baseline)],
+                    ["updated_at", "time::now()"],
+                ])};`,
+            );
+        } else {
+            stmts.push(
+                `UPDATE ${proposalRef} SET ${[
+                    ["title", surrealString(row.title)],
+                    ["hypothesis", surrealString(row.hypothesis)],
+                    ["frequency", String(row.frequency)],
+                    ["confidence", surrealString(row.confidence)],
+                    ["updated_at", "time::now()"],
+                ].map(([n, v]) => `${n} = ${v}`).join(", ")};`,
+            );
+        }
+        stmts.push(
+            `UPSERT ${payloadRef} MERGE ${surrealObject([
+                ["proposal", proposalRef],
+                ["file_target", surrealString(row.fileTarget)],
+                ["section", surrealOptionString(row.section)],
+                ["suggested_text", surrealString(row.suggestedText)],
+            ])};`,
+        );
+    }
+    return stmts;
+};
+
+/**
+ * One skill proposal per recurring friction kind. The skill title encodes
+ * the kind so a `command_failed` cluster and a `tool_error` cluster won't
+ * collide via dedupe_sig.
+ */
+export interface RetroFrictionSkillProposalRow {
+    readonly proposalKey: string;
+    readonly title: string;
+    readonly hypothesis: string;
+    readonly triggerPattern: string;
+    readonly suspectedGap: string;
+    readonly proposedBehavior: string;
+    readonly expectedImpact: string | null;
+    readonly confidence: string;
+    readonly frequency: number;
+    readonly sig: string;
+    readonly kind: string;
+    readonly retroKeys: readonly string[];
+    readonly sessionKeys: readonly string[];
+}
+
+const frictionProposalKey = (kind: string, sig: string): string =>
+    `skill__retro_friction__${safeKeyPart(kind).slice(0, 40)}__${sig.slice(-12)}`;
+
+export const deriveRetroFrictionSkillRows = (
+    clusters: readonly RetroFrictionCluster[],
+    existingSkillNames: ReadonlySet<string>,
+): {
+    readonly rows: RetroFrictionSkillProposalRow[];
+    readonly skipped: number;
+} => {
+    const rows: RetroFrictionSkillProposalRow[] = [];
+    let skipped = 0;
+    for (const cluster of clusters) {
+        const title = `Address recurring ${cluster.kind} friction`;
+        const normTitle = normalizeTitle(title);
+        if (existingSkillNames.has(normTitle)) { skipped += 1; continue; }
+        const sig = dedupeSig("skill", normTitle);
+        rows.push({
+            proposalKey: frictionProposalKey(cluster.kind, sig),
+            title,
+            hypothesis: `${cluster.kind} friction appeared in ${cluster.sessionKeys.length} sessions`,
+            triggerPattern: `friction_kind=${cluster.kind}`,
+            suspectedGap: `recurring ${cluster.kind} signals across sessions without a guard`,
+            proposedBehavior: `detect ${cluster.kind} pre-conditions and intervene before the friction surfaces`,
+            expectedImpact: `reduce ${cluster.kind} occurrence rate`,
+            confidence: confidenceFor(cluster.totalCount),
+            frequency: cluster.totalCount,
+            sig,
+            kind: cluster.kind,
+            retroKeys: cluster.retroKeys,
+            sessionKeys: cluster.sessionKeys,
+        });
+    }
+    return { rows, skipped };
+};
+
+export const buildRetroFrictionSkillStatements = (
+    rows: readonly RetroFrictionSkillProposalRow[],
+    existingSigs: ReadonlySet<string> = new Set(),
+): string[] => {
+    const stmts: string[] = [];
+    for (const row of rows) {
+        const proposalRef = recordRef("proposal", row.proposalKey);
+        const payloadRef = recordRef("skill_proposal", row.proposalKey);
+        const baseline = JSON.stringify({
+            kind: row.kind,
+            frequency: row.frequency,
+            retroKeys: row.retroKeys,
+            sessionKeys: row.sessionKeys,
+        });
+        const isNew = !existingSigs.has(row.sig);
+        if (isNew) {
+            stmts.push(
+                `CREATE ${proposalRef} CONTENT ${surrealObject([
+                    ["form", surrealString("skill")],
+                    ["title", surrealString(row.title)],
+                    ["hypothesis", surrealString(row.hypothesis)],
+                    ["dedupe_sig", surrealString(row.sig)],
+                    ["frequency", String(row.frequency)],
+                    ["confidence", surrealString(row.confidence)],
+                    ["status", surrealString("open")],
+                    ["baseline", surrealOptionString(baseline)],
+                    ["updated_at", "time::now()"],
+                ])};`,
+            );
+        } else {
+            stmts.push(
+                `UPDATE ${proposalRef} SET ${[
+                    ["title", surrealString(row.title)],
+                    ["hypothesis", surrealString(row.hypothesis)],
+                    ["frequency", String(row.frequency)],
+                    ["confidence", surrealString(row.confidence)],
+                    ["updated_at", "time::now()"],
+                ].map(([n, v]) => `${n} = ${v}`).join(", ")};`,
+            );
+        }
+        stmts.push(
+            `UPSERT ${payloadRef} MERGE ${surrealObject([
+                ["proposal", proposalRef],
+                ["trigger_pattern", surrealString(row.triggerPattern)],
+                ["suspected_gap", surrealString(row.suspectedGap)],
+                ["proposed_behavior", surrealString(row.proposedBehavior)],
+                ["expected_impact", surrealOptionString(row.expectedImpact)],
+            ])};`,
+        );
+    }
+    return stmts;
+};
+
 export interface DeriveRetroProposalsOpts {
     readonly sinceDays?: number;
     readonly minSessions?: number;
     readonly minRetros?: number;
     readonly minTotalCount?: number;
+    readonly minTotalCorrections?: number;
 }
 
 interface RetroFetchRow {
@@ -315,6 +693,7 @@ export const deriveRetroProposals = (
         const minSessions = opts.minSessions ?? 2;
         const minRetros = opts.minRetros ?? 2;
         const minTotalCount = opts.minTotalCount ?? 3;
+        const minTotalCorrections = opts.minTotalCorrections ?? 3;
         const db = yield* SurrealClient;
 
         const [retros, skills, existingProposals] = yield* Effect.all([
@@ -334,7 +713,15 @@ export const deriveRetroProposals = (
             const retroKey = recordKeyPart(r.id, "retro");
             const sessionKey = r.session ? recordKeyPart(r.session, "session") : null;
             if (!retroKey || !sessionKey) continue;
-            failureRows.push({ retroKey, sessionKey, failed: r.failed });
+            failureRows.push({
+                retroKey,
+                sessionKey,
+                failed: r.failed,
+                // Pre-parse here so the pure cluster functions don't re-scan
+                // the raw string twice per row.
+                corrections: parseRetroCorrections(r.failed),
+                frictionKinds: parseRetroFrictionKinds(r.failed),
+            });
         }
 
         const clusters = clusterRetroToolFailures(failureRows, {
@@ -342,19 +729,39 @@ export const deriveRetroProposals = (
             minRetros,
             minTotalCount,
         });
+        const correctionCluster = clusterRetroCorrections(failureRows, {
+            minSessions,
+            minTotalCorrections,
+        });
+        const frictionClusters = clusterRetroFrictionKinds(failureRows, {
+            minSessions,
+            minRetros,
+        });
         const existingSkillNames = new Set(
             skills.map((s) => normalizeTitle(s.name)),
         );
         const existingSigs = new Set(
             existingProposals.map((p) => p.dedupe_sig),
         );
-        const { rows, skipped } = deriveRetroProposalRows(clusters, existingSkillNames);
-        const stmts = buildRetroSkillProposalStatements(rows, existingSigs);
+        const { rows: toolRows, skipped: toolSkipped } =
+            deriveRetroProposalRows(clusters, existingSkillNames);
+        const { rows: correctionRows, skipped: correctionSkipped } =
+            deriveRetroCorrectionProposalRows(correctionCluster);
+        const { rows: frictionRows, skipped: frictionSkipped } =
+            deriveRetroFrictionSkillRows(frictionClusters, existingSkillNames);
+
+        const stmts = [
+            ...buildRetroSkillProposalStatements(toolRows, existingSigs),
+            ...buildRetroCorrectionGuidanceStatements(correctionRows, existingSigs),
+            ...buildRetroFrictionSkillStatements(frictionRows, existingSigs),
+        ];
         yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
         return {
-            proposals: rows.length,
-            skipped,
-            clusters: clusters.length,
+            toolFailureProposals: toolRows.length,
+            correctionProposals: correctionRows.length,
+            frictionProposals: frictionRows.length,
+            clusters: clusters.length + frictionClusters.length + (correctionCluster ? 1 : 0),
+            skipped: toolSkipped + correctionSkipped + frictionSkipped,
         };
     });
 

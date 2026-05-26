@@ -47,9 +47,15 @@ ax retro list --since=7 --json         # cluster-derived friction summary
 ax hooks summary --since=7 --tail=20   # optional; tolerate failure
 ```
 
-If `ax retro list` surfaces clustered tool failures, mention any new
-`Pre-<Tool> guard` proposals derived from them so the user knows to
-triage them in Step 2.
+`ax retro list` reflects three pattern types now:
+- **tool failures** (skill form) -> `Pre-<Tool> guard` proposals
+- **correction pressure** (guidance form) -> "Reduce recurring user
+  corrections" proposals targeting `CLAUDE.md`
+- **friction kinds** (skill form, one per kind) -> `Address recurring
+  <kind> friction` proposals
+
+If any of those surfaced, mention them so the user knows to triage in
+Step 2.
 
 Compute counts: open proposals (by form), accepted experiments with
 `locked_verdict IS NONE`, checkpoints due since last lock. Then render
