@@ -193,22 +193,13 @@ export function deriveClosureRows(input: {
             },
         });
     }
-    const gapSessions = input.sessionHealth.filter((row) =>
-        (row.tool_errors ?? 0) >= 5 || (row.user_corrections ?? 0) > 0 || row.context_pressure === "high",
-    );
-    if (gapSessions.length >= 3) {
-        candidatesByName.set("Session closure quality guardrail", {
-            key: "session_closure_quality_guardrail",
-            name: "Session closure quality guardrail",
-            triggerPattern: "multiple high-pressure/error/correction sessions",
-            suspectedGap: "Sessions are ending with enough risk that closure needs an explicit quality gate.",
-            proposedBehavior: "Before final response, check edits, command outcomes, verification gaps, and unresolved high-pressure sessions.",
-            confidence: gapSessions.length >= 10 ? "high" : "medium",
-            expectedImpact: "Fewer user redirects and post-closure fixes.",
-            evidenceCommits: [],
-            metrics: { risky_session_count: gapSessions.length },
-        });
-    }
+    // NOTE: the prior "Session closure quality guardrail" synthetic was
+    // dropped because risky_session_count = "any session with ≥5 errors OR
+    // any correction OR high pressure" matches every active dev. Per
+    // adversarial review of the live retro it surfaced freq=1072 as the
+    // top proposal - pure noise. If a closure-quality skill is real,
+    // it must derive from a SHARP recurring pattern (Path A continuation,
+    // see plan doc) rather than a broad session-count.
 
     return { classifications, fixChains, skillCandidates: [...candidatesByName.values()] };
 }

@@ -46,6 +46,9 @@ describe("closure derivation", () => {
             overlapFiles: ["src/ingest/codex.ts"],
         }));
         expect(rows.skillCandidates.map((candidate) => candidate.name)).toContain("Ingest pipeline regression checklist");
-        expect(rows.skillCandidates.map((candidate) => candidate.name)).toContain("Session closure quality guardrail");
+        // "Session closure quality guardrail" was a synthetic noise-proposal
+        // (matched every active dev). Dropped 2026-05-26 - see closure.ts
+        // header note. Tightened replacement lives in Path B (retro-driven).
+        expect(rows.skillCandidates.map((candidate) => candidate.name)).not.toContain("Session closure quality guardrail");
     });
 });

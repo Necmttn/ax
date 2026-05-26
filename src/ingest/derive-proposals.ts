@@ -190,12 +190,18 @@ export const parseMetrics = (
     return raw;
 };
 
+/**
+ * Frequency = `fix_chain_count` only. The legacy code also folded in
+ * `risky_session_count` (any session with ≥5 errors / any correction / high
+ * pressure) which matched every active dev and produced a top proposal
+ * with freq=1072 - pure noise. The closure stage no longer emits that
+ * metric; defensive: still read it but never trust it for ranking.
+ */
 export const skillProposalFrequency = (
     metrics: Record<string, unknown>,
 ): number => {
     const fix = Number(metrics.fix_chain_count ?? 0);
-    const risky = Number(metrics.risky_session_count ?? 0);
-    return Math.max(Number.isFinite(fix) ? fix : 0, Number.isFinite(risky) ? risky : 0);
+    return Number.isFinite(fix) ? fix : 0;
 };
 
 const proposalKeyFor = (form: string, title: string, sig: string): string =>

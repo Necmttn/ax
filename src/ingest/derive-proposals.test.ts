@@ -33,9 +33,10 @@ describe("derive-proposals helpers", () => {
         expect(parseMetrics("not-json")).toEqual({});
     });
 
-    test("skillProposalFrequency picks the larger of fix_chain_count / risky_session_count", () => {
-        expect(skillProposalFrequency({ fix_chain_count: 3, risky_session_count: 7 })).toBe(7);
+    test("skillProposalFrequency uses fix_chain_count only - risky_session_count is noise, ignored", () => {
+        expect(skillProposalFrequency({ fix_chain_count: 3, risky_session_count: 7 })).toBe(3);
         expect(skillProposalFrequency({ fix_chain_count: 9 })).toBe(9);
+        expect(skillProposalFrequency({ risky_session_count: 1072 })).toBe(0);
         expect(skillProposalFrequency({})).toBe(0);
     });
 });
