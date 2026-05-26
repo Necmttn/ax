@@ -18,6 +18,7 @@ import { deriveSessionHealth } from "../ingest/session-health.ts";
 import { deriveClosure } from "../ingest/closure.ts";
 import { deriveProposals } from "../ingest/derive-proposals.ts";
 import { deriveOpportunities } from "../ingest/derive-opportunities.ts";
+import { deriveRetroProposals } from "../ingest/derive-retro-proposals.ts";
 import { deriveCheckpoints } from "../ingest/derive-checkpoints.ts";
 import { retroFromSession, upsertRetro, type RetroSource } from "../ingest/retro.ts";
 import { scaffoldSkill } from "../improve/skill-scaffold.ts";
@@ -299,6 +300,7 @@ const STAGE_PROGRESS: Record<IngestStageKey, ProgressStage> = {
     closure: { source: "closure", stage: "derive" },
     proposals: { source: "proposals", stage: "derive" },
     opportunities: { source: "opportunities", stage: "derive" },
+    "retro-proposals": { source: "retro-proposals", stage: "derive" },
     harness: { source: "harness", stage: "doctor" },
 };
 
@@ -521,6 +523,14 @@ const cmdIngest = (args: string[]) => {
                 "opportunities",
                 "derive",
                 deriveOpportunities(),
+                progress,
+            )),
+            "retro-proposals": () => withServices(telemetryStage(
+                db,
+                runId,
+                "retro-proposals",
+                "derive",
+                deriveRetroProposals(),
                 progress,
             )),
             harness: () => withServices(telemetryStage(db, runId, "harness", "doctor", ingestHarness(), progress)),

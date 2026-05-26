@@ -111,12 +111,12 @@ describe("runPipeline DAG scheduling", () => {
 });
 
 describe("INGEST_STAGE_DEPS", () => {
-    test("has all 14 canonical stages", () => {
+    test("has all 15 canonical stages", () => {
         expect(Object.keys(INGEST_STAGE_DEPS).sort()).toEqual(
             [
                 "claude", "closure", "codex", "commands", "git", "harness",
-                "opportunities", "outcomes", "proposals", "session-health", "signals",
-                "skills", "spawned", "subagents",
+                "opportunities", "outcomes", "proposals", "retro-proposals",
+                "session-health", "signals", "skills", "spawned", "subagents",
             ].sort(),
         );
     });
@@ -128,7 +128,7 @@ describe("INGEST_STAGE_DEPS", () => {
     test("deriveOnlyKeys are the DB-only re-derive stages", () => {
         expect(new Set(deriveOnlyKeys())).toEqual(
             new Set([
-                "signals", "outcomes", "session-health", "closure", "proposals", "opportunities",
+                "signals", "outcomes", "session-health", "closure", "proposals", "opportunities", "retro-proposals",
             ]),
         );
     });

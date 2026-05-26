@@ -94,6 +94,8 @@
 
               outputHashAlgo = "sha256";
               outputHashMode = "recursive";
+              # Auto-refreshed by .github/workflows/release-please.yml
+              # (refresh-flake-hash job) on PRs that touch bun.lock / package.json.
               outputHash = "sha256-zDarC1/7bCLdo9A5TSN3zMERw2aRrnt2QneitVPr7dY=";
             };
 

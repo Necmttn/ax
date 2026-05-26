@@ -110,6 +110,9 @@ export const runPipeline = (
  *  - `spawned` derives spawn edges from transcript rows.
  *  - `git` is independent of transcripts.
  *  - the derive-* stages re-read already-ingested turn/session rows.
+ *  - `retro-proposals` clusters per-session retro `failed` strings into
+ *    skill-form proposals; sibling of `opportunities`, runs after
+ *    `proposals` so its dedupe_sig lookup sees a stable proposal table.
  *  - `harness` (doctor) reads everything; runs last.
  */
 export const INGEST_STAGE_DEPS: Record<string, readonly string[]> = {
@@ -126,6 +129,7 @@ export const INGEST_STAGE_DEPS: Record<string, readonly string[]> = {
     closure: ["signals"],
     proposals: ["closure"],
     opportunities: ["proposals"],
+    "retro-proposals": ["proposals"],
     harness: ["outcomes", "session-health", "closure"],
 };
 
@@ -134,7 +138,7 @@ export type IngestStageKey = keyof typeof INGEST_STAGE_DEPS;
 /** Stages that re-derive purely from already-ingested DB rows - the
  *  `--derive-only` set. Defined as "no dep on a transcript/git parse stage". */
 export const deriveOnlyKeys = (): IngestStageKey[] =>
-    ["signals", "outcomes", "session-health", "closure", "proposals", "opportunities"];
+    ["signals", "outcomes", "session-health", "closure", "proposals", "opportunities", "retro-proposals"];
 
 /** Canonical Ingest Stage keys in execution order. Single source of truth. */
 export const ALL_STAGE_KEYS = Object.keys(INGEST_STAGE_DEPS) as IngestStageKey[];

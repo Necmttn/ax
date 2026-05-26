@@ -194,6 +194,7 @@ Full reference: [`docs/insights-cli-reference.md`](docs/insights-cli-reference.m
 ## Docs
 
 - [`docs/manifesto.md`](docs/manifesto.md) - the missing layer in the agent stack
+- [`docs/origin.html`](docs/origin.html) - origin notes on the loop ax closes
 - [`docs/language.md`](docs/language.md) - coined vocabulary, the AX glossary
 - [`docs/brand.md`](docs/brand.md) - design system + voice rules
 - [`docs/development.md`](docs/development.md) - local setup, schema, queries, benchmarks

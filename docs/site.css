@@ -62,6 +62,10 @@ main, header, footer {
   letter-spacing: -1px;
 }
 
+a.wordmark {
+  text-decoration: none;
+}
+
 .brand-tag {
   font-family: var(--mono);
   font-size: 10px;
@@ -171,6 +175,18 @@ h2 {
   letter-spacing: -0.5px;
   margin: 0 0 24px;
 }
+
+.article {
+  padding: 88px 0;
+  border-bottom: none;
+}
+
+/* ---------- essay (origin) ----------
+   Full essay styles live below in their own block, scoped under `.essay`.
+   Old `.article-origin / .origin-* / .feedback-* / .ingest-* / .failure-* /
+   .enforcement-ladder / .experiment-timeline / .article-cta / .article-dek /
+   .article-note / .origin-loop / .signal-grid / .signal-card` removed
+   intentionally. Do not re-add. */
 
 p {
   margin: 0 0 16px;
@@ -585,4 +601,978 @@ footer .right {
   .wordmark { font-size: 28px; }
   main, header, footer { padding: 0 20px; }
   footer { padding: 24px 20px 40px; }
+}
+
+/* ============================================================
+   essay - editorial longform (used by origin.html)
+   Scoped under .essay so site chrome is untouched.
+   ============================================================ */
+
+.essay {
+  --essay-max: 1100px;
+  --prose-max: 64ch;
+  width: 100%;
+  max-width: var(--essay-max);
+  margin: 0 auto;
+  padding: 0 32px;
+  color: var(--ink);
+}
+
+/* center-column prose; exhibits break out */
+.essay > * {
+  max-width: var(--prose-max);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.essay > figure,
+.essay > .essay-wide,
+.essay > .essay-cta {
+  max-width: none;
+}
+
+/* --- type --- */
+
+.essay .eyebrow {
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  color: var(--muted);
+  margin: 0 auto 28px;
+}
+
+.essay h1 {
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: clamp(40px, 7.4vw, 84px);
+  line-height: 1.02;
+  letter-spacing: -1.6px;
+  margin: 0 auto 32px;
+}
+
+.essay h2 {
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: clamp(30px, 4vw, 44px);
+  line-height: 1.08;
+  letter-spacing: -0.6px;
+  margin: 0 auto 28px;
+}
+
+.essay p {
+  font-family: var(--serif);
+  font-size: 19px;
+  line-height: 1.66;
+  margin: 0 auto 20px;
+  color: var(--ink);
+  max-width: var(--prose-max);
+}
+
+.essay .dek {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: clamp(20px, 2.2vw, 26px);
+  line-height: 1.4;
+  color: var(--muted);
+  margin: 0 auto 8px;
+  max-width: 56ch;
+}
+
+.essay p code,
+.essay li code {
+  font-family: var(--mono);
+  font-size: 0.86em;
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--ink);
+}
+
+.essay a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 3px;
+}
+
+.essay a:hover { text-decoration-color: var(--ink); }
+
+/* --- section spacing --- */
+
+.essay .hero {
+  padding: 96px 0 80px;
+  text-align: left;
+}
+
+.essay .section {
+  padding: 56px 0 24px;
+}
+
+.essay .section + figure,
+.essay figure + .section {
+  margin-top: 8px;
+}
+
+/* --- figures, base --- */
+
+.essay figure {
+  width: 100%;
+  margin: 56px auto 80px;
+  padding: 0;
+}
+
+.essay figure .fig-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 18px;
+  padding-bottom: 14px;
+  margin-bottom: 28px;
+  border-bottom: 1px solid var(--ink);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--muted);
+}
+
+.essay figure .fig-head .fig-id {
+  color: var(--ink);
+}
+
+.essay figure figcaption {
+  margin-top: 22px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--muted);
+  max-width: 60ch;
+}
+
+.essay figure figcaption strong {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* ============================================================
+   Exhibit A - curve: capability up, signal density down
+   ============================================================ */
+
+.fig-curve { }
+
+.fig-curve .curve-wrap {
+  width: 100%;
+  aspect-ratio: 1000 / 520;
+  display: block;
+}
+
+.fig-curve svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: visible;
+}
+
+/* axes */
+.fig-curve .ax-axis { stroke: var(--ink); stroke-width: 1.5; fill: none; }
+.fig-curve .ax-tick { stroke: var(--ink); stroke-width: 1.5; }
+
+/* axis titles */
+.fig-curve .ax-y-title,
+.fig-curve .ax-x-title {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 20px;
+  fill: var(--ink);
+}
+.fig-curve .ax-y-sub {
+  font-family: var(--mono);
+  font-size: 12px;
+  fill: var(--muted);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* tick labels */
+.fig-curve .ax-tick-label {
+  font-family: var(--mono);
+  font-size: 14px;
+  fill: var(--ink);
+  letter-spacing: 0.04em;
+}
+.fig-curve .ax-tick-label.dim {
+  font-size: 12px;
+  fill: var(--muted);
+}
+
+/* the main descending curve */
+.fig-curve .curve-line {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+
+/* numbered open circles on the curve */
+.fig-curve .curve-dot {
+  fill: var(--page);
+  stroke: var(--ink);
+  stroke-width: 2;
+}
+.fig-curve .curve-dot-num {
+  font-family: var(--serif);
+  font-size: 18px;
+  font-weight: 400;
+  fill: var(--ink);
+}
+
+/* ax reinjection marker - filled green, clearly separated */
+.fig-curve .ax-marker-connector {
+  stroke: var(--green);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 4;
+  opacity: 0.7;
+}
+.fig-curve .ax-marker-halo {
+  fill: var(--green);
+  opacity: 0.14;
+}
+.fig-curve .ax-marker {
+  fill: var(--green);
+}
+.fig-curve .ax-marker-label {
+  font-family: var(--serif);
+  font-size: 22px;
+  fill: var(--green);
+  font-style: italic;
+}
+.fig-curve .ax-marker-sub {
+  font-family: var(--mono);
+  font-size: 12px;
+  fill: var(--green);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* legend below the curve */
+.fig-curve .curve-legend {
+  list-style: none;
+  margin: 28px 0 0;
+  padding: 18px 0 0;
+  border-top: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0 14px;
+  max-width: 100%;
+}
+
+.fig-curve .curve-legend li {
+  display: grid;
+  grid-template-rows: auto auto auto;
+  gap: 4px;
+  padding-right: 12px;
+  border-right: 1px solid var(--line);
+  align-content: start;
+}
+
+.fig-curve .curve-legend li:last-child { border-right: none; }
+
+.fig-curve .curve-legend .lg-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1.5px solid var(--ink);
+  border-radius: 50%;
+  font-family: var(--serif);
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--page);
+}
+
+.fig-curve .curve-legend .lg-name {
+  font-family: var(--serif);
+  font-size: 17px;
+  line-height: 1.15;
+  color: var(--ink);
+}
+
+.fig-curve .curve-legend .lg-meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+.fig-curve .curve-legend li.is-ax .lg-num {
+  background: var(--green);
+  border-color: var(--green);
+  color: var(--page);
+  font-family: var(--serif);
+  font-size: 13px;
+  font-style: italic;
+  width: 28px;
+  height: 24px;
+  border-radius: 14px;
+}
+
+.fig-curve .curve-legend li.is-ax .lg-name {
+  color: var(--green);
+  font-style: italic;
+}
+
+.fig-curve .curve-legend li.is-ax .lg-meta {
+  color: var(--muted);
+}
+
+/* ============================================================
+   Exhibit B - ledger: four signal sources joined in the graph
+   ============================================================ */
+
+.fig-ledger .ledger-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
+  border-top: 1px solid var(--ink);
+  border-bottom: 1px solid var(--line);
+}
+
+.fig-ledger .ledger-col {
+  padding: 14px 14px 16px;
+  border-right: 1px solid var(--line);
+  background: transparent;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.fig-ledger .ledger-col:last-child { border-right: none; }
+
+.fig-ledger .col-head {
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--ink);
+  margin-bottom: 12px;
+}
+
+.fig-ledger .col-head .col-num {
+  display: inline-block;
+  width: 22px;
+  color: var(--muted);
+}
+
+.fig-ledger .log-line {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin-bottom: 8px;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+
+.fig-ledger .log-line::-webkit-scrollbar { display: none; }
+
+.fig-ledger .log-line .lk { color: var(--muted); }
+.fig-ledger .log-line .lv-ok { color: var(--green); }
+.fig-ledger .log-line .lv-err { color: var(--red); }
+.fig-ledger .log-line .lv-ref { color: var(--blue); }
+
+.fig-ledger .join-row {
+  padding: 14px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.fig-ledger .join-row .join-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--muted);
+  margin-right: 14px;
+}
+
+.fig-ledger .join-row .join-schema {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.fig-ledger .join-row .join-schema .sep {
+  color: var(--muted);
+  padding: 0 6px;
+}
+
+.fig-ledger .out-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 14px;
+}
+
+.fig-ledger .pill {
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  padding: 6px 12px;
+  border: 1px solid var(--ink);
+  color: var(--ink);
+  background: transparent;
+}
+
+.fig-ledger .pill.is-live {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+/* ============================================================
+   framework-list aside (inside scope-grew section)
+   ============================================================ */
+
+.essay .framework-list {
+  display: block;
+  max-width: var(--prose-max);
+  margin: 8px auto 24px;
+  padding: 16px 18px 14px;
+  border-top: 1px solid var(--ink);
+  border-bottom: 1px solid var(--line);
+}
+
+.essay .framework-list .framework-list-label {
+  display: block;
+  font-family: var(--mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+
+.essay .framework-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.essay .framework-list li {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 18px;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.essay .framework-list .fw-name {
+  color: var(--ink);
+  letter-spacing: 0.02em;
+}
+
+.essay .framework-list .fw-note {
+  color: var(--muted);
+}
+
+/* ============================================================
+   Exhibit C - calendar of sessions: recurrence is the data
+   ============================================================ */
+
+.fig-calendar .cal-wrap {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  justify-items: center;
+  gap: 0 56px;
+  align-items: start;
+  border-top: 1px solid var(--ink);
+  padding-top: 18px;
+}
+
+.fig-calendar .cal-half {
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+
+.fig-calendar .cal-col-heads {
+  display: grid;
+  grid-template-columns: 64px max-content;
+  gap: 10px;
+  padding-bottom: 6px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.fig-calendar .cal-col-head {
+  font-family: var(--mono);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--muted);
+}
+
+.fig-calendar .cal-col-head.cells {
+  display: grid;
+  grid-template-columns: repeat(4, 16px);
+  gap: 5px;
+}
+
+.fig-calendar .cal-col-head.cells span {
+  text-align: center;
+}
+
+.fig-calendar .cal-rows {
+  display: grid;
+  grid-template-columns: 64px max-content;
+  gap: 4px 10px;
+  align-items: center;
+}
+
+.fig-calendar .cal-cells {
+  display: grid;
+  grid-template-columns: repeat(4, 16px);
+  gap: 5px;
+}
+
+.fig-calendar .cal-date {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  line-height: 1.2;
+}
+
+.fig-calendar .cell {
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--line);
+  background: transparent;
+}
+
+.fig-calendar .cell.touched-main { background: var(--red); border-color: var(--red); }
+.fig-calendar .cell.clean { background: transparent; border: 1px solid var(--ink); }
+
+.fig-calendar .cal-divider {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0 4px;
+}
+
+.fig-calendar .cal-divider .rule {
+  height: 1px;
+  background: var(--ink);
+}
+
+.fig-calendar .cal-divider .label {
+  font-family: var(--mono);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--ink);
+  padding: 3px 8px;
+  border: 1px solid var(--ink);
+}
+
+.fig-calendar .cal-legend {
+  display: flex;
+  gap: 18px;
+  margin-top: 12px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+}
+
+.fig-calendar .cal-legend .swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+  vertical-align: -2px;
+  border: 1px solid var(--line);
+}
+
+.fig-calendar .cal-legend .swatch.touched-main { background: var(--red); border-color: var(--red); }
+.fig-calendar .cal-legend .swatch.clean { background: transparent; border-color: var(--ink); }
+.fig-calendar .cal-legend .swatch.idle { background: transparent; border-color: var(--line); }
+
+/* ============================================================
+   Exhibit D - enforcement stack: width encodes lossiness
+   ============================================================ */
+
+.fig-stack .stack-wrap {
+  display: grid;
+  grid-template-columns: 1fr 40px;
+  gap: 0;
+  align-items: stretch;
+  border-top: 1px solid var(--ink);
+  padding-top: 28px;
+}
+
+.fig-stack .stack-tiers {
+  display: grid;
+  gap: 18px;
+}
+
+.fig-stack .tier {
+  position: relative;
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 24px;
+  align-items: center;
+  padding: 22px 24px;
+  border: 1px solid var(--line);
+  background: transparent;
+  margin: 0 auto;
+}
+
+.fig-stack .tier.t-guidance { width: 100%; background: color-mix(in srgb, var(--muted) 8%, transparent); border-color: var(--line); }
+.fig-stack .tier.t-skill { width: 78%; background: color-mix(in srgb, var(--muted) 16%, transparent); border-color: var(--line); }
+.fig-stack .tier.t-hook { width: 52%; background: var(--ink); color: var(--page); border-color: var(--ink); }
+
+.fig-stack .tier-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--muted);
+}
+
+.fig-stack .tier.t-hook .tier-label { color: color-mix(in srgb, var(--page) 60%, transparent); }
+
+.fig-stack .tier-name {
+  font-family: var(--serif);
+  font-size: clamp(26px, 3vw, 36px);
+  font-weight: 400;
+  line-height: 1;
+  margin-top: 8px;
+}
+
+.fig-stack .tier-body {
+  display: grid;
+  gap: 10px;
+}
+
+.fig-stack .tier-note {
+  font-family: var(--serif);
+  font-size: 17px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.fig-stack .tier.t-hook .tier-note { color: var(--page); }
+
+.fig-stack .tier-sample {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.fig-stack .tier.t-hook .tier-sample { color: color-mix(in srgb, var(--page) 72%, transparent); }
+
+.fig-stack .tier .locked {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--green);
+}
+
+.fig-stack .tier .locked::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  background: var(--green);
+  border-radius: 50%;
+}
+
+.fig-stack .stack-rail {
+  position: relative;
+  margin-left: 12px;
+}
+
+.fig-stack .stack-rail::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 8px;
+  bottom: 8px;
+  width: 1px;
+  background: var(--ink);
+}
+
+.fig-stack .stack-rail::after {
+  content: "";
+  position: absolute;
+  left: calc(50% - 4px);
+  bottom: 4px;
+  border: 4px solid transparent;
+  border-top-color: var(--ink);
+}
+
+.fig-stack .stack-rail .rail-label {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(90deg);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: var(--page);
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+
+/* ============================================================
+   Exhibit E - experiment lanes with t+0..t+90 verdicts
+   ============================================================ */
+
+.fig-lanes .lanes-wrap {
+  display: grid;
+  grid-template-columns: 160px 1fr 96px;
+  gap: 12px 18px;
+  align-items: center;
+  border-top: 1px solid var(--ink);
+  padding-top: 24px;
+}
+
+.fig-lanes .lanes-axis {
+  grid-column: 2 / 3;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--muted);
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 12px;
+}
+
+.fig-lanes .lanes-axis span {
+  position: relative;
+}
+
+.fig-lanes .lanes-axis span::before {
+  content: "";
+  position: absolute;
+  bottom: -9px;
+  left: 0;
+  width: 1px;
+  height: 6px;
+  background: var(--ink);
+}
+
+.fig-lanes .lane-name {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
+  letter-spacing: 0.04em;
+  padding-right: 8px;
+}
+
+.fig-lanes .lane-name small {
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-top: 4px;
+}
+
+.fig-lanes .lane-bar {
+  position: relative;
+  height: 34px;
+  background: transparent;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.fig-lanes .lane-bar .fill {
+  position: absolute;
+  top: 7px;
+  bottom: 7px;
+  left: 0;
+  background: var(--ink);
+}
+
+.fig-lanes .lane-bar.is-regressed .fill { background: var(--red); }
+.fig-lanes .lane-bar.is-self-resolved .fill { background: color-mix(in srgb, var(--muted) 50%, transparent); }
+
+.fig-lanes .lane-bar .checkpoint {
+  position: absolute;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  margin-top: -4px;
+  margin-left: -4px;
+  background: var(--page);
+  border: 1px solid var(--ink);
+  border-radius: 50%;
+}
+
+.fig-lanes .lane-bar .checkpoint.cp-0  { left: 0%; }
+.fig-lanes .lane-bar .checkpoint.cp-7  { left: 33.33%; }
+.fig-lanes .lane-bar .checkpoint.cp-30 { left: 66.66%; }
+.fig-lanes .lane-bar .checkpoint.cp-90 { left: 100%; }
+
+.fig-lanes .verdict {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  padding: 5px 10px;
+  border: 1px solid var(--ink);
+  color: var(--ink);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.fig-lanes .verdict.kept { border-color: var(--green); color: var(--green); }
+.fig-lanes .verdict.regressed { border-color: var(--red); color: var(--red); }
+.fig-lanes .verdict.self-resolved { border-color: var(--muted); color: var(--muted); }
+
+/* ============================================================
+   Closing CTA + byline
+   ============================================================ */
+
+.essay .essay-cta {
+  margin: 80px auto 24px;
+  padding: 28px 0;
+  border-top: 1px solid var(--ink);
+  border-bottom: 1px solid var(--ink);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.essay .essay-cta .loop-line {
+  font-family: var(--serif);
+  font-size: clamp(20px, 2.4vw, 28px);
+  line-height: 1.2;
+  color: var(--ink);
+}
+
+.essay .essay-cta .loop-line .sep {
+  color: var(--muted);
+  padding: 0 8px;
+}
+
+.essay .essay-cta .btn {
+  font-family: var(--mono);
+  font-size: 13px;
+  text-decoration: none;
+  padding: 12px 18px;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--page);
+}
+
+.essay .byline {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  margin: 28px auto 96px;
+  max-width: var(--prose-max);
+}
+
+/* ============================================================
+   Responsive
+   ============================================================ */
+
+@media (max-width: 900px) {
+  .essay { padding: 0 24px; }
+  .fig-ledger .ledger-grid { grid-template-columns: repeat(2, 1fr); }
+  .fig-ledger .ledger-col:nth-child(2) { border-right: none; }
+  .fig-ledger .ledger-col:nth-child(1),
+  .fig-ledger .ledger-col:nth-child(2) { border-bottom: 1px solid var(--line); }
+
+  .fig-curve .curve-legend {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px 12px;
+  }
+  .fig-curve .curve-legend li:nth-child(3n) { border-right: none; }
+}
+
+@media (max-width: 720px) {
+  .essay { padding: 0 20px; }
+  .essay .hero { padding: 56px 0 40px; }
+  .essay .section { padding: 36px 0 8px; }
+  .essay h1 { font-size: 40px; letter-spacing: -1px; }
+  .essay h2 { font-size: 28px; letter-spacing: -0.4px; }
+  .essay p { font-size: 17px; line-height: 1.6; }
+  .essay figure { margin: 40px auto 56px; }
+
+  .fig-ledger .ledger-grid { grid-template-columns: 1fr; }
+  .fig-ledger .ledger-col { border-right: none; border-bottom: 1px solid var(--line); min-height: auto; }
+  .fig-ledger .ledger-col:last-child { border-bottom: none; }
+  .fig-ledger .log-line { font-size: 11px; }
+
+  .fig-curve .curve-legend {
+    grid-template-columns: 1fr 1fr;
+    gap: 14px 12px;
+    padding-top: 14px;
+  }
+  .fig-curve .curve-legend li {
+    border-right: none;
+    padding-right: 0;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  .fig-curve .curve-legend li:nth-last-child(1),
+  .fig-curve .curve-legend li:nth-last-child(2) {
+    border-bottom: none;
+  }
+  .fig-curve .ax-y-title { font-size: 16px; }
+  .fig-curve .ax-x-title { font-size: 16px; }
+  .fig-curve .ax-tick-label { font-size: 12px; }
+  .fig-curve .ax-tick-label.dim { font-size: 10px; }
+  .fig-curve .ax-marker-label { font-size: 18px; }
+
+  .essay .framework-list li {
+    grid-template-columns: 1fr;
+    gap: 0;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--line);
+  }
+  .essay .framework-list li:last-child { border-bottom: none; padding-bottom: 0; }
+  .essay .framework-list .fw-note { font-size: 12px; }
+
+  .fig-calendar .cal-wrap { grid-template-columns: 1fr; gap: 32px; }
+
+  .fig-stack .stack-wrap { grid-template-columns: 1fr; }
+  .fig-stack .stack-rail { display: none; }
+  .fig-stack .tier { grid-template-columns: 1fr; gap: 8px; padding: 18px; }
+  .fig-stack .tier.t-guidance,
+  .fig-stack .tier.t-skill,
+  .fig-stack .tier.t-hook { width: 100%; }
+
+  .fig-lanes .lanes-wrap { grid-template-columns: 1fr; gap: 8px; }
+  .fig-lanes .lanes-axis { grid-column: 1 / -1; }
+  .fig-lanes .lane-name { padding-top: 8px; }
+  .fig-lanes .verdict { justify-self: start; margin-bottom: 6px; }
+
+  .essay .essay-cta { flex-direction: column; align-items: flex-start; }
 }
