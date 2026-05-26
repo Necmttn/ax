@@ -5,6 +5,8 @@
     flake-parts.url = "github:hercules-ci/flake-parts";
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     process-compose-flake.url = "github:Platonic-Systems/process-compose-flake";
+    bun2nix.url = "github:nix-community/bun2nix";
+    bun2nix.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs = inputs:
@@ -23,6 +25,7 @@
             inherit system;
             config.allowUnfreePredicate = pkg:
               builtins.elem (lib.getName pkg) [ "surrealdb" ];
+            overlays = [ inputs.bun2nix.overlays.default ];
           };
 
           pkgMeta = lib.importJSON ./package.json;
@@ -46,7 +49,7 @@
             '';
           };
 
-          ax = pkgs.stdenv.mkDerivation (finalAttrs: {
+          ax = pkgs.stdenv.mkDerivation {
             pname = "ax";
             version = pkgMeta.version;
 
@@ -55,6 +58,7 @@
               fileset = lib.fileset.unions [
                 ./package.json
                 ./bun.lock
+                ./bun.nix
                 ./tsconfig.json
                 ./bin
                 ./src
@@ -63,49 +67,33 @@
               ];
             };
 
-            nativeBuildInputs = [ pkgs.bun pkgs.makeWrapper ];
+            nativeBuildInputs = [
+              pkgs.bun
+              pkgs.makeWrapper
+              pkgs.bun2nix.hook
+            ];
 
-            deps = pkgs.stdenv.mkDerivation {
-              pname = "ax-node-modules";
-
-              inherit (finalAttrs) version src;
-
-              nativeBuildInputs = [ pkgs.bun ];
-
-              dontConfigure = true;
-              dontFixup = true;
-
-              buildPhase = ''
-                runHook preBuild
-                export HOME="$(mktemp -d)"
-                bun install \
-                  --frozen-lockfile \
-                  --ignore-scripts \
-                  --no-progress
-                runHook postBuild
-              '';
-
-              installPhase = ''
-                runHook preInstall
-                mkdir -p "$out"
-                cp -R node_modules "$out/node_modules"
-                runHook postInstall
-              '';
-
-              outputHashAlgo = "sha256";
-              outputHashMode = "recursive";
-              # Auto-refreshed by .github/workflows/release-please.yml
-              # (refresh-flake-hash job) on PRs that touch bun.lock / package.json.
-              outputHash = "sha256-zDarC1/7bCLdo9A5TSN3zMERw2aRrnt2QneitVPr7dY=";
+            # Deterministic per-package Bun cache generated from bun.lock.
+            # Regenerate with `bunx bun2nix -o bun.nix` (also runs as a
+            # postinstall hook). One file, works on mac + linux.
+            bunDeps = pkgs.bun2nix.fetchBunDeps {
+              bunNix = ./bun.nix;
             };
+
+            # `effect-language-service patch` runs in `prepare`; it pokes at
+            # node_modules in ways that don't survive the Nix sandbox. We
+            # ship a complete node_modules to $out so runtime is unaffected.
+            dontRunLifecycleScripts = true;
+
+            # We do the dashboard build ourselves below; bun2nix's default
+            # build phase doesn't apply here.
+            dontUseBunBuild = true;
+            dontUseBunCheck = true;
 
             dontConfigure = true;
 
             buildPhase = ''
               runHook preBuild
-              cp -R ${finalAttrs.deps}/node_modules ./node_modules
-              chmod -R u+w node_modules
-              export HOME="$(mktemp -d)"
               # Invoke vite via bun so node shebangs aren't honored by the loader.
               bun ./node_modules/vite/bin/vite.js build \
                 --config src/dashboard/web/vite.config.ts
@@ -134,7 +122,7 @@
               mainProgram = "axctl";
               platforms = lib.platforms.unix;
             };
-          });
+          };
         in
         {
           # Override flake-parts' default `pkgs` arg so downstream modules
