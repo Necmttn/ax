@@ -15,7 +15,7 @@
   <!-- masthead tag (mono uppercase) -->
   <text x="80" y="103" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
         font-size="18" letter-spacing="3" fill="#111" font-weight="500">
-    AX · AGENT EXPERIENCE LAYER
+    AX · THE RETRO LOOP FOR AI CODING AGENTS
   </text>
 
   <!-- live pulse dot (top right) -->
@@ -46,7 +46,7 @@
   <!-- bold descriptor -->
   <text x="80" y="465" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif"
         font-size="32" fill="#111" font-weight="700">
-    observability + memory for AI coding agents
+    reflects · experiments · improves - across every session
   </text>
 
   <!-- sub line -->

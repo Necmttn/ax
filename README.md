@@ -1,34 +1,39 @@
 # ax
 
-###### the agent experience layer
+###### the retro loop for AI coding agents
 
-**Make your agent remember.**
-Ingests. Indexes. Surfaces. Local. Typed. Yours.
+**Make your agent learn.**
+Reflects. Experiments. Improves. Across every session.
 
 ---
 
-Every session, your AI coding agent starts from zero. It re-reads the same
-files, re-discovers the same patterns, re-invokes the same broken tools, and
-re-learns the same lessons you taught it last week.
+Every sub-agent you spawn finishes its work and disappears. Whatever it
+figured out - which command failed three times before the right one, which
+file actually mattered, which approach to skip - dies with it. The next
+sub-agent rediscovers it from scratch. Your own next session does too.
 
-`ax` is the layer underneath. It ingests transcripts from Claude Code and
-Codex, plus your installed skills and local git history, into a local
-typed graph - then surfaces what's signal vs. noise on demand, for you
-*and* for the next agent session.
+`ax` is the loop that closes before the session ends. A Stop hook fires
+at session-end (main or sub-agent), asks the agent for a structured retro
+(*tried · worked · failed · next*), and indexes the result as a typed
+experiment in a local graph. Friction patterns become proposals you
+triage. Accepted proposals become experiments with t+7 / t+30 / t+90
+verdicts. The next session reads what worked.
 
-> *Which skills did I actually use this month? Which tool calls keep failing?
-> Which files change together? What did I tell the agent that it forgot?*
+> *What did this sub-agent learn? Which experiments are still open?
+> Which skills earned their keep? Which hooks blocked anything useful?*
 > `ax` answers these by reading what already happened.
 
-![ax · agent experience layer](docs/images/og.png)
+![ax · the retro loop for AI coding agents](docs/images/og.png)
 
 ## What is AX
 
-`AX` is what the agent perceives across sessions, remembers, and acts
-on. It is to AI coding agents what DX is to humans: the surface that
-turns capability into compounding skill. `ax` is the reference
-implementation - local, typed, MIT-licensed.
+`AX` (agent experience) is what the agent perceives across sessions,
+reflects on at the end of each, and turns into the next experiment. It
+is to AI coding agents what retros and post-mortems are to engineering
+teams - a structured reflection step that compounds.
 
+`ax` (lowercase) is the reference implementation. Local typed graph,
+Stop-hook-driven retros, agent-readable queries, React dashboard, MIT.
 A longer take: [`docs/manifesto.md`](docs/manifesto.md). Vocabulary:
 [`docs/language.md`](docs/language.md).
 

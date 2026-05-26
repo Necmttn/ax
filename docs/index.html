@@ -35,18 +35,18 @@
 <main>
 
 <section class="hero">
-  <p class="eyebrow">Agent experience · the missing layer</p>
-  <h1>Make your agent<br><em>remember.</em></h1>
+  <p class="eyebrow">The retro loop · for AI coding agents</p>
+  <h1>Make your agent<br><em>learn.</em></h1>
   <p class="lede">
-    Ingests. Indexes. Surfaces.
-    <code>ax</code> is the local memory layer underneath your AI coding agent -
-    every Claude Code and Codex session, every tool call, every fix,
-    captured in a typed graph you own.
+    Reflects. Experiments. Improves. <code>ax</code> runs a structured
+    retro at the end of every Claude Code and Codex session - main or
+    sub-agent - and indexes the result as a typed experiment in a
+    local graph.
   </p>
 
   <div class="claims">
-    <span>Compound every session</span>
-    <span>Never start from zero</span>
+    <span>Reflect every session</span>
+    <span>Track every experiment</span>
     <span>100% local</span>
   </div>
 
@@ -67,26 +67,27 @@
 </section>
 
 <section id="what">
-  <p class="eyebrow">It remembers.</p>
-  <h2>So you don't have to.</h2>
+  <p class="eyebrow">It reflects.</p>
+  <h2>So your agent learns.</h2>
   <p>
-    Every session, your agent starts from zero. Re-reads the same files.
-    Re-invokes the same broken tools. Re-learns the lessons you taught
-    it last week. <code>ax</code> is the layer that carries forward -
-    typed, queryable, agent-readable, yours.
+    Every sub-agent you spawn finishes its work and disappears. Whatever
+    it figured out - which command failed three times before the right
+    one, which file actually mattered, which approach to skip - dies
+    with it. <code>ax</code> is the loop that closes before the session
+    ends.
   </p>
   <ul class="principles">
     <li>
-      <strong>Skill triage</strong>
-      <p>Which installed skills get used, which never fire, which correlate with stuck sessions.</p>
+      <strong>Structured retro at session end</strong>
+      <p>A Stop hook asks the agent for what was tried, what worked, what failed, what to try next. JSON by default; free-form opt-in.</p>
     </li>
     <li>
-      <strong>Pre-flight grounding</strong>
-      <p><code>axctl project context</code> hands the next agent stack info, recent friction, and verification commands.</p>
+      <strong>Every retro is a proposal</strong>
+      <p>Friction patterns become skill / hook / guidance candidates you accept, reject, or skip - one explicit yes per row.</p>
     </li>
     <li>
-      <strong>Retro signal</strong>
-      <p>Query the graph after a hard session: tool retries, plan churn, file edit pairings. Feed it back into the next run.</p>
+      <strong>Every proposal becomes an experiment</strong>
+      <p>Accepted artifacts get a t+7 / t+30 / t+90 verdict - adopted, ignored, regressed, partial, or no longer needed. The loop closes locally.</p>
     </li>
   </ul>
 </section>
@@ -149,47 +150,49 @@ flowchart LR
 </section>
 
 <section id="demo">
-  <p class="eyebrow">Real CLI. Real data.</p>
-  <h2>Signal you can act on.</h2>
+  <p class="eyebrow">The loop, end to end.</p>
+  <h2>Retro. Propose. Verdict.</h2>
 
   <div class="demo-grid">
 
     <div>
-      <h3>Which skills earned their keep</h3>
-      <p>Composite score across recency, frequency, and clean-run rate.</p>
-<pre><span class="label">$ axctl skills taste --limit=8</span><code>skill                              scope        score    7d     30d    total
-codex:exec_command                 codex-tool  40902.5  1,124  30,500  40,389
-codex:write_stdin                  codex-tool   6,957     166   4,932   6,451
-codex:rescue                       command        781       0     389     605
-codex:update_plan                  codex-tool   766.5      14     338     391
-simplify                           user         718.5       5      89     101
-codex:wait_agent                   codex-tool     713       3     497     507
-codex:spawn_agent                  codex-tool     647       2     439     442
-superpowers:systematic-debugging   plugin        26.5       0       6       6
+      <h3>1. Agent emits a retro at session end</h3>
+      <p>The Stop hook asks for structured JSON before the session is allowed to close.</p>
+<pre><span class="label">$ ax retro --session=$AX_SESSION_ID</span><code>{
+  "tried":  ["bun check before every commit", "rg over node_modules"],
+  "worked": ["scoped rg with -t ts", "stash + worktree per agent"],
+  "failed": ["bun check pre-commit (slow)", "edit-then-tsc loop"],
+  "next":   ["replace bun check with oxlint pre-commit",
+             "add stop-hook: refuse commits without tsc clean"]
+}
 
-(8 / 288 skills shown)</code></pre>
+retro saved · session 019e533c · 4 fields · 0 free-form</code></pre>
     </div>
 
     <div>
-      <h3>Recall past work in milliseconds</h3>
-      <p>Full-text search across every session, both Claude and Codex.</p>
-<pre><span class="label">$ axctl recall "auth middleware"</span><code>4 matches
+      <h3>2. Friction patterns become proposals</h3>
+      <p>Skills, hooks, and guidance candidates ranked by how often they would have fired.</p>
+<pre><span class="label">$ ax improve list --status=open</span><code>  freq  conf    form        title
+  1072  high    skill       Session closure quality guardrail
+    26  high    skill       Post-feature verification checklist
+    26  high    skill       Ingest pipeline regression checklist
+    12  high    skill       Schema change guardrail
+     7  low     guidance    Block main-branch edits in multi-agent projects
+     7  high    skill       Graph query dogfood checklist
 
-2026-05-23T15:19  codex  user       acme-app  alright lets commit auth related work for now
-2026-05-23T14:51  codex  assistant  acme-app  Added the HealthOS just setup. You can now run from repo root: just health dev …
-2026-05-23T14:41  codex  assistant  acme-app  Findings: apple-auth.service.ts accepts extra Apple audiences from ambient env …
-2026-05-19T11:08  claude user       ax        the auth middleware retry loop - we still see exit-code 1 from bun check after …</code></pre>
+triage with: ax improve accept &lt;sig&gt; · reject &lt;sig&gt; · show &lt;sig&gt;</code></pre>
     </div>
 
     <div>
-      <h3>Where the friction is</h3>
-      <p>Failing tools, ranked. Know what to skill-up around.</p>
-<pre><span class="label">$ axctl insights tools --limit=5</span><code>name           failure_count   exit_code   last_seen
-write_stdin    647             1           2026-05-23T14:34
-Edit           483             -           2026-05-23T05:14
-Skill          475             -           2026-05-05T13:34
-exec_command   421             1           2026-05-22T18:50
-Bash           318             1           2026-05-21T22:12</code></pre>
+      <h3>3. Accepted proposals become experiments</h3>
+      <p>Every artifact gets a t+7 / t+30 / t+90 verdict locked back into the graph.</p>
+<pre><span class="label">$ ax improve verdict skill__292666ce747117ee</span><code>experiment   skill / Schema change guardrail
+created      2026-05-19  (t+7 checkpoint due 2026-05-26)
+opportunities  12 in window
+addressed       8 (66.7%)
+suggested verdict   adopted
+
+lock with: ax improve verdict skill__292666ce747117ee --set adopted</code></pre>
     </div>
 
   </div>
@@ -208,19 +211,18 @@ Bash           318             1           2026-05-21T22:12</code></pre>
 </section>
 
 <section id="why">
-  <p class="eyebrow">Why it compounds</p>
-  <h2>The agent stack has a hole in it.</h2>
+  <p class="eyebrow">Why retros compound</p>
+  <h2>Every sub-agent dies with what it learned.</h2>
   <blockquote class="pull">
-    Look at any production agent setup in 2026. You have models. You have
-    inference platforms. You have a tool layer. You have observability at
-    the API level. Now ask: what does the agent <em>know about itself</em>
-    the second time you open a session?
+    Memory is what you remember. Retro is what you reflect on, structure,
+    and turn into the next bet. The agent stack has compute, tools, and
+    logs. It does not have a reflection loop. <code>ax</code> is that
+    loop.
     <cite>- from the manifesto</cite>
   </blockquote>
   <p>
-    <code>ax</code> is the open reference for what a real agent experience
-    layer can be: typed evidence, multi-agent ingest, agent-readable
-    interface, local-first, the self-improvement loop closed.
+    Verbal self-reflection at the engineering layer. Reflexion for
+    software. Open reference, MIT, runs on your laptop.
   </p>
   <p>
     <a class="btn-secondary" href="manifesto.md">Read the full manifesto →</a>

@@ -1,107 +1,142 @@
-# The missing layer
+# The retro loop
 
-*A manifesto for Agent Experience.*
+*A manifesto for self-improving AI coding agents.*
 
 ---
 
-The AI coding agent stack has a hole in it.
+Every sub-agent you spawn finishes its work and disappears. Whatever
+it figured out - which command failed three times before the right
+one, which file actually mattered, which approach to skip next time -
+dies with it. The next sub-agent rediscovers it from scratch. Your
+own next session does too.
 
-Look at any production agent setup in 2026. You have models - Claude
-4.7, GPT-5, the open-weights crowd. You have inference platforms.
-You have a tool layer: shells, editors, MCP servers, IDEs. You have
-some flavor of memory bolt-on: a vector store, maybe Letta, maybe
-just a long context window. You have observability - LangSmith,
-Langfuse, Phoenix - telling you what the agent did at the API level.
+This is not a memory problem. *Memory* is what you remember.
+*Retro* is what you reflect on, structure, and turn into the next
+bet. The agent stack has compute, tools, and logs. It does not have
+a reflection loop.
 
-Now ask: **what does the agent *know about itself* the second time
-you open a session?**
+`ax` is that loop. Before any session ends - main or sub-agent - `ax`
+asks the agent for a structured retro: what was tried, what worked,
+what failed, what to try next. Each retro becomes an *experiment* in
+a typed local graph. Each experiment gets a verdict the next time
+the same situation appears. Over weeks, the graph carries the signal
+your sessions otherwise dropped on the floor.
 
-Nothing. It starts from zero. Re-reads the same files. Re-discovers
-the same broken commands. Re-invokes the same skills you told it to
-stop using last week. Re-learns the verification recipe for your
-project. Every single time.
+This is verbal self-reflection at the engineering layer. Reflexion
+for software. The closed loop is the product.
 
-The stack has compute. It has memory in the rolling-context sense.
-It has tools. It has logs. It does not have an **experience layer**.
+## What's in the stack today
 
-## A note on the term
+Look at any production AI-agent setup in 2026. You have models -
+Claude 4.7, GPT-5, the open-weights crowd. You have inference
+platforms. You have a tool layer: shells, editors, MCP servers, IDEs.
+You have memory bolt-ons: a vector store, maybe Letta, maybe just a
+long context window. You have observability at the API level -
+LangSmith, Langfuse, Phoenix - telling you what the agent did.
 
-Other writers have used "Agent Experience" to mean the *website's*
-friendliness to agent visitors - agent-as-user-of-product. That's a
-real and useful thing. It is not what this manifesto is about.
+What none of them have is a *reflection step*. Nothing in the stack
+asks the agent at end-of-session: *what did you learn?* and turns the
+answer into something the next session can read.
 
-Here, AX is the *agent's* experience of doing its own work - what it
-perceives across sessions, what it remembers, what it acts on. Two
-directions of the same word: outward-facing (does my site work for
-agents) and inward-facing (does my agent's surface work for itself).
-Both will exist. This manifesto is about the inward one.
+The closest analog is the human side: code review, retros, post-
+mortems. Engineers do them because *the act of structuring what
+happened* is what makes the next iteration better. Without it the
+team just does the same thing again.
 
-## What experience means
+Agents are now in the same place. They have the intelligence. They
+lack the reflection loop.
 
-Borrow the analogy from humans. A senior engineer joins a new team.
-On day one, they're useless. By month six, they're shipping. Why?
-They've accumulated *experience* - implicit knowledge of which tools
-fail, which conventions matter, which colleagues to ask, which paths
-are dead ends. The accumulation isn't memory in the LLM sense. It's
-structured: graph-shaped, evidence-grounded, queryable, *theirs*.
+## What the loop has to do
 
-This is what Developer Experience (DX) tools nurture for humans -
-shorter feedback loops, faster onboarding, clearer error messages,
-better defaults. The whole field exists because we figured out that
-human productivity is bottlenecked by the experience surface, not raw
-intelligence.
+A real retro loop for AI coding agents needs five things:
 
-Agents are now bottlenecked by the same thing. They have the
-intelligence. They lack the experience surface.
+1. **Fire at the right time.**
+   The Stop hook on session-end is the only moment the agent has all
+   its context loaded. Five seconds later it's gone. The retro has
+   to be enforced there, not opt-in.
 
-I call this the **Agent Experience Layer**.
+2. **Structured by default.**
+   Free-text retros don't compound. JSON with four fields - *tried*,
+   *worked*, *failed*, *next* - lets the graph index, query, and
+   diff each piece independently. Free-form is an opt-in escape
+   hatch, not the default.
 
-## What it needs to be
+3. **Cover sub-agents.**
+   Main-session retros are nice. Sub-agent retros are the unlock.
+   Sub-agents fan out, finish fast, and die with everything they
+   learned. The hook has to fire for them too, and the retro has
+   to roll up to the parent session.
 
-An Agent Experience Layer is not "agent memory". Memory is a piece of
-it - the part that holds raw facts. AXL is the whole surface where
-prior behavior becomes future capability. Specifically, it needs:
+4. **Become a proposal.**
+   *"That worked, do it more"* isn't useful. *"That worked, here is
+   the skill / hook / guidance candidate that captures it, ranked by
+   how often it would have fired"* is. The retro feeds a
+   deduplicated proposal queue the user accepts, rejects, or skips.
 
-1. **Typed evidence**, not embeddings.
-   Sessions, turns, tool calls, skills, files, commits, friction -
-   each a first-class type with schema. Queryable like a database,
-   not searched like a haystack.
+5. **Become an experiment.**
+   Accepted proposals get scaffolded as real artifacts and tracked
+   as experiments. Checkpoints at t+7 / t+30 / t+90 close the
+   verdict: did this thing actually get used, did it improve
+   outcomes, did it regress, did the pattern self-resolve. Every
+   verdict is itself signal for next time.
 
-2. **Multi-agent ingest.**
-   Claude Code is one agent. Codex is another. Internal harness hooks
-   are a third. They all produce evidence; the layer reads all of it.
-   Single-agent memory tools have already lost.
+That's the spec. Ingest -> reflect -> propose -> experiment ->
+verdict -> next session reads what worked. Nobody is shipping all of
+it.
 
-3. **Agent-readable interface.**
-   The agent doesn't open a dashboard. It calls a function. The layer
-   exposes typed queries the agent can invoke mid-session -
-   `project context`, `recall`, `verify`, `friction recent` - and
-   gets back structured JSON.
+## What `ax` is
 
-4. **Local-first, user-owned.**
-   This is the user's behavior history. Their prompts. Their bugs.
-   Their code. It does not leave the machine. The privacy stance is
-   the moat: the more sensitive the data, the more value the layer
-   provides, the less anyone can sell it.
+`ax` is the reference implementation. Local typed graph,
+agent-readable queries, React dashboard, MIT licensed. Runs on your
+laptop.
 
-5. **The self-improvement loop, closed.**
-   Ingest → signal → act → ingest. Friction in last week's session
-   becomes a verification check in this week's pre-flight. A skill
-   that never fires gets archived. A correction the user kept making
-   becomes guidance. The loop is the product.
+The surface is small on purpose:
 
-That's the spec. Five lines. Nobody is shipping all of it.
+- `ax install` wires the Stop hook into your Claude Code and Codex
+  configs. One command, one time.
+- `ax retro` is what the hook calls at session-end. The agent emits
+  the JSON. `ax` indexes it.
+- `ax improve list` shows the proposal queue derived from accumulated
+  retros and friction signals.
+- `ax improve accept | reject` triages it. Acceptance scaffolds the
+  artifact and opens an experiment.
+- `ax improve verdict` shows the checkpoint state and locks the
+  outcome.
+- `ax retro` (the slash-command skill) walks you through the same
+  triage interactively in Claude Code.
 
-## What ax is
+That's the loop. Everything else - the dashboard, the typed graph,
+the search, the skill-taste scoring - is in service of those six
+commands.
 
-`ax` is the reference implementation. Local graph, agent-readable
-queries, React dashboard, MIT licensed. Runs on your laptop.
-160 skills indexed, 1,100+ sessions, 40k tool invocations on my
-machine right now. Eight commands cover the surface. The agent skill
-plugs into Claude Code and Codex.
+## Why this matters now
 
-It exists because I needed it. I'm publishing it because the category
-needs a flag in the ground.
+The interesting agent work in 2026 - inside labs and out - is
+multi-agent. Sub-agent fan-out, role delegation, parallel worktrees.
+Every additional sub-agent multiplies the amount of evidence
+silently thrown away. The marginal cost of *not* closing the loop
+goes up with every Task tool call you make.
+
+The labs know this. Internal evals at OpenAI and Anthropic
+absolutely track this stuff. What's missing publicly is an open,
+local-first reference for what the loop should look like at the
+end-user side - on the developer's laptop, with their data, in
+their hands.
+
+`ax` exists because I needed it. I'm publishing it because the shape
+of the loop matters more than the implementation, and the shape gets
+locked in early.
+
+## What's next
+
+Read the [README](../README.md). Install `ax`. Let it watch a week
+of your sessions. Run `ax retro` at the end of one. Look at what
+falls out.
+
+Then tell me what's wrong with the shape - there are nineteen ADRs in
+[`docs/adr/`](adr/) arguing with my past self about exactly that. If
+you want to argue with the framing, open an issue. If you want to
+extend it, read [`CONTRIBUTING.md`](../CONTRIBUTING.md).
 
 If you're building agent infrastructure inside an AI lab right now -
 and I know you are - you're building some version of this. Your
@@ -111,21 +146,6 @@ problem first. That's what an open reference does - it shapes the
 problem statement before the closed implementations lock in
 proprietary vocabularies.
 
-The next decade of agent work runs through this layer. The naming
-matters. The shape matters. The privacy stance matters.
-
-## What's next
-
-Read the [README](../README.md), install `ax`, point it at your
-`~/.claude/projects/` and `~/.codex/sessions/`, and look at what
-falls out. Tell me what's wrong with the schema - there are nineteen
-ADRs in `docs/adr/` arguing with my past self about exactly that.
-
-If you want to argue with the framing, open an issue. If you want to
-extend it, read [`CONTRIBUTING.md`](../CONTRIBUTING.md). If you want
-to fork it under your lab's name, that's what MIT means - but you
-might as well stay and help shape the open category instead.
-
-The stack is missing a layer. Let's build it.
+The stack is missing a reflection step. Let's build it.
 
 - [Necmettin Karakaya](https://github.com/Necmttn), 2026

@@ -76,7 +76,44 @@ data product. Year-end shareable view.
 
 The typed evidence store. Sessions, turns, tool calls, plans, skills,
 repositories, checkouts, commits, files, friction, diagnostics,
-insights. SurrealDB underneath, but the abstraction is "the ax-graph".
+insights, **retros, proposals, experiments, verdicts**. Local DB
+underneath, but the abstraction is "the ax-graph".
+
+### retro
+
+A structured reflection emitted by an agent at session-end. Four
+fields by default: **tried** (what the agent attempted), **worked**
+(what landed), **failed** (what didn't), **next** (the experiment to
+run next). Free-form is opt-in via `ax retro --free-form`.
+
+> *Use:* "the Stop hook fires `ax retro`, the agent emits JSON, the
+> graph indexes it."
+> *Don't say:* "session summary" - that's lossy. The retro is a
+> bet on the next session, not a recap.
+
+### proposal
+
+A friction pattern derived from accumulated retros + raw signal.
+Each proposal has a *form* (skill / hook / guidance / automation /
+subagent), a *trigger* (when it would fire), a *behavior* (what it
+would do), and a *dedupe_sig* (so the same pattern doesn't re-propose
+forever). Triaged via `ax improve list | accept | reject`.
+
+### experiment
+
+What an accepted proposal becomes. An experiment has a *form*, an
+*artifact* (the scaffolded skill / hook / etc.), and a checkpoint
+schedule (t+7 / t+30 / t+90). Tracked in the graph; queried via
+`ax improve verdict`.
+
+### verdict
+
+The outcome locked at a checkpoint. Five values:
+**adopted** (the artifact is doing real work),
+**ignored** (it was created but never invoked),
+**regressed** (it made things worse),
+**partial** (mixed signal),
+**no_longer_needed** (the underlying pattern self-resolved).
 
 ### ax-score
 
@@ -91,16 +128,20 @@ ax-signals.
 
 ### ax-loop
 
-The self-improvement cycle: **ingest** (capture what happened) →
-**signal** (derive meaning) → **act** (ground the next session). When
-you say "close the loop", you mean a signal turned into a future
-action.
+The closed self-improvement cycle: **retro** (agent reflects at
+session-end) → **proposal** (friction pattern surfaces) →
+**experiment** (artifact scaffolded, ran) → **verdict** (outcome
+locked) → next session reads what worked. When you say "close the
+loop", you mean one full pass from retro to verdict.
 
 ## Verbs
 
 | Term | Meaning |
 |---|---|
 | **ax it** | Triage a skill or session. "I axed those three unused skills." |
+| **retro** | Emit / collect a structured reflection at session-end. Verb and noun: "the agent retros before stop", "I have three pending retros." |
+| **propose** | Surface a friction pattern as a candidate skill/hook/guidance. "Six retros propose the same hook this week." |
+| **lock a verdict** | Confirm the outcome of an experiment at checkpoint. "I locked the schema-guardrail verdict as `adopted`." |
 | **ground** | Pre-flight an agent with project context. "Always ground before non-trivial repo work." |
 | **wrap** | Generate the annual recap. "ax wrapped" the verb form. |
 
@@ -108,11 +149,13 @@ action.
 
 | Don't say | Say instead | Why |
 |---|---|---|
-| "agent memory" | "ax-graph" or "agent experience" | Memory is a subset of AX; using it cedes positioning to Letta/MemGPT/Mem0. |
-| "observability platform" | "agent experience layer" | Observability is a piece; AXL is bigger. |
-| "telemetry" | "evidence" or "signal" | Telemetry implies just collection. Evidence implies grounded, queryable. |
-| "AI memory" | "AX layer" | "AI memory" is everyone's term - owns nothing. |
+| "agent memory" | "the retro loop" / "ax-graph" | Memory is a subset; positioning ax as memory cedes ground to Letta/MemGPT/Mem0. |
+| "observability platform" | "the retro loop" | Observability watches; ax reflects + acts. |
+| "telemetry" | "evidence" or "retro" | Telemetry implies just collection. Retro implies reflection + a bet on next. |
+| "AI memory" | "agent experience" / "the retro loop" | "AI memory" is everyone's term - owns nothing. |
+| "session summary" | "retro" | Summary is lossy; retro is structured + actionable. |
 | "context engine" | "ax-graph" | Generic and crowded. |
+| "reflection / reflexion" alone | "retro" | Reflexion is the academic anchor; "retro" is the product surface. |
 
 ## Versioning the language
 
