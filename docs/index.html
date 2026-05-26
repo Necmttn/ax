@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ax · agent experience layer</title>
-  <meta name="description" content="The missing layer in the agent stack. Observability and memory for self-improving AI coding agents. Local-first, typed, MIT-licensed.">
+  <meta name="description" content="The reflection step the agent stack lost. Local typed graph + agent retros + experiments + verdicts. MIT-licensed, runs on your laptop.">
   <meta property="og:title" content="ax · agent experience layer">
-  <meta property="og:description" content="The missing layer in the agent stack. Observability + memory for AI coding agents. Local-first.">
+  <meta property="og:description" content="Reflection is the missing layer. Local retros, experiments, verdicts - on your laptop.">
   <meta property="og:image" content="https://raw.githubusercontent.com/Necmttn/ax/main/docs/images/og.png">
   <meta property="og:url" content="https://ax.necmttn.com/">
   <meta property="og:type" content="website">
@@ -36,172 +36,219 @@
 <main>
 
 <section class="hero">
-  <p class="eyebrow">The retro loop · for AI coding agents</p>
-  <h1>Make your agent<br><em>learn.</em></h1>
+  <p class="eyebrow">the retro loop · for AI coding agents</p>
+  <h1>Reflection is the<br><em>missing</em> layer.</h1>
   <p class="lede">
-    Reflects. Experiments. Improves. <code>ax</code> runs a structured
-    retro at the end of every Claude Code and Codex session - main or
-    sub-agent - and indexes the result as a typed experiment in a
-    local graph.
+    <code>ax</code> is the reflection step the agent stack lost. A
+    local typed graph of every session, with retros, experiments, and
+    verdicts that close the loop your sub-agents drop on the floor.
+    Runs on your laptop. MIT.
   </p>
 
   <div class="claims">
-    <span>Reflect every session</span>
-    <span>Track every experiment</span>
+    <span>retro at every session-end</span>
+    <span>experiments with t+7 / t+30 / t+90 verdicts</span>
     <span>100% local</span>
   </div>
 
   <div class="install-block">
-    <p class="install-label">Install in 30 seconds</p>
+    <p class="install-label">install in 30 seconds</p>
     <pre class="install"><code><span class="prompt">$</span> curl -fsSL https://raw.githubusercontent.com/Necmttn/ax/main/install.sh | bash</code></pre>
     <p class="install-meta">
-      macOS-first · Linux works for CLI · requires
+      macOS-first · Linux works for the CLI · requires
       <a href="https://bun.sh">Bun ≥ 1.3</a> and
       <a href="https://surrealdb.com">SurrealDB ≥ 3.0</a>
     </p>
   </div>
 
   <div class="cta">
-    <a class="btn" href="studio/">Try the studio &nbsp;→</a>
+    <a class="btn" href="origin.html">Read the origin &nbsp;→</a>
     <a class="btn-secondary" href="manifesto.md">Read the manifesto</a>
     <a class="btn-secondary" href="https://github.com/Necmttn/ax">View on GitHub</a>
   </div>
 </section>
 
 <section id="what">
-  <p class="eyebrow">It reflects.</p>
-  <h2>So your agent learns.</h2>
+  <p class="eyebrow">what ax does.</p>
+  <h2>It reflects. Then it earns the change.</h2>
   <p>
-    Every sub-agent you spawn finishes its work and disappears. Whatever
-    it figured out - which command failed three times before the right
-    one, which file actually mattered, which approach to skip - dies
-    with it. <code>ax</code> is the loop that closes before the session
-    ends.
+    Every sub-agent you spawn finishes its work and disappears.
+    Whatever it figured out - which command failed three times before
+    the right one, which file actually mattered, which approach to
+    skip - dies with it. <code>ax</code> closes the loop before the
+    session ends, and proves whether the fix earned its place.
   </p>
   <ul class="principles">
     <li>
-      <strong>Structured retro at session end</strong>
-      <p>A Stop hook asks the agent for what was tried, what worked, what failed, what to try next. JSON by default; free-form opt-in.</p>
+      <strong>retros</strong>
+      <p>Every session ends with a structured note - tried, worked, failed, next. Main sessions and sub-agents alike. JSON by default.</p>
     </li>
     <li>
-      <strong>Every retro is a proposal</strong>
-      <p>Friction patterns become skill / hook / guidance candidates you accept, reject, or skip - one explicit yes per row.</p>
+      <strong>experiments</strong>
+      <p>Accepted proposals become artifacts you can point at. Each one gets a t+7 / t+30 / t+90 checkpoint.</p>
     </li>
     <li>
-      <strong>Every proposal becomes an experiment</strong>
-      <p>Accepted artifacts get a t+7 / t+30 / t+90 verdict - adopted, ignored, regressed, partial, or no longer needed. The loop closes locally.</p>
+      <strong>evidence</strong>
+      <p>Verdicts come from retros, tool calls, corrections, and local git outcomes - joined in one graph. No vibes.</p>
     </li>
   </ul>
 </section>
 
 <section id="how">
-  <p class="eyebrow">Hackable. Out of the box.</p>
-  <h2>One graph. Two readers.<br>Zero network round-trips.</h2>
+  <p class="eyebrow">enforcement.</p>
+  <h2>Prose drifts. The hook does not.</h2>
   <p>
-    Everything runs on <code>127.0.0.1</code>. The agent and the CLI both
-    read the same graph; the dashboard is a thin React view over the same
-    queries. Local DB underneath, MIT all the way.
+    A line in <code>CLAUDE.md</code> is a suggestion. The model loses
+    it under context pressure and finds itself back on
+    <code>main</code>, the same correction scattered across weeks of
+    sessions. <code>ax</code> moves the rule down the stack -
+    out of prose, into a tool-time hook the agent cannot skip.
+  </p>
+  <p>
+    The figure below is the boundary. Watch the agent's tool stream
+    drift right. In <code>prose rule</code> mode every call crosses
+    and incidents accumulate. In <code>tool hook</code> mode the
+    dangerous ones stop at the line. Same intent, different layer.
   </p>
 
-  <div class="pipeline-viz">
-    <canvas data-anim="pipeline" data-autoplay="true" class="pipeline-canvas" aria-hidden="true"></canvas>
-    <div class="pipeline-labels">
-      <ul class="pipeline-sources">
-        <li>~/.claude/projects/</li>
-        <li>~/.codex/sessions/</li>
-        <li>~/.claude/skills/</li>
-        <li>local git history</li>
-      </ul>
-      <div class="pipeline-middle">
-        <small>axctl ingest</small>
-        <strong>the ax graph</strong>
-        <small>session · turn · tool_call · skill · file · friction · insight</small>
+  <div class="fig-shell">
+    <figure class="fig-enforce" aria-label="Interactive scene: agent tool calls drift right toward a vertical boundary; in prose mode dangerous calls cross, in hook mode they are blocked">
+      <div class="fig-head">
+        <span class="fig-id">Exhibit F</span>
+        <span>enforcement boundary &middot; prose vs. hook</span>
       </div>
-      <ul class="pipeline-readers">
-        <li>axctl CLI</li>
-        <li>ax studio</li>
-        <li>agent skills</li>
-      </ul>
-    </div>
+
+      <div class="enforce-controls" role="tablist" aria-label="enforcement mode">
+        <span class="enforce-controls-label">enforcement</span>
+        <button type="button" class="enforce-pill" data-mode-toggle data-mode="prose" aria-pressed="true">prose rule</button>
+        <button type="button" class="enforce-pill" data-mode-toggle data-mode="hook" aria-pressed="false">tool hook</button>
+        <span class="enforce-hint" data-enforce-hint>click the boundary or a pill to toggle</span>
+      </div>
+
+      <div class="enforce-scene" data-enforce-scene>
+        <svg class="enforce-svg"
+             viewBox="0 0 1000 280"
+             preserveAspectRatio="none"
+             role="img"
+             aria-hidden="true"
+             data-enforce-svg>
+
+          <line class="lane-rail" x1="0" y1="140" x2="1000" y2="140"/>
+          <line class="lane-edge" x1="0" y1="60"  x2="1000" y2="60"/>
+          <line class="lane-edge" x1="0" y1="220" x2="1000" y2="220"/>
+
+          <text class="lane-label" x="14" y="42">tool calls &middot; agent stream</text>
+          <text class="lane-label dim" x="14" y="252">left = recent, right = executed</text>
+
+          <g data-boundary>
+            <line class="boundary-line" x1="700" y1="20" x2="700" y2="260" data-boundary-line/>
+            <text class="boundary-label top"    x="700" y="14" text-anchor="middle">main branch</text>
+            <text class="boundary-label bottom" x="700" y="276" text-anchor="middle">production</text>
+            <rect class="boundary-hit" x="688" y="0" width="24" height="280"
+                  data-boundary-hit
+                  tabindex="0"
+                  role="button"
+                  aria-label="toggle enforcement mode"></rect>
+          </g>
+
+          <g class="incidents" data-incidents>
+            <text class="incidents-label" x="720" y="42">incidents</text>
+            <text class="incidents-count" x="720" y="64" data-incidents-count>0</text>
+          </g>
+
+          <g data-dot-layer></g>
+        </svg>
+
+        <div class="enforce-tip" data-enforce-tip hidden></div>
+      </div>
+
+      <figcaption>
+        <strong><em>Prose drifts. The hook does not.</em></strong>
+        Toggle the rule. Watch what changes. Hover a dot to read the
+        synthetic tool call. Hover the boundary to see the active rule.
+      </figcaption>
+    </figure>
   </div>
 
-  <details class="mermaid-fallback">
-    <summary>see as a static diagram</summary>
-    <div class="diagram">
-      <div class="mermaid">
-flowchart LR
-  cc["~/.claude/projects/<br/>Claude transcripts"]
-  cx["~/.codex/sessions/<br/>Codex transcripts"]
-  sk["~/.claude/skills/<br/>installed skills"]
-  g[("local git history")]
-
-  cc --> ingest
-  cx --> ingest
-  sk --> ingest
-  g  --> ingest
-
-  ingest["axctl ingest<br/>(Effect pipelines)"] --> db
-  db[("the ax graph<br/>session · turn · tool_call · skill<br/>repository · checkout · commit · file<br/>friction · diagnostic · insight")]
-
-  db --> cli["axctl CLI<br/>recall · skills · insights · evidence"]
-  db --> dash["axctl serve<br/>live dashboard"]
-  db --> agent["agent skill<br/>project context · verify · harness"]
-      </div>
-    </div>
-  </details>
+  <p>
+    <a class="fig-link" href="origin.html#enforce">read: enforced at runtime, not by prompt <span class="arr">→</span></a>
+  </p>
 </section>
 
 <section id="demo">
-  <p class="eyebrow">The loop, end to end.</p>
+  <p class="eyebrow">the loop, end to end.</p>
   <h2>Retro. Propose. Verdict.</h2>
+  <p>
+    Drag a retro across. Click <code>start experiment</code>. Drive
+    time forward and watch what the session actually earned, three
+    months on. <em>Kept</em> means no regressions. <em>Regressed</em>
+    means the PRs came back. <em>Self-resolved</em> means the pattern
+    stopped showing up before the fix mattered.
+  </p>
 
-  <div class="demo-grid">
+  <div class="fig-shell">
+    <figure class="fig-pipeline" aria-label="Interactive four-column pipeline: drag a retro into proposals, start an experiment, then drag the scrubber to t+90 to lock a verdict">
+      <div class="fig-head">
+        <span class="fig-id">Exhibit E</span>
+        <span>retro &rarr; proposal &rarr; experiment &rarr; verdict</span>
+        <button type="button" class="auto-pill" data-auto-pill data-state="idle" aria-label="autoplay status">
+          <span class="auto-dot" aria-hidden="true"></span><span class="auto-label" data-auto-label>auto &middot; idle</span>
+        </button>
+        <button type="button" class="reset" data-pipeline-reset aria-label="reset pipeline">reset</button>
+      </div>
 
-    <div>
-      <h3>1. Agent emits a retro at session end</h3>
-      <p>The Stop hook asks for structured JSON before the session is allowed to close.</p>
-<pre><span class="label">$ ax retro --session=$AX_SESSION_ID</span><code>{
-  "tried":  ["bun check before every commit", "rg over node_modules"],
-  "worked": ["scoped rg with -t ts", "stash + worktree per agent"],
-  "failed": ["bun check pre-commit (slow)", "edit-then-tsc loop"],
-  "next":   ["replace bun check with oxlint pre-commit",
-             "add stop-hook: refuse commits without tsc clean"]
-}
+      <div class="pipeline-grid" data-pipeline-grid>
+        <div class="pipeline-col" data-col="retros">
+          <div class="col-head"><span class="col-num">01</span>retros<span class="col-meta" data-count-retros>3 / week</span></div>
+          <div class="col-body" data-drop="retros"></div>
+        </div>
+        <div class="pipeline-col" data-col="proposals">
+          <div class="col-head"><span class="col-num">02</span>proposals<span class="col-meta">queued</span></div>
+          <div class="col-body" data-drop="proposals">
+            <div class="col-empty" data-empty="proposals">drag a retro here</div>
+          </div>
+        </div>
+        <div class="pipeline-col" data-col="experiments">
+          <div class="col-head"><span class="col-num">03</span>experiments<span class="col-meta">running</span></div>
+          <div class="col-body" data-drop="experiments">
+            <div class="col-empty" data-empty="experiments">start an experiment</div>
+          </div>
+        </div>
+        <div class="pipeline-col" data-col="verdicts">
+          <div class="col-head"><span class="col-num">04</span>verdicts<span class="col-meta" data-count-rejected>locked</span></div>
+          <div class="col-body" data-drop="verdicts">
+            <div class="col-empty" data-empty="verdicts">resolve at t+90</div>
+          </div>
+        </div>
+      </div>
 
-retro saved · session 019e533c · 4 fields · 0 free-form</code></pre>
-    </div>
+      <div class="pipeline-scrubber" data-pipeline-scrubber data-position="0" aria-label="scrubber: drag from now to t+90">
+        <div class="scrubber-rail" data-scrubber-rail>
+          <div class="scrubber-fill" data-scrubber-fill></div>
+          <button type="button" class="scrubber-tick" data-tick="0"  style="left: 0%;"  aria-label="now"><span>t+0</span></button>
+          <button type="button" class="scrubber-tick" data-tick="7"  style="left: 33.333%;" aria-label="t plus 7 days"><span>t+7</span></button>
+          <button type="button" class="scrubber-tick" data-tick="30" style="left: 66.666%;" aria-label="t plus 30 days"><span>t+30</span></button>
+          <button type="button" class="scrubber-tick" data-tick="90" style="left: 100%;" aria-label="t plus 90 days"><span>t+90</span></button>
+          <div class="scrubber-handle" data-scrubber-handle style="left: 0%;" tabindex="0" role="slider" aria-valuemin="0" aria-valuemax="90" aria-valuenow="0" aria-label="time scrubber"></div>
+        </div>
+        <div class="scrubber-readout" data-scrubber-readout>t+0 &middot; now</div>
+      </div>
 
-    <div>
-      <h3>2. Friction patterns become proposals</h3>
-      <p>Skills, hooks, and guidance candidates ranked by how often they would have fired.</p>
-<pre><span class="label">$ ax improve list --status=open</span><code>  freq  conf    form        title
-  1072  high    skill       Session closure quality guardrail
-    26  high    skill       Post-feature verification checklist
-    26  high    skill       Ingest pipeline regression checklist
-    12  high    skill       Schema change guardrail
-     7  low     guidance    Block main-branch edits in multi-agent projects
-     7  high    skill       Graph query dogfood checklist
-
-triage with: ax improve accept &lt;sig&gt; · reject &lt;sig&gt; · show &lt;sig&gt;</code></pre>
-    </div>
-
-    <div>
-      <h3>3. Accepted proposals become experiments</h3>
-      <p>Every artifact gets a t+7 / t+30 / t+90 verdict locked back into the graph.</p>
-<pre><span class="label">$ ax improve verdict skill__292666ce747117ee</span><code>experiment   skill / Schema change guardrail
-created      2026-05-19  (t+7 checkpoint due 2026-05-26)
-opportunities  12 in window
-addressed       8 (66.7%)
-suggested verdict   adopted
-
-lock with: ax improve verdict skill__292666ce747117ee --set adopted</code></pre>
-    </div>
-
+      <figcaption>
+        <strong>The loop only closes when the graph can tell you, from backing data, that the change earned its place.</strong>
+        The user still decides &mdash; drag a retro into proposals or off the board entirely. Then drive time forward
+        and watch what the evidence says.
+      </figcaption>
+    </figure>
   </div>
+
+  <p>
+    <a class="fig-link" href="origin.html#pipeline">read: retro is only the first step <span class="arr">→</span></a>
+  </p>
 </section>
 
 <section id="install">
-  <p class="eyebrow">Install</p>
+  <p class="eyebrow">install</p>
   <h2>30 seconds. Then you're indexing.</h2>
   <p>Requires <a href="https://bun.sh">Bun</a> ≥ 1.3 and <a href="https://surrealdb.com">SurrealDB</a> ≥ 3.0. macOS-first; Linux works for ingest + CLI.</p>
 <pre><code><span class="prompt">$</span> curl -fsSL https://raw.githubusercontent.com/Necmttn/ax/main/install.sh | bash
@@ -213,22 +260,26 @@ lock with: ax improve verdict skill__292666ce747117ee --set adopted</code></pre>
 </section>
 
 <section id="why">
-  <p class="eyebrow">Why retros compound</p>
+  <p class="eyebrow">why retros compound</p>
   <h2>Every sub-agent dies with what it learned.</h2>
   <blockquote class="pull">
-    Memory is what you remember. Retro is what you reflect on, structure,
-    and turn into the next bet. The agent stack has compute, tools, and
-    logs. It does not have a reflection loop. <code>ax</code> is that
-    loop.
+    Memory is what you remember. Retro is what you reflect on,
+    structure, and turn into the next bet. The stack has compute,
+    tools, and logs. It does not have a reflection loop.
+    <code>ax</code> is that loop.
     <cite>- from the manifesto</cite>
   </blockquote>
   <p>
     Verbal self-reflection at the engineering layer. Reflexion for
     software. Open reference, MIT, runs on your laptop.
   </p>
-  <p>
-    <a class="btn-secondary" href="origin.html">Read why ax exists →</a>
-    <a class="btn-secondary" href="manifesto.md">Read the full manifesto →</a>
+  <div class="cta">
+    <a class="btn" href="origin.html">Read the origin &nbsp;→</a>
+    <a class="btn-secondary" href="manifesto.md">Read the manifesto</a>
+    <a class="btn-secondary" href="https://github.com/Necmttn/ax">View on GitHub</a>
+  </div>
+  <p style="margin-top: 28px;">
+    <a class="fig-link" href="studio/">or try the studio <span class="arr">→</span></a>
   </p>
 </section>
 
@@ -245,24 +296,7 @@ lock with: ax improve verdict skill__292666ce747117ee --set adopted</code></pre>
   </div>
 </footer>
 
-<script type="module" src="animations.js"></script>
-
-<script type="module">
-  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
-  mermaid.initialize({
-    startOnLoad: true,
-    theme: "base",
-    themeVariables: {
-      background: "#fbfaf5",
-      primaryColor: "#fbfaf5",
-      primaryTextColor: "#0a0a0a",
-      primaryBorderColor: "#0a0a0a",
-      lineColor: "#0a0a0a",
-      fontFamily: "ui-sans-serif, system-ui, sans-serif",
-      fontSize: "13px"
-    }
-  });
-</script>
+<script src="exhibits.js"></script>
 
 </body>
 </html>
