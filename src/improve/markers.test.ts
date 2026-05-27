@@ -37,6 +37,25 @@ describe("parseInlineMarkers", () => {
         const input = `<!--ax:aa-->one<!--/ax:aa--> <!--ax:aa-->two<!--/ax:aa-->`;
         expect(() => parseInlineMarkers(input)).toThrow(/duplicate id/i);
     });
+
+    test("body containing the marker's own close tag literally → treats outer block as one unit", () => {
+        const input = `<!--ax:foo-->before<!--ax:foo-->nested<!--/ax:foo-->after<!--/ax:foo-->`;
+        const out = parseInlineMarkers(input);
+        expect(out).toHaveLength(1);
+        expect(out[0]!.id).toBe("foo");
+        expect(out[0]!.body).toBe("before<!--ax:foo-->nested<!--/ax:foo-->after");
+    });
+
+    test("body with two nested opens/closes is still balanced", () => {
+        const input = `<!--ax:a-->1<!--ax:a-->2<!--ax:a-->3<!--/ax:a-->4<!--/ax:a-->5<!--/ax:a-->`;
+        const out = parseInlineMarkers(input);
+        expect(out).toHaveLength(1);
+    });
+
+    test("body with only nested opens (no close) still errors", () => {
+        const input = `<!--ax:foo-->before<!--ax:foo-->no-close`;
+        expect(() => parseInlineMarkers(input)).toThrow(/unmatched open/i);
+    });
 });
 
 describe("parseFrontmatterMarker", () => {

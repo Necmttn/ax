@@ -28,9 +28,30 @@ export const parseInlineMarkers = (source: string): InlineMarker[] => {
         const openIndex = match.index;
         const bodyStart = openIndex + match[0].length;
         const closeTag = `<!--/ax:${id}-->`;
-        const closeIndex = source.indexOf(closeTag, bodyStart);
-        if (closeIndex === -1) {
-            throw new Error(`marker ${id}: unmatched open tag at offset ${openIndex}`);
+        const openTag = `<!--ax:${id}-->`;
+        let closeIndex: number;
+        {
+            let depth = 1;
+            let scan = bodyStart;
+            closeIndex = -1;
+            while (depth > 0) {
+                const nextOpen = source.indexOf(openTag, scan);
+                const nextClose = source.indexOf(closeTag, scan);
+                if (nextClose === -1) {
+                    throw new Error(`marker ${id}: unmatched open tag at offset ${openIndex}`);
+                }
+                if (nextOpen !== -1 && nextOpen < nextClose) {
+                    depth += 1;
+                    scan = nextOpen + openTag.length;
+                } else {
+                    depth -= 1;
+                    if (depth === 0) {
+                        closeIndex = nextClose;
+                        break;
+                    }
+                    scan = nextClose + closeTag.length;
+                }
+            }
         }
         if (seen.has(id)) {
             throw new Error(`marker ${id}: duplicate id within document`);
