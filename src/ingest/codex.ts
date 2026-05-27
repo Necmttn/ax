@@ -1,6 +1,6 @@
 import { readdir, stat, open } from "node:fs/promises";
 import { join } from "node:path";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { RecordId, SurrealClient, filePointer } from "../lib/db.ts";
 import { AxConfig } from "../lib/config.ts";
 import { decodeJsonOrNull } from "../lib/decode.ts";
@@ -8,6 +8,8 @@ import { skillRecordKey } from "../lib/skill-id.ts";
 import { surrealString } from "../lib/shared/surql.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
+import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
+import type { StageDef } from "./stage/registry.ts";
 import {
     buildPlanSnapshotStatements,
     buildRelateToolCallSkillStatements,
@@ -1047,3 +1049,41 @@ if (import.meta.main) {
         ) as Effect.Effect<CodexStats>,
     );
 }
+
+// ---------------------------------------------------------------------------
+// Co-located StageDef
+// ---------------------------------------------------------------------------
+
+export const CodexKey = Schema.Literal("codex");
+export type CodexKey = typeof CodexKey.Type;
+
+/**
+ * Codex transcripts stage - ingests `~/.codex/sessions/` JSONL.
+ *
+ * Depends on: {@link SkillsKey}, {@link CommandsKey}
+ * Consumed by: {@link SubagentsKey}, {@link SpawnedKey}, {@link SignalsKey}
+ * Tags: ingest
+ */
+// Named CodexStageStats to avoid collision with the original CodexStats interface.
+export class CodexStageStats extends BaseStageStats.extend<CodexStageStats>("CodexStageStats")({
+    sessionsIngested: Schema.Number,
+    turnsIngested: Schema.Number,
+    toolCallsIngested: Schema.Number,
+}) {}
+
+export const codexStage: StageDef<CodexStageStats, SurrealClient | AxConfig> = {
+    meta: StageMeta.make({ key: "codex", deps: ["skills", "commands"], tags: ["ingest"] }),
+    run: (ctx: IngestContext) =>
+        Effect.gen(function* () {
+            const t0 = Date.now();
+            const sinceDays = Math.max(1, Math.round((Date.now() - ctx.since.getTime()) / 86400000));
+            const result = yield* ingestCodex({ sinceDays });
+            return CodexStageStats.make({
+                durationMs: Date.now() - t0,
+                summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls`,
+                sessionsIngested: result.sessions,
+                turnsIngested: result.turns,
+                toolCallsIngested: result.toolCalls,
+            });
+        }),
+};
