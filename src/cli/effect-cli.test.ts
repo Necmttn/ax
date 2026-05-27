@@ -1,5 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { DB_COMMANDS, insightsOnlyConflicts, resolveIngestStages, rootCommand } from "./index.ts";
+import { ALL_STAGES } from "../ingest/stage/registry.ts";
+import type { StageRegistryShape } from "../ingest/stage/registry.ts";
+
+// Shared registry fixture for resolveIngestStages tests
+const testRegistry: StageRegistryShape = {
+    all: () => ALL_STAGES,
+    byKey: (key: string) => (ALL_STAGES as readonly any[]).find((s) => s.meta.key === key),
+    byTag: (tag: any) => (ALL_STAGES as readonly any[]).filter((s) => s.meta.tags.includes(tag)),
+};
 
 const topLevelNames = (): string[] =>
     rootCommand.subcommands.flatMap((group) =>
@@ -96,36 +105,41 @@ describe("effect cli", () => {
     });
 
     test("resolveIngestStages: default runs every stage", () => {
-        expect(resolveIngestStages([])).toHaveLength(15);
+        expect(resolveIngestStages(testRegistry, [])).toHaveLength(15);
     });
 
     test("resolveIngestStages: --stages= runs exactly the listed stages", () => {
-        expect([...resolveIngestStages(["--stages=signals,outcomes"])].sort()).toEqual([
+        const keys = resolveIngestStages(testRegistry, ["--stages=signals,outcomes"]).map((s: any) => s.meta.key);
+        expect([...keys].sort()).toEqual([
             "outcomes",
             "signals",
         ]);
     });
 
-    test("resolveIngestStages: --derive-only runs only the DB-derive stages", () => {
-        expect([...resolveIngestStages(["--derive-only"])].sort()).toEqual([
+    test("resolveIngestStages: --derive-only runs only stages tagged 'derive'", () => {
+        const keys = resolveIngestStages(testRegistry, ["--derive-only"]).map((s: any) => s.meta.key);
+        // All stages in the registry with the "derive" tag:
+        // subagents, spawned, signals, closure, outcomes, session-health,
+        // proposals, opportunities, retro-proposals, harness.
+        expect([...keys].sort()).toEqual([
             "closure",
+            "harness",
             "opportunities",
             "outcomes",
             "proposals",
             "retro-proposals",
             "session-health",
             "signals",
+            "spawned",
+            "subagents",
         ]);
     });
 
-    test("resolveIngestStages: --stages= takes precedence over --derive-only and legacy", () => {
-        expect([...resolveIngestStages(["--stages=git", "--derive-only", "--codex-only"])]).toEqual([
+    test("resolveIngestStages: --stages= takes precedence over --derive-only", () => {
+        const keys = resolveIngestStages(testRegistry, ["--stages=git", "--derive-only"]).map((s: any) => s.meta.key);
+        expect([...keys]).toEqual([
             "git",
         ]);
-    });
-
-    test("resolveIngestStages: legacy --git-only maps to the git stage alone", () => {
-        expect([...resolveIngestStages(["--git-only"])]).toEqual(["git"]);
     });
 
     test("evidence group exposes guidance/session/weekly", () => {
