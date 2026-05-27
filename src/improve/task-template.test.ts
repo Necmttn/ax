@@ -55,4 +55,10 @@ describe("renderTaskFile", () => {
         const out = renderTaskFile(baseInput());
         expect(out).toContain("axctl improve lint");
     });
+
+    test("guidance: suggested block fence uses ```text not ```md (prevents false-positive marker copy-in)", () => {
+        const out = renderTaskFile(baseInput());
+        expect(out).not.toContain("```md\n<!--ax:");
+        expect(out).toContain("```text\n<!--ax:");
+    });
 });

@@ -37,13 +37,16 @@ Confidence: ${i.confidence}. Frequency: ${i.frequency}/wk.
 1. Open \`${i.targetPath}\`.${i.section ? ` Locate \`## ${i.section}\`. If the section does not exist, create it near related content.` : ""}
 2. Insert the marker block below. You may reword the body but keep the
    \`<!--ax:${i.shortId}-->\` and \`<!--/ax:${i.shortId}-->\` tags untouched.
-3. Run \`axctl improve lint ${i.targetPath}\`. Resolve any warnings.
+3. Run \`axctl improve lint\`. Resolve any warnings.
+   (If your edit is outside ~/.claude or this repo root, add \`--root <dir>\`.)
 4. Commit. This task file is removed automatically by \`axctl improve lint\`
    once it sees the marker land in the target.
 
 ## Suggested block
 
-\`\`\`md
+Copy the lines BETWEEN the fences, NOT the fences themselves.
+
+\`\`\`text
 <!--ax:${i.shortId}-->
 ${i.suggestedBody}
 <!--/ax:${i.shortId}-->
