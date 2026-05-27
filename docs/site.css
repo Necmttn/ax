@@ -3712,3 +3712,61 @@ footer .right {
   outline: 2px solid var(--green);
   outline-offset: 2px;
 }
+
+/* ============================================================
+   Mobile critical fixes (audit 2026-05-27)
+   - prevent inline-strings from forcing horizontal overflow
+   - wrap install command on narrow viewports
+   - bump SVG text on Exhibit A so it stays legible
+   ============================================================ */
+@media (max-width: 720px) {
+  /* Exhibit B's join row + closing CTA's loop line were `nowrap`
+     by default, pushing docW > viewport across the whole essay.
+     ::after on each .sep injects a break opportunity so wrap
+     happens at separators, not mid-word. */
+  .fig-ledger .join-row .join-schema,
+  .essay .essay-cta .loop-line {
+    white-space: normal;
+    overflow-wrap: break-word;
+  }
+  .fig-ledger .join-row .join-schema .sep,
+  .essay .essay-cta .loop-line .sep {
+    padding: 0 4px;
+  }
+  .fig-ledger .join-row .join-schema .sep::after,
+  .essay .essay-cta .loop-line .sep::after {
+    content: " ";
+    font-size: 0;
+  }
+  .fig-ledger .join-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 0;
+  }
+  .essay .essay-cta {
+    flex-direction: column;
+    align-items: flex-start;
+    text-align: left;
+  }
+
+  /* Hero install command — `curl -fsSL ...` ran off the right
+     edge with no visible scroll. Wrap long URLs. */
+  pre.install,
+  #install pre {
+    white-space: pre-wrap;
+    word-break: break-all;
+    overflow-x: auto;
+  }
+
+  /* Exhibit A SVG labels — viewBox 1000x520 displayed at ~375px
+     scales internal font-size by ~0.375. Bump enough that
+     visual size stays ≥11–12px. */
+  .fig-curve .ax-y-title  { font-size: 30px; }
+  .fig-curve .ax-x-title  { font-size: 30px; }
+  .fig-curve .ax-y-sub    { font-size: 22px; }
+  .fig-curve .ax-tick-label { font-size: 24px; }
+  .fig-curve .ax-tick-label.dim { font-size: 20px; }
+  .fig-curve .curve-dot-num { font-size: 26px; }
+  .fig-curve .ax-marker-label { font-size: 30px; }
+  .fig-curve .ax-marker-sub   { font-size: 20px; }
+}
