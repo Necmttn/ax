@@ -46,3 +46,34 @@ export const parseInlineMarkers = (source: string): InlineMarker[] => {
     }
     return markers;
 };
+
+export interface FrontmatterMarker {
+    readonly id: string;
+    readonly experiment?: string;
+}
+
+const FM = /^---\r?\n([\s\S]*?)\r?\n---/;
+const QUOTED = /^["'](.*)["']$/;
+
+const stripQuotes = (raw: string): string => {
+    const m = raw.match(QUOTED);
+    return m ? m[1]! : raw;
+};
+
+export const parseFrontmatterMarker = (source: string): FrontmatterMarker | null => {
+    const fm = source.match(FM);
+    if (!fm) return null;
+    const body = fm[1]!;
+    let id: string | undefined;
+    let experiment: string | undefined;
+    for (const line of body.split(/\r?\n/)) {
+        const eq = line.indexOf(":");
+        if (eq === -1) continue;
+        const key = line.slice(0, eq).trim();
+        const val = stripQuotes(line.slice(eq + 1).trim());
+        if (key === "ax_id") id = val;
+        else if (key === "ax_experiment") experiment = val;
+    }
+    if (!id) return null;
+    return experiment ? { id, experiment } : { id };
+};

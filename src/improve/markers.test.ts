@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseInlineMarkers, type InlineMarker } from "./markers.ts";
+import { parseInlineMarkers, parseFrontmatterMarker, type InlineMarker } from "./markers.ts";
 
 describe("parseInlineMarkers", () => {
     test("returns empty array for content with no markers", () => {
@@ -36,5 +36,32 @@ describe("parseInlineMarkers", () => {
     test("reports duplicate id within one document as error", () => {
         const input = `<!--ax:aa-->one<!--/ax:aa--> <!--ax:aa-->two<!--/ax:aa-->`;
         expect(() => parseInlineMarkers(input)).toThrow(/duplicate id/i);
+    });
+});
+
+describe("parseFrontmatterMarker", () => {
+    test("returns null when there is no frontmatter", () => {
+        expect(parseFrontmatterMarker("# heading\nbody")).toBeNull();
+    });
+
+    test("returns null when frontmatter has no ax_id", () => {
+        const input = `---\nname: foo\n---\nbody`;
+        expect(parseFrontmatterMarker(input)).toBeNull();
+    });
+
+    test("extracts ax_id and ax_experiment", () => {
+        const input = `---\nname: foo\nax_id: e7f3\nax_experiment: experiment:guid_e7f3__lk9\n---\nbody`;
+        expect(parseFrontmatterMarker(input)).toEqual({
+            id: "e7f3",
+            experiment: "experiment:guid_e7f3__lk9",
+        });
+    });
+
+    test("tolerates quoted values", () => {
+        const input = `---\nax_id: "e7f3"\nax_experiment: 'experiment:abc'\n---\n`;
+        expect(parseFrontmatterMarker(input)).toEqual({
+            id: "e7f3",
+            experiment: "experiment:abc",
+        });
     });
 });
