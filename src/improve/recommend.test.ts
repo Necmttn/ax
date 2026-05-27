@@ -45,6 +45,35 @@ describe("recommend", () => {
         );
         expect(out.map((r) => r.shortId)).toEqual(["b"]);
     });
+
+    test("treats malformed updated_at as fully stale (no NaN sort)", async () => {
+        const rows = [
+            { dedupe_sig: "bad", title: "t", form: "guidance", hypothesis: "h",
+              confidence: "high", frequency: 5, updated_at: "" },
+            { dedupe_sig: "good", title: "t", form: "guidance", hypothesis: "h",
+              confidence: "low", frequency: 1, updated_at: new Date().toISOString() },
+        ];
+        const out = await Effect.runPromise(
+            recommend({ limit: 5 }).pipe(Effect.provide(layerWith(rows))),
+        );
+        // Sanity: both rows should appear, neither should produce NaN score.
+        expect(out.every((r) => Number.isFinite(r.score))).toBe(true);
+        expect(out.length).toBe(2);
+    });
+
+    test("high-confidence freq=0 outranks low-confidence freq=2 with same recency", async () => {
+        const now = new Date().toISOString();
+        const rows = [
+            { dedupe_sig: "new-hot", title: "t", form: "guidance", hypothesis: "h",
+              confidence: "high", frequency: 0, updated_at: now },
+            { dedupe_sig: "old-cold", title: "t", form: "guidance", hypothesis: "h",
+              confidence: "low", frequency: 2, updated_at: now },
+        ];
+        const out = await Effect.runPromise(
+            recommend({ limit: 5 }).pipe(Effect.provide(layerWith(rows))),
+        );
+        expect(out[0]!.shortId).toBe("new-hot");
+    });
 });
 
 describe("formatRecommendations", () => {

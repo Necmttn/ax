@@ -35,13 +35,15 @@ const CONFIDENCE_WEIGHT: Record<string, number> = {
 };
 
 const recency = (iso: string): number => {
-    const days = (Date.now() - new Date(iso).getTime()) / 86_400_000;
+    const t = new Date(iso).getTime();
+    if (!Number.isFinite(t)) return 0.1;  // floor - same as the maximally-stale case
+    const days = (Date.now() - t) / 86_400_000;
     return Math.max(0.1, 1 / Math.log(2 + Math.max(0, days)));
 };
 
 const score = (row: { confidence: string; frequency: number; updated_at: string }): number => {
     const c = CONFIDENCE_WEIGHT[row.confidence] ?? 1;
-    return c * recency(row.updated_at) * Math.log(row.frequency + 1 + 1e-3);
+    return c * recency(row.updated_at) * (1 + Math.log1p(Math.max(0, row.frequency)));
 };
 
 export const recommend = (
