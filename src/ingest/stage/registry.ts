@@ -5,13 +5,14 @@ import { SkillsKey, skillsStage } from "../skills.ts";
 import { CommandsKey, commandsStage } from "../commands.ts";
 import { ClaudeKey, claudeStage } from "../transcripts.ts";
 import { CodexKey, codexStage } from "../codex.ts";
+import { SubagentsKey, subagentsStage } from "../derive-claude-subagents.ts";
 
 export type { StageDef } from "./types.ts";
 
 /** Composed union of every known Ingest Stage key. Each stage file exports its
  *  own `Schema.Literal("<key>")`; this union is reassembled by re-exporting
  *  them here. Adding a stage = one import + one entry in the union below. */
-export const IngestStageKey = Schema.Union([SkillsKey, CommandsKey, ClaudeKey, CodexKey]);
+export const IngestStageKey = Schema.Union([SkillsKey, CommandsKey, ClaudeKey, CodexKey, SubagentsKey]);
 export type IngestStageKey = typeof IngestStageKey.Type;
 
 export interface StageRegistryShape {
@@ -35,7 +36,7 @@ export const StageRegistryLive = (
     });
 
 /** The canonical list of stages provided by `StageRegistryDefault`. */
-export const ALL_STAGES = [skillsStage, commandsStage, claudeStage, codexStage] as const;
+export const ALL_STAGES = [skillsStage, commandsStage, claudeStage, codexStage, subagentsStage] as const;
 
 /** Production registry: the canonical list of stages provided by ax. Test code
  *  should prefer `StageRegistryLive([...])` with explicit fixtures. */
