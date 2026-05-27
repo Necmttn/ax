@@ -1309,6 +1309,11 @@ DEFINE FIELD measured.opportunities ON checkpoint TYPE int DEFAULT 0;
 DEFINE FIELD measured.addressed     ON checkpoint TYPE int DEFAULT 0;
 DEFINE FIELD measured.ratio         ON checkpoint TYPE float DEFAULT 0;
 DEFINE FIELD measured.built         ON checkpoint TYPE bool DEFAULT false;
+-- Frequency disambiguation for opportunities=0 verdicts: if the cluster
+-- frequency has grown since the proposal was accepted, the artifact is
+-- being ignored (still firing). Otherwise the pattern self-resolved.
+DEFINE FIELD measured.current_frequency  ON checkpoint TYPE option<int>;
+DEFINE FIELD measured.baseline_frequency ON checkpoint TYPE option<int>;
 DEFINE FIELD suggested    ON checkpoint TYPE option<string>;
     -- adopted | ignored | regressed | no_longer_needed | partial
 DEFINE FIELD user_verdict ON checkpoint TYPE option<string>;

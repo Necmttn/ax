@@ -2443,8 +2443,9 @@ const retroPlanCommand = Command.make(
         confidence: Flag.choice("confidence", ["low", "medium", "high"] as const).pipe(Flag.withDefault("medium")),
         frequency: Flag.integer("frequency").pipe(Flag.withDefault(1)),
         json: jsonFlag,
+        leaveOpen: Flag.boolean("leave-open").pipe(Flag.withDefault(false)),
     },
-    ({ slug, form, title, hypothesis, planPath, evidenceRetros, artifactPath, confidence, frequency, json }) =>
+    ({ slug, form, title, hypothesis, planPath, evidenceRetros, artifactPath, confidence, frequency, json, leaveOpen }) =>
         cmdRetroPlan([
             `--slug=${slug}`,
             `--form=${form}`,
@@ -2456,8 +2457,9 @@ const retroPlanCommand = Command.make(
             `--confidence=${confidence}`,
             `--frequency=${frequency}`,
             ...boolArg("json", json),
+            ...boolArg("leave-open", leaveOpen),
         ]),
-).pipe(Command.withDescription("Register an externally-drafted plan as accepted proposal + experiment (external agent calls this after user yes)"));
+).pipe(Command.withDescription("Register an externally-drafted plan as proposal (+ experiment unless --leave-open). External agent calls this after user yes."));
 
 const retroCommand = Command.make("retro").pipe(
     Command.withDescription("Session retros: structured reflections (tried · worked · failed · next) that drive the experiment loop"),

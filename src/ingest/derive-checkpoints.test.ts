@@ -7,8 +7,30 @@ import {
 } from "./derive-checkpoints.ts";
 
 describe("computeSuggestedVerdict", () => {
-    test("opportunities=0 -> no_longer_needed (pattern self-resolved)", () => {
+    test("opportunities=0 + no frequency info -> no_longer_needed", () => {
         expect(computeSuggestedVerdict({ opportunities: 0, addressed: 0, ratio: 0, built: true })).toBe("no_longer_needed");
+    });
+
+    test("opportunities=0 + current==baseline -> no_longer_needed (pattern self-resolved)", () => {
+        expect(computeSuggestedVerdict({
+            opportunities: 0,
+            addressed: 0,
+            ratio: 0,
+            built: true,
+            currentFrequency: 5,
+            baselineFrequency: 5,
+        })).toBe("no_longer_needed");
+    });
+
+    test("opportunities=0 + current > baseline -> ignored (artifact exists but pattern still firing)", () => {
+        expect(computeSuggestedVerdict({
+            opportunities: 0,
+            addressed: 0,
+            ratio: 0,
+            built: true,
+            currentFrequency: 9,
+            baselineFrequency: 5,
+        })).toBe("ignored");
     });
 
     test("ratio > 0.6 -> adopted", () => {

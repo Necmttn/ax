@@ -17,6 +17,7 @@ const baseArgs = (overrides: Partial<RetroPlanArgs> = {}): RetroPlanArgs => ({
     confidence: "medium",
     frequency: 3,
     json: true,
+    leaveOpen: false,
     ...overrides,
 });
 
@@ -185,6 +186,46 @@ describe("buildRetroPlanStatements SQL shape", () => {
 
     test("proposal key + experiment key share the same slug-derived prefix", () => {
         const built = buildRetroPlanStatements(baseArgs(), 1_700_000_000_000);
-        expect(built.experimentKey.startsWith(built.proposalKey)).toBe(true);
+        // Default (leaveOpen=false) always materialises an experiment key.
+        expect(built.experimentKey).not.toBeNull();
+        expect(built.experimentKey!.startsWith(built.proposalKey)).toBe(true);
+    });
+
+    test("--leave-open: proposal status is 'open' (not 'accepted')", () => {
+        const built = buildRetroPlanStatements(
+            baseArgs({ leaveOpen: true }),
+            1_700_000_000_000,
+        );
+        expect(built.statements[0]).toContain('status: "open"');
+        expect(built.statements[0]).not.toContain('status: "accepted"');
+    });
+
+    test("--leave-open: NO experiment row emitted", () => {
+        const built = buildRetroPlanStatements(
+            baseArgs({ leaveOpen: true }),
+            1_700_000_000_000,
+        );
+        expect(built.experimentKey).toBeNull();
+        const sql = built.statements.join("\n");
+        expect(sql).not.toMatch(/UPSERT experiment:|CREATE experiment:/);
+        // Still emits proposal + per-form payload (so accept later has data).
+        expect(built.statements.length).toBe(2);
+        expect(sql).toMatch(/CREATE proposal:`[^`]+` CONTENT/);
+        expect(sql).toMatch(/CREATE skill_proposal:`[^`]+` CONTENT/);
+    });
+
+    test("parseRetroPlanArgs picks up --leave-open", () => {
+        const parsed = parseRetroPlanArgs(
+            [
+                "--slug=s",
+                "--form=skill",
+                "--title=t",
+                "--hypothesis=h",
+                "--plan-path=/dev/null",
+                "--leave-open",
+            ],
+            { checkPlanPath: false },
+        );
+        expect(parsed.leaveOpen).toBe(true);
     });
 });

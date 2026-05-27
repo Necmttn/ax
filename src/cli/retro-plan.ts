@@ -48,6 +48,14 @@ export interface RetroPlanArgs {
     readonly confidence: "low" | "medium" | "high";
     readonly frequency: number;
     readonly json: boolean;
+    /**
+     * When true, register the proposal with status='open' and DO NOT create
+     * an experiment row. Lets external agents compose with
+     * `ax improve accept --with-agent` afterwards (which refuses to operate
+     * on already-accepted proposals). Default is back-compat: status='accepted'
+     * + experiment row created immediately.
+     */
+    readonly leaveOpen: boolean;
 }
 
 const ALLOWED_FORMS = new Set<PlanForm>([
@@ -90,6 +98,7 @@ export const parseRetroPlanArgs = (
     const confidenceRaw = (flagValue(args, "confidence") ?? "medium").toLowerCase();
     const frequencyRaw = flagValue(args, "frequency") ?? "1";
     const json = args.includes("--json");
+    const leaveOpen = args.includes("--leave-open");
 
     if (!slug) fail("--slug is required");
     if (!form) fail("--form is required (skill|hook|guidance|automation)");
@@ -126,6 +135,7 @@ export const parseRetroPlanArgs = (
         confidence: confidenceRaw as "low" | "medium" | "high",
         frequency,
         json,
+        leaveOpen,
     };
 };
 
@@ -134,7 +144,11 @@ const proposalKeyFor = (slug: string, sig: string): string =>
 
 export interface PlanBuildResult {
     readonly proposalKey: string;
-    readonly experimentKey: string;
+    /**
+     * Experiment key derived from proposalKey + nowMs. NULL when
+     * args.leaveOpen is set - no experiment row is created in that mode.
+     */
+    readonly experimentKey: string | null;
     readonly sig: string;
     readonly statements: readonly string[];
 }
@@ -155,16 +169,20 @@ export const buildRetroPlanStatements = (
     const normTitle = normalizeTitle(args.title);
     const sig = dedupeSig(args.form, normTitle);
     const proposalKey = proposalKeyFor(args.slug, sig);
-    const experimentKey = `${proposalKey}__${nowMs.toString(36)}`;
+    // No experiment row exists in --leave-open mode, so don't reserve a key.
+    const experimentKey = args.leaveOpen ? null : `${proposalKey}__${nowMs.toString(36)}`;
 
     const proposalRef = recordRef("proposal", proposalKey);
-    const experimentRef = recordRef("experiment", experimentKey);
 
+    // Embed frequency snapshot into baseline so the checkpoint verdict math
+    // (current_frequency vs baseline.frequency) has a fixed reference point
+    // even after derive-retro-proposals re-counts on later passes.
     const baseline = JSON.stringify({
         source: "retro_meta_plan",
         slug: args.slug,
         plan_path: args.planPath,
         evidence_retros: args.evidenceRetros,
+        frequency: args.frequency,
     });
 
     const statements: string[] = [];
@@ -177,7 +195,7 @@ export const buildRetroPlanStatements = (
             ["dedupe_sig", surrealString(sig)],
             ["frequency", String(args.frequency)],
             ["confidence", surrealString(args.confidence)],
-            ["status", surrealString("accepted")],
+            ["status", surrealString(args.leaveOpen ? "open" : "accepted")],
             ["baseline", surrealOptionString(baseline)],
             ["updated_at", "time::now()"],
         ])};`,
@@ -224,13 +242,16 @@ export const buildRetroPlanStatements = (
         );
     }
 
-    statements.push(
-        `CREATE ${experimentRef} CONTENT ${surrealObject([
-            ["proposal", proposalRef],
-            ["artifact_path", surrealString(args.artifactPath ?? args.planPath)],
-            ["scaffolded_at", "time::now()"],
-        ])};`,
-    );
+    if (experimentKey !== null) {
+        const experimentRef = recordRef("experiment", experimentKey);
+        statements.push(
+            `CREATE ${experimentRef} CONTENT ${surrealObject([
+                ["proposal", proposalRef],
+                ["artifact_path", surrealString(args.artifactPath ?? args.planPath)],
+                ["scaffolded_at", "time::now()"],
+            ])};`,
+        );
+    }
 
     return { proposalKey, experimentKey, sig, statements };
 };
@@ -261,12 +282,25 @@ export const cmdRetroPlan = (
         yield* db.query(built.statements.join("\n"));
 
         if (parsed.json || !process.stdout.isTTY) {
-            console.log(prettyPrint({
-                proposal_id: `proposal:${built.proposalKey}`,
-                experiment_id: `experiment:${built.experimentKey}`,
-                dedupe_sig: built.sig,
-                form: parsed.form,
-            }));
+            if (parsed.leaveOpen) {
+                console.log(prettyPrint({
+                    proposal_id: `proposal:${built.proposalKey}`,
+                    dedupe_sig: built.sig,
+                    form: parsed.form,
+                    status: "open",
+                }));
+            } else {
+                console.log(prettyPrint({
+                    proposal_id: `proposal:${built.proposalKey}`,
+                    experiment_id: `experiment:${built.experimentKey}`,
+                    dedupe_sig: built.sig,
+                    form: parsed.form,
+                }));
+            }
+        } else if (parsed.leaveOpen) {
+            console.log(
+                `proposal proposal:${built.proposalKey} created (status=open) - run \`ax improve accept --with-agent ${built.sig}\` to scaffold + enrich`,
+            );
         } else {
             console.log(`proposal proposal:${built.proposalKey} created (status=accepted)`);
             console.log(`experiment experiment:${built.experimentKey} created (artifact_path=${parsed.artifactPath ?? parsed.planPath})`);

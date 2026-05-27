@@ -8,7 +8,10 @@
  *  - user_verdict : NULL - the human confirms via `axctl improve verdict`.
  *
  * Verdict math (suggested only - the human still confirms):
- *   if opportunities == 0          -> no_longer_needed (pattern self-resolved)
+ *   if opportunities == 0:
+ *       if currentFrequency > baselineFrequency  -> ignored (pattern still
+ *           firing post-accept, artifact not preventing the trigger)
+ *       else                                     -> no_longer_needed
  *   if ratio > 0.6                 -> adopted
  *   if ratio < 0.1                 -> ignored
  *   otherwise                      -> partial
@@ -54,6 +57,8 @@ interface CheckpointExperimentRow {
     readonly addressed: number;
     readonly artifact_path: string | null;
     readonly existing_kinds: ReadonlyArray<string>;
+    readonly current_frequency?: number | null;
+    readonly baseline_json?: string | null;
 }
 
 export interface CheckpointMeasured {
@@ -61,6 +66,14 @@ export interface CheckpointMeasured {
     readonly addressed: number;
     readonly ratio: number;
     readonly built: boolean;
+    /** proposal.frequency as of this checkpoint pass (live counter). */
+    readonly currentFrequency?: number;
+    /**
+     * proposal.baseline.frequency at proposal-creation time (snapshot).
+     * Used to disambiguate `no_longer_needed` (pattern resolved) from
+     * `ignored` (artifact exists but doesn't fire).
+     */
+    readonly baselineFrequency?: number;
 }
 
 export const CHECKPOINT_WINDOWS_DAYS: ReadonlyArray<readonly [CheckpointKind, number]> = [
@@ -70,7 +83,15 @@ export const CHECKPOINT_WINDOWS_DAYS: ReadonlyArray<readonly [CheckpointKind, nu
 ];
 
 export const computeSuggestedVerdict = (measured: CheckpointMeasured): CheckpointVerdict => {
-    if (measured.opportunities === 0) return "no_longer_needed";
+    if (measured.opportunities === 0) {
+        // Disambiguate via frequency delta. If the cluster has kept growing
+        // post-accept, the trigger pattern is still firing and the artifact
+        // is being ignored. Otherwise, the underlying pattern self-resolved.
+        const base = measured.baselineFrequency ?? 0;
+        const curr = measured.currentFrequency ?? 0;
+        if (curr > base) return "ignored";
+        return "no_longer_needed";
+    }
     const ratio = measured.ratio;
     if (ratio > 0.6) return "adopted";
     if (ratio < 0.1) return "ignored";
@@ -102,7 +123,23 @@ export const buildCheckpointStatement = (params: {
     readonly observedAt: Date;
 }): string => {
     const key = checkpointKey(params.experimentKey, params.kind);
-    return `UPSERT ${recordRef("checkpoint", key)} CONTENT { experiment: ${recordRef("experiment", params.experimentKey)}, kind: ${surrealString(params.kind)}, measured: ${JSON.stringify(params.measured)}, suggested: ${surrealString(params.suggested)}, user_verdict: NONE, observed_at: ${surrealDate(params.observedAt)} };`;
+    // Map camelCase TS fields to the snake_case schema fields. Optional
+    // current/baseline frequency are emitted only when defined so the
+    // option<int> columns stay NONE for older rows.
+    const m = params.measured;
+    const measuredJson: Record<string, number | boolean> = {
+        opportunities: m.opportunities,
+        addressed: m.addressed,
+        ratio: m.ratio,
+        built: m.built,
+    };
+    if (typeof m.currentFrequency === "number") {
+        measuredJson.current_frequency = m.currentFrequency;
+    }
+    if (typeof m.baselineFrequency === "number") {
+        measuredJson.baseline_frequency = m.baselineFrequency;
+    }
+    return `UPSERT ${recordRef("checkpoint", key)} CONTENT { experiment: ${recordRef("experiment", params.experimentKey)}, kind: ${surrealString(params.kind)}, measured: ${JSON.stringify(measuredJson)}, suggested: ${surrealString(params.suggested)}, user_verdict: NONE, observed_at: ${surrealDate(params.observedAt)} };`;
 };
 
 export const deriveCheckpoints = (
@@ -119,7 +156,9 @@ export const deriveCheckpoints = (
                 artifact_path,
                 (SELECT count() FROM opportunity WHERE in = $parent.id GROUP ALL)[0].count ?? 0 AS opportunities,
                 (SELECT count() FROM opportunity WHERE in = $parent.id AND was_addressed = true GROUP ALL)[0].count ?? 0 AS addressed,
-                (SELECT VALUE kind FROM checkpoint WHERE experiment = $parent.id) AS existing_kinds
+                (SELECT VALUE kind FROM checkpoint WHERE experiment = $parent.id) AS existing_kinds,
+                proposal.frequency AS current_frequency,
+                proposal.baseline AS baseline_json
             FROM experiment
             WHERE locked_verdict IS NONE;
         `);
@@ -139,11 +178,32 @@ export const deriveCheckpoints = (
             const opportunities = Number(exp.opportunities ?? 0);
             const addressed = Number(exp.addressed ?? 0);
             const ratio = opportunities === 0 ? 0 : addressed / opportunities;
+
+            // proposal.baseline is stored as a JSON string (schema rule:
+            // SCHEMAFULL v3 has no flexible<object>). Parse defensively -
+            // older proposals predating the frequency snapshot won't have
+            // baseline.frequency and we just leave it undefined.
+            let baselineFrequency: number | undefined;
+            const rawBaseline = exp.baseline_json;
+            if (typeof rawBaseline === "string" && rawBaseline.length > 0) {
+                try {
+                    const parsed = JSON.parse(rawBaseline) as { frequency?: number };
+                    if (typeof parsed.frequency === "number") baselineFrequency = parsed.frequency;
+                } catch { /* ignore - non-JSON baseline (legacy) */ }
+            }
+            const rawCurrent = exp.current_frequency;
+            const currentFrequency =
+                typeof rawCurrent === "number" && Number.isFinite(rawCurrent)
+                    ? rawCurrent
+                    : undefined;
+
             const measured: CheckpointMeasured = {
                 opportunities,
                 addressed,
                 ratio,
                 built: exp.artifact_path !== null,
+                ...(currentFrequency !== undefined ? { currentFrequency } : {}),
+                ...(baselineFrequency !== undefined ? { baselineFrequency } : {}),
             };
             const suggested = computeSuggestedVerdict(measured);
 
