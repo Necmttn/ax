@@ -3,8 +3,10 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { SurrealClient } from "../lib/db.ts";
+import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
+import type { StageDef } from "./stage/registry.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
 import { upsertSkillByName } from "./skill-upsert.ts";
@@ -292,3 +294,35 @@ if (import.meta.main) {
         >,
     );
 }
+
+// ---------------------------------------------------------------------------
+// Co-located StageDef
+// ---------------------------------------------------------------------------
+
+export const CommandsKey = Schema.Literal("commands");
+export type CommandsKey = typeof CommandsKey.Type;
+
+/**
+ * Commands stage - seeds Command rows from `~/.claude/commands/`.
+ *
+ * Depends on: (none - leaf)
+ * Consumed by: {@link ClaudeKey}, {@link CodexKey}
+ * Tags: ingest
+ */
+export class CommandsStats extends BaseStageStats.extend<CommandsStats>("CommandsStats")({
+    commandsUpserted: Schema.Number,
+}) {}
+
+export const commandsStage: StageDef<CommandsStats, SurrealClient> = {
+    meta: StageMeta.make({ key: "commands", deps: [], tags: ["ingest"] }),
+    run: (_ctx: IngestContext) =>
+        Effect.gen(function* () {
+            const t0 = Date.now();
+            const { count } = yield* ingestCommands();
+            return CommandsStats.make({
+                durationMs: Date.now() - t0,
+                summary: `upserted ${count} command rows`,
+                commandsUpserted: count,
+            });
+        }),
+};
