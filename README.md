@@ -191,6 +191,21 @@ axctl doctor | install | uninstall | update | version
 
 Full reference: [`docs/insights-cli-reference.md`](docs/insights-cli-reference.md).
 
+### Grounded agent files
+
+ax can recommend changes to your `AGENTS.md` / `CLAUDE.md` (and skill files)
+and track which lines came from it.
+
+- `axctl improve recommend` - print N ranked proposals as ready-to-paste blocks
+  (already wrapped in `<!--ax:id-->` provenance markers). Use `--apply` to pick
+  and accept inline.
+- `axctl improve accept <id>` - emit a `.ax/tasks/<id>.md` brief. Hand it to
+  your primary agent (Claude Code, Codex, etc.); the agent edits the target
+  file, leaving the marker in place.
+- `axctl improve lint` - scan your agent files, reconcile markers with the
+  DB, remove consumed task files, warn on orphans or stale tasks.
+- `axctl improve show <id>` - full evidence trail for one proposal.
+
 ## Docs
 
 - [`docs/manifesto.md`](docs/manifesto.md) - the missing layer in the agent stack

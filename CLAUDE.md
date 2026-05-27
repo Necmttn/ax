@@ -63,6 +63,12 @@ Run `bun refs:setup` after fresh clone to populate `.references/`.
 - LaunchAgent watcher (`com.necmttn.ax-watch`, installed by `axctl install`) tails `~/.claude/projects/` + `~/.codex/sessions/` and runs `axctl ingest --since=1` in the background on new transcripts. Do NOT add a Stop hook - Stop fires per turn and blocks Claude until ingest returns.
 - Weekly self-improve cron (`~/.claude/self-improve/run.sh`) does deep-scan backfill (planned wire-up)
 
+## Recommend + apply guidance to your own agent files
+
+`axctl improve recommend / accept / lint / show` ship the v0 grounded-files
+loop. `accept` emits a `.ax/tasks/<id>.md` brief; act on it like any other
+task file, then run `axctl improve lint` to reconcile.
+
 ## Open issues
 
 See https://github.com/Necmttn/ax/issues - v0.1 roadmap is 7 issues covering Effect refactor, schema/storage extensions, OpenTUI dashboard, signal derivation, reactivity, and self-improve integration.
