@@ -159,22 +159,40 @@ two `ax_*` keys.
 
 ### Form: hook (JSON edits to `~/.claude/settings.json`)
 
-JSON cannot carry comments. Use a sibling `_ax` map at the top level:
+JSON cannot carry comments and a sibling `_ax` map is brittle (array
+reorders break the pointer; ax binary must exist in PATH for any wrapper
+approach). Use a stdout marker instead: prepend `echo 'ax:<id>'` to the
+hook's command. ax already ingests hook stdout into `harness_hook_event`
+(source_type ∈ `hook_progress | hook_success | hook_blocking_error |
+hook_additional_context`), so the id falls out of the existing capture
+path.
 
 ```json
 {
   "hooks": {
-    "PreToolUse:Bash": [ ... ]
-  },
-  "_ax": {
-    "hooks.PreToolUse:Bash[0]": "e7f3"
+    "PreToolUse:Bash": [
+      { "command": "echo 'ax:e7f3' && real-script.sh" }
+    ]
   }
 }
 ```
 
-Key is a JSON-pointer-ish path to the hook entry; value is the ax id.
-`ax lint` walks `_ax` and verifies each pointer still resolves and the
-referenced entry still matches the experiment's expected shape.
+Why this shape:
+
+- `echo` is a shell builtin - cannot fail at cold boot, zero runtime
+  dependency on the `ax` binary.
+- Marker travels with the command. Array reordering, settings.json
+  merges, and manual edits do not desync provenance.
+- Works regardless of hook implementation language (Bash, Python script,
+  Node, etc.) - the wrapper layer is always the shell.
+- Fire-count telemetry already captured by the existing transcript
+  ingest; no new path needed.
+
+`ax lint` for hooks: parse `settings.json`, scan every hook entry's
+`command` string for the regex `ax:([a-z0-9]+)` (configurable, defaults
+to ax id charset). Reconcile each found id with the DB exactly like
+guidance markers. Multiple ids per command allowed (rare but valid for
+hooks composed from multiple experiments).
 
 ### Form: automation (LaunchAgent plist or cron entry)
 
@@ -239,8 +257,9 @@ Form-specific `Apply` sections differ:
 - **subagent:** "Create `~/.claude/agents/<slug>.md` with the
   frontmatter and prompt below."
 - **hook:** "Add the hook entry below to `~/.claude/settings.json`
-  under `hooks.PreToolUse:Bash`, and add the matching `_ax` pointer at
-  the top level."
+  under `hooks.PreToolUse:Bash`. The command must start with
+  `echo 'ax:<id>' && …` so the existing transcript ingest can attribute
+  the fire to this experiment."
 - **automation:** "Create LaunchAgent plist at the path below. Header
   comment must contain `ax:e7f3`."
 
@@ -302,7 +321,7 @@ Scans the listed files for provenance markers, or auto-discovers:
 - `./AGENTS.md`, `./CLAUDE.md` (cwd, walking up to git root)
 - `~/.claude/CLAUDE.md`, `~/.claude/AGENTS.md`
 - `~/.claude/skills/*/SKILL.md`, `~/.claude/agents/*.md`
-- `~/.claude/settings.json` (`_ax` map)
+- `~/.claude/settings.json` (`echo 'ax:<id>'` prefix scan across hook commands)
 - `~/Library/LaunchAgents/com.necmttn.ax-*.plist`
 
 Rules:
@@ -429,7 +448,7 @@ Following the project's bun:test conventions:
 |---|---|---|
 | **v0** | guidance, skill | marker convention, `.ax/tasks/<id>.md` envelope, `ax recommend`, `ax accept` task path, `ax lint` core, `ax show`, dashboard `/improve` read-only view of markers |
 | **v1** | + subagent | extend task template, lint scan for `~/.claude/agents/`, dashboard subagent row |
-| **v2** | + hook | JSON `_ax` map, `settings.json` scan, dogfooded against ax's own hooks |
+| **v2** | + hook | `echo 'ax:<id>'` prefix convention, `settings.json` scan, reuse `harness_hook_event` ingest for fire telemetry, dogfooded against ax's own hooks |
 | **v3** | + automation | plist/cron header scan, explicit manual-only flag (no auto-apply ever) |
 
 Each phase ships independently; v0 unlocks Jannik's core ask.
@@ -457,9 +476,11 @@ Each phase ships independently; v0 unlocks Jannik's core ask.
 - **Task spam.** User accepts 10 recs, gets 10 task files, never applies
   any. Mitigation: `--limit` on recommend, stale-task warnings, optional
   `--patch` mode that collapses to one diff.
-- **JSON hook edits.** `_ax` map at top of `settings.json` is unusual.
-  Mitigation: hook form deferred to v2; document the convention as part
-  of ax's settings.json contract before shipping.
+- **JSON hook edits.** Convention requires the hook command to begin with
+  `echo 'ax:<id>' && …`. Risk: user reformats command, drops the echo,
+  loses provenance. Mitigation: `ax lint` reports orphaned experiments
+  (DB row exists, no echo seen in any hook) so the user gets a nudge;
+  hook form deferred to v2 anyway.
 - **Two ax installs (global + worktree).** Markers in `~/.claude/CLAUDE.md`
   could be written by one install, lint'd by another. Mitigation:
   marker id is DB-derived, so as long as both installs share the
