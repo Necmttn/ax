@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
-import { mkdtempSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildAgentAcceptPrompt, runAgentAccept } from "./agent-accept.ts";
 import { acceptProposal } from "./actions.ts";
 import { SurrealClient } from "../lib/db.ts";
+import { DbError } from "../lib/errors.ts";
 
 describe("buildAgentAcceptPrompt", () => {
     const ctx = {
@@ -177,6 +178,62 @@ describe("acceptProposal - task emission", () => {
         expect(result.artifact_path).toBeDefined();
         expect(result.task_path).toBeUndefined();
         expect(existsSync(result.artifact_path!)).toBe(true);
+    });
+});
+
+/** Layer that succeeds for queries matching `selectPattern`, fails for all others. */
+const fakeRowsLayerWithFailure = (
+    fixtures: ReadonlyArray<unknown[]>,
+    failPattern: RegExp,
+) => {
+    let i = 0;
+    return Layer.succeed(SurrealClient, {
+        query: <T>(sql: string): Effect.Effect<T, DbError> => {
+            if (failPattern.test(sql)) {
+                return Effect.fail(new DbError({ operation: "query", message: "simulated DB failure", sql }));
+            }
+            return Effect.sync(() => (fixtures[i++] ?? []) as unknown as T);
+        },
+    } as never);
+};
+
+describe("acceptProposal - atomic write on DB failure", () => {
+    test("DB failure after tmp write → neither taskPath nor tmpPath exists", async () => {
+        const taskDir = mkdtempSync(join(tmpdir(), "ax-atomic-"));
+        const longSig = "guidance__atomic99";
+        const proposalRow = {
+            id: "proposal:atm1",
+            form: "guidance",
+            title: "Atomic write test",
+            hypothesis: "Verify tmp cleanup on DB failure",
+            dedupe_sig: longSig,
+            status: "open",
+            skill_payload: null,
+            guidance_payload: {
+                file_target: "~/.claude/CLAUDE.md",
+                section: null,
+                suggested_text: "Use atomic writes.",
+            },
+        };
+
+        // SELECT query succeeds (returns proposalRow); UPDATE+UPSERT query fails
+        const layer = fakeRowsLayerWithFailure([[[proposalRow]]], /UPSERT/);
+
+        const result = await Effect.runPromise(
+            acceptProposal({ sigOrId: longSig, taskDir }).pipe(
+                Effect.provide(layer),
+                Effect.exit,
+            ),
+        );
+
+        // Effect must have failed
+        expect(result._tag).toBe("Failure");
+
+        // Neither the final task file nor any tmp file should exist in taskDir
+        const taskPath = join(taskDir, `${longSig}.md`);
+        expect(existsSync(taskPath)).toBe(false);
+        const remaining = readdirSync(taskDir).filter((f) => f.includes(longSig));
+        expect(remaining).toHaveLength(0);
     });
 });
 

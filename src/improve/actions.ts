@@ -8,7 +8,7 @@
  */
 
 import { Effect } from "effect";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { SurrealClient } from "../lib/db.ts";
 import type { DbError } from "../lib/errors.ts";
@@ -274,7 +274,11 @@ export const acceptProposal = (
         const taskContent = renderTaskFile(taskInput);
 
         mkdirSync(taskDir, { recursive: true });
-        writeFileSync(taskPath, taskContent, { encoding: "utf-8" });
+        // Atomic write: stage content in a temp file first, commit to final path only
+        // after the DB update succeeds. This avoids orphan task files when the DB
+        // query fails after the write.
+        const tmpPath = `${taskPath}.tmp.${process.pid}`;
+        writeFileSync(tmpPath, taskContent, { encoding: "utf-8" });
 
         yield* db.query(`
             UPDATE ${recordRef("proposal", proposalKey)} SET status = 'accepted', updated_at = time::now();
@@ -283,7 +287,13 @@ export const acceptProposal = (
                 task_path: ${surrealLiteral(taskPath)},
                 status: 'task_emitted'
             };
-        `);
+        `).pipe(
+            Effect.tapError(() => Effect.sync(() => {
+                try { unlinkSync(tmpPath); } catch { /* best-effort */ }
+            })),
+        );
+
+        renameSync(tmpPath, taskPath);
 
         return {
             status: "ok",
