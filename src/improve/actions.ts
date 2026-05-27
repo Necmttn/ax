@@ -45,6 +45,14 @@ export interface AcceptResult {
         readonly locked_verdict: string | null;
     };
     readonly message?: string;
+    /** Populated only when autoScaffold=true so callers can drive --with-agent enrichment. */
+    readonly proposal?: {
+        readonly title: string;
+        readonly hypothesis: string;
+        readonly triggerPattern: string | null;
+        readonly proposedBehavior: string;
+        readonly baseline: string | null;
+    };
 }
 
 export interface RejectResult {
@@ -238,6 +246,15 @@ export const acceptProposal = (
                 proposal_id: `proposal:${proposalKey}`,
                 experiment_id: experimentId,
                 artifact_path: scaffold.path,
+                proposal: {
+                    title: row.title,
+                    hypothesis: row.hypothesis,
+                    triggerPattern: payload.trigger_pattern == null ? null : String(payload.trigger_pattern),
+                    proposedBehavior: String(payload.proposed_behavior ?? ""),
+                    baseline: typeof (row as Record<string, unknown>).baseline === "string"
+                        ? String((row as Record<string, unknown>).baseline)
+                        : null,
+                },
             };
         }
 

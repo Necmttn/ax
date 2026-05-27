@@ -2148,8 +2148,53 @@ const improveAcceptCommand = Command.make(
                 console.log(`proposal status -> accepted`);
             }
 
-            if (withAgent && result.artifact_path) {
-                yield* cmdImproveAccept([id, ...boolArg("with-agent", withAgent)]);
+            if (withAgent && result.artifact_path && result.proposal) {
+                // Spawn the claude subagent to enrich the freshly-scaffolded SKILL.md.
+                // We call runAgentAccept directly here rather than re-entering
+                // cmdImproveAccept, which would hit the `status !== 'open'` guard
+                // (the proposal was just marked accepted above).
+                let retroSummaries: readonly string[] = [];
+                const baselineRaw = result.proposal.baseline;
+                if (typeof baselineRaw === "string" && baselineRaw.length > 0) {
+                    try {
+                        const parsed = JSON.parse(baselineRaw) as {
+                            tool?: string;
+                            sessionKeys?: unknown;
+                            frequency?: number;
+                        };
+                        if (Array.isArray(parsed.sessionKeys)) {
+                            const tool = parsed.tool ?? "tool";
+                            retroSummaries = parsed.sessionKeys
+                                .filter((s): s is string => typeof s === "string")
+                                .slice(0, 5)
+                                .map((s) => `session ${s}: top tool ${tool} failed (cluster freq=${parsed.frequency ?? "?"})`);
+                        }
+                    } catch {
+                        // ignore - baseline shape may evolve
+                    }
+                }
+                console.log("");
+                console.log("spawning claude subagent to enrich the stub…");
+                const agentResult = yield* Effect.promise(() =>
+                    runAgentAccept({
+                        skillPath: result.artifact_path!,
+                        proposalTitle: result.proposal!.title,
+                        hypothesis: result.proposal!.hypothesis,
+                        triggerPattern: result.proposal!.triggerPattern ?? "",
+                        proposedBehavior: result.proposal!.proposedBehavior,
+                        retroSummaries,
+                        relatedSkillsDir: process.env.AX_SKILLS_SCAFFOLD_DIR ?? `${homedir()}/.claude/skills`,
+                    }),
+                );
+                if (agentResult.skillEnriched) {
+                    console.log(`agent enriched ${result.artifact_path}`);
+                }
+                if (agentResult.planWritten && agentResult.planPath) {
+                    console.log(`agent wrote plan ${agentResult.planPath}`);
+                }
+                if (agentResult.exitCode !== 0) {
+                    console.log(`agent exit code ${agentResult.exitCode} (stub still scaffolded; experiment row unchanged)`);
+                }
             }
         }),
 ).pipe(Command.withDescription("Accept a proposal: emit a task brief (default) or scaffold the SKILL.md directly (--auto-scaffold, skill form only)"));
