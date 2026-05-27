@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
-import { recommend, formatRecommendations, type RecommendInput, type RecommendItem } from "./recommend.ts";
+import { recommend, formatRecommendations, selectByIndices, parseIndexInput, type RecommendInput, type RecommendItem } from "./recommend.ts";
 import { SurrealClient } from "../lib/db.ts";
 
 const layerWith = (rows: ReadonlyArray<unknown>) =>
@@ -68,5 +68,29 @@ describe("formatRecommendations", () => {
         }];
         const out = formatRecommendations(items);
         expect(out).toContain("ax_id: s1");
+    });
+});
+
+describe("selectByIndices", () => {
+    test("returns picked items in input order", () => {
+        const items: RecommendItem[] = [
+            { shortId: "a", title: "A", form: "guidance", hypothesis: "h", confidence: "high", frequency: 1, score: 1, updatedAt: "" },
+            { shortId: "b", title: "B", form: "guidance", hypothesis: "h", confidence: "high", frequency: 1, score: 1, updatedAt: "" },
+            { shortId: "c", title: "C", form: "guidance", hypothesis: "h", confidence: "high", frequency: 1, score: 1, updatedAt: "" },
+        ];
+        expect(selectByIndices(items, [0, 2]).map((i) => i.shortId)).toEqual(["a", "c"]);
+        expect(selectByIndices(items, [99])).toEqual([]);
+    });
+});
+
+describe("parseIndexInput", () => {
+    test("parses space-separated and range syntaxes", () => {
+        expect(parseIndexInput("1 3", 5)).toEqual([0, 2]);
+        expect(parseIndexInput("1-3", 5)).toEqual([0, 1, 2]);
+        expect(parseIndexInput("1, 2, 4-5", 5)).toEqual([0, 1, 3, 4]);
+    });
+
+    test("clamps out-of-range indices and skips junk tokens", () => {
+        expect(parseIndexInput("1 99 abc", 3)).toEqual([0]);
     });
 });

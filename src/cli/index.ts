@@ -25,7 +25,7 @@ import { scaffoldSkill } from "../improve/skill-scaffold.ts";
 import { runAgentAccept } from "../improve/agent-accept.ts";
 import { acceptProposal } from "../improve/actions.ts";
 import { lintFiles } from "../improve/lint.ts";
-import { recommend, formatRecommendations, copyToClipboard } from "../improve/recommend.ts";
+import { recommend, formatRecommendations, copyToClipboard, selectByIndices, parseIndexInput } from "../improve/recommend.ts";
 import { cmdRetroReflect } from "./retro-reflect.ts";
 import { cmdRetroMeta } from "./retro-meta.ts";
 import { cmdRetroPlan } from "./retro-plan.ts";
@@ -1846,6 +1846,7 @@ const cmdImproveRecommend = (args: string[]) =>
     Effect.gen(function* () {
         const json = args.includes("--json");
         const noClipboard = args.includes("--no-clipboard");
+        const apply = args.includes("--apply");
         const limit = parsePositiveIntFlag("improve recommend", "limit", args, 5);
         const sinceDays = parseOptionalPositiveIntFlag("improve recommend", "since", args);
         // Collect --form values (repeatable; also tolerate comma-separated)
@@ -1873,6 +1874,30 @@ const cmdImproveRecommend = (args: string[]) =>
             const copied = copyToClipboard(formatted);
             if (copied) console.log("\n[copied to clipboard]");
         }
+        if (apply && items.length > 0) {
+            // Print numbered list for reference
+            process.stdout.write("\n");
+            items.forEach((item, i) => {
+                process.stdout.write(`  ${i + 1}. ${item.shortId}  ${item.title}\n`);
+            });
+            process.stdout.write(`\nPick indices to accept (e.g. \`1 3\` or \`1-3\`): `);
+            const input = yield* Effect.promise(
+                () =>
+                    new Promise<string>((resolve) => {
+                        process.stdin.once("data", (b) => {
+                            resolve(b.toString().trim());
+                            process.stdin.pause();
+                        });
+                        process.stdin.resume();
+                    }),
+            );
+            const picked = selectByIndices(items, parseIndexInput(input, items.length));
+            for (const item of picked) {
+                const result = yield* acceptProposal({ sigOrId: item.shortId });
+                const taskSuffix = result.task_path ? ` -> ${result.task_path}` : "";
+                console.log(`${item.shortId}: ${result.status}${taskSuffix}`);
+            }
+        }
     });
 
 const improveRecommendCommand = Command.make(
@@ -1883,14 +1908,16 @@ const improveRecommendCommand = Command.make(
         since: Flag.integer("since").pipe(Flag.optional),
         json: Flag.boolean("json").pipe(Flag.withDefault(false)),
         noClipboard: Flag.boolean("no-clipboard").pipe(Flag.withDefault(false)),
+        apply: Flag.boolean("apply").pipe(Flag.withDefault(false)),
     },
-    ({ limit, form, since, json, noClipboard }) =>
+    ({ limit, form, since, json, noClipboard, apply }) =>
         cmdImproveRecommend([
             `--limit=${limit}`,
             ...[...form].flatMap((f) => [`--form=${f}`]),
             ...intArg("since", optionValue(since)),
             ...boolArg("json", json),
             ...boolArg("no-clipboard", noClipboard),
+            ...boolArg("apply", apply),
         ]),
 ).pipe(Command.withDescription("Rank open proposals by confidence × recency × frequency and print the top N (optionally copy to clipboard)"));
 

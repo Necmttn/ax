@@ -124,3 +124,26 @@ export const copyToClipboard = (text: string): boolean => {
         return false;
     }
 };
+
+export const selectByIndices = (
+    items: ReadonlyArray<RecommendItem>,
+    indices: ReadonlyArray<number>,
+): RecommendItem[] => {
+    const set = new Set(indices);
+    return items.filter((_, i) => set.has(i));
+};
+
+export const parseIndexInput = (raw: string, max: number): number[] => {
+    const tokens = raw.split(/[\s,]+/).filter(Boolean);
+    const out = new Set<number>();
+    for (const tok of tokens) {
+        const m = tok.match(/^(\d+)(?:-(\d+))?$/);
+        if (!m) continue;
+        const lo = parseInt(m[1]!, 10) - 1;
+        const hi = m[2] ? parseInt(m[2], 10) - 1 : lo;
+        for (let i = lo; i <= hi && i < max; i += 1) {
+            if (i >= 0) out.add(i);
+        }
+    }
+    return [...out].sort((a, b) => a - b);
+};
