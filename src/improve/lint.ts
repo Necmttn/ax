@@ -16,6 +16,8 @@ import { SurrealClient } from "../lib/db.ts";
 import { surrealLiteral } from "../lib/json.ts";
 import { parseInlineMarkers, parseFrontmatterMarker } from "./markers.ts";
 import type { DbError } from "../lib/errors.ts";
+import { recordRef } from "../lib/shared/surql.ts";
+import { recordKeyPart } from "../lib/shared/derive-keys.ts";
 
 export type LintForm = "guidance" | "skill" | "subagent";
 
@@ -115,8 +117,14 @@ interface ExperimentRow {
     readonly locked_verdict: string | null;
 }
 
-const collectIds = (target: LintTarget, errors: LintFinding[]): Map<string, string> => {
-    const found = new Map<string, string>();
+interface IdTarget {
+    readonly path: string;
+    /** Explicit experiment record id from `ax_experiment` frontmatter (skill/subagent only). */
+    readonly experiment?: string;
+}
+
+const collectIds = (target: LintTarget, errors: LintFinding[]): Map<string, IdTarget> => {
+    const found = new Map<string, IdTarget>();
     let content: string;
     try {
         content = readFileSync(target.path, "utf-8");
@@ -125,7 +133,8 @@ const collectIds = (target: LintTarget, errors: LintFinding[]): Map<string, stri
     }
     if (target.form === "guidance") {
         try {
-            for (const m of parseInlineMarkers(content)) found.set(m.id, target.path);
+            // Inline markers (guidance files) carry no explicit experiment id.
+            for (const m of parseInlineMarkers(content)) found.set(m.id, { path: target.path });
         } catch (err) {
             errors.push({
                 rule: "marker_parse_error",
@@ -135,12 +144,10 @@ const collectIds = (target: LintTarget, errors: LintFinding[]): Map<string, stri
             });
         }
     } else {
-        // skill and subagent files both use the frontmatter convention;
-        // reconcile path is the same for both (subagent experiments would be
-        // handled identically if one existed - acceptProposal rejects subagent
-        // form in v0, so no experiments exist for them yet).
+        // Skill and subagent files use frontmatter; may carry ax_experiment.
+        // (subagent experiments don't exist yet in v0 but the path is identical.)
         const fm = parseFrontmatterMarker(content);
-        if (fm) found.set(fm.id, target.path);
+        if (fm) found.set(fm.id, { path: target.path, experiment: fm.experiment });
     }
     return found;
 };
@@ -155,39 +162,87 @@ export const lintFiles = (
         const infos: LintFinding[] = [];
         const reconciled: LintReconciliation[] = [];
 
-        const idToPath = new Map<string, string>();
+        // idToTarget: short_id → { path, experiment? }
+        const idToTarget = new Map<string, IdTarget>();
         for (const t of targets) {
             const found = collectIds(t, errors);
-            for (const [id, path] of found) {
-                if (idToPath.has(id)) {
+            for (const [id, tgt] of found) {
+                if (idToTarget.has(id)) {
                     warnings.push({
                         rule: "id_collision",
                         severity: "warning",
-                        path,
+                        path: tgt.path,
                         id,
-                        message: `id ${id} also in ${idToPath.get(id)}`,
+                        message: `id ${id} also in ${idToTarget.get(id)!.path}`,
                     });
                 } else {
-                    idToPath.set(id, path);
+                    idToTarget.set(id, tgt);
                 }
             }
         }
 
         const db = yield* SurrealClient;
 
-        if (idToPath.size > 0) {
-            const idList = [...idToPath.keys()].map(surrealLiteral).join(",");
-            const result = yield* db.query<[ExperimentRow[]]>(`
-                SELECT
-                    type::string(id) AS id,
-                    proposal.dedupe_sig AS short_id,
-                    status,
-                    task_path,
-                    locked_verdict
-                FROM experiment WHERE proposal.dedupe_sig IN [${idList}];
-            `);
-            const rows: ExperimentRow[] = result?.[0] ?? [];
-            const byShortId = new Map(rows.map((r) => [r.short_id, r]));
+        if (idToTarget.size > 0) {
+            // Partition targets into two groups:
+            //   - explicitIds: have ax_experiment → query by exact experiment record id
+            //   - dedupeIds:   no ax_experiment    → query by proposal.dedupe_sig batch
+            const explicitEntries: Array<[string, IdTarget & { experiment: string }]> = [];
+            const dedupeIds: string[] = [];
+            for (const [id, tgt] of idToTarget) {
+                if (tgt.experiment) {
+                    explicitEntries.push([id, tgt as IdTarget & { experiment: string }]);
+                } else {
+                    dedupeIds.push(id);
+                }
+            }
+
+            // --- Query 1: exact-experiment lookup (frontmatter ax_experiment) ---
+            const byExperimentId = new Map<string, ExperimentRow>();
+            if (explicitEntries.length > 0) {
+                const expIdList = explicitEntries
+                    .map(([, tgt]) => tgt.experiment)
+                    .map(surrealLiteral)
+                    .join(",");
+                const expResult = yield* db.query<[ExperimentRow[]]>(`
+                    SELECT
+                        type::string(id) AS id,
+                        proposal.dedupe_sig AS short_id,
+                        status,
+                        task_path,
+                        locked_verdict
+                    FROM experiment WHERE type::string(id) IN [${expIdList}];
+                `);
+                for (const r of expResult?.[0] ?? []) byExperimentId.set(r.id, r);
+            }
+
+            // --- Query 2: dedupe_sig batch (inline guidance markers) ---
+            // When >1 experiment row exists for the same dedupe_sig (re-accept
+            // after reject, etc.), we cannot know which row was intended → emit
+            // multi_experiment_ambiguous and skip reconcile for that id.
+            const byShortId = new Map<string, ExperimentRow>();
+            const ambiguousShortIds = new Set<string>();
+            if (dedupeIds.length > 0) {
+                const idList = dedupeIds.map(surrealLiteral).join(",");
+                const result = yield* db.query<[ExperimentRow[]]>(`
+                    SELECT
+                        type::string(id) AS id,
+                        proposal.dedupe_sig AS short_id,
+                        status,
+                        task_path,
+                        locked_verdict
+                    FROM experiment WHERE proposal.dedupe_sig IN [${idList}];
+                `);
+                const rows: ExperimentRow[] = result?.[0] ?? [];
+                for (const r of rows) {
+                    if (byShortId.has(r.short_id)) {
+                        // Second row for the same short_id → ambiguous
+                        ambiguousShortIds.add(r.short_id);
+                    } else {
+                        byShortId.set(r.short_id, r);
+                    }
+                }
+            }
 
             interface PendingReconcile {
                 shortId: string;
@@ -197,30 +252,25 @@ export const lintFiles = (
             }
             const updates: string[] = [];
             const pending: PendingReconcile[] = [];
-            for (const [id, path] of idToPath) {
-                const row = byShortId.get(id);
-                if (!row) {
-                    warnings.push({
-                        rule: "orphan_id",
-                        severity: "warning",
-                        path,
-                        id,
-                        message: `marker ${id} has no experiment row (consider \`axctl improve forget ${id}\`)`,
-                    });
-                    continue;
-                }
+
+            const reconcileRow = (id: string, tgt: IdTarget, row: ExperimentRow): void => {
                 if (row.locked_verdict === "regressed") {
                     infos.push({
                         rule: "regressed_verdict",
                         severity: "info",
-                        path,
+                        path: tgt.path,
                         id,
                         message: `experiment ${id} locked as regressed - consider removing the marker`,
                     });
                 }
                 if (row.status === "task_emitted") {
+                    // Use recordRef to build the UPDATE target consistently with
+                    // actions.ts (which always wraps record IDs via recordRef rather
+                    // than interpolating the raw type::string id).
+                    const key = recordKeyPart(row.id, "experiment");
+                    const updateTarget = key ? recordRef("experiment", key) : row.id;
                     updates.push(
-                        `UPDATE ${row.id} SET status = 'scaffolded', scaffolded_at = time::now(), artifact_path = ${surrealLiteral(path)};`,
+                        `UPDATE ${updateTarget} SET status = 'scaffolded', scaffolded_at = time::now(), artifact_path = ${surrealLiteral(tgt.path)};`,
                     );
                     pending.push({
                         shortId: id,
@@ -228,6 +278,48 @@ export const lintFiles = (
                         previousStatus: row.status,
                         taskPath: (row.task_path && existsSync(row.task_path)) ? row.task_path : null,
                     });
+                }
+            };
+
+            for (const [id, tgt] of idToTarget) {
+                if (tgt.experiment) {
+                    // Frontmatter-specified experiment: look up by exact record id.
+                    const row = byExperimentId.get(tgt.experiment);
+                    if (!row) {
+                        warnings.push({
+                            rule: "orphan_id",
+                            severity: "warning",
+                            path: tgt.path,
+                            id,
+                            message: `marker ${id} has no experiment row (consider \`axctl improve forget ${id}\`)`,
+                        });
+                        continue;
+                    }
+                    reconcileRow(id, tgt, row);
+                } else {
+                    // Inline guidance marker: use dedupe_sig batch result.
+                    if (ambiguousShortIds.has(id)) {
+                        warnings.push({
+                            rule: "multi_experiment_ambiguous",
+                            severity: "warning",
+                            path: tgt.path,
+                            id,
+                            message: `multiple experiment rows match dedupe_sig ${id}; specify ax_experiment in the skill frontmatter or clean up manually`,
+                        });
+                        continue;
+                    }
+                    const row = byShortId.get(id);
+                    if (!row) {
+                        warnings.push({
+                            rule: "orphan_id",
+                            severity: "warning",
+                            path: tgt.path,
+                            id,
+                            message: `marker ${id} has no experiment row (consider \`axctl improve forget ${id}\`)`,
+                        });
+                        continue;
+                    }
+                    reconcileRow(id, tgt, row);
                 }
             }
 
@@ -274,7 +366,7 @@ export const lintFiles = (
         `);
         const staleCutoffMs = Date.now() - (opts.staleDays ?? 7) * 86_400_000;
         for (const row of staleResult?.[0] ?? []) {
-            if (idToPath.has(row.short_id)) continue; // marker found this run → not stale
+            if (idToTarget.has(row.short_id)) continue; // marker found this run → not stale
             if (!row.task_path || !existsSync(row.task_path)) continue;
             let mtime: number;
             try { mtime = statSync(row.task_path).mtimeMs; }

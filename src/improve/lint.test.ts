@@ -165,6 +165,46 @@ describe("lintFiles", () => {
         expect(report.warnings.some((w) => w.rule === "stale_task")).toBe(true);
     });
 
+    test("frontmatter ax_experiment routes reconcile to the exact experiment row", async () => {
+        const root = mkdtempSync(join(tmpdir(), "ax-lint-"));
+        mkdirSync(join(root, "skills", "explicit"), { recursive: true });
+        const skillFile = join(root, "skills", "explicit", "SKILL.md");
+        writeFileSync(skillFile, `---\nname: x\nax_id: explicit\nax_experiment: experiment:explicit__v2\n---\nbody`);
+
+        const rec: QueryRecorder = { calls: [] };
+        // Query order: (1) explicit-experiment lookup, (2) stale-task scan.
+        // No dedupe_sig batch is issued because the single target has ax_experiment set.
+        const experimentRowsByExperimentId = [{
+            id: "experiment:explicit__v2",
+            short_id: "explicit",
+            status: "task_emitted",
+            task_path: null,
+            locked_verdict: null,
+        }];
+        const program = lintFiles({ roots: [root] });
+        const report = await Effect.runPromise(
+            program.pipe(Effect.provide(recordingLayer(rec, [experimentRowsByExperimentId, []]))),
+        );
+        expect(report.reconciled.some((r) => r.shortId === "explicit" && r.experimentId === "experiment:explicit__v2")).toBe(true);
+    });
+
+    test("inline guidance marker with multiple matching experiments → multi_experiment_ambiguous warning, no reconcile", async () => {
+        const root = mkdtempSync(join(tmpdir(), "ax-lint-"));
+        writeFileSync(join(root, "CLAUDE.md"), "<!--ax:dup-->stuff<!--/ax:dup-->");
+        const rec: QueryRecorder = { calls: [] };
+        // Query order: (1) dedupe_sig batch (no explicit entries), (2) stale-task scan.
+        const ambiguousRows = [
+            { id: "experiment:dup__a", short_id: "dup", status: "task_emitted", task_path: null, locked_verdict: null },
+            { id: "experiment:dup__b", short_id: "dup", status: "task_emitted", task_path: null, locked_verdict: null },
+        ];
+        const program = lintFiles({ roots: [root] });
+        const report = await Effect.runPromise(
+            program.pipe(Effect.provide(recordingLayer(rec, [ambiguousRows]))),
+        );
+        expect(report.warnings.some((w) => w.rule === "multi_experiment_ambiguous")).toBe(true);
+        expect(report.reconciled.some((r) => r.shortId === "dup")).toBe(false);
+    });
+
     test("DB update failure → task file survives and reconciled is empty", async () => {
         const root = mkdtempSync(join(tmpdir(), "ax-lint-"));
         const taskDir = join(root, ".ax", "tasks");
