@@ -79,6 +79,26 @@ export interface AcceptedExperimentRow {
     readonly locked_verdict: string | null;
 }
 
+export interface ExperimentStatusCheckpoint {
+    readonly kind: string;
+    readonly suggested: string | null;
+    readonly observed_at: string;
+}
+
+export interface ExperimentStatusRow {
+    readonly experiment_id: string;
+    readonly proposal_dedupe_sig: string;
+    readonly proposal_title: string;
+    readonly proposal_form: string;
+    readonly artifact_path: string | null;
+    readonly days_since_accepted: number;
+    readonly opportunities_count: number;
+    readonly addressed_count: number;
+    readonly address_ratio: number;
+    readonly latest_checkpoint: ExperimentStatusCheckpoint | null;
+    readonly locked_verdict: string | null;
+}
+
 export interface MetaSnapshot {
     readonly generated_at: string;
     readonly since_days: number;
@@ -95,6 +115,7 @@ export interface MetaSnapshot {
         readonly claude_md_user: string | null;
         readonly claude_md_project: string | null;
     };
+    readonly experiment_status: readonly ExperimentStatusRow[];
     readonly investigation_prompts: readonly string[];
 }
 
@@ -104,12 +125,55 @@ export interface MetaSnapshot {
  * and we can grow this list in one place over time.
  */
 export const INVESTIGATION_PROMPTS: readonly string[] = [
+    "Start with `experiment_status`. Lock stale verdicts (>30d, low ratio) before drafting any new proposals. The retrospective loop is incomplete if old experiments stay in limbo while new ones pile on.",
     "Look at retros[].failed for patterns NOT yet captured as proposals. What recurring shape do you see that the heuristic missed?",
     "Cross-reference top tool_failures against current_state.skills. Is there a guidance gap that explains the recurrence?",
     "Read claude_md_user. Are the corrections in patterns.corrections symptomatic of a missing rule?",
     "For each open_proposal, decide: accept-with-agent now, reject as not worth packaging, or leave open for more evidence?",
     "Are there improvement opportunities that don't fit any existing proposal? Draft a plan and register via `ax retro plan`.",
+    "Review `experiment_status` first. For each accepted experiment with `locked_verdict=null`: does the data support the suggested verdict? If addressed_ratio < 0.1 after t+30, consider locking as `ignored` via `ax improve verdict --set=ignored <dedupe_sig>`. Do NOT propose new improvements that overlap with experiments still pending verdict - wait for them to lock or escalate.",
 ];
+
+/**
+ * SurrealDB may return `duration::days(...)` as a plain int OR as a duration
+ * object/string like `"32d"`/`{ secs: 2764800 }` depending on driver version.
+ * Coerce to a non-negative integer day count; fall back to ISO diff against
+ * created_at when nothing else parses.
+ */
+export const coerceDaysSinceAccepted = (
+    raw: unknown,
+    createdAtIso: string | null | undefined,
+    nowMs: number = Date.now(),
+): number => {
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+        return Math.max(0, Math.floor(raw));
+    }
+    if (typeof raw === "string") {
+        const m = /^(\d+)\s*d\b/.exec(raw);
+        if (m && m[1]) return Math.max(0, parseInt(m[1], 10));
+        const n = Number(raw);
+        if (Number.isFinite(n)) return Math.max(0, Math.floor(n));
+    }
+    if (raw && typeof raw === "object") {
+        const obj = raw as Record<string, unknown>;
+        if (typeof obj.secs === "number") {
+            return Math.max(0, Math.floor(obj.secs / 86_400));
+        }
+        if (typeof obj.seconds === "number") {
+            return Math.max(0, Math.floor(obj.seconds / 86_400));
+        }
+        if (typeof obj.days === "number") {
+            return Math.max(0, Math.floor(obj.days));
+        }
+    }
+    if (createdAtIso) {
+        const t = Date.parse(createdAtIso);
+        if (Number.isFinite(t)) {
+            return Math.max(0, Math.floor((nowMs - t) / 86_400_000));
+        }
+    }
+    return 0;
+};
 
 const idToString = (raw: unknown): string => {
     if (raw === null || raw === undefined) return "";
@@ -210,12 +274,29 @@ export const aggregateFrictionKinds = (
  * Pure assembler so tests can drive it without DB/fs. The Effect entrypoint
  * below pulls inputs and forwards them through this.
  */
+/**
+ * Order experiment_status: pending verdicts first (locked_verdict is null),
+ * then locked. Within each group, oldest accepted first (highest
+ * days_since_accepted) - the agent should triage stale entries before new
+ * ones.
+ */
+export const orderExperimentStatus = (
+    rows: readonly ExperimentStatusRow[],
+): ExperimentStatusRow[] =>
+    [...rows].sort((a, b) => {
+        const aPending = a.locked_verdict === null ? 0 : 1;
+        const bPending = b.locked_verdict === null ? 0 : 1;
+        if (aPending !== bPending) return aPending - bPending;
+        return b.days_since_accepted - a.days_since_accepted;
+    });
+
 export const buildMetaSnapshot = (input: {
     readonly sinceDays: number;
     readonly retros: readonly RetroMetaRow[];
     readonly skills: readonly SkillRow[];
     readonly openProposals: readonly OpenProposalRow[];
     readonly acceptedExperiments: readonly AcceptedExperimentRow[];
+    readonly experimentStatus: readonly ExperimentStatusRow[];
     readonly claudeMdUser: string | null;
     readonly claudeMdProject: string | null;
     readonly nowIso?: string;
@@ -235,6 +316,7 @@ export const buildMetaSnapshot = (input: {
         claude_md_user: input.claudeMdUser,
         claude_md_project: input.claudeMdProject,
     },
+    experiment_status: orderExperimentStatus(input.experimentStatus),
     investigation_prompts: INVESTIGATION_PROMPTS,
 });
 
@@ -256,7 +338,7 @@ export const cmdRetroMeta = (
 
         const db = yield* SurrealClient;
 
-        const [retrosRes, skillsRes, openPropsRes, expsRes] = yield* Effect.all([
+        const [retrosRes, skillsRes, openPropsRes, expsRes, expStatusRes] = yield* Effect.all([
             db.query<[Array<Record<string, unknown>>]>(
                 `SELECT id, session, source, tried, worked, failed, next,
                         type::string(created_at) AS created_at
@@ -279,7 +361,27 @@ export const cmdRetroMeta = (
                  WHERE locked_verdict IS NONE
                  ORDER BY created_at DESC LIMIT 20;`,
             ),
-        ], { concurrency: 4 });
+            db.query<[Array<Record<string, unknown>>]>(
+                `SELECT
+                    id,
+                    proposal.dedupe_sig AS proposal_dedupe_sig,
+                    proposal.title AS proposal_title,
+                    proposal.form AS proposal_form,
+                    artifact_path,
+                    created_at,
+                    type::string(created_at) AS created_at_iso,
+                    duration::days(time::now() - created_at) AS days_since_accepted,
+                    (SELECT count() FROM opportunity WHERE in = $parent.id GROUP ALL)[0].count ?? 0 AS opportunities_count,
+                    (SELECT count() FROM opportunity WHERE in = $parent.id AND was_addressed = true GROUP ALL)[0].count ?? 0 AS addressed_count,
+                    (SELECT kind, suggested, type::string(observed_at) AS observed_at
+                     FROM checkpoint
+                     WHERE experiment = $parent.id
+                     ORDER BY observed_at DESC LIMIT 1)[0] AS latest_checkpoint,
+                    locked_verdict
+                 FROM experiment
+                 ORDER BY created_at DESC;`,
+            ),
+        ], { concurrency: 5 });
 
         const rawRetros = retrosRes?.[0] ?? [];
         const retros: RetroMetaRow[] = rawRetros.map((r) => ({
@@ -314,6 +416,37 @@ export const cmdRetroMeta = (
             locked_verdict: e.locked_verdict == null ? null : String(e.locked_verdict),
         }));
 
+        const experimentStatus: ExperimentStatusRow[] = (expStatusRes?.[0] ?? []).map((e) => {
+            const opps = Number(e.opportunities_count ?? 0);
+            const addressed = Number(e.addressed_count ?? 0);
+            const ratio = opps > 0 ? addressed / opps : 0;
+            const createdAtIso = e.created_at_iso == null ? null : String(e.created_at_iso);
+            const days = coerceDaysSinceAccepted(e.days_since_accepted, createdAtIso);
+            const cp = e.latest_checkpoint;
+            let latest: ExperimentStatusCheckpoint | null = null;
+            if (cp && typeof cp === "object") {
+                const c = cp as Record<string, unknown>;
+                latest = {
+                    kind: String(c.kind ?? ""),
+                    suggested: c.suggested == null ? null : String(c.suggested),
+                    observed_at: String(c.observed_at ?? ""),
+                };
+            }
+            return {
+                experiment_id: idToString(e.id),
+                proposal_dedupe_sig: String(e.proposal_dedupe_sig ?? ""),
+                proposal_title: String(e.proposal_title ?? ""),
+                proposal_form: String(e.proposal_form ?? ""),
+                artifact_path: e.artifact_path == null ? null : String(e.artifact_path),
+                days_since_accepted: days,
+                opportunities_count: opps,
+                addressed_count: addressed,
+                address_ratio: ratio,
+                latest_checkpoint: latest,
+                locked_verdict: e.locked_verdict == null ? null : String(e.locked_verdict),
+            };
+        });
+
         const userMd = `${homedir()}/.claude/CLAUDE.md`;
         const projectMd = `${process.cwd()}/CLAUDE.md`;
         const claudeMdUser = existsSync(userMd) ? userMd : null;
@@ -325,6 +458,7 @@ export const cmdRetroMeta = (
             skills,
             openProposals,
             acceptedExperiments,
+            experimentStatus,
             claudeMdUser,
             claudeMdProject,
         });

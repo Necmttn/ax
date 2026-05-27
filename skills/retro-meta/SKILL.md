@@ -36,10 +36,16 @@ Do NOT auto-trigger on generic "look at recent work".
 ### Step 1 - Snapshot
 
 ```bash
-ax retro meta --since=30 --limit-retros=50 > /tmp/ax-meta.json
+ax retro meta --json --since=30 > /tmp/ax-meta.json
 ```
 
 Read `/tmp/ax-meta.json`. The keys you care about:
+- `experiment_status[]` - **read this FIRST** (see Step 2). Each entry:
+  `experiment_id`, `proposal_dedupe_sig`, `proposal_title`,
+  `proposal_form`, `artifact_path`, `days_since_accepted`,
+  `opportunities_count`, `addressed_count`, `address_ratio`,
+  `latest_checkpoint{kind,suggested,observed_at}`, `locked_verdict`.
+  Pending verdicts (`locked_verdict=null`) come first.
 - `retros[]` - raw `tried/worked/failed/next` per session.
 - `patterns.tool_failures` - sorted by total_count desc.
 - `patterns.corrections` - total + max-per-session + session_count.
@@ -52,7 +58,28 @@ Read `/tmp/ax-meta.json`. The keys you care about:
   paths (null if absent).
 - `investigation_prompts[]` - the prompts you must walk.
 
-### Step 2 - Walk the investigation prompts (high thinking)
+### Step 2 - Vet existing experiments FIRST
+
+Walk `experiment_status` in order. For each entry with
+`locked_verdict=null`:
+
+a. If `latest_checkpoint.suggested` is `ignored` or `regressed`:
+   investigate why (read the `artifact_path`, sample the matching
+   opportunities), then run
+   `ax improve verdict --set=<v> <proposal_dedupe_sig>` to lock the
+   call.
+b. If `latest_checkpoint.suggested` is `adopted` AND
+   `days_since_accepted > 30`: lock it as `adopted` so it stops
+   cluttering the open list:
+   `ax improve verdict --set=adopted <proposal_dedupe_sig>`.
+c. If `latest_checkpoint` is null OR `suggested` is `partial`: leave
+   open. Note in the final summary that it's still gathering signal.
+
+A rule of thumb mirrored from `investigation_prompts`: if
+`address_ratio < 0.1` after t+30, default to locking as `ignored`
+unless the artifact has an obvious "not yet exercised" reason.
+
+### Step 3 - Walk the investigation prompts (high thinking)
 
 For EACH prompt in `investigation_prompts`:
 
@@ -83,7 +110,7 @@ For EACH prompt in `investigation_prompts`:
 4. If the prompt resolves to "no change needed" or "duplicate of
    existing", say so out loud and move on.
 
-### Step 3 - Optional: hand off to scaffolder
+### Step 4 - Optional: hand off to scaffolder
 
 For each plan you registered, you may run:
 
@@ -95,10 +122,11 @@ This spawns the internal scaffolding agent to draft an artifact
 (SKILL.md, hook script, etc) from the plan. Skip if the plan is
 already self-sufficient.
 
-### Step 4 - Summary
+### Step 5 - Summary
 
 Print one paragraph:
 - N plans registered, M of those scaffolded
+- V verdicts locked (with kind, e.g. "2× ignored, 1× adopted")
 - K open_proposals reviewed (and their disposition)
 - Any prompts that resolved to "nothing here"
 - Suggested next retro window
@@ -116,6 +144,10 @@ Print one paragraph:
   one is already accepted just wastes the user's time.
 - Don't trust frequency alone. A frequency=1 retro can still be
   load-bearing if it represents a category Claude can't get right.
+- NEVER propose a new improvement that overlaps a pending experiment.
+  Vet that one first - lock its verdict or escalate before piling on
+  more proposals in the same area. The retrospective loop is
+  incomplete if old experiments stay in limbo.
 
 ## CLI reference
 
@@ -138,6 +170,9 @@ ax retro plan \
 
 # Optionally hand off scaffolding to the internal agent
 ax improve accept --with-agent <dedupe_sig>
+
+# Lock the verdict on a previously-accepted experiment
+ax improve verdict --set=adopted|ignored|regressed|partial|no_longer_needed <dedupe_sig>
 ```
 
 Output of `ax retro meta` defaults to JSON because the reader is you,

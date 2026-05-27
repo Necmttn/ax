@@ -1304,7 +1304,11 @@ DEFINE TABLE checkpoint SCHEMAFULL;
 DEFINE FIELD experiment   ON checkpoint TYPE record<experiment> REFERENCE ON DELETE CASCADE;
 DEFINE FIELD kind         ON checkpoint TYPE string;
     -- t+7 | t+30 | t+90 | adhoc
-DEFINE FIELD measured     ON checkpoint TYPE object;
+DEFINE FIELD measured              ON checkpoint TYPE object;
+DEFINE FIELD measured.opportunities ON checkpoint TYPE int DEFAULT 0;
+DEFINE FIELD measured.addressed     ON checkpoint TYPE int DEFAULT 0;
+DEFINE FIELD measured.ratio         ON checkpoint TYPE float DEFAULT 0;
+DEFINE FIELD measured.built         ON checkpoint TYPE bool DEFAULT false;
 DEFINE FIELD suggested    ON checkpoint TYPE option<string>;
     -- adopted | ignored | regressed | no_longer_needed | partial
 DEFINE FIELD user_verdict ON checkpoint TYPE option<string>;
