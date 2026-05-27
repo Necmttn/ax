@@ -96,7 +96,7 @@ describe("effect cli", () => {
     });
 
     test("resolveIngestStages: default runs every stage", () => {
-        expect(resolveIngestStages([])).toHaveLength(14);
+        expect(resolveIngestStages([])).toHaveLength(15);
     });
 
     test("resolveIngestStages: --stages= runs exactly the listed stages", () => {
@@ -112,6 +112,7 @@ describe("effect cli", () => {
             "opportunities",
             "outcomes",
             "proposals",
+            "retro-proposals",
             "session-health",
             "signals",
         ]);
