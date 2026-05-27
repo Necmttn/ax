@@ -121,4 +121,28 @@ describe("lintFiles", () => {
         expect(report.infos.some((i) => i.rule === "regressed_verdict")).toBe(true);
         expect(report.errors).toHaveLength(0);
     });
+
+    test("stale task (no marker found, task file >7 days old) → warning", async () => {
+        const root = mkdtempSync(join(tmpdir(), "ax-lint-"));
+        const taskDir = join(root, ".ax", "tasks");
+        mkdirSync(taskDir, { recursive: true });
+        const taskFile = join(taskDir, "stale.md");
+        writeFileSync(taskFile, "# old task");
+        const eightDaysAgo = new Date(Date.now() - 8 * 86_400_000);
+        require("node:fs").utimesSync(taskFile, eightDaysAgo, eightDaysAgo);
+
+        const rec: QueryRecorder = { calls: [] };
+        const experimentFixture = [{
+            id: "experiment:stale",
+            short_id: "stale",
+            status: "task_emitted",
+            task_path: taskFile,
+            locked_verdict: null,
+        }];
+        const program = lintFiles({ roots: [root], staleDays: 7 });
+        const report = await Effect.runPromise(
+            program.pipe(Effect.provide(recordingLayer(rec, [experimentFixture]))),
+        );
+        expect(report.warnings.some((w) => w.rule === "stale_task")).toBe(true);
+    });
 });

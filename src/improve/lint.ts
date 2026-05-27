@@ -28,6 +28,10 @@ export interface DiscoverOptions {
     readonly roots?: ReadonlyArray<string>;
 }
 
+export interface LintOptions extends DiscoverOptions {
+    readonly staleDays?: number;
+}
+
 const tryAddFile = (out: LintTarget[], path: string, form: LintForm): void => {
     if (existsSync(path)) out.push({ path, form });
 };
@@ -138,7 +142,7 @@ const collectIds = (target: LintTarget, errors: LintFinding[]): Map<string, stri
 };
 
 export const lintFiles = (
-    opts: DiscoverOptions = {},
+    opts: LintOptions = {},
 ): Effect.Effect<LintReport, DbError, SurrealClient> =>
     Effect.gen(function* () {
         const targets = discoverFiles(opts);
@@ -165,69 +169,98 @@ export const lintFiles = (
             }
         }
 
-        if (idToPath.size === 0) {
-            return { errors, warnings, infos, reconciled };
+        const db = yield* SurrealClient;
+
+        if (idToPath.size > 0) {
+            const idList = [...idToPath.keys()].map(surrealLiteral).join(",");
+            const result = yield* db.query<[ExperimentRow[]]>(`
+                SELECT
+                    type::string(id) AS id,
+                    proposal.dedupe_sig AS short_id,
+                    status,
+                    task_path,
+                    locked_verdict
+                FROM experiment WHERE proposal.dedupe_sig IN [${idList}];
+            `);
+            const rows: ExperimentRow[] = result?.[0] ?? [];
+            const byShortId = new Map(rows.map((r) => [r.short_id, r]));
+
+            const updates: string[] = [];
+            for (const [id, path] of idToPath) {
+                const row = byShortId.get(id);
+                if (!row) {
+                    warnings.push({
+                        rule: "orphan_id",
+                        severity: "warning",
+                        path,
+                        id,
+                        message: `marker ${id} has no experiment row (consider \`axctl improve forget ${id}\`)`,
+                    });
+                    continue;
+                }
+                if (row.locked_verdict === "regressed") {
+                    infos.push({
+                        rule: "regressed_verdict",
+                        severity: "info",
+                        path,
+                        id,
+                        message: `experiment ${id} locked as regressed - consider removing the marker`,
+                    });
+                }
+                if (row.status === "task_emitted") {
+                    let taskDeleted: string | null = null;
+                    if (row.task_path && existsSync(row.task_path)) {
+                        try {
+                            unlinkSync(row.task_path);
+                            taskDeleted = row.task_path;
+                        } catch { /* leave it */ }
+                    }
+                    updates.push(
+                        `UPDATE ${row.id} SET status = 'scaffolded', scaffolded_at = time::now(), artifact_path = ${surrealLiteral(path)};`,
+                    );
+                    reconciled.push({
+                        shortId: id,
+                        experimentId: row.id,
+                        previousStatus: row.status,
+                        nextStatus: "scaffolded",
+                        taskDeleted,
+                    });
+                }
+            }
+
+            if (updates.length > 0) {
+                yield* db.query(updates.join("\n"));
+            }
         }
 
-        const db = yield* SurrealClient;
-        const idList = [...idToPath.keys()].map(surrealLiteral).join(",");
-        const result = yield* db.query<[ExperimentRow[]]>(`
+        // Stale-task scan: always runs regardless of whether markers were found.
+        // Warns about task_emitted experiments whose task file is >staleDays old
+        // and whose short_id was NOT seen as a marker this run.
+        const staleResult = yield* db.query<[ExperimentRow[]]>(`
             SELECT
                 type::string(id) AS id,
                 proposal.dedupe_sig AS short_id,
                 status,
                 task_path,
                 locked_verdict
-            FROM experiment WHERE proposal.dedupe_sig IN [${idList}];
+            FROM experiment WHERE status = 'task_emitted' AND task_path IS NOT NONE;
         `);
-        const rows: ExperimentRow[] = result?.[0] ?? [];
-        const byShortId = new Map(rows.map((r) => [r.short_id, r]));
-
-        const updates: string[] = [];
-        for (const [id, path] of idToPath) {
-            const row = byShortId.get(id);
-            if (!row) {
+        const staleCutoffMs = Date.now() - (opts.staleDays ?? 7) * 86_400_000;
+        for (const row of staleResult?.[0] ?? []) {
+            if (idToPath.has(row.short_id)) continue; // marker found this run → not stale
+            if (!row.task_path || !existsSync(row.task_path)) continue;
+            let mtime: number;
+            try { mtime = statSync(row.task_path).mtimeMs; }
+            catch { continue; }
+            if (mtime < staleCutoffMs) {
                 warnings.push({
-                    rule: "orphan_id",
+                    rule: "stale_task",
                     severity: "warning",
-                    path,
-                    id,
-                    message: `marker ${id} has no experiment row (consider \`axctl improve forget ${id}\`)`,
-                });
-                continue;
-            }
-            if (row.locked_verdict === "regressed") {
-                infos.push({
-                    rule: "regressed_verdict",
-                    severity: "info",
-                    path,
-                    id,
-                    message: `experiment ${id} locked as regressed - consider removing the marker`,
+                    path: row.task_path,
+                    id: row.short_id,
+                    message: `task file >${opts.staleDays ?? 7}d old with no marker (consider \`axctl improve reject ${row.short_id}\`)`,
                 });
             }
-            if (row.status === "task_emitted") {
-                let taskDeleted: string | null = null;
-                if (row.task_path && existsSync(row.task_path)) {
-                    try {
-                        unlinkSync(row.task_path);
-                        taskDeleted = row.task_path;
-                    } catch { /* leave it */ }
-                }
-                updates.push(
-                    `UPDATE ${row.id} SET status = 'scaffolded', scaffolded_at = time::now(), artifact_path = ${surrealLiteral(path)};`,
-                );
-                reconciled.push({
-                    shortId: id,
-                    experimentId: row.id,
-                    previousStatus: row.status,
-                    nextStatus: "scaffolded",
-                    taskDeleted,
-                });
-            }
-        }
-
-        if (updates.length > 0) {
-            yield* db.query(updates.join("\n"));
         }
 
         return { errors, warnings, infos, reconciled };
