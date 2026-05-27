@@ -135,6 +135,10 @@ const collectIds = (target: LintTarget, errors: LintFinding[]): Map<string, stri
             });
         }
     } else {
+        // skill and subagent files both use the frontmatter convention;
+        // reconcile path is the same for both (subagent experiments would be
+        // handled identically if one existed - acceptProposal rejects subagent
+        // form in v0, so no experiments exist for them yet).
         const fm = parseFrontmatterMarker(content);
         if (fm) found.set(fm.id, target.path);
     }

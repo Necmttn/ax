@@ -50,7 +50,8 @@ export function ImproveRoute() {
 
     const onActionResult = (action: string, res: ImproveActionResponse) => {
         if (res.status === "ok") {
-            setActionInfo(`${action}: ok${res.artifact_path ? ` → ${res.artifact_path}` : ""}`);
+            const path = res.artifact_path ?? res.task_path;
+            setActionInfo(`${action}: ok${path ? ` → ${path}` : ""}`);
             setActionError(null);
             queryClient.invalidateQueries({ queryKey: ["improve"] });
         } else {

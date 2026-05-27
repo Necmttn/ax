@@ -100,7 +100,7 @@ const defaultTaskDir = (): string =>
  */
 const buildTaskInput = (row: FullProposalRow, experimentId: string): TaskInput => {
     const form = row.form as TaskInput["form"];
-    const shortId = row.dedupe_sig.slice(0, 8);
+    const shortId = row.dedupe_sig;
     if (row.form === "guidance") {
         return {
             form: "guidance",

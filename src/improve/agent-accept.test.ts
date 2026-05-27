@@ -61,12 +61,14 @@ const fakeRowsLayer = (fixtures: ReadonlyArray<unknown[]>) => {
 describe("acceptProposal - task emission", () => {
     test("guidance form emits .ax/tasks/<id>.md (no direct file scaffold)", async () => {
         const taskDir = mkdtempSync(join(tmpdir(), "ax-task-"));
+        // dedupe_sig is LONGER than 8 chars to catch shortId truncation bugs
+        const longSig = "guidance__abcdef12345";
         const proposalRow = {
             id: "proposal:guid1",
             form: "guidance",
             title: "Add pre-bash guidance",
             hypothesis: "Bash failed repeatedly without pre-checks",
-            dedupe_sig: "e7f3abcd",
+            dedupe_sig: longSig,
             status: "open",
             skill_payload: null,
             guidance_payload: {
@@ -82,7 +84,7 @@ describe("acceptProposal - task emission", () => {
         ]);
 
         const result = await Effect.runPromise(
-            acceptProposal({ sigOrId: "e7f3abcd", taskDir }).pipe(
+            acceptProposal({ sigOrId: longSig, taskDir }).pipe(
                 Effect.provide(layer),
             ),
         );
@@ -94,17 +96,22 @@ describe("acceptProposal - task emission", () => {
 
         const body = readFileSync(result.task_path!, "utf-8");
         expect(body).toContain("form=guidance");
-        expect(body).toContain("<!--ax:e7f3abcd-->");
+        // Full sig must appear in the marker; a truncated 8-char slice must not
+        expect(body).toContain(`<!--ax:${longSig}-->`);
+        // Regression guard: truncated form must not appear as a standalone marker
+        expect(body).not.toContain(`<!--ax:${longSig.slice(0, 8)}-->`);
     });
 
     test("skill form defaults to task emission (no autoScaffold)", async () => {
         const taskDir = mkdtempSync(join(tmpdir(), "ax-task-"));
+        // dedupe_sig is LONGER than 8 chars to catch shortId truncation bugs
+        const longSig = "skill__abcdef12345";
         const proposalRow = {
             id: "proposal:skill1",
             form: "skill",
             title: "Pre-Bash guard skill",
             hypothesis: "Bash failed 7 times",
-            dedupe_sig: "skill1ab",
+            dedupe_sig: longSig,
             status: "open",
             skill_payload: {
                 proposed_behavior: "validate preconditions before Bash",
@@ -120,7 +127,7 @@ describe("acceptProposal - task emission", () => {
         ]);
 
         const result = await Effect.runPromise(
-            acceptProposal({ sigOrId: "skill1ab", taskDir }).pipe(
+            acceptProposal({ sigOrId: longSig, taskDir }).pipe(
                 Effect.provide(layer),
             ),
         );
@@ -132,7 +139,10 @@ describe("acceptProposal - task emission", () => {
 
         const body = readFileSync(result.task_path!, "utf-8");
         expect(body).toContain("form=skill");
-        expect(body).toContain("ax_id: skill1ab");
+        // Full sig must appear in the frontmatter; a truncated 8-char slice must not
+        expect(body).toContain(`ax_id: ${longSig}`);
+        // Regression guard: the truncated form must not appear as the standalone ax_id value
+        expect(body).not.toContain(`ax_id: ${longSig.slice(0, 8)}\n`);
     });
 
     test("skill form with autoScaffold=true preserves direct-write path", async () => {
