@@ -1,11 +1,13 @@
 /**
- * TraceSink — Buffered event sink with pluggable transport.
+ * TraceSink - Buffered event sink with pluggable transport.
  *
  * The sink has two parts:
  * - TraceSinkHandle: synchronous emit() for use inside Tracer.span() (which is sync)
  * - TraceSink: Effect service that manages the handle + flush daemon
  *
  * TraceTransport: pluggable backend (Durable Streams, SSE, WebSocket, console, etc.)
+ *
+ * Console transport implementation lives in `./transports/console.ts`.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -15,7 +17,7 @@ import * as Schedule from "effect/Schedule";
 import type { TraceEvent } from "./types.ts";
 
 // ============================================================================
-// TraceTransport — pluggable destination
+// TraceTransport - pluggable destination
 // ============================================================================
 
 export interface TraceTransport {
@@ -26,7 +28,7 @@ export interface TraceTransport {
 export class TraceTransportTag extends Context.Service<TraceTransportTag, TraceTransport>()("@live-traces/TraceTransport") {}
 
 // ============================================================================
-// TraceSinkHandle — the synchronous interface used by WrappedSpan
+// TraceSinkHandle - the synchronous interface used by WrappedSpan
 // ============================================================================
 
 export interface TraceSinkHandle {
@@ -35,13 +37,13 @@ export interface TraceSinkHandle {
 }
 
 // ============================================================================
-// TraceSink — Effect service managing buffer + flush lifecycle
+// TraceSink - Effect service managing buffer + flush lifecycle
 // ============================================================================
 
 export class TraceSink extends Context.Service<TraceSink, TraceSinkHandle>()("@live-traces/TraceSink") {}
 
 // ============================================================================
-// Layer — creates a TraceSink backed by a TraceTransport
+// Layer - creates a TraceSink backed by a TraceTransport
 // ============================================================================
 
 export interface TraceSinkConfig {
@@ -89,19 +91,3 @@ export const TraceSinkLive = (config?: TraceSinkConfig): Layer.Layer<TraceSink, 
             return handle;
         }),
     );
-
-// ============================================================================
-// Console transport — for development/debugging
-// ============================================================================
-
-export const ConsoleTransport: TraceTransport = {
-    send: (events) =>
-        Effect.sync(() => {
-            for (const event of events) {
-                // eslint-disable-next-line no-console
-                console.log(`[live-trace] ${event._tag}`, JSON.stringify(event));
-            }
-        }),
-};
-
-export const ConsoleTransportLayer: Layer.Layer<TraceTransportTag> = Layer.succeed(TraceTransportTag, ConsoleTransport);
