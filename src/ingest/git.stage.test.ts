@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { Schema } from "effect";
-import { GitKey, GitStageStats, gitStage } from "./git.ts";
+import { GitKey, gitStage } from "./git.ts";
 
 describe("gitStage", () => {
     it("declares the canonical key/deps/tags", () => {

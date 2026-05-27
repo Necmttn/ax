@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { Schema } from "effect";
-import { HarnessKey, HarnessStageStats, harnessStage } from "./harness.ts";
+import { HarnessKey, harnessStage } from "./harness.ts";
 
 describe("harnessStage", () => {
     it("declares the canonical key/deps/tags", () => {

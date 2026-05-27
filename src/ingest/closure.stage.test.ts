@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { Schema } from "effect";
-import { ClosureKey, ClosureStageStats, closureStage } from "./closure.ts";
+import { ClosureKey, closureStage } from "./closure.ts";
 
 describe("closureStage", () => {
     it("declares the canonical key/deps/tags", () => {

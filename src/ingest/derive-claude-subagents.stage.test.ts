@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { Schema } from "effect";
-import { SubagentsKey, SubagentsStats, subagentsStage } from "./derive-claude-subagents.ts";
+import { SubagentsKey, subagentsStage } from "./derive-claude-subagents.ts";
 
 describe("subagentsStage", () => {
     it("declares the canonical key/deps/tags", () => {

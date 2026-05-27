@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { Schema } from "effect";
-import { OutcomesKey, OutcomesStageStats, outcomesStage } from "./outcomes.ts";
+import { OutcomesKey, outcomesStage } from "./outcomes.ts";
 
 describe("outcomesStage", () => {
     it("declares the canonical key/deps/tags", () => {

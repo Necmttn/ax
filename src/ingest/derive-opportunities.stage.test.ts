@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { Schema } from "effect";
-import { OpportunitiesKey, OpportunitiesStats, opportunitiesStage } from "./derive-opportunities.ts";
+import { OpportunitiesKey, opportunitiesStage } from "./derive-opportunities.ts";
 
 describe("opportunitiesStage", () => {
     it("declares the canonical key/deps/tags", () => {

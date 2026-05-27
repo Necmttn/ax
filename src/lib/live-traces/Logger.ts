@@ -27,7 +27,7 @@ export const liveTraceLogger = Logger.make(({ message, logLevel, fiber }) => {
     const msg = Array.isArray(message) ? message.join(" ") : String(message);
 
     const annotations = fiber.getRef(References.CurrentLogAnnotations);
-    const attrs: Record<string, unknown> = { "effect.logLevel": logLevel.label };
+    const attrs: Record<string, unknown> = { "effect.logLevel": logLevel };
     for (const [k, v] of Object.entries(annotations)) {
         attrs[k] = v;
     }

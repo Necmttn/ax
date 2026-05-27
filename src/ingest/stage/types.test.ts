@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { Schema } from "effect";
 import { BaseStageStats, IngestContext, StageMeta } from "./types.ts";
-import { IngestTag, DeriveTag, IngestStageTag } from "./tags.ts";
+import { IngestStageTag } from "./tags.ts";
 
 class ExampleStats extends BaseStageStats.extend<ExampleStats>("ExampleStats")({
     rowsWritten: Schema.Number,

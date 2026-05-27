@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { Schema } from "effect";
-import { SessionHealthKey, SessionHealthStageStats, sessionHealthStage } from "./session-health.ts";
+import { SessionHealthKey, sessionHealthStage } from "./session-health.ts";
 
 describe("sessionHealthStage", () => {
     it("declares the canonical key/deps/tags", () => {

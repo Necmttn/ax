@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { Schema } from "effect";
-import { CodexKey, CodexStageStats, codexStage } from "./codex.ts";
+import { CodexKey, codexStage } from "./codex.ts";
 
 describe("codexStage", () => {
     it("declares the canonical key/deps/tags", () => {

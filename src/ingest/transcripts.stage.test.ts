@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { Schema } from "effect";
-import { ClaudeKey, ClaudeStats, claudeStage } from "./transcripts.ts";
+import { ClaudeKey, claudeStage } from "./transcripts.ts";
 
 describe("claudeStage", () => {
     it("declares the canonical key/deps/tags", () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { Schema } from "effect";
-import { SpawnedKey, SpawnedStats, spawnedStage } from "./derive-spawned.ts";
+import { SpawnedKey, spawnedStage } from "./derive-spawned.ts";
 
 describe("spawnedStage", () => {
     it("declares the canonical key/deps/tags", () => {
