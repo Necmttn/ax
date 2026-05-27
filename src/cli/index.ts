@@ -24,6 +24,7 @@ import { retroFromSession, upsertRetro, type RetroSource } from "../ingest/retro
 import { scaffoldSkill } from "../improve/skill-scaffold.ts";
 import { runAgentAccept } from "../improve/agent-accept.ts";
 import { acceptProposal } from "../improve/actions.ts";
+import { lintFiles } from "../improve/lint.ts";
 import { cmdRetroReflect } from "./retro-reflect.ts";
 import { cmdRetroMeta } from "./retro-meta.ts";
 import { cmdRetroPlan } from "./retro-plan.ts";
@@ -1797,6 +1798,64 @@ const cmdImproveShow = (args: string[]) =>
         }
     });
 
+const cmdImproveLint = (args: string[]) =>
+    Effect.gen(function* () {
+        const json = args.includes("--json");
+        const staleDays = parsePositiveIntFlag("improve lint", "stale-days", args, 7);
+        // Collect --root values (repeatable)
+        const roots: string[] = [];
+        for (const a of args) {
+            if (a.startsWith("--root=")) roots.push(a.slice("--root=".length));
+        }
+        const report = yield* lintFiles({
+            roots: roots.length > 0 ? roots : undefined,
+            staleDays,
+        });
+        if (json) {
+            console.log(JSON.stringify(report, null, 2));
+        } else {
+            for (const f of report.errors) {
+                console.log(`error  ${f.rule}: ${f.message} (${f.path})`);
+            }
+            for (const f of report.warnings) {
+                console.log(`warn   ${f.rule}: ${f.message} (${f.path})`);
+            }
+            for (const f of report.infos) {
+                console.log(`info   ${f.rule}: ${f.message} (${f.path})`);
+            }
+            for (const r of report.reconciled) {
+                const suffix = r.taskDeleted ? ` (removed ${r.taskDeleted})` : "";
+                console.log(`reconciled ${r.shortId}: ${r.previousStatus} -> ${r.nextStatus}${suffix}`);
+            }
+            const allEmpty =
+                report.errors.length === 0 &&
+                report.warnings.length === 0 &&
+                report.infos.length === 0 &&
+                report.reconciled.length === 0;
+            if (allEmpty) console.log("clean.");
+        }
+        if (report.errors.length > 0) {
+            process.exit(2);
+        } else if (report.warnings.length > 0) {
+            process.exitCode = 1;
+        }
+    });
+
+const improveLintCommand = Command.make(
+    "lint",
+    {
+        root: Flag.string("root").pipe(Flag.atLeast(0)),
+        json: jsonFlag,
+        staleDays: Flag.integer("stale-days").pipe(Flag.withDefault(7)),
+    },
+    ({ root, json, staleDays }) =>
+        cmdImproveLint([
+            ...[...root].map((r) => `--root=${r}`),
+            ...boolArg("json", json),
+            `--stale-days=${staleDays}`,
+        ]),
+).pipe(Command.withDescription("Scan grounded agent files for marker issues; reconcile task_emitted experiments; warn on stale tasks"));
+
 const improveListCommand = Command.make(
     "list",
     {
@@ -2294,6 +2353,7 @@ const improveCheckpointCommand = Command.make(
 const improveCommand = Command.make("improve").pipe(
     Command.withDescription("Experiment loop: review proposals, accept skills, track verdicts"),
     Command.withSubcommands([
+        improveLintCommand,
         improveListCommand,
         improveShowCommand,
         improveAcceptCommand,
