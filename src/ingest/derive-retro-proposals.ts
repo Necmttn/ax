@@ -773,3 +773,41 @@ if (import.meta.main) {
         ) as Effect.Effect<DeriveRetroProposalsStats>,
     );
 }
+
+// ---------------------------------------------------------------------------
+// Co-located StageDef
+// ---------------------------------------------------------------------------
+
+import { Schema } from "effect";
+import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
+import type { StageDef } from "./stage/registry.ts";
+
+export const RetroProposalsKey = Schema.Literal("retro-proposals");
+export type RetroProposalsKey = typeof RetroProposalsKey.Type;
+
+/**
+ * Retro-proposals stage - clusters per-session retro `failed` strings into
+ * skill-form proposals. Depends on {@link ProposalsKey}.
+ */
+export class RetroProposalsStats extends BaseStageStats.extend<RetroProposalsStats>("RetroProposalsStats")({
+    toolFailureProposals: Schema.Number,
+    clusters: Schema.Number,
+}) {}
+
+export const retroProposalsStage: StageDef<RetroProposalsStats, SurrealClient> = {
+    meta: StageMeta.make({ key: "retro-proposals", deps: ["proposals"], tags: ["derive", "retro"] }),
+    run: (ctx: IngestContext) =>
+        Effect.gen(function* () {
+            const t0 = Date.now();
+            const sinceDays = Math.ceil(
+                (Date.now() - ctx.since.getTime()) / (1000 * 60 * 60 * 24),
+            );
+            const result = yield* deriveRetroProposals({ sinceDays });
+            return RetroProposalsStats.make({
+                durationMs: Date.now() - t0,
+                summary: `derived ${result.toolFailureProposals} tool-failure proposals from ${result.clusters} clusters`,
+                toolFailureProposals: result.toolFailureProposals,
+                clusters: result.clusters,
+            });
+        }),
+};
