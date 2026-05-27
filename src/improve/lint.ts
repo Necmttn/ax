@@ -8,9 +8,14 @@
  * `~/.claude`. Override via `discoverFiles({ roots: [...] })`.
  */
 
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { Effect } from "effect";
+import { SurrealClient } from "../lib/db.ts";
+import { surrealLiteral } from "../lib/json.ts";
+import { parseInlineMarkers, parseFrontmatterMarker } from "./markers.ts";
+import type { DbError } from "../lib/errors.ts";
 
 export type LintForm = "guidance" | "skill" | "subagent";
 
@@ -68,3 +73,164 @@ export const discoverFiles = (opts: DiscoverOptions = {}): LintTarget[] => {
         return true;
     });
 };
+
+// ---------------------------------------------------------------------------
+// lintFiles - marker scan + DB reconcile + task cleanup
+// ---------------------------------------------------------------------------
+
+export type LintSeverity = "error" | "warning" | "info";
+
+export interface LintFinding {
+    readonly rule: string;
+    readonly severity: LintSeverity;
+    readonly path: string;
+    readonly id?: string;
+    readonly message: string;
+}
+
+export interface LintReconciliation {
+    readonly shortId: string;
+    readonly experimentId: string;
+    readonly previousStatus: string;
+    readonly nextStatus: string;
+    readonly taskDeleted: string | null;
+}
+
+export interface LintReport {
+    readonly errors: LintFinding[];
+    readonly warnings: LintFinding[];
+    readonly infos: LintFinding[];
+    readonly reconciled: LintReconciliation[];
+}
+
+interface ExperimentRow {
+    readonly id: string;
+    readonly short_id: string;
+    readonly status: string;
+    readonly task_path: string | null;
+    readonly locked_verdict: string | null;
+}
+
+const collectIds = (target: LintTarget, errors: LintFinding[]): Map<string, string> => {
+    const found = new Map<string, string>();
+    let content: string;
+    try {
+        content = readFileSync(target.path, "utf-8");
+    } catch {
+        return found;
+    }
+    if (target.form === "guidance") {
+        try {
+            for (const m of parseInlineMarkers(content)) found.set(m.id, target.path);
+        } catch (err) {
+            errors.push({
+                rule: "marker_parse_error",
+                severity: "error",
+                path: target.path,
+                message: (err as Error).message,
+            });
+        }
+    } else {
+        const fm = parseFrontmatterMarker(content);
+        if (fm) found.set(fm.id, target.path);
+    }
+    return found;
+};
+
+export const lintFiles = (
+    opts: DiscoverOptions = {},
+): Effect.Effect<LintReport, DbError, SurrealClient> =>
+    Effect.gen(function* () {
+        const targets = discoverFiles(opts);
+        const errors: LintFinding[] = [];
+        const warnings: LintFinding[] = [];
+        const infos: LintFinding[] = [];
+        const reconciled: LintReconciliation[] = [];
+
+        const idToPath = new Map<string, string>();
+        for (const t of targets) {
+            const found = collectIds(t, errors);
+            for (const [id, path] of found) {
+                if (idToPath.has(id)) {
+                    warnings.push({
+                        rule: "id_collision",
+                        severity: "warning",
+                        path,
+                        id,
+                        message: `id ${id} also in ${idToPath.get(id)}`,
+                    });
+                } else {
+                    idToPath.set(id, path);
+                }
+            }
+        }
+
+        if (idToPath.size === 0) {
+            return { errors, warnings, infos, reconciled };
+        }
+
+        const db = yield* SurrealClient;
+        const idList = [...idToPath.keys()].map(surrealLiteral).join(",");
+        const result = yield* db.query<[ExperimentRow[]]>(`
+            SELECT
+                type::string(id) AS id,
+                proposal.dedupe_sig AS short_id,
+                status,
+                task_path,
+                locked_verdict
+            FROM experiment WHERE proposal.dedupe_sig IN [${idList}];
+        `);
+        const rows: ExperimentRow[] = Array.isArray(result?.[0])
+            ? (result[0] as ExperimentRow[])
+            : ((result ?? []) as unknown as ExperimentRow[]);
+        const byShortId = new Map(rows.map((r) => [r.short_id, r]));
+
+        const updates: string[] = [];
+        for (const [id, path] of idToPath) {
+            const row = byShortId.get(id);
+            if (!row) {
+                warnings.push({
+                    rule: "orphan_id",
+                    severity: "warning",
+                    path,
+                    id,
+                    message: `marker ${id} has no experiment row (consider \`axctl improve forget ${id}\`)`,
+                });
+                continue;
+            }
+            if (row.locked_verdict === "regressed") {
+                infos.push({
+                    rule: "regressed_verdict",
+                    severity: "info",
+                    path,
+                    id,
+                    message: `experiment ${id} locked as regressed - consider removing the marker`,
+                });
+            }
+            if (row.status === "task_emitted") {
+                let taskDeleted: string | null = null;
+                if (row.task_path && existsSync(row.task_path)) {
+                    try {
+                        unlinkSync(row.task_path);
+                        taskDeleted = row.task_path;
+                    } catch { /* leave it */ }
+                }
+                updates.push(
+                    `UPDATE ${row.id} SET status = 'scaffolded', scaffolded_at = time::now(), artifact_path = ${surrealLiteral(path)};`,
+                );
+                reconciled.push({
+                    shortId: id,
+                    experimentId: row.id,
+                    previousStatus: row.status,
+                    nextStatus: "scaffolded",
+                    taskDeleted,
+                });
+            }
+        }
+
+        if (updates.length > 0) {
+            yield* db.query(updates.join("\n"));
+        }
+
+        return { errors, warnings, infos, reconciled };
+    });
