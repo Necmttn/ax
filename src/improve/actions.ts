@@ -8,12 +8,15 @@
  */
 
 import { Effect } from "effect";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { SurrealClient } from "../lib/db.ts";
 import type { DbError } from "../lib/errors.ts";
 import { recordRef, surrealString } from "../lib/shared/surql.ts";
 import { surrealLiteral } from "../lib/json.ts";
 import { recordKeyPart } from "../lib/shared/derive-keys.ts";
 import { scaffoldSkill, type ScaffoldResult } from "./skill-scaffold.ts";
+import { renderTaskFile, type TaskInput } from "./task-template.ts";
 
 export type ImproveActionStatus =
     | "ok"
@@ -34,6 +37,7 @@ export interface AcceptResult {
     readonly proposal_id?: string;
     readonly experiment_id?: string;
     readonly artifact_path?: string;
+    readonly task_path?: string;
     readonly existing_experiment?: {
         readonly id: string;
         readonly artifact_path: string | null;
@@ -67,28 +71,85 @@ interface ProposalRow {
     readonly skill_payload?: Record<string, unknown> | null;
 }
 
-const fetchProposal = (idLiteral: string) =>
+interface FullProposalRow extends ProposalRow {
+    readonly guidance_payload?: {
+        readonly file_target?: string | null;
+        readonly section?: string | null;
+        readonly suggested_text?: string | null;
+    } | null;
+}
+
+const fetchFullProposal = (idLiteral: string) =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
-        const result = yield* db.query<[ProposalRow[]]>(
-            `SELECT *, (SELECT * FROM skill_proposal WHERE proposal = $parent.id LIMIT 1)[0] AS skill_payload
+        const result = yield* db.query<[FullProposalRow[]]>(
+            `SELECT *,
+                (SELECT * FROM skill_proposal WHERE proposal = $parent.id LIMIT 1)[0] AS skill_payload,
+                (SELECT * FROM guidance_proposal WHERE proposal = $parent.id LIMIT 1)[0] AS guidance_payload
             FROM proposal WHERE dedupe_sig = ${idLiteral} OR id = ${idLiteral} LIMIT 1;`,
         );
         return (result?.[0] ?? [])[0] ?? null;
     });
 
+/** Default directory for .ax/tasks/ task brief files. */
+const defaultTaskDir = (): string =>
+    process.env.AX_TASK_DIR ?? join(process.cwd(), ".ax", "tasks");
+
+/**
+ * Map a full proposal row + experimentId to a TaskInput for renderTaskFile.
+ */
+const buildTaskInput = (row: FullProposalRow, experimentId: string): TaskInput => {
+    const form = row.form as TaskInput["form"];
+    const shortId = row.dedupe_sig.slice(0, 8);
+    if (row.form === "guidance") {
+        return {
+            form: "guidance",
+            experimentId,
+            proposalId: `proposal:${recordKeyPart(row.id, "proposal") ?? row.dedupe_sig}`,
+            shortId,
+            title: row.title,
+            targetPath: row.guidance_payload?.file_target ?? "~/.claude/CLAUDE.md",
+            section: row.guidance_payload?.section ?? null,
+            suggestedBody: row.guidance_payload?.suggested_text ?? row.hypothesis,
+            proposedBehavior: null,
+            confidence: "medium",
+            frequency: 0,
+            evidence: row.hypothesis,
+        };
+    }
+    // skill form
+    return {
+        form: "skill",
+        experimentId,
+        proposalId: `proposal:${recordKeyPart(row.id, "proposal") ?? row.dedupe_sig}`,
+        shortId,
+        title: row.title,
+        targetPath: `~/.claude/skills/${row.dedupe_sig}/SKILL.md`,
+        section: null,
+        suggestedBody: "",
+        proposedBehavior: String(row.skill_payload?.proposed_behavior ?? ""),
+        confidence: "medium",
+        frequency: 0,
+        evidence: row.hypothesis,
+    };
+};
+
 export interface AcceptOptions {
     readonly sigOrId: string;
     readonly force?: boolean;
-    readonly scaffoldBaseDir?: string;
+    readonly autoScaffold?: boolean;     // skill form only - preserves existing direct-write path
+    readonly scaffoldBaseDir?: string;   // forwarded to scaffoldSkill when autoScaffold=true
+    readonly taskDir?: string;           // override .ax/tasks/ output dir
 }
+
+const V0_FORMS = new Set(["guidance", "skill"]);
 
 export const acceptProposal = (
     opts: AcceptOptions,
 ): Effect.Effect<AcceptResult, DbError, SurrealClient> =>
     Effect.gen(function* () {
         const idLiteral = surrealLiteral(opts.sigOrId);
-        const row = yield* fetchProposal(idLiteral);
+        const row = yield* fetchFullProposal(idLiteral);
         if (!row) return { status: "not_found", message: `no proposal matched ${opts.sigOrId}` };
         const proposalKey = recordKeyPart(row.id, "proposal");
         if (!proposalKey) {
@@ -117,59 +178,101 @@ export const acceptProposal = (
             }
             return result;
         }
-        if (row.form !== "skill") {
+
+        if (!V0_FORMS.has(row.form)) {
             return {
                 status: "unsupported_form",
-                message: `accept currently supports form=skill only (got ${row.form}); subagent/hook/guidance/automation land in later phases`,
+                message: `accept supports form=guidance and form=skill (got ${row.form}); subagent/hook/automation land in later phases`,
             };
         }
-        const payload = row.skill_payload ?? null;
-        if (!payload) {
-            return { status: "missing_payload", message: "skill_proposal payload missing" };
-        }
-        let scaffold: ScaffoldResult;
-        try {
-            scaffold = scaffoldSkill({
-                input: {
-                    title: row.title,
-                    hypothesis: row.hypothesis,
-                    proposedBehavior: String(payload.proposed_behavior ?? ""),
-                    triggerPattern: payload.trigger_pattern == null ? null : String(payload.trigger_pattern),
-                    expectedImpact: payload.expected_impact == null ? null : String(payload.expected_impact),
-                    dedupeSig: row.dedupe_sig,
-                    nowIso: new Date().toISOString(),
-                },
-                ...(opts.scaffoldBaseDir === undefined ? {} : { baseDir: opts.scaffoldBaseDir }),
-                ...(opts.force === undefined ? {} : { force: opts.force }),
-            });
-        } catch (err) {
+
+        const experimentKey = `${proposalKey}__${Date.now().toString(36)}`;
+        const experimentId = `experiment:${experimentKey}`;
+        const db = yield* SurrealClient;
+
+        // autoScaffold=true && form=skill: legacy direct-write path
+        if (opts.autoScaffold && row.form === "skill") {
+            const payload = row.skill_payload ?? null;
+            if (!payload) {
+                return { status: "missing_payload", message: "skill_proposal payload missing" };
+            }
+            let scaffold: ScaffoldResult;
+            try {
+                scaffold = scaffoldSkill({
+                    input: {
+                        title: row.title,
+                        hypothesis: row.hypothesis,
+                        proposedBehavior: String(payload.proposed_behavior ?? ""),
+                        triggerPattern: payload.trigger_pattern == null ? null : String(payload.trigger_pattern),
+                        expectedImpact: payload.expected_impact == null ? null : String(payload.expected_impact),
+                        dedupeSig: row.dedupe_sig,
+                        nowIso: new Date().toISOString(),
+                    },
+                    ...(opts.scaffoldBaseDir === undefined ? {} : { baseDir: opts.scaffoldBaseDir }),
+                    ...(opts.force === undefined ? {} : { force: opts.force }),
+                });
+            } catch (err) {
+                return {
+                    status: "missing_payload",
+                    message: `scaffold failed: ${err instanceof Error ? err.message : String(err)}`,
+                };
+            }
+            if (scaffold.skipped) {
+                return {
+                    status: "scaffold_exists",
+                    message: `existing scaffold at ${scaffold.path} (pass force=true to overwrite)`,
+                    artifact_path: scaffold.path,
+                };
+            }
+            yield* db.query(`
+                UPDATE ${recordRef("proposal", proposalKey)} SET status = 'accepted', updated_at = time::now();
+                UPSERT ${recordRef("experiment", experimentKey)} MERGE {
+                    proposal: ${recordRef("proposal", proposalKey)},
+                    artifact_path: ${surrealLiteral(scaffold.path)},
+                    scaffolded_at: time::now(),
+                    status: 'scaffolded'
+                };
+            `);
             return {
-                status: "missing_payload",
-                message: `scaffold failed: ${err instanceof Error ? err.message : String(err)}`,
-            };
-        }
-        if (scaffold.skipped) {
-            return {
-                status: "scaffold_exists",
-                message: `existing scaffold at ${scaffold.path} (pass force=true to overwrite)`,
+                status: "ok",
+                proposal_id: `proposal:${proposalKey}`,
+                experiment_id: experimentId,
                 artifact_path: scaffold.path,
             };
         }
-        const experimentKey = `${proposalKey}__${Date.now().toString(36)}`;
-        const db = yield* SurrealClient;
+
+        // Default path for all v0 forms: emit .ax/tasks/<dedupe_sig>.md
+        const taskDir = opts.taskDir ?? defaultTaskDir();
+        const taskPath = join(taskDir, `${row.dedupe_sig}.md`);
+
+        if (existsSync(taskPath) && !opts.force) {
+            return {
+                status: "scaffold_exists",
+                message: `task brief already exists at ${taskPath} (pass force=true to overwrite)`,
+                task_path: taskPath,
+            };
+        }
+
+        const taskInput = buildTaskInput(row, experimentId);
+        const taskContent = renderTaskFile(taskInput);
+
+        mkdirSync(taskDir, { recursive: true });
+        writeFileSync(taskPath, taskContent, { encoding: "utf-8" });
+
         yield* db.query(`
             UPDATE ${recordRef("proposal", proposalKey)} SET status = 'accepted', updated_at = time::now();
             UPSERT ${recordRef("experiment", experimentKey)} MERGE {
                 proposal: ${recordRef("proposal", proposalKey)},
-                artifact_path: ${surrealLiteral(scaffold.path)},
-                scaffolded_at: time::now()
+                task_path: ${surrealLiteral(taskPath)},
+                status: 'task_emitted'
             };
         `);
+
         return {
             status: "ok",
             proposal_id: `proposal:${proposalKey}`,
-            experiment_id: `experiment:${experimentKey}`,
-            artifact_path: scaffold.path,
+            experiment_id: experimentId,
+            task_path: taskPath,
         };
     });
 
@@ -183,7 +286,7 @@ export const rejectProposal = (
 ): Effect.Effect<RejectResult, DbError, SurrealClient> =>
     Effect.gen(function* () {
         const idLiteral = surrealLiteral(opts.sigOrId);
-        const row = yield* fetchProposal(idLiteral);
+        const row = yield* fetchFullProposal(idLiteral);
         if (!row) return { status: "not_found", message: `no proposal matched ${opts.sigOrId}` };
         if (row.status !== "open") return { status: "wrong_status", message: `proposal already ${row.status}` };
         const proposalKey = recordKeyPart(row.id, "proposal");

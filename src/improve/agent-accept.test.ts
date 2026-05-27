@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { Effect, Layer } from "effect";
+import { mkdtempSync, readFileSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { buildAgentAcceptPrompt, runAgentAccept } from "./agent-accept.ts";
+import { acceptProposal } from "./actions.ts";
+import { SurrealClient } from "../lib/db.ts";
 
 describe("buildAgentAcceptPrompt", () => {
     const ctx = {
@@ -39,6 +45,128 @@ describe("buildAgentAcceptPrompt", () => {
         const out = buildAgentAcceptPrompt(ctx);
         expect(out).toContain(ctx.relatedSkillsDir);
         expect(out).toContain("PLAN.md");
+    });
+});
+
+// ---------------------------------------------------------------------------
+// fakeRowsLayer: feed successive query() calls from a fixture array
+// ---------------------------------------------------------------------------
+const fakeRowsLayer = (fixtures: ReadonlyArray<unknown[]>) => {
+    let i = 0;
+    return Layer.succeed(SurrealClient, {
+        query: <T>(_: string) => Effect.sync(() => (fixtures[i++] ?? []) as unknown as T),
+    } as never);
+};
+
+describe("acceptProposal - task emission", () => {
+    test("guidance form emits .ax/tasks/<id>.md (no direct file scaffold)", async () => {
+        const taskDir = mkdtempSync(join(tmpdir(), "ax-task-"));
+        const proposalRow = {
+            id: "proposal:guid1",
+            form: "guidance",
+            title: "Add pre-bash guidance",
+            hypothesis: "Bash failed repeatedly without pre-checks",
+            dedupe_sig: "e7f3abcd",
+            status: "open",
+            skill_payload: null,
+            guidance_payload: {
+                file_target: "~/.claude/CLAUDE.md",
+                section: "Pre-Bash",
+                suggested_text: "Always validate bash preconditions.",
+            },
+        };
+
+        const layer = fakeRowsLayer([
+            [[proposalRow]],   // fetchFullProposal: query returns [FullProposalRow[]]
+            [[]],              // UPDATE + UPSERT (ignored by fake)
+        ]);
+
+        const result = await Effect.runPromise(
+            acceptProposal({ sigOrId: "e7f3abcd", taskDir }).pipe(
+                Effect.provide(layer),
+            ),
+        );
+
+        expect(result.status).toBe("ok");
+        expect(result.task_path).toBeDefined();
+        expect(result.artifact_path).toBeUndefined();
+        expect(existsSync(result.task_path!)).toBe(true);
+
+        const body = readFileSync(result.task_path!, "utf-8");
+        expect(body).toContain("form=guidance");
+        expect(body).toContain("<!--ax:e7f3abcd-->");
+    });
+
+    test("skill form defaults to task emission (no autoScaffold)", async () => {
+        const taskDir = mkdtempSync(join(tmpdir(), "ax-task-"));
+        const proposalRow = {
+            id: "proposal:skill1",
+            form: "skill",
+            title: "Pre-Bash guard skill",
+            hypothesis: "Bash failed 7 times",
+            dedupe_sig: "skill1ab",
+            status: "open",
+            skill_payload: {
+                proposed_behavior: "validate preconditions before Bash",
+                trigger_pattern: "tool=Bash",
+                expected_impact: "reduces failures",
+            },
+            guidance_payload: null,
+        };
+
+        const layer = fakeRowsLayer([
+            [[proposalRow]],
+            [[]],
+        ]);
+
+        const result = await Effect.runPromise(
+            acceptProposal({ sigOrId: "skill1ab", taskDir }).pipe(
+                Effect.provide(layer),
+            ),
+        );
+
+        expect(result.status).toBe("ok");
+        expect(result.task_path).toBeDefined();
+        expect(result.artifact_path).toBeUndefined();
+        expect(existsSync(result.task_path!)).toBe(true);
+
+        const body = readFileSync(result.task_path!, "utf-8");
+        expect(body).toContain("form=skill");
+        expect(body).toContain("ax_id: skill1ab");
+    });
+
+    test("skill form with autoScaffold=true preserves direct-write path", async () => {
+        const scaffoldBaseDir = mkdtempSync(join(tmpdir(), "ax-scaffold-"));
+        const proposalRow = {
+            id: "proposal:skill2",
+            form: "skill",
+            title: "My Direct Skill",
+            hypothesis: "direct scaffold test",
+            dedupe_sig: "skill2cd",
+            status: "open",
+            skill_payload: {
+                proposed_behavior: "do the thing directly",
+                trigger_pattern: null,
+                expected_impact: null,
+            },
+            guidance_payload: null,
+        };
+
+        const layer = fakeRowsLayer([
+            [[proposalRow]],
+            [[]],
+        ]);
+
+        const result = await Effect.runPromise(
+            acceptProposal({ sigOrId: "skill2cd", autoScaffold: true, scaffoldBaseDir }).pipe(
+                Effect.provide(layer),
+            ),
+        );
+
+        expect(result.status).toBe("ok");
+        expect(result.artifact_path).toBeDefined();
+        expect(result.task_path).toBeUndefined();
+        expect(existsSync(result.artifact_path!)).toBe(true);
     });
 });
 
