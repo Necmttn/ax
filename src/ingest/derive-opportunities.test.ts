@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
     buildOpportunityStatements,
+    hookBasenameFromArtifactPath,
     kebabNameFromArtifactPath,
     opportunityKey,
     overlapFilesMatch,
     parseOverlapFiles,
+    parseSkillTriggerTool,
+    resolveGuidanceTargetPath,
     triggerTokensFromCandidate,
 } from "./derive-opportunities.ts";
 
@@ -99,5 +102,55 @@ describe("kebabNameFromArtifactPath (C5a addressed-detector helper)", () => {
         expect(kebabNameFromArtifactPath(null)).toBeNull();
         expect(kebabNameFromArtifactPath("")).toBeNull();
         expect(kebabNameFromArtifactPath("/SKILL.md")).toBeNull();
+    });
+});
+
+describe("hookBasenameFromArtifactPath (hook-form addressed-detector helper)", () => {
+    test("returns the .sh basename", () => {
+        expect(hookBasenameFromArtifactPath("/Users/x/.claude/hooks/pre-bash-guard.sh"))
+            .toBe("pre-bash-guard.sh");
+        expect(hookBasenameFromArtifactPath("./hooks/my-hook.sh")).toBe("my-hook.sh");
+    });
+
+    test("returns null for null/empty/non-.sh paths", () => {
+        expect(hookBasenameFromArtifactPath(null)).toBeNull();
+        expect(hookBasenameFromArtifactPath("")).toBeNull();
+        expect(hookBasenameFromArtifactPath("/Users/x/.claude/hooks/script.py")).toBeNull();
+        expect(hookBasenameFromArtifactPath("/Users/x/.claude/hooks/")).toBeNull();
+    });
+});
+
+describe("parseSkillTriggerTool", () => {
+    test("extracts the tool name from a tool=<Name> pattern", () => {
+        expect(parseSkillTriggerTool("tool=Bash")).toBe("Bash");
+        expect(parseSkillTriggerTool("tool=Read")).toBe("Read");
+        expect(parseSkillTriggerTool("  tool=Edit  ")).toBe("Edit");
+    });
+
+    test("returns null for unrecognised patterns", () => {
+        expect(parseSkillTriggerTool("garbage")).toBeNull();
+        expect(parseSkillTriggerTool("")).toBeNull();
+        expect(parseSkillTriggerTool("cmd=foo")).toBeNull();
+    });
+});
+
+describe("resolveGuidanceTargetPath", () => {
+    const home = "/Users/test";
+
+    test("expands bare CLAUDE.md / AGENTS.md to <home>/.claude/<file>", () => {
+        expect(resolveGuidanceTargetPath("CLAUDE.md", home)).toBe("/Users/test/.claude/CLAUDE.md");
+        expect(resolveGuidanceTargetPath("AGENTS.md", home)).toBe("/Users/test/.claude/AGENTS.md");
+    });
+
+    test("expands ~/ prefix to home", () => {
+        expect(resolveGuidanceTargetPath("~/.claude/CLAUDE.md", home)).toBe("/Users/test/.claude/CLAUDE.md");
+    });
+
+    test("leaves absolute paths unchanged", () => {
+        expect(resolveGuidanceTargetPath("/etc/foo", home)).toBe("/etc/foo");
+    });
+
+    test("leaves other relative paths unchanged", () => {
+        expect(resolveGuidanceTargetPath("docs/notes.md", home)).toBe("docs/notes.md");
     });
 });
