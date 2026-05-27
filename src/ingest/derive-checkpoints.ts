@@ -30,6 +30,7 @@ import type { DbError } from "../lib/errors.ts";
 import { recordRef, surrealDate, surrealString } from "../lib/shared/surql.ts";
 import { executeStatementsWith } from "../lib/shared/statement-exec.ts";
 import { safeKeyPart, recordKeyPart } from "../lib/shared/derive-keys.ts";
+import { safeJsonParse } from "../lib/shared/safe-json.ts";
 
 export type CheckpointKind = "t+7" | "t+30" | "t+90";
 export type CheckpointVerdict =
@@ -186,10 +187,9 @@ export const deriveCheckpoints = (
             let baselineFrequency: number | undefined;
             const rawBaseline = exp.baseline_json;
             if (typeof rawBaseline === "string" && rawBaseline.length > 0) {
-                try {
-                    const parsed = JSON.parse(rawBaseline) as { frequency?: number };
-                    if (typeof parsed.frequency === "number") baselineFrequency = parsed.frequency;
-                } catch { /* ignore - non-JSON baseline (legacy) */ }
+                const parsed = safeJsonParse<{ frequency?: number }>(rawBaseline);
+                if (parsed && typeof parsed.frequency === "number") baselineFrequency = parsed.frequency;
+                // non-JSON baseline (legacy) - null parse is ignored.
             }
             const rawCurrent = exp.current_frequency;
             const currentFrequency =

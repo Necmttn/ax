@@ -67,6 +67,34 @@ interface ProposalRow {
     readonly skill_payload?: Record<string, unknown> | null;
 }
 
+// scaffoldSkill can throw on filesystem errors. Wrapping the try/catch
+// here keeps the Effect.gen body free of try/catch (Effect language
+// service TS15: tryCatchInEffectGen).
+function trySafeScaffold(
+    row: ProposalRow,
+    payload: NonNullable<ProposalRow["skill_payload"]>,
+    opts: AcceptOptions,
+): { result: ScaffoldResult } | { error: string } {
+    try {
+        const result = scaffoldSkill({
+            input: {
+                title: row.title,
+                hypothesis: row.hypothesis,
+                proposedBehavior: String(payload.proposed_behavior ?? ""),
+                triggerPattern: payload.trigger_pattern == null ? null : String(payload.trigger_pattern),
+                expectedImpact: payload.expected_impact == null ? null : String(payload.expected_impact),
+                dedupeSig: row.dedupe_sig,
+                nowIso: new Date().toISOString(),
+            },
+            ...(opts.scaffoldBaseDir === undefined ? {} : { baseDir: opts.scaffoldBaseDir }),
+            ...(opts.force === undefined ? {} : { force: opts.force }),
+        });
+        return { result };
+    } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+    }
+}
+
 const fetchProposal = (idLiteral: string) =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
@@ -127,27 +155,14 @@ export const acceptProposal = (
         if (!payload) {
             return { status: "missing_payload", message: "skill_proposal payload missing" };
         }
-        let scaffold: ScaffoldResult;
-        try {
-            scaffold = scaffoldSkill({
-                input: {
-                    title: row.title,
-                    hypothesis: row.hypothesis,
-                    proposedBehavior: String(payload.proposed_behavior ?? ""),
-                    triggerPattern: payload.trigger_pattern == null ? null : String(payload.trigger_pattern),
-                    expectedImpact: payload.expected_impact == null ? null : String(payload.expected_impact),
-                    dedupeSig: row.dedupe_sig,
-                    nowIso: new Date().toISOString(),
-                },
-                ...(opts.scaffoldBaseDir === undefined ? {} : { baseDir: opts.scaffoldBaseDir }),
-                ...(opts.force === undefined ? {} : { force: opts.force }),
-            });
-        } catch (err) {
+        const scaffoldOutcome = trySafeScaffold(row, payload, opts);
+        if ("error" in scaffoldOutcome) {
             return {
                 status: "missing_payload",
-                message: `scaffold failed: ${err instanceof Error ? err.message : String(err)}`,
+                message: `scaffold failed: ${scaffoldOutcome.error}`,
             };
         }
+        const scaffold = scaffoldOutcome.result;
         if (scaffold.skipped) {
             return {
                 status: "scaffold_exists",

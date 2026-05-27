@@ -3,6 +3,7 @@ import { Effect, Option, References } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
 import { AxConfig } from "../lib/config.ts";
+import { safeJsonParse } from "../lib/shared/safe-json.ts";
 import { ProcessService } from "../lib/process.ts";
 import { prettyPrint, surrealLiteral } from "../lib/json.ts";
 import { prettifyProjectSlug } from "../lib/shared/project-slug.ts";
@@ -1922,22 +1923,15 @@ const cmdImproveAccept = (args: string[]) =>
             let retroSummaries: readonly string[] = [];
             const baselineRaw = row.baseline;
             if (typeof baselineRaw === "string" && baselineRaw.length > 0) {
-                try {
-                    const parsed = JSON.parse(baselineRaw) as {
-                        tool?: string;
-                        sessionKeys?: unknown;
-                        frequency?: number;
-                    };
-                    if (Array.isArray(parsed.sessionKeys)) {
-                        const tool = parsed.tool ?? "tool";
-                        retroSummaries = parsed.sessionKeys
-                            .filter((s): s is string => typeof s === "string")
-                            .slice(0, 5)
-                            .map((s) => `session ${s}: top tool ${tool} failed (cluster freq=${parsed.frequency ?? "?"})`);
-                    }
-                } catch {
-                    // ignore - baseline shape may evolve
+                const parsed = safeJsonParse<{ tool?: string; sessionKeys?: unknown; frequency?: number }>(baselineRaw);
+                if (parsed && Array.isArray(parsed.sessionKeys)) {
+                    const tool = parsed.tool ?? "tool";
+                    retroSummaries = parsed.sessionKeys
+                        .filter((s): s is string => typeof s === "string")
+                        .slice(0, 5)
+                        .map((s) => `session ${s}: top tool ${tool} failed (cluster freq=${parsed.frequency ?? "?"})`);
                 }
+                // baseline shape may evolve - null parse is ignored.
             }
             console.log("");
             console.log("spawning claude subagent to enrich the stub…");
@@ -2298,11 +2292,9 @@ const cmdRetroEmit = (args: string[]) =>
                 process.exit(2);
                 return "";
             }));
-            let parsed: { tried?: string; worked?: string; failed?: string; next?: string };
-            try {
-                parsed = JSON.parse(raw);
-            } catch (e) {
-                console.error(`ax retro emit: --from-file is not valid JSON: ${e}`);
+            const parsed = safeJsonParse<{ tried?: string; worked?: string; failed?: string; next?: string }>(raw);
+            if (!parsed) {
+                console.error(`ax retro emit: --from-file is not valid JSON`);
                 process.exit(2);
                 return;
             }
