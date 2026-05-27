@@ -189,7 +189,14 @@ export const lintFiles = (
             const rows: ExperimentRow[] = result?.[0] ?? [];
             const byShortId = new Map(rows.map((r) => [r.short_id, r]));
 
+            interface PendingReconcile {
+                shortId: string;
+                experimentId: string;
+                previousStatus: string;
+                taskPath: string | null;
+            }
             const updates: string[] = [];
+            const pending: PendingReconcile[] = [];
             for (const [id, path] of idToPath) {
                 const row = byShortId.get(id);
                 if (!row) {
@@ -212,28 +219,44 @@ export const lintFiles = (
                     });
                 }
                 if (row.status === "task_emitted") {
-                    let taskDeleted: string | null = null;
-                    if (row.task_path && existsSync(row.task_path)) {
-                        try {
-                            unlinkSync(row.task_path);
-                            taskDeleted = row.task_path;
-                        } catch { /* leave it */ }
-                    }
                     updates.push(
                         `UPDATE ${row.id} SET status = 'scaffolded', scaffolded_at = time::now(), artifact_path = ${surrealLiteral(path)};`,
                     );
-                    reconciled.push({
+                    pending.push({
                         shortId: id,
                         experimentId: row.id,
                         previousStatus: row.status,
-                        nextStatus: "scaffolded",
-                        taskDeleted,
+                        taskPath: (row.task_path && existsSync(row.task_path)) ? row.task_path : null,
                     });
                 }
             }
 
             if (updates.length > 0) {
                 yield* db.query(updates.join("\n"));
+                // DB succeeded - now safe to remove task files and record reconciliation
+                for (const p of pending) {
+                    let taskDeleted: string | null = null;
+                    if (p.taskPath) {
+                        try {
+                            unlinkSync(p.taskPath);
+                            taskDeleted = p.taskPath;
+                        } catch {
+                            warnings.push({
+                                rule: "task_cleanup_failed",
+                                severity: "warning",
+                                path: p.taskPath,
+                                message: `failed to delete task file ${p.taskPath} after DB update`,
+                            });
+                        }
+                    }
+                    reconciled.push({
+                        shortId: p.shortId,
+                        experimentId: p.experimentId,
+                        previousStatus: p.previousStatus,
+                        nextStatus: "scaffolded",
+                        taskDeleted,
+                    });
+                }
             }
         }
 

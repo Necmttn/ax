@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Layer } from "effect";
 import { SurrealClient } from "../lib/db.ts";
+import { DbError } from "../lib/errors.ts";
 import { discoverFiles, lintFiles, type LintTarget, type LintReport } from "./lint.ts";
 
 const make = () => {
@@ -46,6 +47,24 @@ const recordingLayer = (recorder: QueryRecorder, fixtures: ReadonlyArray<unknown
             recorder.calls.push(sql);
             return [(fixtures[i++] ?? [])] as unknown as T;
         }),
+    } as never);
+};
+
+/** Layer that succeeds for the first N queries, then fails for queries matching `failPattern`. */
+const recordingLayerWithFailure = (
+    recorder: QueryRecorder,
+    fixtures: ReadonlyArray<unknown[]>,
+    failPattern: RegExp,
+) => {
+    let i = 0;
+    return Layer.succeed(SurrealClient, {
+        query: <T>(sql: string): Effect.Effect<T, DbError> => {
+            recorder.calls.push(sql);
+            if (failPattern.test(sql)) {
+                return Effect.fail(new DbError({ operation: "query", message: "simulated DB failure", sql }));
+            }
+            return Effect.sync(() => [(fixtures[i++] ?? [])] as unknown as T);
+        },
     } as never);
 };
 
@@ -144,5 +163,37 @@ describe("lintFiles", () => {
             program.pipe(Effect.provide(recordingLayer(rec, [experimentFixture]))),
         );
         expect(report.warnings.some((w) => w.rule === "stale_task")).toBe(true);
+    });
+
+    test("DB update failure → task file survives and reconciled is empty", async () => {
+        const root = mkdtempSync(join(tmpdir(), "ax-lint-"));
+        const taskDir = join(root, ".ax", "tasks");
+        mkdirSync(taskDir, { recursive: true });
+        const taskFile = join(taskDir, "f1b2.md");
+        writeFileSync(taskFile, "# pending task");
+        writeFileSync(
+            join(root, "CLAUDE.md"),
+            "<!--ax:f1b2-->Use fd, not find.<!--/ax:f1b2-->",
+        );
+        const rec: QueryRecorder = { calls: [] };
+        const experimentFixture = [{
+            id: "experiment:xyz",
+            short_id: "f1b2",
+            status: "task_emitted",
+            task_path: taskFile,
+            locked_verdict: null,
+        }];
+        // SELECT query returns the fixture; the UPDATE query (containing 'scaffolded') fails
+        const program = lintFiles({ roots: [root] });
+        const result = await Effect.runPromise(
+            program.pipe(
+                Effect.provide(recordingLayerWithFailure(rec, [experimentFixture, []], /scaffolded/)),
+                Effect.exit,
+            ),
+        );
+        // The effect should have failed
+        expect(result._tag).toBe("Failure");
+        // Task file must still exist - unlink must NOT have been called before the DB update
+        expect(fsExists(taskFile)).toBe(true);
     });
 });
