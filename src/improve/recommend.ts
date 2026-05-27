@@ -79,3 +79,48 @@ export const recommend = (
             .slice(0, input.limit);
         return ranked;
     });
+
+const guidanceBlock = (item: RecommendItem): string =>
+    `${item.score.toFixed(2)}  ${item.shortId}  [${item.confidence}, ${item.frequency}/wk]  ${item.title}
+    evidence: ${item.hypothesis}
+    suggested:
+        <!--ax:${item.shortId}-->
+        ${item.title}
+        <!--/ax:${item.shortId}-->
+    apply: axctl improve accept ${item.shortId}`;
+
+const skillBlock = (item: RecommendItem): string =>
+    `${item.score.toFixed(2)}  ${item.shortId}  [${item.confidence}, ${item.frequency}/wk]  ${item.title}
+    evidence: ${item.hypothesis}
+    suggested frontmatter:
+        ---
+        name: ${item.title}
+        ax_id: ${item.shortId}
+        ---
+    apply: axctl improve accept ${item.shortId}`;
+
+export const formatRecommendations = (items: ReadonlyArray<RecommendItem>): string => {
+    if (items.length === 0) return "(no recommendations - run `axctl ingest --since=1` first?)";
+    return items
+        .map((i) => (i.form === "skill" ? skillBlock(i) : guidanceBlock(i)))
+        .join("\n\n");
+};
+
+const clipboardCmd = (): string[] | null => {
+    switch (process.platform) {
+        case "darwin": return ["pbcopy"];
+        case "linux": return ["xclip", "-selection", "clipboard"];
+        default: return null;
+    }
+};
+
+export const copyToClipboard = (text: string): boolean => {
+    const cmd = clipboardCmd();
+    if (!cmd) return false;
+    try {
+        const proc = Bun.spawnSync(cmd, { stdin: new TextEncoder().encode(text) });
+        return proc.exitCode === 0;
+    } catch {
+        return false;
+    }
+};

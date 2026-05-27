@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
-import { recommend, type RecommendInput, type RecommendItem } from "./recommend.ts";
+import { recommend, formatRecommendations, type RecommendInput, type RecommendItem } from "./recommend.ts";
 import { SurrealClient } from "../lib/db.ts";
 
 const layerWith = (rows: ReadonlyArray<unknown>) =>
@@ -44,5 +44,29 @@ describe("recommend", () => {
             recommend({ limit: 5, forms: ["guidance"] }).pipe(Effect.provide(layerWith(rows))),
         );
         expect(out.map((r) => r.shortId)).toEqual(["b"]);
+    });
+});
+
+describe("formatRecommendations", () => {
+    test("guidance items wrap suggested text in marker pair", () => {
+        const items: RecommendItem[] = [{
+            shortId: "e7f3", title: "Use ripgrep", form: "guidance",
+            hypothesis: "12 corrections", confidence: "high", frequency: 3,
+            score: 1, updatedAt: "2026-05-20T00:00:00Z",
+        }];
+        const out = formatRecommendations(items);
+        expect(out).toContain("<!--ax:e7f3-->");
+        expect(out).toContain("<!--/ax:e7f3-->");
+        expect(out).toContain("Use ripgrep");
+    });
+
+    test("skill items show frontmatter sketch instead of marker", () => {
+        const items: RecommendItem[] = [{
+            shortId: "s1", title: "Pre-Bash guard", form: "skill",
+            hypothesis: "Bash failed 7×", confidence: "medium", frequency: 7,
+            score: 1, updatedAt: "2026-05-20T00:00:00Z",
+        }];
+        const out = formatRecommendations(items);
+        expect(out).toContain("ax_id: s1");
     });
 });
