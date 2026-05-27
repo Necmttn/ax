@@ -1,6 +1,8 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { SurrealClient } from "../lib/db.ts";
 import type { DbError } from "../lib/errors.ts";
+import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
+import type { StageDef } from "./stage/registry.ts";
 import { surrealLiteral } from "../lib/json.ts";
 import { decodeJsonOrNull } from "../lib/decode.ts";
 
@@ -168,3 +170,35 @@ export const deriveSpawned = (): Effect.Effect<
             written,
         };
     });
+
+// ---------------------------------------------------------------------------
+// Co-located StageDef
+// ---------------------------------------------------------------------------
+
+export const SpawnedKey = Schema.Literal("spawned");
+export type SpawnedKey = typeof SpawnedKey.Type;
+
+/**
+ * Spawned stage - derives spawn edges from transcript rows.
+ *
+ * Depends on: {@link ClaudeKey}, {@link CodexKey}
+ * Consumed by: (none - terminal)
+ * Tags: derive
+ */
+export class SpawnedStats extends BaseStageStats.extend<SpawnedStats>("SpawnedStats")({
+    spawnEdgesWritten: Schema.Number,
+}) {}
+
+export const spawnedStage: StageDef<SpawnedStats, SurrealClient> = {
+    meta: StageMeta.make({ key: "spawned", deps: ["claude", "codex"], tags: ["derive"] }),
+    run: (_ctx: IngestContext) =>
+        Effect.gen(function* () {
+            const t0 = Date.now();
+            const result = yield* deriveSpawned();
+            return SpawnedStats.make({
+                durationMs: Date.now() - t0,
+                summary: `wrote ${result.written} spawn edges`,
+                spawnEdgesWritten: result.written,
+            });
+        }),
+};
