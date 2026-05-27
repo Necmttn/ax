@@ -23,6 +23,7 @@ import { deriveCheckpoints } from "../ingest/derive-checkpoints.ts";
 import { retroFromSession, upsertRetro, type RetroSource } from "../ingest/retro.ts";
 import { scaffoldSkill } from "../improve/skill-scaffold.ts";
 import { runAgentAccept } from "../improve/agent-accept.ts";
+import { acceptProposal } from "../improve/actions.ts";
 import { cmdRetroReflect } from "./retro-reflect.ts";
 import { cmdRetroMeta } from "./retro-meta.ts";
 import { cmdRetroPlan } from "./retro-plan.ts";
@@ -1998,13 +1999,59 @@ const improveAcceptCommand = Command.make(
         id: Argument.string("id"),
         force: Flag.boolean("force").pipe(Flag.withDefault(false)),
         withAgent: Flag.boolean("with-agent").pipe(Flag.withDefault(false)),
+        autoScaffold: Flag.boolean("auto-scaffold").pipe(
+            Flag.withDefault(false),
+            Flag.withDescription("Skip task emission and directly scaffold the SKILL.md (skill form only)"),
+        ),
     },
-    ({ id, force, withAgent }) => cmdImproveAccept([
-        id,
-        ...boolArg("force", force),
-        ...boolArg("with-agent", withAgent),
-    ]),
-).pipe(Command.withDescription("Accept a proposal: scaffold the artifact + create an experiment row (pass --with-agent to spawn a claude subagent that enriches the stub)"));
+    ({ id, force, withAgent, autoScaffold }) =>
+        Effect.gen(function* () {
+            const result = yield* acceptProposal({ sigOrId: id, force, autoScaffold });
+
+            if (result.status === "not_found") {
+                console.error(result.message ?? `no proposal matched ${id}`);
+                process.exit(2);
+            }
+            if (result.status === "wrong_status") {
+                console.error(result.message ?? "proposal already processed");
+                const ex = result.existing_experiment;
+                if (ex) {
+                    console.error(`  experiment   ${ex.id}`);
+                    if (ex.artifact_path) console.error(`  scaffold     ${ex.artifact_path}`);
+                    if (ex.scaffolded_at) console.error(`  scaffolded   ${ex.scaffolded_at}`);
+                    if (ex.locked_verdict) console.error(`  verdict      ${ex.locked_verdict}`);
+                }
+                process.exit(2);
+            }
+            if (result.status === "unsupported_form") {
+                console.error(result.message ?? "unsupported form");
+                process.exit(2);
+            }
+            if (result.status === "missing_payload") {
+                console.error(result.message ?? "missing payload");
+                process.exit(2);
+            }
+            if (result.status === "scaffold_exists") {
+                console.error(result.message ?? "scaffold already exists (use --force to overwrite)");
+                process.exit(2);
+            }
+
+            // status === "ok"
+            if (result.task_path) {
+                console.log(`task emitted at ${result.task_path}`);
+                console.log(`apply with your agent: \`claude "do ${result.task_path}"\``);
+                console.log(`reconcile after edit: \`axctl improve lint\``);
+            } else if (result.artifact_path) {
+                console.log(`scaffolded ${result.artifact_path}`);
+                console.log(`experiment ${result.experiment_id ?? ""} created`);
+                console.log(`proposal status -> accepted`);
+            }
+
+            if (withAgent && result.artifact_path) {
+                yield* cmdImproveAccept([id, ...boolArg("with-agent", withAgent)]);
+            }
+        }),
+).pipe(Command.withDescription("Accept a proposal: emit a task brief (default) or scaffold the SKILL.md directly (--auto-scaffold, skill form only)"));
 
 const improveRejectCommand = Command.make(
     "reject",
