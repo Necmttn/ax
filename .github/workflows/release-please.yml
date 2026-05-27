@@ -48,6 +48,10 @@ jobs:
         with:
           bun-version: "1.3.10"
 
+      - name: Install ripgrep (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
       - run: bun install --frozen-lockfile
 
       - run: bash -n install.sh
