@@ -105,7 +105,7 @@ SELECT id, form, title, hypothesis, dedupe_sig, frequency, confidence, status, r
     (SELECT event_name, target_tool, hook_command FROM hook_proposal       WHERE proposal = $parent.id LIMIT 1)[0] AS hook_payload,
     (SELECT file_target, section, suggested_text FROM guidance_proposal   WHERE proposal = $parent.id LIMIT 1)[0] AS guidance_payload,
     (SELECT trigger_signal, schedule, action FROM automation_proposal WHERE proposal = $parent.id LIMIT 1)[0] AS automation_payload,
-    (SELECT id, artifact_path, locked_verdict,
+    (SELECT id, artifact_path, status, task_path, locked_verdict,
         type::string(created_at) AS created_at,
         type::string(scaffolded_at) AS scaffolded_at,
         (SELECT kind, suggested, user_verdict, measured, type::string(observed_at) AS observed_at FROM checkpoint WHERE experiment = $parent.id ORDER BY observed_at DESC LIMIT 1)[0] AS latest_checkpoint
