@@ -3653,3 +3653,51 @@ footer .right {
   .fig-heatmap .fig-head { flex-wrap: wrap; gap: 8px 12px; }
   .fig-heatmap .fig-head .auto-pill { margin-left: 0; }
 }
+
+/* ============================================================
+   <kbd> key-cap (article only) — Tab as a clickable artifact
+   ============================================================ */
+
+.essay kbd {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 0.85em;
+  font-weight: 500;
+  line-height: 1;
+  padding: 2px 7px 3px;
+  margin: 0 1px;
+  border: 1px solid var(--ink);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--page);
+  color: var(--ink);
+  letter-spacing: 0.02em;
+  vertical-align: baseline;
+  cursor: pointer;
+  user-select: none;
+  transition: transform 60ms ease-out, border-bottom-width 60ms ease-out, background 120ms;
+}
+
+.essay h2 kbd,
+.essay h1 kbd {
+  font-size: 0.72em;
+  padding: 3px 10px 4px;
+  border-radius: 6px;
+  vertical-align: 0.12em;
+}
+
+.essay kbd:hover {
+  background: var(--panel);
+}
+
+.essay kbd:active,
+.essay kbd.is-pressed {
+  transform: translateY(1px);
+  border-bottom-width: 1px;
+  background: var(--panel);
+}
+
+.essay kbd:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}

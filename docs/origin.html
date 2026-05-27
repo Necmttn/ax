@@ -41,7 +41,7 @@
     <p class="eyebrow">Origin note &middot; May 2026</p>
     <h1>Autocomplete was the last good feedback loop.</h1>
     <p class="dek">
-      Tab meant yes. Typing through it meant no. A binary signal,
+      <kbd>Tab</kbd> meant yes. Typing through it meant no. A binary signal,
       on every keystroke, from the one person who knew. Then we traded
       the loop for autonomy &mdash; one generation at a time.
     </p>
@@ -49,12 +49,12 @@
 
   <!-- ============== SECTION 1: autocomplete worked ============== -->
   <section class="section">
-    <h2>Tab was the harness.</h2>
+    <h2><kbd>Tab</kbd> was the harness.</h2>
 
     <p>
       The first coding agents that worked were not the ones that did the
       most. They were the ones with the tightest harness. You typed, the
-      model predicted the next edit, and your fingers answered &mdash; tab
+      model predicted the next edit, and your fingers answered &mdash; <kbd>tab</kbd>
       or keep typing. Instant feedback, every keystroke, from the one
       person who knew whether the prediction was right.
     </p>
@@ -182,7 +182,7 @@
 
     <!-- legend -->
     <ol class="curve-legend" aria-label="generations on the curve">
-      <li><span class="lg-num">1</span><span class="lg-name">autocomplete</span><span class="lg-meta">tab / no-tab &middot; ~60 signals per minute</span></li>
+      <li><span class="lg-num">1</span><span class="lg-name">autocomplete</span><span class="lg-meta"><kbd>tab</kbd> / no-tab &middot; ~60 signals per minute</span></li>
       <li><span class="lg-num">2</span><span class="lg-name">chat</span><span class="lg-meta">correction in prose &middot; ~6 per hour</span></li>
       <li><span class="lg-num">3</span><span class="lg-name">task loop</span><span class="lg-meta">plan + check &middot; ~1 per hour</span></li>
       <li><span class="lg-num">4</span><span class="lg-name">background</span><span class="lg-meta">hand off, walk away &middot; ~2 per week</span></li>
@@ -203,7 +203,7 @@
     <h2>Scope grew. Feedback collapsed.</h2>
 
     <p>
-      Chat agents came next. You stopped pressing tab and started
+      Chat agents came next. You stopped pressing <kbd>tab</kbd> and started
       describing: build me this. The agent planned, executed, showed
       you the result, and you reacted in natural language. Still a
       loop, just slower and fuzzier. The original contract was simple
@@ -3376,6 +3376,60 @@
     armTakeoverListeners();
     armObserver();
   }
+})();
+
+/* ============================================================
+   <kbd> click sound - short synthesized key click
+   ============================================================ */
+(function () {
+  var keys = document.querySelectorAll('.essay kbd');
+  if (!keys.length) return;
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    // still allow clicks, just no sound + no press transform animation extra
+  }
+  var Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  var ctx = null;
+  function ensureCtx() {
+    if (!ctx) ctx = new Ctx();
+    if (ctx.state === 'suspended') ctx.resume();
+    return ctx;
+  }
+  function click(downward) {
+    var c = ensureCtx();
+    var now = c.currentTime;
+    // short noise burst
+    var buf = c.createBuffer(1, Math.floor(c.sampleRate * 0.03), c.sampleRate);
+    var data = buf.getChannelData(0);
+    for (var i = 0; i < data.length; i++) {
+      data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+    }
+    var src = c.createBufferSource();
+    src.buffer = buf;
+    var bp = c.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = downward ? 1800 : 2400;
+    bp.Q.value = 4;
+    var g = c.createGain();
+    g.gain.setValueAtTime(0.12, now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+    src.connect(bp).connect(g).connect(c.destination);
+    src.start(now);
+    src.stop(now + 0.07);
+  }
+  keys.forEach(function (k) {
+    if (!k.hasAttribute('tabindex')) k.setAttribute('tabindex', '0');
+    if (!k.hasAttribute('role')) k.setAttribute('role', 'button');
+    k.addEventListener('pointerdown', function () { click(true); k.classList.add('is-pressed'); });
+    k.addEventListener('pointerup',   function () { click(false); k.classList.remove('is-pressed'); });
+    k.addEventListener('pointerleave', function () { k.classList.remove('is-pressed'); });
+    k.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); click(true); k.classList.add('is-pressed'); }
+    });
+    k.addEventListener('keyup', function (ev) {
+      if (ev.key === 'Enter' || ev.key === ' ') { click(false); k.classList.remove('is-pressed'); }
+    });
+  });
 })();
 
 </script>
