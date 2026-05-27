@@ -44,7 +44,7 @@ const recordingLayer = (recorder: QueryRecorder, fixtures: ReadonlyArray<unknown
     return Layer.succeed(SurrealClient, {
         query: <T>(sql: string) => Effect.sync(() => {
             recorder.calls.push(sql);
-            return (fixtures[i++] ?? []) as unknown as T;
+            return [(fixtures[i++] ?? [])] as unknown as T;
         }),
     } as never);
 };

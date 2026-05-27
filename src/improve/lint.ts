@@ -180,9 +180,7 @@ export const lintFiles = (
                 locked_verdict
             FROM experiment WHERE proposal.dedupe_sig IN [${idList}];
         `);
-        const rows: ExperimentRow[] = Array.isArray(result?.[0])
-            ? (result[0] as ExperimentRow[])
-            : ((result ?? []) as unknown as ExperimentRow[]);
+        const rows: ExperimentRow[] = result?.[0] ?? [];
         const byShortId = new Map(rows.map((r) => [r.short_id, r]));
 
         const updates: string[] = [];
