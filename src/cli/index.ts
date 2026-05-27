@@ -25,6 +25,7 @@ import { scaffoldSkill } from "../improve/skill-scaffold.ts";
 import { runAgentAccept } from "../improve/agent-accept.ts";
 import { acceptProposal } from "../improve/actions.ts";
 import { lintFiles } from "../improve/lint.ts";
+import { recommend, formatRecommendations, copyToClipboard } from "../improve/recommend.ts";
 import { cmdRetroReflect } from "./retro-reflect.ts";
 import { cmdRetroMeta } from "./retro-meta.ts";
 import { cmdRetroPlan } from "./retro-plan.ts";
@@ -1841,6 +1842,58 @@ const cmdImproveLint = (args: string[]) =>
         }
     });
 
+const cmdImproveRecommend = (args: string[]) =>
+    Effect.gen(function* () {
+        const json = args.includes("--json");
+        const noClipboard = args.includes("--no-clipboard");
+        const limit = parsePositiveIntFlag("improve recommend", "limit", args, 5);
+        const sinceDays = parseOptionalPositiveIntFlag("improve recommend", "since", args);
+        // Collect --form values (repeatable; also tolerate comma-separated)
+        const forms: string[] = [];
+        for (const a of args) {
+            if (a.startsWith("--form=")) {
+                const val = a.slice("--form=".length);
+                for (const f of val.split(",").map((s) => s.trim()).filter((s) => s.length > 0)) {
+                    forms.push(f);
+                }
+            }
+        }
+        const items = yield* recommend({
+            limit,
+            forms: forms.length > 0 ? forms : undefined,
+            sinceDays,
+        });
+        if (json) {
+            console.log(JSON.stringify(items, null, 2));
+            return;
+        }
+        const formatted = formatRecommendations(items);
+        console.log(formatted);
+        if (items.length > 0 && !noClipboard) {
+            const copied = copyToClipboard(formatted);
+            if (copied) console.log("\n[copied to clipboard]");
+        }
+    });
+
+const improveRecommendCommand = Command.make(
+    "recommend",
+    {
+        limit: Flag.integer("limit").pipe(Flag.withDefault(5)),
+        form: Flag.string("form").pipe(Flag.atLeast(0)),
+        since: Flag.integer("since").pipe(Flag.optional),
+        json: Flag.boolean("json").pipe(Flag.withDefault(false)),
+        noClipboard: Flag.boolean("no-clipboard").pipe(Flag.withDefault(false)),
+    },
+    ({ limit, form, since, json, noClipboard }) =>
+        cmdImproveRecommend([
+            `--limit=${limit}`,
+            ...[...form].flatMap((f) => [`--form=${f}`]),
+            ...intArg("since", optionValue(since)),
+            ...boolArg("json", json),
+            ...boolArg("no-clipboard", noClipboard),
+        ]),
+).pipe(Command.withDescription("Rank open proposals by confidence × recency × frequency and print the top N (optionally copy to clipboard)"));
+
 const improveLintCommand = Command.make(
     "lint",
     {
@@ -2353,6 +2406,7 @@ const improveCheckpointCommand = Command.make(
 const improveCommand = Command.make("improve").pipe(
     Command.withDescription("Experiment loop: review proposals, accept skills, track verdicts"),
     Command.withSubcommands([
+        improveRecommendCommand,
         improveLintCommand,
         improveListCommand,
         improveShowCommand,
