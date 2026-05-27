@@ -598,6 +598,9 @@ footer .right {
 .essay .hero {
   padding: 96px 0 80px;
   text-align: left;
+  max-width: 980px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .essay .section {

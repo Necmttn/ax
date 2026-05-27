@@ -27,7 +27,6 @@
     <a href="index.html#how">How</a>
     <a href="index.html#demo">Demo</a>
     <a href="origin.html">Origin</a>
-    <a href="manifesto.md">Manifesto</a>
     <a class="primary" href="https://github.com/Necmttn/ax">GitHub -></a>
   </nav>
 </header>
@@ -915,6 +914,17 @@
       about. Every accepted fix becomes an experiment with checkpoints
       at t+7, t+30, and t+90.
     </p>
+
+    <aside class="framework-list" aria-label="five requirements the retro loop has to meet">
+      <span class="framework-list-label">what the loop has to do</span>
+      <ul>
+        <li><span class="fw-name">01 &middot; fire at the right time</span><span class="fw-note">the Stop hook on session-end is the only moment the agent still has its context. five seconds later it is gone.</span></li>
+        <li><span class="fw-name">02 &middot; structured by default</span><span class="fw-note">json with four fields &mdash; tried, worked, failed, next. free-form is an escape hatch, not the default.</span></li>
+        <li><span class="fw-name">03 &middot; cover sub-agents</span><span class="fw-note">main-session retros are nice. sub-agent retros are the unlock. the hook has to fire for them too.</span></li>
+        <li><span class="fw-name">04 &middot; become a proposal</span><span class="fw-note">&ldquo;that worked, do it more&rdquo; is not useful. the retro feeds a deduplicated queue you accept, reject, or skip.</span></li>
+        <li><span class="fw-name">05 &middot; become an experiment</span><span class="fw-note">accepted proposals get scaffolded as real artifacts. checkpoints at t+7, t+30, t+90 close the verdict.</span></li>
+      </ul>
+    </aside>
   </section>
 
   <!-- ============== EXHIBIT E: retro → proposal → experiment → verdict ============== -->
@@ -1035,8 +1045,18 @@
     </p>
 
     <p>
-      If you want the argument instead of the story, read the
-      <a href="manifesto.md">manifesto</a>. If you want to try it, it is
+      If you are building agent infrastructure inside an AI lab right
+      now &mdash; and I know you are &mdash; you are building some
+      version of this. Your version will be better-funded, more
+      polished, deeper-integrated. It should be. What it will not be
+      is open, local-first, and shape-of-the-problem first. That is
+      what an open reference does: it shapes the problem statement
+      before the closed implementations lock in proprietary
+      vocabularies.
+    </p>
+
+    <p>
+      If you want to try it, it is
       <a href="https://github.com/Necmttn/ax">on GitHub</a>, MIT
       licensed, and runs on your laptop. Then tell me where the shape
       is wrong.
