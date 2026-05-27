@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { SurrealClient } from "../lib/db.ts";
 import { skillRecordKey } from "../lib/skill-id.ts";
 import { AppLayer } from "../lib/layers.ts";
@@ -977,3 +977,44 @@ if (import.meta.main) {
         ) as Effect.Effect<DeriveStats>,
     );
 }
+
+// ---------------------------------------------------------------------------
+// Co-located StageDef
+// ---------------------------------------------------------------------------
+
+import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
+import type { StageDef } from "./stage/registry.ts";
+
+export const SignalsKey = Schema.Literal("signals");
+export type SignalsKey = typeof SignalsKey.Type;
+
+/**
+ * Signals stage - derives Friction/Feedback/Diagnostic/Intent edges from
+ * Tool Calls + Turns. Depends on {@link ClaudeKey}, {@link CodexKey},
+ * {@link SubagentsKey}, {@link SpawnedKey}, {@link GitKey}.
+ * Consumed by {@link OutcomesKey}, {@link SessionHealthKey}, {@link ClosureKey}.
+ */
+export class SignalsStats extends BaseStageStats.extend<SignalsStats>("SignalsStats")({
+    frictionEvents: Schema.Number,
+    diagnosticEvents: Schema.Number,
+    corrections: Schema.Number,
+    proposed: Schema.Number,
+}) {}
+
+export const signalsStage: StageDef<SignalsStats, SurrealClient> = {
+    meta: StageMeta.make({ key: "signals", deps: ["claude", "codex", "subagents", "spawned", "git"], tags: ["derive"] }),
+    run: (ctx: IngestContext) =>
+        Effect.gen(function* () {
+            const t0 = Date.now();
+            const sinceDays = Math.max(1, Math.round((Date.now() - ctx.since.getTime()) / 86400000));
+            const result = yield* deriveSignals({ sinceDays });
+            return SignalsStats.make({
+                durationMs: Date.now() - t0,
+                summary: `derived ${result.frictionEvents} friction, ${result.diagnosticEvents} diagnostic events`,
+                frictionEvents: result.frictionEvents,
+                diagnosticEvents: result.diagnosticEvents,
+                corrections: result.corrections,
+                proposed: result.proposed,
+            });
+        }),
+};
