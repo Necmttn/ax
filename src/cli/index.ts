@@ -26,6 +26,7 @@ import { runAgentAccept } from "../improve/agent-accept.ts";
 import { acceptProposal } from "../improve/actions.ts";
 import { lintFiles } from "../improve/lint.ts";
 import { recommend, formatRecommendations, copyToClipboard, selectByIndices, parseIndexInput } from "../improve/recommend.ts";
+import { showExperiment, formatShow } from "../improve/show.ts";
 import { cmdRetroReflect } from "./retro-reflect.ts";
 import { cmdRetroMeta } from "./retro-meta.ts";
 import { cmdRetroPlan } from "./retro-plan.ts";
@@ -1748,55 +1749,16 @@ const cmdImproveShow = (args: string[]) =>
             console.error("axctl improve show: missing <id> (use a dedupe_sig from `axctl improve list`)");
             process.exit(2);
         }
-        const db = yield* SurrealClient;
-        // Accept dedupe_sig (preferred) or full record id (proposal:`key`)
-        const idLiteral = surrealLiteral(positional);
-        const sql = `
-            SELECT *,
-                (SELECT * FROM skill_proposal      WHERE proposal = $parent.id LIMIT 1)[0] AS skill_payload,
-                (SELECT * FROM subagent_proposal   WHERE proposal = $parent.id LIMIT 1)[0] AS subagent_payload,
-                (SELECT * FROM hook_proposal       WHERE proposal = $parent.id LIMIT 1)[0] AS hook_payload,
-                (SELECT * FROM guidance_proposal   WHERE proposal = $parent.id LIMIT 1)[0] AS guidance_payload,
-                (SELECT * FROM automation_proposal WHERE proposal = $parent.id LIMIT 1)[0] AS automation_payload,
-                (SELECT out, count, type::string(ts) AS ts FROM cites_evidence WHERE in = $parent.id) AS evidence
-            FROM proposal WHERE dedupe_sig = ${idLiteral} OR id = ${idLiteral} LIMIT 1;
-        `;
-        const result = yield* db.query<[Array<Record<string, unknown>>]>(sql);
-        const rows = result?.[0] ?? [];
-        const detail = rows[0] ?? null;
+        const result = yield* showExperiment({ sigOrId: positional });
         if (json) {
-            console.log(prettyPrint(detail));
+            console.log(prettyPrint(result));
             return;
         }
-        if (!detail) {
-            console.error("no proposal matched");
+        if (result === null) {
+            process.stderr.write(`no proposal matched ${positional}\n`);
             process.exit(2);
         }
-        const row = detail as unknown as ProposalRow & {
-            skill_payload?: SkillProposalRow | null;
-            evidence?: Array<{ out: string; count: number; ts: string }>;
-        };
-        console.log(`${row.title}`);
-        console.log(`  form        ${row.form}`);
-        console.log(`  status      ${row.status}`);
-        console.log(`  confidence  ${row.confidence}`);
-        console.log(`  frequency   ${row.frequency}`);
-        console.log(`  dedupe_sig  ${row.dedupe_sig}`);
-        console.log(`  hypothesis  ${row.hypothesis}`);
-        if (row.skill_payload && row.form === "skill") {
-            console.log(`  trigger     ${row.skill_payload.trigger_pattern}`);
-            console.log(`  gap         ${row.skill_payload.suspected_gap}`);
-            console.log(`  behavior    ${row.skill_payload.proposed_behavior}`);
-            if (row.skill_payload.expected_impact) {
-                console.log(`  impact      ${row.skill_payload.expected_impact}`);
-            }
-        }
-        if (row.evidence?.length) {
-            console.log(`  evidence    ${row.evidence.length} cited`);
-            for (const e of row.evidence.slice(0, 5)) {
-                console.log(`    - ${String(e.out)} (count=${e.count})`);
-            }
-        }
+        console.log(formatShow(result));
     });
 
 const cmdImproveLint = (args: string[]) =>
@@ -1960,7 +1922,7 @@ const improveShowCommand = Command.make(
         json: jsonFlag,
     },
     ({ id, json }) => cmdImproveShow([id, ...boolArg("json", json)]),
-).pipe(Command.withDescription("Show a proposal + form payload + cited evidence"));
+).pipe(Command.withDescription("Show experiment evidence + status for one proposal id"));
 
 const cmdImproveAccept = (args: string[]) =>
     Effect.gen(function* () {
