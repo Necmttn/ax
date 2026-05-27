@@ -178,15 +178,30 @@ Recommended agent loop:
 ## CLI shape
 
 ```text
-axctl ingest [--since=N] [--reset]
-axctl serve | report               # live dashboard / static HTML
-axctl recall <query>               # full-text search across turns
+axctl ingest [--since=N] [--reset]   # backfill the graph
+axctl derive-signals                  # re-run derive pass standalone
+axctl derive-intents                  # re-run user-intent derive standalone
+axctl serve                           # live web dashboard (API for ax studio)
+axctl report                          # one-shot static HTML
+axctl tui                             # interactive terminal dashboard
+
+axctl recall <query>                  # full-text search across turns
+axctl context [file] [<query>]        # file/agent-context grounding
 axctl skills <search|taste|unused|pairs|recovery>
-axctl insights <view>              # 16 read-only graph views
+axctl insights <view>                 # 16 read-only graph views
 axctl project <context|verify|harness>
 axctl evidence <guidance-next|session-summary|weekly>
+axctl improve <list|show|accept|reject|verdict|checkpoint|reset>
+axctl retro <emit|list|reflect|plan>  # the retro-loop CLI
+axctl hook <fire>                     # hook helper invoked from settings.json
+axctl hooks <summary|invocations|backtest>
+
 axctl daemon <status|start|stop|restart>
-axctl doctor | install | uninstall | update | version
+axctl doctor                          # local-install health check
+axctl install                         # wire launchd + hooks + DB
+axctl uninstall                       # remove launchd + bin symlink
+axctl update [--check]                # pull latest release
+axctl version [--check|--banner]
 ```
 
 Full reference: [`docs/insights-cli-reference.md`](docs/insights-cli-reference.md).
