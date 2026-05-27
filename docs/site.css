@@ -3694,7 +3694,15 @@ footer .right {
 .essay kbd.is-pressed {
   transform: translateY(1px);
   border-bottom-width: 1px;
+  padding-bottom: 4px;
   background: var(--panel);
+}
+
+.essay h2 kbd:active,
+.essay h2 kbd.is-pressed,
+.essay h1 kbd:active,
+.essay h1 kbd.is-pressed {
+  padding-bottom: 5px;
 }
 
 .essay kbd:focus-visible {
