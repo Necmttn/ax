@@ -1278,6 +1278,11 @@ DEFINE FIELD artifact_path   ON experiment TYPE option<string>;
 DEFINE FIELD scaffolded_at   ON experiment TYPE option<datetime>;
 DEFINE FIELD created_at      ON experiment TYPE datetime DEFAULT time::now();
 DEFINE FIELD locked_verdict  ON experiment TYPE option<string>;
+DEFINE FIELD status     ON experiment TYPE string  DEFAULT 'task_emitted';
+-- task_emitted | scaffolded | regressed | retired
+DEFINE FIELD task_path  ON experiment TYPE option<string>;
+-- absolute path to .ax/tasks/<id>.md while pending
+DEFINE INDEX experiment_status_idx ON experiment FIELDS status;
 DEFINE INDEX experiment_proposal_uq ON experiment FIELDS proposal UNIQUE;
 DEFINE INDEX experiment_created     ON experiment FIELDS created_at;
 
