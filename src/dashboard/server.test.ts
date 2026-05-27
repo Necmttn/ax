@@ -1,7 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { dashboardApiKind, formatSseEvent, parseDashboardServeArgs, parseQueryRequest, recentIngestEventsSql, routeStaticAsset } from "./server.ts";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { dashboardApiKind, formatSseEvent, parseDashboardServeArgs, parseQueryRequest, recentIngestEventsSql } from "./server.ts";
 
 describe("dashboard server", () => {
     test("parseDashboardServeArgs defaults to port 1738", () => {
@@ -10,17 +8,6 @@ describe("dashboard server", () => {
 
     test("parseDashboardServeArgs accepts explicit port", () => {
         expect(parseDashboardServeArgs(["--port=1800"]).port).toBe(1800);
-    });
-
-    test("routeStaticAsset serves index for root", () => {
-        expect(routeStaticAsset(new URL("http://localhost/"))?.path.endsWith("index.html")).toBe(true);
-    });
-
-    test("dashboard static assets exist", () => {
-        const dir = join(import.meta.dir, "static");
-        expect(existsSync(join(dir, "index.html"))).toBe(true);
-        expect(existsSync(join(dir, "app.js"))).toBe(true);
-        expect(existsSync(join(dir, "styles.css"))).toBe(true);
     });
 
     test("parseQueryRequest rejects non-select mutations", async () => {

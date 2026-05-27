@@ -1,6 +1,3 @@
-import { realpathSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
 import { Effect } from "effect";
 import { SurrealClient } from "../lib/db.ts";
 import { AppLayer } from "../lib/layers.ts";
@@ -33,117 +30,11 @@ import { fetchGraphExplorer } from "./graph-explorer.ts";
 import { fetchSkillGraph } from "./skill-graph.ts";
 import { fetchWrapped, sanitizeWrappedProfile } from "./wrapped.ts";
 
-/**
- * Prefer the Vite-built SPA in `web/dist` (`bun run dashboard:build`). Fall
- * back to the legacy hand-rolled `static/` snapshot when dist isn't there yet
- * (e.g. fresh clones that haven't run the build). The legacy assets stay one
- * release as a safety net; remove once the SPA path is exercised.
- */
-const SPA_DIST_DIR = join(import.meta.dir, "web", "dist");
-const LEGACY_STATIC_DIR = join(import.meta.dir, "static");
-const executableDir = (): string => {
-    for (const candidate of [process.argv[1], process.execPath]) {
-        if (!candidate) continue;
-        try {
-            return dirname(realpathSync(candidate));
-        } catch {
-            // Bun compiled binaries may report /$bunfs/root/... for argv[1].
-        }
-    }
-    return process.cwd();
-};
-const EXECUTABLE_DIR = executableDir();
-const SOURCE_SPA_DIST_DIR = join(EXECUTABLE_DIR, "..", "src", "dashboard", "web", "dist");
-const SOURCE_LEGACY_STATIC_DIR = join(EXECUTABLE_DIR, "..", "src", "dashboard", "static");
-
-const CONTENT_TYPES: Record<string, string> = {
-    ".html": "text/html; charset=utf-8",
-    ".js": "text/javascript; charset=utf-8",
-    ".mjs": "text/javascript; charset=utf-8",
-    ".css": "text/css; charset=utf-8",
-    ".json": "application/json; charset=utf-8",
-    ".svg": "image/svg+xml",
-    ".png": "image/png",
-    ".ico": "image/x-icon",
-    ".map": "application/json",
-};
-
-const contentTypeFor = (path: string): string => {
-    const dot = path.lastIndexOf(".");
-    if (dot < 0) return "application/octet-stream";
-    return CONTENT_TYPES[path.slice(dot).toLowerCase()] ?? "application/octet-stream";
-};
-
-const LEGACY_PATHS = new Set(["/index.html", "/app.js", "/styles.css"]);
-
-const staticHeaders = (
-    contentType: string,
-    cacheControl = "no-cache, no-store, must-revalidate",
-): Record<string, string> => ({
-    "content-type": contentType,
-    "cache-control": cacheControl,
-});
-
 export function parseDashboardServeArgs(args: string[]): { port: number } {
     const raw = args.find((arg) => arg.startsWith("--port="))?.split("=")[1];
     const port = raw === undefined ? 1738 : Number(raw);
     if (!Number.isInteger(port) || port <= 0) throw new Error(`--port must be a positive integer (got ${raw})`);
     return { port };
-}
-
-export function routeStaticAsset(url: URL): { path: string; contentType: string } | null {
-    // SPA shell + hashed assets land in web/dist/. Anything else under
-    // `/assets/`, `/index.html`, or `/` is served from there.
-    const requested = url.pathname === "/" ? "/index.html" : url.pathname;
-    const isAssetLike =
-        requested === "/index.html" ||
-        requested.startsWith("/assets/") ||
-        /^\/[\w.-]+\.(?:js|css|map|svg|png|ico)$/.test(requested);
-    if (isAssetLike) {
-        return {
-            path: join(SPA_DIST_DIR, requested.slice(1)),
-            contentType: contentTypeFor(requested),
-        };
-    }
-    // Legacy hand-rolled static SPA - kept until SPA is fully cut over.
-    if (LEGACY_PATHS.has(requested)) {
-        return {
-            path: join(LEGACY_STATIC_DIR, requested.slice(1)),
-            contentType: contentTypeFor(requested),
-        };
-    }
-    return null;
-}
-
-async function readFirstAvailable(paths: ReadonlyArray<string>): Promise<Uint8Array> {
-    let lastError: unknown;
-    for (const path of paths) {
-        try {
-            return await readFile(path);
-        } catch (err) {
-            lastError = err;
-        }
-    }
-    throw lastError;
-}
-
-function staticPathCandidates(path: string): ReadonlyArray<string> {
-    if (path.startsWith(SPA_DIST_DIR)) {
-        const rel = path.slice(SPA_DIST_DIR.length + 1);
-        return [path, join(SOURCE_SPA_DIST_DIR, rel)];
-    }
-    if (path.startsWith(LEGACY_STATIC_DIR)) {
-        const rel = path.slice(LEGACY_STATIC_DIR.length + 1);
-        return [path, join(SOURCE_LEGACY_STATIC_DIR, rel)];
-    }
-    return [path];
-}
-
-function spaIndexCandidates(): ReadonlyArray<string> {
-    return [
-        join(SPA_DIST_DIR, "index.html"),
-        join(SOURCE_SPA_DIST_DIR, "index.html"),
-    ];
 }
 
 export async function parseQueryRequest(req: Request): Promise<{ sql: string }> {
