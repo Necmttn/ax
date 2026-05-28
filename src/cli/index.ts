@@ -34,6 +34,7 @@ import { cmdRetroReflect } from "./retro-reflect.ts";
 import { cmdRetroMeta } from "./retro-meta.ts";
 import { cmdRetroPlan } from "./retro-plan.ts";
 import { cmdSkillsClassify } from "./skills-classify.ts";
+import { cmdSkillsTag } from "./skills-tag.ts";
 import { homedir } from "node:os";
 import { recordKeyPart } from "../lib/shared/derive-keys.ts";
 import { recordRef, surrealString } from "../lib/shared/surql.ts";
@@ -3479,8 +3480,40 @@ const classifyCommand = Command.make(
     ),
 );
 
+const tagCommand = Command.make(
+    "tag",
+    {
+        skill: Argument.string("skill"),
+        role: Argument.string("role"),
+        confidence: Flag.float("confidence").pipe(Flag.withDefault(1.0)),
+        rationale: Flag.string("rationale").pipe(Flag.optional),
+        remove: Flag.boolean("remove").pipe(Flag.withDefault(false)),
+    },
+    ({ skill, role, confidence, rationale, remove }) =>
+        cmdSkillsTag({
+            skillName: skill,
+            roleName: role,
+            confidence,
+            rationale: optionValue(rationale),
+            remove,
+        }).pipe(
+            Effect.catchTag("DbError", (e) =>
+                Effect.sync(() => {
+                    process.stderr.write(`axctl skills tag: DB error - ${e.message}\n`);
+                    process.exit(1);
+                }),
+            ),
+        ),
+).pipe(
+    Command.withDescription(
+        "Manually assign a role to a skill (writes a plays_role edge with source=user). " +
+        "Idempotent. Use --remove to delete an existing user-source edge. " +
+        "--confidence=N (0–1, default 1.0)  --rationale=\"...\""
+    ),
+);
+
 const skillsCommand = Command.make("skills").pipe(
-    Command.withDescription("Skill-graph queries: search, stats, usage, pairs, recovery, classify"),
+    Command.withDescription("Skill-graph queries: search, stats, usage, pairs, recovery, classify, tag"),
     Command.withSubcommands([
         searchCommand,
         statsCommand,
@@ -3490,6 +3523,7 @@ const skillsCommand = Command.make("skills").pipe(
         pairsCommand,
         recoveryCommand,
         classifyCommand,
+        tagCommand,
     ]),
 );
 
