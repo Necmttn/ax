@@ -35,6 +35,56 @@ unrelated context into the loop.
 
 ## Workflow
 
+### Step 0 - Drain pending session retros
+
+Before the proposal queue, check whether prior sessions still owe a
+retro. This is the "quota arbitrage" path - idle Opus budget chews
+through the backlog so the experiment loop has signal next time.
+
+1. Run:
+
+   ```bash
+   ax retro pending --since=7 --idle-min=30 --json
+   ```
+
+   Returns sessions in the last 7 days that have no `reviewed` graph
+   edge yet AND look finished (explicit `ended_at`, or last turn is
+   >30min idle). If the list is empty, skip to Step 1.
+
+2. Show the list to the user as 1 line per session (project · turns ·
+   model · reason). Ask:
+
+   > N session(s) pending retro. Want me to dispatch the
+   > retro-reviewer subagent for all of them in parallel, or pick a
+   > subset?
+
+3. On `all` or `<subset>`: for each chosen session, write a brief:
+
+   ```bash
+   ax retro brief --session=<session_id>
+   ```
+
+   This writes `.ax/tasks/retro/<key>.md` with frontmatter (transcript
+   path, suggested model, turn count, etc.) and a body that tells the
+   reviewer what to do.
+
+4. Dispatch one `retro-reviewer` subagent per brief, in parallel. Pass
+   each brief path in the prompt; let the subagent's frontmatter pin
+   `model: opus` (override per session if `suggested_model` differs and
+   the user asked you to economize).
+
+5. Wait for all subagents. Aggregate results: counts of retros emitted,
+   proposals recommended, model-fit suggestions. Render as a short
+   summary. The user does not approve retro emissions per row - the
+   subagent already wrote them. The user DOES decide on resulting
+   proposals in Step 2.
+
+6. The `reviewed` edge now exists for each drained session, so a
+   re-run of `ax retro pending` should show fewer rows.
+
+If the user declines Step 0, move on. The backlog stays - next retro
+picks it up.
+
 ### Step 1 - Snapshot
 
 Run silently (parallel where possible):
@@ -198,6 +248,11 @@ ax improve reject <dedupe_sig> --reason "<text>"
 ax improve verdict [<dedupe_sig>] [--set <verdict>] [--json]
 ax improve checkpoint [--force]
 ax improve reset --yes                     # destructive; only when user requests
+
+ax retro pending [--since=N] [--idle-min=N] [--json]   # Step 0 backlog
+ax retro brief --session=<id> [--out-dir=<path>] [--json]
+ax retro emit --session=<id> [--source=<src>] [--from-file=<json>]
+ax retro list [--since=N] [--limit=N] [--json]
 
 ax hooks summary [--since=N] [--tail=N]
 ax hooks invocations [--command="<name>"] [--tail=N]

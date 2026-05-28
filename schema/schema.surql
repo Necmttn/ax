@@ -1382,3 +1382,11 @@ DEFINE INDEX retro_session_uq    ON retro FIELDS session UNIQUE;
 DEFINE INDEX retro_source_ts     ON retro FIELDS source, created_at;
 DEFINE INDEX retro_repository_ts ON retro FIELDS repository, created_at;
 
+-- Graph edge: session got a retro. Lets queries traverse both directions
+-- (session->reviewed->retro, retro<-reviewed<-session) and ask
+-- `WHERE count(->reviewed) = 0` for the pending-retro queue powering
+-- `ax retro pending`. Bidirectional + reads cleanly in English.
+DEFINE TABLE reviewed TYPE RELATION FROM session TO retro SCHEMAFULL;
+DEFINE FIELD created_at ON reviewed TYPE datetime DEFAULT time::now();
+DEFINE INDEX reviewed_in_out_uq ON reviewed FIELDS in, out UNIQUE;
+

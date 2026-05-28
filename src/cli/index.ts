@@ -1750,7 +1750,10 @@ const improveRecommendCommand = Command.make(
         since: Flag.integer("since").pipe(Flag.optional),
         json: Flag.boolean("json").pipe(Flag.withDefault(false)),
         noClipboard: Flag.boolean("no-clipboard").pipe(Flag.withDefault(false)),
-        apply: Flag.boolean("apply").pipe(Flag.withDefault(false)),
+        apply: Flag.boolean("apply").pipe(
+            Flag.withDefault(false),
+            Flag.withDescription("Interactive: pick a proposal from the printed list and accept inline (loops until you quit). Combine with --with-agent on the accept side via the prompt."),
+        ),
     },
     ({ limit, form, since, json, noClipboard, apply }) =>
         cmdImproveRecommend([
@@ -1761,7 +1764,7 @@ const improveRecommendCommand = Command.make(
             ...boolArg("no-clipboard", noClipboard),
             ...boolArg("apply", apply),
         ]),
-).pipe(Command.withDescription("Rank open proposals by confidence × recency × frequency and print the top N (optionally copy to clipboard)"));
+).pipe(Command.withDescription("Rank open proposals by confidence × recency × frequency and print the top N as paste-ready blocks (with `<!--ax:id-->` provenance markers). --apply for interactive accept loop."));
 
 const improveLintCommand = Command.make(
     "lint",
@@ -1776,7 +1779,7 @@ const improveLintCommand = Command.make(
             ...boolArg("json", json),
             `--stale-days=${staleDays}`,
         ]),
-).pipe(Command.withDescription("Scan grounded agent files for marker issues; reconcile task_emitted experiments; warn on stale tasks"));
+).pipe(Command.withDescription("Scan grounded agent files (AGENTS.md / CLAUDE.md / skills) for `<!--ax:id-->` markers, reconcile against the DB, remove consumed `.ax/tasks/<id>.md` briefs, warn on orphans + tasks older than --stale-days (default 7)."));
 
 const improveListCommand = Command.make(
     "list",
@@ -1972,10 +1975,13 @@ const improveAcceptCommand = Command.make(
     {
         id: Argument.string("id"),
         force: Flag.boolean("force").pipe(Flag.withDefault(false)),
-        withAgent: Flag.boolean("with-agent").pipe(Flag.withDefault(false)),
+        withAgent: Flag.boolean("with-agent").pipe(
+            Flag.withDefault(false),
+            Flag.withDescription("After scaffold, spawn a `claude -p` subagent to read the stub + sibling skills and rewrite SKILL.md with concrete guidance. Streams to terminal. Implies --auto-scaffold."),
+        ),
         autoScaffold: Flag.boolean("auto-scaffold").pipe(
             Flag.withDefault(false),
-            Flag.withDescription("Skip task emission and directly scaffold the SKILL.md (skill form only)"),
+            Flag.withDescription("Skip the `.ax/tasks/<id>.md` brief and write SKILL.md directly (skill form only). Use when you want the file now, not a brief to hand to your agent."),
         ),
     },
     ({ id, force, withAgent, autoScaffold }) =>
@@ -2070,7 +2076,7 @@ const improveAcceptCommand = Command.make(
                 }
             }
         }),
-).pipe(Command.withDescription("Accept a proposal: emit a task brief (default) or scaffold the SKILL.md directly (--auto-scaffold, skill form only)"));
+).pipe(Command.withDescription("Accept a proposal. Default emits a `.ax/tasks/<id>.md` brief to hand to your agent (Claude Code, Codex). --auto-scaffold writes SKILL.md directly. --with-agent dispatches a subagent to enrich the stub."));
 
 const improveRejectCommand = Command.make(
     "reject",
@@ -2311,7 +2317,7 @@ const improveCheckpointCommand = Command.make(
 ).pipe(Command.withDescription("Compute checkpoint snapshots at t+7/t+30/t+90 for active experiments"));
 
 const improveCommand = Command.make("improve").pipe(
-    Command.withDescription("Experiment loop: review proposals, accept skills, track verdicts"),
+    Command.withDescription("Experiment loop: rank proposals (recommend), accept (emit task brief or scaffold + dispatch subagent), lint grounded agent files, track verdicts at t+7/t+30/t+90."),
     Command.withSubcommands([
         improveRecommendCommand,
         improveLintCommand,
@@ -2436,6 +2442,310 @@ const cmdRetroList = (args: string[]) =>
         }
     });
 
+/**
+ * `ax retro pending` - sessions that lack a `reviewed` edge to any retro.
+ *
+ * A session is "pending retro" when:
+ *   - it has no outbound `reviewed` edge, AND
+ *   - it looks finished: either `ended_at` is set, or the last turn was
+ *     more than --idle-min minutes ago (user closed the tab, no explicit
+ *     end marker).
+ *
+ * Drives the quota-arbitrage flow: idle Opus budget chews through the
+ * backlog via the retro-reviewer subagent.
+ */
+interface PendingSessionRow {
+    readonly id: string | { tb: string; id: string };
+    readonly project: string | null;
+    readonly source: string | null;
+    readonly model: string | null;
+    readonly started_at: string | null;
+    readonly ended_at: string | null;
+    readonly last_turn_at: string | null;
+    readonly turns: number;
+}
+
+interface PendingSession {
+    readonly sessionId: string;     // `session:<key>` record id
+    readonly key: string;           // bare key (UUID, no prefix)
+    readonly project: string | null;
+    readonly source: string | null;
+    readonly model: string | null;
+    readonly startedAt: string | null;
+    readonly endedAt: string | null;
+    readonly lastTurnAt: string | null;
+    readonly turns: number;
+    readonly reason: "ended_at" | "idle";
+}
+
+/**
+ * Two-pass query so we don't pay for per-session turn subqueries on the
+ * common path:
+ *
+ *   1. Sessions with `ended_at` set in the window. Cheap. Most rows.
+ *   2. Sessions w/o `ended_at` whose `started_at` is older than the idle
+ *      threshold. Approximation - assumes "no end marker AND old start"
+ *      means the user walked away. Fast.
+ *
+ * `turns` is fetched lazily inside `ax retro brief`, not here, because
+ * the per-session `count(turn)` subquery is what blew up the v0 query.
+ */
+interface PendingQueryOpts {
+    readonly sinceDays: number;
+    readonly idleMinutes: number;
+    readonly includeSubagents: boolean;
+    readonly limit: number;
+}
+
+const queryPendingSessions = (opts: PendingQueryOpts) =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        // claude-subagent sessions are orchestrated children; their retros
+        // belong to the parent session's review. Exclude unless asked.
+        const subagentFilter = opts.includeSubagents ? "" : "AND source != 'claude-subagent'";
+        const endedRows = yield* db.query<[Array<{
+            id: PendingSessionRow["id"]; project: string | null; source: string | null;
+            model: string | null; started_at: string | null; ended_at: string | null;
+        }>]>(`
+            SELECT id, project, source, model,
+                type::string(started_at) AS started_at,
+                type::string(ended_at) AS ended_at
+            FROM session
+            WHERE count(->reviewed) = 0
+              AND ended_at != NONE
+              AND ended_at > time::now() - ${opts.sinceDays}d
+              ${subagentFilter}
+            ORDER BY ended_at DESC
+            LIMIT ${opts.limit};
+        `);
+        const idleRows = yield* db.query<[Array<{
+            id: PendingSessionRow["id"]; project: string | null; source: string | null;
+            model: string | null; started_at: string | null;
+        }>]>(`
+            SELECT id, project, source, model,
+                type::string(started_at) AS started_at
+            FROM session
+            WHERE count(->reviewed) = 0
+              AND ended_at = NONE
+              AND started_at != NONE
+              AND started_at > time::now() - ${opts.sinceDays}d
+              AND started_at < time::now() - ${opts.idleMinutes}m
+              ${subagentFilter}
+            ORDER BY started_at DESC
+            LIMIT ${opts.limit};
+        `);
+
+        const recordIdOf = (id: PendingSessionRow["id"]): string =>
+            typeof id === "string" ? id : `session:${id.id}`;
+        const keyOf = (recordId: string): string =>
+            recordId.startsWith("session:")
+                ? recordId.slice("session:".length).replace(/`/g, "")
+                : recordId;
+
+        const out: PendingSession[] = [];
+        for (const row of (endedRows?.[0] ?? [])) {
+            const sessionRecordId = recordIdOf(row.id);
+            out.push({
+                sessionId: sessionRecordId,
+                key: keyOf(sessionRecordId),
+                project: row.project,
+                source: row.source,
+                model: row.model,
+                startedAt: row.started_at,
+                endedAt: row.ended_at,
+                lastTurnAt: null,
+                turns: 0,
+                reason: "ended_at",
+            });
+        }
+        for (const row of (idleRows?.[0] ?? [])) {
+            const sessionRecordId = recordIdOf(row.id);
+            out.push({
+                sessionId: sessionRecordId,
+                key: keyOf(sessionRecordId),
+                project: row.project,
+                source: row.source,
+                model: row.model,
+                startedAt: row.started_at,
+                endedAt: null,
+                lastTurnAt: null,
+                turns: 0,
+                reason: "idle",
+            });
+        }
+        return out;
+    });
+
+const cmdRetroPending = (args: string[]) =>
+    Effect.gen(function* () {
+        const json = args.includes("--json");
+        const includeSubagents = args.includes("--include-subagents");
+        const sinceFlag = flag("since", args);
+        const idleFlag = flag("idle-min", args);
+        const limitFlag = flag("limit", args);
+        const sinceDays = sinceFlag ? Math.max(1, parseInt(sinceFlag, 10) || 7) : 7;
+        const idleMinutes = idleFlag ? Math.max(1, parseInt(idleFlag, 10) || 30) : 30;
+        const limit = limitFlag ? Math.max(1, parseInt(limitFlag, 10) || 20) : 20;
+        const pending = yield* queryPendingSessions({ sinceDays, idleMinutes, includeSubagents, limit });
+        if (json) {
+            console.log(prettyPrint(pending));
+            return;
+        }
+        if (pending.length === 0) {
+            console.log(`(no pending retros in last ${sinceDays}d${includeSubagents ? "" : ", excluding subagents"})`);
+            return;
+        }
+        const subAgentHint = includeSubagents ? "" : " (subagents hidden - pass --include-subagents to show)";
+        console.log(`${pending.length} session(s) pending retro, since=${sinceDays}d limit=${limit}${subAgentHint}:`);
+        for (const s of pending) {
+            const proj = s.project ? prettifyProjectSlug(s.project) : "?";
+            const when = s.endedAt ?? s.startedAt ?? "?";
+            console.log(`  ${s.sessionId}  [${s.source ?? "?"}]  ${proj}  ${s.reason}=${when}`);
+        }
+    });
+
+/**
+ * `ax retro brief --session=<id>` - write `.ax/tasks/retro/<key>.md` brief
+ * the retro-reviewer subagent consumes.
+ *
+ * Suggested-model heuristic: short, error-free sessions → haiku; sessions
+ * with many turns, corrections, or tool errors → opus. The brief embeds
+ * the suggestion as advisory metadata; the dispatcher picks the model.
+ */
+const formatRetroBrief = (s: PendingSession, transcriptPath: string | null, suggestedModel: string): string => {
+    const fm = [
+        "---",
+        "kind: retro",
+        `session_id: ${s.sessionId}`,
+        `session_key: ${s.key}`,
+        s.project ? `project: ${s.project}` : null,
+        s.source ? `source: ${s.source}` : null,
+        s.model ? `model_used: ${s.model}` : null,
+        `turns: ${s.turns}`,
+        s.startedAt ? `started_at: ${s.startedAt}` : null,
+        (s.endedAt ?? s.lastTurnAt) ? `ended_at: ${s.endedAt ?? s.lastTurnAt}` : null,
+        `pending_reason: ${s.reason}`,
+        `suggested_model: ${suggestedModel}`,
+        transcriptPath ? `transcript: ${transcriptPath}` : null,
+        "status: pending",
+        "---",
+    ].filter((line): line is string => line !== null).join("\n");
+
+    const body = `# Retro: ${s.sessionId}
+
+Review the prior session and emit findings. Source of truth is the
+transcript at \`${transcriptPath ?? "(unknown - check raw_file on the session record)"}\`.
+
+## What to look for
+
+- **Worked**: which moves landed; which skills/tools fired and helped.
+- **Failed**: corrections, retries, dead-ends, tool errors. Pattern over single events.
+- **Model fit**: was \`${s.model ?? "?"}\` overkill (cheap rote work) or undersized (visible struggle)?
+- **Missing scaffolding**: behaviors a skill / hook / subagent would've prevented.
+
+## Required output
+
+Run these from the repo whose session this was:
+
+\`\`\`bash
+ax retro emit --session=${s.sessionId} --source=manual --from-file=<path-to-json>
+\`\`\`
+
+…where the JSON file contains \`{tried, worked, failed, next}\`. If you
+spot a repeated pattern (≥2 occurrences in this session, or rhymes with
+prior retros), also call:
+
+\`\`\`bash
+ax improve recommend ...
+\`\`\`
+
+When done, update this file's frontmatter \`status: completed\`. The next
+\`ax retro pending\` call will exclude this session because the
+\`reviewed\` edge now exists.
+`;
+    return `${fm}\n\n${body}`;
+};
+
+const suggestModelFor = (s: PendingSession): string => {
+    if (s.turns >= 40) return "opus";
+    if (s.turns <= 5) return "haiku";
+    return "sonnet";
+};
+
+const cmdRetroBrief = (args: string[]) =>
+    Effect.gen(function* () {
+        const sessionFlag = flag("session", args);
+        const outDirFlag = flag("out-dir", args);
+        const json = args.includes("--json");
+        if (!sessionFlag) {
+            console.error("ax retro brief: --session=<id> required");
+            process.exit(2);
+        }
+        const rawSession = sessionFlag.startsWith("session:")
+            ? sessionFlag.slice("session:".length).replace(/`/g, "")
+            : sessionFlag;
+        const sessionRef = recordRef("session", rawSession);
+        const sessionRecordId = `session:${rawSession}`;
+        const db = yield* SurrealClient;
+        const rows = yield* db.query<[Array<{
+            id: string | { tb: string; id: string };
+            project: string | null;
+            source: string | null;
+            model: string | null;
+            started_at: string | null;
+            ended_at: string | null;
+            raw_file: string | null;
+            last_turn_at: string | null;
+            turns: number;
+        }>]>(`
+            SELECT
+                id, project, source, model, raw_file,
+                type::string(started_at) AS started_at,
+                type::string(ended_at) AS ended_at,
+                type::string((SELECT VALUE math::max(ts) FROM turn WHERE session = $parent.id GROUP ALL)[0]) AS last_turn_at,
+                (SELECT count() FROM turn WHERE session = $parent.id GROUP ALL)[0].count ?? 0 AS turns
+            FROM ${sessionRef} LIMIT 1;
+        `);
+        const row = (rows?.[0] ?? [])[0];
+        if (!row) {
+            console.error(`ax retro brief: session ${sessionRecordId} not found`);
+            process.exit(2);
+        }
+        const idStr = typeof row.id === "string" ? row.id : `session:${row.id.id}`;
+        const key = idStr.startsWith("session:") ? idStr.slice("session:".length).replace(/`/g, "") : idStr;
+        const session: PendingSession = {
+            sessionId: idStr,
+            key,
+            project: row.project,
+            source: row.source,
+            model: row.model,
+            startedAt: row.started_at,
+            endedAt: row.ended_at,
+            lastTurnAt: row.last_turn_at,
+            turns: row.turns ?? 0,
+            reason: row.ended_at ? "ended_at" : "idle",
+        };
+        const suggested = suggestModelFor(session);
+        const transcriptPath = row.raw_file ?? null;
+        const body = formatRetroBrief(session, transcriptPath, suggested);
+
+        const { mkdir, writeFile } = yield* Effect.promise(() => import("node:fs/promises"));
+        const { join, resolve } = yield* Effect.promise(() => import("node:path"));
+        const outDir = resolve(outDirFlag ?? join(process.cwd(), ".ax", "tasks", "retro"));
+        yield* Effect.promise(() => mkdir(outDir, { recursive: true }));
+        const safeKey = key.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80);
+        const filePath = join(outDir, `${safeKey}.md`);
+        yield* Effect.promise(() => writeFile(filePath, body, "utf8"));
+
+        if (json) {
+            console.log(prettyPrint({ session: idStr, path: filePath, suggested_model: suggested, transcript: transcriptPath }));
+            return;
+        }
+        console.log(`brief: ${filePath}`);
+        console.log(`  session=${idStr}  turns=${session.turns}  suggested_model=${suggested}`);
+        if (transcriptPath) console.log(`  transcript=${transcriptPath}`);
+    });
+
 const retroEmitCommand = Command.make(
     "emit",
     {
@@ -2527,9 +2837,41 @@ const retroPlanCommand = Command.make(
         ]),
 ).pipe(Command.withDescription("Register an externally-drafted plan as proposal (+ experiment unless --leave-open). External agent calls this after user yes."));
 
+const retroPendingCommand = Command.make(
+    "pending",
+    {
+        since: Flag.integer("since").pipe(Flag.withDefault(7)),
+        idleMin: Flag.integer("idle-min").pipe(Flag.withDefault(30)),
+        limit: Flag.integer("limit").pipe(Flag.withDefault(20)),
+        includeSubagents: Flag.boolean("include-subagents").pipe(Flag.withDefault(false)),
+        json: jsonFlag,
+    },
+    ({ since, idleMin, limit, includeSubagents, json }) => cmdRetroPending([
+        `--since=${since}`,
+        `--idle-min=${idleMin}`,
+        `--limit=${limit}`,
+        ...boolArg("include-subagents", includeSubagents),
+        ...boolArg("json", json),
+    ]),
+).pipe(Command.withDescription("List sessions in the last N days that have no `reviewed` edge yet - the retro backlog the /retro skill drains. Excludes claude-subagent rows by default."));
+
+const retroBriefCommand = Command.make(
+    "brief",
+    {
+        session: Flag.string("session"),
+        outDir: Flag.string("out-dir").pipe(Flag.optional),
+        json: jsonFlag,
+    },
+    ({ session, outDir, json }) => cmdRetroBrief([
+        `--session=${session}`,
+        ...stringArg("out-dir", optionValue(outDir)),
+        ...boolArg("json", json),
+    ]),
+).pipe(Command.withDescription("Write a task brief for one session to .ax/tasks/retro/<key>.md - hands off to the retro-reviewer subagent"));
+
 const retroCommand = Command.make("retro").pipe(
     Command.withDescription("Session retros: structured reflections (tried · worked · failed · next) that drive the experiment loop"),
-    Command.withSubcommands([retroEmitCommand, retroListCommand, retroReflectCommand, retroMetaCommand, retroPlanCommand]),
+    Command.withSubcommands([retroEmitCommand, retroListCommand, retroPendingCommand, retroBriefCommand, retroReflectCommand, retroMetaCommand, retroPlanCommand]),
 );
 
 const serveCommand = Command.make(
