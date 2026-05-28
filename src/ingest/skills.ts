@@ -7,6 +7,8 @@
  * @inputs ~/.claude/skills/, ~/.agents/skills/, plugin caches
  * @outputs `skill` rows, `plays_role` edges
  * @order 10
+ *
+ * @see scripts/extract-stage-rationale.ts for the full annotation contract.
  */
 import { readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";

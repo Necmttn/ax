@@ -9,6 +9,31 @@ const REPO_ROOT = resolve(SCRIPT_DIR, "..");
 const SRC_DIR = resolve(REPO_ROOT, "src/ingest");
 const OUT_PATH = resolve(REPO_ROOT, "docs/how-ax-sees-your-work.generated.mdx");
 
+/**
+ * Annotation contract for src/ingest/*.ts files:
+ *
+ *   /**
+ *    * @stage     <display name>           (required)
+ *    * @rationale <prose, 1-3 sentences,
+ *    *            product-level voice>     (required)
+ *    *
+ *    *            Multi-line continuation: each follow-up line must be
+ *    *            ` *   text` (space, star, space-or-tab+). Do NOT put a
+ *    *            blank ` *` line between tags - the continuation regex
+ *    *            requires non-blank continuation text.
+ *    *
+ *    * @inputs    <short description>       (optional)
+ *    * @outputs   <short description>       (optional)
+ *    * @order     <integer, lower = earlier> (optional, default 999)
+ *    *\/
+ *
+ * The block must be the FIRST /** encountered in the file. Leading
+ * `//` line comments or shebangs are tolerated. Files without a
+ * @stage or @rationale tag are silently skipped (used to filter
+ * non-stage helper files).
+ *
+ * Generated output: docs/how-ax-sees-your-work.generated.mdx
+ */
 interface Stage {
     readonly name: string;
     readonly rationale: string;
@@ -20,18 +45,21 @@ interface Stage {
 
 // Matches @tag value-text where value-text continues until the next @tag
 // or the end of the JSDoc block. Continuation lines start with `  * `.
+// `[ \t]+` (not `\s+`) so a blank ` *` line cannot bridge to the next tag.
 const tagPattern =
-    /@(stage|rationale|inputs|outputs|order)\s+([^\n]+(?:\n\s*\*\s+[^\n@*][^\n]*)*)/g;
+    /@(stage|rationale|inputs|outputs|order)[ \t]+([^\n]+(?:\n[ \t]*\*[ \t]+[^\n@*][^\n]*)*)/g;
 
 const parseFile = async (path: string): Promise<Stage | null> => {
     const text = await readFile(path, "utf8");
-    const headerMatch = text.match(/^\s*\/\*\*([\s\S]*?)\*\//);
+    // Match the FIRST `/** ... */` block anywhere in the file (no leading
+    // anchor) so leading `//` comments or shebangs do not silently skip it.
+    const headerMatch = text.match(/\/\*\*([\s\S]*?)\*\//);
     if (!headerMatch) return null;
     const header = headerMatch[1] ?? "";
     const tags: Record<string, string> = {};
     for (const m of header.matchAll(tagPattern)) {
         const key = m[1] as string;
-        const raw = (m[2] ?? "").replace(/\n\s*\*\s+/g, " ").trim();
+        const raw = (m[2] ?? "").replace(/\n[ \t]*\*[ \t]+/g, " ").trim();
         tags[key] = raw;
     }
     if (!tags.stage || !tags.rationale) return null;
