@@ -5,7 +5,7 @@ export function ChapterCta() {
         <div className="loop-line">
           retro<span className="sep">→</span>evidence<span className="sep">→</span>proposal<span className="sep">→</span>experiment<span className="sep">→</span>verdict
         </div>
-        <a className="btn" href="https://github.com/Necmttn/ax">View on GitHub →</a>
+        <a className="btn" href="https://github.com/Necmttn/ax" target="_blank" rel="noopener noreferrer">View on GitHub →</a>
       </div>
 
       <p className="byline">

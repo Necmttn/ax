@@ -1,28 +1,26 @@
 export function Chapter4Example() {
   return (
-    <>
-      <section className="section">
-        <h2>The example that convinced me.</h2>
+    <section className="section">
+      <h2>The example that convinced me.</h2>
 
-        <p>
-          It was small and stupid, which is exactly why it convinced me.
-        </p>
+      <p>
+        It was small and stupid, which is exactly why it convinced me.
+      </p>
 
-        <p>
-          I do not like agents working on main. I want a clean main and a
-          worktree per task. So I did the obvious thing and wrote it into my{" "}
-          <code>CLAUDE.md</code> and <code>AGENTS.md</code>: always branch,
-          never touch main, keep the root clean.
-        </p>
+      <p>
+        I do not like agents working on main. I want a clean main and a
+        worktree per task. So I did the obvious thing and wrote it into my{" "}
+        <code>CLAUDE.md</code> and <code>AGENTS.md</code>: always branch,
+        never touch main, keep the root clean.
+      </p>
 
-        <p>
-          It failed constantly. Under a full context window the agent simply
-          lost that line. I would catch it three sessions later, working on
-          main again, and spend the next ten minutes moving the work off.
-          Same correction, over and over, scattered across weeks of chats.
-        </p>
-      </section>
-    </>
+      <p>
+        It failed constantly. Under a full context window the agent simply
+        lost that line. I would catch it three sessions later, working on
+        main again, and spend the next ten minutes moving the work off.
+        Same correction, over and over, scattered across weeks of chats.
+      </p>
+    </section>
   );
 }
 

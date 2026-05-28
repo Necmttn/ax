@@ -44,7 +44,7 @@ export function Chapter8WhatAxIs() {
 
       <p>
         If you want to try it, it is{" "}
-        <a href="https://github.com/Necmttn/ax">on GitHub</a>, MIT
+        <a href="https://github.com/Necmttn/ax" target="_blank" rel="noopener noreferrer">on GitHub</a>, MIT
         licensed, and runs on your laptop. Then tell me where the shape
         is wrong.
       </p>

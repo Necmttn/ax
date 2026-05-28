@@ -52,8 +52,6 @@ export function ChapterExhibitG() {
     }
 
     function formatK(k: number) {
-      if (k < 10)  return `${Math.round(k)}k`;
-      if (k < 100) return `${Math.round(k)}k`;
       return `${Math.round(k)}k`;
     }
 
