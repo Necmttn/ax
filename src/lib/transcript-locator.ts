@@ -31,7 +31,7 @@ export type Harness = "claude" | "codex";
  * Encode an absolute filesystem path as the Claude project directory slug.
  *
  * Claude stores transcripts under `~/.claude/projects/<slug>/` where slug is
- * derived by replacing every `/` in the absolute path with `-` and dropping
+ * derived by replacing every `/` in the absolute path with `-`, retaining
  * the leading `-`. For example:
  *   `/Users/necmttn/Projects/ax` → `-Users-necmttn-Projects-ax`
  *

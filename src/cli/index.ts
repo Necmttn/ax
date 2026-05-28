@@ -579,6 +579,9 @@ const cmdIngest = (args: string[]) => {
     });
 };
 
+// Default stages for `ingest here`: all stages except codex (no cwd filter in v0).
+const HERE_DEFAULT_STAGES: IngestStageKey[] = ALL_STAGE_KEYS.filter((k) => k !== "codex");
+
 /**
  * `axctl ingest here [--since=Nd]` - scope ingest to the git repository at $PWD.
  *
@@ -594,28 +597,15 @@ const cmdIngestHere = (args: string[]) =>
     Effect.gen(function* () {
         // Validate stage flags before hitting the DB (same guard as cmdIngest).
         const hasStagesArg = args.some((a) => a.startsWith("--stages="));
-        const hasDeriveOnly = args.includes("--derive-only");
-        if (hasStagesArg && hasDeriveOnly) {
-            console.error("axctl ingest here: --stages and --derive-only are mutually exclusive");
-            process.exit(2);
-        }
 
         // Resolve the cwd git repo before DB work.
         const pwdResolution = yield* resolvePwdRepository().pipe(
-            Effect.catch((err) =>
-                Effect.gen(function* () {
-                    const cwd = process.cwd();
-                    if (err && typeof err === "object" && "_tag" in err && err._tag === "NotAGitRepoError") {
-                        process.stderr.write(
-                            `axctl ingest here: not in a git repository (cwd=${(err as { cwd: string }).cwd ?? cwd})\n`,
-                        );
-                    } else {
-                        process.stderr.write(
-                            `axctl ingest here: not in a git repository (cwd=${cwd})\n`,
-                        );
-                    }
+            Effect.catchTag("NotAGitRepoError", (err) =>
+                Effect.sync(() => {
+                    process.stderr.write(
+                        `axctl ingest here: not in a git repository (cwd=${err.cwd})\n`,
+                    );
                     process.exit(2);
-                    return yield* Effect.die(err);
                 }),
             ),
         );
@@ -623,15 +613,12 @@ const cmdIngestHere = (args: string[]) =>
         const repoRoot = pwdResolution.repoRoot;
         const claudeSlug = encodeClaudeProjectSlug(repoRoot);
 
-        // Default stages for `here`: all stages except codex.
-        const HERE_DEFAULT_STAGES: IngestStageKey[] = ALL_STAGE_KEYS.filter((k) => k !== "codex");
-
         // Resolve stages: user --stages= overrides, otherwise use HERE_DEFAULT_STAGES.
-        const sel: IngestStageKey[] = hasStagesArg || hasDeriveOnly
+        const sel: IngestStageKey[] = hasStagesArg
             ? resolveIngestStages(args)
             : HERE_DEFAULT_STAGES;
 
-        if (!hasStagesArg && !hasDeriveOnly) {
+        if (!hasStagesArg) {
             // Inform the user that codex is skipped.
             process.stderr.write("ingest here: codex stage skipped - no cwd filter yet\n");
         }
@@ -674,6 +661,7 @@ const cmdIngestHere = (args: string[]) =>
                 Effect.provideService(ProcessService, proc),
             );
 
+        // Mirror of cmdIngest.stageRun - keep in sync. Differences: claude stage passes project:, git stage passes repoPaths:.
         const stageRun: Record<IngestStageKey, () => Effect.Effect<unknown, DbError, never>> = {
             skills: () => withServices(telemetryStage(db, runId, "skills", "upsert", ingestSkills(), progress)),
             commands: () => withServices(telemetryStage(db, runId, "commands", "upsert", ingestCommands(), progress)),
