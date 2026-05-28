@@ -40,19 +40,19 @@ function makeMockDb() {
 }
 
 const SKILL_ID = new RecordId("skill", "test-skill");
+const SKILL_LIT = "skill:`test-skill`";
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe("relateSkillRoles", () => {
-    test("single role: produces 1 role upsert + 1 plays_role edge", async () => {
+    test("single role: produces sweep DELETE + 1 role upsert + 1 plays_role edge", async () => {
         const { calls, db } = makeMockDb();
 
         const result = await Effect.runPromise(
             relateSkillRoles(db, {
                 skillId: SKILL_ID,
-                skillName: "test-skill",
                 roles: ["framing"],
             }),
         );
@@ -65,21 +65,31 @@ describe("relateSkillRoles", () => {
         expect(upsertCalls).toHaveLength(1);
         expect(upsertCalls[0]!.content).toEqual({ name: "framing" });
 
-        // DELETE + RELATE queries for the one role
         const queryCalls = calls.filter((c): c is Extract<Call, { kind: "query" }> => c.kind === "query");
-        const deleteCall = queryCalls.find((c) => c.sql.includes("DELETE plays_role") && c.sql.includes("out = $role"));
+
+        // Sweep DELETE uses literal skill id, no $skill/$role placeholders
+        const sweepDelete = queryCalls.find((c) =>
+            c.sql.includes("DELETE plays_role") && c.sql.includes(SKILL_LIT),
+        );
+        expect(sweepDelete).toBeDefined();
+        expect(sweepDelete!.sql).not.toContain("$skill");
+        expect(sweepDelete!.sql).not.toContain("$role");
+
+        // RELATE uses literal skill + role ids
         const relateCall = queryCalls.find((c) => c.sql.includes("RELATE"));
-        expect(deleteCall).toBeDefined();
         expect(relateCall).toBeDefined();
+        expect(relateCall!.sql).toContain(SKILL_LIT);
+        expect(relateCall!.sql).toContain("role:`framing`");
+        expect(relateCall!.sql).not.toContain("$skill");
+        expect(relateCall!.sql).not.toContain("$role");
     });
 
-    test("multi-role: produces 2 role upserts + 2 edges", async () => {
+    test("multi-role: sweep DELETE once, then 2 role upserts + 2 edges", async () => {
         const { calls, db } = makeMockDb();
 
         const result = await Effect.runPromise(
             relateSkillRoles(db, {
                 skillId: SKILL_ID,
-                skillName: "test-skill",
                 roles: ["framing", "execution"],
             }),
         );
@@ -93,11 +103,25 @@ describe("relateSkillRoles", () => {
         expect(upsertedNames).toContain("framing");
         expect(upsertedNames).toContain("execution");
 
+        // Exactly one sweep DELETE (outside the loop)
+        const deleteCalls = calls.filter(
+            (c): c is Extract<Call, { kind: "query" }> =>
+                c.kind === "query" && c.sql.includes("DELETE plays_role"),
+        );
+        expect(deleteCalls).toHaveLength(1);
+
         const relateCalls = calls.filter(
             (c): c is Extract<Call, { kind: "query" }> =>
                 c.kind === "query" && c.sql.includes("RELATE"),
         );
         expect(relateCalls).toHaveLength(2);
+        // Each RELATE uses the correct role literal
+        const relatedRoles = relateCalls.map((c) => {
+            const m = c.sql.match(/role:`([^`]+)`/);
+            return m?.[1];
+        });
+        expect(relatedRoles).toContain("framing");
+        expect(relatedRoles).toContain("execution");
     });
 
     test("deduplication: roles=['framing', 'Framing', ' framing '] → 1 role upsert + 1 edge", async () => {
@@ -106,7 +130,6 @@ describe("relateSkillRoles", () => {
         const result = await Effect.runPromise(
             relateSkillRoles(db, {
                 skillId: SKILL_ID,
-                skillName: "test-skill",
                 roles: ["framing", "Framing", " framing "],
             }),
         );
@@ -122,104 +145,81 @@ describe("relateSkillRoles", () => {
     test("idempotent: running twice issues DELETE then RELATE both times", async () => {
         const { calls, db } = makeMockDb();
 
-        // First run
+        // First run: 1 sweep DELETE + 1 upsert + 1 RELATE = 3 calls
         await Effect.runPromise(
-            relateSkillRoles(db, {
-                skillId: SKILL_ID,
-                skillName: "test-skill",
-                roles: ["framing"],
-            }),
+            relateSkillRoles(db, { skillId: SKILL_ID, roles: ["framing"] }),
         );
         const firstRunCallCount = calls.length;
+        expect(firstRunCallCount).toBe(3);
 
-        // Second run
+        // Second run: same 3 calls
         await Effect.runPromise(
-            relateSkillRoles(db, {
-                skillId: SKILL_ID,
-                skillName: "test-skill",
-                roles: ["framing"],
-            }),
+            relateSkillRoles(db, { skillId: SKILL_ID, roles: ["framing"] }),
         );
-
-        // Each run should issue: 1 upsert + 1 DELETE + 1 RELATE = 3 calls
         expect(calls.length).toBe(firstRunCallCount * 2);
 
         const allDeleteCalls = calls.filter(
             (c): c is Extract<Call, { kind: "query" }> =>
-                c.kind === "query" && c.sql.includes("DELETE plays_role") && c.sql.includes("out = $role"),
+                c.kind === "query" && c.sql.includes("DELETE plays_role"),
         );
         const allRelateCalls = calls.filter(
             (c): c is Extract<Call, { kind: "query" }> =>
                 c.kind === "query" && c.sql.includes("RELATE"),
         );
-        // 2 DELETE (once per run) + 2 RELATE (once per run)
+        // 2 sweep DELETEs (once per run) + 2 RELATEs (once per run)
         expect(allDeleteCalls.length).toBe(2);
         expect(allRelateCalls.length).toBe(2);
     });
 
-    test("parameter binding: bindings carry RecordId for $skill and $role (not strings)", async () => {
+    test("SQL uses literal record ids: no $skill or $role placeholders anywhere", async () => {
         const { calls, db } = makeMockDb();
 
         await Effect.runPromise(
-            relateSkillRoles(db, {
-                skillId: SKILL_ID,
-                skillName: "test-skill",
-                roles: ["framing"],
-            }),
+            relateSkillRoles(db, { skillId: SKILL_ID, roles: ["framing"] }),
         );
 
         const queryCalls = calls.filter((c): c is Extract<Call, { kind: "query" }> => c.kind === "query");
-
-        // DELETE query bindings
-        const deleteCall = queryCalls.find(
-            (c) => c.sql.includes("DELETE plays_role") && c.sql.includes("out = $role"),
-        );
-        expect(deleteCall).toBeDefined();
-        expect(deleteCall!.bindings!["skill"]).toBeInstanceOf(RecordId);
-        expect(deleteCall!.bindings!["role"]).toBeInstanceOf(RecordId);
-
-        // RELATE query bindings
-        const relateCall = queryCalls.find((c) => c.sql.includes("RELATE"));
-        expect(relateCall).toBeDefined();
-        expect(relateCall!.bindings!["skill"]).toBeInstanceOf(RecordId);
-        expect(relateCall!.bindings!["role"]).toBeInstanceOf(RecordId);
+        for (const qc of queryCalls) {
+            expect(qc.sql).not.toContain("$skill");
+            expect(qc.sql).not.toContain("$role");
+            // No bindings object passed for record-id queries
+            expect(qc.bindings).toBeUndefined();
+        }
     });
 
-    test("empty roles: returns 0/0 and issues a sweep DELETE for stale frontmatter edges", async () => {
+    test("empty roles: returns 0/0 and issues a sweep DELETE (no RELATE)", async () => {
         const { calls, db } = makeMockDb();
 
         const result = await Effect.runPromise(
-            relateSkillRoles(db, {
-                skillId: SKILL_ID,
-                skillName: "test-skill",
-                roles: [],
-            }),
+            relateSkillRoles(db, { skillId: SKILL_ID, roles: [] }),
         );
 
         expect(result.rolesUpserted).toBe(0);
         expect(result.edgesWritten).toBe(0);
 
-        // Should issue a sweep DELETE for stale edges
+        // Should issue sweep DELETE using literal skill id
         const sweepDelete = calls.find(
             (c): c is Extract<Call, { kind: "query" }> =>
                 c.kind === "query" &&
                 c.sql.includes("DELETE plays_role") &&
-                c.sql.includes('source = "frontmatter"') &&
-                !c.sql.includes("out = $role"),
+                c.sql.includes(SKILL_LIT) &&
+                c.sql.includes('source = "frontmatter"'),
         );
         expect(sweepDelete).toBeDefined();
-        expect(sweepDelete!.bindings!["skill"]).toBeInstanceOf(RecordId);
+        expect(sweepDelete!.sql).not.toContain("$skill");
+
+        // No RELATE for empty roles
+        const relateCall = calls.find(
+            (c): c is Extract<Call, { kind: "query" }> => c.kind === "query" && c.sql.includes("RELATE"),
+        );
+        expect(relateCall).toBeUndefined();
     });
 
     test("source=frontmatter and confidence=1.0 set on RELATE query", async () => {
         const { calls, db } = makeMockDb();
 
         await Effect.runPromise(
-            relateSkillRoles(db, {
-                skillId: SKILL_ID,
-                skillName: "test-skill",
-                roles: ["framing"],
-            }),
+            relateSkillRoles(db, { skillId: SKILL_ID, roles: ["framing"] }),
         );
 
         const relateCall = calls.find(
@@ -229,5 +229,31 @@ describe("relateSkillRoles", () => {
         expect(relateCall).toBeDefined();
         expect(relateCall!.sql).toContain('source = "frontmatter"');
         expect(relateCall!.sql).toContain("confidence = 1.0");
+    });
+
+    test("stale-edge sweep: roles shrinking [framing,execution]→[framing] removes execution edge", async () => {
+        const { calls, db } = makeMockDb();
+
+        // First run with two roles
+        await Effect.runPromise(
+            relateSkillRoles(db, { skillId: SKILL_ID, roles: ["framing", "execution"] }),
+        );
+
+        calls.length = 0; // reset
+
+        // Second run with one role - sweep DELETE fires once (covers both old edges)
+        const result = await Effect.runPromise(
+            relateSkillRoles(db, { skillId: SKILL_ID, roles: ["framing"] }),
+        );
+        expect(result.edgesWritten).toBe(1);
+
+        const deleteCalls = calls.filter(
+            (c): c is Extract<Call, { kind: "query" }> =>
+                c.kind === "query" && c.sql.includes("DELETE plays_role"),
+        );
+        // One sweep DELETE - not one per role
+        expect(deleteCalls).toHaveLength(1);
+        expect(deleteCalls[0]!.sql).toContain(SKILL_LIT);
+        expect(deleteCalls[0]!.sql).not.toContain("role:`");
     });
 });

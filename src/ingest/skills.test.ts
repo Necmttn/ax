@@ -4,15 +4,16 @@
  * Tests for parseSkillFile (private) are covered via the module's exported
  * shape by calling ingestSkills with synthetic on-disk fixtures. For the pure
  * parse logic we test indirectly via the exported behavior.
- *
- * We also export a test-only helper `_testParseSkillFile` so we can unit-test
- * the extraction logic without a DB.
  */
 import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { RecordId } from "surrealdb";
+import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { SurrealClient } from "../lib/db.ts";
 import type { SurrealClientShape } from "../lib/db.ts";
+import { ingestSkills } from "./skills.ts";
 
 // ---------------------------------------------------------------------------
 // Import the module's test-only parse helper
@@ -32,6 +33,36 @@ function extractRoles(fm: Record<string, unknown>): string[] {
         if (norm) result.push(norm);
     }
     return result;
+}
+
+// ---------------------------------------------------------------------------
+// Mock DB helpers
+// ---------------------------------------------------------------------------
+
+type Call =
+    | { kind: "query"; sql: string; bindings?: Record<string, unknown> }
+    | { kind: "upsert"; id: RecordId; content: Record<string, unknown> };
+
+function makeMockDb(queryResponses: Map<string, unknown[][]> = new Map()) {
+    const calls: Call[] = [];
+    const impl: SurrealClientShape = {
+        query: <T extends unknown[] = unknown[]>(sql: string, bindings?: Record<string, unknown>) => {
+            calls.push(bindings !== undefined ? { kind: "query", sql, bindings } : { kind: "query", sql });
+            for (const [pattern, response] of queryResponses) {
+                if (sql.includes(pattern)) return Effect.succeed(response as T);
+            }
+            return Effect.succeed([[]] as unknown as T);
+        },
+        upsert: (id: RecordId, content: Record<string, unknown>) => {
+            calls.push({ kind: "upsert", id, content });
+            return Effect.succeed(undefined);
+        },
+        relate: () => Effect.void,
+        putFile: () => Effect.void,
+        getFile: () => Effect.succeed(""),
+        raw: undefined as unknown as import("surrealdb").Surreal,
+    };
+    return { calls, layer: Layer.succeed(SurrealClient, impl) };
 }
 
 // ---------------------------------------------------------------------------
@@ -85,45 +116,57 @@ describe("extractRoles (frontmatter parsing)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// looseLineParse list-format fallback: YAML failure + list role field
+// ---------------------------------------------------------------------------
+
+describe("looseLineParse list-format fallback", () => {
+    test("YAML failure with list role: description: a: b: c + role list → 2 edges", async () => {
+        const root = await mkdtemp(join(tmpdir(), "ax-skill-test-loose-"));
+        const prevSkillDirs = process.env["AX_SKILLS_DIRS"];
+        const skillsDir = join(root, "skills");
+        process.env["AX_SKILLS_DIRS"] = skillsDir;
+        try {
+            const skillDir = join(skillsDir, "loose-role-skill");
+            await mkdir(skillDir, { recursive: true });
+            // description with unquoted colons forces YAML parse failure
+            await writeFile(
+                join(skillDir, "SKILL.md"),
+                [
+                    "---",
+                    "name: loose-role-skill",
+                    "description: a: b: c",
+                    "role:",
+                    "  - framing",
+                    "  - execution",
+                    "---",
+                    "# Body",
+                    "",
+                ].join("\n"),
+                "utf8",
+            );
+
+            const { layer } = makeMockDb();
+            const stats = await Effect.runPromise(
+                ingestSkills().pipe(Effect.provide(layer)),
+            );
+
+            expect(stats.edgesWritten).toBe(2);
+            expect(stats.rolesUpserted).toBe(2);
+        } finally {
+            if (prevSkillDirs === undefined) delete process.env["AX_SKILLS_DIRS"];
+            else process.env["AX_SKILLS_DIRS"] = prevSkillDirs;
+            await rm(root, { recursive: true, force: true });
+        }
+    });
+});
+
+// ---------------------------------------------------------------------------
 // Integration: ingestSkills calls relateSkillRoles with the right roles list
 // ---------------------------------------------------------------------------
 
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { Layer } from "effect";
-import { ingestSkills } from "./skills.ts";
-
-type Call =
-    | { kind: "query"; sql: string; bindings?: Record<string, unknown> }
-    | { kind: "upsert"; id: RecordId; content: Record<string, unknown> };
-
-function makeMockDb(queryResponses: Map<string, unknown[][]> = new Map()) {
-    const calls: Call[] = [];
-    const impl: SurrealClientShape = {
-        query: <T extends unknown[] = unknown[]>(sql: string, bindings?: Record<string, unknown>) => {
-            calls.push(bindings !== undefined ? { kind: "query", sql, bindings } : { kind: "query", sql });
-            for (const [pattern, response] of queryResponses) {
-                if (sql.includes(pattern)) return Effect.succeed(response as T);
-            }
-            return Effect.succeed([[]] as unknown as T);
-        },
-        upsert: (id: RecordId, content: Record<string, unknown>) => {
-            calls.push({ kind: "upsert", id, content });
-            return Effect.succeed(undefined);
-        },
-        relate: () => Effect.void,
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: undefined as unknown as import("surrealdb").Surreal,
-    };
-    return { calls, layer: Layer.succeed(SurrealClient, impl) };
-}
-
 describe("ingestSkills end-to-end role wiring", () => {
-    test("skill with role: framing in frontmatter produces relateSkillRoles call with ['framing']", async () => {
+    test("skill with role: framing in frontmatter produces RELATE with literal record ids", async () => {
         const root = await mkdtemp(join(tmpdir(), "ax-skill-test-"));
-        // Point AX_SKILLS_DIRS at our temp dir so defaultSkillDirs() returns it.
         const prevSkillDirs = process.env["AX_SKILLS_DIRS"];
         const skillsDir = join(root, "skills");
         process.env["AX_SKILLS_DIRS"] = skillsDir;
@@ -141,17 +184,17 @@ describe("ingestSkills end-to-end role wiring", () => {
                 ingestSkills().pipe(Effect.provide(layer)),
             );
 
-            // Check that a RELATE query was issued with source=frontmatter
+            // RELATE query should use literal record ids, not $skill/$role bindings
             const relateCall = calls.find(
                 (c): c is Extract<Call, { kind: "query" }> =>
                     c.kind === "query" && c.sql.includes("RELATE") && c.sql.includes('"frontmatter"'),
             );
             expect(relateCall).toBeDefined();
-
-            // The role binding should be a RecordId for role:framing
-            expect(relateCall!.bindings!["role"]).toBeInstanceOf(RecordId);
-            const roleId = relateCall!.bindings!["role"] as RecordId;
-            expect(String(roleId)).toContain("framing");
+            expect(relateCall!.sql).toContain("role:`framing`");
+            expect(relateCall!.sql).not.toContain("$skill");
+            expect(relateCall!.sql).not.toContain("$role");
+            // No bindings object for record-id queries
+            expect(relateCall!.bindings).toBeUndefined();
         } finally {
             if (prevSkillDirs === undefined) delete process.env["AX_SKILLS_DIRS"];
             else process.env["AX_SKILLS_DIRS"] = prevSkillDirs;

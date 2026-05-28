@@ -30,12 +30,29 @@ const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/;
 
 function looseLineParse(raw: string): Record<string, unknown> {
     const out: Record<string, unknown> = {};
-    for (const line of raw.split("\n")) {
+    const lines = raw.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]!;
         const m = line.match(/^([a-zA-Z_][\w-]*)\s*:\s*(.*)$/);
         if (!m) continue;
         const [, key, value] = m;
-        if (value === "") continue;
-        out[key] = value.replace(/^["']|["']$/g, "");
+        if (value !== "") {
+            out[key] = value.replace(/^["']|["']$/g, "");
+            continue;
+        }
+        // Empty value: look ahead for `  - item` list lines.
+        const listItems: string[] = [];
+        while (i + 1 < lines.length) {
+            const next = lines[i + 1]!;
+            const lm = next.match(/^\s+-\s+(.+)$/);
+            if (!lm) break;
+            listItems.push(lm[1]!.trim());
+            i++;
+        }
+        if (listItems.length > 0) {
+            out[key] = listItems;
+        }
+        // If no list items found, key is omitted (empty value stays absent).
     }
     return out;
 }
@@ -218,7 +235,6 @@ export const ingestSkills = (): Effect.Effect<
                     });
                     const roleStats = yield* relateSkillRoles(db, {
                         skillId,
-                        skillName: item.skill.name,
                         roles: item.skill.roles,
                     });
                     rolesUpserted += roleStats.rolesUpserted;
