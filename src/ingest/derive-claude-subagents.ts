@@ -117,6 +117,10 @@ export interface DeriveClaudeSubagentsStats {
     readonly missingParent: number;
     readonly written: number;
     readonly skippedExisting: number;
+    /** Subagents that inherited repository/checkout/cwd from their parent during this run. */
+    readonly repositoryInherited: number;
+    /** Existing subagent rows that were backfilled with repository/checkout/cwd from parent. */
+    readonly repositoryBackfilled: number;
     readonly activity: {
         readonly turns: number;
         readonly invocations: number;
@@ -165,6 +169,8 @@ export const deriveClaudeSubagents = (
         let written = 0;
         let missingParent = 0;
         let skippedExisting = 0;
+        let repositoryInherited = 0;
+        let repositoryBackfilled = 0;
         let turnsTotal = 0;
         let invocationsTotal = 0;
         let toolCallsTotal = 0;
@@ -189,14 +195,16 @@ export const deriveClaudeSubagents = (
                 });
             }
             // Confirm parent exists - subagent without its parent is orphaned data.
+            // Also fetch repository/checkout/cwd so we can inherit them below.
             const parentRid = `session:⟨${m.parentSessionId}⟩`;
             const check = yield* db.query<[Array<Record<string, unknown>>]>(
-                `SELECT id FROM ${parentRid};`,
+                `SELECT id, repository, checkout, cwd FROM ${parentRid};`,
             );
             if ((check?.[0]?.length ?? 0) === 0) {
                 missingParent += 1;
                 continue;
             }
+            const parentRow = check[0]![0]!;
 
             // Run the Claude extractor against the subagent jsonl using the
             // synthetic session id. This produces turns/invocations/tool_calls
@@ -205,6 +213,14 @@ export const deriveClaudeSubagents = (
             const extracted = yield* Effect.promise(() =>
                 extractFileWithSessionId(m.file, m.project ?? "", m.subagentSessionId),
             );
+
+            // Inherit repository/checkout from parent unconditionally (the extractor
+            // never sets them). Inherit cwd from parent only if extractor produced none.
+            const parentRepository = parentRow["repository"] ?? undefined;
+            const parentCheckout = parentRow["checkout"] ?? undefined;
+            const parentCwd = typeof parentRow["cwd"] === "string" && parentRow["cwd"].length > 0
+                ? parentRow["cwd"]
+                : undefined;
 
             if (!extracted) {
                 // No usable content; still record the session+edge so the link
@@ -216,14 +232,22 @@ export const deriveClaudeSubagents = (
                     started_at: m.startedAt ? new Date(m.startedAt) : undefined,
                     ended_at: m.endedAt ? new Date(m.endedAt) : undefined,
                     raw_file: m.file ?? undefined,
+                    repository: parentRepository,
+                    checkout: parentCheckout,
+                    cwd: parentCwd,
                 });
+                if (parentRepository !== undefined) repositoryInherited += 1;
             } else {
                 // Force source=claude-subagent at the upsert level (the extractor
                 // doesn't track source; it's set on the DB row).
                 const subagentRid = new RecordId("session", m.subagentSessionId);
+                // cwd: use extracted value if present, else inherit from parent
+                const cwdValue = (extracted.session.cwd != null && extracted.session.cwd !== "")
+                    ? extracted.session.cwd
+                    : parentCwd;
                 yield* db.upsert(subagentRid, {
                     project: extracted.session.project ?? m.project ?? undefined,
-                    cwd: extracted.session.cwd ?? undefined,
+                    cwd: cwdValue,
                     source: "claude-subagent",
                     started_at: extracted.session.started_at
                         ? new Date(extracted.session.started_at)
@@ -236,7 +260,10 @@ export const deriveClaudeSubagents = (
                             ? new Date(m.endedAt)
                             : undefined,
                     raw_file: m.file ?? undefined,
+                    repository: parentRepository,
+                    checkout: parentCheckout,
                 });
+                if (parentRepository !== undefined) repositoryInherited += 1;
 
                 yield* upsertTurnsForSubagents(extracted.turns);
                 yield* writeToolCallStatementsForSubagents(extracted.toolCalls);
@@ -288,11 +315,39 @@ export const deriveClaudeSubagents = (
             }
         }
 
+        // ---------------------------------------------------------------------------
+        // Backfill: fix existing claude-subagent rows that are missing repository.
+        // For each such row, find its parent via the spawned RELATION and copy
+        // repository/checkout/cwd. Idempotent: WHERE clause guards against
+        // overwriting rows that already have a value.
+        // ---------------------------------------------------------------------------
+        const backfillRows = (yield* db.query<[Array<Record<string, unknown>>]>(
+            `SELECT id, <-spawned<-session[0].repository AS parent_repository, <-spawned<-session[0].checkout AS parent_checkout, <-spawned<-session[0].cwd AS parent_cwd FROM session WHERE source = "claude-subagent" AND repository IS NONE;`,
+        ))?.[0] ?? [];
+
+        for (const row of backfillRows) {
+            const id = row["id"];
+            const parentRepo = row["parent_repository"];
+            const parentCk = row["parent_checkout"] ?? null;
+            const parentCwdBf = typeof row["parent_cwd"] === "string" && (row["parent_cwd"] as string).length > 0
+                ? row["parent_cwd"]
+                : null;
+            if (id == null || parentRepo == null) continue;
+            // Use parameterized bindings so record-ID values round-trip correctly.
+            yield* db.query(
+                `UPDATE ${String(id)} SET repository = $repo, checkout = $checkout, cwd = $cwd WHERE repository IS NONE;`,
+                { repo: parentRepo, checkout: parentCk, cwd: parentCwdBf },
+            );
+            repositoryBackfilled += 1;
+        }
+
         return {
             discovered: manifests.length,
             missingParent,
             written,
             skippedExisting,
+            repositoryInherited,
+            repositoryBackfilled,
             activity: {
                 turns: turnsTotal,
                 invocations: invocationsTotal,
