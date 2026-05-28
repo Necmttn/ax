@@ -45,6 +45,8 @@ import { INSIGHT_VIEWS, insightSqlForView, isInsightView } from "../queries/insi
 import { writeDashboard } from "../dashboard/report.ts";
 import { serveDashboard } from "../dashboard/server.ts";
 import { fetchRecall, type RecallSource, type RecallScope } from "../dashboard/recall.ts";
+import { fetchSessionShow } from "../dashboard/session-show.ts";
+import { renderSessionMarkdown, renderSessionJson } from "./session-show-format.ts";
 import { cmdDaemon, cmdDoctor, cmdInstall, cmdUninstall } from "./install.ts";
 import { resolvePwdRepository } from "../lib/pwd.ts";
 import { encodeClaudeProjectSlug } from "../lib/transcript-locator.ts";
@@ -2912,6 +2914,93 @@ const cmdSessionsNear = (args: string[]) =>
         console.log(formatSessionsTable(rows));
     });
 
+// ---------------------------------------------------------------------------
+// ax session show <id> - single-session detail with subagent timeline (P2.2)
+// ---------------------------------------------------------------------------
+
+/**
+ * `ax session show <id> [--expand=<uuid>] [--all] [--json]`
+ *
+ * Displays a session's invoked + tool_call timeline. Collapses subagent
+ * sessions to one-line summaries by default. --expand=<uuid> (repeatable)
+ * or --all drills into subagent contents inline.
+ *
+ * Auto markdown (TTY) vs JSON (piped). --json forces JSON output.
+ *
+ * NOTE(P3.7): --by-role grouping is deferred to P3.7 (depends on
+ * role + plays_role schema fields not yet implemented). Add a `--by-role`
+ * flag that groups the timeline by the session's phase/role breakdown once
+ * the schema fields `invoked_role` and `plays_role` are available on turns.
+ */
+const cmdSessionShow = (args: string[]) =>
+    Effect.gen(function* () {
+        const positionals = args.filter((a) => !a.startsWith("--"));
+        const sessionId = positionals[0];
+        if (!sessionId) {
+            console.error("axctl session show: missing <id>");
+            console.error("  usage: axctl session show <uuid|claude-subagent-<id>|session:⟨...⟩>");
+            process.exit(2);
+        }
+
+        const forceJson = args.includes("--json");
+        const expandAll = args.includes("--all");
+        const useJson = forceJson || process.stdout.isTTY === false;
+
+        // Collect --expand=<uuid> values (repeatable)
+        const expandSet = new Set<string>();
+        for (const a of args) {
+            if (a.startsWith("--expand=")) {
+                const val = a.slice("--expand=".length).trim();
+                if (val.length > 0) expandSet.add(val);
+            }
+        }
+
+        const payload = yield* fetchSessionShow({
+            sessionId,
+            expand: expandSet,
+            expandAll,
+        });
+
+        if (payload.session.overview === null) {
+            process.stderr.write(`session ${sessionId} not found\n`);
+            process.exit(1);
+        }
+
+        if (useJson) {
+            console.log(renderSessionJson(payload));
+        } else {
+            console.log(renderSessionMarkdown(payload));
+        }
+    });
+
+const sessionShowCommand = Command.make(
+    "show",
+    {
+        id: Argument.string("id"),
+        expand: Flag.string("expand").pipe(Flag.atLeast(0)),
+        all: Flag.boolean("all").pipe(Flag.withDefault(false)),
+        json: jsonFlag,
+    },
+    ({ id, expand, all, json }) =>
+        cmdSessionShow([
+            id,
+            ...[...expand].map((e) => `--expand=${e}`),
+            ...boolArg("all", all),
+            ...boolArg("json", json),
+        ]),
+).pipe(
+    Command.withDescription(
+        "Display a session's timeline (tool calls + subagent spawns). " +
+        "--expand=<uuid> (repeatable) or --all expands subagent timelines inline. " +
+        "Auto markdown on TTY, JSON when piped. --json forces JSON.",
+    ),
+);
+
+const sessionCommand = Command.make("session").pipe(
+    Command.withDescription("Single-session operations (show, inspect, ...)"),
+    Command.withSubcommands([sessionShowCommand]),
+);
+
 // Effect/CLI Command definitions for sessions subcommands
 
 const sessionsHereCommand = Command.make(
@@ -3778,6 +3867,7 @@ export const rootCommand = Command.make("axctl").pipe(
         deriveSignalsCommand,
         deriveIntentsCommand,
         insightsCommand,
+        sessionCommand,
         sessionsCommand,
         improveCommand,
         retroCommand,
@@ -3848,6 +3938,7 @@ export const DB_COMMANDS: ReadonlySet<string> = new Set([
     "derive-signals",
     "derive-intents",
     "insights",
+    "session",
     "sessions",
     "improve",
     "retro",
