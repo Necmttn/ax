@@ -54,7 +54,7 @@
     <p class="install-label">install in 30 seconds</p>
     <pre class="install"><code><span class="prompt">$</span> curl -fsSL https://raw.githubusercontent.com/Necmttn/ax/main/install.sh | bash</code></pre>
     <p class="install-label install-or">or via nix</p>
-    <pre class="install"><code><span class="prompt">$</span> nix profile install github:Necmttn/ax</code></pre>
+    <pre class="install"><code><span class="prompt">$</span> nix profile add github:Necmttn/ax</code></pre>
     <p class="install-meta">macOS first &middot; Linux for CLI &middot; runs on your laptop</p>
   </div>
 
@@ -261,9 +261,13 @@
 <span class="prompt">$</span> PATH="$HOME/.local/bin:$PATH" axctl ingest --since=7
 <span class="prompt">$</span> axctl serve   <span class="comment"># live dashboard at http://127.0.0.1:8520</span></code></pre>
   <p class="install-label install-or">or via nix</p>
-<pre><code><span class="prompt">$</span> nix profile install github:Necmttn/ax
+<pre><code><span class="prompt">$</span> nix profile add github:Necmttn/ax
 <span class="prompt">$</span> axctl ingest --since=7
 <span class="prompt">$</span> axctl serve   <span class="comment"># live dashboard at http://127.0.0.1:8520</span></code></pre>
+  <p class="install-meta">
+    ephemeral run &middot; <code>nix run github:Necmttn/ax</code><br>
+    devshell &middot; <code>nix develop github:Necmttn/ax</code>
+  </p>
   <p>For dev setup, schema, and benchmarks, see
     <a href="development.md"><code>docs/development.md</code></a>.
   </p>
