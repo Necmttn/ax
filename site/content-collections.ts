@@ -61,7 +61,35 @@ const howItWorks = defineCollection({
     content: z.string(),
   }),
   transform: async (doc, ctx) => {
-    const body = await compileMDX(ctx, doc, mdxOptions);
+    // Inline-fetch the Task 6 generated partial and splice it where the
+    // source MDX has a <StageRationales /> placeholder. Survives a missing
+    // generated file (empty injection) so a cold checkout before the
+    // extractor runs doesn't crash MDX compile.
+    const { readFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    // Resolve from process.cwd() (which is site/ for both `bun run dev`
+    // and `bun run build`) using the same relative path as this
+    // collection's `directory` config. Can't use `import.meta.url` because
+    // content-collections compiles this config into
+    // `.content-collections/cache/`, which would mis-anchor the lookup.
+    // `doc._meta.filePath` is the bare filename in this version
+    // (verified in `.content-collections/generated/allHowItWorks.js`),
+    // so dirname() on it alone returns "." and doesn't help either.
+    const generatedPath = join(
+      process.cwd(),
+      "..",
+      "docs",
+      "how-ax-sees-your-work.generated.mdx",
+    );
+    let generated = "";
+    try {
+      generated = await readFile(generatedPath, "utf8");
+    } catch {
+      // Generated partial not yet produced (cold checkout, extractor
+      // hasn't fired). Render the page without the dynamic section.
+    }
+    const merged = doc.content.replace(/<StageRationales\s*\/>/, generated);
+    const body = await compileMDX(ctx, { ...doc, content: merged }, mdxOptions);
     return { ...doc, body };
   },
 });
