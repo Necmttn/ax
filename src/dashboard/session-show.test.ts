@@ -106,7 +106,7 @@ describe("fetchSessionShow - call count", () => {
         expect(childrenToExpand).toHaveLength(3);
     });
 
-    it("makes 1 + len(expand) fetchSessionDetail calls", () => {
+    it("filter produces N matches for expand set of size N", () => {
         // Structural test: fetchSessionShow calls fetchSessionDetail once for
         // the primary and once per matched child.
         const child1 = makeChild("claude-subagent-a41ef");

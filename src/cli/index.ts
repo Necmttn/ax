@@ -2959,7 +2959,14 @@ const cmdSessionShow = (args: string[]) =>
             sessionId,
             expand: expandSet,
             expandAll,
-        });
+        }).pipe(
+            Effect.catchTag("DbError", (e) =>
+                Effect.sync(() => {
+                    process.stderr.write(`axctl session show: DB error - ${e.message}\n`);
+                    process.exit(1);
+                }),
+            ),
+        );
 
         if (payload.session.overview === null) {
             process.stderr.write(`session ${sessionId} not found\n`);

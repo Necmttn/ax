@@ -87,14 +87,10 @@ function renderTimeline(payload: SessionDetailPayload, prefix = ""): string[] {
     // TODO(P3.7): add --by-role grouping once role + plays_role schema is
     // implemented.
 
-    const ts0 = payload.overview?.started_at
-        ? fmtTs(payload.overview.started_at)
-        : "??:??";
-
     // Show top tools as summary items
     for (const tc of payload.tool_calls.slice(0, 8)) {
         const failures = tc.failures > 0 ? ` (${tc.failures} fail)` : "";
-        lines.push(`${prefix}${ts0}  ${tc.label.padEnd(22)}  ×${tc.count}${failures}`);
+        lines.push(`${prefix}${tc.label.padEnd(22)}  ×${tc.count}${failures}`);
     }
 
     // Show agent delegations (spawn events) with rough timestamps
@@ -108,18 +104,12 @@ function renderTimeline(payload: SessionDetailPayload, prefix = ""): string[] {
     return lines;
 }
 
-export interface RenderSessionMarkdownOptions {
-    /** If set, expand these subagent ids inline in the timeline. */
-    readonly expandedSubagents?: ReadonlyArray<SessionDetailPayload>;
-}
-
 /**
  * Render the session show payload as a markdown-flavoured TTY string.
  * Pure function - no I/O.
  */
 export function renderSessionMarkdown(
     payload: SessionShowPayload,
-    _opts: RenderSessionMarkdownOptions = {},
 ): string {
     const { session } = payload;
     const expandedMap = new Map<string, SessionDetailPayload>();
