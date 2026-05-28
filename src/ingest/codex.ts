@@ -8,7 +8,7 @@ import { skillRecordKey } from "../lib/skill-id.ts";
 import { surrealString } from "../lib/shared/surql.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
-import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
+import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 import {
     buildPlanSnapshotStatements,
@@ -1076,7 +1076,7 @@ export const codexStage: StageDef<CodexStageStats, SurrealClient | AxConfig> = {
     run: (ctx: IngestContext) =>
         Effect.gen(function* () {
             const t0 = Date.now();
-            const sinceDays = Math.max(1, Math.round((Date.now() - ctx.since.getTime()) / 86400000));
+            const sinceDays = sinceDaysFromCtx(ctx);
             const result = yield* ingestCodex({ sinceDays });
             return CodexStageStats.make({
                 durationMs: Date.now() - t0,

@@ -18,6 +18,20 @@ export class IngestContext extends Schema.Class<IngestContext>("IngestContext")(
     debug: Schema.Boolean,
 }) {}
 
+/** Compute `sinceDays` from an {@link IngestContext}, suitable for passing to
+ *  derive/ingest opts. Returns `undefined` when:
+ *    - `ctx.since` is epoch-zero (the default "full re-derive" sentinel), to
+ *      avoid a 56-year scan; callers treat `undefined` as "no time filter"
+ *      or apply their own default.
+ *    - `ctx.since` is in the future (negative diff).
+ *  Otherwise returns the ceiling of the day-delta. */
+export const sinceDaysFromCtx = (ctx: IngestContext): number | undefined => {
+    const sinceMs = ctx.since.getTime();
+    if (sinceMs === 0) return undefined;
+    const days = Math.ceil((Date.now() - sinceMs) / 86400000);
+    return days > 0 ? days : undefined;
+};
+
 /** Declarative metadata for a stage. The `key` field is narrowed per stage at
  *  construction time; deps/tags reference Schema unions defined in
  *  `./registry.ts` and `./tags.ts`. */

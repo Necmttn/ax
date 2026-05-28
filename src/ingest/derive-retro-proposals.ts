@@ -664,7 +664,7 @@ export const buildRetroFrictionSkillStatements = (
 };
 
 export interface DeriveRetroProposalsOpts {
-    readonly sinceDays?: number;
+    readonly sinceDays?: number | undefined;
     readonly minSessions?: number;
     readonly minRetros?: number;
     readonly minTotalCount?: number;
@@ -779,7 +779,7 @@ if (import.meta.main) {
 // ---------------------------------------------------------------------------
 
 import { Schema } from "effect";
-import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
+import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 
 export const RetroProposalsKey = Schema.Literal("retro-proposals");
@@ -799,9 +799,7 @@ export const retroProposalsStage: StageDef<RetroProposalsStats, SurrealClient> =
     run: (ctx: IngestContext) =>
         Effect.gen(function* () {
             const t0 = Date.now();
-            const sinceDays = Math.ceil(
-                (Date.now() - ctx.since.getTime()) / (1000 * 60 * 60 * 24),
-            );
+            const sinceDays = sinceDaysFromCtx(ctx);
             const result = yield* deriveRetroProposals({ sinceDays });
             return RetroProposalsStats.make({
                 durationMs: Date.now() - t0,

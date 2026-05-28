@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { Schema } from "effect";
-import { BaseStageStats, IngestContext, StageMeta } from "./types.ts";
+import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./types.ts";
 import { IngestStageTag } from "./tags.ts";
 
 class ExampleStats extends BaseStageStats.extend<ExampleStats>("ExampleStats")({
@@ -38,6 +38,27 @@ describe("IngestContext", () => {
             debug: false,
         });
         expect(ctx.debug).toBe(false);
+    });
+});
+
+describe("sinceDaysFromCtx", () => {
+    it("returns undefined for epoch-zero (default 'all time' sentinel)", () => {
+        const ctx = IngestContext.make({ cwd: "/tmp", since: new Date(0), debug: false });
+        expect(sinceDaysFromCtx(ctx)).toBeUndefined();
+    });
+
+    it("returns a small positive int for a recent date", () => {
+        const fiveDaysAgo = new Date(Date.now() - 5 * 86400000);
+        const ctx = IngestContext.make({ cwd: "/tmp", since: fiveDaysAgo, debug: false });
+        const days = sinceDaysFromCtx(ctx);
+        expect(days).toBeGreaterThanOrEqual(5);
+        expect(days).toBeLessThanOrEqual(6);
+    });
+
+    it("returns undefined for a future date (negative diff)", () => {
+        const tomorrow = new Date(Date.now() + 86400000);
+        const ctx = IngestContext.make({ cwd: "/tmp", since: tomorrow, debug: false });
+        expect(sinceDaysFromCtx(ctx)).toBeUndefined();
     });
 });
 

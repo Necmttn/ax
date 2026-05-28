@@ -982,7 +982,7 @@ if (import.meta.main) {
 // Co-located StageDef
 // ---------------------------------------------------------------------------
 
-import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
+import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 
 export const SignalsKey = Schema.Literal("signals");
@@ -1006,7 +1006,7 @@ export const signalsStage: StageDef<SignalsStats, SurrealClient> = {
     run: (ctx: IngestContext) =>
         Effect.gen(function* () {
             const t0 = Date.now();
-            const sinceDays = Math.max(1, Math.round((Date.now() - ctx.since.getTime()) / 86400000));
+            const sinceDays = sinceDaysFromCtx(ctx);
             const result = yield* deriveSignals({ sinceDays });
             return SignalsStats.make({
                 durationMs: Date.now() - t0,
