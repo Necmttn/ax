@@ -2,12 +2,20 @@ import { describe, expect, test } from "bun:test";
 import { DB_COMMANDS, detectRemovedIngestFlag, insightsOnlyConflicts, resolveIngestStages, rootCommand } from "./index.ts";
 import { ALL_STAGES } from "../ingest/stage/registry.ts";
 import type { StageRegistryShape } from "../ingest/stage/registry.ts";
+import type { BaseStageStats, StageDef } from "../ingest/stage/types.ts";
 
-// Shared registry fixture for resolveIngestStages tests
+// Shared registry fixture for resolveIngestStages tests. We widen `ALL_STAGES`
+// (a heterogeneous readonly tuple of `StageDef<S, R>` with varying R service
+// channels) to the registry's canonical `StageDef<BaseStageStats, unknown>[]`
+// via a single cast at the boundary, so the lookup helpers below can be
+// `any`-free.
+const stages: ReadonlyArray<StageDef<BaseStageStats, unknown>> =
+    ALL_STAGES as unknown as ReadonlyArray<StageDef<BaseStageStats, unknown>>;
+
 const testRegistry: StageRegistryShape = {
-    all: () => ALL_STAGES,
-    byKey: (key: string) => (ALL_STAGES as readonly any[]).find((s) => s.meta.key === key),
-    byTag: (tag: any) => (ALL_STAGES as readonly any[]).filter((s) => s.meta.tags.includes(tag)),
+    all: () => stages,
+    byKey: (key) => stages.find((s) => s.meta.key === key),
+    byTag: (tag) => stages.filter((s) => s.meta.tags.includes(tag)),
 };
 
 const topLevelNames = (): string[] =>
