@@ -8,6 +8,7 @@ import { defaultSkillDirs } from "../lib/paths.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
 import { upsertSkillByName } from "./skill-upsert.ts";
+import { relateSkillRoles } from "./skill-role.ts";
 import { discoverProjectRoots } from "./project-discovery.ts";
 
 interface ParsedSkill {
@@ -15,6 +16,7 @@ interface ParsedSkill {
     description: string | undefined;
     frontmatter: Record<string, unknown>;
     body: string;
+    roles: string[];
 }
 
 interface SkillItem {
@@ -38,10 +40,23 @@ function looseLineParse(raw: string): Record<string, unknown> {
     return out;
 }
 
+function extractRoles(fm: Record<string, unknown>): string[] {
+    const raw = fm["role"];
+    if (raw === undefined || raw === null || raw === "") return [];
+    const items = Array.isArray(raw) ? raw : [raw];
+    const result: string[] = [];
+    for (const item of items) {
+        if (typeof item !== "string") continue;
+        const norm = item.trim().toLowerCase();
+        if (norm) result.push(norm);
+    }
+    return result;
+}
+
 function parseSkillFile(content: string, fallbackName: string): ParsedSkill {
     const m = content.match(FRONTMATTER_RE);
     if (!m) {
-        return { name: fallbackName, description: undefined, frontmatter: {}, body: content };
+        return { name: fallbackName, description: undefined, frontmatter: {}, body: content, roles: [] };
     }
     let fm: Record<string, unknown> = {};
     try {
@@ -56,6 +71,7 @@ function parseSkillFile(content: string, fallbackName: string): ParsedSkill {
         description: typeof fm.description === "string" ? fm.description : undefined,
         frontmatter: fm,
         body: m[2],
+        roles: extractRoles(fm),
     };
 }
 
@@ -172,10 +188,17 @@ const collectSkills = (): Effect.Effect<SkillItem[]> =>
         return [...byName.values()];
     });
 
-export const ingestSkills = (): Effect.Effect<{ count: number }, DbError, SurrealClient> =>
+export const ingestSkills = (): Effect.Effect<
+    { count: number; rolesUpserted: number; edgesWritten: number },
+    DbError,
+    SurrealClient
+> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         const items = yield* collectSkills();
+
+        let rolesUpserted = 0;
+        let edgesWritten = 0;
 
         yield* Effect.forEach(
             items,
@@ -184,27 +207,36 @@ export const ingestSkills = (): Effect.Effect<{ count: number }, DbError, Surrea
                     .update(item.skill.body)
                     .digest("hex")
                     .slice(0, 16);
-                return upsertSkillByName(db, {
-                    name: item.skill.name,
-                    scope: item.scope,
-                    dir_path: item.dir_path,
-                    description: item.skill.description ?? null,
-                    content_hash: hash,
-                    bytes: item.bytes,
+                return Effect.gen(function* () {
+                    const skillId = yield* upsertSkillByName(db, {
+                        name: item.skill.name,
+                        scope: item.scope,
+                        dir_path: item.dir_path,
+                        description: item.skill.description ?? null,
+                        content_hash: hash,
+                        bytes: item.bytes,
+                    });
+                    const roleStats = yield* relateSkillRoles(db, {
+                        skillId,
+                        skillName: item.skill.name,
+                        roles: item.skill.roles,
+                    });
+                    rolesUpserted += roleStats.rolesUpserted;
+                    edgesWritten += roleStats.edgesWritten;
                 });
             },
             { concurrency: 8, discard: true },
         );
 
         const count = items.length;
-        yield* Effect.logDebug("skills upserted", { count });
-        return { count };
+        yield* Effect.logDebug("skills upserted", { count, rolesUpserted, edgesWritten });
+        return { count, rolesUpserted, edgesWritten };
     });
 
 if (import.meta.main) {
     await Effect.runPromise(
         ingestSkills().pipe(Effect.provide(AppLayer), Effect.scoped) as Effect.Effect<
-            { count: number }
+            { count: number; rolesUpserted: number; edgesWritten: number }
         >,
     );
 }
