@@ -30,3 +30,4 @@ site/.tanstack
 site/.wrangler
 site/node_modules
 site/app/routeTree.gen.ts
+site/.content-collections

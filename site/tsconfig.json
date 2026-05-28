@@ -12,8 +12,9 @@
     "verbatimModuleSyntax": true,
     "noEmit": true,
     "paths": {
-      "~/*": ["./app/*"]
+      "~/*": ["./app/*"],
+      "content-collections": ["./.content-collections/generated"]
     }
   },
-  "include": ["app", "vite.config.ts"]
+  "include": ["app", "vite.config.ts", "content-collections.ts"]
 }
