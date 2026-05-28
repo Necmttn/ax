@@ -69,7 +69,7 @@ export const runPipeline = <S extends BaseStageStats, R>(
             }).pipe(
                 Effect.tap((stats) => Deferred.succeed(deferreds.get(s.meta.key)!, stats)),
                 Effect.tapCause((cause) =>
-                    Deferred.failCause(deferreds.get(s.meta.key)!, cause as never),
+                    Deferred.failCause(deferreds.get(s.meta.key)!, cause),
                 ),
             );
 
