@@ -382,6 +382,249 @@ Dashboard generated at:
 
 `file:///Users/necmttn/.local/share/ax/dashboard.html`
 
+## Experiment Loop CLI (`axctl improve`)
+
+`axctl improve` is the read-write surface on top of the experiment-loop tables
+(`proposal`, `skill_proposal`, `experiment`, `checkpoint`). The loop:
+**retro → proposal → experiment → verdict** (see `axctl retro` for the front
+end). Subcommands:
+
+### `axctl improve recommend`
+
+Rank open proposals by `confidence × recency × frequency` and print them as
+paste-ready blocks, each wrapped in `<!--ax:id-->` provenance markers so the
+agent file edit is traceable back to the proposal.
+
+Flags:
+
+- `--limit=N` (default 5) - top N to print
+- `--form=<skill|guidance|...>` (repeatable) - filter by proposal form
+- `--since=N` - only proposals derived within N days
+- `--json` - machine-readable
+- `--no-clipboard` - skip auto-copy of top result
+- `--apply` - interactive accept loop: pick a numbered row, accept, repeat
+
+### `axctl improve accept <id>`
+
+Default mode emits `.ax/tasks/<id>.md`, a structured brief your primary
+agent (Claude Code, Codex, etc.) consumes to edit the target file with the
+marker still in place. The brief tracks `task_emitted` status on the
+experiment row.
+
+Flags:
+
+- `--auto-scaffold` - skip the brief, write `SKILL.md` directly under the
+  scaffold dir (skill form only). Use when you want the file now and don't
+  need a brief to hand off.
+- `--with-agent` - after scaffold, spawn a `claude -p` subagent (bypass
+  permissions, streaming to terminal) that reads the stub + sibling skills
+  and rewrites `SKILL.md` with concrete triggers, steps, anti-patterns.
+  Optionally writes a sibling `PLAN.md` with a 3-bullet experiment plan
+  (what to measure, success criterion, kill criterion). Implies
+  `--auto-scaffold` semantics.
+- `--force` - overwrite an existing scaffold.
+
+`<id>` accepts either the dedupe sig (12-char prefix from `recommend`) or the
+full `proposal:<key>` record id.
+
+### `axctl improve lint`
+
+Scan grounded agent files for `<!--ax:id-->` markers and reconcile against
+the DB:
+
+- Markers in files but no matching proposal → orphan warning.
+- `task_emitted` experiments whose `.ax/tasks/<id>.md` brief has been
+  consumed (marker now lives in agent file) → consumed task file removed,
+  experiment status advanced.
+- Task briefs older than `--stale-days` (default 7) with no marker landed →
+  stale warning, candidate for reject.
+
+Flags:
+
+- `--root=<dir>` (repeatable) - additional scan roots beyond CWD
+- `--stale-days=N` (default 7)
+- `--json`
+
+Linter dedupes against `proposal.dedupe_sig` exactly and pushes the stale-task
+date filter into SurrealQL, so it stays fast as the proposal table grows.
+
+### `axctl improve show <id>`
+
+Full evidence trail for one proposal: source retro(s), baseline cluster,
+skill payload (trigger pattern, proposed behavior, expected impact), the
+linked experiment row, scaffold path, checkpoint snapshots, locked verdict.
+
+### `axctl improve list`
+
+Browse the proposal queue.
+
+Flags:
+
+- `--status=<open|accepted|rejected|all>`
+- `--form=<skill|guidance|...>`
+- `--limit=N` (default 30)
+- `--json`
+
+### `axctl improve verdict <id>`
+
+Inspect or lock the t+90 verdict.
+
+Flags:
+
+- `--set=<adopted|ignored|regressed|partial|no_longer_needed>` - lock the
+  verdict (otherwise computed from checkpoints)
+
+### `axctl improve reject <id>`
+
+Mark proposal rejected. Future re-derives of the same trigger are deduped
+against rejected proposals, so the same pattern won't re-propose every retro.
+
+Flags:
+
+- `--reason=<short_string>` (default `not_worth_packaging`) - tracked on the
+  row for later analysis of what kinds of proposals get rejected.
+
+### `axctl improve checkpoint`
+
+Compute checkpoint snapshots at t+7/t+30/t+90 for active experiments. Cron-
+runnable; the weekly self-improve cron will call this.
+
+### `axctl improve reset --yes`
+
+Wipe all experiment-loop state (proposals, experiments, checkpoints, skill
+proposals). For test fixtures and local-only debugging. Requires `--yes`.
+
+### Provenance markers
+
+Every accepted proposal's edit is wrapped:
+
+```markdown
+<!--ax:a1b2c3d4e5f6-->
+... agent-file content ...
+<!--/ax:a1b2c3d4e5f6-->
+```
+
+The id is the proposal `dedupe_sig` prefix. `axctl improve lint` reconciles
+both directions: orphan markers (DB has no proposal) and orphan proposals
+(`task_emitted` but the brief was never consumed). Nested same-id close tags
+are balanced; markers across multiple files for the same proposal are
+allowed.
+
+### `.ax/tasks/<id>.md` task briefs
+
+When `axctl improve accept <id>` runs without `--auto-scaffold`/`--with-agent`,
+it writes `.ax/tasks/<id>.md` with:
+
+1. Target file path (e.g. `~/.claude/CLAUDE.md` or a skill `SKILL.md` path).
+2. The exact paste-ready block (markers + content).
+3. A `Lint after applying:` footer pointing at `axctl improve lint`.
+
+The brief is plain markdown. Hand it to any agent; the agent's diff is what
+lands in your config. `lint` reconciles the brief's existence against the
+marker actually showing up in the target file.
+
+## Retro CLI (`axctl retro`)
+
+The retro surface tracks one structured reflection per session
+(`tried`, `worked`, `failed`, `next`). A session has been retro'd iff
+the graph has a `reviewed` edge from it to a `retro` row. See ADR-0010
+for the design rationale.
+
+### `axctl retro emit`
+
+Write a retro for one session and create the `reviewed` edge.
+
+Two paths:
+
+- No `--from-file`: run the deterministic heuristic on the named
+  session (defaults to `$AX_SESSION_ID`, then the most recent session).
+  Cheap, no LLM. Suitable for Stop-hook autoemit.
+- `--from-file=<path>`: ingest `{tried, worked, failed, next}` JSON
+  written by an agent (the `retro-reviewer` subagent does this).
+  `--source` defaults to `claude_stop_hook` here; pass
+  `--source=manual` for subagent-authored payloads.
+
+Flags:
+
+- `--session=<id>` - target session record id or bare key
+- `--from-file=<path>` - JSON payload to ingest
+- `--source=<claude_stop_hook|codex_rollout|heuristic|manual>`
+- `--json` - machine-readable
+
+### `axctl retro pending`
+
+List sessions in the window that have no `reviewed` edge. Drives the
+`/retro` skill's Step 0 "drain the backlog" flow.
+
+Two-pass query: ended sessions (`ended_at != NONE`) come first; idle
+sessions (no `ended_at` AND `started_at` older than `--idle-min`) come
+second. Subagent sessions (`source = 'claude-subagent'`) are excluded
+by default - their retros belong to the parent session's review.
+
+Flags:
+
+- `--since=N` (default 7) - window in days
+- `--idle-min=N` (default 30) - idle threshold in minutes for sessions
+  without `ended_at`
+- `--limit=N` (default 20) - per-pass cap
+- `--include-subagents` - include `claude-subagent` rows
+- `--json`
+
+### `axctl retro brief`
+
+Write a `.ax/tasks/retro/<session-key>.md` task brief for one session.
+The brief is what the `retro-reviewer` subagent consumes. Frontmatter
+includes the transcript pointer, model used, turn count, pending
+reason, and a `suggested_model` heuristic (haiku for ≤5 turns, opus
+for ≥40 turns, sonnet otherwise).
+
+Flags:
+
+- `--session=<id>` (required) - target session record id or bare key
+- `--out-dir=<path>` - override `.ax/tasks/retro/` location
+- `--json`
+
+### `axctl retro list`
+
+Browse recent retros (reverse-chronological).
+
+Flags:
+
+- `--since=N` (default 7) - window in days
+- `--limit=N` (default 20)
+- `--json`
+
+### `axctl retro reflect`
+
+Walk clustered retro-derived proposals interactively (accept / reject
+/ skip each pattern). Used by the `/retro` skill's triage step; see
+that skill for the full workflow.
+
+### `axctl retro meta`
+
+Emit a read-only investigation snapshot (JSON) for an external AI
+agent to drive a deep retro-of-retros. Used by `/retro-meta`.
+
+### `axctl retro plan`
+
+Register an externally-drafted plan as a proposal (plus experiment
+unless `--leave-open`). Called by an external agent after the user
+agrees in a `/retro-meta` session.
+
+### `.ax/tasks/retro/<session-key>.md` briefs
+
+A retro brief is a markdown file with YAML frontmatter (`session_id`,
+`session_key`, `transcript`, `model_used`, `turns`, `pending_reason`,
+`suggested_model`, `status: pending`) and a body describing what the
+reviewer should produce. The `retro-reviewer` subagent reads it, calls
+`ax retro emit --source=manual`, optionally calls `ax improve
+recommend` for repeated patterns, and updates the brief's frontmatter
+`status: completed`. The `reviewed` edge created by `ax retro emit`
+removes the session from the next `ax retro pending` result.
+
+These briefs live next to the older `.ax/tasks/<id>.md` improve briefs
+but in their own subdir to keep listings clean.
+
 ## Empty DB Benchmarks
 
 Use `scripts/bench-empty-db.sh` for cold ingest timing without mutating

@@ -91,6 +91,21 @@ run next). Free-form is opt-in via `ax retro --free-form`.
 > *Don't say:* "session summary" - that's lossy. The retro is a
 > bet on the next session, not a recap.
 
+### reviewed
+
+A typed graph edge (`session -> reviewed -> retro`) that records that
+a session has been retro'd. `ax retro pending` queries `WHERE
+count(->reviewed) = 0` to drain the backlog of un-reviewed sessions;
+`ax retro emit` writes the edge alongside the retro row so re-emit
+stays idempotent.
+
+> *Use:* "the `/retro` skill drains everything without a `reviewed`
+> edge - that's the backlog the user spends weekly Opus quota on."
+> *Don't say:* "the retro foreign key" - we have one, but the edge is
+> the load-bearing primitive; the FK is duplicate state we keep for
+> compatibility with `ax retro emit` callers that don't traverse the
+> graph.
+
 ### proposal
 
 A friction pattern derived from accumulated retros + raw signal.
