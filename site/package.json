@@ -10,7 +10,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "deploy": "bun run build && wrangler deploy --config dist/server/wrangler.json"
+    "deploy": "bun run build && wrangler deploy --config dist/server/wrangler.json",
+    "deploy:check": "bun run build && wrangler deploy --config dist/server/wrangler.json --dry-run"
   },
   "dependencies": {
     "@content-collections/core": "^0.15.1",

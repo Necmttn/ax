@@ -7,7 +7,12 @@ import { cloudflare } from "@cloudflare/vite-plugin";
 export default defineConfig({
   plugins: [
     contentCollections(),
+    // target:"cloudflare-pages" was not a valid option in v1.168 - CF
+    // runtime discovery happens via the cloudflare() plugin's
+    // viteEnvironment match below.
     tanstackStart({ srcDirectory: "app" }),
+    // "ssr" mirrors START_ENVIRONMENT_NAMES.server from
+    // @tanstack/start-plugin-core/constants - stable by design.
     cloudflare({ viteEnvironment: { name: "ssr" } }),
     tailwindcss(),
   ],
