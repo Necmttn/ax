@@ -53,8 +53,17 @@ const pages = defineCollection({
   },
 });
 
-export default defineConfig({ content: [adrs, pages] });
+const howItWorks = defineCollection({
+  name: "howItWorks",
+  directory: "../docs",
+  include: "how-ax-sees-your-work.mdx",
+  schema: z.object({
+    content: z.string(),
+  }),
+  transform: async (doc, ctx) => {
+    const body = await compileMDX(ctx, doc, mdxOptions);
+    return { ...doc, body };
+  },
+});
 
-// Task 7 (how-ax-sees-your-work.mdx): append a `howItWorks` collection
-// here following the same shape as `pages` - directory: "../docs",
-// include: "how-ax-sees-your-work.mdx", schema: z.object({ content: z.string() }).
+export default defineConfig({ content: [adrs, pages, howItWorks] });
