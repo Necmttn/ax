@@ -16,12 +16,10 @@ export interface InlineMarker {
     readonly closeIndex: number;
 }
 
-const OPEN = /<!--ax:([a-z0-9_-]+)-->/g;
-
 export const parseInlineMarkers = (source: string): InlineMarker[] => {
+    const OPEN = /<!--ax:([a-z0-9_-]+)-->/g;   // local - no shared state
     const markers: InlineMarker[] = [];
     const seen = new Set<string>();
-    OPEN.lastIndex = 0;
     let match: RegExpExecArray | null;
     while ((match = OPEN.exec(source)) !== null) {
         const id = match[1]!;

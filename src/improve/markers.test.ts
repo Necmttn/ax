@@ -56,6 +56,13 @@ describe("parseInlineMarkers", () => {
         const input = `<!--ax:foo-->before<!--ax:foo-->no-close`;
         expect(() => parseInlineMarkers(input)).toThrow(/unmatched open/i);
     });
+
+    test("two sequential calls on different inputs do not share regex state", () => {
+        const first = parseInlineMarkers(`<!--ax:foo-->a<!--/ax:foo-->`);
+        const second = parseInlineMarkers(`<!--ax:bar-->b<!--/ax:bar-->`);
+        expect(first[0]!.id).toBe("foo");
+        expect(second[0]!.id).toBe("bar");
+    });
 });
 
 describe("parseFrontmatterMarker", () => {
