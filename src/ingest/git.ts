@@ -1,10 +1,12 @@
 import { lstat, readFile, stat } from "node:fs/promises";
 import { join, basename, dirname } from "node:path";
 import { homedir } from "node:os";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
+import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
+import type { StageDef } from "./stage/registry.ts";
 import {
     checkoutRecordKey,
     commitRecordKey,
@@ -798,3 +800,39 @@ if (import.meta.main) {
         ) as Effect.Effect<GitStats>,
     );
 }
+
+// ---------------------------------------------------------------------------
+// Co-located StageDef
+// ---------------------------------------------------------------------------
+
+export const GitKey = Schema.Literal("git");
+export type GitKey = typeof GitKey.Type;
+
+/**
+ * Git stage - ingests Repository commits + touched files.
+ *
+ * Depends on: (none - leaf)
+ * Consumed by: {@link SignalsKey}
+ * Tags: ingest
+ */
+// Named GitStageStats to avoid collision with the original GitStats interface.
+export class GitStageStats extends BaseStageStats.extend<GitStageStats>("GitStageStats")({
+    commitsIngested: Schema.Number,
+    repositoriesSeen: Schema.Number,
+}) {}
+
+export const gitStage: StageDef<GitStageStats, SurrealClient> = {
+    meta: StageMeta.make({ key: "git", deps: [], tags: ["ingest"] }),
+    run: (ctx: IngestContext) =>
+        Effect.gen(function* () {
+            const t0 = Date.now();
+            const sinceDays = sinceDaysFromCtx(ctx);
+            const result = yield* ingestGit({ sinceDays });
+            return GitStageStats.make({
+                durationMs: Date.now() - t0,
+                summary: `ingested ${result.commits} commits from ${result.repos} repos`,
+                commitsIngested: result.commits,
+                repositoriesSeen: result.repos,
+            });
+        }),
+};

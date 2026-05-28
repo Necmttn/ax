@@ -1,9 +1,11 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { SurrealClient, RecordId } from "../lib/db.ts";
 import { AxConfig } from "../lib/config.ts";
 import type { DbError } from "../lib/errors.ts";
+import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
+import type { StageDef } from "./stage/registry.ts";
 import { surrealLiteral } from "../lib/json.ts";
 import { decodeJsonOrNull } from "../lib/decode.ts";
 import {
@@ -302,3 +304,35 @@ export const deriveClaudeSubagents = (
             },
         };
     });
+
+// ---------------------------------------------------------------------------
+// Co-located StageDef
+// ---------------------------------------------------------------------------
+
+export const SubagentsKey = Schema.Literal("subagents");
+export type SubagentsKey = typeof SubagentsKey.Type;
+
+/**
+ * Subagents stage - derives parent↔child session links.
+ *
+ * Depends on: {@link ClaudeKey}, {@link CodexKey}
+ * Consumed by: (none - terminal)
+ * Tags: derive
+ */
+export class SubagentsStats extends BaseStageStats.extend<SubagentsStats>("SubagentsStats")({
+    subagentLinksWritten: Schema.Number,
+}) {}
+
+export const subagentsStage: StageDef<SubagentsStats, SurrealClient | AxConfig> = {
+    meta: StageMeta.make({ key: "subagents", deps: ["claude", "codex"], tags: ["derive"] }),
+    run: (_ctx: IngestContext) =>
+        Effect.gen(function* () {
+            const t0 = Date.now();
+            const result = yield* deriveClaudeSubagents();
+            return SubagentsStats.make({
+                durationMs: Date.now() - t0,
+                summary: `wrote ${result.written} subagent links`,
+                subagentLinksWritten: result.written,
+            });
+        }),
+};

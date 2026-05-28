@@ -1,8 +1,9 @@
-import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
+import { describe, expect, it, test } from "bun:test";
+import { Effect, Schema } from "effect";
 import { RecordId, type SurrealClientShape } from "../lib/db.ts";
 import { skillRecordKey } from "../lib/skill-id.ts";
 import { skillRecordIdFromLookup, upsertSkillByName } from "./skill-upsert.ts";
+import { SkillsKey, SkillsStats, skillsStage } from "./skills.ts";
 
 describe("skill upsert", () => {
     test("reuses a legacy skill id returned by name lookup", () => {
@@ -30,5 +31,19 @@ describe("skill upsert", () => {
         }));
 
         expect(upserts).toEqual([`skill:${skillRecordKey("new:skill")}`]);
+    });
+});
+
+describe("skillsStage", () => {
+    it("declares the canonical key and tag", () => {
+        expect(Schema.decodeUnknownSync(SkillsKey)("skills")).toBe("skills");
+        expect(skillsStage.meta.key).toBe("skills");
+        expect(skillsStage.meta.tags).toEqual(["ingest"]);
+        expect(skillsStage.meta.deps).toEqual([]);
+    });
+
+    it("produces a SkillsStats class instance shape", () => {
+        const s = SkillsStats.make({ durationMs: 1, summary: "x", skillsUpserted: 2 });
+        expect(s.skillsUpserted).toBe(2);
     });
 });

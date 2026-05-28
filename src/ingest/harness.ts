@@ -97,3 +97,41 @@ if (import.meta.main) {
         ) as Effect.Effect<HarnessIngestStats>,
     );
 }
+
+// ---------------------------------------------------------------------------
+// Co-located StageDef
+// ---------------------------------------------------------------------------
+
+import { Schema } from "effect";
+import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
+import type { StageDef } from "./stage/registry.ts";
+
+export const HarnessKey = Schema.Literal("harness");
+export type HarnessKey = typeof HarnessKey.Type;
+
+/**
+ * Harness stage - rolls up Harness Doctor evidence (Guidance sources/revisions,
+ * Stack capability). Depends on {@link OutcomesKey}, {@link SessionHealthKey},
+ * {@link ClosureKey}.
+ */
+export class HarnessStageStats extends BaseStageStats.extend<HarnessStageStats>("HarnessStageStats")({
+    guidanceSources: Schema.Number,
+    guidanceRevisions: Schema.Number,
+    stacks: Schema.Number,
+}) {}
+
+export const harnessStage: StageDef<HarnessStageStats, SurrealClient | ProcessService> = {
+    meta: StageMeta.make({ key: "harness", deps: ["outcomes", "session-health", "closure"], tags: ["derive", "health"] }),
+    run: (_ctx: IngestContext) =>
+        Effect.gen(function* () {
+            const t0 = Date.now();
+            const result = yield* ingestHarness();
+            return HarnessStageStats.make({
+                durationMs: Date.now() - t0,
+                summary: `ingested ${result.guidanceSources} guidance sources, ${result.guidanceRevisions} revisions, ${result.stacks} stacks`,
+                guidanceSources: result.guidanceSources,
+                guidanceRevisions: result.guidanceRevisions,
+                stacks: result.stacks,
+            });
+        }),
+};

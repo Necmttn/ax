@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { SurrealClient } from "../lib/db.ts";
 import { AppLayer } from "../lib/layers.ts";
 import { decodeJsonOrNull } from "../lib/decode.ts";
@@ -431,3 +431,39 @@ if (import.meta.main) {
         ) as Effect.Effect<SessionHealthStats>,
     );
 }
+
+// ---------------------------------------------------------------------------
+// Co-located StageDef
+// ---------------------------------------------------------------------------
+
+import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
+import type { StageDef } from "./stage/registry.ts";
+
+export const SessionHealthKey = Schema.Literal("session-health");
+export type SessionHealthKey = typeof SessionHealthKey.Type;
+
+/**
+ * Session health stage - scores Session Insights via friction/feedback ratios.
+ * Depends on {@link SignalsKey}.
+ */
+// Named SessionHealthStageStats to avoid collision with the original SessionHealthStats interface.
+export class SessionHealthStageStats extends BaseStageStats.extend<SessionHealthStageStats>("SessionHealthStageStats")({
+    sessionTokenUsage: Schema.Number,
+    sessionHealth: Schema.Number,
+}) {}
+
+export const sessionHealthStage: StageDef<SessionHealthStageStats, SurrealClient> = {
+    meta: StageMeta.make({ key: "session-health", deps: ["signals"], tags: ["derive", "health"] }),
+    run: (ctx: IngestContext) =>
+        Effect.gen(function* () {
+            const t0 = Date.now();
+            const sinceDays = sinceDaysFromCtx(ctx);
+            const result = yield* deriveSessionHealth({ sinceDays });
+            return SessionHealthStageStats.make({
+                durationMs: Date.now() - t0,
+                summary: `scored ${result.sessionHealth} session health records, ${result.sessionTokenUsage} token usages`,
+                sessionTokenUsage: result.sessionTokenUsage,
+                sessionHealth: result.sessionHealth,
+            });
+        }),
+};
