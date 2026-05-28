@@ -2,6 +2,8 @@
 import { Effect, Option, References } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
+import { listSessionsHere, listSessionsAround, listSessionsNear, type SessionRow } from "../dashboard/sessions-query.ts";
+import { findCommitWindow } from "../lib/git-window.ts";
 import { AxConfig } from "../lib/config.ts";
 import { safeJsonParse } from "../lib/shared/safe-json.ts";
 import { ProcessService } from "../lib/process.ts";
@@ -2731,6 +2733,233 @@ const improveCheckpointCommand = Command.make(
         cmdImproveCheckpoint([...boolArg("force", force), ...boolArg("json", json)]),
 ).pipe(Command.withDescription("Compute checkpoint snapshots at t+7/t+30/t+90 for active experiments"));
 
+// ---------------------------------------------------------------------------
+// ax sessions - windowed session queries (F2, F3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Format a list of SessionRows for TTY output as a compact table.
+ * Falls back to 100 columns when process.stdout.columns is unavailable.
+ */
+function formatSessionsTable(rows: SessionRow[]): string {
+    if (rows.length === 0) return "(no sessions found)";
+    const termWidth = (process.stdout.columns ?? 100) as number;
+    const lines: string[] = [];
+    // Header
+    lines.push(
+        `${"started_at".padEnd(26)} ${"source".padEnd(18)} ${"repo".padEnd(16)} ${"project".padEnd(20)} ${"turns".padStart(5)}  summary`,
+    );
+    lines.push("-".repeat(Math.min(termWidth, 120)));
+    for (const row of rows) {
+        const started = (row.started_at ?? "?").slice(0, 25).padEnd(26);
+        const source = (row.source ?? "?").slice(0, 17).padEnd(18);
+        // Extract a short repo key from record id string
+        const repoRaw = row.repository ?? "";
+        const repoShort = repoRaw
+            .replace(/^repository:/, "")
+            .replace(/[⟨⟩]/g, "")
+            .replace(/^(remote|initial)__/, "")
+            .slice(-16)
+            .padEnd(16);
+        const project = prettifyProjectSlug(row.project ?? "").slice(0, 19).padEnd(20);
+        const turns = String(row.turn_count ?? 0).padStart(5);
+        const msg = (row.first_user_message ?? "").replace(/\s+/g, " ").trim();
+        const summaryWidth = Math.max(0, termWidth - 26 - 1 - 18 - 1 - 16 - 1 - 20 - 1 - 5 - 2);
+        const summary = summaryWidth > 0 ? msg.slice(0, summaryWidth) : msg.slice(0, 40);
+        lines.push(`${started} ${source} ${repoShort} ${project} ${turns}  ${summary}`);
+    }
+    return lines.join("\n");
+}
+
+/**
+ * Detect if output should be JSON: explicit --json flag, or non-TTY stdout.
+ */
+function wantsJson(args: string[]): boolean {
+    return args.includes("--json") || process.stdout.isTTY === false;
+}
+
+// --- sessions here ---
+
+const cmdSessionsHere = (args: string[]) =>
+    Effect.gen(function* () {
+        const days = parsePositiveIntFlag("sessions here", "days", args, 14);
+        const json = wantsJson(args);
+
+        const pwdResolution = yield* resolvePwdRepository().pipe(
+            Effect.catchTag("NotAGitRepoError", (err) =>
+                Effect.sync(() => {
+                    process.stderr.write(
+                        `axctl sessions here: not in a git repository (cwd=${err.cwd})\n`,
+                    );
+                    process.exit(2);
+                }),
+            ),
+        );
+
+        const repositoryRecordId = String(pwdResolution.repositoryRecordId);
+        const rows = yield* listSessionsHere({ repositoryRecordId, days });
+
+        if (json) {
+            console.log(JSON.stringify(rows, null, 2));
+            return;
+        }
+        console.log(formatSessionsTable(rows));
+    });
+
+// --- sessions around ---
+
+const cmdSessionsAround = (args: string[]) =>
+    Effect.gen(function* () {
+        const positional = args.filter((a) => !a.startsWith("--"))[0];
+        if (!positional) {
+            console.error("axctl sessions around: missing <date> argument");
+            process.exit(2);
+        }
+        // Parse date: YYYY-MM-DD or full ISO8601
+        let date: Date;
+        if (/^\d{4}-\d{2}-\d{2}$/.test(positional)) {
+            date = new Date(`${positional}T00:00:00.000Z`);
+        } else {
+            date = new Date(positional);
+        }
+        if (isNaN(date.getTime())) {
+            console.error(
+                `axctl sessions around: invalid date "${positional}" (expected YYYY-MM-DD or ISO8601)`,
+            );
+            process.exit(2);
+        }
+
+        const days = parsePositiveIntFlag("sessions around", "days", args, 3);
+        const json = wantsJson(args);
+        const projectRaw = flag("project", args);
+        // Resolve --project: accept encoded slug or absolute path
+        let project: string | null = null;
+        if (projectRaw) {
+            project = projectRaw.startsWith("/")
+                ? encodeClaudeProjectSlug(projectRaw)
+                : projectRaw;
+        }
+
+        const rows = yield* listSessionsAround({ date, days, project });
+
+        if (json) {
+            console.log(JSON.stringify(rows, null, 2));
+            return;
+        }
+        console.log(formatSessionsTable(rows));
+    });
+
+// --- sessions near ---
+
+const cmdSessionsNear = (args: string[]) =>
+    Effect.gen(function* () {
+        const sha = args.filter((a) => !a.startsWith("--"))[0];
+        if (!sha) {
+            console.error("axctl sessions near: missing <sha> argument");
+            process.exit(2);
+        }
+        const json = wantsJson(args);
+
+        // Resolve repository via pwd (near is always pwd-scoped)
+        const pwdResolution = yield* resolvePwdRepository().pipe(
+            Effect.catchTag("NotAGitRepoError", (err) =>
+                Effect.sync(() => {
+                    process.stderr.write(
+                        `axctl sessions near: not in a git repository (cwd=${err.cwd})\n`,
+                    );
+                    process.exit(2);
+                }),
+            ),
+        );
+
+        const repoRoot = pwdResolution.repoRoot;
+        const repositoryRecordId = String(pwdResolution.repositoryRecordId);
+
+        // Resolve commit window
+        const window = yield* findCommitWindow(repoRoot, sha).pipe(
+            Effect.catchTag("ProcessError", () =>
+                Effect.sync(() => {
+                    console.error(`axctl sessions near: unknown sha ${sha}`);
+                    process.exit(2);
+                    return { kind: "not_found" as const };
+                }),
+            ),
+        );
+
+        if (window.kind === "not_found") {
+            console.error(`axctl sessions near: unknown sha ${sha}`);
+            process.exit(2);
+            return;
+        }
+
+        let from: Date;
+        let to: Date;
+        if (window.kind === "orphan") {
+            // root commit: ±3 days around commitTs
+            from = new Date(window.commitTs.getTime() - 3 * 24 * 60 * 60 * 1000);
+            to = new Date(window.commitTs.getTime() + 3 * 24 * 60 * 60 * 1000);
+        } else {
+            from = window.from;
+            to = window.to;
+        }
+
+        const rows = yield* listSessionsNear({ from, to, repositoryRecordId });
+
+        if (json) {
+            console.log(JSON.stringify(rows, null, 2));
+            return;
+        }
+        console.log(formatSessionsTable(rows));
+    });
+
+// Effect/CLI Command definitions for sessions subcommands
+
+const sessionsHereCommand = Command.make(
+    "here",
+    {
+        days: Flag.integer("days").pipe(Flag.withDefault(14)),
+        json: jsonFlag,
+    },
+    ({ days, json }) =>
+        cmdSessionsHere([`--days=${days}`, ...boolArg("json", json)]),
+).pipe(Command.withDescription("List sessions for the current git repository (default: last 14 days)"));
+
+const sessionsAroundCommand = Command.make(
+    "around",
+    {
+        date: Argument.string("date"),
+        days: Flag.integer("days").pipe(Flag.withDefault(3)),
+        project: Flag.string("project").pipe(Flag.optional),
+        json: jsonFlag,
+    },
+    ({ date, days, project, json }) =>
+        cmdSessionsAround([
+            date,
+            `--days=${days}`,
+            ...stringArg("project", optionValue(project)),
+            ...boolArg("json", json),
+        ]),
+).pipe(Command.withDescription("List sessions in a ±N-day window around a date (YYYY-MM-DD or ISO8601)"));
+
+const sessionsNearCommand = Command.make(
+    "near",
+    {
+        sha: Argument.string("sha"),
+        json: jsonFlag,
+    },
+    ({ sha, json }) =>
+        cmdSessionsNear([sha, ...boolArg("json", json)]),
+).pipe(Command.withDescription("List sessions near a git commit (adaptive window: predecessor → commit)"));
+
+const sessionsCommand = Command.make("sessions").pipe(
+    Command.withDescription("Windowed session queries: here (pwd-repo), around (date), near (sha)"),
+    Command.withSubcommands([
+        sessionsHereCommand,
+        sessionsAroundCommand,
+        sessionsNearCommand,
+    ]),
+);
+
 const improveCommand = Command.make("improve").pipe(
     Command.withDescription("Experiment loop: review proposals, accept skills, track verdicts"),
     Command.withSubcommands([
@@ -3549,6 +3778,7 @@ export const rootCommand = Command.make("axctl").pipe(
         deriveSignalsCommand,
         deriveIntentsCommand,
         insightsCommand,
+        sessionsCommand,
         improveCommand,
         retroCommand,
         serveCommand,
@@ -3618,6 +3848,7 @@ export const DB_COMMANDS: ReadonlySet<string> = new Set([
     "derive-signals",
     "derive-intents",
     "insights",
+    "sessions",
     "improve",
     "retro",
     "report",
