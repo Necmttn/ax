@@ -36,6 +36,8 @@ import { cmdRetroPlan } from "./retro-plan.ts";
 import { cmdSkillsClassify } from "./skills-classify.ts";
 import { cmdSkillsTag } from "./skills-tag.ts";
 import { cmdSkillsLint } from "./skills-lint.ts";
+import { fetchSkillsWeighted } from "../dashboard/skills-weighted.ts";
+import { renderWeightedTable, renderWeightedJson } from "./skills-weighted-format.ts";
 import { homedir } from "node:os";
 import { recordKeyPart } from "../lib/shared/derive-keys.ts";
 import { recordRef, surrealString } from "../lib/shared/surql.ts";
@@ -1568,6 +1570,36 @@ SELECT name, scope FROM skill WHERE array::len(<-invoked) = 0;`;
             );
         }
         console.log(`\n${unused.length} skills unused in last ${days} days.`);
+    });
+
+const cmdSkillsWeighted = (args: string[]) =>
+    Effect.gen(function* () {
+        const limit = parsePositiveIntFlag("skills weighted", "limit", args, 25);
+        const windowDays = parseOptionalPositiveIntFlag("skills weighted", "window", args);
+        const doctorThreshold = parsePositiveIntFlag("skills weighted", "doctor-threshold", args, 5);
+        const json = args.includes("--json");
+
+        // --window=0 is invalid: parseOptionalPositiveIntFlag rejects it (n <= 0).
+        // If the user passes --window, but 0 or negative, process.exit(2) already fired.
+
+        const result = yield* fetchSkillsWeighted({
+            ...(windowDays !== undefined ? { windowDays } : {}),
+            limit,
+            doctorThreshold,
+        }).pipe(
+            Effect.catchTag("DbError", (e) =>
+                Effect.sync(() => {
+                    process.stderr.write(`axctl skills weighted: DB error - ${e.message}\n`);
+                    process.exit(1);
+                }),
+            ),
+        );
+
+        if (json) {
+            console.log(renderWeightedJson(result));
+        } else {
+            console.log(renderWeightedTable(result));
+        }
     });
 
 const cmdTaste = (args: string[]) =>
@@ -3537,14 +3569,38 @@ const skillsLintCommand = Command.make(
     ),
 );
 
+const weightedCommand = Command.make(
+    "weighted",
+    {
+        window: Flag.integer("window").pipe(Flag.optional),
+        limit: positiveLimit(25),
+        doctorThreshold: Flag.integer("doctor-threshold").pipe(Flag.withDefault(5)),
+        json: jsonFlag,
+    },
+    ({ window, limit, doctorThreshold, json }) =>
+        cmdSkillsWeighted([
+            `--limit=${limit}`,
+            ...intArg("window", optionValue(window)),
+            `--doctor-threshold=${doctorThreshold}`,
+            ...boolArg("json", json),
+        ]),
+).pipe(
+    Command.withDescription(
+        "Rank skills by usage × role-weight (classified skills score higher). " +
+        "Doctor mode warns when many skills are unclassified. " +
+        "--window=Nd  --limit=N  --doctor-threshold=N  --json",
+    ),
+);
+
 const skillsCommand = Command.make("skills").pipe(
-    Command.withDescription("Skill-graph queries: search, stats, usage, pairs, recovery, classify, tag, lint"),
+    Command.withDescription("Skill-graph queries: search, stats, usage, pairs, recovery, classify, tag, lint, weighted"),
     Command.withSubcommands([
         searchCommand,
         statsCommand,
         recentCommand,
         unusedCommand,
         tasteCommand,
+        weightedCommand,
         pairsCommand,
         recoveryCommand,
         classifyCommand,
