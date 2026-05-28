@@ -24,6 +24,10 @@ import { deriveCheckpoints } from "../ingest/derive-checkpoints.ts";
 import { retroFromSession, upsertRetro, type RetroSource } from "../ingest/retro.ts";
 import { scaffoldSkill } from "../improve/skill-scaffold.ts";
 import { runAgentAccept } from "../improve/agent-accept.ts";
+import { acceptProposal } from "../improve/actions.ts";
+import { lintFiles } from "../improve/lint.ts";
+import { recommend, formatRecommendations, copyToClipboard, selectByIndices, parseIndexInput } from "../improve/recommend.ts";
+import { showExperiment, formatShow } from "../improve/show.ts";
 import { cmdRetroReflect } from "./retro-reflect.ts";
 import { cmdRetroMeta } from "./retro-meta.ts";
 import { cmdRetroPlan } from "./retro-plan.ts";
@@ -1746,56 +1750,154 @@ const cmdImproveShow = (args: string[]) =>
             console.error("axctl improve show: missing <id> (use a dedupe_sig from `axctl improve list`)");
             process.exit(2);
         }
-        const db = yield* SurrealClient;
-        // Accept dedupe_sig (preferred) or full record id (proposal:`key`)
-        const idLiteral = surrealLiteral(positional);
-        const sql = `
-            SELECT *,
-                (SELECT * FROM skill_proposal      WHERE proposal = $parent.id LIMIT 1)[0] AS skill_payload,
-                (SELECT * FROM subagent_proposal   WHERE proposal = $parent.id LIMIT 1)[0] AS subagent_payload,
-                (SELECT * FROM hook_proposal       WHERE proposal = $parent.id LIMIT 1)[0] AS hook_payload,
-                (SELECT * FROM guidance_proposal   WHERE proposal = $parent.id LIMIT 1)[0] AS guidance_payload,
-                (SELECT * FROM automation_proposal WHERE proposal = $parent.id LIMIT 1)[0] AS automation_payload,
-                (SELECT out, count, type::string(ts) AS ts FROM cites_evidence WHERE in = $parent.id) AS evidence
-            FROM proposal WHERE dedupe_sig = ${idLiteral} OR id = ${idLiteral} LIMIT 1;
-        `;
-        const result = yield* db.query<[Array<Record<string, unknown>>]>(sql);
-        const rows = result?.[0] ?? [];
-        const detail = rows[0] ?? null;
+        const result = yield* showExperiment({ sigOrId: positional });
         if (json) {
-            console.log(prettyPrint(detail));
+            console.log(prettyPrint(result));
             return;
         }
-        if (!detail) {
-            console.error("no proposal matched");
+        if (result === null) {
+            process.stderr.write(`no proposal matched ${positional}\n`);
             process.exit(2);
         }
-        const row = detail as unknown as ProposalRow & {
-            skill_payload?: SkillProposalRow | null;
-            evidence?: Array<{ out: string; count: number; ts: string }>;
-        };
-        console.log(`${row.title}`);
-        console.log(`  form        ${row.form}`);
-        console.log(`  status      ${row.status}`);
-        console.log(`  confidence  ${row.confidence}`);
-        console.log(`  frequency   ${row.frequency}`);
-        console.log(`  dedupe_sig  ${row.dedupe_sig}`);
-        console.log(`  hypothesis  ${row.hypothesis}`);
-        if (row.skill_payload && row.form === "skill") {
-            console.log(`  trigger     ${row.skill_payload.trigger_pattern}`);
-            console.log(`  gap         ${row.skill_payload.suspected_gap}`);
-            console.log(`  behavior    ${row.skill_payload.proposed_behavior}`);
-            if (row.skill_payload.expected_impact) {
-                console.log(`  impact      ${row.skill_payload.expected_impact}`);
+        console.log(formatShow(result));
+    });
+
+const cmdImproveLint = (args: string[]) =>
+    Effect.gen(function* () {
+        const json = args.includes("--json");
+        const staleDays = parsePositiveIntFlag("improve lint", "stale-days", args, 7);
+        // Collect --root values (repeatable)
+        const roots: string[] = [];
+        for (const a of args) {
+            if (a.startsWith("--root=")) roots.push(a.slice("--root=".length));
+        }
+        const report = yield* lintFiles({
+            roots: roots.length > 0 ? roots : undefined,
+            staleDays,
+        });
+        if (json) {
+            console.log(JSON.stringify(report, null, 2));
+        } else {
+            for (const f of report.errors) {
+                console.log(`error  ${f.rule}: ${f.message} (${f.path})`);
+            }
+            for (const f of report.warnings) {
+                console.log(`warn   ${f.rule}: ${f.message} (${f.path})`);
+            }
+            for (const f of report.infos) {
+                console.log(`info   ${f.rule}: ${f.message} (${f.path})`);
+            }
+            for (const r of report.reconciled) {
+                const suffix = r.taskDeleted ? ` (removed ${r.taskDeleted})` : "";
+                console.log(`reconciled ${r.shortId}: ${r.previousStatus} -> ${r.nextStatus}${suffix}`);
+            }
+            const allEmpty =
+                report.errors.length === 0 &&
+                report.warnings.length === 0 &&
+                report.infos.length === 0 &&
+                report.reconciled.length === 0;
+            if (allEmpty) console.log("clean.");
+        }
+        if (report.errors.length > 0) {
+            process.exit(2);
+        } else if (report.warnings.length > 0) {
+            process.exitCode = 1;
+        }
+    });
+
+const cmdImproveRecommend = (args: string[]) =>
+    Effect.gen(function* () {
+        const json = args.includes("--json");
+        const noClipboard = args.includes("--no-clipboard");
+        const apply = args.includes("--apply");
+        const limit = parsePositiveIntFlag("improve recommend", "limit", args, 5);
+        const sinceDays = parseOptionalPositiveIntFlag("improve recommend", "since", args);
+        // Collect --form values (repeatable; also tolerate comma-separated)
+        const forms: string[] = [];
+        for (const a of args) {
+            if (a.startsWith("--form=")) {
+                const val = a.slice("--form=".length);
+                for (const f of val.split(",").map((s) => s.trim()).filter((s) => s.length > 0)) {
+                    forms.push(f);
+                }
             }
         }
-        if (row.evidence?.length) {
-            console.log(`  evidence    ${row.evidence.length} cited`);
-            for (const e of row.evidence.slice(0, 5)) {
-                console.log(`    - ${String(e.out)} (count=${e.count})`);
+        const items = yield* recommend({
+            limit,
+            forms: forms.length > 0 ? forms : undefined,
+            sinceDays,
+        });
+        if (json) {
+            console.log(JSON.stringify(items, null, 2));
+            return;
+        }
+        const formatted = formatRecommendations(items);
+        console.log(formatted);
+        if (items.length > 0 && !noClipboard) {
+            const copied = copyToClipboard(formatted);
+            if (copied) console.log("\n[copied to clipboard]");
+        }
+        if (apply && items.length > 0) {
+            // Print numbered list for reference
+            process.stdout.write("\n");
+            items.forEach((item, i) => {
+                process.stdout.write(`  ${i + 1}. ${item.shortId}  ${item.title}\n`);
+            });
+            process.stdout.write(`\nPick indices to accept (e.g. \`1 3\` or \`1-3\`): `);
+            const input = yield* Effect.promise(
+                () =>
+                    new Promise<string>((resolve) => {
+                        process.stdin.once("data", (b) => {
+                            resolve(b.toString().trim());
+                            process.stdin.pause();
+                        });
+                        process.stdin.resume();
+                    }),
+            );
+            const picked = selectByIndices(items, parseIndexInput(input, items.length));
+            for (const item of picked) {
+                const result = yield* acceptProposal({ sigOrId: item.shortId });
+                const taskSuffix = result.task_path ? ` -> ${result.task_path}` : "";
+                console.log(`${item.shortId}: ${result.status}${taskSuffix}`);
             }
         }
     });
+
+const improveRecommendCommand = Command.make(
+    "recommend",
+    {
+        limit: Flag.integer("limit").pipe(Flag.withDefault(5)),
+        form: Flag.string("form").pipe(Flag.atLeast(0)),
+        since: Flag.integer("since").pipe(Flag.optional),
+        json: Flag.boolean("json").pipe(Flag.withDefault(false)),
+        noClipboard: Flag.boolean("no-clipboard").pipe(Flag.withDefault(false)),
+        apply: Flag.boolean("apply").pipe(Flag.withDefault(false)),
+    },
+    ({ limit, form, since, json, noClipboard, apply }) =>
+        cmdImproveRecommend([
+            `--limit=${limit}`,
+            ...[...form].flatMap((f) => [`--form=${f}`]),
+            ...intArg("since", optionValue(since)),
+            ...boolArg("json", json),
+            ...boolArg("no-clipboard", noClipboard),
+            ...boolArg("apply", apply),
+        ]),
+).pipe(Command.withDescription("Rank open proposals by confidence × recency × frequency and print the top N (optionally copy to clipboard)"));
+
+const improveLintCommand = Command.make(
+    "lint",
+    {
+        root: Flag.string("root").pipe(Flag.atLeast(0)),
+        json: jsonFlag,
+        staleDays: Flag.integer("stale-days").pipe(Flag.withDefault(7)),
+    },
+    ({ root, json, staleDays }) =>
+        cmdImproveLint([
+            ...[...root].map((r) => `--root=${r}`),
+            ...boolArg("json", json),
+            `--stale-days=${staleDays}`,
+        ]),
+).pipe(Command.withDescription("Scan grounded agent files for marker issues; reconcile task_emitted experiments; warn on stale tasks"));
 
 const improveListCommand = Command.make(
     "list",
@@ -1821,7 +1923,7 @@ const improveShowCommand = Command.make(
         json: jsonFlag,
     },
     ({ id, json }) => cmdImproveShow([id, ...boolArg("json", json)]),
-).pipe(Command.withDescription("Show a proposal + form payload + cited evidence"));
+).pipe(Command.withDescription("Show experiment evidence + status for one proposal id"));
 
 const cmdImproveAccept = (args: string[]) =>
     Effect.gen(function* () {
@@ -1992,13 +2094,104 @@ const improveAcceptCommand = Command.make(
         id: Argument.string("id"),
         force: Flag.boolean("force").pipe(Flag.withDefault(false)),
         withAgent: Flag.boolean("with-agent").pipe(Flag.withDefault(false)),
+        autoScaffold: Flag.boolean("auto-scaffold").pipe(
+            Flag.withDefault(false),
+            Flag.withDescription("Skip task emission and directly scaffold the SKILL.md (skill form only)"),
+        ),
     },
-    ({ id, force, withAgent }) => cmdImproveAccept([
-        id,
-        ...boolArg("force", force),
-        ...boolArg("with-agent", withAgent),
-    ]),
-).pipe(Command.withDescription("Accept a proposal: scaffold the artifact + create an experiment row (pass --with-agent to spawn a claude subagent that enriches the stub)"));
+    ({ id, force, withAgent, autoScaffold }) =>
+        Effect.gen(function* () {
+            const result = yield* acceptProposal({ sigOrId: id, force, autoScaffold });
+
+            if (result.status === "not_found") {
+                console.error(result.message ?? `no proposal matched ${id}`);
+                process.exit(2);
+            }
+            if (result.status === "wrong_status") {
+                console.error(result.message ?? "proposal already processed");
+                const ex = result.existing_experiment;
+                if (ex) {
+                    console.error(`  experiment   ${ex.id}`);
+                    if (ex.artifact_path) console.error(`  scaffold     ${ex.artifact_path}`);
+                    if (ex.scaffolded_at) console.error(`  scaffolded   ${ex.scaffolded_at}`);
+                    if (ex.locked_verdict) console.error(`  verdict      ${ex.locked_verdict}`);
+                }
+                process.exit(2);
+            }
+            if (result.status === "unsupported_form") {
+                console.error(result.message ?? "unsupported form");
+                process.exit(2);
+            }
+            if (result.status === "missing_payload") {
+                console.error(result.message ?? "missing payload");
+                process.exit(2);
+            }
+            if (result.status === "scaffold_exists") {
+                console.error(result.message ?? "scaffold already exists (use --force to overwrite)");
+                process.exit(2);
+            }
+
+            // status === "ok"
+            if (result.task_path) {
+                console.log(`task emitted at ${result.task_path}`);
+                console.log(`apply with your agent: \`claude "do ${result.task_path}"\``);
+                console.log(`reconcile after edit: \`axctl improve lint\``);
+            } else if (result.artifact_path) {
+                console.log(`scaffolded ${result.artifact_path}`);
+                console.log(`experiment ${result.experiment_id ?? ""} created`);
+                console.log(`proposal status -> accepted`);
+            }
+
+            if (withAgent && result.artifact_path && result.proposal) {
+                // Spawn the claude subagent to enrich the freshly-scaffolded SKILL.md.
+                // We call runAgentAccept directly here rather than re-entering
+                // cmdImproveAccept, which would hit the `status !== 'open'` guard
+                // (the proposal was just marked accepted above).
+                let retroSummaries: readonly string[] = [];
+                const baselineRaw = result.proposal.baseline;
+                if (typeof baselineRaw === "string" && baselineRaw.length > 0) {
+                    try {
+                        const parsed = JSON.parse(baselineRaw) as {
+                            tool?: string;
+                            sessionKeys?: unknown;
+                            frequency?: number;
+                        };
+                        if (Array.isArray(parsed.sessionKeys)) {
+                            const tool = parsed.tool ?? "tool";
+                            retroSummaries = parsed.sessionKeys
+                                .filter((s): s is string => typeof s === "string")
+                                .slice(0, 5)
+                                .map((s) => `session ${s}: top tool ${tool} failed (cluster freq=${parsed.frequency ?? "?"})`);
+                        }
+                    } catch {
+                        // ignore - baseline shape may evolve
+                    }
+                }
+                console.log("");
+                console.log("spawning claude subagent to enrich the stub…");
+                const agentResult = yield* Effect.promise(() =>
+                    runAgentAccept({
+                        skillPath: result.artifact_path!,
+                        proposalTitle: result.proposal!.title,
+                        hypothesis: result.proposal!.hypothesis,
+                        triggerPattern: result.proposal!.triggerPattern ?? "",
+                        proposedBehavior: result.proposal!.proposedBehavior,
+                        retroSummaries,
+                        relatedSkillsDir: process.env.AX_SKILLS_SCAFFOLD_DIR ?? `${homedir()}/.claude/skills`,
+                    }),
+                );
+                if (agentResult.skillEnriched) {
+                    console.log(`agent enriched ${result.artifact_path}`);
+                }
+                if (agentResult.planWritten && agentResult.planPath) {
+                    console.log(`agent wrote plan ${agentResult.planPath}`);
+                }
+                if (agentResult.exitCode !== 0) {
+                    console.log(`agent exit code ${agentResult.exitCode} (stub still scaffolded; experiment row unchanged)`);
+                }
+            }
+        }),
+).pipe(Command.withDescription("Accept a proposal: emit a task brief (default) or scaffold the SKILL.md directly (--auto-scaffold, skill form only)"));
 
 const improveRejectCommand = Command.make(
     "reject",
@@ -2241,6 +2434,8 @@ const improveCheckpointCommand = Command.make(
 const improveCommand = Command.make("improve").pipe(
     Command.withDescription("Experiment loop: review proposals, accept skills, track verdicts"),
     Command.withSubcommands([
+        improveRecommendCommand,
+        improveLintCommand,
         improveListCommand,
         improveShowCommand,
         improveAcceptCommand,

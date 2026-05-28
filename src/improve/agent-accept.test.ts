@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import { Effect, Layer } from "effect";
+import { mkdtempSync, readFileSync, existsSync, readdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { buildAgentAcceptPrompt, runAgentAccept } from "./agent-accept.ts";
+import { acceptProposal } from "./actions.ts";
+import { SurrealClient } from "../lib/db.ts";
+import { DbError } from "../lib/errors.ts";
 
 describe("buildAgentAcceptPrompt", () => {
     const ctx = {
@@ -39,6 +46,241 @@ describe("buildAgentAcceptPrompt", () => {
         const out = buildAgentAcceptPrompt(ctx);
         expect(out).toContain(ctx.relatedSkillsDir);
         expect(out).toContain("PLAN.md");
+    });
+});
+
+// ---------------------------------------------------------------------------
+// fakeRowsLayer: feed successive query() calls from a fixture array
+// ---------------------------------------------------------------------------
+const fakeRowsLayer = (fixtures: ReadonlyArray<unknown[]>) => {
+    let i = 0;
+    return Layer.succeed(SurrealClient, {
+        query: <T>(_: string) => Effect.sync(() => (fixtures[i++] ?? []) as unknown as T),
+    } as never);
+};
+
+describe("acceptProposal - task emission", () => {
+    test("guidance form emits .ax/tasks/<id>.md (no direct file scaffold)", async () => {
+        const taskDir = mkdtempSync(join(tmpdir(), "ax-task-"));
+        // dedupe_sig is LONGER than 8 chars to catch shortId truncation bugs
+        const longSig = "guidance__abcdef12345";
+        const proposalRow = {
+            id: "proposal:guid1",
+            form: "guidance",
+            title: "Add pre-bash guidance",
+            hypothesis: "Bash failed repeatedly without pre-checks",
+            dedupe_sig: longSig,
+            status: "open",
+            skill_payload: null,
+            guidance_payload: {
+                file_target: "~/.claude/CLAUDE.md",
+                section: "Pre-Bash",
+                suggested_text: "Always validate bash preconditions.",
+            },
+        };
+
+        const layer = fakeRowsLayer([
+            [[proposalRow]],   // fetchFullProposal: query returns [FullProposalRow[]]
+            [[]],              // UPDATE + UPSERT (ignored by fake)
+        ]);
+
+        const result = await Effect.runPromise(
+            acceptProposal({ sigOrId: longSig, taskDir }).pipe(
+                Effect.provide(layer),
+            ),
+        );
+
+        expect(result.status).toBe("ok");
+        expect(result.task_path).toBeDefined();
+        expect(result.artifact_path).toBeUndefined();
+        expect(existsSync(result.task_path!)).toBe(true);
+
+        const body = readFileSync(result.task_path!, "utf-8");
+        expect(body).toContain("form=guidance");
+        // Full sig must appear in the marker; a truncated 8-char slice must not
+        expect(body).toContain(`<!--ax:${longSig}-->`);
+        // Regression guard: truncated form must not appear as a standalone marker
+        expect(body).not.toContain(`<!--ax:${longSig.slice(0, 8)}-->`);
+    });
+
+    test("skill form defaults to task emission (no autoScaffold)", async () => {
+        const taskDir = mkdtempSync(join(tmpdir(), "ax-task-"));
+        // dedupe_sig is LONGER than 8 chars to catch shortId truncation bugs
+        const longSig = "skill__abcdef12345";
+        const proposalRow = {
+            id: "proposal:skill1",
+            form: "skill",
+            title: "Pre-Bash guard skill",
+            hypothesis: "Bash failed 7 times",
+            dedupe_sig: longSig,
+            status: "open",
+            skill_payload: {
+                proposed_behavior: "validate preconditions before Bash",
+                trigger_pattern: "tool=Bash",
+                expected_impact: "reduces failures",
+            },
+            guidance_payload: null,
+        };
+
+        const layer = fakeRowsLayer([
+            [[proposalRow]],
+            [[]],
+        ]);
+
+        const result = await Effect.runPromise(
+            acceptProposal({ sigOrId: longSig, taskDir }).pipe(
+                Effect.provide(layer),
+            ),
+        );
+
+        expect(result.status).toBe("ok");
+        expect(result.task_path).toBeDefined();
+        expect(result.artifact_path).toBeUndefined();
+        expect(existsSync(result.task_path!)).toBe(true);
+
+        const body = readFileSync(result.task_path!, "utf-8");
+        expect(body).toContain("form=skill");
+        // Full sig must appear in the frontmatter; a truncated 8-char slice must not
+        expect(body).toContain(`ax_id: ${longSig}`);
+        // Regression guard: the truncated form must not appear as the standalone ax_id value
+        expect(body).not.toContain(`ax_id: ${longSig.slice(0, 8)}\n`);
+    });
+
+    test("skill form with autoScaffold=true preserves direct-write path", async () => {
+        const scaffoldBaseDir = mkdtempSync(join(tmpdir(), "ax-scaffold-"));
+        const proposalRow = {
+            id: "proposal:skill2",
+            form: "skill",
+            title: "My Direct Skill",
+            hypothesis: "direct scaffold test",
+            dedupe_sig: "skill2cd",
+            status: "open",
+            skill_payload: {
+                proposed_behavior: "do the thing directly",
+                trigger_pattern: null,
+                expected_impact: null,
+            },
+            guidance_payload: null,
+        };
+
+        const layer = fakeRowsLayer([
+            [[proposalRow]],
+            [[]],
+        ]);
+
+        const result = await Effect.runPromise(
+            acceptProposal({ sigOrId: "skill2cd", autoScaffold: true, scaffoldBaseDir }).pipe(
+                Effect.provide(layer),
+            ),
+        );
+
+        expect(result.status).toBe("ok");
+        expect(result.artifact_path).toBeDefined();
+        expect(result.task_path).toBeUndefined();
+        expect(existsSync(result.artifact_path!)).toBe(true);
+    });
+
+    test("dedupe_sig with path separator characters is rejected", async () => {
+        const taskDir = mkdtempSync(join(tmpdir(), "ax-task-"));
+        const badRow = {
+            id: { tb: "proposal", id: "guid_evil" },
+            form: "guidance",
+            title: "x",
+            hypothesis: "y",
+            dedupe_sig: "../../etc/passwd",
+            status: "open",
+            skill_payload: null,
+            guidance_payload: { file_target: "~/.claude/CLAUDE.md", suggested_text: "z" },
+        };
+        const program = acceptProposal({ sigOrId: "../../etc/passwd", taskDir });
+        let threw = false;
+        try {
+            await Effect.runPromise(
+                program.pipe(Effect.provide(fakeRowsLayer([[[badRow]], []]))),
+            );
+        } catch {
+            threw = true;
+        }
+        expect(threw).toBe(true);
+    });
+
+    test("two acceptProposal calls in quick succession produce distinct experiment keys", async () => {
+        const taskDir = mkdtempSync(join(tmpdir(), "ax-task-"));
+        const row = {
+            id: { tb: "proposal", id: "guid_concurrent" },
+            form: "guidance",
+            title: "x",
+            hypothesis: "y",
+            dedupe_sig: "concurrent_sig",
+            status: "open",
+            skill_payload: null,
+            guidance_payload: { file_target: "~/.claude/CLAUDE.md", suggested_text: "z" },
+        };
+        const r1 = await Effect.runPromise(
+            acceptProposal({ sigOrId: "concurrent_sig", taskDir, force: true })
+                .pipe(Effect.provide(fakeRowsLayer([[[row]], []]))),
+        );
+        const r2 = await Effect.runPromise(
+            acceptProposal({ sigOrId: "concurrent_sig", taskDir, force: true })
+                .pipe(Effect.provide(fakeRowsLayer([[[row]], []]))),
+        );
+        expect(r1.experiment_id).not.toBe(r2.experiment_id);
+    });
+});
+
+/** Layer that succeeds for queries matching `selectPattern`, fails for all others. */
+const fakeRowsLayerWithFailure = (
+    fixtures: ReadonlyArray<unknown[]>,
+    failPattern: RegExp,
+) => {
+    let i = 0;
+    return Layer.succeed(SurrealClient, {
+        query: <T>(sql: string): Effect.Effect<T, DbError> => {
+            if (failPattern.test(sql)) {
+                return Effect.fail(new DbError({ operation: "query", message: "simulated DB failure", sql }));
+            }
+            return Effect.sync(() => (fixtures[i++] ?? []) as unknown as T);
+        },
+    } as never);
+};
+
+describe("acceptProposal - atomic write on DB failure", () => {
+    test("DB failure after tmp write → neither taskPath nor tmpPath exists", async () => {
+        const taskDir = mkdtempSync(join(tmpdir(), "ax-atomic-"));
+        const longSig = "guidance__atomic99";
+        const proposalRow = {
+            id: "proposal:atm1",
+            form: "guidance",
+            title: "Atomic write test",
+            hypothesis: "Verify tmp cleanup on DB failure",
+            dedupe_sig: longSig,
+            status: "open",
+            skill_payload: null,
+            guidance_payload: {
+                file_target: "~/.claude/CLAUDE.md",
+                section: null,
+                suggested_text: "Use atomic writes.",
+            },
+        };
+
+        // SELECT query succeeds (returns proposalRow); UPDATE+UPSERT query fails
+        const layer = fakeRowsLayerWithFailure([[[proposalRow]]], /UPSERT/);
+
+        const result = await Effect.runPromise(
+            acceptProposal({ sigOrId: longSig, taskDir }).pipe(
+                Effect.provide(layer),
+                Effect.exit,
+            ),
+        );
+
+        // Effect must have failed
+        expect(result._tag).toBe("Failure");
+
+        // Neither the final task file nor any tmp file should exist in taskDir
+        const taskPath = join(taskDir, `${longSig}.md`);
+        expect(existsSync(taskPath)).toBe(false);
+        const remaining = readdirSync(taskDir).filter((f) => f.includes(longSig));
+        expect(remaining).toHaveLength(0);
     });
 });
 

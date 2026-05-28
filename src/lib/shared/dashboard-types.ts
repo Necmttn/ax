@@ -774,9 +774,17 @@ export interface CheckpointSnapshotDto {
     readonly observed_at: string;
 }
 
+export type ExperimentStatus =
+    | "task_emitted"
+    | "scaffolded"
+    | "regressed"
+    | "retired";
+
 export interface ExperimentDto {
     readonly id: string;
     readonly artifact_path: string | null;
+    readonly status: ExperimentStatus | string | null;
+    readonly task_path: string | null;
     readonly locked_verdict: CheckpointVerdictDto | string | null;
     readonly created_at: string;
     readonly scaffolded_at: string | null;
@@ -806,10 +814,21 @@ export interface ImprovePayload {
     readonly proposals: ReadonlyArray<ProposalDto>;
 }
 
+export type ImproveActionStatus =
+    | "ok"
+    | "not_found"
+    | "wrong_status"
+    | "unsupported_form"
+    | "missing_payload"
+    | "scaffold_exists"
+    | "verdict_locked"
+    | "invalid_verdict";
+
 export interface ImproveActionResponse {
-    readonly status: ProposalStatus;
+    readonly status: ImproveActionStatus;
     readonly proposal_id?: string;
     readonly experiment_id?: string;
     readonly artifact_path?: string;
+    readonly task_path?: string;
     readonly message?: string;
 }

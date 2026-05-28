@@ -1,0 +1,93 @@
+import { describe, expect, test } from "bun:test";
+import { parseInlineMarkers, parseFrontmatterMarker, type InlineMarker } from "./markers.ts";
+
+describe("parseInlineMarkers", () => {
+    test("returns empty array for content with no markers", () => {
+        expect(parseInlineMarkers("hello world")).toEqual([]);
+    });
+
+    test("extracts a single paired marker", () => {
+        const input = `prefix <!--ax:e7f3-->body<!--/ax:e7f3--> suffix`;
+        const out = parseInlineMarkers(input);
+        expect(out).toEqual([
+            { id: "e7f3", body: "body", openIndex: 7, closeIndex: 40 } as InlineMarker,
+        ]);
+    });
+
+    test("extracts multiline body", () => {
+        const input = `<!--ax:9a21-->\n- one\n- two\n<!--/ax:9a21-->`;
+        const out = parseInlineMarkers(input);
+        expect(out).toHaveLength(1);
+        expect(out[0]!.id).toBe("9a21");
+        expect(out[0]!.body).toBe("\n- one\n- two\n");
+    });
+
+    test("extracts multiple markers with different ids", () => {
+        const input = `<!--ax:aa-->one<!--/ax:aa--> mid <!--ax:bb-->two<!--/ax:bb-->`;
+        const out = parseInlineMarkers(input);
+        expect(out.map((m) => m.id)).toEqual(["aa", "bb"]);
+    });
+
+    test("reports unmatched open as error", () => {
+        const input = `<!--ax:e7f3-->dangling`;
+        expect(() => parseInlineMarkers(input)).toThrow(/unmatched open/i);
+    });
+
+    test("reports duplicate id within one document as error", () => {
+        const input = `<!--ax:aa-->one<!--/ax:aa--> <!--ax:aa-->two<!--/ax:aa-->`;
+        expect(() => parseInlineMarkers(input)).toThrow(/duplicate id/i);
+    });
+
+    test("body containing the marker's own close tag literally → treats outer block as one unit", () => {
+        const input = `<!--ax:foo-->before<!--ax:foo-->nested<!--/ax:foo-->after<!--/ax:foo-->`;
+        const out = parseInlineMarkers(input);
+        expect(out).toHaveLength(1);
+        expect(out[0]!.id).toBe("foo");
+        expect(out[0]!.body).toBe("before<!--ax:foo-->nested<!--/ax:foo-->after");
+    });
+
+    test("body with two nested opens/closes is still balanced", () => {
+        const input = `<!--ax:a-->1<!--ax:a-->2<!--ax:a-->3<!--/ax:a-->4<!--/ax:a-->5<!--/ax:a-->`;
+        const out = parseInlineMarkers(input);
+        expect(out).toHaveLength(1);
+    });
+
+    test("body with only nested opens (no close) still errors", () => {
+        const input = `<!--ax:foo-->before<!--ax:foo-->no-close`;
+        expect(() => parseInlineMarkers(input)).toThrow(/unmatched open/i);
+    });
+
+    test("two sequential calls on different inputs do not share regex state", () => {
+        const first = parseInlineMarkers(`<!--ax:foo-->a<!--/ax:foo-->`);
+        const second = parseInlineMarkers(`<!--ax:bar-->b<!--/ax:bar-->`);
+        expect(first[0]!.id).toBe("foo");
+        expect(second[0]!.id).toBe("bar");
+    });
+});
+
+describe("parseFrontmatterMarker", () => {
+    test("returns null when there is no frontmatter", () => {
+        expect(parseFrontmatterMarker("# heading\nbody")).toBeNull();
+    });
+
+    test("returns null when frontmatter has no ax_id", () => {
+        const input = `---\nname: foo\n---\nbody`;
+        expect(parseFrontmatterMarker(input)).toBeNull();
+    });
+
+    test("extracts ax_id and ax_experiment", () => {
+        const input = `---\nname: foo\nax_id: e7f3\nax_experiment: experiment:guid_e7f3__lk9\n---\nbody`;
+        expect(parseFrontmatterMarker(input)).toEqual({
+            id: "e7f3",
+            experiment: "experiment:guid_e7f3__lk9",
+        });
+    });
+
+    test("tolerates quoted values", () => {
+        const input = `---\nax_id: "e7f3"\nax_experiment: 'experiment:abc'\n---\n`;
+        expect(parseFrontmatterMarker(input)).toEqual({
+            id: "e7f3",
+            experiment: "experiment:abc",
+        });
+    });
+});

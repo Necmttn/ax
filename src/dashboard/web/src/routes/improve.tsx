@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api.ts";
 import type {
+    ExperimentStatus,
     ImproveActionResponse,
     ProposalDto,
     ProposalForm,
@@ -49,7 +50,8 @@ export function ImproveRoute() {
 
     const onActionResult = (action: string, res: ImproveActionResponse) => {
         if (res.status === "ok") {
-            setActionInfo(`${action}: ok${res.artifact_path ? ` → ${res.artifact_path}` : ""}`);
+            const path = res.artifact_path ?? res.task_path;
+            setActionInfo(`${action}: ok${path ? ` → ${path}` : ""}`);
             setActionError(null);
             queryClient.invalidateQueries({ queryKey: ["improve"] });
         } else {
@@ -122,6 +124,7 @@ export function ImproveRoute() {
                             <th>Freq</th>
                             <th>Form</th>
                             <th>Status</th>
+                            <th>Exp. Status</th>
                             <th>Verdict</th>
                             <th>Title</th>
                         </tr>
@@ -146,6 +149,10 @@ export function ImproveRoute() {
                                     <td style={{ textAlign: "right" }}>{p.frequency}</td>
                                     <td>{p.form}</td>
                                     <td><StatusPill status={p.status} /></td>
+                                    <td>{p.experiment?.status
+                                        ? <ExperimentStatusBadge status={p.experiment.status} />
+                                        : <span className="meta">-</span>}
+                                    </td>
                                     <td>{verdict}</td>
                                     <td>{p.title}</td>
                                 </tr>
@@ -176,6 +183,16 @@ export function ImproveRoute() {
 
 function StatusPill({ status }: { status: string }) {
     const cls = status === "open" ? "keep" : status === "rejected" ? "archive" : "review";
+    return <span className={`badge ${cls}`}>{status}</span>;
+}
+
+function ExperimentStatusBadge({ status }: { status: ExperimentStatus | string }) {
+    const cls =
+        status === "task_emitted" ? "review"
+        : status === "scaffolded" ? "keep"
+        : status === "regressed" ? "archive"
+        : status === "retired" ? "archive"
+        : "review";
     return <span className={`badge ${cls}`}>{status}</span>;
 }
 
@@ -225,7 +242,10 @@ function ProposalDetail({
                         <span className="meta">{fmtTs(exp.created_at)}</span>
                     </header>
                     <dl className="kv">
+                        {exp.status ? (<><dt>Exp. Status</dt><dd><ExperimentStatusBadge status={exp.status} /></dd></>) : null}
                         {exp.artifact_path ? (<><dt>Artifact</dt><dd><code>{exp.artifact_path}</code></dd></>) : null}
+                        {exp.task_path && exp.status === "task_emitted"
+                            ? (<><dt>Task path</dt><dd>{exp.task_path}</dd></>) : null}
                         {exp.scaffolded_at ? (<><dt>Scaffolded</dt><dd>{fmtTs(exp.scaffolded_at)}</dd></>) : null}
                         <dt>Verdict</dt><dd>
                             {exp.locked_verdict
