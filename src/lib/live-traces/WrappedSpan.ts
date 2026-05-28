@@ -27,6 +27,19 @@ export class WrappedSpan implements Span {
     /** Scope for stream routing */
     readonly liveScope: TraceScope;
 
+    /**
+     * Snapshot of inner.status.startTime captured at construction.
+     *
+     * Both call sites (`LiveTrace.withTrace` and `Tracer.span`) construct
+     * WrappedSpan from an inner span that has just been started by the
+     * runtime, so `inner.status._tag === "Started"` here. We snapshot
+     * `startTime` immediately so `end()` no longer depends on the inner span
+     * mutating its own `status` to `Ended` during `inner.end(...)` -- some
+     * non-native (e.g. OTel-bridged) spans skip that transition, which used
+     * to leave `startTime = 0n` and produce nonsense (~1.7e15 ms) durations.
+     */
+    private readonly startTimeNs: bigint;
+
     constructor(
         readonly inner: Span,
         readonly sink: TraceSinkHandle,
@@ -35,6 +48,9 @@ export class WrappedSpan implements Span {
     ) {
         this.liveTraceId = liveTraceId;
         this.liveScope = liveScope;
+        // Inner span is freshly started here; both variants of SpanStatus
+        // expose `startTime`, so this is safe regardless of _tag.
+        this.startTimeNs = inner.status.startTime;
     }
 
     // -- Delegated reads --
@@ -108,8 +124,10 @@ export class WrappedSpan implements Span {
     end(endTime: bigint, exit: Exit.Exit<unknown, unknown>): void {
         this.inner.end(endTime, exit);
 
-        const startTime = this.inner.status._tag === "Ended" ? this.inner.status.startTime : BigInt(0);
-        const durationMs = Number(endTime - startTime) / 1_000_000;
+        // Use the startTime captured at construction (see `startTimeNs` doc).
+        // This decouples duration computation from any post-end status
+        // mutation on `inner`, which OTel-bridged spans may not perform.
+        const durationMs = Number(endTime - this.startTimeNs) / 1_000_000;
         const status = exit._tag === "Success" ? ("ok" as const) : ("error" as const);
 
         this.sink.emit({
