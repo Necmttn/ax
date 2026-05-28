@@ -328,14 +328,15 @@ export const deriveClaudeSubagents = (
         for (const row of backfillRows) {
             const id = row["id"];
             const parentRepo = row["parent_repository"];
-            const parentCk = row["parent_checkout"] ?? null;
-            const parentCwdBf = typeof row["parent_cwd"] === "string" && (row["parent_cwd"] as string).length > 0
+            const parentCk = row["parent_checkout"] ?? undefined;
+            const parentCwdBf = typeof row["parent_cwd"] === "string" && row["parent_cwd"].length > 0
                 ? row["parent_cwd"]
-                : null;
+                : undefined;
             if (id == null || parentRepo == null) continue;
+            if (!(id instanceof RecordId)) continue;
             // Use parameterized bindings so record-ID values round-trip correctly.
             yield* db.query(
-                `UPDATE ${String(id)} SET repository = $repo, checkout = $checkout, cwd = $cwd WHERE repository IS NONE;`,
+                `UPDATE ${id} SET repository = $repo, checkout = $checkout, cwd = $cwd WHERE repository IS NONE;`,
                 { repo: parentRepo, checkout: parentCk, cwd: parentCwdBf },
             );
             repositoryBackfilled += 1;

@@ -20,7 +20,7 @@ import { deriveClaudeSubagents } from "./derive-claude-subagents.ts";
 // ---------------------------------------------------------------------------
 
 type Call =
-    | { kind: "query"; sql: string }
+    | { kind: "query"; sql: string; bindings?: Record<string, unknown> }
     | { kind: "upsert"; id: string; content: Record<string, unknown> };
 
 /**
@@ -32,8 +32,11 @@ function makeMockDb(queryResponses: Map<string, unknown[][]> = new Map()) {
     const calls: Call[] = [];
 
     const impl = {
-        query: <T extends unknown[] = unknown[]>(sql: string) => {
-            calls.push({ kind: "query", sql });
+        query: <T extends unknown[] = unknown[]>(sql: string, bindings?: Record<string, unknown>) => {
+            const call: Call = bindings !== undefined
+                ? { kind: "query", sql, bindings }
+                : { kind: "query", sql };
+            calls.push(call);
             // Find first matching key that the sql CONTAINS
             for (const [pattern, response] of queryResponses) {
                 if (sql.includes(pattern)) {
@@ -113,10 +116,12 @@ describe("repository backfill (F7)", () => {
         // Skill catalog query
         responses.set("SELECT name FROM skill", [[{ name: "test-skill" }]]);
 
-        // Backfill SELECT: find subagents with no repository, with parent data
+        // Backfill SELECT: find subagents with no repository, with parent data.
+        // id must be a RecordId instance (as the real DB driver returns) so the
+        // instanceof guard in the production code allows it through.
         responses.set('source = "claude-subagent" AND repository IS NONE', [[
             {
-                id: "session:⟨claude-subagent-abc⟩",
+                id: new RecordId("session", "claude-subagent-abc"),
                 parent_repository: "repository:my-repo",
                 parent_checkout: "checkout:abc123",
                 parent_cwd: "/home/user/project",
@@ -143,6 +148,13 @@ describe("repository backfill (F7)", () => {
                 (c.sql.includes("SET repository") || c.sql.includes("repository =")),
         );
         expect(updateCall).toBeDefined();
+
+        // Verify bindings carry the correct parent values (not just the SQL string)
+        if (updateCall?.kind === "query") {
+            expect(updateCall.bindings?.["repo"]).toBe("repository:my-repo");
+            expect(updateCall.bindings?.["checkout"]).toBe("checkout:abc123");
+            expect(updateCall.bindings?.["cwd"]).toBe("/home/user/project");
+        }
     });
 
     test("backfill idempotent: when no subagents have missing repository, no UPDATE issued", async () => {
@@ -167,16 +179,16 @@ describe("repository backfill (F7)", () => {
     test("stats: repositoryBackfilled reflects count of backfilled rows", async () => {
         const responses = new Map<string, unknown[][]>();
         responses.set("SELECT name FROM skill", [[]]);
-        // Two rows need backfill
+        // Two rows need backfill (RecordId instances as the real DB driver returns)
         responses.set('source = "claude-subagent" AND repository IS NONE', [[
             {
-                id: "session:⟨claude-subagent-aaa⟩",
+                id: new RecordId("session", "claude-subagent-aaa"),
                 parent_repository: "repository:repo-x",
                 parent_checkout: null,
                 parent_cwd: "/tmp/repo-x",
             },
             {
-                id: "session:⟨claude-subagent-bbb⟩",
+                id: new RecordId("session", "claude-subagent-bbb"),
                 parent_repository: "repository:repo-y",
                 parent_checkout: "checkout:def456",
                 parent_cwd: "/tmp/repo-y",
