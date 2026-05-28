@@ -179,7 +179,6 @@ describe("acceptProposal - task emission", () => {
         expect(result.task_path).toBeUndefined();
         expect(existsSync(result.artifact_path!)).toBe(true);
     });
-});
 
     test("dedupe_sig with path separator characters is rejected", async () => {
         const taskDir = mkdtempSync(join(tmpdir(), "ax-task-"));
