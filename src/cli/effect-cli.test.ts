@@ -129,7 +129,7 @@ describe("effect cli", () => {
     });
 
     test("resolveIngestStages: --stages= runs exactly the listed stages", () => {
-        const keys = resolveIngestStages(testRegistry, ["--stages=signals,outcomes"]).map((s: any) => s.meta.key);
+        const keys = resolveIngestStages(testRegistry, ["--stages=signals,outcomes"]).map((s) => s.meta.key);
         expect([...keys].sort()).toEqual([
             "outcomes",
             "signals",
@@ -137,7 +137,7 @@ describe("effect cli", () => {
     });
 
     test("resolveIngestStages: --derive-only runs only stages tagged 'derive'", () => {
-        const keys = resolveIngestStages(testRegistry, ["--derive-only"]).map((s: any) => s.meta.key);
+        const keys = resolveIngestStages(testRegistry, ["--derive-only"]).map((s) => s.meta.key);
         // All stages in the registry with the "derive" tag:
         // subagents, spawned, signals, closure, outcomes, session-health,
         // proposals, opportunities, retro-proposals, harness.
@@ -156,7 +156,7 @@ describe("effect cli", () => {
     });
 
     test("resolveIngestStages: --stages= takes precedence over --derive-only", () => {
-        const keys = resolveIngestStages(testRegistry, ["--stages=git", "--derive-only"]).map((s: any) => s.meta.key);
+        const keys = resolveIngestStages(testRegistry, ["--stages=git", "--derive-only"]).map((s) => s.meta.key);
         expect([...keys]).toEqual([
             "git",
         ]);

@@ -5,7 +5,7 @@ import {
     StageRegistryLive,
     type StageDef,
 } from "./registry.ts";
-import { BaseStageStats, IngestContext, StageMeta } from "./types.ts";
+import { BaseStageStats, StageMeta } from "./types.ts";
 
 const fakeStage: StageDef = {
     meta: StageMeta.make({ key: "skills", deps: [], tags: ["ingest"] }),
