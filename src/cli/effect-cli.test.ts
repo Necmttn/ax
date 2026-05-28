@@ -4,13 +4,8 @@ import { ALL_STAGES } from "../ingest/stage/registry.ts";
 import type { StageRegistryShape } from "../ingest/stage/registry.ts";
 import type { BaseStageStats, StageDef } from "../ingest/stage/types.ts";
 
-// Shared registry fixture for resolveIngestStages tests. We widen `ALL_STAGES`
-// (a heterogeneous readonly tuple of `StageDef<S, R>` with varying R service
-// channels) to the registry's canonical `StageDef<BaseStageStats, unknown>[]`
-// via a single cast at the boundary, so the lookup helpers below can be
-// `any`-free.
-const stages: ReadonlyArray<StageDef<BaseStageStats, unknown>> =
-    ALL_STAGES as unknown as ReadonlyArray<StageDef<BaseStageStats, unknown>>;
+// widened to the registry's canonical erased-R shape (matches StageRegistryLive's parameter)
+const stages: ReadonlyArray<StageDef<BaseStageStats, unknown>> = ALL_STAGES;
 
 const testRegistry: StageRegistryShape = {
     all: () => stages,
