@@ -42,7 +42,7 @@ import { deriveClaudeSubagents } from "../ingest/derive-claude-subagents.ts";
 import { INSIGHT_VIEWS, insightSqlForView, isInsightView } from "../queries/insights.ts";
 import { writeDashboard } from "../dashboard/report.ts";
 import { serveDashboard } from "../dashboard/server.ts";
-import { fetchRecall } from "../dashboard/recall.ts";
+import { fetchRecall, type RecallSource, type RecallScope } from "../dashboard/recall.ts";
 import { cmdDaemon, cmdDoctor, cmdInstall, cmdUninstall } from "./install.ts";
 import { resolvePwdRepository } from "../lib/pwd.ts";
 import { encodeClaudeProjectSlug } from "../lib/transcript-locator.ts";
@@ -867,13 +867,68 @@ const cmdReport = (args: string[]) =>
         );
     });
 
+const VALID_SOURCES: ReadonlySet<string> = new Set(["turn", "commit", "skill"]);
+
+function parseSourcesFlag(raw: string | null): ReadonlyArray<RecallSource> | null {
+    if (!raw) return null;
+    const parts = raw.split(",").map((s) => s.trim()).filter(Boolean);
+    const invalid = parts.filter((p) => !VALID_SOURCES.has(p));
+    if (invalid.length > 0) {
+        console.error(
+            `axctl recall: unknown source(s): ${invalid.join(", ")}. Valid: turn, commit, skill`,
+        );
+        process.exit(2);
+    }
+    return parts as RecallSource[];
+}
+
 interface RecallCliOpts {
     readonly query: string;
     readonly project: string | null;
     readonly skill: string | null;
     readonly since: string | null;
+    readonly sources: string | null;
+    readonly scopeFlag: string | null;
     readonly json: boolean;
 }
+
+/**
+ * Resolve `--scope` flag + cwd into a RecallScope.
+ *
+ * Rules:
+ *  - `--scope=all`  → { kind: "all" } (no DB lookup)
+ *  - `--scope=here` → look up cwd repository; error if not a git repo
+ *  - omitted        → auto-detect: try `here`; fall back to `all` silently
+ */
+const resolveScope = (
+    scopeFlag: string | null,
+): Effect.Effect<RecallScope, never, SurrealClient | ProcessService> =>
+    Effect.gen(function* () {
+        if (scopeFlag === "all") return { kind: "all" } as RecallScope;
+
+        if (scopeFlag === "here" || scopeFlag === null) {
+            const resolution = yield* resolvePwdRepository().pipe(
+                Effect.catch((err) => {
+                    if (scopeFlag === "here") {
+                        // explicit --scope=here outside a git repo → error
+                        const cwd = "cwd" in (err as object) ? (err as { cwd: string }).cwd : process.cwd();
+                        console.error(`axctl recall: --scope=here requires a git repo (cwd=${cwd})`);
+                        process.exit(2);
+                    }
+                    // auto-detect: not a git repo → fall back to all
+                    return Effect.succeed(null as import("../lib/pwd.ts").PwdResolution | null);
+                }),
+            );
+            if (resolution === null) return { kind: "all" } as RecallScope;
+            return {
+                kind: "here",
+                repositoryRecordId: String(resolution.repositoryRecordId),
+            } as RecallScope;
+        }
+
+        console.error(`axctl recall: unknown --scope value "${scopeFlag}". Valid: here, all`);
+        process.exit(2);
+    });
 
 /**
  * Resolve a user-supplied filter (project slug, skill name) into the
@@ -1025,36 +1080,85 @@ const cmdRecall = (opts: RecallCliOpts) =>
         }
         const project = yield* resolveProject(opts.project);
         const skill = yield* resolveSkill(opts.skill);
+        const sources = parseSourcesFlag(opts.sources);
+        const scope = yield* resolveScope(opts.scopeFlag);
         const result = yield* fetchRecall({
             q: opts.query,
             project,
             skill,
             since: opts.since,
+            ...(sources !== null ? { sources } : {}),
+            scope,
         });
         if (opts.json) {
             console.log(JSON.stringify(result, null, 2));
             return;
         }
-        if (result.hits.length === 0) {
+
+        const multiSource = (result.commits.length > 0 || result.skills.length > 0);
+
+        // --- turns section ---
+        if (result.hits.length === 0 && !multiSource) {
             console.log(`no matches for "${opts.query}"`);
             return;
         }
-        const more = result.total_count > result.hits.length
-            ? ` (showing first ${result.hits.length} of ${result.total_count})`
-            : "";
-        console.log(`${result.hits.length} match${result.hits.length === 1 ? "" : "es"}${more}`);
-        for (const hit of result.hits) {
-            const ts = hit.ts ?? "?";
-            const project = hit.project ? prettifyProjectSlug(hit.project) : "?";
-            const sid = hit.session_id
-                .replace(/^session:⟨/, "")
-                .replace(/⟩$/, "")
-                .slice(0, 12);
-            const role = (hit.role ?? "?").padEnd(9);
-            const src = (hit.source ?? "?").padEnd(15);
-            console.log(`\n[2m${ts}  ${src} ${role} ${project}  ${sid}[0m`);
-            const snippet = hit.snippet.replace(/\s+/g, " ").trim();
-            console.log(`  ${snippet}`);
+        if (result.hits.length > 0) {
+            if (multiSource) console.log("\n\x1b[1mturns\x1b[0m");
+            const more = result.total_count > result.hits.length
+                ? ` (showing first ${result.hits.length} of ${result.total_count})`
+                : "";
+            console.log(`${result.hits.length} match${result.hits.length === 1 ? "" : "es"}${more}`);
+            for (const hit of result.hits) {
+                const ts = hit.ts ?? "?";
+                const proj = hit.project ? prettifyProjectSlug(hit.project) : "?";
+                const sid = hit.session_id
+                    .replace(/^session:⟨/, "")
+                    .replace(/⟩$/, "")
+                    .slice(0, 12);
+                const role = (hit.role ?? "?").padEnd(9);
+                const src = (hit.source ?? "?").padEnd(15);
+                console.log(`\n\x1b[2m${ts}  ${src} ${role} ${proj}  ${sid}\x1b[0m`);
+                const snippet = hit.snippet.replace(/\s+/g, " ").trim();
+                console.log(`  ${snippet}`);
+            }
+        }
+
+        // --- commits section ---
+        if (result.commits.length > 0) {
+            console.log(`\n\x1b[1mcommits\x1b[0m`);
+            const more = result.total_counts.commit > result.commits.length
+                ? ` (showing first ${result.commits.length} of ${result.total_counts.commit})`
+                : "";
+            console.log(`${result.commits.length} match${result.commits.length === 1 ? "" : "es"}${more}`);
+            for (const hit of result.commits) {
+                const ts = hit.ts ?? "?";
+                const repo = hit.repo ?? "?";
+                const sha = hit.sha.slice(0, 8);
+                console.log(`\n\x1b[2m${ts}  ${repo}  ${sha}\x1b[0m`);
+                const snippet = hit.snippet.replace(/\s+/g, " ").trim();
+                console.log(`  ${snippet}`);
+            }
+        }
+
+        // --- skills section ---
+        if (result.skills.length > 0) {
+            console.log(`\n\x1b[1mskills\x1b[0m`);
+            const more = result.total_counts.skill > result.skills.length
+                ? ` (showing first ${result.skills.length} of ${result.total_counts.skill})`
+                : "";
+            console.log(`${result.skills.length} match${result.skills.length === 1 ? "" : "es"}${more}`);
+            for (const hit of result.skills) {
+                const desc = hit.description ? `  \x1b[2m${hit.description.slice(0, 80)}\x1b[0m` : "";
+                console.log(`  ${hit.name}${desc}`);
+                if (hit.snippet && hit.snippet !== hit.name) {
+                    const snippet = hit.snippet.replace(/\s+/g, " ").trim();
+                    console.log(`    ${snippet}`);
+                }
+            }
+        }
+
+        if (result.hits.length === 0 && result.commits.length === 0 && result.skills.length === 0) {
+            console.log(`no matches for "${opts.query}"`);
         }
     });
 
@@ -2954,19 +3058,24 @@ const recallCommand = Command.make(
         project: Flag.string("project").pipe(Flag.optional),
         skill: Flag.string("skill").pipe(Flag.optional),
         since: Flag.string("since").pipe(Flag.optional),
+        sources: Flag.string("sources").pipe(Flag.optional),
+        scope: Flag.string("scope").pipe(Flag.optional),
         json: jsonFlag,
     },
-    ({ query, project, skill, since, json }) =>
+    ({ query, project, skill, since, sources, scope, json }) =>
         cmdRecall({
             query: query.join(" "),
             project: Option.getOrNull(project),
             skill: Option.getOrNull(skill),
             since: Option.getOrNull(since),
+            sources: Option.getOrNull(sources),
+            scopeFlag: Option.getOrNull(scope),
             json,
         }),
 ).pipe(
     Command.withDescription(
-        "Cross-session text search over user/assistant turns (BM25 FTS)",
+        "Cross-session text search over turns, commits, and skills (BM25 FTS). " +
+        "--sources=turn,commit,skill  --scope=here|all",
     ),
 );
 
