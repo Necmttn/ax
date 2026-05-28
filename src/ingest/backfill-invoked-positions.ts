@@ -8,6 +8,25 @@
  * full turn count per session and the per-(session, skill) group ordering -
  * information that is only stable after all transcripts are ingested. This
  * stage runs after `claude`, `codex`, and `subagents` to fill in those values.
+ *
+ * Algorithm (R4 - incremental-safe):
+ *
+ * 1. Identify affected (session, skill) pairs - those with ANY row where at
+ *    least one position field is NONE. Even if only one new row was appended,
+ *    we must recompute the full group to avoid marking a non-first invocation
+ *    as is_first=true.
+ *
+ * 2. For each affected pair, fetch ALL invoked rows in that group.
+ *
+ * 3. Compute desired state:
+ *    - turn_index: keep existing value if NOT NONE (RELATE-time snapshot);
+ *      fall back to in.seq only when currently NONE.
+ *    - total_turns: always recompute from current session turn count (sessions
+ *      grow as new transcripts are appended).
+ *    - is_first: always recompute - the row with the smallest seq in the group.
+ *
+ * 4. Emit UPDATE only when at least one field differs from the current value.
+ *    Idempotent: a second run with no new data produces 0 updates.
  */
 
 import { Effect } from "effect";
@@ -20,13 +39,22 @@ export interface BackfillInvokedPositionsStats {
     sessions: number;
 }
 
+/** Row returned by the "find affected pairs" SELECT. */
+type AffectedPairRow = { session: unknown; skill: unknown };
+
+/** Row returned by the "all rows for a group" SELECT. */
+type GroupRow = {
+    id: unknown;
+    seq: unknown;
+    turn_index: unknown;
+    total_turns: unknown;
+    is_first: unknown;
+};
+
 /**
- * One-shot idempotent backfill: for every invoked row where any of the three
- * position fields is NONE, compute the correct values from the per-session turn
- * count and the sorted (session, skill) group, then UPDATE the row.
- *
- * Second run is a no-op: the guard `WHERE turn_index IS NONE OR total_turns IS
- * NONE OR is_first IS NONE` returns 0 rows when everything is already filled.
+ * Idempotent backfill: recomputes is_first, total_turns, and turn_index for
+ * every (session, skill) group that has at least one row with a missing field.
+ * Rows that already carry the correct values are not re-updated.
  */
 export const backfillInvokedPositions = (): Effect.Effect<
     BackfillInvokedPositionsStats,
@@ -36,22 +64,20 @@ export const backfillInvokedPositions = (): Effect.Effect<
     Effect.gen(function* () {
         const db = yield* SurrealClient;
 
-        // 1. Find all invoked rows that need backfilling.
-        //    The joined select pulls session + seq from the source turn so we
-        //    don't need a second round-trip per row.
-        const missingRows = (yield* db.query<
-            [Array<{ id: unknown; session: unknown; seq: unknown; skill: unknown }>]
-        >(
-            `SELECT id, in.session AS session, in.seq AS seq, out AS skill
+        // 1. Identify affected (session, skill) pairs.
+        //    A pair is "affected" when ANY of its invoked rows has a NONE field.
+        const affectedPairs = (yield* db.query<[Array<AffectedPairRow>]>(
+            `SELECT DISTINCT in.session AS session, out AS skill
              FROM invoked
              WHERE turn_index IS NONE OR total_turns IS NONE OR is_first IS NONE;`,
         ))?.[0] ?? [];
 
-        if (missingRows.length === 0) {
+        if (affectedPairs.length === 0) {
             return { backfilled: 0, sessions: 0 };
         }
 
-        // 2. Per-session turn counts: how many turns exist for each session.
+        // 2. Per-session turn counts. Fetch once; sessions can grow between runs
+        //    so we always recompute total_turns even for already-filled rows.
         const turnCountRows = (yield* db.query<
             [Array<{ session: unknown; n: unknown }>]
         >(
@@ -65,46 +91,75 @@ export const backfillInvokedPositions = (): Effect.Effect<
             if (session) turnCountBySession.set(session, n);
         }
 
-        // 3. Group invoked rows by (session, skill). Within each group, sort by
-        //    seq ascending. First row in each group = is_first=true.
-        type MissingRow = { id: unknown; session: unknown; seq: unknown; skill: unknown };
-        const groups = new Map<string, MissingRow[]>();
-        for (const row of missingRows) {
-            const session = String(row.session ?? "");
-            const skill = String(row.skill ?? "");
-            const key = `${session}|||${skill}`;
-            const existing = groups.get(key);
-            if (existing) {
-                existing.push(row);
-            } else {
-                groups.set(key, [row]);
-            }
-        }
-
-        // Sort each group by seq ascending so the first element is is_first.
-        for (const rows of groups.values()) {
-            rows.sort((a, b) => Number(a.seq ?? 0) - Number(b.seq ?? 0));
-        }
-
-        // 4. Build UPDATE statements. One per invoked row, guarded by the NONE
-        //    check so re-running is always a no-op for already-filled rows.
+        // 3. For each affected pair, fetch ALL rows in the group and compute
+        //    the desired state. Emit an UPDATE only when something changes.
         const stmts: string[] = [];
         const seenSessions = new Set<string>();
 
-        for (const [, rows] of groups) {
-            for (let i = 0; i < rows.length; i += 1) {
-                const row = rows[i]!;
-                const session = String(row.session ?? "");
-                const seq = Number(row.seq ?? 0);
+        for (const pair of affectedPairs) {
+            const session = String(pair.session ?? "");
+            const skill = String(pair.skill ?? "");
+            if (!session || !skill) continue;
+
+            seenSessions.add(session);
+
+            // Fetch every invoked row for this (session, skill) pair.
+            const groupRows = (yield* db.query<[Array<GroupRow>]>(
+                `SELECT id, in.seq AS seq, turn_index, total_turns, is_first
+                 FROM invoked
+                 WHERE in.session = ${session} AND out = ${skill}
+                 ORDER BY in.seq ASC;`,
+            ))?.[0] ?? [];
+
+            if (groupRows.length === 0) continue;
+
+            const totalTurns = turnCountBySession.get(session) ?? null;
+
+            for (let i = 0; i < groupRows.length; i += 1) {
+                const row = groupRows[i]!;
                 const id = String(row.id ?? "");
-                const n = turnCountBySession.get(session) ?? null;
-                const isFirst = i === 0;
+                if (!id) continue;
 
-                seenSessions.add(session);
+                const seq = Number(row.seq ?? 0);
 
-                const totalTurns = n !== null ? String(n) : "NONE";
+                // turn_index: preserve RELATE-time snapshot; fill from seq only
+                // when currently NONE.
+                const currentTurnIndex =
+                    row.turn_index !== null && row.turn_index !== undefined
+                        ? Number(row.turn_index)
+                        : null;
+                const desiredTurnIndex = currentTurnIndex !== null ? currentTurnIndex : seq;
+
+                // total_turns: always refresh (session size can grow).
+                const desiredTotalTurns = totalTurns;
+
+                // is_first: the row with the smallest seq in the full group.
+                const desiredIsFirst = i === 0;
+
+                // Compare current vs desired. Skip if everything already matches.
+                const currentTotalTurns =
+                    row.total_turns !== null && row.total_turns !== undefined
+                        ? Number(row.total_turns)
+                        : null;
+                const currentIsFirst =
+                    row.is_first !== null && row.is_first !== undefined
+                        ? Boolean(row.is_first)
+                        : null;
+
+                const turnIndexChanged =
+                    row.turn_index === null || row.turn_index === undefined;
+                const totalTurnsChanged = currentTotalTurns !== desiredTotalTurns;
+                const isFirstChanged = currentIsFirst !== desiredIsFirst;
+
+                if (!turnIndexChanged && !totalTurnsChanged && !isFirstChanged) {
+                    continue; // already correct - skip
+                }
+
+                const totalTurnsLit =
+                    desiredTotalTurns !== null ? String(desiredTotalTurns) : "NONE";
+
                 stmts.push(
-                    `UPDATE ${id} SET turn_index = ${seq}, total_turns = ${totalTurns}, is_first = ${isFirst} WHERE turn_index IS NONE OR total_turns IS NONE OR is_first IS NONE;`,
+                    `UPDATE ${id} SET turn_index = ${desiredTurnIndex}, total_turns = ${totalTurnsLit}, is_first = ${desiredIsFirst};`,
                 );
             }
         }
