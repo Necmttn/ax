@@ -36,7 +36,7 @@ Decide one of three modes based on what the user gave you:
 |---|---|---|
 | commit sha (full or short) | sha | use it directly |
 | date or date range (YYYY-MM-DD) | date | use `ax sessions around <date>` |
-| topic / feature / artifact name | topic | `ax commits search "<topic>"` to find candidate shas |
+| topic / feature / artifact name | topic | `ax recall "<topic>" --sources=commit --json` to find candidate shas |
 | "this repo, recently" | pwd | `ax sessions here --days=14` |
 
 For topic mode pick the most relevant sha and proceed in sha mode. If
