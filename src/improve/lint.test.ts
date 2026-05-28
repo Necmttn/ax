@@ -157,12 +157,26 @@ describe("lintFiles", () => {
             status: "task_emitted",
             task_path: taskFile,
             locked_verdict: null,
+            created_at: "2026-01-01T00:00:00.000Z",
         }];
         const program = lintFiles({ roots: [root], staleDays: 7 });
         const report = await Effect.runPromise(
             program.pipe(Effect.provide(recordingLayer(rec, [experimentFixture]))),
         );
         expect(report.warnings.some((w) => w.rule === "stale_task")).toBe(true);
+    });
+
+    test("stale-task scan SQL filters by date cutoff (not JS-side only)", async () => {
+        const root = mkdtempSync(join(tmpdir(), "ax-lint-"));
+        const rec: QueryRecorder = { calls: [] };
+        const program = lintFiles({ roots: [root], staleDays: 7 });
+        await Effect.runPromise(
+            program.pipe(Effect.provide(recordingLayer(rec, [[]]))),
+        );
+        // The stale-task SQL must include a date predicate pushed into SurrealQL
+        const staleQuery = rec.calls.find((c) => /task_emitted/.test(c) && /task_path/.test(c));
+        expect(staleQuery).toBeDefined();
+        expect(staleQuery).toMatch(/created_at\s*<\s*d"/);
     });
 
     test("frontmatter ax_experiment routes reconcile to the exact experiment row", async () => {

@@ -355,6 +355,10 @@ export const lintFiles = (
         // Stale-task scan: always runs regardless of whether markers were found.
         // Warns about task_emitted experiments whose task file is >staleDays old
         // and whose short_id was NOT seen as a marker this run.
+        // The date predicate is pushed into SurrealQL so only rows older than
+        // staleDays round-trip to JS (avoiding a linear statSync-per-row scan).
+        const staleDays = opts.staleDays ?? 7;
+        const staleCutoff = new Date(Date.now() - staleDays * 86_400_000).toISOString();
         const staleResult = yield* db.query<[ExperimentRow[]]>(`
             SELECT
                 type::string(id) AS id,
@@ -362,22 +366,28 @@ export const lintFiles = (
                 status,
                 task_path,
                 locked_verdict
-            FROM experiment WHERE status = 'task_emitted' AND task_path IS NOT NONE;
+            FROM experiment
+            WHERE status = 'task_emitted'
+              AND task_path IS NOT NONE
+              AND created_at < d"${staleCutoff}";
         `);
-        const staleCutoffMs = Date.now() - (opts.staleDays ?? 7) * 86_400_000;
         for (const row of staleResult?.[0] ?? []) {
             if (idToTarget.has(row.short_id)) continue; // marker found this run → not stale
             if (!row.task_path || !existsSync(row.task_path)) continue;
+            // JS-side mtime cross-check: the task file may have been touched
+            // (e.g. by the agent) after the experiment was created, so we still
+            // verify the file is actually old before emitting the warning.
             let mtime: number;
             try { mtime = statSync(row.task_path).mtimeMs; }
             catch { continue; }
+            const staleCutoffMs = Date.now() - staleDays * 86_400_000;
             if (mtime < staleCutoffMs) {
                 warnings.push({
                     rule: "stale_task",
                     severity: "warning",
                     path: row.task_path,
                     id: row.short_id,
-                    message: `task file >${opts.staleDays ?? 7}d old with no marker (consider \`axctl improve reject ${row.short_id}\`)`,
+                    message: `task file >${staleDays}d old with no marker (consider \`axctl improve reject ${row.short_id}\`)`,
                 });
             }
         }
