@@ -15,5 +15,5 @@
       "~/*": ["./app/*"]
     }
   },
-  "include": ["app", "vite.config.ts", "content-collections.ts"]
+  "include": ["app", "vite.config.ts"]
 }
