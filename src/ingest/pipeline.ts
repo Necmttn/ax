@@ -109,6 +109,8 @@ export const runPipeline = (
  *  - `subagents` derives parent↔child links - needs both transcript stages.
  *  - `spawned` derives spawn edges from transcript rows.
  *  - `git` is independent of transcripts.
+ *  - `invoked-positions` backfills turn_index/total_turns/is_first onto
+ *    `invoked` edges after all transcript + subagent stages complete.
  *  - the derive-* stages re-read already-ingested turn/session rows.
  *  - `retro-proposals` clusters per-session retro `failed` strings into
  *    skill-form proposals; sibling of `opportunities`, runs after
@@ -123,6 +125,7 @@ export const INGEST_STAGE_DEPS: Record<string, readonly string[]> = {
     subagents: ["claude", "codex"],
     spawned: ["claude", "codex"],
     git: [],
+    "invoked-positions": ["claude", "codex", "subagents"],
     signals: ["claude", "codex", "subagents", "spawned", "git"],
     outcomes: ["signals"],
     "session-health": ["signals"],

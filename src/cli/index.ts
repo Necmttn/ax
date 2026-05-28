@@ -37,6 +37,7 @@ import { homedir } from "node:os";
 import { recordKeyPart } from "../lib/shared/derive-keys.ts";
 import { recordRef, surrealString } from "../lib/shared/surql.ts";
 import { ingestClaudeInsights } from "../ingest/claude-insights.ts";
+import { backfillInvokedPositions } from "../ingest/backfill-invoked-positions.ts";
 import { deriveSignals } from "../ingest/derive-signals.ts";
 import { deriveTurnIntents } from "../ingest/derive-intents.ts";
 import { deriveSpawned } from "../ingest/derive-spawned.ts";
@@ -310,6 +311,7 @@ const STAGE_PROGRESS: Record<IngestStageKey, ProgressStage> = {
     subagents: { source: "claude", stage: "subagents" },
     spawned: { source: "signals", stage: "spawned" },
     git: { source: "git", stage: "history" },
+    "invoked-positions": { source: "invoked", stage: "backfill-positions" },
     signals: { source: "signals", stage: "derive" },
     outcomes: { source: "outcomes", stage: "derive" },
     "session-health": { source: "session-health", stage: "derive" },
@@ -488,6 +490,16 @@ const cmdIngest = (args: string[]) => {
                 "git",
                 "history",
                 ingestGit({ sinceDays, onProgress: progressUpdater(progress, "git", "history") }),
+                progress,
+            )),
+            // Backfill position fields on invoked edges after all transcript +
+            // subagent stages complete so total_turns + is_first are stable.
+            "invoked-positions": () => withServices(telemetryStage(
+                db,
+                runId,
+                "invoked",
+                "backfill-positions",
+                backfillInvokedPositions(),
                 progress,
             )),
             // Derive stages re-read already-ingested turn/session rows, so they
@@ -708,6 +720,14 @@ const cmdIngestHere = (args: string[]) =>
                     repoPaths: [repoRoot],
                     onProgress: progressUpdater(progress, "git", "history"),
                 }),
+                progress,
+            )),
+            "invoked-positions": () => withServices(telemetryStage(
+                db,
+                runId,
+                "invoked",
+                "backfill-positions",
+                backfillInvokedPositions(),
                 progress,
             )),
             signals: () => withServices(telemetryStage(

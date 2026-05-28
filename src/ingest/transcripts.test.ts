@@ -134,6 +134,54 @@ describe("Claude transcript extraction", () => {
         ]);
     });
 
+    test("invocations carry seq as turn_index", () => {
+        const extracted = __testExtractClaudeJsonlLines(
+            [
+                JSON.stringify({
+                    type: "assistant",
+                    timestamp: "2026-05-09T10:00:00.000Z",
+                    cwd: "/Users/necmttn/Projects/ax",
+                    message: {
+                        content: [
+                            {
+                                type: "tool_use",
+                                id: "toolu_s1",
+                                name: "Skill",
+                                input: { skill: "composto" },
+                            },
+                        ],
+                    },
+                }),
+                JSON.stringify({
+                    type: "assistant",
+                    timestamp: "2026-05-09T10:00:01.000Z",
+                    cwd: "/Users/necmttn/Projects/ax",
+                    message: {
+                        content: [
+                            {
+                                type: "tool_use",
+                                id: "toolu_s2",
+                                name: "Skill",
+                                input: { skill: "composto" },
+                            },
+                        ],
+                    },
+                }),
+            ],
+            "-Users-necmttn-Projects-ax",
+            "session-turn-index",
+        );
+
+        expect(extracted).not.toBeNull();
+        if (!extracted) return;
+
+        expect(extracted.invocations).toHaveLength(2);
+        // First assistant turn → seq=1; second → seq=2
+        expect(extracted.invocations[0]!.seq).toBe(1);
+        expect(extracted.invocations[1]!.seq).toBe(2);
+        // The seq value on invocations is what gets written as turn_index on the edge.
+    });
+
     test("extracts tool calls, tool results, skill relations, edits, and TodoWrite snapshots", () => {
         const longOutput = `${"x".repeat(1600)}\nfinal line`;
         const extracted = __testExtractClaudeJsonlLines(
