@@ -3770,3 +3770,20 @@ footer .right {
   .fig-curve .ax-marker-label { font-size: 30px; }
   .fig-curve .ax-marker-sub   { font-size: 20px; }
 }
+
+/* Install "or via nix" divider — sits between two install blocks. */
+.install-label.install-or {
+  margin-top: 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.install-label.install-or::before,
+.install-label.install-or::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid var(--line);
+}
+#install .install-or {
+  margin-top: 22px;
+}
