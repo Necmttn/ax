@@ -30,13 +30,70 @@
 
           pkgMeta = lib.importJSON ./package.json;
 
+          # Pin SurrealDB to 3.1.0. nixpkgs trails upstream and the on-disk
+          # storage format moves between minor versions, so we fetch the
+          # official prebuilt tarball directly. Bump `version` + all four
+          # hashes together when upgrading.
+          surrealdb = pkgs.stdenv.mkDerivation rec {
+            pname = "surrealdb";
+            version = "3.1.0";
+
+            src =
+              let
+                sources = {
+                  "aarch64-darwin" = {
+                    suffix = "darwin-arm64";
+                    hash = "sha256-Ss81eOPMHVeiO0QkG03Vswqr+K676bIRQw2jNVDxTT0=";
+                  };
+                  "x86_64-darwin" = {
+                    suffix = "darwin-amd64";
+                    hash = "sha256-akFoE+VPVnu2scpk4B8C3xv41b4dcrKPPV/CnUMHIX4=";
+                  };
+                  "x86_64-linux" = {
+                    suffix = "linux-amd64";
+                    hash = "sha256-qKffirEffeIq4UxkpGCepxRlx/if57Ai4Cn63cWHnkI=";
+                  };
+                  "aarch64-linux" = {
+                    suffix = "linux-arm64";
+                    hash = "sha256-0qbD1vsBoiK3J1ZqR6FZdA6nh95ml0gMd0ugTeYpqlk=";
+                  };
+                };
+                sel = sources.${system} or (throw "surrealdb 3.1.0: unsupported system ${system}");
+              in
+              pkgs.fetchurl {
+                url = "https://download.surrealdb.com/v${version}/surreal-v${version}.${sel.suffix}.tgz";
+                inherit (sel) hash;
+              };
+
+            sourceRoot = ".";
+            dontConfigure = true;
+            dontBuild = true;
+
+            nativeBuildInputs = lib.optionals pkgs.stdenv.isLinux [ pkgs.autoPatchelfHook ];
+            buildInputs = lib.optionals pkgs.stdenv.isLinux [ pkgs.stdenv.cc.cc.lib ];
+
+            installPhase = ''
+              runHook preInstall
+              install -Dm755 surreal "$out/bin/surreal"
+              runHook postInstall
+            '';
+
+            meta = {
+              description = "SurrealDB - the multi-model database";
+              homepage = "https://surrealdb.com";
+              license = lib.licenses.unfreeRedistributable;
+              mainProgram = "surreal";
+              platforms = [ "aarch64-darwin" "x86_64-darwin" "x86_64-linux" "aarch64-linux" ];
+            };
+          };
+
           # SurrealDB launcher. Wrapping with writeShellApplication gives us
           # shellcheck + `set -euo pipefail` + a closure of runtime deps for free.
           # All knobs honour the env vars the rest of the project already uses
           # (AX_DATA_DIR, AX_DB_HOST, AX_DB_PORT, AX_DB_USER, AX_DB_PASS).
           ax-surreal = pkgs.writeShellApplication {
             name = "ax-surreal";
-            runtimeInputs = [ pkgs.surrealdb pkgs.coreutils ];
+            runtimeInputs = [ surrealdb pkgs.coreutils ];
             text = ''
               data_dir="''${AX_DATA_DIR:-$HOME/.local/share/ax}/db"
               mkdir -p "$data_dir"
@@ -108,7 +165,7 @@
 
               makeWrapper ${lib.getExe pkgs.bun} "$out/bin/axctl" \
                 --add-flags "$out/share/ax/src/cli/index.ts" \
-                --prefix PATH : ${lib.makeBinPath [ pkgs.bun pkgs.surrealdb ]}
+                --prefix PATH : ${lib.makeBinPath [ pkgs.bun surrealdb ]}
 
               ln -s axctl "$out/bin/ax"
 
@@ -131,7 +188,7 @@
 
           packages = {
             default = ax;
-            inherit ax ax-surreal;
+            inherit ax ax-surreal surrealdb;
           };
 
           devShells.default = pkgs.mkShell {
@@ -140,7 +197,7 @@
             packages = [
               pkgs.bun
               pkgs.nodejs_22
-              pkgs.surrealdb
+              surrealdb
               pkgs.jq
               pkgs.lsof
               pkgs.git
