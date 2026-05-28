@@ -405,7 +405,7 @@ export function ChapterExhibitA() {
       <figcaption>
         <strong>Capability went up. Signal density collapsed.</strong>{" "}
         Drag the dial on the right to set how much of that lost signal{" "}
-        <code>ax</code> rejoins. Off is the null state - what the
+        <code>ax</code> rejoins. Off is the null state — what the
         article looks like without it. Re-injection rates illustrative;
         actual values vary by session length and ingest scope.
       </figcaption>

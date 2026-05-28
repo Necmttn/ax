@@ -41,8 +41,8 @@ export function Chapter2Scope() {
       </p>
 
       <p>
-        The interview-style skills - Matt Peacock's{" "}
-        <code>grillme</code> is the sharpest example - turn the
+        The interview-style skills — Matt Peacock’s{" "}
+        <code>grillme</code> is the sharpest example — turn the
         agent into a debugger of your own intent. Before any code runs,
         the model grills you for scope, terminology, decision-tree
         branches, the ADR you should have already written. The output is
@@ -53,9 +53,9 @@ export function Chapter2Scope() {
       <p>
         The orchestration is the same shape; the direction of signal
         flow is opposite. Pulling human signal into the front of the
-        loop is good. Closing the back of the loop - what
+        loop is good. Closing the back of the loop — what
         happened after the agent ran, what should change next time
-        - is the part still missing.
+        — is the part still missing.
       </p>
 
       <p>

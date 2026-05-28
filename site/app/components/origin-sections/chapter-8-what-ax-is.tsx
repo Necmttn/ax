@@ -33,7 +33,7 @@ export function Chapter8WhatAxIs() {
 
       <p>
         If you are building agent infrastructure inside an AI lab right
-        now - and I know you are - you are building some
+        now — and I know you are — you are building some
         version of this. Your version will be better-funded, more
         polished, deeper-integrated. It should be. What it will not be
         is open, local-first, and shape-of-the-problem first. That is

@@ -6,7 +6,7 @@ export function Chapter1Tab() {
       <p>
         The first coding agents that worked were not the ones that did the
         most. They were the ones with the tightest harness. You typed, the
-        model predicted the next edit, and your fingers answered - <kbd>tab</kbd>
+        model predicted the next edit, and your fingers answered — <kbd>tab</kbd>
         or keep typing. Instant feedback, every keystroke, from the one
         person who knew whether the prediction was right.
       </p>

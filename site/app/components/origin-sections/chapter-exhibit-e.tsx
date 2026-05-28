@@ -651,7 +651,7 @@ export function ChapterExhibitE() {
 
       <figcaption>
         <strong>The loop only closes when the graph can tell you, from backing data, that the change earned its place.</strong>{" "}
-        The user still decides - drag a retro into proposals or off the board entirely. Then drive time forward
+        The user still decides — drag a retro into proposals or off the board entirely. Then drive time forward
         and watch what the evidence says. <em>Kept</em>: still firing, no regressions. <em>Regressed</em>: bugfix
         PRs followed. <em>Self-resolved</em>: the underlying pattern stopped showing up before the fix mattered.
       </figcaption>

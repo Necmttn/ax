@@ -6,7 +6,7 @@ export function ChapterHero() {
       <p className="dek">
         <kbd>Tab</kbd> meant yes. Typing through it meant no. A binary signal,
         on every keystroke, from the one person who knew. Then we traded
-        the loop for autonomy - one generation at a time.
+        the loop for autonomy — one generation at a time.
       </p>
     </header>
   );

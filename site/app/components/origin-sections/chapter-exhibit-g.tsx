@@ -366,7 +366,7 @@ export function ChapterExhibitG() {
         <strong>Prose is the first thing the model forgets.</strong>{" "}
         Drag the slider. Watch prose rules fade as the window fills,
         skills degrade to "followed when invoked," and hooks stay
-        locked at the tool layer. Thresholds are illustrative -
+        locked at the tool layer. Thresholds are illustrative —
         anchored to observed retention across transcripts, exact values
         vary by session length and prompt density.
       </figcaption>
