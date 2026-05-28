@@ -24,6 +24,7 @@ export function HowSection() {
       </div>
 
       <p>
+        {/* /origin route lands in Task 5; plain <a> for now */}
         <a className="fig-link" href="/origin#pipeline">
           read: retro is only the first step <span className="arr">→</span>
         </a>
@@ -33,7 +34,7 @@ export function HowSection() {
 }
 
 function LoopFigure() {
-  const rootRef = useRef<HTMLElement>(null);
+  const rootRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -236,16 +237,18 @@ function LoopFigure() {
     jumpTo("retro");
     setPill("idle");
 
+    let io: IntersectionObserver | null = null;
     if (reduce) {
       setPill("reduce");
       staticEnd();
     } else if ("IntersectionObserver" in window) {
       let fired = false;
-      const io = new IntersectionObserver((entries) => {
+      io = new IntersectionObserver((entries) => {
         entries.forEach((e) => {
           if (e.isIntersecting && !fired && !userTookOver) {
             fired = true;
-            io.disconnect();
+            io?.disconnect();
+            io = null;
             const tid = setTimeout(() => { if (!userTookOver) runSequence(); }, 1500);
             pendingTimers.push(tid);
           }
@@ -259,11 +262,12 @@ function LoopFigure() {
 
     return () => {
       clearPending();
+      io?.disconnect();
     };
   }, []);
 
   return (
-    <figure className="fig-loop" aria-label="Animated ring: a token travels clockwise through retro, proposal, experiment, verdict, completing the loop" ref={rootRef as React.RefObject<HTMLElement>}>
+    <figure className="fig-loop" aria-label="Animated ring: a token travels clockwise through retro, proposal, experiment, verdict, completing the loop" ref={rootRef}>
       <div className="fig-head">
         <span className="fig-id">Loop</span>
         <span>retro &rarr; proposal &rarr; experiment &rarr; verdict &rarr;</span>

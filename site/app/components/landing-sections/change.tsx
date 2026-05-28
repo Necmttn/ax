@@ -20,7 +20,7 @@ export function ChangeSection() {
       </div>
 
       <p>
-        <a className="fig-link" href="https://github.com/Necmttn/ax/blob/main/README.md#grounded-agent-files">
+        <a className="fig-link" href="https://github.com/Necmttn/ax/blob/main/README.md#grounded-agent-files" target="_blank" rel="noopener noreferrer">
           read: grounded agent files reference <span className="arr">→</span>
         </a>
       </p>
@@ -29,7 +29,7 @@ export function ChangeSection() {
 }
 
 function TerminalFigure() {
-  const rootRef = useRef<HTMLElement>(null);
+  const rootRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -179,33 +179,35 @@ function TerminalFigure() {
       });
     }
 
+    let io: IntersectionObserver | null = null;
     if (reduce) {
       showAllInPane(activePane());
       setPill("reduce");
-      return;
-    }
-
-    if ("IntersectionObserver" in window) {
-      const io = new IntersectionObserver((entries) => {
+    } else if ("IntersectionObserver" in window) {
+      io = new IntersectionObserver((entries) => {
         entries.forEach((entry) => {
           if (entry.isIntersecting && !userTookOver) {
-            io.disconnect();
+            io?.disconnect();
+            io = null;
             runSequence();
           }
         });
       }, { threshold: 0.35 });
       io.observe(root);
+      setPill("idle");
     } else {
       runSequence();
+      setPill("idle");
     }
 
-    setPill("idle");
-
-    return () => { clearTimers(); };
+    return () => {
+      clearTimers();
+      io?.disconnect();
+    };
   }, []);
 
   return (
-    <figure className="fig-terminal" aria-label="Two mock terminal sessions showing the same flow in Claude Code and Codex" ref={rootRef as React.RefObject<HTMLElement>}>
+    <figure className="fig-terminal" aria-label="Two mock terminal sessions showing the same flow in Claude Code and Codex" ref={rootRef}>
       <div className="fig-head">
         <span className="fig-id">Session</span>
         <span>claude code · codex · same flow</span>

@@ -34,8 +34,9 @@ export function HeroSection() {
       </div>
 
       <div className="cta">
+        {/* /origin route lands in Task 5; plain <a> until then so tsc stays clean */}
         <a className="btn" href="/origin">Read the origin &nbsp;→</a>
-        <a className="btn-secondary" href="https://github.com/Necmttn/ax">View on GitHub</a>
+        <a className="btn-secondary" href="https://github.com/Necmttn/ax" target="_blank" rel="noopener noreferrer">View on GitHub</a>
       </div>
     </section>
   );

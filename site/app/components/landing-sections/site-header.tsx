@@ -12,8 +12,9 @@ export function SiteHeader() {
         <a href="#change">Change</a>
         <a href="#demo">Demo</a>
         <a href="#install">Install</a>
+        {/* /origin route lands in Task 5; plain <a> for now */}
         <a href="/origin">Origin</a>
-        <a className="primary" href="https://github.com/Necmttn/ax">GitHub →</a>
+        <a className="primary" href="https://github.com/Necmttn/ax" target="_blank" rel="noopener noreferrer">GitHub →</a>
       </nav>
     </header>
   );

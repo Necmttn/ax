@@ -14,8 +14,9 @@ export function WhySection() {
         software. Open reference, MIT, runs on your laptop.
       </p>
       <div className="cta">
+        {/* /origin + /studio routes land in later tasks; plain <a> for now */}
         <a className="btn" href="/origin">Read the origin &nbsp;→</a>
-        <a className="btn-secondary" href="https://github.com/Necmttn/ax">View on GitHub</a>
+        <a className="btn-secondary" href="https://github.com/Necmttn/ax" target="_blank" rel="noopener noreferrer">View on GitHub</a>
       </div>
       <p style={{ marginTop: "28px" }}>
         <a className="fig-link" href="/studio">or try the studio <span className="arr">→</span></a>

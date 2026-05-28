@@ -24,6 +24,7 @@ export function InstallSection() {
       </p>
       <p>
         For dev setup, schema, and benchmarks, see{" "}
+        {/* /docs/development route lands in Task 5/7; plain <a> for now */}
         <a href="/docs/development"><code>docs/development.md</code></a>.
       </p>
     </section>

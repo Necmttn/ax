@@ -3,7 +3,7 @@ export function SiteFooter() {
     <footer>
       <div className="row">
         <div>
-          <a href="https://github.com/Necmttn/ax">github.com/Necmttn/ax</a>
+          <a href="https://github.com/Necmttn/ax" target="_blank" rel="noopener noreferrer">github.com/Necmttn/ax</a>
           &nbsp;·&nbsp; MIT licensed
           &nbsp;·&nbsp; 2026
         </div>

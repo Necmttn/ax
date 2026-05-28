@@ -55,6 +55,7 @@ export function DemoSection() {
       </div>
 
       <p>
+        {/* /origin route lands in Task 5; plain <a> for now */}
         <a className="fig-link" href="/origin">
           read: the origin behind the layer <span className="arr">→</span>
         </a>
@@ -64,8 +65,8 @@ export function DemoSection() {
 }
 
 function HeatmapFigure() {
-  const rootRef = useRef<HTMLElement>(null);
-  const gridRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLElement | null>(null);
+  const gridRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -86,7 +87,7 @@ function HeatmapFigure() {
     const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
     let litCount = 0;
     let userTookOver = false;
-    let rafId = 0;
+    const rafIds = new Set<number>();
     const pendingTimers: ReturnType<typeof setTimeout>[] = [];
 
     // Build tiles
@@ -137,8 +138,8 @@ function HeatmapFigure() {
     function clearPending() {
       pendingTimers.forEach((id) => clearTimeout(id));
       pendingTimers.length = 0;
-      if (rafId) cancelAnimationFrame(rafId);
-      rafId = 0;
+      rafIds.forEach((id) => cancelAnimationFrame(id));
+      rafIds.clear();
     }
 
     function lightTile(idx: number, animate: boolean) {
@@ -158,13 +159,15 @@ function HeatmapFigure() {
           fireEl!.textContent = `${v}×`;
           tile.setAttribute("data-fires", String(v));
           if (t < 1) {
-            rafId = requestAnimationFrame(step);
+            const id = requestAnimationFrame(step);
+            rafIds.add(id);
           } else {
             fireEl!.textContent = `${final}×`;
             tile.setAttribute("data-fires", String(final));
           }
         }
-        requestAnimationFrame(step);
+        const firstId = requestAnimationFrame(step);
+        rafIds.add(firstId);
       } else if (fireEl) {
         fireEl.textContent = `${final}×`;
         tile.setAttribute("data-fires", String(final));
@@ -273,16 +276,18 @@ function HeatmapFigure() {
 
     setPill("idle");
 
+    let io: IntersectionObserver | null = null;
     if (reduce) {
       setPill("reduce");
       staticEnd();
     } else if ("IntersectionObserver" in window) {
       let fired = false;
-      const io = new IntersectionObserver((entries) => {
+      io = new IntersectionObserver((entries) => {
         entries.forEach((e) => {
           if (e.isIntersecting && !fired && !userTookOver) {
             fired = true;
-            io.disconnect();
+            io?.disconnect();
+            io = null;
             const tid = setTimeout(() => { if (!userTookOver) runSequence(); }, 1500);
             pendingTimers.push(tid);
           }
@@ -294,11 +299,14 @@ function HeatmapFigure() {
       pendingTimers.push(tid);
     }
 
-    return () => { clearPending(); };
+    return () => {
+      clearPending();
+      io?.disconnect();
+    };
   }, []);
 
   return (
-    <figure className="fig-heatmap" aria-label="Animated heatmap: 20 skill tiles, 11 light up as ax sweeps the week's usage" ref={rootRef as React.RefObject<HTMLElement>}>
+    <figure className="fig-heatmap" aria-label="Animated heatmap: 20 skill tiles, 11 light up as ax sweeps the week's usage" ref={rootRef}>
       <div className="fig-head">
         <span className="fig-id">Heatmap</span>
         <span>installed skills · fires this week</span>
