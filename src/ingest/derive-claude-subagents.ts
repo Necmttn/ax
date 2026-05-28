@@ -16,6 +16,7 @@ import {
     writePlanSnapshotsForSubagents,
 } from "./transcripts.ts";
 import { resolveSkillName } from "../lib/skill-id.ts";
+import { recordLiteral } from "../lib/ids.ts";
 
 interface SubagentManifest {
     readonly agentId: string;
@@ -334,10 +335,13 @@ export const deriveClaudeSubagents = (
                 : undefined;
             if (id == null || parentRepo == null) continue;
             if (!(id instanceof RecordId)) continue;
-            // Use parameterized bindings so record-ID values round-trip correctly.
+            if (!(parentRepo instanceof RecordId)) continue;
+            // Record-typed fields require record literals, not bindings, for correct comparison.
+            // parentRepo.id is the bare key from the graph traversal result.
+            const repoLiteral = recordLiteral("repository", String(parentRepo.id));
             yield* db.query(
-                `UPDATE ${id} SET repository = $repo, checkout = $checkout, cwd = $cwd WHERE repository IS NONE;`,
-                { repo: parentRepo, checkout: parentCk, cwd: parentCwdBf },
+                `UPDATE ${id} SET repository = ${repoLiteral}, checkout = $checkout, cwd = $cwd WHERE repository IS NONE;`,
+                { checkout: parentCk, cwd: parentCwdBf },
             );
             repositoryBackfilled += 1;
         }

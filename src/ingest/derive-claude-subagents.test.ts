@@ -117,12 +117,12 @@ describe("repository backfill (F7)", () => {
         responses.set("SELECT name FROM skill", [[{ name: "test-skill" }]]);
 
         // Backfill SELECT: find subagents with no repository, with parent data.
-        // id must be a RecordId instance (as the real DB driver returns) so the
-        // instanceof guard in the production code allows it through.
+        // id and parent_repository must be RecordId instances (as the real DB driver
+        // returns for record-typed fields) so the instanceof guards pass.
         responses.set('source = "claude-subagent" AND repository IS NONE', [[
             {
                 id: new RecordId("session", "claude-subagent-abc"),
-                parent_repository: "repository:my-repo",
+                parent_repository: new RecordId("repository", "my-repo"),
                 parent_checkout: "checkout:abc123",
                 parent_cwd: "/home/user/project",
             },
@@ -149,9 +149,10 @@ describe("repository backfill (F7)", () => {
         );
         expect(updateCall).toBeDefined();
 
-        // Verify bindings carry the correct parent values (not just the SQL string)
+        // repository is now embedded as a record literal in SQL - not a binding
         if (updateCall?.kind === "query") {
-            expect(updateCall.bindings?.["repo"]).toBe("repository:my-repo");
+            expect(updateCall.sql).toContain("repository = repository:`my-repo`");
+            expect(updateCall.bindings?.["repo"]).toBeUndefined();
             expect(updateCall.bindings?.["checkout"]).toBe("checkout:abc123");
             expect(updateCall.bindings?.["cwd"]).toBe("/home/user/project");
         }
@@ -179,17 +180,18 @@ describe("repository backfill (F7)", () => {
     test("stats: repositoryBackfilled reflects count of backfilled rows", async () => {
         const responses = new Map<string, unknown[][]>();
         responses.set("SELECT name FROM skill", [[]]);
-        // Two rows need backfill (RecordId instances as the real DB driver returns)
+        // Two rows need backfill (RecordId instances as the real DB driver returns
+        // for record-typed fields)
         responses.set('source = "claude-subagent" AND repository IS NONE', [[
             {
                 id: new RecordId("session", "claude-subagent-aaa"),
-                parent_repository: "repository:repo-x",
+                parent_repository: new RecordId("repository", "repo-x"),
                 parent_checkout: null,
                 parent_cwd: "/tmp/repo-x",
             },
             {
                 id: new RecordId("session", "claude-subagent-bbb"),
-                parent_repository: "repository:repo-y",
+                parent_repository: new RecordId("repository", "repo-y"),
                 parent_checkout: "checkout:def456",
                 parent_cwd: "/tmp/repo-y",
             },

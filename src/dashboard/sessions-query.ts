@@ -7,6 +7,7 @@
 import { Effect } from "effect";
 import { SurrealClient } from "../lib/db.ts";
 import type { DbError } from "../lib/errors.ts";
+import { recordLiteral } from "../lib/ids.ts";
 
 // ---------------------------------------------------------------------------
 // Row shape
@@ -47,8 +48,11 @@ FROM session`.trim();
 // ---------------------------------------------------------------------------
 
 export interface SessionsHereOpts {
-    /** repository record id string, e.g. "repository:⟨remote__github.com_foo_bar⟩" */
-    readonly repositoryRecordId: string;
+    /**
+     * Bare repository key (suitable for `recordLiteral("repository", key)`).
+     * E.g. `remote__github_com_foo_bar__<hash>` - NOT the full record id string.
+     */
+    readonly repositoryKey: string;
     /** how many days back from now (default 14) */
     readonly days?: number;
 }
@@ -64,13 +68,14 @@ export const listSessionsHere = (
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         const days = opts.days ?? 14;
+        // `days` is a validated integer and `repositoryKey` is validated by recordLiteral -
+        // literal interpolation is intentional: record-typed fields require record literals.
         const sql = `
 SELECT ${SESSION_SELECT}
-WHERE repository = $repository
+WHERE repository = ${recordLiteral("repository", opts.repositoryKey)}
   AND started_at >= time::now() - ${days}d
 ORDER BY started_at DESC;`;
-        // `days` is a validated integer - numeric interpolation is intentional here.
-        const result = yield* db.query<[SessionRow[]]>(sql, { repository: opts.repositoryRecordId });
+        const result = yield* db.query<[SessionRow[]]>(sql);
         return result?.[0] ?? [];
     });
 
@@ -127,8 +132,11 @@ export interface SessionsNearOpts {
     readonly from: Date;
     /** end of commit window (commit ts or commitTs + 3d fallback) */
     readonly to: Date;
-    /** restrict to a specific repository record id */
-    readonly repositoryRecordId?: string | null;
+    /**
+     * Bare repository key (suitable for `recordLiteral("repository", key)`).
+     * Omit or pass null/undefined to skip the repo filter.
+     */
+    readonly repositoryKey?: string | null;
 }
 
 /**
@@ -142,8 +150,9 @@ export const listSessionsNear = (
 ): Effect.Effect<SessionRow[], DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
-        const repoClause = opts.repositoryRecordId
-            ? `  AND repository = $repository`
+        // Record-typed fields require record literals, not bindings, for correct comparison.
+        const repoClause = opts.repositoryKey
+            ? `  AND repository = ${recordLiteral("repository", opts.repositoryKey)}`
             : "";
 
         const sql = `
@@ -152,9 +161,6 @@ WHERE started_at >= $from
   AND started_at <= $to${repoClause}
 ORDER BY started_at DESC;`;
 
-        const bindings: Record<string, unknown> = { from: opts.from, to: opts.to };
-        if (opts.repositoryRecordId) bindings.repository = opts.repositoryRecordId;
-
-        const result = yield* db.query<[SessionRow[]]>(sql, bindings);
+        const result = yield* db.query<[SessionRow[]]>(sql, { from: opts.from, to: opts.to });
         return result?.[0] ?? [];
     });

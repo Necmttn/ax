@@ -147,10 +147,11 @@ describe("fetchRecall - commit source", () => {
         expect(result.commits[0]!.repo).toBe("github.com/foo/bar");
         expect(result.commits[0]!.snippet).toBe("fix <mark>auth</mark> token");
 
-        // Verify scope clause was passed in SQL (record literal, not binding)
+        // Verify scope clause was embedded as a record literal - NOT a binding
         const commitCall = calls.find((c) => c.sql.includes("message @1@ $q"));
         expect(commitCall).toBeDefined();
-        expect(commitCall!.sql).toContain("AND repository =");
+        expect(commitCall!.sql).toContain("AND repository = repository:`foo__bar`");
+        expect(commitCall!.bindings?.["repository"]).toBeUndefined();
 
         // hits/skills should be empty (source not requested)
         expect(result.hits).toHaveLength(0);
@@ -173,7 +174,7 @@ describe("fetchRecall - commit source", () => {
 
         const commitCall = calls.find((c) => c.sql.includes("message @1@ $q"));
         expect(commitCall).toBeDefined();
-        expect(commitCall!.sql).not.toContain("AND repository = $repository");
+        expect(commitCall!.sql).not.toContain("AND repository");
     });
 
     test("total_counts.commit reflects count query result", async () => {

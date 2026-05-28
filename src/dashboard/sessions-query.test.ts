@@ -51,19 +51,20 @@ async function run<A>(
 // ---------------------------------------------------------------------------
 
 describe("listSessionsHere", () => {
-    test("uses repository filter and default days=14", async () => {
+    test("uses repository literal and default days=14", async () => {
         const { layer, captured } = makeMockDb();
 
         await run(
-            listSessionsHere({ repositoryRecordId: "repository:⟨remote__github.com_foo_bar⟩" }),
+            listSessionsHere({ repositoryKey: "remote__github_com_foo_bar__abc123" }),
             layer,
         );
 
         expect(captured).toHaveLength(1);
         const { sql, bindings } = captured[0]!;
-        expect(sql).toContain("repository = $repository");
-        expect(sql).not.toContain("repository:⟨remote__github.com_foo_bar⟩");
-        expect(bindings!.repository).toBe("repository:⟨remote__github.com_foo_bar⟩");
+        // Record literal must be embedded in SQL - NOT a binding
+        expect(sql).toContain("repository = repository:`remote__github_com_foo_bar__abc123`");
+        expect(sql).not.toContain("$repository");
+        expect(bindings?.["repository"]).toBeUndefined();
         expect(sql).toContain("14d");
         expect(sql).toContain("time::now()");
     });
@@ -72,7 +73,7 @@ describe("listSessionsHere", () => {
         const { layer, captured } = makeMockDb();
 
         await run(
-            listSessionsHere({ repositoryRecordId: "repository:⟨remote__test⟩", days: 7 }),
+            listSessionsHere({ repositoryKey: "remote__test__abc", days: 7 }),
             layer,
         );
 
@@ -84,7 +85,7 @@ describe("listSessionsHere", () => {
         const { layer, captured } = makeMockDb();
 
         await run(
-            listSessionsHere({ repositoryRecordId: "repository:⟨remote__test⟩" }),
+            listSessionsHere({ repositoryKey: "remote__test__abc" }),
             layer,
         );
 
@@ -96,7 +97,7 @@ describe("listSessionsHere", () => {
     test("orders by started_at DESC", async () => {
         const { layer, captured } = makeMockDb();
         await run(
-            listSessionsHere({ repositoryRecordId: "repository:⟨remote__test⟩" }),
+            listSessionsHere({ repositoryKey: "remote__test__abc" }),
             layer,
         );
         expect(captured[0]!.sql).toContain("ORDER BY started_at DESC");
@@ -192,32 +193,33 @@ describe("listSessionsNear", () => {
         expect(bindings!.to).toBe(to);
     });
 
-    test("includes repository filter when provided", async () => {
+    test("includes repository literal when repositoryKey is provided", async () => {
         const { layer, captured } = makeMockDb();
 
         await run(
             listSessionsNear({
                 from: new Date("2025-03-14T00:00:00Z"),
                 to: new Date("2025-03-15T00:00:00Z"),
-                repositoryRecordId: "repository:⟨remote__github.com_foo_bar⟩",
+                repositoryKey: "remote__github_com_foo_bar__abc123",
             }),
             layer,
         );
 
         const { sql: nearSql, bindings: nearBindings } = captured[0]!;
-        expect(nearSql).toContain("AND repository = $repository");
-        expect(nearSql).not.toContain("AND repository = repository:⟨remote__github.com_foo_bar⟩");
-        expect(nearBindings!.repository).toBe("repository:⟨remote__github.com_foo_bar⟩");
+        // Record literal must be embedded in SQL - NOT a binding
+        expect(nearSql).toContain("AND repository = repository:`remote__github_com_foo_bar__abc123`");
+        expect(nearSql).not.toContain("$repository");
+        expect(nearBindings?.["repository"]).toBeUndefined();
     });
 
-    test("omits repository WHERE filter when repositoryRecordId is null", async () => {
+    test("omits repository WHERE filter when repositoryKey is null", async () => {
         const { layer, captured } = makeMockDb();
 
         await run(
             listSessionsNear({
                 from: new Date(),
                 to: new Date(),
-                repositoryRecordId: null,
+                repositoryKey: null,
             }),
             layer,
         );
