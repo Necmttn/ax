@@ -166,9 +166,13 @@ export const step =
             }
             // Re-stash the (wrapped) current span as the new LiveSpanRef so any
             // nested step() calls parent to *this* step rather than skipping
-            // straight back to the trace root. `currentSpan` is guaranteed to
-            // succeed because we're inside `Effect.withSpan`; `orDie` keeps the
-            // error channel clean (would only fail as a defect on misuse).
+            // straight back to the trace root. Because LiveTraceLayer wraps every
+            // child of a WrappedSpan parent, the `current` retrieved here is
+            // itself a WrappedSpan - so `isWrappedSpan(stashed)` holds on the
+            // grandchild path and Tracer.ts's parent-detection keeps firing.
+            // `currentSpan` is guaranteed to succeed because we're inside
+            // `Effect.withSpan`; `orDie` keeps the error channel clean (would
+            // only fail as a defect on misuse).
             const inner = Effect.gen(function* () {
                 const current = yield* Effect.orDie(Effect.currentSpan);
                 return yield* Effect.provideService(effect, LiveSpanRef, current);

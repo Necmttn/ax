@@ -87,4 +87,62 @@ describe("LiveTrace.withTrace", () => {
         expect(childEnd).toBeDefined();
         expect(childEnd?.status).toBe("ok");
     });
+
+    it("emits child SpanEnd(status=error) when step() fails, and still closes the root span", async () => {
+        const events: TraceEvent[] = [];
+        const Transport: TraceTransport = {
+            send: (batch) =>
+                Effect.sync(() => {
+                    for (const e of batch) events.push(e);
+                }),
+        };
+        const TransportLayer = Layer.succeed(TraceTransportTag, Transport);
+        const Sink = TraceSinkLive({ flushIntervalMs: 10 }).pipe(Layer.provide(TransportLayer));
+        const TraceLayer = Layer.mergeAll(Sink, LiveTraceLayer.pipe(Layer.provide(Sink)));
+
+        // Use runPromiseExit to absorb the failure at the outer boundary - keeps
+        // the assertion focused on what the sink emits rather than on error
+        // routing. (Effect v4 beta does not export `Effect.catch` / `catchAll`.)
+        const program = Effect.fail("boom" as const).pipe(
+            LiveTrace.step("FailingStep"),
+            LiveTrace.withTrace({
+                traceId: "test:fail",
+                label: "smoke-with-failing-step",
+                scope: { type: "user", id: "u1" },
+            }),
+            Effect.delay("30 millis"),
+        );
+
+        const exit = await Effect.runPromiseExit(
+            program.pipe(
+                Effect.provide(TraceLayer),
+                Effect.scoped,
+            ) as Effect.Effect<unknown, string, never>,
+        );
+        expect(exit._tag).toBe("Failure");
+
+        const spanStarts = events.filter((e): e is Extract<TraceEvent, { _tag: "SpanStart" }> => e._tag === "SpanStart");
+        const rootStart = spanStarts.find((e) => e.parentSpanId === undefined);
+        expect(rootStart).toBeDefined();
+
+        const childStart = spanStarts.find((e) => e.name === "FailingStep");
+        expect(childStart).toBeDefined();
+        expect(childStart?.parentSpanId).toBe(rootStart!.spanId);
+
+        const spanEnds = events.filter((e): e is Extract<TraceEvent, { _tag: "SpanEnd" }> => e._tag === "SpanEnd");
+
+        // Child SpanEnd must exist and be marked error.
+        const childEnd = spanEnds.find((e) => e.spanId === childStart!.spanId);
+        expect(childEnd).toBeDefined();
+        expect(childEnd?.status).toBe("error");
+
+        // Root SpanEnd must still fire after the failure propagates up.
+        const rootEnd = spanEnds.find((e) => e.spanId === rootStart!.spanId);
+        expect(rootEnd).toBeDefined();
+        expect(rootEnd?.status).toBe("error");
+
+        // And the TraceEnd envelope should land as failed.
+        const traceEnd = events.find((e): e is Extract<TraceEvent, { _tag: "TraceEnd" }> => e._tag === "TraceEnd");
+        expect(traceEnd?.status).toBe("failed");
+    });
 });
