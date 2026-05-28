@@ -181,6 +181,54 @@ describe("acceptProposal - task emission", () => {
     });
 });
 
+    test("dedupe_sig with path separator characters is rejected", async () => {
+        const taskDir = mkdtempSync(join(tmpdir(), "ax-task-"));
+        const badRow = {
+            id: { tb: "proposal", id: "guid_evil" },
+            form: "guidance",
+            title: "x",
+            hypothesis: "y",
+            dedupe_sig: "../../etc/passwd",
+            status: "open",
+            skill_payload: null,
+            guidance_payload: { file_target: "~/.claude/CLAUDE.md", suggested_text: "z" },
+        };
+        const program = acceptProposal({ sigOrId: "../../etc/passwd", taskDir });
+        let threw = false;
+        try {
+            await Effect.runPromise(
+                program.pipe(Effect.provide(fakeRowsLayer([[[badRow]], []]))),
+            );
+        } catch {
+            threw = true;
+        }
+        expect(threw).toBe(true);
+    });
+
+    test("two acceptProposal calls in quick succession produce distinct experiment keys", async () => {
+        const taskDir = mkdtempSync(join(tmpdir(), "ax-task-"));
+        const row = {
+            id: { tb: "proposal", id: "guid_concurrent" },
+            form: "guidance",
+            title: "x",
+            hypothesis: "y",
+            dedupe_sig: "concurrent_sig",
+            status: "open",
+            skill_payload: null,
+            guidance_payload: { file_target: "~/.claude/CLAUDE.md", suggested_text: "z" },
+        };
+        const r1 = await Effect.runPromise(
+            acceptProposal({ sigOrId: "concurrent_sig", taskDir, force: true })
+                .pipe(Effect.provide(fakeRowsLayer([[[row]], []]))),
+        );
+        const r2 = await Effect.runPromise(
+            acceptProposal({ sigOrId: "concurrent_sig", taskDir, force: true })
+                .pipe(Effect.provide(fakeRowsLayer([[[row]], []]))),
+        );
+        expect(r1.experiment_id).not.toBe(r2.experiment_id);
+    });
+});
+
 /** Layer that succeeds for queries matching `selectPattern`, fails for all others. */
 const fakeRowsLayerWithFailure = (
     fixtures: ReadonlyArray<unknown[]>,

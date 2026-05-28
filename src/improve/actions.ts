@@ -152,6 +152,26 @@ export interface AcceptOptions {
 
 const V0_FORMS = new Set(["guidance", "skill"]);
 
+// ---------------------------------------------------------------------------
+// Safety helpers
+// ---------------------------------------------------------------------------
+
+const SAFE_SIG = /^[a-z0-9_-]+$/i;
+
+const validateSig = (sig: string): void => {
+    if (!SAFE_SIG.test(sig)) {
+        throw new Error(`unsafe dedupe_sig for filename: ${sig.slice(0, 40)}...`);
+    }
+};
+
+// Disambiguates same-millisecond acceptProposal calls within a process run.
+// Cross-process collisions for the same proposal are not a concern because
+// acceptProposal is short-lived and proposalKey is content-derived.
+const KEY_COUNTER = (() => {
+    let i = 0;
+    return () => (++i).toString(36);
+})();
+
 export const acceptProposal = (
     opts: AcceptOptions,
 ): Effect.Effect<AcceptResult, DbError, SurrealClient> =>
@@ -194,12 +214,13 @@ export const acceptProposal = (
             };
         }
 
-        const experimentKey = `${proposalKey}__${Date.now().toString(36)}`;
+        const experimentKey = `${proposalKey}__${Date.now().toString(36)}_${KEY_COUNTER()}`;
         const experimentId = `experiment:${experimentKey}`;
         const db = yield* SurrealClient;
 
         // autoScaffold=true && form=skill: legacy direct-write path
         if (opts.autoScaffold && row.form === "skill") {
+            validateSig(row.dedupe_sig);
             const payload = row.skill_payload ?? null;
             if (!payload) {
                 return { status: "missing_payload", message: "skill_proposal payload missing" };
@@ -259,6 +280,7 @@ export const acceptProposal = (
         }
 
         // Default path for all v0 forms: emit .ax/tasks/<dedupe_sig>.md
+        validateSig(row.dedupe_sig);
         const taskDir = opts.taskDir ?? defaultTaskDir();
         const taskPath = join(taskDir, `${row.dedupe_sig}.md`);
 
