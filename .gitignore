@@ -23,3 +23,10 @@ result-*
 
 # SurrealDB CLI scratch
 history.txt
+
+# site workspace
+site/dist
+site/.tanstack
+site/.wrangler
+site/node_modules
+site/app/routeTree.gen.ts

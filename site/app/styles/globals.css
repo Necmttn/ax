@@ -1,0 +1,10 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: oklch(98% 0.005 80);
+  --color-fg: oklch(20% 0.01 80);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+html, body { background: var(--color-bg); color: var(--color-fg); }
