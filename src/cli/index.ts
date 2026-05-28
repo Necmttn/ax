@@ -33,6 +33,7 @@ import { showExperiment, formatShow } from "../improve/show.ts";
 import { cmdRetroReflect } from "./retro-reflect.ts";
 import { cmdRetroMeta } from "./retro-meta.ts";
 import { cmdRetroPlan } from "./retro-plan.ts";
+import { cmdSkillsClassify } from "./skills-classify.ts";
 import { homedir } from "node:os";
 import { recordKeyPart } from "../lib/shared/derive-keys.ts";
 import { recordRef, surrealString } from "../lib/shared/surql.ts";
@@ -3455,8 +3456,31 @@ const recoveryCommand = Command.make(
     ({ limit }) => cmdRecovery([`--limit=${limit}`]),
 ).pipe(Command.withDescription("Show skills that recovered failed work"));
 
+const classifyCommand = Command.make(
+    "classify",
+    {
+        names: Argument.string("skill").pipe(Argument.variadic({ min: 0 })),
+        outDir: Flag.string("out-dir").pipe(Flag.withDefault(".ax/tasks")),
+        dryRun: Flag.boolean("dry-run").pipe(Flag.withDefault(false)),
+        json: jsonFlag,
+    },
+    ({ names, outDir, dryRun, json }) =>
+        cmdSkillsClassify({
+            names: [...names],
+            outDir,
+            dryRun,
+            json,
+        }),
+).pipe(
+    Command.withDescription(
+        "Emit classify-brief task files for unclassified skills with ≥3 invocations. " +
+        "With skill names: emit briefs for those specific skills (no threshold). " +
+        "--out-dir=<path> (default .ax/tasks)  --dry-run  --json",
+    ),
+);
+
 const skillsCommand = Command.make("skills").pipe(
-    Command.withDescription("Skill-graph queries: search, stats, usage, pairs, recovery"),
+    Command.withDescription("Skill-graph queries: search, stats, usage, pairs, recovery, classify"),
     Command.withSubcommands([
         searchCommand,
         statsCommand,
@@ -3465,6 +3489,7 @@ const skillsCommand = Command.make("skills").pipe(
         tasteCommand,
         pairsCommand,
         recoveryCommand,
+        classifyCommand,
     ]),
 );
 

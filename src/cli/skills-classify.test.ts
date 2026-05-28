@@ -1,0 +1,229 @@
+import { describe, expect, test } from "bun:test";
+import { Effect } from "effect";
+import { mkdtempSync } from "node:fs";
+import { readFile, access } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
+import { cmdSkillsClassify } from "./skills-classify.ts";
+import { skillNameToSlug } from "./skills-classify-template.ts";
+import { DbError } from "../lib/errors.ts";
+
+// ---------------------------------------------------------------------------
+// Test fixtures + mock DB
+// ---------------------------------------------------------------------------
+
+type MockRow = { name: string; invocations: number; sessions: number };
+
+/** Build a minimal SurrealClientShape mock that returns a fixed row list. */
+function mockDb(rows: MockRow[]): SurrealClientShape {
+    return {
+        query: <T extends unknown[] = unknown[]>(
+            _sql: string,
+            _bindings?: Record<string, unknown>,
+        ): Effect.Effect<T, DbError> =>
+            Effect.succeed([rows] as unknown as T),
+        upsert: () => Effect.succeed(undefined),
+        relate: () => Effect.succeed(undefined),
+        putFile: () => Effect.succeed(undefined as void),
+        getFile: () => Effect.succeed(""),
+        raw: {} as never,
+    };
+}
+
+const runWith = <A>(
+    db: SurrealClientShape,
+    eff: Effect.Effect<A, DbError, SurrealClient>,
+): Promise<A> =>
+    Effect.runPromise(
+        eff.pipe(Effect.provideService(SurrealClient, db)),
+    );
+
+// ---------------------------------------------------------------------------
+// skillNameToSlug (re-test via integration path)
+// ---------------------------------------------------------------------------
+
+describe("skillNameToSlug (slug helper)", () => {
+    test("colon becomes double underscore", () => {
+        expect(skillNameToSlug("superpowers:subagent-driven-development")).toBe(
+            "superpowers__subagent-driven-development",
+        );
+    });
+    test("plain name passes through", () => {
+        expect(skillNameToSlug("pre-bash-guard")).toBe("pre-bash-guard");
+    });
+});
+
+// ---------------------------------------------------------------------------
+// cmdSkillsClassify - default mode
+// ---------------------------------------------------------------------------
+
+describe("cmdSkillsClassify default mode", () => {
+    test("writes a classify-<slug>.md for each returned row", async () => {
+        const outDir = mkdtempSync(join(tmpdir(), "ax-classify-"));
+        const rows: MockRow[] = [
+            { name: "composto", invocations: 15, sessions: 4 },
+            { name: "codex:rescue", invocations: 8, sessions: 3 },
+        ];
+        const db = mockDb(rows);
+        await runWith(db, cmdSkillsClassify({ names: [], outDir, dryRun: false, json: false }));
+
+        for (const row of rows) {
+            const slug = skillNameToSlug(row.name);
+            const filePath = join(outDir, `classify-${slug}.md`);
+            const content = await readFile(filePath, "utf8");
+            expect(content).toContain(`# ax classify: ${row.name}`);
+            expect(content).toContain(`${row.invocations} invocations`);
+            expect(content).toContain(`${row.sessions} sessions`);
+        }
+    });
+
+    test("is idempotent - skips existing files without re-writing", async () => {
+        const outDir = mkdtempSync(join(tmpdir(), "ax-classify-idem-"));
+        const rows: MockRow[] = [{ name: "composto", invocations: 15, sessions: 4 }];
+        const db = mockDb(rows);
+
+        // First run - write the file
+        await runWith(db, cmdSkillsClassify({ names: [], outDir, dryRun: false, json: false }));
+        const filePath = join(outDir, `classify-composto.md`);
+        const firstContent = await readFile(filePath, "utf8");
+
+        // Manually mutate the file to confirm second run doesn't overwrite
+        await Bun.write(filePath, "sentinel content");
+
+        // Second run - should skip
+        await runWith(db, cmdSkillsClassify({ names: [], outDir, dryRun: false, json: false }));
+        const secondContent = await readFile(filePath, "utf8");
+        expect(secondContent).toBe("sentinel content");
+        expect(firstContent).not.toBe("sentinel content");
+    });
+
+    test("dry-run does not write any files", async () => {
+        const outDir = mkdtempSync(join(tmpdir(), "ax-classify-dry-"));
+        const rows: MockRow[] = [{ name: "composto", invocations: 15, sessions: 4 }];
+        const db = mockDb(rows);
+        await runWith(db, cmdSkillsClassify({ names: [], outDir, dryRun: true, json: false }));
+        const filePath = join(outDir, `classify-composto.md`);
+        const exists = await access(filePath).then(() => true, () => false);
+        expect(exists).toBe(false);
+    });
+
+    test("json mode outputs structured list, no files written", async () => {
+        const outDir = mkdtempSync(join(tmpdir(), "ax-classify-json-"));
+        const rows: MockRow[] = [{ name: "composto", invocations: 15, sessions: 4 }];
+        const db = mockDb(rows);
+
+        const logged: string[] = [];
+        const origLog = console.log;
+        console.log = (msg: string) => { logged.push(msg); };
+        try {
+            await runWith(db, cmdSkillsClassify({ names: [], outDir, dryRun: false, json: true }));
+        } finally {
+            console.log = origLog;
+        }
+
+        expect(logged.length).toBe(1);
+        const parsed = JSON.parse(logged[0]) as Array<Record<string, unknown>>;
+        expect(Array.isArray(parsed)).toBe(true);
+        expect(parsed[0]?.skill).toBe("composto");
+        expect(typeof parsed[0]?.path).toBe("string");
+        expect((parsed[0]?.path as string)).toContain("classify-composto.md");
+
+        // No files written
+        const filePath = join(outDir, `classify-composto.md`);
+        const exists = await access(filePath).then(() => true, () => false);
+        expect(exists).toBe(false);
+    });
+
+    test("empty result from DB prints informational message", async () => {
+        const outDir = mkdtempSync(join(tmpdir(), "ax-classify-empty-"));
+        const db = mockDb([]);
+        const logged: string[] = [];
+        const origLog = console.log;
+        console.log = (msg: string) => { logged.push(msg); };
+        try {
+            await runWith(db, cmdSkillsClassify({ names: [], outDir, dryRun: false, json: false }));
+        } finally {
+            console.log = origLog;
+        }
+        expect(logged.join(" ")).toContain("no unclassified skills");
+    });
+});
+
+// ---------------------------------------------------------------------------
+// cmdSkillsClassify - explicit mode (names provided)
+// ---------------------------------------------------------------------------
+
+describe("cmdSkillsClassify explicit mode", () => {
+    test("queries the named skills (SQL contains the name)", async () => {
+        const outDir = mkdtempSync(join(tmpdir(), "ax-classify-explicit-"));
+        let capturedSql = "";
+        const db: SurrealClientShape = {
+            ...mockDb([{ name: "composto", invocations: 5, sessions: 2 }]),
+            query: <T extends unknown[] = unknown[]>(
+                sql: string,
+            ): Effect.Effect<T, DbError> => {
+                capturedSql = sql;
+                return Effect.succeed([[{ name: "composto", invocations: 5, sessions: 2 }]] as unknown as T);
+            },
+        };
+        await runWith(db, cmdSkillsClassify({ names: ["composto"], outDir, dryRun: false, json: false }));
+        expect(capturedSql).toContain('"composto"');
+        // Explicit mode should NOT contain the >= 3 threshold
+        expect(capturedSql).not.toContain(">= 3");
+    });
+
+    test("writes brief for explicitly-named skill with fewer than 3 invocations", async () => {
+        const outDir = mkdtempSync(join(tmpdir(), "ax-classify-low-inv-"));
+        const rows: MockRow[] = [{ name: "my-skill", invocations: 1, sessions: 1 }];
+        const db = mockDb(rows);
+        await runWith(db, cmdSkillsClassify({ names: ["my-skill"], outDir, dryRun: false, json: false }));
+        const filePath = join(outDir, `classify-my-skill.md`);
+        const exists = await access(filePath).then(() => true, () => false);
+        expect(exists).toBe(true);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// SQL predicate shape verification
+// ---------------------------------------------------------------------------
+
+describe("SQL shape (default mode)", () => {
+    test("default query requires invocations >= 3 and NOT plays_role", async () => {
+        const outDir = mkdtempSync(join(tmpdir(), "ax-classify-sql-"));
+        let capturedSql = "";
+        const db: SurrealClientShape = {
+            ...mockDb([]),
+            query: <T extends unknown[] = unknown[]>(
+                sql: string,
+            ): Effect.Effect<T, DbError> => {
+                capturedSql = sql;
+                return Effect.succeed([[]] as unknown as T);
+            },
+        };
+        await runWith(db, cmdSkillsClassify({ names: [], outDir, dryRun: false, json: false }));
+        expect(capturedSql).toContain("plays_role");
+        expect(capturedSql).toContain(">= 3");
+        expect(capturedSql).toContain(`"frontmatter"`);
+        expect(capturedSql).toContain(`"brief"`);
+        expect(capturedSql).toContain(`"user"`);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// File path shape
+// ---------------------------------------------------------------------------
+
+describe("output path", () => {
+    test("uses .ax/tasks as default out-dir in the path suffix", async () => {
+        const outDir = mkdtempSync(join(tmpdir(), "ax-classify-path-"));
+        const rows: MockRow[] = [
+            { name: "superpowers:subagent-driven-development", invocations: 10, sessions: 5 },
+        ];
+        const db = mockDb(rows);
+        await runWith(db, cmdSkillsClassify({ names: [], outDir, dryRun: false, json: false }));
+        const expectedFile = join(outDir, "classify-superpowers__subagent-driven-development.md");
+        const exists = await access(expectedFile).then(() => true, () => false);
+        expect(exists).toBe(true);
+    });
+});
