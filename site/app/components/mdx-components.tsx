@@ -12,4 +12,11 @@ export const mdxComponents = {
   pre: (props: ComponentProps<"pre">) => <pre className="my-4 p-4 rounded-lg overflow-x-auto bg-black/90 text-white text-sm" {...props} />,
   a: (props: ComponentProps<"a">) => <a className="underline decoration-1 underline-offset-2" {...props} />,
   blockquote: (props: ComponentProps<"blockquote">) => <blockquote className="my-4 pl-4 border-l-4 border-black/15 italic" {...props} />,
+  hr: (props: ComponentProps<"hr">) => <hr className="my-8 border-black/10" {...props} />,
+  table: (props: ComponentProps<"table">) => <table className="my-4 w-full text-sm border-collapse" {...props} />,
+  thead: (props: ComponentProps<"thead">) => <thead className="border-b border-black/15" {...props} />,
+  tbody: (props: ComponentProps<"tbody">) => <tbody {...props} />,
+  tr: (props: ComponentProps<"tr">) => <tr className="border-b border-black/10" {...props} />,
+  th: (props: ComponentProps<"th">) => <th className="py-2 pr-4 text-left font-semibold" {...props} />,
+  td: (props: ComponentProps<"td">) => <td className="py-2 pr-4 align-top" {...props} />,
 };

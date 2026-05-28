@@ -16,7 +16,7 @@ function AdrPage() {
   const { adr } = Route.useLoaderData();
   return (
     <main className="max-w-3xl mx-auto p-8">
-      <h1 className="text-3xl font-semibold mb-8 capitalize">{adr.title}</h1>
+      <h1 className="text-3xl font-semibold mb-8">{adr.title}</h1>
       <article>
         <MDXContent code={adr.body} components={mdxComponents} />
       </article>
