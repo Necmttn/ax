@@ -1501,8 +1501,7 @@ const ingestCommand = Command.make(
 ).pipe(Command.withDescription(
     "Ingest skills, transcripts, Codex sessions, git history, and insight artifacts. " +
         "Use --stages=<a,b,c> for a custom subset, or --derive-only to run every stage tagged `derive` " +
-        "(signals, outcomes, session-health, closure, proposals, opportunities, retro-proposals, " +
-        "subagents, spawned, harness) against an already-ingested DB. " +
+        "(see ADR-0006; canonical list lives in src/ingest/stage/registry.ts). " +
         "Use --reset to wipe the skill graph first and rebuild it clean.",
 ));
 

@@ -8,8 +8,8 @@ into a tag-based query (`registry.byTag("derive")`) so that the canonical list
 lives next to the stages themselves rather than in a CLI-side enum.
 
 We accept the widening that falls out: `--derive-only` now selects every stage
-carrying the `derive` tag - currently signals, outcomes, session-health,
-closure, proposals, opportunities, retro-proposals, subagents, spawned, and
+carrying the `derive` tag - currently subagents, spawned, signals, outcomes,
+session-health, closure, proposals, opportunities, retro-proposals, and
 harness (10 stages, in registry order). Tag membership is the contract;
 adding `derive` to a new stage's `tags` is enough to opt it in.
 
