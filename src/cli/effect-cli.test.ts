@@ -78,30 +78,11 @@ describe("effect cli", () => {
         ]));
     });
 
-    test("--insights-only rejects other --*-only flags and --since", () => {
-        const base = {
-            skillsOnly: false,
-            transcriptsOnly: false,
-            codexOnly: false,
-            gitOnly: false,
-            claudeOnly: false,
-            hasSince: false,
-        };
+    test("--insights-only rejects --since", () => {
         // No conflicts when --insights-only stands alone.
-        expect(insightsOnlyConflicts(base)).toEqual([]);
-        // Each other --*-only flag is flagged as a conflict.
-        expect(insightsOnlyConflicts({ ...base, codexOnly: true })).toEqual(["--codex-only"]);
-        expect(insightsOnlyConflicts({ ...base, skillsOnly: true })).toEqual(["--skills-only"]);
-        expect(insightsOnlyConflicts({ ...base, transcriptsOnly: true })).toEqual(["--transcripts-only"]);
-        expect(insightsOnlyConflicts({ ...base, gitOnly: true })).toEqual(["--git-only"]);
-        expect(insightsOnlyConflicts({ ...base, claudeOnly: true })).toEqual(["--claude-only"]);
+        expect(insightsOnlyConflicts({ hasSince: false })).toEqual([]);
         // --since does not honour --insights-only, so combining is user-error.
-        expect(insightsOnlyConflicts({ ...base, hasSince: true })).toEqual(["--since"]);
-        // Multiple conflicts list every offender, in stable order.
-        expect(insightsOnlyConflicts({ ...base, codexOnly: true, hasSince: true })).toEqual([
-            "--codex-only",
-            "--since",
-        ]);
+        expect(insightsOnlyConflicts({ hasSince: true })).toEqual(["--since"]);
     });
 
     test("resolveIngestStages: default runs every stage", () => {

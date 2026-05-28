@@ -1407,24 +1407,13 @@ const progressFlag = Flag.choice("progress", ["auto", "pipeline", "plain", "json
 
 /**
  * `--insights-only` short-circuits to `cmdIngestInsights`, bypassing
- * `cmdIngest`'s `--*-only` mutual-exclusion check. Without this helper,
- * `axctl ingest --insights-only --codex-only --since=7` silently ignores
- * `--codex-only` and `--since`. Exported for unit testing.
+ * `cmdIngest`. `--since` doesn't apply to insights, so combining them is
+ * user-error. Exported for unit testing.
  */
 export const insightsOnlyConflicts = (opts: {
-    skillsOnly: boolean;
-    transcriptsOnly: boolean;
-    codexOnly: boolean;
-    gitOnly: boolean;
-    claudeOnly: boolean;
     hasSince: boolean;
 }): string[] => {
     const conflicts: string[] = [];
-    if (opts.skillsOnly) conflicts.push("--skills-only");
-    if (opts.transcriptsOnly) conflicts.push("--transcripts-only");
-    if (opts.codexOnly) conflicts.push("--codex-only");
-    if (opts.gitOnly) conflicts.push("--git-only");
-    if (opts.claudeOnly) conflicts.push("--claude-only");
     if (opts.hasSince) conflicts.push("--since");
     return conflicts;
 };
@@ -1432,11 +1421,6 @@ export const insightsOnlyConflicts = (opts: {
 const ingestCommand = Command.make(
     "ingest",
     {
-        skillsOnly: Flag.boolean("skills-only").pipe(Flag.withDefault(false)),
-        transcriptsOnly: Flag.boolean("transcripts-only").pipe(Flag.withDefault(false)),
-        codexOnly: Flag.boolean("codex-only").pipe(Flag.withDefault(false)),
-        gitOnly: Flag.boolean("git-only").pipe(Flag.withDefault(false)),
-        claudeOnly: Flag.boolean("claude-only").pipe(Flag.withDefault(false)),
         insightsOnly: Flag.boolean("insights-only").pipe(Flag.withDefault(false)),
         // Run a chosen subset of stages, e.g. --stages=signals,outcomes.
         stages: Flag.string("stages").pipe(Flag.optional),
@@ -1449,18 +1433,13 @@ const ingestCommand = Command.make(
         progress: progressFlag,
         verbose: verboseFlag,
     },
-    ({ skillsOnly, transcriptsOnly, codexOnly, gitOnly, claudeOnly, insightsOnly, stages, deriveOnly, reset, since, progress, verbose }) => {
+    ({ insightsOnly, stages, deriveOnly, reset, since, progress, verbose }) => {
         if (insightsOnly) {
             if (reset) {
                 console.error("axctl ingest: --reset cannot be combined with --insights-only");
                 process.exit(2);
             }
             const conflicts = insightsOnlyConflicts({
-                skillsOnly,
-                transcriptsOnly,
-                codexOnly,
-                gitOnly,
-                claudeOnly,
                 hasSince: Option.isSome(since),
             });
             if (conflicts.length > 0) {
@@ -1475,11 +1454,6 @@ const ingestCommand = Command.make(
             ]);
         }
         return cmdIngest([
-            ...boolArg("skills-only", skillsOnly),
-            ...boolArg("transcripts-only", transcriptsOnly),
-            ...boolArg("codex-only", codexOnly),
-            ...boolArg("git-only", gitOnly),
-            ...boolArg("claude-only", claudeOnly),
             ...stringArg("stages", optionValue(stages)),
             ...boolArg("derive-only", deriveOnly),
             ...boolArg("reset", reset),
