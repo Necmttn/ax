@@ -96,7 +96,7 @@ describe("effect cli", () => {
     });
 
     test("resolveIngestStages: default runs every stage", () => {
-        expect(resolveIngestStages([])).toHaveLength(15);
+        expect(resolveIngestStages([])).toHaveLength(16);
     });
 
     test("resolveIngestStages: --stages= runs exactly the listed stages", () => {

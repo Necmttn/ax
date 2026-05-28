@@ -111,12 +111,13 @@ describe("runPipeline DAG scheduling", () => {
 });
 
 describe("INGEST_STAGE_DEPS", () => {
-    test("has all 15 canonical stages", () => {
+    test("has all 16 canonical stages", () => {
         expect(Object.keys(INGEST_STAGE_DEPS).sort()).toEqual(
             [
                 "claude", "closure", "codex", "commands", "git", "harness",
-                "opportunities", "outcomes", "proposals", "retro-proposals",
-                "session-health", "signals", "skills", "spawned", "subagents",
+                "invoked-positions", "opportunities", "outcomes", "proposals",
+                "retro-proposals", "session-health", "signals", "skills",
+                "spawned", "subagents",
             ].sort(),
         );
     });
