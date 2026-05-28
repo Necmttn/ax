@@ -23,9 +23,9 @@ function mockDb(rows: MockRow[]): SurrealClientShape {
             _bindings?: Record<string, unknown>,
         ): Effect.Effect<T, DbError> =>
             Effect.succeed([rows] as unknown as T),
-        upsert: () => Effect.succeed(undefined),
-        relate: () => Effect.succeed(undefined),
-        putFile: () => Effect.succeed(undefined as void),
+        upsert: () => Effect.void,
+        relate: () => Effect.void,
+        putFile: () => Effect.void,
         getFile: () => Effect.succeed(""),
         raw: {} as never,
     };
@@ -171,6 +171,22 @@ describe("cmdSkillsClassify explicit mode", () => {
         expect(capturedSql).toContain('"composto"');
         // Explicit mode should NOT contain the >= 3 threshold
         expect(capturedSql).not.toContain(">= 3");
+        // Explicit mode should NOT filter out already-classified skills
+        expect(capturedSql).not.toContain("plays_role");
+    });
+
+    test("emits brief for already-classified skill (re-classification)", async () => {
+        const outDir = mkdtempSync(join(tmpdir(), "ax-classify-reclassify-"));
+        // DB returns the skill even though it already has a plays_role edge
+        // (the SQL no longer filters it out in explicit mode)
+        const rows: MockRow[] = [{ name: "composto", invocations: 20, sessions: 8 }];
+        const db = mockDb(rows);
+        await runWith(db, cmdSkillsClassify({ names: ["composto"], outDir, dryRun: false, json: false }));
+        const filePath = join(outDir, `classify-composto.md`);
+        const exists = await access(filePath).then(() => true, () => false);
+        expect(exists).toBe(true);
+        const content = await readFile(filePath, "utf8");
+        expect(content).toContain("# ax classify: composto");
     });
 
     test("writes brief for explicitly-named skill with fewer than 3 invocations", async () => {

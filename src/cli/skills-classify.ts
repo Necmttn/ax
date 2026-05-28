@@ -32,6 +32,8 @@ export interface ClassifyResult {
 const buildDefaultSql = () => `
 SELECT
     name,
+    // $parent.id refers to the outer SELECT row's id (SurrealDB correlated subquery)
+    // https://surrealdb.com/docs/surrealql/statements/select#subqueries
     array::len((SELECT id FROM invoked WHERE out = $parent.id)) AS invocations,
     array::len(array::distinct((SELECT in.session FROM invoked WHERE out = $parent.id).in.session)) AS sessions
 FROM skill
@@ -42,7 +44,8 @@ ORDER BY invocations DESC;
 `.trim();
 
 /**
- * SurrealQL for explicit mode: named skills, unclassified only, no threshold.
+ * SurrealQL for explicit mode: named skills only, no invocation threshold and
+ * no unclassified guard (user-requested re-classification must be allowed).
  */
 const buildExplicitSql = (names: readonly string[]) => {
     const nameList = names.map((n) => `"${n.replace(/"/g, '\\"')}"`).join(", ");
@@ -52,9 +55,7 @@ SELECT
     array::len((SELECT id FROM invoked WHERE out = $parent.id)) AS invocations,
     array::len(array::distinct((SELECT in.session FROM invoked WHERE out = $parent.id).in.session)) AS sessions
 FROM skill
-WHERE
-    name IN [${nameList}]
-    AND NOT (SELECT id FROM plays_role WHERE in = $parent.id AND source IN ["frontmatter", "brief", "user"])[0]
+WHERE name IN [${nameList}]
 ORDER BY invocations DESC;
 `.trim();
 };
