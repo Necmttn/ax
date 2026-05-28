@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { Effect, Layer } from "effect";
 import { SurrealClient, type SurrealClientShape } from "./db.ts";
 import {
+    encodeClaudeProjectSlug,
     harnessFromPath,
     locateTranscript,
     locateTranscriptOnDisk,
@@ -29,6 +30,38 @@ function fakeLocatorClient(rawFile: string | null): SurrealClientShape {
         raw: {} as never,
     };
 }
+
+describe("encodeClaudeProjectSlug", () => {
+    test("standard absolute path", () => {
+        expect(encodeClaudeProjectSlug("/Users/necmttn/Projects/ax")).toBe(
+            "-Users-necmttn-Projects-ax",
+        );
+    });
+
+    test("trailing slash is stripped before encoding", () => {
+        expect(encodeClaudeProjectSlug("/Users/necmttn/Projects/ax/")).toBe(
+            "-Users-necmttn-Projects-ax",
+        );
+        // Multiple trailing slashes
+        expect(encodeClaudeProjectSlug("/Users/necmttn/Projects/ax//")).toBe(
+            "-Users-necmttn-Projects-ax",
+        );
+    });
+
+    test("root path / encodes to empty string (edge case)", () => {
+        expect(encodeClaudeProjectSlug("/")).toBe("");
+    });
+
+    test("single-segment path", () => {
+        expect(encodeClaudeProjectSlug("/tmp")).toBe("-tmp");
+    });
+
+    test("path with dots", () => {
+        expect(encodeClaudeProjectSlug("/Users/foo/.claude/worktrees/fix-kg")).toBe(
+            "-Users-foo-.claude-worktrees-fix-kg",
+        );
+    });
+});
 
 describe("harnessFromPath", () => {
     test("codex paths under ~/.codex/sessions/ are codex", () => {

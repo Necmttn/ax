@@ -44,6 +44,8 @@ import { writeDashboard } from "../dashboard/report.ts";
 import { serveDashboard } from "../dashboard/server.ts";
 import { fetchRecall } from "../dashboard/recall.ts";
 import { cmdDaemon, cmdDoctor, cmdInstall, cmdUninstall } from "./install.ts";
+import { resolvePwdRepository } from "../lib/pwd.ts";
+import { encodeClaudeProjectSlug } from "../lib/transcript-locator.ts";
 import {
     createProgressReporter,
     parseProgressMode,
@@ -576,6 +578,192 @@ const cmdIngest = (args: string[]) => {
         yield* program;
     });
 };
+
+/**
+ * `axctl ingest here [--since=Nd]` - scope ingest to the git repository at $PWD.
+ *
+ * Resolves $PWD to a repo root, then runs the full ingest pipeline with:
+ *   - `claude` stage filtered to the matching `~/.claude/projects/<slug>/` dir
+ *   - `git` stage restricted to just that repo path
+ *   - `codex` stage SKIPPED (no cwd filter available in v0)
+ *   - `skills`, `commands`, and all derive stages run unfiltered
+ *
+ * Honors `--stages=` to override the default set, `--since=Nd`, `--verbose`.
+ */
+const cmdIngestHere = (args: string[]) =>
+    Effect.gen(function* () {
+        // Validate stage flags before hitting the DB (same guard as cmdIngest).
+        const hasStagesArg = args.some((a) => a.startsWith("--stages="));
+        const hasDeriveOnly = args.includes("--derive-only");
+        if (hasStagesArg && hasDeriveOnly) {
+            console.error("axctl ingest here: --stages and --derive-only are mutually exclusive");
+            process.exit(2);
+        }
+
+        // Resolve the cwd git repo before DB work.
+        const pwdResolution = yield* resolvePwdRepository().pipe(
+            Effect.catch((err) =>
+                Effect.gen(function* () {
+                    const cwd = process.cwd();
+                    if (err && typeof err === "object" && "_tag" in err && err._tag === "NotAGitRepoError") {
+                        process.stderr.write(
+                            `axctl ingest here: not in a git repository (cwd=${(err as { cwd: string }).cwd ?? cwd})\n`,
+                        );
+                    } else {
+                        process.stderr.write(
+                            `axctl ingest here: not in a git repository (cwd=${cwd})\n`,
+                        );
+                    }
+                    process.exit(2);
+                    return yield* Effect.die(err);
+                }),
+            ),
+        );
+
+        const repoRoot = pwdResolution.repoRoot;
+        const claudeSlug = encodeClaudeProjectSlug(repoRoot);
+
+        // Default stages for `here`: all stages except codex.
+        const HERE_DEFAULT_STAGES: IngestStageKey[] = ALL_STAGE_KEYS.filter((k) => k !== "codex");
+
+        // Resolve stages: user --stages= overrides, otherwise use HERE_DEFAULT_STAGES.
+        const sel: IngestStageKey[] = hasStagesArg || hasDeriveOnly
+            ? resolveIngestStages(args)
+            : HERE_DEFAULT_STAGES;
+
+        if (!hasStagesArg && !hasDeriveOnly) {
+            // Inform the user that codex is skipped.
+            process.stderr.write("ingest here: codex stage skipped - no cwd filter yet\n");
+        }
+
+        const stages = sel.map((k) => STAGE_PROGRESS[k]);
+        const db = yield* SurrealClient;
+        const runId = runIdFor("ingest-here");
+        const progressMode = progressModeFor("ingest here", args);
+        const verbose = args.includes("--verbose");
+        const sinceDays = parseOptionalPositiveIntFlag("ingest here", "since", args);
+
+        yield* db.query(buildIngestRunStartStatement({
+            runId,
+            command: "ingest-here",
+            ...(sinceDays === undefined ? {} : { sinceDays }),
+        }));
+
+        const useTui = shouldUseTui(process.stdout.isTTY ?? false, progressMode);
+        const tuiHandle = useTui
+            ? yield* Effect.tryPromise({
+                try: () => initTuiProgress({ command: "ingest-here", runId, stages }),
+                catch: () => undefined,
+              }).pipe(Effect.catch(() => Effect.succeed(undefined)))
+            : undefined;
+        const progress: ProgressReporter = tuiHandle?.progress ?? createProgressReporter({
+            command: "ingest-here",
+            mode: progressMode,
+            runId,
+            stages,
+        });
+
+        const config = yield* AxConfig;
+        const proc = yield* ProcessService;
+        const withServices = <A>(
+            eff: Effect.Effect<A, DbError, SurrealClient | AxConfig | ProcessService>,
+        ): Effect.Effect<A, DbError, never> =>
+            eff.pipe(
+                Effect.provideService(SurrealClient, db),
+                Effect.provideService(AxConfig, config),
+                Effect.provideService(ProcessService, proc),
+            );
+
+        const stageRun: Record<IngestStageKey, () => Effect.Effect<unknown, DbError, never>> = {
+            skills: () => withServices(telemetryStage(db, runId, "skills", "upsert", ingestSkills(), progress)),
+            commands: () => withServices(telemetryStage(db, runId, "commands", "upsert", ingestCommands(), progress)),
+            claude: () => withServices(telemetryStage(
+                db,
+                runId,
+                "claude",
+                "transcripts",
+                ingestTranscripts({
+                    sinceDays,
+                    project: claudeSlug,
+                    onProgress: progressUpdater(progress, "claude", "transcripts"),
+                }),
+                progress,
+            )),
+            codex: () => withServices(telemetryStage(
+                db,
+                runId,
+                "codex",
+                "sessions",
+                ingestCodex({ sinceDays, onProgress: progressUpdater(progress, "codex", "sessions") }),
+                progress,
+            )),
+            subagents: () => withServices(telemetryStage(
+                db,
+                runId,
+                "claude",
+                "subagents",
+                deriveClaudeSubagents({ onProgress: progressUpdater(progress, "claude", "subagents") }),
+                progress,
+            )),
+            spawned: () => withServices(telemetryStage(db, runId, "signals", "spawned", deriveSpawned(), progress)),
+            git: () => withServices(telemetryStage(
+                db,
+                runId,
+                "git",
+                "history",
+                ingestGit({
+                    sinceDays,
+                    repoPaths: [repoRoot],
+                    onProgress: progressUpdater(progress, "git", "history"),
+                }),
+                progress,
+            )),
+            signals: () => withServices(telemetryStage(
+                db,
+                runId,
+                "signals",
+                "derive",
+                deriveSignals({ sinceDays, onProgress: progressUpdater(progress, "signals", "derive") }),
+                progress,
+            )),
+            outcomes: () => withServices(telemetryStage(db, runId, "outcomes", "derive", deriveOutcomes({ sinceDays }), progress)),
+            "session-health": () => withServices(telemetryStage(db, runId, "session-health", "derive", deriveSessionHealth({ sinceDays }), progress)),
+            closure: () => withServices(telemetryStage(db, runId, "closure", "derive", deriveClosure(), progress)),
+            proposals: () => withServices(telemetryStage(db, runId, "proposals", "derive", deriveProposals(), progress)),
+            opportunities: () => withServices(telemetryStage(db, runId, "opportunities", "derive", deriveOpportunities(), progress)),
+            "retro-proposals": () => withServices(telemetryStage(db, runId, "retro-proposals", "derive", deriveRetroProposals(), progress)),
+            harness: () => withServices(telemetryStage(db, runId, "harness", "doctor", ingestHarness(), progress)),
+        };
+
+        const specs: StageSpec[] = sel.map((key) => ({
+            key,
+            deps: INGEST_STAGE_DEPS[key],
+            run: stageRun[key],
+        }));
+
+        const program = Effect.gen(function* () {
+            yield* runPipeline(specs);
+        }).pipe(
+            Effect.tap(() => db.query(buildIngestRunFinishStatement({ runId, status: "ok" })).pipe(Effect.asVoid)),
+            Effect.catch((error) =>
+                Effect.gen(function* () {
+                    yield* db.query(buildIngestRunFinishStatement({
+                        runId,
+                        status: "error",
+                        metrics: { error: errorText(error) },
+                    }));
+                    return yield* error;
+                }),
+            ),
+            Effect.provideService(References.MinimumLogLevel, verbose ? "Debug" : "Info"),
+            Effect.ensuring(
+                tuiHandle
+                    ? Effect.promise(() => tuiHandle.teardown())
+                    : Effect.sync(() => progress.stop()),
+            ),
+        );
+        yield* program;
+    });
 
 const cmdDeriveSignals = (args: string[]) =>
     Effect.gen(function* () {
@@ -1565,6 +1753,27 @@ export const insightsOnlyConflicts = (opts: {
     return conflicts;
 };
 
+const ingestHereCommand = Command.make(
+    "here",
+    {
+        since: optionalSince,
+        stages: Flag.string("stages").pipe(Flag.optional),
+        progress: progressFlag,
+        verbose: verboseFlag,
+    },
+    ({ since, stages, progress, verbose }) =>
+        cmdIngestHere([
+            ...intArg("since", optionValue(since)),
+            ...stringArg("stages", optionValue(stages)),
+            `--progress=${progress}`,
+            ...boolArg("verbose", verbose),
+        ]),
+).pipe(Command.withDescription(
+    "Ingest only the git repository at $PWD. Filters claude transcripts to this project, " +
+    "restricts git history to this repo. Codex stage is skipped (no cwd filter in v0). " +
+    "Use --stages=<a,b,c> to run a subset.",
+));
+
 const ingestCommand = Command.make(
     "ingest",
     {
@@ -1624,11 +1833,14 @@ const ingestCommand = Command.make(
             ...boolArg("verbose", verbose),
         ]);
     },
-).pipe(Command.withDescription(
-    "Ingest skills, transcripts, Codex sessions, git history, and insight artifacts. " +
-        "Use --stages=<a,b,c> or --derive-only to run a subset against an already-ingested DB. " +
-        "Use --reset to wipe the skill graph first and rebuild it clean.",
-));
+).pipe(
+    Command.withDescription(
+        "Ingest skills, transcripts, Codex sessions, git history, and insight artifacts. " +
+            "Use --stages=<a,b,c> or --derive-only to run a subset against an already-ingested DB. " +
+            "Use --reset to wipe the skill graph first and rebuild it clean.",
+    ),
+    Command.withSubcommands([ingestHereCommand]),
+);
 
 const deriveSignalsCommand = Command.make(
     "derive-signals",

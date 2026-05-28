@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { Effect, Layer } from "effect";
+import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
 import {
     buildCommitLookupQueries,
     buildCommitUpsertStatement,
@@ -13,6 +15,7 @@ import {
     touchedRelationRecordKey,
     deriveRepositoryDisplayName,
     nestedCheckoutPaths,
+    ingestGit,
 } from "./git.ts";
 
 describe("git ingest relation statements", () => {
@@ -209,5 +212,64 @@ describe("git ingest relation statements", () => {
             ),
         ).toBe("myapp");
         expect(deriveRepositoryDisplayName(null, "/tmp/worktree-a")).toBe("worktree-a");
+    });
+});
+
+describe("ingestGit repoPaths bypass", () => {
+    test("when repoPaths is provided, only that path's repo is written", async () => {
+        const issued: string[] = [];
+        const fakeDb: SurrealClientShape = {
+            query: <T extends unknown[]>(sql: string) =>
+                Effect.sync(() => {
+                    issued.push(sql);
+                    // Minimal stubs so writeRepo / linkedSessionCount / etc. don't crash.
+                    // Return an empty array for any SELECT, and void for UPDATE/UPSERT/RELATE.
+                    return [[]] as T;
+                }),
+            upsert: () => Effect.void,
+            relate: () => Effect.void,
+            putFile: () => Effect.void,
+            getFile: () => Effect.succeed(""),
+            raw: {} as never,
+        };
+
+        // Use the current worktree's own repo root as the target - it's a real
+        // git repo so buildRepoInfo succeeds.
+        const repoRoot = "/Users/necmttn/Projects/ax/.claude/worktrees/workflow-extraction-frictions";
+
+        const result = await Effect.runPromise(
+            ingestGit({ repoPaths: [repoRoot], sinceDays: 1 }).pipe(
+                Effect.provide(Layer.succeed(SurrealClient, fakeDb)),
+            ),
+        );
+
+        // We got at least one repo processed (the path we supplied).
+        expect(result.repos).toBe(1);
+
+        // At least one UPSERT or SELECT should reference the repo - just confirm
+        // something was issued (meaning discovery was bypassed and writeRepo ran).
+        expect(issued.length).toBeGreaterThan(0);
+    });
+
+    test("when repoPaths is empty array, falls back to discovery (returns 0 repos on empty DB)", async () => {
+        const fakeDb: SurrealClientShape = {
+            query: <T extends unknown[]>(_sql: string) =>
+                Effect.sync(() => [[]] as T),
+            upsert: () => Effect.void,
+            relate: () => Effect.void,
+            putFile: () => Effect.void,
+            getFile: () => Effect.succeed(""),
+            raw: {} as never,
+        };
+
+        const result = await Effect.runPromise(
+            ingestGit({ repoPaths: [], sinceDays: 1 }).pipe(
+                Effect.provide(Layer.succeed(SurrealClient, fakeDb)),
+            ),
+        );
+
+        // Empty repoPaths → falls back to discoverRepos → nothing discovered from
+        // empty DB sessions → 0 repos.
+        expect(result.repos).toBe(0);
     });
 });

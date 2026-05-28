@@ -170,6 +170,22 @@ describe("effect cli", () => {
     });
 });
 
+describe("ingest here subcommand", () => {
+    test("ingest command exposes a 'here' subcommand", () => {
+        const ingest = rootCommand.subcommands
+            .flatMap((g) => g.commands)
+            .find((c) => c.name === "ingest");
+        expect(ingest).toBeDefined();
+        const subNames = ingest!.subcommands.flatMap((g) => g.commands.map((c) => c.name));
+        expect(subNames).toContain("here");
+    });
+
+    test("ingest here is routed as a DB command (via ingest parent)", () => {
+        // 'ingest here' routes through the 'ingest' parent which is a DB command.
+        expect(DB_COMMANDS.has("ingest")).toBe(true);
+    });
+});
+
 describe("AX_DEV flag", () => {
     test("AX_DEV=1 exposes dogfood at top level", async () => {
         process.env.AX_DEV = "1";
