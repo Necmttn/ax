@@ -3003,11 +3003,6 @@ const sessionShowCommand = Command.make(
     ),
 );
 
-const sessionCommand = Command.make("session").pipe(
-    Command.withDescription("Single-session operations (show, inspect, ...)"),
-    Command.withSubcommands([sessionShowCommand]),
-);
-
 // Effect/CLI Command definitions for sessions subcommands
 
 const sessionsHereCommand = Command.make(
@@ -3048,11 +3043,12 @@ const sessionsNearCommand = Command.make(
 ).pipe(Command.withDescription("List sessions near a git commit (adaptive window: predecessor → commit)"));
 
 const sessionsCommand = Command.make("sessions").pipe(
-    Command.withDescription("Windowed session queries: here (pwd-repo), around (date), near (sha)"),
+    Command.withDescription("Windowed session queries: here (pwd-repo), around (date), near (sha), show (detail)"),
     Command.withSubcommands([
         sessionsHereCommand,
         sessionsAroundCommand,
         sessionsNearCommand,
+        sessionShowCommand,
     ]),
 );
 
@@ -3874,7 +3870,6 @@ export const rootCommand = Command.make("axctl").pipe(
         deriveSignalsCommand,
         deriveIntentsCommand,
         insightsCommand,
-        sessionCommand,
         sessionsCommand,
         improveCommand,
         retroCommand,
@@ -3945,7 +3940,6 @@ export const DB_COMMANDS: ReadonlySet<string> = new Set([
     "derive-signals",
     "derive-intents",
     "insights",
-    "session",
     "sessions",
     "improve",
     "retro",
