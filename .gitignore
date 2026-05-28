@@ -24,6 +24,9 @@ result-*
 # SurrealDB CLI scratch
 history.txt
 
+# landing port scratchpad
+site/PORT-NOTES-LANDING.md
+
 # site workspace
 site/dist
 site/.tanstack

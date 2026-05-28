@@ -1,5 +1,32 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { SiteHeader } from "~/components/landing-sections/site-header";
+import { HeroSection } from "~/components/landing-sections/hero";
+import { WhatSection } from "~/components/landing-sections/what";
+import { HowSection } from "~/components/landing-sections/how";
+import { ChangeSection } from "~/components/landing-sections/change";
+import { DemoSection } from "~/components/landing-sections/demo";
+import { InstallSection } from "~/components/landing-sections/install";
+import { WhySection } from "~/components/landing-sections/why";
+import { SiteFooter } from "~/components/landing-sections/site-footer";
 
 export const Route = createFileRoute("/")({
-  component: () => <main className="p-8"><h1 className="text-4xl">{"ax — scaffolded"}</h1></main>,
+  component: Landing,
 });
+
+function Landing() {
+  return (
+    <>
+      <SiteHeader />
+      <main>
+        <HeroSection />
+        <WhatSection />
+        <HowSection />
+        <ChangeSection />
+        <DemoSection />
+        <InstallSection />
+        <WhySection />
+      </main>
+      <SiteFooter />
+    </>
+  );
+}
