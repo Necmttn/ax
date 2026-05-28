@@ -655,7 +655,7 @@ const cmdIngestHere = (args: string[]) =>
 
         if (!hasStagesArg) {
             // Inform the user that codex is skipped.
-            process.stderr.write("ingest here: codex stage skipped - no cwd filter yet\n");
+            process.stderr.write("axctl ingest here: codex stage skipped - no cwd filter yet\n");
         }
 
         const stages = sel.map((k) => STAGE_PROGRESS[k]);
@@ -964,7 +964,7 @@ const resolveScope = (
             if (resolution === null) return { kind: "all" } as RecallScope;
             return {
                 kind: "here",
-                repositoryRecordId: String(resolution.repositoryRecordId),
+                repositoryKey: resolution.repositoryRecordId.id as string,
             } as RecallScope;
         }
 
@@ -2934,8 +2934,8 @@ const cmdSessionsHere = (args: string[]) =>
             ),
         );
 
-        const repositoryRecordId = String(pwdResolution.repositoryRecordId);
-        const rows = yield* listSessionsHere({ repositoryRecordId, days });
+        const repositoryKey = pwdResolution.repositoryRecordId.id as string;
+        const rows = yield* listSessionsHere({ repositoryKey, days });
 
         if (json) {
             console.log(JSON.stringify(rows, null, 2));
@@ -3011,7 +3011,7 @@ const cmdSessionsNear = (args: string[]) =>
         );
 
         const repoRoot = pwdResolution.repoRoot;
-        const repositoryRecordId = String(pwdResolution.repositoryRecordId);
+        const repositoryKey = pwdResolution.repositoryRecordId.id as string;
 
         // Resolve commit window
         const window = yield* findCommitWindow(repoRoot, sha).pipe(
@@ -3041,7 +3041,7 @@ const cmdSessionsNear = (args: string[]) =>
             to = window.to;
         }
 
-        const rows = yield* listSessionsNear({ from, to, repositoryRecordId });
+        const rows = yield* listSessionsNear({ from, to, repositoryKey });
 
         if (json) {
             console.log(JSON.stringify(rows, null, 2));
@@ -3132,7 +3132,7 @@ const sessionShowCommand = Command.make(
     Command.withDescription(
         "Display a session's timeline (tool calls + subagent spawns). " +
         "--expand=<uuid> (repeatable) or --all expands subagent timelines inline. " +
-        "--by-role groups the Top skills section by role (P3.7). " +
+        "--by-role groups the Top skills section by role. " +
         "Auto markdown on TTY, JSON when piped. --json forces JSON.",
     ),
 );
@@ -3174,7 +3174,11 @@ const sessionsNearCommand = Command.make(
     },
     ({ sha, json }) =>
         cmdSessionsNear([sha, ...boolArg("json", json)]),
-).pipe(Command.withDescription("List sessions near a git commit (adaptive window: predecessor → commit)"));
+).pipe(Command.withDescription(
+    "List sessions that overlapped with a git commit window (from the predecessor commit's timestamp to this commit's timestamp). " +
+    "Pass a full or short SHA. Must be inside the target git repo. " +
+    "See the ax:extract-workflow skill for narrating workflows around a sha.",
+));
 
 const sessionsCommand = Command.make("sessions").pipe(
     Command.withDescription("Windowed session queries: here (pwd-repo), around (date), near (sha), show (detail)"),
@@ -3525,8 +3529,10 @@ const recallCommand = Command.make(
         }),
 ).pipe(
     Command.withDescription(
-        "Cross-session text search over turns, commits, and skills (BM25 FTS). " +
-        "--sources=turn,commit,skill  --scope=here|all",
+        "Cross-session text search (BM25). --sources=turn,commit,skill chooses record types (default turn). " +
+        "--scope=here filters to the current repo (auto-detected); --scope=all overrides. " +
+        "--project=? / --skill=? opens an interactive picker. " +
+        "See the ax:extract-workflow skill for narrating workflows behind shipped artifacts.",
     ),
 );
 
@@ -3718,7 +3724,9 @@ const rolesCommand = Command.make(
     ({ json }) => cmdRoles([...boolArg("json", json)]),
 ).pipe(
     Command.withDescription(
-        "List all roles with skill counts (includes roles with 0 skills). --json",
+        "List all roles with skill counts (includes roles with 0 skills). " +
+        "Role labels are semantic categories (framing, execution, verification...) tagged on skills via plays_role edges. " +
+        "--json",
     ),
 );
 

@@ -138,7 +138,7 @@ describe("fetchRecall - commit source", () => {
             fetchRecall({
                 q: "auth",
                 sources: ["commit"],
-                scope: { kind: "here", repositoryRecordId: "repository:foo__bar" },
+                scope: { kind: "here", repositoryKey: "foo__bar" },
             }).pipe(Effect.provide(layer)),
         );
 
@@ -147,14 +147,17 @@ describe("fetchRecall - commit source", () => {
         expect(result.commits[0]!.repo).toBe("github.com/foo/bar");
         expect(result.commits[0]!.snippet).toBe("fix <mark>auth</mark> token");
 
-        // Verify scope clause was passed in SQL
+        // Verify scope clause was passed in SQL (record literal, not binding)
         const commitCall = calls.find((c) => c.sql.includes("message @1@ $q"));
         expect(commitCall).toBeDefined();
-        expect(commitCall!.sql).toContain("AND repository = $repository");
+        expect(commitCall!.sql).toContain("AND repository =");
 
         // hits/skills should be empty (source not requested)
         expect(result.hits).toHaveLength(0);
         expect(result.skills).toHaveLength(0);
+
+        // total_count must equal commits count when only commit source requested (R5)
+        expect(result.total_count).toBe(result.total_counts.commit);
     });
 
     test("issues commit query without scope clause when scope=all", async () => {
@@ -195,6 +198,8 @@ describe("fetchRecall - commit source", () => {
         expect(result.total_counts.commit).toBe(42);
         expect(result.total_counts.turn).toBe(0);
         expect(result.total_counts.skill).toBe(0);
+        // total_count must be the sum across all requested sources (R5)
+        expect(result.total_count).toBe(42);
     });
 });
 
@@ -217,7 +222,7 @@ describe("fetchRecall - skill source", () => {
             fetchRecall({
                 q: "retro",
                 sources: ["skill"],
-                scope: { kind: "here", repositoryRecordId: "repository:foo__bar" },
+                scope: { kind: "here", repositoryKey: "foo__bar" },
             }).pipe(Effect.provide(layer)),
         );
 
@@ -257,6 +262,32 @@ describe("fetchRecall - multi-source", () => {
         expect(result.skills).toHaveLength(1);
         expect(result.total_counts.commit).toBe(1);
         expect(result.total_counts.skill).toBe(1);
+    });
+
+    test("sources=turn,commit: total_count = turns + commits (R5)", async () => {
+        const responses = new Map<string, unknown[][]>([
+            // count() AS total matches both turn count and commit count queries
+            ["count() AS total", [[{ total: 3 }]]],
+            // Commit page query returns 2 commits
+            ["message @1@ $q", [[
+                { id: "commit:a", sha: "aaa", repo: "r", repository: null, ts: null, snippet: "s1", score: 1 },
+                { id: "commit:b", sha: "bbb", repo: "r", repository: null, ts: null, snippet: "s2", score: 1 },
+            ]]],
+        ]);
+        const { layer } = makeMockDb(responses);
+
+        const result = await Effect.runPromise(
+            fetchRecall({
+                q: "thing",
+                sources: ["turn", "commit"],
+            }).pipe(Effect.provide(layer)),
+        );
+
+        // turn count = 3 (from mock), commit count = 3 (same mock), no skill
+        // total_count must be sum of all requested sources
+        expect(result.total_count).toBe(result.total_counts.turn + result.total_counts.commit + result.total_counts.skill);
+        expect(result.total_counts.skill).toBe(0);
+        expect(result.commits).toHaveLength(2);
     });
 
     test("defaults to turn-only when sources not specified (back-compat)", async () => {

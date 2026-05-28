@@ -197,8 +197,8 @@ export const fetchSkillsWeighted = (
                 ? [
                       `${unclassifiedCount} skill${unclassifiedCount === 1 ? "" : "s"} (≥3 invocations) have no role classification.`,
                       "Their score uses neutral weight 1.0 - ranking may be noisy.",
-                      "To classify:    ax skills classify",
-                      "Then:           edit .ax/tasks/classify-*.md  →  ax skills lint",
+                      "To classify:    axctl skills classify",
+                      "Then:           edit .ax/tasks/classify-*.md  →  axctl skills lint",
                   ].join("\n")
                 : null;
 

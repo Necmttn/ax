@@ -19,13 +19,21 @@ import type {
 import { clampPagination, type PaginationConfig } from "../lib/shared/pagination.ts";
 import { isRecord, recordIdString } from "../lib/shared/row-fields.ts";
 import { runQuery } from "../lib/shared/graph-query.ts";
+import { recordLiteral } from "../lib/ids.ts";
 
 const RECALL_PAGINATION: PaginationConfig = { defaultLimit: 50, maxLimit: 200 };
 
 export type RecallSource = "turn" | "commit" | "skill";
 
 export type RecallScope =
-    | { readonly kind: "here"; readonly repositoryRecordId: string }
+    | {
+        readonly kind: "here";
+        /**
+         * Bare repository key (suitable for `recordLiteral("repository", key)`).
+         * E.g. `remote__github_com_foo_bar__<hash>` - NOT the full record id string.
+         */
+        readonly repositoryKey: string;
+      }
     | { readonly kind: "all" }
     | null;
 
@@ -108,9 +116,10 @@ export const fetchRecall = (
                     sessionFilterClause = `AND session IN [${ids.join(", ")}]`;
                 }
 
-                // Repository scope filter on turns: filter by session.repository
+                // Repository scope filter on turns: filter by session.repository.
+                // Record-typed fields require record literals, not bindings.
                 if (params.scope?.kind === "here") {
-                    const repoClause = "AND session.repository = $scopeRepo";
+                    const repoClause = `AND session.repository = ${recordLiteral("repository", params.scope.repositoryKey)}`;
                     sessionFilterClause = sessionFilterClause
                         ? `${sessionFilterClause} ${repoClause}`
                         : repoClause;
@@ -120,9 +129,6 @@ export const fetchRecall = (
                     q,
                     project: params.project?.trim() || null,
                     since: params.since?.trim() || null,
-                    ...(params.scope?.kind === "here"
-                        ? { scopeRepo: params.scope.repositoryRecordId }
-                        : {}),
                 };
 
                 const [mapped, countRows] = yield* Effect.all(
@@ -169,13 +175,10 @@ export const fetchRecall = (
             SurrealClient
         > =>
             Effect.gen(function* () {
-                let scopeClause = "";
-                let bindings: Record<string, unknown> = { q, limit };
-
-                if (params.scope?.kind === "here") {
-                    scopeClause = "AND repository = $repository";
-                    bindings = { ...bindings, repository: params.scope.repositoryRecordId };
-                }
+                // Record-typed fields require record literals, not bindings, for correct comparison.
+                const scopeClause = params.scope?.kind === "here"
+                    ? `AND repository = ${recordLiteral("repository", params.scope.repositoryKey)}`
+                    : "";
 
                 const [mapped, countRows] = yield* Effect.all(
                     [
@@ -183,13 +186,11 @@ export const fetchRecall = (
                             q,
                             limit,
                             scopeClause,
-                            repository: params.scope?.kind === "here"
-                                ? params.scope.repositoryRecordId
-                                : null,
+                            repository: null,
                         }),
                         db.query<[Array<Record<string, unknown>>]>(
                             RECALL_COMMITS_COUNT_SQL(scopeClause),
-                            bindings,
+                            { q, limit },
                         ),
                     ],
                     { concurrency: "unbounded" },
@@ -271,20 +272,27 @@ export const fetchRecall = (
             { concurrency: "unbounded" },
         );
 
-        const total_count = turnsResult.total_count;
+        const totalCounts = {
+            turn: turnsResult.total_count,
+            commit: commitsResult.total_count,
+            skill: skillsResult.total_count,
+        };
+        const total_count = totalCounts.turn + totalCounts.commit + totalCounts.skill;
+
+        // truncated: turns have more pages OR commit/skill result set hit the limit cap
+        const turnsTruncated = offset + turnsResult.hits.length < totalCounts.turn;
+        const commitsTruncated = wantCommit && commitsResult.commits.length === limit;
+        const skillsTruncated = wantSkill && skillsResult.skills.length === limit;
+        const truncated = turnsTruncated || commitsTruncated || skillsTruncated;
 
         return {
             q: params.q,
             hits: turnsResult.hits,
             commits: commitsResult.commits,
             skills: skillsResult.skills,
-            truncated: offset + turnsResult.hits.length < total_count,
+            truncated,
             total_count,
-            total_counts: {
-                turn: turnsResult.total_count,
-                commit: commitsResult.total_count,
-                skill: skillsResult.total_count,
-            },
+            total_counts: totalCounts,
             window: { offset, limit },
         };
     });

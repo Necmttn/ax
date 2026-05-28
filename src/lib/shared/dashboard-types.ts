@@ -474,11 +474,13 @@ export interface RecallResponse {
     readonly hits: ReadonlyArray<RecallHit>;     // turns, unchanged
     readonly commits: ReadonlyArray<RecallCommitHit>;  // empty when not requested
     readonly skills: ReadonlyArray<RecallSkillHit>;    // empty when not requested
-    /** Back-compat: true when more results exist beyond what was returned.
-     *  Now derived from total_count vs window; older callers may still rely
-     *  on it. */
+    /** Back-compat: true when more results exist beyond what was returned in
+     *  any source - turns have more pages, OR commit/skill results were
+     *  limit-capped. */
     readonly truncated: boolean;
-    /** Total turn matches across the whole query (independent of window). Back-compat. */
+    /** Sum of matched records across ALL requested sources (turn + commit +
+     *  skill). When only turns are requested this equals the turn count
+     *  (back-compat). Per-source breakdown is in `total_counts`. */
     readonly total_count: number;
     /** Per-source total counts. */
     readonly total_counts: {

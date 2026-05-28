@@ -66,8 +66,8 @@ const withUnclassified: SkillsWeightedResult = {
         advice: [
             "7 skills (≥3 invocations) have no role classification.",
             "Their score uses neutral weight 1.0 - ranking may be noisy.",
-            "To classify:    ax skills classify",
-            "Then:           edit .ax/tasks/classify-*.md  →  ax skills lint",
+            "To classify:    axctl skills classify",
+            "Then:           edit .ax/tasks/classify-*.md  →  axctl skills lint",
         ].join("\n"),
     },
 };
@@ -139,7 +139,7 @@ describe("renderWeightedTable", () => {
 
     it("doctor block contains guidance hint", () => {
         const out = renderWeightedTable(withUnclassified);
-        expect(out).toContain("ax skills classify");
+        expect(out).toContain("axctl skills classify");
     });
 
     it("handles empty rows", () => {

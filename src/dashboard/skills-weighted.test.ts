@@ -166,7 +166,7 @@ describe("fetchSkillsWeighted", () => {
         const db = makeMockDb([mockInvRows, mockRoleRows, mockDoctorAbove]);
         const result = await runWithMock(db, fetchSkillsWeighted({ doctorThreshold: 5 }));
         expect(result.doctor.advice).not.toBeNull();
-        expect(result.doctor.advice).toContain("ax skills classify");
+        expect(result.doctor.advice).toContain("axctl skills classify");
         expect(result.doctor.unclassified_count).toBe(7);
     });
 
