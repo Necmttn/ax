@@ -84,11 +84,23 @@ const howItWorks = defineCollection({
     let generated = "";
     try {
       generated = await readFile(generatedPath, "utf8");
-    } catch {
-      // Generated partial not yet produced (cold checkout, extractor
-      // hasn't fired). Render the page without the dynamic section.
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT") {
+        // Real IO/permissions/encoding failure - surface it. ENOENT is the
+        // legitimate "cold checkout, extractor hasn't fired" case.
+        console.warn(
+          `[howItWorks] could not read generated partial at ${generatedPath}: ${(err as Error).message}`,
+        );
+      }
     }
-    const merged = doc.content.replace(/<StageRationales\s*\/>/, generated);
+    const placeholder = /<StageRationales\s*\/>/;
+    if (!placeholder.test(doc.content)) {
+      console.warn(
+        "[howItWorks] <StageRationales /> placeholder not found in MDX - generated stage section will not appear",
+      );
+    }
+    const merged = doc.content.replace(placeholder, generated);
     const body = await compileMDX(ctx, { ...doc, content: merged }, mdxOptions);
     return { ...doc, body };
   },
