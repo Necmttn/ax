@@ -11,6 +11,7 @@ import { mkdir, writeFile, access } from "node:fs/promises";
 import { SurrealClient } from "../lib/db.ts";
 import type { DbError } from "../lib/errors.ts";
 import { skillNameToSlug, renderClassifyBrief } from "./skills-classify-template.ts";
+import { validateSkillName } from "../lib/role-name.ts";
 
 export interface ClassifyRow {
     readonly name: string;
@@ -70,6 +71,21 @@ export interface ClassifyOptions {
 export const cmdSkillsClassify = (opts: ClassifyOptions): Effect.Effect<void, DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
+
+        // Validate any explicitly-provided skill names at the boundary.
+        if (opts.names.length > 0) {
+            for (const name of opts.names) {
+                try {
+                    validateSkillName(name);
+                } catch {
+                    console.error(
+                        `axctl skills classify: invalid skill name "${name}" (must be alphanumeric, _ or -, optionally plugin:namespaced)`,
+                    );
+                    process.exit(2);
+                    return; // unreachable; satisfies TypeScript
+                }
+            }
+        }
 
         const sql = opts.names.length > 0
             ? buildExplicitSql(opts.names)

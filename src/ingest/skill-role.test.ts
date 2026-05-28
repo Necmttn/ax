@@ -231,6 +231,83 @@ describe("relateSkillRoles", () => {
         expect(relateCall!.sql).toContain("confidence = 1.0");
     });
 
+    test("invalid role name (backtick): skipped, not crashed; rolesSkipped incremented", async () => {
+        const { calls, db } = makeMockDb();
+
+        const result = await Effect.runPromise(
+            relateSkillRoles(db, {
+                skillId: SKILL_ID,
+                roles: ["framing", "role`with`backtick", "execution"],
+            }),
+        );
+
+        // backtick role is skipped; valid roles proceed normally
+        expect(result.rolesUpserted).toBe(2);
+        expect(result.edgesWritten).toBe(2);
+        expect(result.rolesSkipped).toBe(1);
+
+        // Only valid roles were upserted
+        const upsertCalls = calls.filter((c): c is Extract<Call, { kind: "upsert" }> => c.kind === "upsert");
+        const upsertedNames = upsertCalls.map((c) => (c.content as { name: string }).name);
+        expect(upsertedNames).toContain("framing");
+        expect(upsertedNames).toContain("execution");
+        expect(upsertedNames).not.toContain("role`with`backtick");
+
+        // No SQL with the backtick role was issued
+        const queryCalls = calls.filter((c): c is Extract<Call, { kind: "query" }> => c.kind === "query");
+        for (const qc of queryCalls) {
+            expect(qc.sql).not.toContain("role`with`backtick");
+        }
+    });
+
+    test("invalid role name (semicolon injection): skipped; no SQL injection", async () => {
+        const { calls, db } = makeMockDb();
+
+        const result = await Effect.runPromise(
+            relateSkillRoles(db, {
+                skillId: SKILL_ID,
+                roles: ["framing;DROP TABLE role", "execution"],
+            }),
+        );
+
+        expect(result.rolesSkipped).toBe(1);
+        expect(result.rolesUpserted).toBe(1);
+        expect(result.edgesWritten).toBe(1);
+
+        const queryCalls = calls.filter((c): c is Extract<Call, { kind: "query" }> => c.kind === "query");
+        for (const qc of queryCalls) {
+            expect(qc.sql).not.toContain("DROP TABLE");
+        }
+    });
+
+    test("all-invalid roles: sweep DELETE still issued, returns 0/0 + correct rolesSkipped", async () => {
+        const { calls, db } = makeMockDb();
+
+        const result = await Effect.runPromise(
+            relateSkillRoles(db, {
+                skillId: SKILL_ID,
+                roles: ["bad role!", "another;bad", "also`bad"],
+            }),
+        );
+
+        expect(result.rolesUpserted).toBe(0);
+        expect(result.edgesWritten).toBe(0);
+        expect(result.rolesSkipped).toBe(3);
+
+        // Sweep DELETE still fires
+        const sweepDelete = calls.find(
+            (c): c is Extract<Call, { kind: "query" }> =>
+                c.kind === "query" && c.sql.includes("DELETE plays_role"),
+        );
+        expect(sweepDelete).toBeDefined();
+
+        // No RELATE issued
+        const relateCall = calls.find(
+            (c): c is Extract<Call, { kind: "query" }> => c.kind === "query" && c.sql.includes("RELATE"),
+        );
+        expect(relateCall).toBeUndefined();
+    });
+
     test("stale-edge sweep: roles shrinking [framing,execution]→[framing] removes execution edge", async () => {
         const { calls, db } = makeMockDb();
 

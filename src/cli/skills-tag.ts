@@ -9,6 +9,7 @@ import { Effect } from "effect";
 import { RecordId, SurrealClient, type SurrealClientShape } from "../lib/db.ts";
 import type { DbError } from "../lib/errors.ts";
 import { recordLiteral } from "../lib/ids.ts";
+import { validateRoleName, validateSkillName } from "../lib/role-name.ts";
 
 export interface SkillsTagOptions {
     readonly skillName: string;
@@ -51,15 +52,26 @@ export const cmdSkillsTag = (opts: SkillsTagOptions): Effect.Effect<void, DbErro
         const db = yield* SurrealClient;
 
         // 1. Validate inputs
-        const trimmedSkill = opts.skillName.trim();
-        if (!trimmedSkill) {
-            console.error("axctl skills tag: skill name must not be empty");
+        let trimmedSkill: string;
+        try {
+            trimmedSkill = validateSkillName(opts.skillName);
+        } catch {
+            console.error(
+                `axctl skills tag: invalid skill name "${opts.skillName}" (must be alphanumeric, _ or -, optionally plugin:namespaced)`,
+            );
             process.exit(2);
+            return; // unreachable; satisfies TypeScript
         }
-        const roleName = opts.roleName.trim().toLowerCase();
-        if (!roleName) {
-            console.error("axctl skills tag: role name must not be empty");
+
+        let roleName: string;
+        try {
+            roleName = validateRoleName(opts.roleName);
+        } catch {
+            console.error(
+                `axctl skills tag: invalid role name "${opts.roleName}" (must be lowercase alphanumeric, _ or -)`,
+            );
             process.exit(2);
+            return; // unreachable; satisfies TypeScript
         }
         if (opts.confidence < 0 || opts.confidence > 1) {
             console.error(`axctl skills tag: --confidence must be between 0 and 1 (got ${opts.confidence})`);

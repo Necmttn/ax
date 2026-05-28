@@ -13,6 +13,7 @@ import { parse as parseYaml } from "yaml";
 import { RecordId, SurrealClient, type SurrealClientShape } from "../lib/db.ts";
 import type { DbError } from "../lib/errors.ts";
 import { recordLiteral } from "../lib/ids.ts";
+import { validateRoleName, validateSkillName } from "../lib/role-name.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -95,28 +96,57 @@ function parseBrief(
 
     const fm = parsed as Record<string, unknown>;
 
-    // ax_classify is REQUIRED
-    const ax_classify = typeof fm["ax_classify"] === "string" ? fm["ax_classify"].trim() : "";
-    if (!ax_classify) {
+    // ax_classify is REQUIRED and must be a valid skill name
+    const ax_classify_raw = typeof fm["ax_classify"] === "string" ? fm["ax_classify"].trim() : "";
+    if (!ax_classify_raw) {
         return { error: `missing or empty ax_classify in ${filePath}` };
+    }
+    let ax_classify: string;
+    try {
+        ax_classify = validateSkillName(ax_classify_raw);
+    } catch {
+        return {
+            error: `invalid skill name "${ax_classify_raw}" in ax_classify of ${filePath} (must be alphanumeric, _ or -, optionally plugin:namespaced)`,
+        };
     }
 
     // primary_role is REQUIRED to be filled - if absent/empty this is pending
-    const primary_role = typeof fm["primary_role"] === "string" ? fm["primary_role"].trim() : "";
-    if (!primary_role) {
+    const primary_role_raw = typeof fm["primary_role"] === "string" ? fm["primary_role"].trim() : "";
+    if (!primary_role_raw) {
         // Pending brief - not an error, just not ready yet
         return null;
     }
+    let primary_role: string;
+    try {
+        primary_role = validateRoleName(primary_role_raw);
+    } catch {
+        return {
+            error: `invalid role name "${primary_role_raw}" in primary_role of ${filePath} (must be lowercase alphanumeric, _ or -)`,
+        };
+    }
 
-    // secondary is optional; coerce to string[]
+    // secondary is optional; coerce to string[] and validate each entry
     let secondary: string[] = [];
     if (Array.isArray(fm["secondary"])) {
         secondary = fm["secondary"]
             .filter((s): s is string => typeof s === "string")
             .map((s) => s.trim())
-            .filter((s) => s.length > 0);
+            .filter((s) => s.length > 0)
+            .flatMap((s): string[] => {
+                try {
+                    return [validateRoleName(s)];
+                } catch {
+                    // Invalid secondary role - skip it (not a hard error, brief is still applied)
+                    return [];
+                }
+            });
     } else if (typeof fm["secondary"] === "string" && fm["secondary"].trim()) {
-        secondary = [fm["secondary"].trim()];
+        const s = fm["secondary"].trim();
+        try {
+            secondary = [validateRoleName(s)];
+        } catch {
+            // Skip invalid secondary role
+        }
     }
 
     // confidence is optional float [0,1], default 1.0

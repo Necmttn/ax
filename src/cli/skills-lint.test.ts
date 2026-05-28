@@ -420,4 +420,95 @@ describe("cmdSkillsLint", () => {
         expect(report.errors).toBe(0);
         expect(report.briefs).toHaveLength(0);
     });
+
+    // 11. Invalid primary_role (backtick injection) → error reported, file stays, no edges
+    it("reports error for brief with invalid primary_role (backtick), file stays, no edges", async () => {
+        const taskDir = await createTaskDir("invalid-role");
+        const filePath = join(taskDir, "classify-my-skill.md");
+        const brief = `---
+ax_classify: my-skill
+primary_role: "bad\`role"
+secondary: []
+---
+`;
+        await writeFile(filePath, brief, "utf8");
+
+        const knownSkills = new Map([["my-skill", "my-skill"]]);
+        const { db, state } = makeMockDb(knownSkills);
+
+        const report = await runLintJson(db, { taskDir });
+
+        expect(report.errors).toBe(1);
+        expect(report.applied).toBe(0);
+        const r = report.briefs[0]!;
+        expect(r.action).toBe("error");
+        expect(r.error).toMatch(/invalid role name/);
+
+        // File must remain (error case)
+        expect(await fileExists(filePath)).toBe(true);
+
+        // No edges written
+        expect(state.queries.filter((q) => q.sql.includes("RELATE")).length).toBe(0);
+        expect(state.upserts.length).toBe(0);
+    });
+
+    // 12. Invalid ax_classify (semicolon injection) → error reported, file stays, no edges
+    it("reports error for brief with invalid ax_classify (semicolon), file stays, no edges", async () => {
+        const taskDir = await createTaskDir("invalid-skill");
+        const filePath = join(taskDir, "classify-bad-skill.md");
+        const brief = `---
+ax_classify: "bad;skill name"
+primary_role: framing
+secondary: []
+---
+`;
+        await writeFile(filePath, brief, "utf8");
+
+        const { db, state } = makeMockDb(new Map());
+
+        const report = await runLintJson(db, { taskDir });
+
+        expect(report.errors).toBe(1);
+        expect(report.applied).toBe(0);
+        const r = report.briefs[0]!;
+        expect(r.action).toBe("error");
+        expect(r.error).toMatch(/invalid skill name/);
+
+        expect(await fileExists(filePath)).toBe(true);
+        expect(state.queries.filter((q) => q.sql.includes("RELATE")).length).toBe(0);
+        expect(state.upserts.length).toBe(0);
+    });
+
+    // 13. Invalid secondary role entries are skipped (brief still applied with valid roles only)
+    it("applies brief with mixed valid/invalid secondary roles, skipping invalid ones", async () => {
+        const taskDir = await createTaskDir("invalid-secondary");
+        const filePath = join(taskDir, "classify-my-skill.md");
+        // primary=framing valid, secondary=[execution, "bad`role"] → execution kept, bad one skipped
+        const brief = `---
+ax_classify: my-skill
+primary_role: framing
+secondary:
+  - execution
+  - "bad\`role"
+---
+`;
+        await writeFile(filePath, brief, "utf8");
+
+        const knownSkills = new Map([["my-skill", "my-skill"]]);
+        const { db, state } = makeMockDb(knownSkills);
+
+        const report = await runLintJson(db, { taskDir });
+
+        expect(report.applied).toBe(1);
+        expect(report.errors).toBe(0);
+        // primary=framing + secondary=execution = 2 edges (bad role skipped)
+        expect(report.briefs[0]!.edgesWritten).toBe(2);
+
+        const relateQueries = state.queries.filter((q) => q.sql.includes("RELATE"));
+        expect(relateQueries.length).toBe(2);
+        // Verify no backtick made it into any SQL
+        for (const q of relateQueries) {
+            expect(q.sql).not.toContain("`role`with");
+        }
+    });
 });

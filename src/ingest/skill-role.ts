@@ -3,17 +3,28 @@ import { RecordId } from "../lib/db.ts";
 import type { SurrealClientShape } from "../lib/db.ts";
 import type { DbError } from "../lib/errors.ts";
 import { recordLiteral } from "../lib/ids.ts";
+import { validateRoleName } from "../lib/role-name.ts";
 
 export const relateSkillRoles = (
     db: SurrealClientShape,
     args: { skillId: RecordId; roles: ReadonlyArray<string> },
-): Effect.Effect<{ rolesUpserted: number; edgesWritten: number }, DbError> =>
+): Effect.Effect<{ rolesUpserted: number; edgesWritten: number; rolesSkipped: number }, DbError> =>
     Effect.gen(function* () {
         const seen = new Set<string>();
         const cleaned: string[] = [];
+        let rolesSkipped = 0;
         for (const r of args.roles) {
-            const norm = r.trim().toLowerCase();
-            if (!norm || seen.has(norm)) continue;
+            let norm: string;
+            try {
+                norm = validateRoleName(r);
+            } catch {
+                // Invalid role name (e.g. contains backtick, semicolon, or
+                // doesn't match the allowed pattern). Skip rather than crash
+                // the whole stage - the caller accumulates the skip count.
+                rolesSkipped += 1;
+                continue;
+            }
+            if (seen.has(norm)) continue;
             seen.add(norm);
             cleaned.push(norm);
         }
@@ -31,7 +42,7 @@ export const relateSkillRoles = (
         );
 
         if (cleaned.length === 0) {
-            return { rolesUpserted: 0, edgesWritten: 0 };
+            return { rolesUpserted: 0, edgesWritten: 0, rolesSkipped };
         }
 
         let rolesUpserted = 0;
@@ -47,5 +58,5 @@ export const relateSkillRoles = (
             );
             edgesWritten += 1;
         }
-        return { rolesUpserted, edgesWritten };
+        return { rolesUpserted, edgesWritten, rolesSkipped };
     });

@@ -211,4 +211,96 @@ describe("cmdSkillsTag", () => {
         expect(relateSql?.sql).toContain("role:`framing`");
         expect(relateSql?.sql).not.toContain("FRAMING");
     });
+
+    test("7. Invalid role name (backtick) → exit 2, no DB calls", async () => {
+        const { db, calls } = buildMockDb({ skillExists: true });
+        const exitSpy = mock(() => { throw new Error("process.exit(2)"); });
+        const origExit = process.exit;
+        process.exit = exitSpy as unknown as typeof process.exit;
+
+        try {
+            await runTag(
+                { skillName: "composto", roleName: "bad`role", confidence: 1.0, rationale: undefined, remove: false },
+                db,
+            );
+            expect(true).toBe(false); // unreachable
+        } catch (err) {
+            expect((err as Error).message).toBe("process.exit(2)");
+        } finally {
+            process.exit = origExit;
+        }
+
+        // No DB queries issued (validation fires before lookup)
+        expect(calls.length).toBe(0);
+    });
+
+    test("8. Invalid role name (semicolon injection) → exit 2, no DB calls", async () => {
+        const { db, calls } = buildMockDb({ skillExists: true });
+        const exitSpy = mock(() => { throw new Error("process.exit(2)"); });
+        const origExit = process.exit;
+        process.exit = exitSpy as unknown as typeof process.exit;
+
+        try {
+            await runTag(
+                {
+                    skillName: "composto",
+                    roleName: "framing;DROP TABLE role",
+                    confidence: 1.0,
+                    rationale: undefined,
+                    remove: false,
+                },
+                db,
+            );
+            expect(true).toBe(false); // unreachable
+        } catch (err) {
+            expect((err as Error).message).toBe("process.exit(2)");
+        } finally {
+            process.exit = origExit;
+        }
+
+        expect(calls.length).toBe(0);
+    });
+
+    test("9. Invalid skill name (backtick) → exit 2, no DB calls", async () => {
+        const { db, calls } = buildMockDb({ skillExists: true });
+        const exitSpy = mock(() => { throw new Error("process.exit(2)"); });
+        const origExit = process.exit;
+        process.exit = exitSpy as unknown as typeof process.exit;
+
+        try {
+            await runTag(
+                { skillName: "bad`skill", roleName: "framing", confidence: 1.0, rationale: undefined, remove: false },
+                db,
+            );
+            expect(true).toBe(false); // unreachable
+        } catch (err) {
+            expect((err as Error).message).toBe("process.exit(2)");
+        } finally {
+            process.exit = origExit;
+        }
+
+        // Validation fires before any DB lookup
+        expect(calls.length).toBe(0);
+    });
+
+    test("10. Invalid skill name (spaces) → exit 2, no DB calls", async () => {
+        const { db, calls } = buildMockDb({ skillExists: true });
+        const exitSpy = mock(() => { throw new Error("process.exit(2)"); });
+        const origExit = process.exit;
+        process.exit = exitSpy as unknown as typeof process.exit;
+
+        try {
+            await runTag(
+                { skillName: "bad skill name", roleName: "framing", confidence: 1.0, rationale: undefined, remove: false },
+                db,
+            );
+            expect(true).toBe(false); // unreachable
+        } catch (err) {
+            expect((err as Error).message).toBe("process.exit(2)");
+        } finally {
+            process.exit = origExit;
+        }
+
+        expect(calls.length).toBe(0);
+    });
 });

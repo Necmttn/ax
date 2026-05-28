@@ -10,6 +10,7 @@ import type { DbError } from "../lib/errors.ts";
 import { upsertSkillByName } from "./skill-upsert.ts";
 import { relateSkillRoles } from "./skill-role.ts";
 import { discoverProjectRoots } from "./project-discovery.ts";
+import { validateRoleName } from "../lib/role-name.ts";
 
 interface ParsedSkill {
     name: string;
@@ -57,15 +58,24 @@ function looseLineParse(raw: string): Record<string, unknown> {
     return out;
 }
 
-function extractRoles(fm: Record<string, unknown>): string[] {
+function extractRoles(fm: Record<string, unknown>, skillName?: string): string[] {
     const raw = fm["role"];
     if (raw === undefined || raw === null || raw === "") return [];
     const items = Array.isArray(raw) ? raw : [raw];
     const result: string[] = [];
     for (const item of items) {
         if (typeof item !== "string") continue;
-        const norm = item.trim().toLowerCase();
-        if (norm) result.push(norm);
+        try {
+            const norm = validateRoleName(item);
+            result.push(norm);
+        } catch (err) {
+            // Frontmatter typo - silently skip. The Effect.logWarning call
+            // below is deferred to the ingest pipeline context where an Effect
+            // runtime is available. Here we just omit the bad entry.
+            void Effect.logWarning(
+                `skills: skipping invalid role "${item}" in skill "${skillName ?? "unknown"}" frontmatter: ${err instanceof Error ? err.message : String(err)}`,
+            );
+        }
     }
     return result;
 }
@@ -83,12 +93,13 @@ function parseSkillFile(content: string, fallbackName: string): ParsedSkill {
         // fall back to a tolerant line parser.
         fm = looseLineParse(m[1]);
     }
+    const name = typeof fm.name === "string" ? fm.name : fallbackName;
     return {
-        name: typeof fm.name === "string" ? fm.name : fallbackName,
+        name,
         description: typeof fm.description === "string" ? fm.description : undefined,
         frontmatter: fm,
         body: m[2],
-        roles: extractRoles(fm),
+        roles: extractRoles(fm, name),
     };
 }
 
