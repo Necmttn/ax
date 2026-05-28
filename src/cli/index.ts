@@ -3138,7 +3138,7 @@ async function main() {
         await Effect.runPromise(withoutDb(["--help"]));
         return;
     }
-    if (args[0] === "-V") {
+    if (args[0] === "-V" || args[0] === "-v" || args[0] === "--version") {
         await printVersion(args.slice(1), liveVersionDeps);
         return;
     }
