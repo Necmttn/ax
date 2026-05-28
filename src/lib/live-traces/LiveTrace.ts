@@ -142,6 +142,12 @@ export const withTrace =
  * The tracer decorator (LiveTraceLayer) detects that the parent span is a
  * WrappedSpan and wraps this child automatically, emitting SpanStart/SpanEnd.
  *
+ * NOTE: Effect's runtime uses the unwrapped inner span (from `Effect.currentSpan`)
+ * as the parent of new child spans by default, so `LiveTraceLayer`'s
+ * `isWrappedSpan(parent)` check would miss children of a `withTrace` root. To
+ * fix this we read the WrappedSpan stashed in `LiveSpanRef` and pin it as the
+ * parent via `Effect.withParentSpan` before delegating to `Effect.withSpan`.
+ *
  * ```ts
  * yield* LiveTrace.step("Parsing")(parseDocument(doc))
  * yield* LiveTrace.step("Embedding")(embedChunks(chunks))
@@ -150,6 +156,25 @@ export const withTrace =
 export const step =
     (name: string, attributes?: Record<string, unknown>) =>
     <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
-        Effect.withSpan(effect, name, {
-            attributes: { [UI_STEP]: true, ...attributes },
+        Effect.gen(function* () {
+            const parent = yield* LiveSpanRef;
+            // When no live trace is active, fall through to bare withSpan.
+            if (parent === null) {
+                return yield* Effect.withSpan(effect, name, {
+                    attributes: { [UI_STEP]: true, ...attributes },
+                });
+            }
+            // Re-stash the (wrapped) current span as the new LiveSpanRef so any
+            // nested step() calls parent to *this* step rather than skipping
+            // straight back to the trace root. `currentSpan` is guaranteed to
+            // succeed because we're inside `Effect.withSpan`; `orDie` keeps the
+            // error channel clean (would only fail as a defect on misuse).
+            const inner = Effect.gen(function* () {
+                const current = yield* Effect.orDie(Effect.currentSpan);
+                return yield* Effect.provideService(effect, LiveSpanRef, current);
+            });
+            const spanned = Effect.withSpan(inner, name, {
+                attributes: { [UI_STEP]: true, ...attributes },
+            });
+            return yield* Effect.withParentSpan(spanned, parent);
         });
