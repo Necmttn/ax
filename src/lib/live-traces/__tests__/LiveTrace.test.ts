@@ -138,4 +138,45 @@ describe("LiveTrace.withTrace", () => {
         const traceEnd = events.find((e): e is Extract<TraceEvent, { _tag: "TraceEnd" }> => e._tag === "TraceEnd");
         expect(traceEnd?.status).toBe("failed");
     });
+
+    it("emits exactly one root SpanEnd per withTrace invocation", async () => {
+        const { events, TraceLayer } = setupTraceCapture();
+
+        const program = Effect.succeed(42).pipe(
+            LiveTrace.withTrace({
+                traceId: "test:dedupe",
+                label: "smoke-dedupe",
+                scope: { type: "user", id: "u1" },
+            }),
+            Effect.delay("30 millis"),
+        );
+
+        await Effect.runPromise(
+            program.pipe(
+                Effect.provide(TraceLayer),
+                Effect.scoped,
+            ) as Effect.Effect<unknown, never, never>,
+        );
+
+        // Identify the root span from its SpanStart (no parentSpanId).
+        const rootStart = events.find(
+            (e): e is Extract<TraceEvent, { _tag: "SpanStart" }> =>
+                e._tag === "SpanStart" && e.parentSpanId === undefined,
+        );
+        expect(rootStart).toBeDefined();
+
+        // Exactly one SpanEnd should fire for the root span - not two.
+        const rootEnds = events.filter(
+            (e): e is Extract<TraceEvent, { _tag: "SpanEnd" }> =>
+                e._tag === "SpanEnd" && e.spanId === rootStart!.spanId,
+        );
+        expect(rootEnds).toHaveLength(1);
+
+        // And the lone root SpanEnd should still be "ok".
+        expect(rootEnds[0]?.status).toBe("ok");
+
+        // TraceEnd companion still fires exactly once.
+        const traceEnds = events.filter((e) => e._tag === "TraceEnd");
+        expect(traceEnds).toHaveLength(1);
+    });
 });
