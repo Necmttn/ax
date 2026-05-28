@@ -4,13 +4,15 @@ import { SurrealClientLive } from "./db.ts";
 import { ProcessServiceLive } from "./process.ts";
 import { LiveTraceLayer } from "./live-traces/Tracer.ts";
 import { TraceSinkLive } from "./live-traces/Sink.ts";
-import { ConsoleTransportLayer } from "./live-traces/transports/console.ts";
+import { NoopTransportLayer } from "./live-traces/transports/console.ts";
 
 /**
  * Library-level composed application layer.
  *
  * Build order (outer → inner):
- *   1. ConsoleTransportLayer (overridable for tests)
+ *   1. NoopTransportLayer - silent default; drops trace events on the floor
+ *      so stdout stays clean for machine-readable output (e.g. `--progress=json`).
+ *      CLI entrypoints layer `ConsoleTransportLayer` on top when `--debug` is set.
  *   2. TraceSinkLive - buffered sink + flush daemon over the transport
  *   3. LiveTraceLayer - Effect tracer decorator that emits to the sink
  *   4. SurrealClient, AxConfig, ProcessService - library services
@@ -25,5 +27,5 @@ export const AppLayer = SurrealClientLive.pipe(
     Layer.merge(ProcessServiceLive),
     Layer.provideMerge(LiveTraceLayer),
     Layer.provideMerge(TraceSinkLive({ flushIntervalMs: 200 })),
-    Layer.provideMerge(ConsoleTransportLayer),
+    Layer.provideMerge(NoopTransportLayer),
 );

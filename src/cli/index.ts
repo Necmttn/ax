@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { Effect, Option, References } from "effect";
+import { Effect, Layer, Option, References } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
 import { AxConfig } from "../lib/config.ts";
@@ -70,6 +70,7 @@ import {
 import type { DbError } from "../lib/errors.ts";
 import { StageRegistry, type StageRegistryShape } from "../ingest/stage/registry.ts";
 import { IngestRuntimeLayer } from "../ingest/stage/runtime.ts";
+import { ConsoleTransportLayer } from "../lib/live-traces/transports/console.ts";
 import { selectByKeys, selectByTag } from "../ingest/stage/select.ts";
 import { runPipeline } from "../ingest/stage/runner.ts";
 import { IngestContext, type BaseStageStats, type StageDef } from "../ingest/stage/types.ts";
@@ -1423,6 +1424,13 @@ const optionalSince = Flag.integer("since").pipe(Flag.optional);
 const jsonFlag = Flag.boolean("json").pipe(Flag.withDefault(false));
 const checkFlag = Flag.boolean("check").pipe(Flag.withDefault(false));
 const verboseFlag = Flag.boolean("verbose").pipe(Flag.withDefault(false));
+/**
+ * `--debug` opts the user into stderr trace events. Wired only into the
+ * ingest command (Task #4). Default off keeps stdout clean for
+ * `--progress=json` and friends. When set, the CLI layers
+ * `ConsoleTransportLayer` on top of `IngestRuntimeLayer`.
+ */
+const debugFlag = Flag.boolean("debug").pipe(Flag.withDefault(false));
 const progressFlag = Flag.choice("progress", ["auto", "pipeline", "plain", "json", "off"] as const).pipe(
     Flag.withDefault("auto"),
 );
@@ -1454,8 +1462,9 @@ const ingestCommand = Command.make(
         since: optionalSince,
         progress: progressFlag,
         verbose: verboseFlag,
+        debug: debugFlag,
     },
-    ({ insightsOnly, stages, deriveOnly, reset, since, progress, verbose }) => {
+    ({ insightsOnly, stages, deriveOnly, reset, since, progress, verbose, debug }) => {
         if (insightsOnly) {
             if (reset) {
                 console.error("axctl ingest: --reset cannot be combined with --insights-only");
@@ -1473,6 +1482,7 @@ const ingestCommand = Command.make(
             return cmdIngestInsights([
                 `--progress=${progress}`,
                 ...boolArg("verbose", verbose),
+                ...boolArg("debug", debug),
             ]);
         }
         return cmdIngest([
@@ -1482,6 +1492,7 @@ const ingestCommand = Command.make(
             ...intArg("since", optionValue(since)),
             `--progress=${progress}`,
             ...boolArg("verbose", verbose),
+            ...boolArg("debug", debug),
         ]);
     },
 ).pipe(Command.withDescription(
@@ -2960,9 +2971,19 @@ const withDb = (args: ReadonlyArray<string>): CliProgram =>
 /**
  * Provide IngestRuntimeLayer (AppLayer + StageRegistryDefault) for the
  * ingest command so the CLI handler can yield* StageRegistry.
+ *
+ * When `--debug` is present in argv, layer `ConsoleTransportLayer` on top
+ * so trace events stream to **stderr**. Default (no --debug) keeps the
+ * silent NoopTransport from AppLayer so stdout stays clean for
+ * machine-readable output (e.g. `--progress=json`).
  */
-const withIngest = (args: ReadonlyArray<string>): CliProgram =>
-    runCli(args).pipe(Effect.provide(IngestRuntimeLayer), Effect.scoped);
+const withIngest = (args: ReadonlyArray<string>): CliProgram => {
+    const debug = args.includes("--debug");
+    const layer = debug
+        ? Layer.provideMerge(IngestRuntimeLayer, ConsoleTransportLayer)
+        : IngestRuntimeLayer;
+    return runCli(args).pipe(Effect.provide(layer), Effect.scoped);
+};
 
 /**
  * Provide a sentinel SurrealClient that panics on access. Used by lifecycle

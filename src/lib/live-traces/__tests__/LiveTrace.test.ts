@@ -9,17 +9,28 @@ import {
 } from "../Sink.ts";
 import type { TraceEvent } from "../types.ts";
 
+/**
+ * Common test scaffold: build a fresh in-memory transport, sink, and
+ * tracer layer. Returns the event buffer + the merged layer.
+ *
+ * Sink must be visible to BOTH `withTrace` (in user code) and
+ * `LiveTraceLayer`; merging them ensures both surfaces see the same
+ * TraceSink instance.
+ */
+const setupTraceCapture = (flushIntervalMs = 10) => {
+    const events: TraceEvent[] = [];
+    const Transport: TraceTransport = {
+        send: (batch) => Effect.sync(() => { for (const e of batch) events.push(e); }),
+    };
+    const TransportLayer = Layer.succeed(TraceTransportTag, Transport);
+    const Sink = TraceSinkLive({ flushIntervalMs }).pipe(Layer.provide(TransportLayer));
+    const TraceLayer = Layer.mergeAll(Sink, LiveTraceLayer.pipe(Layer.provide(Sink)));
+    return { events, TraceLayer };
+};
+
 describe("LiveTrace.withTrace", () => {
     it("emits TraceStart/SpanStart/SpanEnd/TraceEnd through the tracer", async () => {
-        const events: TraceEvent[] = [];
-        const Transport: TraceTransport = {
-            send: (batch) => Effect.sync(() => { for (const e of batch) events.push(e); }),
-        };
-        const TransportLayer = Layer.succeed(TraceTransportTag, Transport);
-        const Sink = TraceSinkLive({ flushIntervalMs: 10 }).pipe(Layer.provide(TransportLayer));
-        // Sink must be visible to BOTH withTrace (in user code) and LiveTraceLayer.
-        // Merge them so both surfaces see the same TraceSink instance.
-        const TraceLayer = Layer.mergeAll(Sink, LiveTraceLayer.pipe(Layer.provide(Sink)));
+        const { events, TraceLayer } = setupTraceCapture();
         const program = Effect.succeed(42).pipe(
             LiveTrace.withTrace({
                 traceId: "test:1",
@@ -42,16 +53,7 @@ describe("LiveTrace.withTrace", () => {
     });
 
     it("emits child SpanStart/SpanEnd for step() calls inside withTrace", async () => {
-        const events: TraceEvent[] = [];
-        const Transport: TraceTransport = {
-            send: (batch) =>
-                Effect.sync(() => {
-                    for (const e of batch) events.push(e);
-                }),
-        };
-        const TransportLayer = Layer.succeed(TraceTransportTag, Transport);
-        const Sink = TraceSinkLive({ flushIntervalMs: 10 }).pipe(Layer.provide(TransportLayer));
-        const TraceLayer = Layer.mergeAll(Sink, LiveTraceLayer.pipe(Layer.provide(Sink)));
+        const { events, TraceLayer } = setupTraceCapture();
 
         const program = Effect.succeed(42).pipe(
             LiveTrace.step("Parsing"),
@@ -89,16 +91,7 @@ describe("LiveTrace.withTrace", () => {
     });
 
     it("emits child SpanEnd(status=error) when step() fails, and still closes the root span", async () => {
-        const events: TraceEvent[] = [];
-        const Transport: TraceTransport = {
-            send: (batch) =>
-                Effect.sync(() => {
-                    for (const e of batch) events.push(e);
-                }),
-        };
-        const TransportLayer = Layer.succeed(TraceTransportTag, Transport);
-        const Sink = TraceSinkLive({ flushIntervalMs: 10 }).pipe(Layer.provide(TransportLayer));
-        const TraceLayer = Layer.mergeAll(Sink, LiveTraceLayer.pipe(Layer.provide(Sink)));
+        const { events, TraceLayer } = setupTraceCapture();
 
         // Use runPromiseExit to absorb the failure at the outer boundary - keeps
         // the assertion focused on what the sink emits rather than on error
