@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { Deferred, Effect, Fiber } from "effect";
-import { runPipeline, topoLayers } from "./runner.ts";
+import { PIPELINE_CONCURRENCY, runPipeline, topoLayers } from "./runner.ts";
 import { BaseStageStats, IngestContext, StageMeta, type StageDef } from "./types.ts";
 
 const stage = (key: string, deps: string[]): StageDef => ({
@@ -65,6 +65,16 @@ describe("runPipeline", () => {
     // any sibling dep-free stage still running. See ADR-0007 / commit bded64b
     // for the legacy `pipeline.ts` path this replaced.
     it("does not let a dep-free long stage block downstream stages whose deps are met", async () => {
+        // Implicit dependency: if the semaphore had only 1 permit, git would
+        // hold it forever (parked on `released`) and claude could never run.
+        // Guard so a future tuning of the constant fails loudly here.
+        expect(PIPELINE_CONCURRENCY).toBeGreaterThanOrEqual(2);
+
+        // Worst-case yields: ~N*stages cooperative ticks for Effect's runloop
+        // to walk skills/commands -> deferreds -> claude. 50 is generous for
+        // the 4-stage fixture below.
+        const MAX_YIELDS_FOR_PARALLEL_DISPATCH = 50;
+
         const program = Effect.gen(function* () {
             const released = yield* Deferred.make<void, never>();
             const finished: string[] = [];
@@ -105,7 +115,11 @@ describe("runPipeline", () => {
             // progress: skills + commands resolve, claude's deps fire, claude
             // runs. git stays parked on `released`. No setTimeout - purely
             // cooperative scheduling on Effect's runloop.
-            for (let i = 0; i < 50 && !finished.includes("claude"); i++) {
+            for (
+                let i = 0;
+                i < MAX_YIELDS_FOR_PARALLEL_DISPATCH && !finished.includes("claude");
+                i++
+            ) {
                 yield* Effect.yieldNow;
             }
 
