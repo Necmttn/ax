@@ -23,11 +23,18 @@ interface QueryCapture {
     bindings: Record<string, unknown> | undefined;
 }
 
-function makeMockDb(): { layer: Layer.Layer<SurrealClient>; captured: QueryCapture[] } {
+function makeMockDb(opts?: {
+    sessionRows?: ReadonlyArray<Record<string, unknown>>;
+}): { layer: Layer.Layer<SurrealClient>; captured: QueryCapture[] } {
     const captured: QueryCapture[] = [];
+    let calls = 0;
     const impl: SurrealClientShape = {
         query: <T extends unknown[] = unknown[]>(sql: string, bindings?: Record<string, unknown>) => {
             captured.push({ sql, bindings });
+            calls += 1;
+            if (calls === 1 && opts?.sessionRows) {
+                return Effect.succeed([opts.sessionRows] as unknown as T);
+            }
             return Effect.succeed([[]] as unknown as T);
         },
         upsert: (_id: RecordId, _content: Record<string, unknown>) => Effect.succeed(undefined),
@@ -81,17 +88,32 @@ describe("listSessionsHere", () => {
         expect(captured[0]!.sql).not.toContain("14d");
     });
 
-    test("selects turn_count and first_user_message", async () => {
-        const { layer, captured } = makeMockDb();
+    test("enriches turn_count and first_user_message via batched queries", async () => {
+        const { layer, captured } = makeMockDb({
+            sessionRows: [
+                {
+                    id: "session:`s1`",
+                    started_at: "2026-05-28T00:00:00Z",
+                    ended_at: null,
+                    source: "claude",
+                    project: "p",
+                    repository: "repository:`r`",
+                },
+            ],
+        });
 
         await run(
             listSessionsHere({ repositoryKey: "remote__test__abc" }),
             layer,
         );
 
-        const { sql } = captured[0]!;
-        expect(sql).toContain("turn_count");
-        expect(sql).toContain("first_user_message");
+        // First call: session list (no turn_count/first_user_message in projection).
+        expect(captured[0]!.sql).not.toContain("turn_count");
+        // Second + third calls: count + first-message enrichment.
+        expect(captured[1]!.sql).toContain("count() AS n FROM turn");
+        expect(captured[1]!.sql).toContain("session IN [session:`s1`]");
+        expect(captured[2]!.sql).toContain("text_excerpt AS text FROM turn");
+        expect(captured[2]!.sql).toContain("AND role = 'user'");
     });
 
     test("orders by started_at DESC", async () => {

@@ -29,8 +29,9 @@ export interface SessionRow {
 // ---------------------------------------------------------------------------
 
 /**
- * Build the SELECT projection shared by all three query functions.
- * Turn count and first-user-message are resolved with sub-selects.
+ * Core session projection. Turn count and first-user-message are resolved
+ * in a second batched query (`enrichSessions`) instead of correlated sub-
+ * selects, which were O(N * turns_per_session) and hung at ~5k sessions.
  */
 const SESSION_SELECT = `
     type::string(id) AS id,
@@ -38,10 +39,65 @@ const SESSION_SELECT = `
     type::string(ended_at) AS ended_at,
     source,
     project,
-    type::string(repository) AS repository,
-    array::len((SELECT id FROM turn WHERE session = $parent.id)) AS turn_count,
-    (SELECT VALUE text_excerpt FROM turn WHERE session = $parent.id AND role = 'user' ORDER BY seq LIMIT 1)[0] AS first_user_message
+    type::string(repository) AS repository
 FROM session`.trim();
+
+/**
+ * Enrich session rows with turn_count + first_user_message via two bulk
+ * queries instead of per-row sub-selects. Returns rows in original order.
+ */
+const enrichSessions = (
+    rows: ReadonlyArray<{
+        readonly id: string;
+        readonly started_at: string | null;
+        readonly ended_at: string | null;
+        readonly source: string;
+        readonly project: string | null;
+        readonly repository: string | null;
+    }>,
+): Effect.Effect<SessionRow[], DbError, SurrealClient> =>
+    Effect.gen(function* () {
+        if (rows.length === 0) return [];
+        const db = yield* SurrealClient;
+
+        // type::string(id) returns one of: `session:plain`, `session:⟨key⟩`,
+        // or `` session:`key` `` depending on the key's char set. Strip prefix
+        // + any wrapping delimiters so we can rebuild a clean backtick literal.
+        const ids = rows.map((r) => {
+            let k = r.id.replace(/^session:/, "");
+            if (k.startsWith("⟨") && k.endsWith("⟩")) k = k.slice(1, -1);
+            else if (k.startsWith("`") && k.endsWith("`")) k = k.slice(1, -1);
+            return k;
+        });
+        const idLiterals = ids.map((k) => `session:\`${k}\``).join(", ");
+        const inClause = `[${idLiterals}]`;
+
+        const countResult = yield* db.query<[Array<{ session: unknown; n: number }>]>(
+            `SELECT type::string(session) AS session, count() AS n FROM turn WHERE session IN ${inClause} GROUP BY session;`,
+        );
+        const counts = new Map<string, number>();
+        for (const row of countResult?.[0] ?? []) {
+            const sid = String(row.session);
+            counts.set(sid, Number(row.n) || 0);
+        }
+
+        const firstResult = yield* db.query<[Array<{ session: unknown; text: string | null }>]>(
+            `SELECT type::string(session) AS session, seq, text_excerpt AS text FROM turn
+             WHERE session IN ${inClause} AND role = 'user'
+             ORDER BY session, seq;`,
+        );
+        const firstMsg = new Map<string, string | null>();
+        for (const row of firstResult?.[0] ?? []) {
+            const sid = String(row.session);
+            if (!firstMsg.has(sid)) firstMsg.set(sid, row.text ?? null);
+        }
+
+        return rows.map((r) => ({
+            ...r,
+            turn_count: counts.get(r.id) ?? 0,
+            first_user_message: firstMsg.get(r.id) ?? null,
+        }));
+    });
 
 // ---------------------------------------------------------------------------
 // listSessionsHere
@@ -75,8 +131,8 @@ SELECT ${SESSION_SELECT}
 WHERE repository = ${recordLiteral("repository", opts.repositoryKey)}
   AND started_at >= time::now() - ${days}d
 ORDER BY started_at DESC;`;
-        const result = yield* db.query<[SessionRow[]]>(sql);
-        return result?.[0] ?? [];
+        const result = yield* db.query<[Array<Omit<SessionRow, "turn_count" | "first_user_message">>]>(sql);
+        return yield* enrichSessions(result?.[0] ?? []);
     });
 
 // ---------------------------------------------------------------------------
@@ -119,8 +175,8 @@ ORDER BY started_at DESC;`;
         const bindings: Record<string, unknown> = { from, to };
         if (opts.project) bindings.project = opts.project;
 
-        const result = yield* db.query<[SessionRow[]]>(sql, bindings);
-        return result?.[0] ?? [];
+        const result = yield* db.query<[Array<Omit<SessionRow, "turn_count" | "first_user_message">>]>(sql, bindings);
+        return yield* enrichSessions(result?.[0] ?? []);
     });
 
 // ---------------------------------------------------------------------------
@@ -161,6 +217,6 @@ WHERE started_at >= $from
   AND started_at <= $to${repoClause}
 ORDER BY started_at DESC;`;
 
-        const result = yield* db.query<[SessionRow[]]>(sql, { from: opts.from, to: opts.to });
-        return result?.[0] ?? [];
+        const result = yield* db.query<[Array<Omit<SessionRow, "turn_count" | "first_user_message">>]>(sql, { from: opts.from, to: opts.to });
+        return yield* enrichSessions(result?.[0] ?? []);
     });
