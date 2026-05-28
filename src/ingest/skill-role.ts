@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { RecordId } from "../lib/db.ts";
 import type { SurrealClientShape } from "../lib/db.ts";
 import type { DbError } from "../lib/errors.ts";
+import { recordLiteral } from "../lib/ids.ts";
 
 export const relateSkillRoles = (
     db: SurrealClientShape,
@@ -20,7 +21,7 @@ export const relateSkillRoles = (
         // Inline record id literal - bypasses SDK RecordId binding which
         // silently produces empty results against live SurrealDB (see
         // src/lib/shared/graph-query.ts:132 and src/dashboard/session-detail.ts:33).
-        const skillLit = `skill:\`${args.skillId.id}\``;
+        const skillLit = recordLiteral("skill", String(args.skillId.id));
 
         // Sweep ALL frontmatter-sourced edges for this skill before writing
         // the current set. This handles role shrinkage (e.g. [framing,execution]
@@ -40,7 +41,7 @@ export const relateSkillRoles = (
             yield* db.upsert(roleId, { name: roleName });
             rolesUpserted += 1;
 
-            const roleLit = `role:\`${roleName}\``;
+            const roleLit = recordLiteral("role", roleName);
             yield* db.query(
                 `RELATE ${skillLit}->plays_role->${roleLit} SET source = "frontmatter", confidence = 1.0, since = time::now();`,
             );

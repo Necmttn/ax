@@ -78,6 +78,7 @@ import {
 import { initTuiProgress, shouldUseTui } from "./progress-tui.tsx";
 import { cmdProject } from "./project.ts";
 import { AX_VERSION, liveVersionDeps, printVersion, updateAxctl } from "./version.ts";
+import { wantsJson, catchDbErrorAndExit } from "./output.ts";
 import { cmdDogfoodTerminal } from "../dogfood/wterm.ts";
 import { buildFileContextPack } from "../context/file-context.ts";
 import {
@@ -1600,12 +1601,7 @@ const cmdSkillsWeighted = (args: string[]) =>
             limit,
             doctorThreshold,
         }).pipe(
-            Effect.catchTag("DbError", (e) =>
-                Effect.sync(() => {
-                    process.stderr.write(`axctl skills weighted: DB error - ${e.message}\n`);
-                    process.exit(1);
-                }),
-            ),
+            catchDbErrorAndExit("axctl skills weighted"),
         );
 
         if (json) {
@@ -1631,16 +1627,11 @@ const cmdSkillsByRole = (args: string[]) =>
             console.error("axctl skills by-role: missing <role-name>");
             process.exit(2);
         }
-        const json = args.includes("--json") || process.stdout.isTTY === false;
+        const json = wantsJson(args);
         const limit = parsePositiveIntFlag("skills by-role", "limit", args, 50);
 
         const result = yield* fetchSkillsByRole({ role, limit }).pipe(
-            Effect.catchTag("DbError", (e) =>
-                Effect.sync(() => {
-                    process.stderr.write(`axctl skills by-role: DB error - ${e.message}\n`);
-                    process.exit(1);
-                }),
-            ),
+            catchDbErrorAndExit("axctl skills by-role"),
         );
 
         if (json) {
@@ -1662,15 +1653,10 @@ const cmdRolesForSkill = (args: string[]) =>
             console.error("axctl skills roles: missing <skill-name>");
             process.exit(2);
         }
-        const json = args.includes("--json") || process.stdout.isTTY === false;
+        const json = wantsJson(args);
 
         const result = yield* fetchRolesForSkill({ skill }).pipe(
-            Effect.catchTag("DbError", (e) =>
-                Effect.sync(() => {
-                    process.stderr.write(`axctl skills roles: DB error - ${e.message}\n`);
-                    process.exit(1);
-                }),
-            ),
+            catchDbErrorAndExit("axctl skills roles"),
         );
 
         if (!result.skillExists) {
@@ -1691,15 +1677,10 @@ const cmdRolesForSkill = (args: string[]) =>
  */
 const cmdRoles = (args: string[]) =>
     Effect.gen(function* () {
-        const json = args.includes("--json") || process.stdout.isTTY === false;
+        const json = wantsJson(args);
 
         const result = yield* fetchAllRoles().pipe(
-            Effect.catchTag("DbError", (e) =>
-                Effect.sync(() => {
-                    process.stderr.write(`axctl roles: DB error - ${e.message}\n`);
-                    process.exit(1);
-                }),
-            ),
+            catchDbErrorAndExit("axctl roles"),
         );
 
         if (json) {
@@ -2935,13 +2916,6 @@ function formatSessionsTable(rows: SessionRow[]): string {
     return lines.join("\n");
 }
 
-/**
- * Detect if output should be JSON: explicit --json flag, or non-TTY stdout.
- */
-function wantsJson(args: string[]): boolean {
-    return args.includes("--json") || process.stdout.isTTY === false;
-}
-
 // --- sessions here ---
 
 const cmdSessionsHere = (args: string[]) =>
@@ -3122,12 +3096,7 @@ const cmdSessionShow = (args: string[]) =>
             expandAll,
             byRole,
         }).pipe(
-            Effect.catchTag("DbError", (e) =>
-                Effect.sync(() => {
-                    process.stderr.write(`axctl session show: DB error - ${e.message}\n`);
-                    process.exit(1);
-                }),
-            ),
+            catchDbErrorAndExit("axctl session show"),
         );
 
         if (payload.session.overview === null) {
@@ -3640,12 +3609,7 @@ const tagCommand = Command.make(
             rationale: optionValue(rationale),
             remove,
         }).pipe(
-            Effect.catchTag("DbError", (e) =>
-                Effect.sync(() => {
-                    process.stderr.write(`axctl skills tag: DB error - ${e.message}\n`);
-                    process.exit(1);
-                }),
-            ),
+            catchDbErrorAndExit("axctl skills tag"),
         ),
 ).pipe(
     Command.withDescription(
@@ -3664,12 +3628,7 @@ const skillsLintCommand = Command.make(
     },
     ({ taskDir, dryRun, json }) =>
         cmdSkillsLint({ taskDir, dryRun, json }).pipe(
-            Effect.catchTag("DbError", (e) =>
-                Effect.sync(() => {
-                    process.stderr.write(`axctl skills lint: DB error - ${e.message}\n`);
-                    process.exit(1);
-                }),
-            ),
+            catchDbErrorAndExit("axctl skills lint"),
         ),
 ).pipe(
     Command.withDescription(

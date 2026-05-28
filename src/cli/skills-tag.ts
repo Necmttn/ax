@@ -8,6 +8,7 @@
 import { Effect } from "effect";
 import { RecordId, SurrealClient, type SurrealClientShape } from "../lib/db.ts";
 import type { DbError } from "../lib/errors.ts";
+import { recordLiteral } from "../lib/ids.ts";
 
 export interface SkillsTagOptions {
     readonly skillName: string;
@@ -76,13 +77,13 @@ export const cmdSkillsTag = (opts: SkillsTagOptions): Effect.Effect<void, DbErro
         // Inline record id literal - bypasses SDK RecordId binding which
         // silently produces empty results against live SurrealDB.
         // See src/lib/shared/graph-query.ts:132 and skill-role.ts:23.
-        const skillLit = `skill:\`${skillKey}\``;
+        const skillLit = recordLiteral("skill", skillKey);
 
         // 3. Upsert role node by name (lowercase, matches P3.2 behaviour)
         const roleId = new RecordId("role", roleName);
         yield* db.upsert(roleId, { name: roleName });
 
-        const roleLit = `role:\`${roleName}\``;
+        const roleLit = recordLiteral("role", roleName);
 
         // 4. Delete any existing user-source edge for this (skill, role) pair
         yield* db.query(

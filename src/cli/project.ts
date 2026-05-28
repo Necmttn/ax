@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { SurrealClient } from "../lib/db.ts";
 import { ProcessService } from "../lib/process.ts";
 import type { DbError } from "../lib/errors.ts";
+import { wantsJson } from "./output.ts";
 import { buildProjectContext, buildProjectHarness, buildProjectVerification } from "../project/context.ts";
 import type { HarnessDoctorFinding, ProjectContext, ProjectHarnessReport, ProjectVerification, VerificationCheck } from "../project/types.ts";
 
@@ -12,10 +13,6 @@ Usage:
   axctl project verify [--json]
   axctl project harness [--json]
 `;
-
-function wantsJson(args: ReadonlyArray<string>): boolean {
-    return args.includes("--json");
-}
 
 function printJson(payload: unknown): void {
     console.log(JSON.stringify(payload, null, 2));

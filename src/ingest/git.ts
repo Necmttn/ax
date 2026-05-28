@@ -10,6 +10,7 @@ import {
     commitRecordKey,
     fileRecordKey,
 } from "./record-keys.ts";
+import { recordLiteral } from "../lib/ids.ts";
 import {
     chooseIdentity,
     classifyCheckoutKind,
@@ -311,8 +312,6 @@ const fetchCommits = (
     });
 
 // ---------- DB writers ----------
-
-const recordLiteral = (table: string, key: string): string => `${table}:\`${key}\``;
 
 const dbRecordLiteral = (fallbackTable: string, id: unknown, fallbackKey: string): string => {
     if (id === null || id === undefined) return recordLiteral(fallbackTable, fallbackKey);

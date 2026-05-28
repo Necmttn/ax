@@ -12,6 +12,7 @@ import { readdir, readFile, unlink } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
 import { RecordId, SurrealClient, type SurrealClientShape } from "../lib/db.ts";
 import type { DbError } from "../lib/errors.ts";
+import { recordLiteral } from "../lib/ids.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -215,7 +216,7 @@ const applyBrief = (
         // Inline record id literal (SDK RecordId bindings in db.query silently
         // produce empty results - see src/lib/shared/graph-query.ts:132 and
         // src/ingest/skill-role.ts:23).
-        const skillLit = `skill:\`${skillKey}\``;
+        const skillLit = recordLiteral("skill", skillKey);
 
         // Sweep ALL prior brief-sourced edges for this skill before writing
         // the current set (handles role shrinkage atomically).
@@ -233,7 +234,7 @@ const applyBrief = (
             const roleId = new RecordId("role", roleName);
             yield* db.upsert(roleId, { name: roleName });
 
-            const roleLit = `role:\`${roleName}\``;
+            const roleLit = recordLiteral("role", roleName);
             yield* db.query(
                 `RELATE ${skillLit}->plays_role->${roleLit} SET source = "brief", confidence = ${confidence}${rationaleSql}, since = time::now();`,
             );
