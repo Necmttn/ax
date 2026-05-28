@@ -235,7 +235,7 @@ function TerminalFigure() {
             <div className="term-rule"></div>
           </div>
           <div className="term-body" data-term-body>
-            <div className="term-line" data-step="say"    data-delay="200"><span className="t-sys">[ session 4129 wrapping - stop hook fires ]</span></div>
+            <div className="term-line" data-step="say"    data-delay="200"><span className="t-sys">[ session 4129 wrapping — stop hook fires ]</span></div>
             <div className="term-line" data-step="tool"   data-delay="800">  <span className="t-bullet">⏺</span> Bash(<span className="t-cmd">axctl retro emit --session=4129</span>)</div>
             <div className="term-line" data-step="out"    data-delay="500">    <span className="t-arm">⎿</span>  tried=8 · worked=6 · failed=3 · next=2</div>
             <div className="term-line" data-step="out"    data-delay="180">       failed: <span className="t-err">2 fixes landed after feature in src/ingest/transcripts.ts</span></div>
@@ -389,7 +389,7 @@ function TerminalFigure() {
       </div>
 
       <figcaption>
-        <strong>Failure prevention, success replay - one graph.</strong>{" "}
+        <strong>Failure prevention, success replay — one graph.</strong>{" "}
         The first two tabs show the post-session retro flow in
         Claude Code and Codex. The third synthesizes a workflow
         skill from a previous clean session by reading evidence
