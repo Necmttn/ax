@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DB_COMMANDS, insightsOnlyConflicts, resolveIngestStages, rootCommand } from "./index.ts";
+import { DB_COMMANDS, detectRemovedIngestFlag, insightsOnlyConflicts, resolveIngestStages, rootCommand } from "./index.ts";
 import { ALL_STAGES } from "../ingest/stage/registry.ts";
 import type { StageRegistryShape } from "../ingest/stage/registry.ts";
 
@@ -83,6 +83,42 @@ describe("effect cli", () => {
         expect(insightsOnlyConflicts({ hasSince: false })).toEqual([]);
         // --since does not honour --insights-only, so combining is user-error.
         expect(insightsOnlyConflicts({ hasSince: true })).toEqual(["--since"]);
+    });
+
+    test("detectRemovedIngestFlag: returns null when no removed flag present", () => {
+        expect(detectRemovedIngestFlag([])).toBeNull();
+        expect(detectRemovedIngestFlag(["--stages=codex", "--verbose"])).toBeNull();
+        expect(detectRemovedIngestFlag(["--derive-only", "--reset"])).toBeNull();
+    });
+
+    test("detectRemovedIngestFlag: maps each removed --*-only flag to its --stages= replacement", () => {
+        expect(detectRemovedIngestFlag(["--skills-only"])).toEqual({
+            flag: "--skills-only",
+            replacement: "--stages=skills",
+        });
+        expect(detectRemovedIngestFlag(["--transcripts-only"])).toEqual({
+            flag: "--transcripts-only",
+            replacement: "--stages=claude,codex",
+        });
+        expect(detectRemovedIngestFlag(["--codex-only"])).toEqual({
+            flag: "--codex-only",
+            replacement: "--stages=codex",
+        });
+        expect(detectRemovedIngestFlag(["--git-only"])).toEqual({
+            flag: "--git-only",
+            replacement: "--stages=git",
+        });
+        expect(detectRemovedIngestFlag(["--claude-only"])).toEqual({
+            flag: "--claude-only",
+            replacement: "--stages=claude",
+        });
+    });
+
+    test("detectRemovedIngestFlag: still detects when removed flag is buried in args", () => {
+        expect(detectRemovedIngestFlag(["--verbose", "--codex-only", "--progress=json"])).toEqual({
+            flag: "--codex-only",
+            replacement: "--stages=codex",
+        });
     });
 
     test("resolveIngestStages: default runs every stage", () => {

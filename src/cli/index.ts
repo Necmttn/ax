@@ -316,6 +316,28 @@ export const resolveIngestStages = (
 };
 
 
+/** Removed `--*-only` flags mapped to the equivalent `--stages=` suggestion.
+ *  Effect's CLI parser silently ignores unknown flags, so without this guard
+ *  users typing the old flag would get a no-op full ingest. */
+const REMOVED_INGEST_FLAGS: ReadonlyArray<readonly [string, string]> = [
+    ["--skills-only", "--stages=skills"],
+    ["--transcripts-only", "--stages=claude,codex"],
+    ["--codex-only", "--stages=codex"],
+    ["--git-only", "--stages=git"],
+    ["--claude-only", "--stages=claude"],
+];
+
+/** Returns the removed flag + replacement suggestion if any `args` entry
+ *  matches a deprecated `--*-only` flag, else `null`. Exported for tests. */
+export const detectRemovedIngestFlag = (
+    args: ReadonlyArray<string>,
+): { flag: string; replacement: string } | null => {
+    for (const [flag, replacement] of REMOVED_INGEST_FLAGS) {
+        if (args.includes(flag)) return { flag, replacement };
+    }
+    return null;
+};
+
 const cmdIngest = (args: string[]) => {
     // Validate args synchronously before any Effect/DB work so that
     // flag errors print even when the daemon is down.
@@ -2996,6 +3018,16 @@ async function main() {
         return;
     }
     if (args[0] === "ingest") {
+        // Effect's CLI parser silently ignores unknown flags, so the removed
+        // `--*-only` flags would otherwise no-op into a full ingest. Reject
+        // them up-front against raw argv before Effect strips them.
+        const removed = detectRemovedIngestFlag(args.slice(1));
+        if (removed) {
+            console.error(
+                `axctl ingest: ${removed.flag} was removed. Use ${removed.replacement} instead.`,
+            );
+            process.exit(2);
+        }
         await Effect.runPromise(withIngest(args));
         return;
     }
