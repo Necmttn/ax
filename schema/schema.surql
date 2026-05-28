@@ -127,6 +127,19 @@ DEFINE INDEX commit_sha_uq  ON commit FIELDS repo, sha UNIQUE;
 DEFINE INDEX commit_repository_ts ON commit FIELDS repository, ts;
 REMOVE INDEX IF EXISTS commit_checkout_ts ON commit;
 
+-- Full-text search on commit messages (BM25 + word tokenization) for `ax recall` / `ax commits search`.
+-- Backs friction F4: "recall BM25 covers turns only - not commit messages".
+-- Uses `ascii` filter (same as turn_text) for v0 compatibility with SurrealDB 3.0.
+-- `snowball(english)` stemming is not verified for SurrealDB 3.0 so ascii is the safe fallback.
+-- DEFINE INDEX IF NOT EXISTS re-indexes existing rows automatically on `bun run db:schema`
+-- so no separate backfill code path is needed. HIGHLIGHTS enables SEARCH::highlight() in queries.
+DEFINE ANALYZER IF NOT EXISTS commit_text
+    TOKENIZERS class
+    FILTERS lowercase, ascii;
+DEFINE INDEX IF NOT EXISTS commit_message_fts
+    ON commit FIELDS message
+    FULLTEXT ANALYZER commit_text BM25 HIGHLIGHTS;
+
 DEFINE TABLE repository SCHEMAFULL;
 DEFINE FIELD name           ON repository TYPE option<string>;
 DEFINE FIELD remote_url     ON repository TYPE option<string>;
