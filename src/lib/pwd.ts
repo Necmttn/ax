@@ -71,6 +71,7 @@ export const resolvePwdRepository = (
 
         // Step 1: resolve symlinks so the path is canonical.
         const rawCwd = cwd ?? process.cwd();
+        // fall back to raw path if symlink resolution fails; git will validate existence next
         const resolvedCwd = yield* Effect.promise(() => realpath(rawCwd).catch(() => rawCwd));
 
         // Step 2: git rev-parse --show-toplevel
@@ -120,7 +121,7 @@ export const resolvePwdRepository = (
         // Step 7: check DB existence
         const db = yield* SurrealClient;
         const queryResult = yield* db.query<[[{ id: unknown }[]]]>(
-            `SELECT id FROM repository:⟨${identity.repositoryKey}⟩`,
+            `SELECT id FROM repository:\`${identity.repositoryKey}\` LIMIT 1`,
         );
         const rows = queryResult[0] ?? [];
         const existsInDb = rows.length > 0;
