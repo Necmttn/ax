@@ -35,6 +35,7 @@ import { cmdRetroMeta } from "./retro-meta.ts";
 import { cmdRetroPlan } from "./retro-plan.ts";
 import { cmdSkillsClassify } from "./skills-classify.ts";
 import { cmdSkillsTag } from "./skills-tag.ts";
+import { cmdSkillsLint } from "./skills-lint.ts";
 import { homedir } from "node:os";
 import { recordKeyPart } from "../lib/shared/derive-keys.ts";
 import { recordRef, surrealString } from "../lib/shared/surql.ts";
@@ -3512,8 +3513,32 @@ const tagCommand = Command.make(
     ),
 );
 
+const skillsLintCommand = Command.make(
+    "lint",
+    {
+        taskDir: Flag.string("task-dir").pipe(Flag.withDefault(".ax/tasks")),
+        dryRun: Flag.boolean("dry-run").pipe(Flag.withDefault(false)),
+        json: jsonFlag,
+    },
+    ({ taskDir, dryRun, json }) =>
+        cmdSkillsLint({ taskDir, dryRun, json }).pipe(
+            Effect.catchTag("DbError", (e) =>
+                Effect.sync(() => {
+                    process.stderr.write(`axctl skills lint: DB error - ${e.message}\n`);
+                    process.exit(1);
+                }),
+            ),
+        ),
+).pipe(
+    Command.withDescription(
+        "Read filled classify briefs from --task-dir (default .ax/tasks) and write plays_role " +
+        "edges with source=\"brief\". Removes applied brief files. " +
+        "--dry-run  --json  --task-dir=<path>",
+    ),
+);
+
 const skillsCommand = Command.make("skills").pipe(
-    Command.withDescription("Skill-graph queries: search, stats, usage, pairs, recovery, classify, tag"),
+    Command.withDescription("Skill-graph queries: search, stats, usage, pairs, recovery, classify, tag, lint"),
     Command.withSubcommands([
         searchCommand,
         statsCommand,
@@ -3524,6 +3549,7 @@ const skillsCommand = Command.make("skills").pipe(
         recoveryCommand,
         classifyCommand,
         tagCommand,
+        skillsLintCommand,
     ]),
 );
 
