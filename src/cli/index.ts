@@ -1454,8 +1454,11 @@ const ingestCommand = Command.make(
         insightsOnly: Flag.boolean("insights-only").pipe(Flag.withDefault(false)),
         // Run a chosen subset of stages, e.g. --stages=signals,outcomes.
         stages: Flag.string("stages").pipe(Flag.optional),
-        // Shortcut: only the DB-derive stages (signals/outcomes/session-health/
-        // closure) - skips the slow transcript + git parse.
+        // Shortcut: run every stage tagged `derive` (currently signals,
+        // outcomes, session-health, closure, proposals, opportunities,
+        // retro-proposals, subagents, spawned, harness) and skip the slow
+        // transcript + git parse. Tag membership lives on each stage; see
+        // ADR-0006 and the stage registry for the canonical list.
         deriveOnly: Flag.boolean("derive-only").pipe(Flag.withDefault(false)),
         // Wipe the skill graph before a full re-ingest so it rebuilds clean.
         reset: Flag.boolean("reset").pipe(Flag.withDefault(false)),
@@ -1497,7 +1500,9 @@ const ingestCommand = Command.make(
     },
 ).pipe(Command.withDescription(
     "Ingest skills, transcripts, Codex sessions, git history, and insight artifacts. " +
-        "Use --stages=<a,b,c> or --derive-only to run a subset against an already-ingested DB. " +
+        "Use --stages=<a,b,c> for a custom subset, or --derive-only to run every stage tagged `derive` " +
+        "(signals, outcomes, session-health, closure, proposals, opportunities, retro-proposals, " +
+        "subagents, spawned, harness) against an already-ingested DB. " +
         "Use --reset to wipe the skill graph first and rebuild it clean.",
 ));
 
