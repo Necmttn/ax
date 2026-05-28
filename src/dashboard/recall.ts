@@ -110,8 +110,7 @@ export const fetchRecall = (
 
                 // Repository scope filter on turns: filter by session.repository
                 if (params.scope?.kind === "here") {
-                    const repoId = params.scope.repositoryRecordId;
-                    const repoClause = `AND session.repository = ${repoId}`;
+                    const repoClause = "AND session.repository = $scopeRepo";
                     sessionFilterClause = sessionFilterClause
                         ? `${sessionFilterClause} ${repoClause}`
                         : repoClause;
@@ -121,6 +120,9 @@ export const fetchRecall = (
                     q,
                     project: params.project?.trim() || null,
                     since: params.since?.trim() || null,
+                    ...(params.scope?.kind === "here"
+                        ? { scopeRepo: params.scope.repositoryRecordId }
+                        : {}),
                 };
 
                 const [mapped, countRows] = yield* Effect.all(
@@ -224,7 +226,7 @@ export const fetchRecall = (
                         runQuery(recallSkillsQuery, { q, limit }),
                         db.query<[Array<Record<string, unknown>>]>(
                             RECALL_SKILLS_COUNT_SQL,
-                            { q, limit },
+                            { q },
                         ),
                     ],
                     { concurrency: "unbounded" },

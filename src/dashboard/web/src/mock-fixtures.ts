@@ -204,7 +204,7 @@ const EMPTY_SESSION_LIST: SessionListResponse = {
 const EMPTY_TOOL_FAILURES: ToolFailuresResponse = { rows: [], total: 0 } as never;
 const EMPTY_GRAPH: GraphExplorerPayload = { mode: "file-attention", limit: 0, nodes: [], edges: [], query: null } as never;
 const EMPTY_SKILL_GRAPH: SkillGraphPayload = { min_count: 0, limit: 0, node_count: 0, edge_count: 0, max_edge_count: 0, nodes: [], edges: [] };
-const EMPTY_RECALL: RecallResponse = { matches: [], total: 0, took_ms: 0, query: { q: "", project: null, skill: null, since: null } } as never;
+const EMPTY_RECALL: RecallResponse = { q: "", hits: [], commits: [], skills: [], truncated: false, total_count: 0, total_counts: { turn: 0, commit: 0, skill: 0 }, window: { offset: 0, limit: 50 } };
 const EMPTY_WRAPPED: WrappedProfile = { generatedAt: NOW, ready: false, sections: [] } as never;
 
 // ---------------------------------------------------------------------------

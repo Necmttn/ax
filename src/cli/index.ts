@@ -902,20 +902,19 @@ interface RecallCliOpts {
  */
 const resolveScope = (
     scopeFlag: string | null,
-): Effect.Effect<RecallScope, never, SurrealClient | ProcessService> =>
+): Effect.Effect<RecallScope, DbError | import("../lib/process.ts").ProcessError, SurrealClient | ProcessService> =>
     Effect.gen(function* () {
         if (scopeFlag === "all") return { kind: "all" } as RecallScope;
 
         if (scopeFlag === "here" || scopeFlag === null) {
             const resolution = yield* resolvePwdRepository().pipe(
-                Effect.catch((err) => {
+                Effect.catchTag("NotAGitRepoError", (err) => {
                     if (scopeFlag === "here") {
                         // explicit --scope=here outside a git repo → error
-                        const cwd = "cwd" in (err as object) ? (err as { cwd: string }).cwd : process.cwd();
-                        console.error(`axctl recall: --scope=here requires a git repo (cwd=${cwd})`);
+                        process.stderr.write(`axctl recall: --scope=here requires a git repo (cwd=${err.cwd})\n`);
                         process.exit(2);
                     }
-                    // auto-detect: not a git repo → fall back to all
+                    // auto-detect: not a git repo → silent fall-through to all
                     return Effect.succeed(null as import("../lib/pwd.ts").PwdResolution | null);
                 }),
             );
@@ -1157,9 +1156,6 @@ const cmdRecall = (opts: RecallCliOpts) =>
             }
         }
 
-        if (result.hits.length === 0 && result.commits.length === 0 && result.skills.length === 0) {
-            console.log(`no matches for "${opts.query}"`);
-        }
     });
 
 const cmdSearch = (args: string[]) =>
