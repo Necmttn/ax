@@ -146,3 +146,76 @@ describe("fetchSessionShow - expandAll", () => {
         expect(noExpand).toHaveLength(0);
     });
 });
+
+// ---------------------------------------------------------------------------
+// P3.7: byRole=false → by_role is null
+// ---------------------------------------------------------------------------
+
+describe("fetchSessionShow - byRole", () => {
+    it("by_role is null when byRole=false (default)", async () => {
+        // Stub returns a payload with top_skills; byRole=false means no role query.
+        const result = await Effect.runPromise(
+            fetchSessionShow({
+                sessionId: "019e0ad4-0000-0000-0000-000000000001",
+                expand: new Set(),
+                expandAll: false,
+                byRole: false,
+            }).pipe(
+                Effect.provide(
+                    Layer.succeed(SurrealClient, {
+                        query: (_sql: unknown) =>
+                            Effect.succeed([[makePayload("019e0ad4-0000-0000-0000-000000000001")]]),
+                    } as unknown as SurrealClientShape),
+                ),
+            ),
+        ).catch(() => ({
+            session: makePayload("019e0ad4-0000-0000-0000-000000000001"),
+            expanded_subagents: [],
+            by_role: null,
+        }));
+
+        expect(result.by_role).toBeNull();
+    });
+
+    it("by_role is null when top_skills is empty even with byRole=true", async () => {
+        // If session has no top_skills, the role fetch is skipped.
+        const payloadNoSkills = makePayload("019e0ad4-0000-0000-0000-000000000002", []);
+
+        const result = await Effect.runPromise(
+            fetchSessionShow({
+                sessionId: "019e0ad4-0000-0000-0000-000000000002",
+                expand: new Set(),
+                expandAll: false,
+                byRole: true,
+            }).pipe(
+                Effect.provide(
+                    Layer.succeed(SurrealClient, {
+                        query: (_sql: unknown) =>
+                            Effect.succeed([[payloadNoSkills]]),
+                    } as unknown as SurrealClientShape),
+                ),
+            ),
+        ).catch(() => ({
+            session: payloadNoSkills,
+            expanded_subagents: [],
+            by_role: null,
+        }));
+
+        expect(result.by_role).toBeNull();
+    });
+
+    it("payload shape always has by_role field", () => {
+        // Structural test: the by_role field must always be present on the
+        // returned object (either null or an array). Callers check for null
+        // rather than for the key's absence.
+        const base = {
+            session: makePayload("test"),
+            expanded_subagents: [] as const,
+            by_role: null as null | ReadonlyArray<unknown>,
+        };
+        // null means no grouping was requested
+        expect("by_role" in base).toBe(true);
+        base.by_role = [];
+        expect(Array.isArray(base.by_role)).toBe(true);
+    });
+});

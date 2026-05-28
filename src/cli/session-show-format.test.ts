@@ -67,6 +67,7 @@ const MINIMAL_PAYLOAD: SessionShowPayload = {
         ],
     },
     expanded_subagents: [],
+    by_role: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -186,6 +187,7 @@ describe("renderSessionMarkdown - not found", () => {
                 agent_delegations: [],
             },
             expanded_subagents: [],
+            by_role: null,
         };
         const out = renderSessionMarkdown(payload);
         expect(out).toContain("not found");
@@ -268,6 +270,7 @@ describe("renderSessionMarkdown - empty session", () => {
                 agent_delegations: [],
             },
             expanded_subagents: [],
+            by_role: null,
         };
         const out = renderSessionMarkdown(payload);
         expect(out).not.toContain("## Top skills");
@@ -284,6 +287,7 @@ describe("renderSessionMarkdown - empty session", () => {
                 agent_delegations: [],
             },
             expanded_subagents: [],
+            by_role: null,
         };
         const out = renderSessionMarkdown(payload);
         expect(out).not.toContain("## Subagents");
@@ -329,5 +333,80 @@ describe("renderSessionJson", () => {
         const parsed = JSON.parse(renderSessionJson(payload));
         expect(parsed.expanded_subagents).toHaveLength(1);
         expect(parsed.expanded_subagents[0].tool_calls[0].label).toBe("Bash");
+    });
+
+    it("does not include by_role key when null", () => {
+        const parsed = JSON.parse(renderSessionJson(MINIMAL_PAYLOAD));
+        expect("by_role" in parsed).toBe(false);
+    });
+
+    it("includes by_role array when populated", () => {
+        const payload: SessionShowPayload = {
+            ...MINIMAL_PAYLOAD,
+            by_role: [
+                { role: "debugging", skills: [{ skill: "caveman", count: 3 }] },
+                { role: null, skills: [{ skill: "untagged", count: 1 }] },
+            ],
+        };
+        const parsed = JSON.parse(renderSessionJson(payload));
+        expect(Array.isArray(parsed.by_role)).toBe(true);
+        expect(parsed.by_role).toHaveLength(2);
+        expect(parsed.by_role[0].role).toBe("debugging");
+        expect(parsed.by_role[1].role).toBeNull();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: renderSessionMarkdown - --by-role (P3.7)
+// ---------------------------------------------------------------------------
+
+describe("renderSessionMarkdown - by-role (P3.7)", () => {
+    const byRolePayload: SessionShowPayload = {
+        ...MINIMAL_PAYLOAD,
+        by_role: [
+            {
+                role: "debugging",
+                skills: [
+                    { skill: "caveman", count: 5 },
+                    { skill: "diagnose", count: 2 },
+                ],
+            },
+            {
+                role: null,
+                skills: [{ skill: "unclassified-tool", count: 1 }],
+            },
+        ],
+    };
+
+    it("renders ## By role header when by_role is populated", () => {
+        const out = renderSessionMarkdown(byRolePayload);
+        expect(out).toContain("## By role");
+    });
+
+    it("does NOT render ## Top skills when by_role is populated", () => {
+        const out = renderSessionMarkdown(byRolePayload);
+        expect(out).not.toContain("## Top skills");
+    });
+
+    it("renders role subheadings", () => {
+        const out = renderSessionMarkdown(byRolePayload);
+        expect(out).toContain("### debugging");
+    });
+
+    it("renders (unclassified) for null role", () => {
+        const out = renderSessionMarkdown(byRolePayload);
+        expect(out).toContain("### (unclassified)");
+    });
+
+    it("renders skill names and counts in by-role section", () => {
+        const out = renderSessionMarkdown(byRolePayload);
+        expect(out).toContain("caveman");
+        expect(out).toContain("×5");
+    });
+
+    it("falls back to Top skills when by_role is null", () => {
+        const out = renderSessionMarkdown(MINIMAL_PAYLOAD);
+        expect(out).toContain("## Top skills");
+        expect(out).not.toContain("## By role");
     });
 });

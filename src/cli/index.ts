@@ -38,6 +38,19 @@ import { cmdSkillsTag } from "./skills-tag.ts";
 import { cmdSkillsLint } from "./skills-lint.ts";
 import { fetchSkillsWeighted } from "../dashboard/skills-weighted.ts";
 import { renderWeightedTable, renderWeightedJson } from "./skills-weighted-format.ts";
+import {
+    fetchSkillsByRole,
+    fetchRolesForSkill,
+    fetchAllRoles,
+} from "../dashboard/role-queries.ts";
+import {
+    renderSkillsByRoleTable,
+    renderSkillsByRoleJson,
+    renderRolesForSkillTable,
+    renderRolesForSkillJson,
+    renderAllRolesTable,
+    renderAllRolesJson,
+} from "./role-format.ts";
 import { homedir } from "node:os";
 import { recordKeyPart } from "../lib/shared/derive-keys.ts";
 import { recordRef, surrealString } from "../lib/shared/surql.ts";
@@ -1602,6 +1615,100 @@ const cmdSkillsWeighted = (args: string[]) =>
         }
     });
 
+// ---------------------------------------------------------------------------
+// P3.7: Role read commands
+// ---------------------------------------------------------------------------
+
+/**
+ * `ax skills by-role <role> [--json] [--limit=N]`
+ * List skills classified as a given role, ranked by invocations.
+ */
+const cmdSkillsByRole = (args: string[]) =>
+    Effect.gen(function* () {
+        const positionals = args.filter((a) => !a.startsWith("--"));
+        const role = positionals[0];
+        if (!role) {
+            console.error("axctl skills by-role: missing <role-name>");
+            process.exit(2);
+        }
+        const json = args.includes("--json") || process.stdout.isTTY === false;
+        const limit = parsePositiveIntFlag("skills by-role", "limit", args, 50);
+
+        const result = yield* fetchSkillsByRole({ role, limit }).pipe(
+            Effect.catchTag("DbError", (e) =>
+                Effect.sync(() => {
+                    process.stderr.write(`axctl skills by-role: DB error - ${e.message}\n`);
+                    process.exit(1);
+                }),
+            ),
+        );
+
+        if (json) {
+            console.log(renderSkillsByRoleJson(result, role));
+        } else {
+            console.log(renderSkillsByRoleTable(result, role));
+        }
+    });
+
+/**
+ * `ax skills roles <skill> [--json]`
+ * List all roles for a given skill.
+ */
+const cmdRolesForSkill = (args: string[]) =>
+    Effect.gen(function* () {
+        const positionals = args.filter((a) => !a.startsWith("--"));
+        const skill = positionals[0];
+        if (!skill) {
+            console.error("axctl skills roles: missing <skill-name>");
+            process.exit(2);
+        }
+        const json = args.includes("--json") || process.stdout.isTTY === false;
+
+        const result = yield* fetchRolesForSkill({ skill }).pipe(
+            Effect.catchTag("DbError", (e) =>
+                Effect.sync(() => {
+                    process.stderr.write(`axctl skills roles: DB error - ${e.message}\n`);
+                    process.exit(1);
+                }),
+            ),
+        );
+
+        if (!result.skillExists) {
+            process.stderr.write(`axctl skills roles: unknown skill "${skill}"\n`);
+            process.exit(2);
+        }
+
+        if (json) {
+            console.log(renderRolesForSkillJson(result, skill));
+        } else {
+            console.log(renderRolesForSkillTable(result, skill));
+        }
+    });
+
+/**
+ * `ax roles [--json]`
+ * List all roles with skill counts.
+ */
+const cmdRoles = (args: string[]) =>
+    Effect.gen(function* () {
+        const json = args.includes("--json") || process.stdout.isTTY === false;
+
+        const result = yield* fetchAllRoles().pipe(
+            Effect.catchTag("DbError", (e) =>
+                Effect.sync(() => {
+                    process.stderr.write(`axctl roles: DB error - ${e.message}\n`);
+                    process.exit(1);
+                }),
+            ),
+        );
+
+        if (json) {
+            console.log(renderAllRolesJson(result));
+        } else {
+            console.log(renderAllRolesTable(result));
+        }
+    });
+
 const cmdTaste = (args: string[]) =>
     Effect.gen(function* () {
         const limit = parsePositiveIntFlag("taste", "limit", args, 30);
@@ -2974,18 +3081,16 @@ const cmdSessionsNear = (args: string[]) =>
 // ---------------------------------------------------------------------------
 
 /**
- * `ax session show <id> [--expand=<uuid>] [--all] [--json]`
+ * `ax session show <id> [--expand=<uuid>] [--all] [--by-role] [--json]`
  *
  * Displays a session's invoked + tool_call timeline. Collapses subagent
  * sessions to one-line summaries by default. --expand=<uuid> (repeatable)
  * or --all drills into subagent contents inline.
  *
- * Auto markdown (TTY) vs JSON (piped). --json forces JSON output.
+ * P3.7: --by-role groups the Top skills section by role instead of flat list.
+ * Skills without a role appear in "(unclassified)".
  *
- * NOTE(P3.7): --by-role grouping is deferred to P3.7 (depends on
- * role + plays_role schema fields not yet implemented). Add a `--by-role`
- * flag that groups the timeline by the session's phase/role breakdown once
- * the schema fields `invoked_role` and `plays_role` are available on turns.
+ * Auto markdown (TTY) vs JSON (piped). --json forces JSON output.
  */
 const cmdSessionShow = (args: string[]) =>
     Effect.gen(function* () {
@@ -2999,6 +3104,7 @@ const cmdSessionShow = (args: string[]) =>
 
         const forceJson = args.includes("--json");
         const expandAll = args.includes("--all");
+        const byRole = args.includes("--by-role");
         const useJson = forceJson || process.stdout.isTTY === false;
 
         // Collect --expand=<uuid> values (repeatable)
@@ -3014,6 +3120,7 @@ const cmdSessionShow = (args: string[]) =>
             sessionId,
             expand: expandSet,
             expandAll,
+            byRole,
         }).pipe(
             Effect.catchTag("DbError", (e) =>
                 Effect.sync(() => {
@@ -3041,19 +3148,22 @@ const sessionShowCommand = Command.make(
         id: Argument.string("id"),
         expand: Flag.string("expand").pipe(Flag.atLeast(0)),
         all: Flag.boolean("all").pipe(Flag.withDefault(false)),
+        byRole: Flag.boolean("by-role").pipe(Flag.withDefault(false)),
         json: jsonFlag,
     },
-    ({ id, expand, all, json }) =>
+    ({ id, expand, all, byRole, json }) =>
         cmdSessionShow([
             id,
             ...[...expand].map((e) => `--expand=${e}`),
             ...boolArg("all", all),
+            ...boolArg("by-role", byRole),
             ...boolArg("json", json),
         ]),
 ).pipe(
     Command.withDescription(
         "Display a session's timeline (tool calls + subagent spawns). " +
         "--expand=<uuid> (repeatable) or --all expands subagent timelines inline. " +
+        "--by-role groups the Top skills section by role (P3.7). " +
         "Auto markdown on TTY, JSON when piped. --json forces JSON.",
     ),
 );
@@ -3592,8 +3702,39 @@ const weightedCommand = Command.make(
     ),
 );
 
+// P3.7: ax skills by-role <role>
+const byRoleCommand = Command.make(
+    "by-role",
+    {
+        role: Argument.string("role"),
+        limit: positiveLimit(50),
+        json: jsonFlag,
+    },
+    ({ role, limit, json }) =>
+        cmdSkillsByRole([role, `--limit=${limit}`, ...boolArg("json", json)]),
+).pipe(
+    Command.withDescription(
+        "List skills classified as <role>, ranked by invocations. " +
+        "--limit=N  --json",
+    ),
+);
+
+// P3.7: ax skills roles <skill>
+const rolesForSkillCommand = Command.make(
+    "roles",
+    {
+        skill: Argument.string("skill"),
+        json: jsonFlag,
+    },
+    ({ skill, json }) => cmdRolesForSkill([skill, ...boolArg("json", json)]),
+).pipe(
+    Command.withDescription(
+        "List all roles assigned to <skill>. Exit 2 if skill is unknown. --json",
+    ),
+);
+
 const skillsCommand = Command.make("skills").pipe(
-    Command.withDescription("Skill-graph queries: search, stats, usage, pairs, recovery, classify, tag, lint, weighted"),
+    Command.withDescription("Skill-graph queries: search, stats, usage, pairs, recovery, classify, tag, lint, weighted, by-role, roles"),
     Command.withSubcommands([
         searchCommand,
         statsCommand,
@@ -3606,7 +3747,20 @@ const skillsCommand = Command.make("skills").pipe(
         classifyCommand,
         tagCommand,
         skillsLintCommand,
+        byRoleCommand,
+        rolesForSkillCommand,
     ]),
+);
+
+// P3.7: ax roles (top-level)
+const rolesCommand = Command.make(
+    "roles",
+    { json: jsonFlag },
+    ({ json }) => cmdRoles([...boolArg("json", json)]),
+).pipe(
+    Command.withDescription(
+        "List all roles with skill counts (includes roles with 0 skills). --json",
+    ),
 );
 
 const projectContextCommand = Command.make(
@@ -4038,6 +4192,7 @@ export const rootCommand = Command.make("axctl").pipe(
         reportCommand,
         recallCommand,
         skillsCommand,
+        rolesCommand,
         contextCommand,
         hookCommand,
         hooksCommand,
@@ -4107,6 +4262,7 @@ export const DB_COMMANDS: ReadonlySet<string> = new Set([
     "report",
     "recall",
     "skills",
+    "roles",
     "project",
     "context",
     "hook",

@@ -1,8 +1,11 @@
 /**
- * P2.2: ax session show - pure markdown formatter.
+ * P2.2 / P3.7: ax session show - pure markdown formatter.
  *
  * No I/O, no Effect. Given a SessionShowPayload, returns a string ready for
  * process.stdout.write.
+ *
+ * P3.7 adds --by-role: when payload.by_role is populated, replaces the
+ * "## Top skills" section with "## By role" grouped output.
  */
 
 import type { SessionShowPayload } from "../dashboard/session-show.ts";
@@ -11,6 +14,7 @@ import type {
     SessionLink,
     SessionToolCall,
 } from "../lib/shared/dashboard-types.ts";
+import { renderByRoleSection } from "./role-format.ts";
 import { prettifyProjectSlug } from "../lib/shared/project-slug.ts";
 
 /** Last `n` hex chars of a UUID-like string, same pattern as cmdRecall. */
@@ -79,13 +83,6 @@ function renderTimeline(payload: SessionDetailPayload, prefix = ""): string[] {
     // timestamps. The SessionDetailPayload does not include a per-event
     // stream in this fetch shape. We render what we have: the top tools and
     // agent delegation events.
-    //
-    // NOTE P3.7: When the per-role schema lands (P3.7), replace this section
-    // with a by-role grouped timeline using the invoked_at timestamps from the
-    // new schema fields. For now we list top tools by count, then spawn events.
-    //
-    // TODO(P3.7): add --by-role grouping once role + plays_role schema is
-    // implemented.
 
     // Show top tools as summary items
     for (const tc of payload.tool_calls.slice(0, 8)) {
@@ -153,8 +150,12 @@ export function renderSessionMarkdown(
     lines.push(`parent    ${parentStr}`);
     lines.push("");
 
-    // ── top skills ───────────────────────────────────────────────────────────
-    if (session.top_skills.length > 0) {
+    // ── top skills / by-role ─────────────────────────────────────────────────
+    if (payload.by_role !== null && payload.by_role !== undefined) {
+        // P3.7: --by-role grouping replaces "## Top skills"
+        lines.push(renderByRoleSection(payload.by_role));
+        lines.push("");
+    } else if (session.top_skills.length > 0) {
         lines.push("## Top skills");
         lines.push(`${"N".padStart(3)}  ${"skill".padEnd(30)} uses`);
         for (let i = 0; i < session.top_skills.length; i++) {
@@ -217,12 +218,16 @@ export function renderSessionMarkdown(
 /**
  * Render the session show payload as compact JSON for piped/non-TTY output.
  * Emits the full fetchSessionDetail payload plus expanded_subagents array.
+ * P3.7: includes by_role when populated.
  */
 export function renderSessionJson(payload: SessionShowPayload): string {
     return JSON.stringify(
         {
             ...payload.session,
             expanded_subagents: payload.expanded_subagents,
+            ...(payload.by_role !== null && payload.by_role !== undefined
+                ? { by_role: payload.by_role }
+                : {}),
         },
         null,
         2,
