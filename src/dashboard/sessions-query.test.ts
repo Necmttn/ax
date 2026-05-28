@@ -60,8 +60,10 @@ describe("listSessionsHere", () => {
         );
 
         expect(captured).toHaveLength(1);
-        const { sql } = captured[0]!;
-        expect(sql).toContain("repository = repository:⟨remote__github.com_foo_bar⟩");
+        const { sql, bindings } = captured[0]!;
+        expect(sql).toContain("repository = $repository");
+        expect(sql).not.toContain("repository:⟨remote__github.com_foo_bar⟩");
+        expect(bindings!.repository).toBe("repository:⟨remote__github.com_foo_bar⟩");
         expect(sql).toContain("14d");
         expect(sql).toContain("time::now()");
     });
@@ -202,9 +204,10 @@ describe("listSessionsNear", () => {
             layer,
         );
 
-        expect(captured[0]!.sql).toContain(
-            "AND repository = repository:⟨remote__github.com_foo_bar⟩",
-        );
+        const { sql: nearSql, bindings: nearBindings } = captured[0]!;
+        expect(nearSql).toContain("AND repository = $repository");
+        expect(nearSql).not.toContain("AND repository = repository:⟨remote__github.com_foo_bar⟩");
+        expect(nearBindings!.repository).toBe("repository:⟨remote__github.com_foo_bar⟩");
     });
 
     test("omits repository WHERE filter when repositoryRecordId is null", async () => {

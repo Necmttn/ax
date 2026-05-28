@@ -66,10 +66,11 @@ export const listSessionsHere = (
         const days = opts.days ?? 14;
         const sql = `
 SELECT ${SESSION_SELECT}
-WHERE repository = ${opts.repositoryRecordId}
+WHERE repository = $repository
   AND started_at >= time::now() - ${days}d
 ORDER BY started_at DESC;`;
-        const result = yield* db.query<[SessionRow[]]>(sql);
+        // `days` is a validated integer - numeric interpolation is intentional here.
+        const result = yield* db.query<[SessionRow[]]>(sql, { repository: opts.repositoryRecordId });
         return result?.[0] ?? [];
     });
 
@@ -142,7 +143,7 @@ export const listSessionsNear = (
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         const repoClause = opts.repositoryRecordId
-            ? `  AND repository = ${opts.repositoryRecordId}`
+            ? `  AND repository = $repository`
             : "";
 
         const sql = `
@@ -151,9 +152,9 @@ WHERE started_at >= $from
   AND started_at <= $to${repoClause}
 ORDER BY started_at DESC;`;
 
-        const result = yield* db.query<[SessionRow[]]>(sql, {
-            from: opts.from,
-            to: opts.to,
-        });
+        const bindings: Record<string, unknown> = { from: opts.from, to: opts.to };
+        if (opts.repositoryRecordId) bindings.repository = opts.repositoryRecordId;
+
+        const result = yield* db.query<[SessionRow[]]>(sql, bindings);
         return result?.[0] ?? [];
     });
