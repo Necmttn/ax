@@ -174,13 +174,13 @@ describe("Cursor state.vscdb extraction", () => {
             const firstEventKey = agentEventRecordKey({
                 provider: "cursor",
                 providerSessionId: first.providerEvents[0]!.providerSessionId,
-                providerEventId: first.providerEvents[0]!.providerEventId,
+                providerEventId: first.providerEvents[0]!.providerEventId ?? null,
                 seq: first.providerEvents[0]!.seq,
             });
             const secondEventKey = agentEventRecordKey({
                 provider: "cursor",
                 providerSessionId: second.providerEvents[0]!.providerSessionId,
-                providerEventId: second.providerEvents[0]!.providerEventId,
+                providerEventId: second.providerEvents[0]!.providerEventId ?? null,
                 seq: second.providerEvents[0]!.seq,
             });
             expect(firstEventKey).not.toBe(secondEventKey);
