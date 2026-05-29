@@ -17,6 +17,9 @@ export interface AxConfigShape {
         readonly skillDirs: ReadonlyArray<string>;
         readonly commandDirs: ReadonlyArray<string>;
         readonly codexDir: string;
+        readonly piDir: string;
+        readonly opencodeDir: string;
+        readonly cursorUserDir: string;
         readonly dataDir: string;
         readonly claudeUsageDir: string;
         readonly repoListFile: string;
@@ -86,6 +89,10 @@ export function envSnapshot(env: Record<string, string | undefined> = process.en
             skillDirs: csv(env.AX_SKILLS_DIRS),
             commandDirs: csv(env.AX_COMMAND_DIRS),
             codexDir: env.AX_CODEX_DIR ?? join(home, ".codex", "sessions"),
+            piDir: env.AX_PI_DIR ?? join(home, ".pi", "agent", "sessions"),
+            opencodeDir: env.AX_OPENCODE_DIR ?? join(home, ".local", "share", "opencode"),
+            cursorUserDir:
+                env.AX_CURSOR_USER_DIR ?? join(home, "Library", "Application Support", "Cursor", "User"),
             dataDir,
             claudeUsageDir:
                 env.AX_CLAUDE_USAGE_DIR ?? join(home, ".claude", "usage-data"),

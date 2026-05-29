@@ -5,6 +5,9 @@ import { SkillsKey, skillsStage } from "../skills.ts";
 import { CommandsKey, commandsStage } from "../commands.ts";
 import { ClaudeKey, claudeStage } from "../transcripts.ts";
 import { CodexKey, codexStage } from "../codex.ts";
+import { PiKey, piStage } from "../pi.ts";
+import { OpenCodeKey, opencodeStage } from "../opencode.ts";
+import { CursorKey, cursorStage } from "../cursor.ts";
 import { SubagentsKey, subagentsStage } from "../derive-claude-subagents.ts";
 import { SpawnedKey, spawnedStage } from "../derive-spawned.ts";
 import { GitKey, gitStage } from "../git.ts";
@@ -22,7 +25,7 @@ export type { StageDef } from "./types.ts";
 /** Composed union of every known Ingest Stage key. Each stage file exports its
  *  own `Schema.Literal("<key>")`; this union is reassembled by re-exporting
  *  them here. Adding a stage = one import + one entry in the union below. */
-export const IngestStageKey = Schema.Union([SkillsKey, CommandsKey, ClaudeKey, CodexKey, SubagentsKey, SpawnedKey, GitKey, SignalsKey, OutcomesKey, SessionHealthKey, ClosureKey, ProposalsKey, OpportunitiesKey, RetroProposalsKey, HarnessKey]);
+export const IngestStageKey = Schema.Union([SkillsKey, CommandsKey, ClaudeKey, CodexKey, PiKey, OpenCodeKey, CursorKey, SubagentsKey, SpawnedKey, GitKey, SignalsKey, OutcomesKey, SessionHealthKey, ClosureKey, ProposalsKey, OpportunitiesKey, RetroProposalsKey, HarnessKey]);
 export type IngestStageKey = typeof IngestStageKey.Type;
 
 export interface StageRegistryShape {
@@ -46,7 +49,7 @@ export const StageRegistryLive = (
     });
 
 /** The canonical list of stages provided by `StageRegistryDefault`. */
-export const ALL_STAGES = [skillsStage, commandsStage, claudeStage, codexStage, subagentsStage, spawnedStage, gitStage, signalsStage, outcomesStage, sessionHealthStage, closureStage, proposalsStage, opportunitiesStage, retroProposalsStage, harnessStage] as const;
+export const ALL_STAGES = [skillsStage, commandsStage, claudeStage, codexStage, piStage, opencodeStage, cursorStage, subagentsStage, spawnedStage, gitStage, signalsStage, outcomesStage, sessionHealthStage, closureStage, proposalsStage, opportunitiesStage, retroProposalsStage, harnessStage] as const;
 
 /** Production registry: the canonical list of stages provided by ax. Test code
  *  should prefer `StageRegistryLive([...])` with explicit fixtures. */

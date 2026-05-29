@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { Effect } from "effect";
 import {
+    ALL_STAGES,
     StageRegistry,
     StageRegistryLive,
     type StageDef,
@@ -35,5 +36,15 @@ describe("StageRegistry", () => {
         });
         const Live = StageRegistryLive([fakeStage]);
         await Effect.runPromise(program.pipe(Effect.provide(Live)));
+    });
+
+    it("registers local agent provider ingest stages after codex", () => {
+        const keys = ALL_STAGES.map((stage) => stage.meta.key);
+        expect(keys.slice(keys.indexOf("codex"), keys.indexOf("codex") + 4)).toEqual([
+            "codex",
+            "pi",
+            "opencode",
+            "cursor",
+        ]);
     });
 });

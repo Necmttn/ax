@@ -16,6 +16,21 @@ describe("AxConfig", () => {
         expect(snap.knobs.codexConcurrency).toBe(4);
         expect(snap.knobs.claudeConcurrency).toBe(8);
         expect(snap.paths.transcriptsDir).toBe("/tmp/home/.claude/projects");
+        expect(snap.paths.piDir).toBe("/tmp/home/.pi/agent/sessions");
+        expect(snap.paths.opencodeDir).toBe("/tmp/home/.local/share/opencode");
+        expect(snap.paths.cursorUserDir).toBe("/tmp/home/Library/Application Support/Cursor/User");
+    });
+
+    test("envSnapshot honors local agent provider path overrides", () => {
+        const snap = envSnapshot({
+            HOME: "/tmp/home",
+            AX_PI_DIR: "/tmp/pi-sessions",
+            AX_OPENCODE_DIR: "/tmp/opencode",
+            AX_CURSOR_USER_DIR: "/tmp/cursor-user",
+        });
+        expect(snap.paths.piDir).toBe("/tmp/pi-sessions");
+        expect(snap.paths.opencodeDir).toBe("/tmp/opencode");
+        expect(snap.paths.cursorUserDir).toBe("/tmp/cursor-user");
     });
 
     test("envSnapshot falls back to defaults", () => {
@@ -24,6 +39,9 @@ describe("AxConfig", () => {
         expect(snap.db.ns).toBe("ax");
         expect(snap.knobs.claudeConcurrency).toBe(4);
         expect(snap.knobs.codexConcurrency).toBe(1);
+        expect(snap.paths.piDir).toBe("/tmp/home/.pi/agent/sessions");
+        expect(snap.paths.opencodeDir).toBe("/tmp/home/.local/share/opencode");
+        expect(snap.paths.cursorUserDir).toBe("/tmp/home/Library/Application Support/Cursor/User");
     });
 
     test("envSnapshot ignores invalid numeric knobs", () => {

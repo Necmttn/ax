@@ -299,7 +299,7 @@ const progressUpdater = (
  *  Key is the old IngestStageKey string; cast `s.meta.key as IngestStageKeyLegacy`
  *  when looking up (the registry keys are the same string values). */
 type IngestStageKeyLegacy =
-    | "skills" | "commands" | "claude" | "codex" | "subagents" | "spawned" | "git"
+    | "skills" | "commands" | "claude" | "codex" | "pi" | "opencode" | "cursor" | "subagents" | "spawned" | "git"
     | "signals" | "outcomes" | "session-health" | "closure" | "proposals"
     | "opportunities" | "retro-proposals" | "harness";
 
@@ -308,6 +308,9 @@ const STAGE_PROGRESS: Record<IngestStageKeyLegacy, ProgressStage> = {
     commands: { source: "commands", stage: "upsert" },
     claude: { source: "claude", stage: "transcripts" },
     codex: { source: "codex", stage: "sessions" },
+    pi: { source: "pi", stage: "sessions" },
+    opencode: { source: "opencode", stage: "sessions" },
+    cursor: { source: "cursor", stage: "sessions" },
     subagents: { source: "claude", stage: "subagents" },
     spawned: { source: "signals", stage: "spawned" },
     git: { source: "git", stage: "history" },
@@ -352,7 +355,7 @@ export const resolveIngestStages = (
  *  users typing the old flag would get a no-op full ingest. */
 const REMOVED_INGEST_FLAGS: ReadonlyArray<readonly [string, string]> = [
     ["--skills-only", "--stages=skills"],
-    ["--transcripts-only", "--stages=claude,codex"],
+    ["--transcripts-only", "--stages=claude,codex,pi,opencode,cursor"],
     ["--codex-only", "--stages=codex"],
     ["--git-only", "--stages=git"],
     ["--claude-only", "--stages=claude"],
@@ -1734,7 +1737,7 @@ const ingestCommand = Command.make(
         ]);
     },
 ).pipe(Command.withDescription(
-    "Ingest skills, transcripts, Codex sessions, git history, and insight artifacts. " +
+    "Ingest skills, local agent transcripts, git history, and insight artifacts. " +
         "Use --stages=<a,b,c> for a custom subset, or --derive-only to run every stage tagged `derive` " +
         "(see ADR-0009; canonical list lives in src/ingest/stage/registry.ts). " +
         "Use --reset to wipe the skill graph first and rebuild it clean.",

@@ -101,7 +101,7 @@ describe("effect cli", () => {
         });
         expect(detectRemovedIngestFlag(["--transcripts-only"])).toEqual({
             flag: "--transcripts-only",
-            replacement: "--stages=claude,codex",
+            replacement: "--stages=claude,codex,pi,opencode,cursor",
         });
         expect(detectRemovedIngestFlag(["--codex-only"])).toEqual({
             flag: "--codex-only",
@@ -125,8 +125,12 @@ describe("effect cli", () => {
     });
 
     test("resolveIngestStages: default runs every stage", () => {
-        // 15 here; bumps to 16 in Phase B when invoked-positions registers.
-        expect(resolveIngestStages(testRegistry, [])).toHaveLength(15);
+        expect(resolveIngestStages(testRegistry, [])).toHaveLength(18);
+    });
+
+    test("resolveIngestStages: local agent provider stages can be selected", () => {
+        const keys = resolveIngestStages(testRegistry, ["--stages=pi,opencode,cursor"]).map((s) => s.meta.key);
+        expect(keys).toEqual(["pi", "opencode", "cursor"]);
     });
 
     test("resolveIngestStages: --stages= runs exactly the listed stages", () => {
