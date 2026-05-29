@@ -1,0 +1,7 @@
+# Progress is a live-traces TraceEvent stream, not a ProgressReporter service
+
+`axctl` will not introduce a dedicated `ProgressReporter` Effect service for the **Ingest Pipeline**. Instead the pipeline wraps its run with a `LiveTrace.withTrace({ traceId: "ingest:<runId>", ... })` scope and wraps each **Ingest Stage** with `LiveTrace.step(meta.key)`. Stage progress is emitted through `Effect.log` and `Effect.annotateCurrentSpan`; the `LiveTraceLayer` tracer decorator captures it as a typed `TraceEvent` discriminated union (`TraceStart | SpanStart | SpanEnd | SpanEvent | TraceEnd`) routed through a buffered `TraceSink` to a pluggable `TraceTransport`.
+
+Each stage's typed `BaseStageStats`-extending output is surfaced as a `SpanEvent` payload or span attributes at stage end, so the **Insights Surface**, the CLI progress TUI, and durable telemetry sinks all subscribe to the same stream of evidence rather than parallel channels. The tracer wrapping composes cleanly alongside OTel: `TelemetryLive` builds first and sets the OTel tracer; `LiveTraceLayer` builds inside it and wraps the OTel tracer transparently.
+
+Consequence: stages do not import progress plumbing; they use the Effect built-ins they already use. Adding a new progress consumer (durable persistence, web SSE, NDJSON dump) means writing a `TraceTransport`, not editing any stage. Stage stats stay typed end-to-end, while emission stays decoupled from stage logic.
