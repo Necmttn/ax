@@ -11,6 +11,12 @@ import {
 } from "./pi.ts";
 
 describe("Pi JSONL extraction", () => {
+    const extractAgentEventKeysAndSeqs = (statements: readonly string[]): { key: string; seq: number }[] =>
+        statements.flatMap((statement) => {
+            const match = statement.match(/^UPSERT agent_event:`([^`]+)` CONTENT \{[\s\S]*? seq: (\d+),/);
+            return match ? [{ key: match[1]!, seq: Number(match[2]) }] : [];
+        });
+
     test("textFromPiContent joins text blocks and ignores unknown blocks", () => {
         expect(textFromPiContent([
             { type: "text", text: "first" },
@@ -420,7 +426,7 @@ describe("Pi JSONL extraction", () => {
             provider: "pi",
             providerSessionId: "pi-tools",
             providerEventId: "call-read",
-            seq: 1,
+            seq: 1000001001,
         }));
         expect(extracted.invocations).toEqual([
             {
@@ -458,6 +464,62 @@ describe("Pi JSONL extraction", () => {
         expect(sql).toContain("cache_read_input_tokens: 2");
         expect(sql).toContain("cache_creation_input_tokens: 1");
         expect(sql).toContain("estimated_tokens: 19");
+    });
+
+    test("provider event keys and session seqs are stable and unique across repeated statement generation", () => {
+        const lines = [
+            JSON.stringify({
+                type: "session",
+                version: 3,
+                id: "pi-idempotent",
+                timestamp: "2026-05-29T07:00:00.000Z",
+                cwd: "/Users/necmttn/Projects/ax",
+            }),
+            JSON.stringify({
+                type: "message",
+                id: "assistant-idempotent",
+                parentId: null,
+                timestamp: "2026-05-29T07:00:01.000Z",
+                message: {
+                    role: "assistant",
+                    content: [
+                        { type: "text", text: "Reading." },
+                        {
+                            type: "toolCall",
+                            id: "call-read",
+                            name: "read",
+                            input: { path: "src/ingest/pi.ts" },
+                        },
+                    ],
+                },
+            }),
+            JSON.stringify({
+                type: "message",
+                id: "tool-result-read",
+                parentId: "assistant-idempotent",
+                timestamp: "2026-05-29T07:00:02.000Z",
+                message: {
+                    role: "toolResult",
+                    toolCallId: "call-read",
+                    toolName: "read",
+                    content: [{ type: "text", text: "pi source" }],
+                },
+            }),
+        ];
+        const first = __testExtractPiJsonlLines(lines);
+        const second = __testExtractPiJsonlLines(lines);
+
+        expect(first).not.toBeNull();
+        expect(second).not.toBeNull();
+        if (!first || !second) return;
+
+        const firstEvents = extractAgentEventKeysAndSeqs(__testBuildPiBatchStatements(first));
+        const secondEvents = extractAgentEventKeysAndSeqs(__testBuildPiBatchStatements(second));
+
+        expect(firstEvents).toEqual(secondEvents);
+        expect(new Set(firstEvents.map((event) => event.key)).size).toBe(firstEvents.length);
+        expect(new Set(firstEvents.map((event) => event.seq)).size).toBe(firstEvents.length);
+        expect(firstEvents.map((event) => event.seq).sort((a, b) => a - b)).toEqual([1, 2, 1000001001]);
     });
 
     test("turn statements escape session ids and timestamps through shared Surreal helpers", () => {

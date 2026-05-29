@@ -53,6 +53,7 @@ interface PiUsage {
 interface PiTurn {
     session: string;
     providerEventId: string | null;
+    providerEventSeq: number;
     seq: number;
     ts: string;
     role: string;
@@ -96,6 +97,7 @@ export interface PiStats {
 }
 
 const SAFE_FALLBACK_TS = "1970-01-01T00:00:00.000Z";
+const SYNTHETIC_PROVIDER_SEQ_OFFSET = 1_000_000_000;
 
 function isRecord(input: unknown): input is Record<string, unknown> {
     return typeof input === "object" && input !== null && !Array.isArray(input);
@@ -307,10 +309,12 @@ function createPiExtractor(filePath: string) {
         ts: string,
         parentProviderEventId: string | null,
         currentSession: PiSession,
+        blockOrdinal: number,
     ): void => {
         const toolName = piToolName(block);
         if (!toolName) return;
-        const callId = piToolCallId(block) ?? `tool_call_${seq.toString(10).padStart(6, "0")}_${toolCalls.length + 1}`;
+        const callId = piToolCallId(block) ?? `tool_call_${seq.toString(10).padStart(6, "0")}_${blockOrdinal}`;
+        const eventSeq = SYNTHETIC_PROVIDER_SEQ_OFFSET + (seq * 1000) + blockOrdinal;
         const inputJson = piToolInput(block);
         const toolCallKey = toolCallRecordKey({
             sessionId: currentSession.id,
@@ -328,7 +332,7 @@ function createPiExtractor(filePath: string) {
                 provider: "pi",
                 providerSessionId: currentSession.id,
                 providerEventId: callId,
-                seq,
+                seq: eventSeq,
             }),
             callId,
             ts,
@@ -351,7 +355,7 @@ function createPiExtractor(filePath: string) {
             providerEventId: callId,
             parentProviderEventId,
             parentKind: "turn_item",
-            seq,
+            seq: eventSeq,
             ts,
             type: "toolCall",
             role: "assistant",
@@ -487,6 +491,7 @@ function createPiExtractor(filePath: string) {
                 turns.push({
                     session: session.id,
                     providerEventId,
+                    providerEventSeq: seq,
                     seq,
                     ts,
                     role: piTurnRole(role),
@@ -534,9 +539,11 @@ function createPiExtractor(filePath: string) {
             }, session);
 
             if (message && role === "assistant" && Array.isArray(message.content)) {
+                let toolCallOrdinal = 0;
                 for (const block of message.content) {
                     if (isRecord(block) && stringField(block, "type") === "toolCall") {
-                        processToolCallBlock(block, ts, providerEventId, session);
+                        toolCallOrdinal += 1;
+                        processToolCallBlock(block, ts, providerEventId, session, toolCallOrdinal);
                     }
                 }
             } else if (message && (role === "toolResult" || role === "tool_result")) {
@@ -611,7 +618,7 @@ const buildTurnStatements = (turns: readonly PiTurn[]): string[] =>
             provider: "pi",
             providerSessionId: turn.session,
             providerEventId: turn.providerEventId,
-            seq: turn.seq,
+            seq: turn.providerEventSeq,
         });
         return `UPSERT turn:\`${turnRecordKey(turn.session, turn.seq)}\` CONTENT { session: ${recordRef("session", turn.session)}, agent_event: ${recordRef("agent_event", eventKey)}, seq: ${turn.seq}, ts: ${surrealDate(turn.ts)}, role: ${surrealString(turn.role)}, message_kind: ${surrealString(turn.message_kind)}, intent_kind: ${surrealString(turn.intent_kind)}, text: ${turn.text === null ? "NONE" : surrealString(turn.text)}, text_excerpt: ${turn.text_excerpt === null ? "NONE" : surrealString(turn.text_excerpt)}, has_tool_use: ${turn.has_tool_use}, has_error: ${turn.has_error} };`;
     });
