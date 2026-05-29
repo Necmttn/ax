@@ -192,7 +192,7 @@ describe("Claude transcript extraction", () => {
             {
                 provider: "claude",
                 providerSessionId: "claude-user-text",
-                seq: 6,
+                seq: 7,
                 type: "tool_result",
                 role: "user",
                 textExcerpt: "src/ingest/transcripts.ts",
@@ -393,7 +393,7 @@ describe("Claude transcript extraction", () => {
             provider: "claude",
             providerSessionId: "session-abc",
             providerEventId: "toolu_skill",
-            seq: 1,
+            seq: 2,
         }));
 
         const bashCall = extracted.toolCalls.find((call) => call.toolName === "Bash");
@@ -417,7 +417,7 @@ describe("Claude transcript extraction", () => {
             provider: "claude",
             providerSessionId: "session-abc",
             providerEventId: "toolu_bash",
-            seq: 1,
+            seq: 3,
         }));
         expect(extracted.providerEvents.map((event) => ({
             providerEventId: event.providerEventId,
@@ -435,63 +435,63 @@ describe("Claude transcript extraction", () => {
             },
             {
                 providerEventId: "toolu_skill",
-                seq: 1,
+                seq: 2,
                 type: "tool_use",
                 role: "assistant",
                 textExcerpt: "Skill",
             },
             {
                 providerEventId: "toolu_bash",
-                seq: 1,
+                seq: 3,
                 type: "tool_use",
                 role: "assistant",
                 textExcerpt: "Bash",
             },
             {
                 providerEventId: "toolu_edit",
-                seq: 1,
+                seq: 4,
                 type: "tool_use",
                 role: "assistant",
                 textExcerpt: "Edit",
             },
             {
                 providerEventId: null,
-                seq: 2,
+                seq: 5,
                 type: "user",
                 role: "user",
                 textExcerpt: null,
             },
             {
                 providerEventId: "tool_result:toolu_bash",
-                seq: 2,
+                seq: 6,
                 type: "tool_result",
                 role: "user",
                 textExcerpt: longOutput.slice(0, 500),
             },
             {
                 providerEventId: null,
-                seq: 3,
+                seq: 7,
                 type: "assistant",
                 role: "assistant",
                 textExcerpt: null,
             },
             {
                 providerEventId: "toolu_todo_1",
-                seq: 3,
+                seq: 8,
                 type: "tool_use",
                 role: "assistant",
                 textExcerpt: "TodoWrite",
             },
             {
                 providerEventId: null,
-                seq: 4,
+                seq: 9,
                 type: "assistant",
                 role: "assistant",
                 textExcerpt: null,
             },
             {
                 providerEventId: "toolu_todo_2",
-                seq: 4,
+                seq: 10,
                 type: "tool_use",
                 role: "assistant",
                 textExcerpt: "TodoWrite",
@@ -592,6 +592,56 @@ describe("Claude transcript extraction", () => {
                 ),
             ).size,
         ).toBe(2);
+    });
+
+    test("assigns unique provider event seqs and links tool calls to their tool_use events", () => {
+        const extracted = __testExtractClaudeJsonlLines(
+            [
+                JSON.stringify({
+                    type: "assistant",
+                    timestamp: "2026-05-09T11:30:00.000Z",
+                    message: {
+                        content: [
+                            {
+                                type: "tool_use",
+                                id: "toolu_first",
+                                name: "Bash",
+                                input: { command: "pwd" },
+                            },
+                            {
+                                type: "tool_use",
+                                id: "toolu_second",
+                                name: "Read",
+                                input: { file_path: "src/ingest/transcripts.ts" },
+                            },
+                        ],
+                    },
+                }),
+            ],
+            "-Users-necmttn-Projects-ax",
+            "session-provider-seq",
+        );
+
+        expect(extracted).not.toBeNull();
+        if (!extracted) return;
+
+        const providerSeqs = extracted.providerEvents.map((event) => event.seq);
+        expect(new Set(providerSeqs).size).toBe(providerSeqs.length);
+
+        for (const call of extracted.toolCalls) {
+            const event = extracted.providerEvents.find(
+                (providerEvent) => providerEvent.providerEventId === call.callId,
+            );
+            expect(event).toBeDefined();
+            if (!event) continue;
+            expect(call.seq).toBe(1);
+            expect(call.agentEventKey).toBe(agentEventRecordKey({
+                provider: "claude",
+                providerSessionId: "session-provider-seq",
+                providerEventId: call.callId,
+                seq: event.seq,
+            }));
+        }
     });
 
     test("turn IDs use centralized turnRecordKey format", () => {

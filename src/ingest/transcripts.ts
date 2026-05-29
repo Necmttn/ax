@@ -364,8 +364,14 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
     const planSnapshotCountsBySource = new Map<string, number>();
     const anonymousToolUseCountsByTurn = new Map<number, number>();
     let seq = 0;
+    let providerSeq = 0;
     let cwd: string | null = null;
     let model: string | null = null;
+
+    const nextProviderSeq = (): number => {
+        providerSeq += 1;
+        return providerSeq;
+    };
 
     const pushProviderEvent = (event: Omit<AgentEventWrite, "provider" | "providerSessionId" | "axSessionId">): void => {
         providerEvents.push({
@@ -420,6 +426,7 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
             seq,
             callId,
         });
+        const eventSeq = nextProviderSeq();
         const call: MutableToolCallWrite = {
             provider: "claude",
             toolName: name,
@@ -431,7 +438,7 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
                 provider: "claude",
                 providerSessionId: sessionId,
                 providerEventId: callId,
-                seq,
+                seq: eventSeq,
             }),
             callId,
             ts,
@@ -445,7 +452,7 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
             providerEventId: callId,
             parentProviderEventId,
             parentKind: "turn_item",
-            seq,
+            seq: eventSeq,
             ts,
             type: "tool_use",
             role,
@@ -814,6 +821,7 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
         const callId = stringField(block, "tool_use_id");
         const hasError = block.is_error === true;
         const text = outputText(block.content ?? null);
+        const eventSeq = nextProviderSeq();
         const result: ToolResultFields = {
             outputJson: block.content ?? null,
             outputExcerpt: text ? boundedExcerpt(text) : null,
@@ -825,7 +833,7 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
             providerEventId: callId ? `tool_result:${callId}` : null,
             parentProviderEventId: callId ?? parentProviderEventId,
             parentKind: callId ? "tool_result" : "turn_item",
-            seq,
+            seq: eventSeq,
             ts,
             type: "tool_result",
             role,
@@ -916,7 +924,7 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
             const intentKind = classifyTurnIntent({ role, messageKind: kind, source: "claude", text });
             pushProviderEvent({
                 providerEventId,
-                seq,
+                seq: nextProviderSeq(),
                 ts,
                 type: role,
                 role,
