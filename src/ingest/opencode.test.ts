@@ -154,6 +154,50 @@ describe("OpenCode SQLite extraction", () => {
         });
     });
 
+    test("extracts observed messages when message.time_updated is absent", async () => {
+        await withTempOpenCodeDb((db, dbPath) => {
+            db.run(
+                "CREATE TABLE session (id text primary key, directory text, title text, time_created integer, time_updated integer)",
+            );
+            db.run(
+                "CREATE TABLE message (id text primary key, session_id text, time_created integer, data text)",
+            );
+            db.run(
+                "CREATE TABLE part (id text primary key, message_id text, session_id text, time_created integer, data text)",
+            );
+            db.query(
+                "INSERT INTO session (id, directory, title, time_created, time_updated) VALUES (?, ?, ?, ?, ?)",
+            ).run("ses-no-message-updated", "/tmp/project", "No message updated", 1775546262338, 1775546262339);
+            db.query(
+                "INSERT INTO message (id, session_id, time_created, data) VALUES (?, ?, ?, ?)",
+            ).run(
+                "msg-no-message-updated",
+                "ses-no-message-updated",
+                1775546262338,
+                JSON.stringify({ role: "user" }),
+            );
+            db.query(
+                "INSERT INTO part (id, message_id, session_id, time_created, data) VALUES (?, ?, ?, ?, ?)",
+            ).run(
+                "prt-no-message-updated",
+                "msg-no-message-updated",
+                "ses-no-message-updated",
+                1775546262338,
+                JSON.stringify({ type: "text", text: "No message updated column." }),
+            );
+
+            const extracted = extractOpenCodeDatabase(dbPath);
+
+            expect(extracted.sessions).toHaveLength(1);
+            expect(extracted.providerEvents).toHaveLength(1);
+            expect(extracted.providerEvents[0]).toMatchObject({
+                providerEventId: "msg-no-message-updated",
+                text: "No message updated column.",
+            });
+            expect(extracted.warnings).toEqual([]);
+        });
+    });
+
     test("keeps valid rows when timestamps or JSON payloads are malformed", async () => {
         await withTempOpenCodeDb((db, dbPath) => {
             db.run(

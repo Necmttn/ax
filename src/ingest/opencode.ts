@@ -92,7 +92,6 @@ interface ObservedMessageRow extends SQLiteRow {
     readonly id: string;
     readonly session_id: string;
     readonly time_created: number | bigint | string | null;
-    readonly time_updated: number | bigint | string | null;
     readonly data: string | null;
 }
 
@@ -233,7 +232,7 @@ function observedRows(db: Database, hasModelColumn: boolean): {
             `SELECT id, directory, title, ${modelSelect}, time_created, time_updated FROM session ORDER BY time_created, id`,
         ).all(),
         messages: db.query<ObservedMessageRow, []>(
-            "SELECT id, session_id, time_created, time_updated, data FROM message ORDER BY time_created, id",
+            "SELECT id, session_id, time_created, data FROM message ORDER BY time_created, id",
         ).all(),
         parts: db.query<ObservedPartRow, []>(
             "SELECT id, message_id, session_id, time_created, data FROM part ORDER BY time_created, id",
