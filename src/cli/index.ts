@@ -273,9 +273,9 @@ const progressUpdater = (
  *  Key is the old IngestStageKey string; cast `s.meta.key as IngestStageKeyLegacy`
  *  when looking up (the registry keys are the same string values). */
 type IngestStageKeyLegacy =
-    | "skills" | "commands" | "claude" | "codex" | "subagents" | "spawned" | "git"
-    | "signals" | "outcomes" | "session-health" | "closure" | "proposals"
-    | "opportunities" | "retro-proposals" | "harness";
+    | "skills" | "commands" | "claude" | "codex" | "subagents" | "invoked-positions"
+    | "spawned" | "git" | "signals" | "outcomes" | "session-health" | "closure"
+    | "proposals" | "opportunities" | "retro-proposals" | "harness";
 
 const STAGE_PROGRESS: Record<IngestStageKeyLegacy, ProgressStage> = {
     skills: { source: "skills", stage: "upsert" },
@@ -283,6 +283,7 @@ const STAGE_PROGRESS: Record<IngestStageKeyLegacy, ProgressStage> = {
     claude: { source: "claude", stage: "transcripts" },
     codex: { source: "codex", stage: "sessions" },
     subagents: { source: "claude", stage: "subagents" },
+    "invoked-positions": { source: "invoked", stage: "backfill-positions" },
     spawned: { source: "signals", stage: "spawned" },
     git: { source: "git", stage: "history" },
     signals: { source: "signals", stage: "derive" },

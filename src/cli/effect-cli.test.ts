@@ -125,7 +125,7 @@ describe("effect cli", () => {
     });
 
     test("resolveIngestStages: default runs every stage", () => {
-        expect(resolveIngestStages(testRegistry, [])).toHaveLength(15);
+        expect(resolveIngestStages(testRegistry, [])).toHaveLength(16);
     });
 
     test("resolveIngestStages: --stages= runs exactly the listed stages", () => {
@@ -139,11 +139,12 @@ describe("effect cli", () => {
     test("resolveIngestStages: --derive-only runs only stages tagged 'derive'", () => {
         const keys = resolveIngestStages(testRegistry, ["--derive-only"]).map((s) => s.meta.key);
         // All stages in the registry with the "derive" tag:
-        // subagents, spawned, signals, closure, outcomes, session-health,
-        // proposals, opportunities, retro-proposals, harness.
+        // subagents, invoked-positions, spawned, signals, closure, outcomes,
+        // session-health, proposals, opportunities, retro-proposals, harness.
         expect([...keys].sort()).toEqual([
             "closure",
             "harness",
+            "invoked-positions",
             "opportunities",
             "outcomes",
             "proposals",
