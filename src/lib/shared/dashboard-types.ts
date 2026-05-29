@@ -722,7 +722,9 @@ export interface SessionInspectPayload {
 
 export type ProposalForm = "skill" | "subagent" | "hook" | "guidance" | "automation";
 export type ProposalStatus = "open" | "accepted" | "rejected" | "superseded";
-export type CheckpointKindDto = "t+7" | "t+30" | "t+90";
+// New session-based kinds (+3s | +10s | +30s) per issue #83.
+// Legacy day-based kinds (t+7 | t+30 | t+90) remain valid for historical rows.
+export type CheckpointKindDto = "+3s" | "+10s" | "+30s" | "t+7" | "t+30" | "t+90";
 export type CheckpointVerdictDto =
     | "adopted"
     | "ignored"

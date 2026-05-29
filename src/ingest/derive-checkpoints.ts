@@ -1,11 +1,21 @@
 /**
  * Derive-Checkpoints Stage (Phase C6).
  *
- * For each active experiment, at the t+7 / t+30 / t+90 day marks measured
- * from experiment.created_at, emit one `checkpoint` row carrying:
+ * For each active experiment, at the +3 / +10 / +30 session marks measured
+ * by count of sessions created after experiment.created_at, emit one
+ * `checkpoint` row carrying:
  *  - measured  : { opportunities, addressed, ratio, built }
  *  - suggested : adopted | ignored | regressed | no_longer_needed | partial
  *  - user_verdict : NULL - the human confirms via `axctl improve verdict`.
+ *
+ * Windows are session-count, not calendar days, because an AI-coding agent
+ * may ship eight sessions in a day or none in a weekend. The verdict should
+ * ride exposure to the pattern, not the wall clock. See issue #83.
+ *
+ * v1 exposure definition: count of sessions whose `created_at` is after
+ * `experiment.created_at`. (Refinements to narrow this to "sessions that
+ * touched the artifact file" or "sessions that fired the trigger pattern"
+ * are tracked in follow-ups.)
  *
  * Verdict math (suggested only - the human still confirms):
  *   if opportunities == 0:
@@ -21,6 +31,11 @@
  * opportunity count changes the suggested verdict, the user can re-run
  * `axctl improve checkpoint --force` (Phase C7) to refresh - that path
  * deletes the existing checkpoint and re-inserts.
+ *
+ * Legacy `t+7` / `t+30` / `t+90` checkpoint rows from the calendar-day era
+ * remain valid in the DB (kind is a free-form string). New experiments
+ * emit the session-based kinds. The two are non-conflicting because the
+ * (experiment, kind) unique index keys on the kind string.
  */
 
 import { Effect } from "effect";
@@ -32,7 +47,7 @@ import { executeStatementsWith } from "../lib/shared/statement-exec.ts";
 import { safeKeyPart, recordKeyPart } from "../lib/shared/derive-keys.ts";
 import { safeJsonParse } from "../lib/shared/safe-json.ts";
 
-export type CheckpointKind = "t+7" | "t+30" | "t+90";
+export type CheckpointKind = "+3s" | "+10s" | "+30s";
 export type CheckpointVerdict =
     | "adopted"
     | "ignored"
@@ -60,6 +75,8 @@ interface CheckpointExperimentRow {
     readonly existing_kinds: ReadonlyArray<string>;
     readonly current_frequency?: number | null;
     readonly baseline_json?: string | null;
+    /** Sessions created after this experiment's accept time. Drives window cadence. */
+    readonly sessions_since_created: number;
 }
 
 export interface CheckpointMeasured {
@@ -77,10 +94,10 @@ export interface CheckpointMeasured {
     readonly baselineFrequency?: number;
 }
 
-export const CHECKPOINT_WINDOWS_DAYS: ReadonlyArray<readonly [CheckpointKind, number]> = [
-    ["t+7", 7],
-    ["t+30", 30],
-    ["t+90", 90],
+export const CHECKPOINT_WINDOWS_SESSIONS: ReadonlyArray<readonly [CheckpointKind, number]> = [
+    ["+3s", 3],
+    ["+10s", 10],
+    ["+30s", 30],
 ];
 
 export const computeSuggestedVerdict = (measured: CheckpointMeasured): CheckpointVerdict => {
@@ -100,17 +117,14 @@ export const computeSuggestedVerdict = (measured: CheckpointMeasured): Checkpoin
 };
 
 export const dueCheckpointKinds = (
-    createdAt: Date,
-    now: Date,
+    sessionsSinceCreated: number,
     existing: ReadonlySet<string>,
 ): CheckpointKind[] => {
-    const dueMs = (kind: CheckpointKind) => {
-        const days = CHECKPOINT_WINDOWS_DAYS.find(([k]) => k === kind)?.[1] ?? 0;
-        return createdAt.getTime() + days * 24 * 3600 * 1000;
-    };
-    return CHECKPOINT_WINDOWS_DAYS
+    const threshold = (kind: CheckpointKind) =>
+        CHECKPOINT_WINDOWS_SESSIONS.find(([k]) => k === kind)?.[1] ?? 0;
+    return CHECKPOINT_WINDOWS_SESSIONS
         .map(([k]) => k)
-        .filter((k) => now.getTime() >= dueMs(k) && !existing.has(k));
+        .filter((k) => sessionsSinceCreated >= threshold(k) && !existing.has(k));
 };
 
 export const checkpointKey = (experimentKey: string, kind: CheckpointKind): string =>
@@ -159,7 +173,8 @@ export const deriveCheckpoints = (
                 (SELECT count() FROM opportunity WHERE in = $parent.id AND was_addressed = true GROUP ALL)[0].count ?? 0 AS addressed,
                 (SELECT VALUE kind FROM checkpoint WHERE experiment = $parent.id) AS existing_kinds,
                 proposal.frequency AS current_frequency,
-                proposal.baseline AS baseline_json
+                proposal.baseline AS baseline_json,
+                (SELECT count() FROM session WHERE created_at > $parent.created_at GROUP ALL)[0].count ?? 0 AS sessions_since_created
             FROM experiment
             WHERE locked_verdict IS NONE;
         `);
@@ -171,9 +186,9 @@ export const deriveCheckpoints = (
         for (const exp of experiments) {
             const experimentKey = recordKeyPart(exp.id, "experiment");
             if (!experimentKey) continue;
-            const createdAt = new Date(exp.created_at);
             const existing = new Set(opts.force ? [] : (exp.existing_kinds ?? []));
-            const due = dueCheckpointKinds(createdAt, now, existing);
+            const sessionsSince = Number(exp.sessions_since_created ?? 0);
+            const due = dueCheckpointKinds(sessionsSince, existing);
             if (due.length === 0) continue;
 
             const opportunities = Number(exp.opportunities ?? 0);
@@ -220,7 +235,7 @@ export const deriveCheckpoints = (
                 }));
                 inserted += 1;
             }
-            skipped += (CHECKPOINT_WINDOWS_DAYS.length - due.length);
+            skipped += (CHECKPOINT_WINDOWS_SESSIONS.length - due.length);
         }
 
         yield* executeStatementsWith(db, statements, { chunkSize: 200 });

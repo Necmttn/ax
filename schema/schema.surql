@@ -1300,15 +1300,20 @@ DEFINE INDEX opportunity_in_ts  ON opportunity FIELDS in, matched_at;
 DEFINE INDEX opportunity_out    ON opportunity FIELDS out;
 
 -- ==== Checkpoint (decision support, never auto-verdict) ====
--- One row per (experiment, kind) snapshot at t+7 / t+30 / t+90.
+-- One row per (experiment, kind) snapshot at +3 / +10 / +30 sessions
+-- since experiment.created_at (see issue #83 - calendar days are the wrong
+-- cadence when an agent ships eight sessions a day). Legacy day-based
+-- rows (t+7 / t+30 / t+90) are preserved as historical data; the kind
+-- field is a free-form string so the two cadences coexist.
 -- `measured` is the aggregate {built, invoked, opportunities, addressed,
 -- friction_delta}. `suggested` is the algorithm's verdict guess. The
 -- human-confirmed `user_verdict` is what gets locked into experiment.
--- locked_verdict at t+30. Algorithm proposes, human decides.
+-- locked_verdict at +30s. Algorithm proposes, human decides.
 DEFINE TABLE checkpoint SCHEMAFULL;
 DEFINE FIELD experiment   ON checkpoint TYPE record<experiment> REFERENCE ON DELETE CASCADE;
 DEFINE FIELD kind         ON checkpoint TYPE string;
-    -- t+7 | t+30 | t+90 | adhoc
+    -- current: +3s | +10s | +30s | adhoc
+    -- legacy:  t+7 | t+30 | t+90 (calendar-day windows, pre-#83)
 DEFINE FIELD measured              ON checkpoint TYPE object;
 DEFINE FIELD measured.opportunities ON checkpoint TYPE int DEFAULT 0;
 DEFINE FIELD measured.addressed     ON checkpoint TYPE int DEFAULT 0;

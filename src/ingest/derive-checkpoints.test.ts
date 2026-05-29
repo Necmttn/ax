@@ -47,37 +47,45 @@ describe("computeSuggestedVerdict", () => {
 });
 
 describe("dueCheckpointKinds", () => {
-    const created = new Date("2026-01-01T00:00:00Z");
-    test("nothing due yet at t+6 days", () => {
-        const now = new Date("2026-01-07T00:00:00Z"); // 6 days exactly minus 1ms = 6 < 7
-        expect(dueCheckpointKinds(created, now, new Set()).length).toBe(0);
+    test("nothing due at 2 sessions", () => {
+        expect(dueCheckpointKinds(2, new Set()).length).toBe(0);
     });
 
-    test("t+7 due at exactly 7 days", () => {
-        const now = new Date("2026-01-08T00:00:00Z"); // 7 days
-        expect(dueCheckpointKinds(created, now, new Set())).toEqual(["t+7"]);
+    test("+3s due at exactly 3 sessions", () => {
+        expect(dueCheckpointKinds(3, new Set())).toEqual(["+3s"]);
     });
 
-    test("t+7, t+30 due at 31 days", () => {
-        const now = new Date("2026-02-01T00:00:00Z"); // 31 days
-        expect(dueCheckpointKinds(created, now, new Set())).toEqual(["t+7", "t+30"]);
+    test("+3s and +10s due at 11 sessions", () => {
+        expect(dueCheckpointKinds(11, new Set())).toEqual(["+3s", "+10s"]);
     });
 
-    test("all three due at 91 days", () => {
-        const now = new Date("2026-04-02T00:00:00Z"); // 91 days
-        expect(dueCheckpointKinds(created, now, new Set())).toEqual(["t+7", "t+30", "t+90"]);
+    test("all three due at 30+ sessions", () => {
+        expect(dueCheckpointKinds(30, new Set())).toEqual(["+3s", "+10s", "+30s"]);
+        expect(dueCheckpointKinds(42, new Set())).toEqual(["+3s", "+10s", "+30s"]);
     });
 
     test("skips kinds already present in existing", () => {
-        const now = new Date("2026-04-02T00:00:00Z");
-        expect(dueCheckpointKinds(created, now, new Set(["t+7", "t+30"]))).toEqual(["t+90"]);
+        expect(dueCheckpointKinds(40, new Set(["+3s", "+10s"]))).toEqual(["+30s"]);
+    });
+
+    test("legacy day-based kinds in existing are not treated as the new session-based ones", () => {
+        // A migrated experiment may have legacy t+7/t+30/t+90 rows. Those
+        // don't satisfy the new windows; they're separate kinds. The new
+        // session-based checkpoints should still emit.
+        expect(dueCheckpointKinds(40, new Set(["t+7", "t+30", "t+90"]))).toEqual(["+3s", "+10s", "+30s"]);
     });
 });
 
 describe("checkpointKey", () => {
     test("deterministic and disambiguates by kind", () => {
-        expect(checkpointKey("exp_a", "t+7")).toBe(checkpointKey("exp_a", "t+7"));
-        expect(checkpointKey("exp_a", "t+7")).not.toBe(checkpointKey("exp_a", "t+30"));
+        expect(checkpointKey("exp_a", "+3s")).toBe(checkpointKey("exp_a", "+3s"));
+        expect(checkpointKey("exp_a", "+3s")).not.toBe(checkpointKey("exp_a", "+10s"));
+    });
+
+    test("escapes the + so the key is a safe SurrealDB identifier", () => {
+        const key = checkpointKey("exp_a", "+3s");
+        expect(key).not.toContain("+");
+        expect(key).toContain("_plus_3s");
     });
 });
 
@@ -85,14 +93,14 @@ describe("buildCheckpointStatement", () => {
     test("emits UPSERT with NONE user_verdict + json measured + recorded suggested", () => {
         const sql = buildCheckpointStatement({
             experimentKey: "exp_demo",
-            kind: "t+7",
+            kind: "+3s",
             measured: { opportunities: 4, addressed: 3, ratio: 0.75, built: true },
             suggested: "adopted",
             observedAt: new Date("2026-05-25T00:00:00.000Z"),
         });
         expect(sql).toContain("UPSERT checkpoint:");
         expect(sql).toContain("experiment: experiment:");
-        expect(sql).toContain("kind: \"t+7\"");
+        expect(sql).toContain("kind: \"+3s\"");
         expect(sql).toContain("suggested: \"adopted\"");
         expect(sql).toContain("user_verdict: NONE");
         expect(sql).toContain("\"opportunities\":4");

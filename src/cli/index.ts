@@ -2314,10 +2314,10 @@ const improveCheckpointCommand = Command.make(
     },
     ({ force, json }) =>
         cmdImproveCheckpoint([...boolArg("force", force), ...boolArg("json", json)]),
-).pipe(Command.withDescription("Compute checkpoint snapshots at t+7/t+30/t+90 for active experiments"));
+).pipe(Command.withDescription("Compute checkpoint snapshots at +3/+10/+30 sessions for active experiments (session-count windows, not calendar days - see issue #83)"));
 
 const improveCommand = Command.make("improve").pipe(
-    Command.withDescription("Experiment loop: rank proposals (recommend), accept (emit task brief or scaffold + dispatch subagent), lint grounded agent files, track verdicts at t+7/t+30/t+90."),
+    Command.withDescription("Experiment loop: rank proposals (recommend), accept (emit task brief or scaffold + dispatch subagent), lint grounded agent files, track verdicts at +3/+10/+30 sessions after accept."),
     Command.withSubcommands([
         improveRecommendCommand,
         improveLintCommand,
