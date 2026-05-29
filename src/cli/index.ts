@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { Effect, Option, References } from "effect";
+import { Effect, Layer, Option, References } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
 import { AxConfig } from "../lib/config.ts";
@@ -8,18 +8,6 @@ import { ProcessService } from "../lib/process.ts";
 import { prettyPrint, surrealLiteral } from "../lib/json.ts";
 import { prettifyProjectSlug } from "../lib/shared/project-slug.ts";
 import { AppLayer } from "../lib/layers.ts";
-import { ingestSkills } from "../ingest/skills.ts";
-import { ingestCommands } from "../ingest/commands.ts";
-import { ingestTranscripts } from "../ingest/transcripts.ts";
-import { ingestCodex } from "../ingest/codex.ts";
-import { ingestGit } from "../ingest/git.ts";
-import { ingestHarness } from "../ingest/harness.ts";
-import { deriveOutcomes } from "../ingest/outcomes.ts";
-import { deriveSessionHealth } from "../ingest/session-health.ts";
-import { deriveClosure } from "../ingest/closure.ts";
-import { deriveProposals } from "../ingest/derive-proposals.ts";
-import { deriveOpportunities } from "../ingest/derive-opportunities.ts";
-import { deriveRetroProposals } from "../ingest/derive-retro-proposals.ts";
 import { deriveCheckpoints } from "../ingest/derive-checkpoints.ts";
 import { retroFromSession, upsertRetro, type RetroSource } from "../ingest/retro.ts";
 import { scaffoldSkill } from "../improve/skill-scaffold.ts";
@@ -37,8 +25,6 @@ import { recordRef, surrealString } from "../lib/shared/surql.ts";
 import { ingestClaudeInsights } from "../ingest/claude-insights.ts";
 import { deriveSignals } from "../ingest/derive-signals.ts";
 import { deriveTurnIntents } from "../ingest/derive-intents.ts";
-import { deriveSpawned } from "../ingest/derive-spawned.ts";
-import { deriveClaudeSubagents } from "../ingest/derive-claude-subagents.ts";
 import { INSIGHT_VIEWS, insightSqlForView, isInsightView } from "../queries/insights.ts";
 import { writeDashboard } from "../dashboard/report.ts";
 import { serveDashboard } from "../dashboard/server.ts";
@@ -86,15 +72,13 @@ import {
     publishIngestEvent,
 } from "../dashboard/telemetry.ts";
 import type { DbError } from "../lib/errors.ts";
-import {
-    type IngestStageKey,
-    ALL_STAGE_KEYS,
-    INGEST_STAGE_DEPS,
-    deriveOnlyKeys,
-    selectStages,
-    runPipeline,
-    type StageSpec,
-} from "../ingest/pipeline.ts";
+import { StageRegistry, type StageRegistryShape } from "../ingest/stage/registry.ts";
+import { IngestRuntimeLayer } from "../ingest/stage/runtime.ts";
+import { ConsoleTransportLayer } from "../lib/live-traces/transports/console.ts";
+import { selectByKeys, selectByTag } from "../ingest/stage/select.ts";
+import { runPipeline } from "../ingest/stage/runner.ts";
+import { IngestContext, type BaseStageStats, type StageDef } from "../ingest/stage/types.ts";
+import { LiveTrace } from "../lib/live-traces/index.ts";
 
 const boolArg = (name: string, enabled: boolean): string[] =>
     enabled ? [`--${name}`] : [];
@@ -285,18 +269,15 @@ const progressUpdater = (
     (counts: Record<string, number>): Effect.Effect<void> =>
         Effect.sync(() => progress?.update({ source, stage }, counts));
 
-/** Legacy `--X-only` flags expressed as explicit stage sets, preserving their
- *  historical behaviour. New code should prefer `--stages=` / `--derive-only`. */
-const LEGACY_ONLY_SETS: Record<string, readonly IngestStageKey[]> = {
-    "skills-only": ["skills", "commands"],
-    "transcripts-only": ["claude", "subagents", "spawned", ...deriveOnlyKeys()],
-    "claude-only": ["skills", "commands", "claude", "subagents", "spawned", ...deriveOnlyKeys()],
-    "codex-only": ["codex", "spawned", ...deriveOnlyKeys()],
-    "git-only": ["git"],
-};
+/** ProgressStage descriptor for each stage key, in execution order.
+ *  Key is the old IngestStageKey string; cast `s.meta.key as IngestStageKeyLegacy`
+ *  when looking up (the registry keys are the same string values). */
+type IngestStageKeyLegacy =
+    | "skills" | "commands" | "claude" | "codex" | "subagents" | "spawned" | "git"
+    | "signals" | "outcomes" | "session-health" | "closure" | "proposals"
+    | "opportunities" | "retro-proposals" | "harness";
 
-/** ProgressStage descriptor for each stage key, in execution order. */
-const STAGE_PROGRESS: Record<IngestStageKey, ProgressStage> = {
+const STAGE_PROGRESS: Record<IngestStageKeyLegacy, ProgressStage> = {
     skills: { source: "skills", stage: "upsert" },
     commands: { source: "commands", stage: "upsert" },
     claude: { source: "claude", stage: "transcripts" },
@@ -315,9 +296,12 @@ const STAGE_PROGRESS: Record<IngestStageKey, ProgressStage> = {
 };
 
 /** Resolve which ingest stages to run from CLI args. Precedence:
- *  `--stages=` (explicit list) > `--derive-only` > a legacy `--X-only` > all.
+ *  `--stages=` (explicit list) > `--derive-only` > all.
  *  Exits with code 2 on an unknown `--stages=` value. */
-export const resolveIngestStages = (args: string[]): IngestStageKey[] => {
+export const resolveIngestStages = (
+    registry: StageRegistryShape,
+    args: string[],
+): ReadonlyArray<StageDef<BaseStageStats, unknown>> => {
     const stagesArg = args.find((a) => a.startsWith("--stages="));
     if (stagesArg) {
         const raw = stagesArg
@@ -326,47 +310,44 @@ export const resolveIngestStages = (args: string[]): IngestStageKey[] => {
             .map((s) => s.trim())
             .filter((s) => s.length > 0);
         try {
-            return selectStages(raw);
+            return selectByKeys(registry, raw);
         } catch (err) {
             process.stderr.write(`axctl ingest: ${(err as Error).message}\n`);
             process.exit(2);
         }
     }
-    if (args.includes("--derive-only")) return deriveOnlyKeys();
-    for (const [flagName, set] of Object.entries(LEGACY_ONLY_SETS)) {
-        if (args.includes(`--${flagName}`)) {
-            process.stderr.write(
-                `axctl ingest: --${flagName} is deprecated; use --stages=${set.join(",")} or --derive-only\n`,
-            );
-            return [...set];
-        }
-    }
-    return ALL_STAGE_KEYS;
+    if (args.includes("--derive-only")) return selectByTag(registry, "derive");
+    return registry.all();
 };
 
 
-const cmdIngest = (args: string[]) => {
-    // Validate + resolve stages synchronously before any Effect/DB work so that
-    // flag errors and deprecation warnings print even when the daemon is down.
-    // Issue #44: silent contradictions like `--codex-only --claude-only`
-    // turn the command into a no-op. Bail loudly instead.
-    const setOnly = Object.keys(LEGACY_ONLY_SETS)
-        .map((f) => `--${f}`)
-        .filter((f) => args.includes(f));
-    if (setOnly.length > 1) {
-        console.error(
-            `axctl ingest: ${setOnly.join(", ")} are mutually exclusive (each is a complete-source filter)`,
-        );
-        process.exit(2);
+/** Removed `--*-only` flags mapped to the equivalent `--stages=` suggestion.
+ *  Effect's CLI parser silently ignores unknown flags, so without this guard
+ *  users typing the old flag would get a no-op full ingest. */
+const REMOVED_INGEST_FLAGS: ReadonlyArray<readonly [string, string]> = [
+    ["--skills-only", "--stages=skills"],
+    ["--transcripts-only", "--stages=claude,codex"],
+    ["--codex-only", "--stages=codex"],
+    ["--git-only", "--stages=git"],
+    ["--claude-only", "--stages=claude"],
+];
+
+/** Returns the removed flag + replacement suggestion if any `args` entry
+ *  matches a deprecated `--*-only` flag, else `null`. Exported for tests. */
+export const detectRemovedIngestFlag = (
+    args: ReadonlyArray<string>,
+): { flag: string; replacement: string } | null => {
+    for (const [flag, replacement] of REMOVED_INGEST_FLAGS) {
+        if (args.includes(flag)) return { flag, replacement };
     }
+    return null;
+};
+
+const cmdIngest = (args: string[]) => {
+    // Validate args synchronously before any Effect/DB work so that
+    // flag errors print even when the daemon is down.
     const hasStagesArg = args.some((a) => a.startsWith("--stages="));
     const hasDeriveOnly = args.includes("--derive-only");
-    if ((hasStagesArg || hasDeriveOnly) && setOnly.length > 0) {
-        console.error(
-            `axctl ingest: ${hasStagesArg ? "--stages" : "--derive-only"} cannot be combined with ${setOnly.join(", ")}`,
-        );
-        process.exit(2);
-    }
     if (hasStagesArg && hasDeriveOnly) {
         console.error("axctl ingest: --stages and --derive-only are mutually exclusive");
         process.exit(2);
@@ -375,18 +356,24 @@ const cmdIngest = (args: string[]) => {
     // scratch (drops ghost `scope=unknown` rows whose invocations now resolve
     // onto real skills). It only makes sense with a complete ingest run.
     const wantReset = args.includes("--reset");
-    if (wantReset && (hasStagesArg || hasDeriveOnly || setOnly.length > 0)) {
+    if (wantReset && (hasStagesArg || hasDeriveOnly)) {
         console.error(
             "axctl ingest: --reset rebuilds the whole skill graph and cannot be combined with stage filters",
         );
         process.exit(2);
     }
-    // Single source of truth for which stages run; see resolveIngestStages.
-    // Also prints deprecation warnings for legacy --X-only flags.
-    const sel = resolveIngestStages(args);
-    const stages = sel.map((k) => STAGE_PROGRESS[k]);
+
     return Effect.gen(function* () {
         const db = yield* SurrealClient;
+        const registry = yield* StageRegistry;
+
+        // Single source of truth for which stages run; see resolveIngestStages.
+        const selectedStages = resolveIngestStages(registry, args);
+        const stageProgressList = selectedStages.map((s) => {
+            const ps = STAGE_PROGRESS[s.meta.key as IngestStageKeyLegacy];
+            return ps ?? { source: s.meta.key, stage: "run" };
+        });
+
         if (wantReset) {
             // Edges before nodes. `skill_triage_decision` is keyed by skill
             // name (not a record link) so user keep/archive decisions survive.
@@ -409,7 +396,7 @@ const cmdIngest = (args: string[]) => {
         const useTui = shouldUseTui(process.stdout.isTTY ?? false, progressMode);
         const tuiHandle = useTui
             ? yield* Effect.tryPromise({
-                try: () => initTuiProgress({ command: "ingest", runId, stages }),
+                try: () => initTuiProgress({ command: "ingest", runId, stages: stageProgressList }),
                 catch: () => undefined,
               }).pipe(Effect.catch(() => Effect.succeed(undefined)))
             : undefined;
@@ -417,144 +404,48 @@ const cmdIngest = (args: string[]) => {
             command: "ingest",
             mode: progressMode,
             runId,
-            stages,
+            stages: stageProgressList,
         });
-        // Resolve services up front so stage lambdas can close over them and
-        // return Effect.Effect<unknown, DbError, never> (matching StageSpec.run).
-        const config = yield* AxConfig;
-        const proc = yield* ProcessService;
-        const withServices = <A>(
-            eff: Effect.Effect<A, DbError, SurrealClient | AxConfig | ProcessService>,
-        ): Effect.Effect<A, DbError, never> =>
-            eff.pipe(
-                Effect.provideService(SurrealClient, db),
-                Effect.provideService(AxConfig, config),
-                Effect.provideService(ProcessService, proc),
-            );
 
-        // Build stage run map: each key maps to a thunk returning a fully-
-        // provided Effect with R=never so it satisfies StageSpec.run.
-        const stageRun: Record<IngestStageKey, () => Effect.Effect<unknown, DbError, never>> = {
-            skills: () => withServices(telemetryStage(db, runId, "skills", "upsert", ingestSkills(), progress)),
-            // Slash commands live in `~/.claude/commands/` (and plugin
-            // command dirs) and aren't indexed by ingestSkills. Without
-            // this, every Skill-tool call against a slash command becomes
-            // an orphan `invoked` edge. See issues #41 / #42.
-            commands: () => withServices(telemetryStage(db, runId, "commands", "upsert", ingestCommands(), progress)),
-            claude: () => withServices(telemetryStage(
-                db,
-                runId,
-                "claude",
-                "transcripts",
-                ingestTranscripts({ sinceDays, onProgress: progressUpdater(progress, "claude", "transcripts") }),
-                progress,
-            )),
-            codex: () => withServices(telemetryStage(
-                db,
-                runId,
-                "codex",
-                "sessions",
-                ingestCodex({ sinceDays, onProgress: progressUpdater(progress, "codex", "sessions") }),
-                progress,
-            )),
-            // Subagent stages run AFTER the parent transcript stages so the
-            // parent sessions are already in the DB. Without this ordering
-            // every spawn-derived edge would skip via missingParent.
-            subagents: () => withServices(telemetryStage(
-                db,
-                runId,
-                "claude",
-                "subagents",
-                deriveClaudeSubagents({ onProgress: progressUpdater(progress, "claude", "subagents") }),
-                progress,
-            )),
-            spawned: () => withServices(telemetryStage(
-                db,
-                runId,
-                "signals",
-                "spawned",
-                deriveSpawned(),
-                progress,
-            )),
-            git: () => withServices(telemetryStage(
-                db,
-                runId,
-                "git",
-                "history",
-                ingestGit({ sinceDays, onProgress: progressUpdater(progress, "git", "history") }),
-                progress,
-            )),
-            // Derive stages re-read already-ingested turn/session rows, so they
-            // can run standalone via `--stages=` / `--derive-only` against an
-            // existing DB without re-parsing transcripts.
-            signals: () => withServices(telemetryStage(
-                db,
-                runId,
-                "signals",
-                "derive",
-                deriveSignals({ sinceDays, onProgress: progressUpdater(progress, "signals", "derive") }),
-                progress,
-            )),
-            outcomes: () => withServices(telemetryStage(
-                db,
-                runId,
-                "outcomes",
-                "derive",
-                deriveOutcomes({ sinceDays }),
-                progress,
-            )),
-            "session-health": () => withServices(telemetryStage(
-                db,
-                runId,
-                "session-health",
-                "derive",
-                deriveSessionHealth({ sinceDays }),
-                progress,
-            )),
-            closure: () => withServices(telemetryStage(
-                db,
-                runId,
-                "closure",
-                "derive",
-                deriveClosure(),
-                progress,
-            )),
-            proposals: () => withServices(telemetryStage(
-                db,
-                runId,
-                "proposals",
-                "derive",
-                deriveProposals(),
-                progress,
-            )),
-            opportunities: () => withServices(telemetryStage(
-                db,
-                runId,
-                "opportunities",
-                "derive",
-                deriveOpportunities(),
-                progress,
-            )),
-            "retro-proposals": () => withServices(telemetryStage(
-                db,
-                runId,
-                "retro-proposals",
-                "derive",
-                deriveRetroProposals(),
-                progress,
-            )),
-            harness: () => withServices(telemetryStage(db, runId, "harness", "doctor", ingestHarness(), progress)),
-        };
+        const ctx = IngestContext.make({
+            cwd: process.cwd(),
+            since: sinceDays === undefined ? new Date(0) : new Date(Date.now() - sinceDays * 86400 * 1000),
+            debug: args.includes("--debug"),
+        });
 
-        const specs: StageSpec[] = sel.map((key) => ({
-            key,
-            deps: INGEST_STAGE_DEPS[key],
-            run: stageRun[key],
+        // Wrap each stage's run with telemetryStage so the existing TUI + DB
+        // recording continue working. The stage run(ctx) is the inner Effect;
+        // telemetryStage handles start/end rows. Per-stage onProgress callbacks
+        // are dropped (accepted UX regression; proper fix via TraceEvent streams).
+        const wrappedStages = selectedStages.map((s) => ({
+            ...s,
+            run: (_innerCtx: IngestContext): Effect.Effect<BaseStageStats, DbError, SurrealClient | AxConfig | ProcessService> => {
+                const ps = STAGE_PROGRESS[s.meta.key as IngestStageKeyLegacy] ?? { source: s.meta.key, stage: "run" };
+                // Cast: stage run() returns Effect<S, DbError, R> where R ⊆ SurrealClient|AxConfig|ProcessService;
+                // telemetryStage accepts the full union and the runtime provides all three.
+                return telemetryStage(
+                    db,
+                    runId,
+                    ps.source,
+                    ps.stage,
+                    s.run(_innerCtx) as Effect.Effect<BaseStageStats, DbError, SurrealClient | AxConfig | ProcessService>,
+                    progress,
+                );
+            },
         }));
 
+        const traceId = `ingest:${runId}`;
         const program = Effect.gen(function* () {
-            yield* runPipeline(specs);
+            yield* runPipeline(
+                wrappedStages as ReadonlyArray<StageDef<BaseStageStats, SurrealClient | AxConfig | ProcessService>>,
+                ctx,
+            );
         }).pipe(
+            LiveTrace.withTrace({
+                traceId,
+                label: `ingest ${selectedStages.map((s) => s.meta.key).join(",")}`,
+                scope: { type: "user", id: process.env.USER ?? "local" },
+            }),
             Effect.tap(() => db.query(buildIngestRunFinishStatement({ runId, status: "ok" })).pipe(Effect.asVoid)),
             Effect.catch((error) =>
                 Effect.gen(function* () {
@@ -1537,30 +1428,26 @@ const optionalSince = Flag.integer("since").pipe(Flag.optional);
 const jsonFlag = Flag.boolean("json").pipe(Flag.withDefault(false));
 const checkFlag = Flag.boolean("check").pipe(Flag.withDefault(false));
 const verboseFlag = Flag.boolean("verbose").pipe(Flag.withDefault(false));
+/**
+ * `--debug` opts the user into stderr trace events. Wired only into the
+ * ingest command (Task #4). Default off keeps stdout clean for
+ * `--progress=json` and friends. When set, the CLI layers
+ * `ConsoleTransportLayer` on top of `IngestRuntimeLayer`.
+ */
+const debugFlag = Flag.boolean("debug").pipe(Flag.withDefault(false));
 const progressFlag = Flag.choice("progress", ["auto", "pipeline", "plain", "json", "off"] as const).pipe(
     Flag.withDefault("auto"),
 );
 
 /**
  * `--insights-only` short-circuits to `cmdIngestInsights`, bypassing
- * `cmdIngest`'s `--*-only` mutual-exclusion check. Without this helper,
- * `axctl ingest --insights-only --codex-only --since=7` silently ignores
- * `--codex-only` and `--since`. Exported for unit testing.
+ * `cmdIngest`. `--since` doesn't apply to insights, so combining them is
+ * user-error. Exported for unit testing.
  */
 export const insightsOnlyConflicts = (opts: {
-    skillsOnly: boolean;
-    transcriptsOnly: boolean;
-    codexOnly: boolean;
-    gitOnly: boolean;
-    claudeOnly: boolean;
     hasSince: boolean;
 }): string[] => {
     const conflicts: string[] = [];
-    if (opts.skillsOnly) conflicts.push("--skills-only");
-    if (opts.transcriptsOnly) conflicts.push("--transcripts-only");
-    if (opts.codexOnly) conflicts.push("--codex-only");
-    if (opts.gitOnly) conflicts.push("--git-only");
-    if (opts.claudeOnly) conflicts.push("--claude-only");
     if (opts.hasSince) conflicts.push("--since");
     return conflicts;
 };
@@ -1568,35 +1455,29 @@ export const insightsOnlyConflicts = (opts: {
 const ingestCommand = Command.make(
     "ingest",
     {
-        skillsOnly: Flag.boolean("skills-only").pipe(Flag.withDefault(false)),
-        transcriptsOnly: Flag.boolean("transcripts-only").pipe(Flag.withDefault(false)),
-        codexOnly: Flag.boolean("codex-only").pipe(Flag.withDefault(false)),
-        gitOnly: Flag.boolean("git-only").pipe(Flag.withDefault(false)),
-        claudeOnly: Flag.boolean("claude-only").pipe(Flag.withDefault(false)),
         insightsOnly: Flag.boolean("insights-only").pipe(Flag.withDefault(false)),
         // Run a chosen subset of stages, e.g. --stages=signals,outcomes.
         stages: Flag.string("stages").pipe(Flag.optional),
-        // Shortcut: only the DB-derive stages (signals/outcomes/session-health/
-        // closure) - skips the slow transcript + git parse.
+        // Shortcut: run every stage tagged `derive` (currently signals,
+        // outcomes, session-health, closure, proposals, opportunities,
+        // retro-proposals, subagents, spawned, harness) and skip the slow
+        // transcript + git parse. Tag membership lives on each stage; see
+        // ADR-0009 and the stage registry for the canonical list.
         deriveOnly: Flag.boolean("derive-only").pipe(Flag.withDefault(false)),
         // Wipe the skill graph before a full re-ingest so it rebuilds clean.
         reset: Flag.boolean("reset").pipe(Flag.withDefault(false)),
         since: optionalSince,
         progress: progressFlag,
         verbose: verboseFlag,
+        debug: debugFlag,
     },
-    ({ skillsOnly, transcriptsOnly, codexOnly, gitOnly, claudeOnly, insightsOnly, stages, deriveOnly, reset, since, progress, verbose }) => {
+    ({ insightsOnly, stages, deriveOnly, reset, since, progress, verbose, debug }) => {
         if (insightsOnly) {
             if (reset) {
                 console.error("axctl ingest: --reset cannot be combined with --insights-only");
                 process.exit(2);
             }
             const conflicts = insightsOnlyConflicts({
-                skillsOnly,
-                transcriptsOnly,
-                codexOnly,
-                gitOnly,
-                claudeOnly,
                 hasSince: Option.isSome(since),
             });
             if (conflicts.length > 0) {
@@ -1608,25 +1489,23 @@ const ingestCommand = Command.make(
             return cmdIngestInsights([
                 `--progress=${progress}`,
                 ...boolArg("verbose", verbose),
+                ...boolArg("debug", debug),
             ]);
         }
         return cmdIngest([
-            ...boolArg("skills-only", skillsOnly),
-            ...boolArg("transcripts-only", transcriptsOnly),
-            ...boolArg("codex-only", codexOnly),
-            ...boolArg("git-only", gitOnly),
-            ...boolArg("claude-only", claudeOnly),
             ...stringArg("stages", optionValue(stages)),
             ...boolArg("derive-only", deriveOnly),
             ...boolArg("reset", reset),
             ...intArg("since", optionValue(since)),
             `--progress=${progress}`,
             ...boolArg("verbose", verbose),
+            ...boolArg("debug", debug),
         ]);
     },
 ).pipe(Command.withDescription(
     "Ingest skills, transcripts, Codex sessions, git history, and insight artifacts. " +
-        "Use --stages=<a,b,c> or --derive-only to run a subset against an already-ingested DB. " +
+        "Use --stages=<a,b,c> for a custom subset, or --derive-only to run every stage tagged `derive` " +
+        "(see ADR-0009; canonical list lives in src/ingest/stage/registry.ts). " +
         "Use --reset to wipe the skill graph first and rebuild it clean.",
 ));
 
@@ -1871,7 +1750,10 @@ const improveRecommendCommand = Command.make(
         since: Flag.integer("since").pipe(Flag.optional),
         json: Flag.boolean("json").pipe(Flag.withDefault(false)),
         noClipboard: Flag.boolean("no-clipboard").pipe(Flag.withDefault(false)),
-        apply: Flag.boolean("apply").pipe(Flag.withDefault(false)),
+        apply: Flag.boolean("apply").pipe(
+            Flag.withDefault(false),
+            Flag.withDescription("Interactive: pick a proposal from the printed list and accept inline (loops until you quit). Combine with --with-agent on the accept side via the prompt."),
+        ),
     },
     ({ limit, form, since, json, noClipboard, apply }) =>
         cmdImproveRecommend([
@@ -1882,7 +1764,7 @@ const improveRecommendCommand = Command.make(
             ...boolArg("no-clipboard", noClipboard),
             ...boolArg("apply", apply),
         ]),
-).pipe(Command.withDescription("Rank open proposals by confidence × recency × frequency and print the top N (optionally copy to clipboard)"));
+).pipe(Command.withDescription("Rank open proposals by confidence × recency × frequency and print the top N as paste-ready blocks (with `<!--ax:id-->` provenance markers). --apply for interactive accept loop."));
 
 const improveLintCommand = Command.make(
     "lint",
@@ -1897,7 +1779,7 @@ const improveLintCommand = Command.make(
             ...boolArg("json", json),
             `--stale-days=${staleDays}`,
         ]),
-).pipe(Command.withDescription("Scan grounded agent files for marker issues; reconcile task_emitted experiments; warn on stale tasks"));
+).pipe(Command.withDescription("Scan grounded agent files (AGENTS.md / CLAUDE.md / skills) for `<!--ax:id-->` markers, reconcile against the DB, remove consumed `.ax/tasks/<id>.md` briefs, warn on orphans + tasks older than --stale-days (default 7)."));
 
 const improveListCommand = Command.make(
     "list",
@@ -2093,10 +1975,13 @@ const improveAcceptCommand = Command.make(
     {
         id: Argument.string("id"),
         force: Flag.boolean("force").pipe(Flag.withDefault(false)),
-        withAgent: Flag.boolean("with-agent").pipe(Flag.withDefault(false)),
+        withAgent: Flag.boolean("with-agent").pipe(
+            Flag.withDefault(false),
+            Flag.withDescription("After scaffold, spawn a `claude -p` subagent to read the stub + sibling skills and rewrite SKILL.md with concrete guidance. Streams to terminal. Implies --auto-scaffold."),
+        ),
         autoScaffold: Flag.boolean("auto-scaffold").pipe(
             Flag.withDefault(false),
-            Flag.withDescription("Skip task emission and directly scaffold the SKILL.md (skill form only)"),
+            Flag.withDescription("Skip the `.ax/tasks/<id>.md` brief and write SKILL.md directly (skill form only). Use when you want the file now, not a brief to hand to your agent."),
         ),
     },
     ({ id, force, withAgent, autoScaffold }) =>
@@ -2191,7 +2076,7 @@ const improveAcceptCommand = Command.make(
                 }
             }
         }),
-).pipe(Command.withDescription("Accept a proposal: emit a task brief (default) or scaffold the SKILL.md directly (--auto-scaffold, skill form only)"));
+).pipe(Command.withDescription("Accept a proposal. Default emits a `.ax/tasks/<id>.md` brief to hand to your agent (Claude Code, Codex). --auto-scaffold writes SKILL.md directly. --with-agent dispatches a subagent to enrich the stub."));
 
 const improveRejectCommand = Command.make(
     "reject",
@@ -2429,10 +2314,10 @@ const improveCheckpointCommand = Command.make(
     },
     ({ force, json }) =>
         cmdImproveCheckpoint([...boolArg("force", force), ...boolArg("json", json)]),
-).pipe(Command.withDescription("Compute checkpoint snapshots at t+7/t+30/t+90 for active experiments"));
+).pipe(Command.withDescription("Compute checkpoint snapshots at +3/+10/+30 sessions for active experiments (session-count windows, not calendar days - see issue #83)"));
 
 const improveCommand = Command.make("improve").pipe(
-    Command.withDescription("Experiment loop: review proposals, accept skills, track verdicts"),
+    Command.withDescription("Experiment loop: rank proposals (recommend), accept (emit task brief or scaffold + dispatch subagent), lint grounded agent files, track verdicts at +3/+10/+30 sessions after accept."),
     Command.withSubcommands([
         improveRecommendCommand,
         improveLintCommand,
@@ -2557,6 +2442,310 @@ const cmdRetroList = (args: string[]) =>
         }
     });
 
+/**
+ * `ax retro pending` - sessions that lack a `reviewed` edge to any retro.
+ *
+ * A session is "pending retro" when:
+ *   - it has no outbound `reviewed` edge, AND
+ *   - it looks finished: either `ended_at` is set, or the last turn was
+ *     more than --idle-min minutes ago (user closed the tab, no explicit
+ *     end marker).
+ *
+ * Drives the quota-arbitrage flow: idle Opus budget chews through the
+ * backlog via the retro-reviewer subagent.
+ */
+interface PendingSessionRow {
+    readonly id: string | { tb: string; id: string };
+    readonly project: string | null;
+    readonly source: string | null;
+    readonly model: string | null;
+    readonly started_at: string | null;
+    readonly ended_at: string | null;
+    readonly last_turn_at: string | null;
+    readonly turns: number;
+}
+
+interface PendingSession {
+    readonly sessionId: string;     // `session:<key>` record id
+    readonly key: string;           // bare key (UUID, no prefix)
+    readonly project: string | null;
+    readonly source: string | null;
+    readonly model: string | null;
+    readonly startedAt: string | null;
+    readonly endedAt: string | null;
+    readonly lastTurnAt: string | null;
+    readonly turns: number;
+    readonly reason: "ended_at" | "idle";
+}
+
+/**
+ * Two-pass query so we don't pay for per-session turn subqueries on the
+ * common path:
+ *
+ *   1. Sessions with `ended_at` set in the window. Cheap. Most rows.
+ *   2. Sessions w/o `ended_at` whose `started_at` is older than the idle
+ *      threshold. Approximation - assumes "no end marker AND old start"
+ *      means the user walked away. Fast.
+ *
+ * `turns` is fetched lazily inside `ax retro brief`, not here, because
+ * the per-session `count(turn)` subquery is what blew up the v0 query.
+ */
+interface PendingQueryOpts {
+    readonly sinceDays: number;
+    readonly idleMinutes: number;
+    readonly includeSubagents: boolean;
+    readonly limit: number;
+}
+
+const queryPendingSessions = (opts: PendingQueryOpts) =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        // claude-subagent sessions are orchestrated children; their retros
+        // belong to the parent session's review. Exclude unless asked.
+        const subagentFilter = opts.includeSubagents ? "" : "AND source != 'claude-subagent'";
+        const endedRows = yield* db.query<[Array<{
+            id: PendingSessionRow["id"]; project: string | null; source: string | null;
+            model: string | null; started_at: string | null; ended_at: string | null;
+        }>]>(`
+            SELECT id, project, source, model,
+                type::string(started_at) AS started_at,
+                type::string(ended_at) AS ended_at
+            FROM session
+            WHERE count(->reviewed) = 0
+              AND ended_at != NONE
+              AND ended_at > time::now() - ${opts.sinceDays}d
+              ${subagentFilter}
+            ORDER BY ended_at DESC
+            LIMIT ${opts.limit};
+        `);
+        const idleRows = yield* db.query<[Array<{
+            id: PendingSessionRow["id"]; project: string | null; source: string | null;
+            model: string | null; started_at: string | null;
+        }>]>(`
+            SELECT id, project, source, model,
+                type::string(started_at) AS started_at
+            FROM session
+            WHERE count(->reviewed) = 0
+              AND ended_at = NONE
+              AND started_at != NONE
+              AND started_at > time::now() - ${opts.sinceDays}d
+              AND started_at < time::now() - ${opts.idleMinutes}m
+              ${subagentFilter}
+            ORDER BY started_at DESC
+            LIMIT ${opts.limit};
+        `);
+
+        const recordIdOf = (id: PendingSessionRow["id"]): string =>
+            typeof id === "string" ? id : `session:${id.id}`;
+        const keyOf = (recordId: string): string =>
+            recordId.startsWith("session:")
+                ? recordId.slice("session:".length).replace(/`/g, "")
+                : recordId;
+
+        const out: PendingSession[] = [];
+        for (const row of (endedRows?.[0] ?? [])) {
+            const sessionRecordId = recordIdOf(row.id);
+            out.push({
+                sessionId: sessionRecordId,
+                key: keyOf(sessionRecordId),
+                project: row.project,
+                source: row.source,
+                model: row.model,
+                startedAt: row.started_at,
+                endedAt: row.ended_at,
+                lastTurnAt: null,
+                turns: 0,
+                reason: "ended_at",
+            });
+        }
+        for (const row of (idleRows?.[0] ?? [])) {
+            const sessionRecordId = recordIdOf(row.id);
+            out.push({
+                sessionId: sessionRecordId,
+                key: keyOf(sessionRecordId),
+                project: row.project,
+                source: row.source,
+                model: row.model,
+                startedAt: row.started_at,
+                endedAt: null,
+                lastTurnAt: null,
+                turns: 0,
+                reason: "idle",
+            });
+        }
+        return out;
+    });
+
+const cmdRetroPending = (args: string[]) =>
+    Effect.gen(function* () {
+        const json = args.includes("--json");
+        const includeSubagents = args.includes("--include-subagents");
+        const sinceFlag = flag("since", args);
+        const idleFlag = flag("idle-min", args);
+        const limitFlag = flag("limit", args);
+        const sinceDays = sinceFlag ? Math.max(1, parseInt(sinceFlag, 10) || 7) : 7;
+        const idleMinutes = idleFlag ? Math.max(1, parseInt(idleFlag, 10) || 30) : 30;
+        const limit = limitFlag ? Math.max(1, parseInt(limitFlag, 10) || 20) : 20;
+        const pending = yield* queryPendingSessions({ sinceDays, idleMinutes, includeSubagents, limit });
+        if (json) {
+            console.log(prettyPrint(pending));
+            return;
+        }
+        if (pending.length === 0) {
+            console.log(`(no pending retros in last ${sinceDays}d${includeSubagents ? "" : ", excluding subagents"})`);
+            return;
+        }
+        const subAgentHint = includeSubagents ? "" : " (subagents hidden - pass --include-subagents to show)";
+        console.log(`${pending.length} session(s) pending retro, since=${sinceDays}d limit=${limit}${subAgentHint}:`);
+        for (const s of pending) {
+            const proj = s.project ? prettifyProjectSlug(s.project) : "?";
+            const when = s.endedAt ?? s.startedAt ?? "?";
+            console.log(`  ${s.sessionId}  [${s.source ?? "?"}]  ${proj}  ${s.reason}=${when}`);
+        }
+    });
+
+/**
+ * `ax retro brief --session=<id>` - write `.ax/tasks/retro/<key>.md` brief
+ * the retro-reviewer subagent consumes.
+ *
+ * Suggested-model heuristic: short, error-free sessions → haiku; sessions
+ * with many turns, corrections, or tool errors → opus. The brief embeds
+ * the suggestion as advisory metadata; the dispatcher picks the model.
+ */
+const formatRetroBrief = (s: PendingSession, transcriptPath: string | null, suggestedModel: string): string => {
+    const fm = [
+        "---",
+        "kind: retro",
+        `session_id: ${s.sessionId}`,
+        `session_key: ${s.key}`,
+        s.project ? `project: ${s.project}` : null,
+        s.source ? `source: ${s.source}` : null,
+        s.model ? `model_used: ${s.model}` : null,
+        `turns: ${s.turns}`,
+        s.startedAt ? `started_at: ${s.startedAt}` : null,
+        (s.endedAt ?? s.lastTurnAt) ? `ended_at: ${s.endedAt ?? s.lastTurnAt}` : null,
+        `pending_reason: ${s.reason}`,
+        `suggested_model: ${suggestedModel}`,
+        transcriptPath ? `transcript: ${transcriptPath}` : null,
+        "status: pending",
+        "---",
+    ].filter((line): line is string => line !== null).join("\n");
+
+    const body = `# Retro: ${s.sessionId}
+
+Review the prior session and emit findings. Source of truth is the
+transcript at \`${transcriptPath ?? "(unknown - check raw_file on the session record)"}\`.
+
+## What to look for
+
+- **Worked**: which moves landed; which skills/tools fired and helped.
+- **Failed**: corrections, retries, dead-ends, tool errors. Pattern over single events.
+- **Model fit**: was \`${s.model ?? "?"}\` overkill (cheap rote work) or undersized (visible struggle)?
+- **Missing scaffolding**: behaviors a skill / hook / subagent would've prevented.
+
+## Required output
+
+Run these from the repo whose session this was:
+
+\`\`\`bash
+ax retro emit --session=${s.sessionId} --source=manual --from-file=<path-to-json>
+\`\`\`
+
+…where the JSON file contains \`{tried, worked, failed, next}\`. If you
+spot a repeated pattern (≥2 occurrences in this session, or rhymes with
+prior retros), also call:
+
+\`\`\`bash
+ax improve recommend ...
+\`\`\`
+
+When done, update this file's frontmatter \`status: completed\`. The next
+\`ax retro pending\` call will exclude this session because the
+\`reviewed\` edge now exists.
+`;
+    return `${fm}\n\n${body}`;
+};
+
+const suggestModelFor = (s: PendingSession): string => {
+    if (s.turns >= 40) return "opus";
+    if (s.turns <= 5) return "haiku";
+    return "sonnet";
+};
+
+const cmdRetroBrief = (args: string[]) =>
+    Effect.gen(function* () {
+        const sessionFlag = flag("session", args);
+        const outDirFlag = flag("out-dir", args);
+        const json = args.includes("--json");
+        if (!sessionFlag) {
+            console.error("ax retro brief: --session=<id> required");
+            process.exit(2);
+        }
+        const rawSession = sessionFlag.startsWith("session:")
+            ? sessionFlag.slice("session:".length).replace(/`/g, "")
+            : sessionFlag;
+        const sessionRef = recordRef("session", rawSession);
+        const sessionRecordId = `session:${rawSession}`;
+        const db = yield* SurrealClient;
+        const rows = yield* db.query<[Array<{
+            id: string | { tb: string; id: string };
+            project: string | null;
+            source: string | null;
+            model: string | null;
+            started_at: string | null;
+            ended_at: string | null;
+            raw_file: string | null;
+            last_turn_at: string | null;
+            turns: number;
+        }>]>(`
+            SELECT
+                id, project, source, model, raw_file,
+                type::string(started_at) AS started_at,
+                type::string(ended_at) AS ended_at,
+                type::string((SELECT VALUE math::max(ts) FROM turn WHERE session = $parent.id GROUP ALL)[0]) AS last_turn_at,
+                (SELECT count() FROM turn WHERE session = $parent.id GROUP ALL)[0].count ?? 0 AS turns
+            FROM ${sessionRef} LIMIT 1;
+        `);
+        const row = (rows?.[0] ?? [])[0];
+        if (!row) {
+            console.error(`ax retro brief: session ${sessionRecordId} not found`);
+            process.exit(2);
+        }
+        const idStr = typeof row.id === "string" ? row.id : `session:${row.id.id}`;
+        const key = idStr.startsWith("session:") ? idStr.slice("session:".length).replace(/`/g, "") : idStr;
+        const session: PendingSession = {
+            sessionId: idStr,
+            key,
+            project: row.project,
+            source: row.source,
+            model: row.model,
+            startedAt: row.started_at,
+            endedAt: row.ended_at,
+            lastTurnAt: row.last_turn_at,
+            turns: row.turns ?? 0,
+            reason: row.ended_at ? "ended_at" : "idle",
+        };
+        const suggested = suggestModelFor(session);
+        const transcriptPath = row.raw_file ?? null;
+        const body = formatRetroBrief(session, transcriptPath, suggested);
+
+        const { mkdir, writeFile } = yield* Effect.promise(() => import("node:fs/promises"));
+        const { join, resolve } = yield* Effect.promise(() => import("node:path"));
+        const outDir = resolve(outDirFlag ?? join(process.cwd(), ".ax", "tasks", "retro"));
+        yield* Effect.promise(() => mkdir(outDir, { recursive: true }));
+        const safeKey = key.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80);
+        const filePath = join(outDir, `${safeKey}.md`);
+        yield* Effect.promise(() => writeFile(filePath, body, "utf8"));
+
+        if (json) {
+            console.log(prettyPrint({ session: idStr, path: filePath, suggested_model: suggested, transcript: transcriptPath }));
+            return;
+        }
+        console.log(`brief: ${filePath}`);
+        console.log(`  session=${idStr}  turns=${session.turns}  suggested_model=${suggested}`);
+        if (transcriptPath) console.log(`  transcript=${transcriptPath}`);
+    });
+
 const retroEmitCommand = Command.make(
     "emit",
     {
@@ -2648,9 +2837,41 @@ const retroPlanCommand = Command.make(
         ]),
 ).pipe(Command.withDescription("Register an externally-drafted plan as proposal (+ experiment unless --leave-open). External agent calls this after user yes."));
 
+const retroPendingCommand = Command.make(
+    "pending",
+    {
+        since: Flag.integer("since").pipe(Flag.withDefault(7)),
+        idleMin: Flag.integer("idle-min").pipe(Flag.withDefault(30)),
+        limit: Flag.integer("limit").pipe(Flag.withDefault(20)),
+        includeSubagents: Flag.boolean("include-subagents").pipe(Flag.withDefault(false)),
+        json: jsonFlag,
+    },
+    ({ since, idleMin, limit, includeSubagents, json }) => cmdRetroPending([
+        `--since=${since}`,
+        `--idle-min=${idleMin}`,
+        `--limit=${limit}`,
+        ...boolArg("include-subagents", includeSubagents),
+        ...boolArg("json", json),
+    ]),
+).pipe(Command.withDescription("List sessions in the last N days that have no `reviewed` edge yet - the retro backlog the /retro skill drains. Excludes claude-subagent rows by default."));
+
+const retroBriefCommand = Command.make(
+    "brief",
+    {
+        session: Flag.string("session"),
+        outDir: Flag.string("out-dir").pipe(Flag.optional),
+        json: jsonFlag,
+    },
+    ({ session, outDir, json }) => cmdRetroBrief([
+        `--session=${session}`,
+        ...stringArg("out-dir", optionValue(outDir)),
+        ...boolArg("json", json),
+    ]),
+).pipe(Command.withDescription("Write a task brief for one session to .ax/tasks/retro/<key>.md - hands off to the retro-reviewer subagent"));
+
 const retroCommand = Command.make("retro").pipe(
     Command.withDescription("Session retros: structured reflections (tried · worked · failed · next) that drive the experiment loop"),
-    Command.withSubcommands([retroEmitCommand, retroListCommand, retroReflectCommand, retroMetaCommand, retroPlanCommand]),
+    Command.withSubcommands([retroEmitCommand, retroListCommand, retroPendingCommand, retroBriefCommand, retroReflectCommand, retroMetaCommand, retroPlanCommand]),
 );
 
 const serveCommand = Command.make(
@@ -3289,6 +3510,23 @@ const withDb = (args: ReadonlyArray<string>): CliProgram =>
     runCli(args).pipe(Effect.provide(AppLayer), Effect.scoped);
 
 /**
+ * Provide IngestRuntimeLayer (AppLayer + StageRegistryDefault) for the
+ * ingest command so the CLI handler can yield* StageRegistry.
+ *
+ * When `--debug` is present in argv, layer `ConsoleTransportLayer` on top
+ * so trace events stream to **stderr**. Default (no --debug) keeps the
+ * silent NoopTransport from AppLayer so stdout stays clean for
+ * machine-readable output (e.g. `--progress=json`).
+ */
+const withIngest = (args: ReadonlyArray<string>): CliProgram => {
+    const debug = args.includes("--debug");
+    const layer = debug
+        ? Layer.provideMerge(IngestRuntimeLayer, ConsoleTransportLayer)
+        : IngestRuntimeLayer;
+    return runCli(args).pipe(Effect.provide(layer), Effect.scoped);
+};
+
+/**
  * Provide a sentinel SurrealClient that panics on access. Used by lifecycle
  * commands (install/daemon/doctor/uninstall/version/update) and unknown
  * commands / typos - none of these should reach the DB, so accidental
@@ -3339,6 +3577,20 @@ async function main() {
     }
     if (args[0] === "upgrade") {
         await Effect.runPromise(withoutDb(["update", ...args.slice(1)]));
+        return;
+    }
+    if (args[0] === "ingest") {
+        // Effect's CLI parser silently ignores unknown flags, so the removed
+        // `--*-only` flags would otherwise no-op into a full ingest. Reject
+        // them up-front against raw argv before Effect strips them.
+        const removed = detectRemovedIngestFlag(args.slice(1));
+        if (removed) {
+            console.error(
+                `axctl ingest: ${removed.flag} was removed. Use ${removed.replacement} instead.`,
+            );
+            process.exit(2);
+        }
+        await Effect.runPromise(withIngest(args));
         return;
     }
     if (DB_COMMANDS.has(args[0] ?? "")) {

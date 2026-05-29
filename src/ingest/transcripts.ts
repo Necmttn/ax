@@ -1,6 +1,6 @@
 import { readdir, stat, open } from "node:fs/promises";
 import { join, basename, isAbsolute, resolve } from "node:path";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { RecordId, SurrealClient, filePointer } from "../lib/db.ts";
 import { AxConfig } from "../lib/config.ts";
 import { surrealLiteral } from "../lib/json.ts";
@@ -8,6 +8,8 @@ import { decodeJsonOrNull } from "../lib/decode.ts";
 import { resolveSkillName, skillRecordKey } from "../lib/skill-id.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
+import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
+import type { StageDef } from "./stage/registry.ts";
 import {
     buildPlanSnapshotStatements,
     buildRelateToolCallSkillStatements,
@@ -1376,3 +1378,40 @@ if (import.meta.main) {
         ) as Effect.Effect<TranscriptStats>,
     );
 }
+
+// ---------------------------------------------------------------------------
+// Co-located StageDef
+// ---------------------------------------------------------------------------
+
+export const ClaudeKey = Schema.Literal("claude");
+export type ClaudeKey = typeof ClaudeKey.Type;
+
+/**
+ * Claude transcripts stage - ingests `.claude/projects/` JSONL into Turn + Tool Call rows.
+ *
+ * Depends on: {@link SkillsKey}, {@link CommandsKey}
+ * Consumed by: {@link SubagentsKey}, {@link SpawnedKey}, {@link SignalsKey}
+ * Tags: ingest
+ */
+export class ClaudeStats extends BaseStageStats.extend<ClaudeStats>("ClaudeStats")({
+    sessionsIngested: Schema.Number,
+    turnsIngested: Schema.Number,
+    toolCallsIngested: Schema.Number,
+}) {}
+
+export const claudeStage: StageDef<ClaudeStats, SurrealClient | AxConfig> = {
+    meta: StageMeta.make({ key: "claude", deps: ["skills", "commands"], tags: ["ingest"] }),
+    run: (ctx: IngestContext) =>
+        Effect.gen(function* () {
+            const t0 = Date.now();
+            const sinceDays = sinceDaysFromCtx(ctx);
+            const result = yield* ingestTranscripts({ sinceDays });
+            return ClaudeStats.make({
+                durationMs: Date.now() - t0,
+                summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls`,
+                sessionsIngested: result.sessions,
+                turnsIngested: result.turns,
+                toolCallsIngested: result.toolCalls,
+            });
+        }),
+};

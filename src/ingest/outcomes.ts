@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { SurrealClient } from "../lib/db.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
@@ -276,3 +276,39 @@ if (import.meta.main) {
         ) as Effect.Effect<OutcomeStats>,
     );
 }
+
+// ---------------------------------------------------------------------------
+// Co-located StageDef
+// ---------------------------------------------------------------------------
+
+import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
+import type { StageDef } from "./stage/registry.ts";
+
+export const OutcomesKey = Schema.Literal("outcomes");
+export type OutcomesKey = typeof OutcomesKey.Type;
+
+/**
+ * Outcomes stage - derives Command outcome rollups + user-turn n-grams.
+ * Depends on {@link SignalsKey}.
+ */
+// Named OutcomesStageStats to avoid collision with the original OutcomeStats interface.
+export class OutcomesStageStats extends BaseStageStats.extend<OutcomesStageStats>("OutcomesStageStats")({
+    commandOutcomes: Schema.Number,
+    userMessageNgrams: Schema.Number,
+}) {}
+
+export const outcomesStage: StageDef<OutcomesStageStats, SurrealClient> = {
+    meta: StageMeta.make({ key: "outcomes", deps: ["signals"], tags: ["derive"] }),
+    run: (ctx: IngestContext) =>
+        Effect.gen(function* () {
+            const t0 = Date.now();
+            const sinceDays = sinceDaysFromCtx(ctx);
+            const result = yield* deriveOutcomes({ sinceDays });
+            return OutcomesStageStats.make({
+                durationMs: Date.now() - t0,
+                summary: `derived ${result.commandOutcomes} command outcomes, ${result.userMessageNgrams} ngrams`,
+                commandOutcomes: result.commandOutcomes,
+                userMessageNgrams: result.userMessageNgrams,
+            });
+        }),
+};

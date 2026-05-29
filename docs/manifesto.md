@@ -75,10 +75,12 @@ A real retro loop for AI coding agents needs five things:
 
 5. **Become an experiment.**
    Accepted proposals get scaffolded as real artifacts and tracked
-   as experiments. Checkpoints at t+7 / t+30 / t+90 close the
-   verdict: did this thing actually get used, did it improve
-   outcomes, did it regress, did the pattern self-resolve. Every
-   verdict is itself signal for next time.
+   as experiments. Checkpoints at +3 / +10 / +30 sessions after
+   accept close the verdict: did this thing actually get used, did
+   it improve outcomes, did it regress, did the pattern
+   self-resolve. Sessions, not calendar days - a weekend doesn't
+   delay the verdict, a productive afternoon doesn't rush it.
+   Every verdict is itself signal for next time.
 
 That's the spec. Ingest -> reflect -> propose -> experiment ->
 verdict -> next session reads what worked. Nobody is shipping all of

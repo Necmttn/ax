@@ -22,7 +22,7 @@
  * compute friction_delta against a stable reference point.
  */
 
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { SurrealClient } from "../lib/db.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
@@ -373,3 +373,38 @@ if (import.meta.main) {
         ) as Effect.Effect<DeriveProposalsStats>,
     );
 }
+
+// ---------------------------------------------------------------------------
+// Co-located StageDef
+// ---------------------------------------------------------------------------
+
+import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
+import type { StageDef } from "./stage/registry.ts";
+import type { ProcessService } from "../lib/process.ts";
+
+export const ProposalsKey = Schema.Literal("proposals");
+export type ProposalsKey = typeof ProposalsKey.Type;
+
+/**
+ * Proposals stage - derives Skill + Guidance Proposals from cumulated evidence.
+ * Depends on {@link ClosureKey}. Consumed by {@link OpportunitiesKey}, {@link RetroProposalsKey}.
+ */
+export class ProposalsStats extends BaseStageStats.extend<ProposalsStats>("ProposalsStats")({
+    skillProposals: Schema.Number,
+    guidanceProposals: Schema.Number,
+}) {}
+
+export const proposalsStage: StageDef<ProposalsStats, SurrealClient | ProcessService> = {
+    meta: StageMeta.make({ key: "proposals", deps: ["closure"], tags: ["derive"] }),
+    run: (_ctx: IngestContext) =>
+        Effect.gen(function* () {
+            const t0 = Date.now();
+            const result = yield* deriveProposals({ minFrequency: 3 });
+            return ProposalsStats.make({
+                durationMs: Date.now() - t0,
+                summary: `derived ${result.skillProposals} skill proposals, ${result.guidanceProposals} guidance proposals`,
+                skillProposals: result.skillProposals,
+                guidanceProposals: result.guidanceProposals,
+            });
+        }),
+};

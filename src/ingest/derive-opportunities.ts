@@ -23,7 +23,7 @@
  * passes are idempotent.
  */
 
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { homedir } from "node:os";
 import { statSync } from "node:fs";
 import { SurrealClient } from "../lib/db.ts";
@@ -469,3 +469,37 @@ if (import.meta.main) {
         ) as Effect.Effect<DeriveOpportunitiesStats>,
     );
 }
+
+// ---------------------------------------------------------------------------
+// Co-located StageDef
+// ---------------------------------------------------------------------------
+
+import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
+import type { StageDef } from "./stage/registry.ts";
+
+export const OpportunitiesKey = Schema.Literal("opportunities");
+export type OpportunitiesKey = typeof OpportunitiesKey.Type;
+
+/**
+ * Opportunities stage - derives experiment-loop Opportunity records from
+ * accepted proposals + evidence. Depends on {@link ProposalsKey}.
+ */
+export class OpportunitiesStats extends BaseStageStats.extend<OpportunitiesStats>("OpportunitiesStats")({
+    experimentsScanned: Schema.Number,
+    opportunities: Schema.Number,
+}) {}
+
+export const opportunitiesStage: StageDef<OpportunitiesStats, SurrealClient> = {
+    meta: StageMeta.make({ key: "opportunities", deps: ["proposals"], tags: ["derive"] }),
+    run: (_ctx: IngestContext) =>
+        Effect.gen(function* () {
+            const t0 = Date.now();
+            const result = yield* deriveOpportunities();
+            return OpportunitiesStats.make({
+                durationMs: Date.now() - t0,
+                summary: `scanned ${result.experimentsScanned} experiments, derived ${result.opportunities} opportunities`,
+                experimentsScanned: result.experimentsScanned,
+                opportunities: result.opportunities,
+            });
+        }),
+};

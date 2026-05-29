@@ -1300,15 +1300,20 @@ DEFINE INDEX opportunity_in_ts  ON opportunity FIELDS in, matched_at;
 DEFINE INDEX opportunity_out    ON opportunity FIELDS out;
 
 -- ==== Checkpoint (decision support, never auto-verdict) ====
--- One row per (experiment, kind) snapshot at t+7 / t+30 / t+90.
+-- One row per (experiment, kind) snapshot at +3 / +10 / +30 sessions
+-- since experiment.created_at (see issue #83 - calendar days are the wrong
+-- cadence when an agent ships eight sessions a day). Legacy day-based
+-- rows (t+7 / t+30 / t+90) are preserved as historical data; the kind
+-- field is a free-form string so the two cadences coexist.
 -- `measured` is the aggregate {built, invoked, opportunities, addressed,
 -- friction_delta}. `suggested` is the algorithm's verdict guess. The
 -- human-confirmed `user_verdict` is what gets locked into experiment.
--- locked_verdict at t+30. Algorithm proposes, human decides.
+-- locked_verdict at +30s. Algorithm proposes, human decides.
 DEFINE TABLE checkpoint SCHEMAFULL;
 DEFINE FIELD experiment   ON checkpoint TYPE record<experiment> REFERENCE ON DELETE CASCADE;
 DEFINE FIELD kind         ON checkpoint TYPE string;
-    -- t+7 | t+30 | t+90 | adhoc
+    -- current: +3s | +10s | +30s | adhoc
+    -- legacy:  t+7 | t+30 | t+90 (calendar-day windows, pre-#83)
 DEFINE FIELD measured              ON checkpoint TYPE object;
 DEFINE FIELD measured.opportunities ON checkpoint TYPE int DEFAULT 0;
 DEFINE FIELD measured.addressed     ON checkpoint TYPE int DEFAULT 0;
@@ -1381,4 +1386,12 @@ DEFINE FIELD created_at    ON retro TYPE datetime DEFAULT time::now();
 DEFINE INDEX retro_session_uq    ON retro FIELDS session UNIQUE;
 DEFINE INDEX retro_source_ts     ON retro FIELDS source, created_at;
 DEFINE INDEX retro_repository_ts ON retro FIELDS repository, created_at;
+
+-- Graph edge: session got a retro. Lets queries traverse both directions
+-- (session->reviewed->retro, retro<-reviewed<-session) and ask
+-- `WHERE count(->reviewed) = 0` for the pending-retro queue powering
+-- `ax retro pending`. Bidirectional + reads cleanly in English.
+DEFINE TABLE reviewed TYPE RELATION FROM session TO retro SCHEMAFULL;
+DEFINE FIELD created_at ON reviewed TYPE datetime DEFAULT time::now();
+DEFINE INDEX reviewed_in_out_uq ON reviewed FIELDS in, out UNIQUE;
 

@@ -1,14 +1,28 @@
+/**
+ * @stage skills
+ * @rationale Skills are the agent's standing instructions. Indexing them
+ *   up-front means later stages can ask "which skills exist" without
+ *   re-walking the filesystem on every query, and the dashboard can show a
+ *   static catalogue without reading transcripts at all.
+ * @inputs ~/.claude/skills/, ~/.agents/skills/, plugin caches
+ * @outputs `skill` rows, `plays_role` edges
+ * @order 10
+ *
+ * @see scripts/extract-stage-rationale.ts for the full annotation contract.
+ */
 import { readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { SurrealClient } from "../lib/db.ts";
 import { defaultSkillDirs } from "../lib/paths.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
 import { upsertSkillByName } from "./skill-upsert.ts";
 import { discoverProjectRoots } from "./project-discovery.ts";
+import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
+import type { StageDef } from "./stage/registry.ts";
 
 interface ParsedSkill {
     name: string;
@@ -208,3 +222,38 @@ if (import.meta.main) {
         >,
     );
 }
+
+// ---------------------------------------------------------------------------
+// Co-located StageDef - canonical pattern for Tasks 7–20
+// ---------------------------------------------------------------------------
+
+export const SkillsKey = Schema.Literal("skills");
+export type SkillsKey = typeof SkillsKey.Type;
+
+/**
+ * Per-run stats emitted by the skills stage.
+ */
+export class SkillsStats extends BaseStageStats.extend<SkillsStats>("SkillsStats")({
+    skillsUpserted: Schema.Number,
+}) {}
+
+/**
+ * Skills stage - seeds Skill rows from `~/.claude/skills/` + `~/.agents/skills/`.
+ *
+ * Depends on: (none - leaf)
+ * Consumed by: {@link ClaudeKey}, {@link CodexKey} via `invoked` edges.
+ * Tags: ingest
+ */
+export const skillsStage: StageDef<SkillsStats, SurrealClient> = {
+    meta: StageMeta.make({ key: "skills", deps: [], tags: ["ingest"] }),
+    run: (_ctx: IngestContext) =>
+        Effect.gen(function* () {
+            const t0 = Date.now();
+            const { count } = yield* ingestSkills();
+            return SkillsStats.make({
+                durationMs: Date.now() - t0,
+                summary: `upserted ${count} skill rows`,
+                skillsUpserted: count,
+            });
+        }),
+};

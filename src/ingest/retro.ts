@@ -180,7 +180,8 @@ export const retroFromSession = (
 export const buildRetroStatement = (input: RetroInput): string => {
     const key = safeKeyPart(input.sessionId).slice(0, 96);
     const sessionRef = recordRef("session", input.sessionId);
-    return `UPSERT ${recordRef("retro", key)} MERGE ${surrealObject([
+    const retroRef = recordRef("retro", key);
+    const upsert = `UPSERT ${retroRef} MERGE ${surrealObject([
         ["session", sessionRef],
         ["source", surrealString(input.source)],
         ["tried", surrealString(input.payload.tried)],
@@ -191,6 +192,12 @@ export const buildRetroStatement = (input: RetroInput): string => {
         ["repository", input.repositoryKey ? recordRef("repository", input.repositoryKey) : "NONE"],
         ["created_at", input.createdAt ? surrealDate(input.createdAt) : "time::now()"],
     ])};`;
+    // Idempotent edge: drop any prior `reviewed` between this session and
+    // retro pair, then RELATE fresh. UNIQUE(in, out) on `reviewed` rejects
+    // a second RELATE, and we don't want re-emit to fail.
+    const dropEdge = `DELETE reviewed WHERE in = ${sessionRef} AND out = ${retroRef};`;
+    const relate = `RELATE ${sessionRef}->reviewed->${retroRef};`;
+    return `${upsert} ${dropEdge} ${relate}`;
 };
 
 export const upsertRetro = (

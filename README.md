@@ -211,15 +211,41 @@ Full reference: [`docs/insights-cli-reference.md`](docs/insights-cli-reference.m
 ax can recommend changes to your `AGENTS.md` / `CLAUDE.md` (and skill files)
 and track which lines came from it.
 
-- `axctl improve recommend` - print N ranked proposals as ready-to-paste blocks
-  (already wrapped in `<!--ax:id-->` provenance markers). Use `--apply` to pick
-  and accept inline.
-- `axctl improve accept <id>` - emit a `.ax/tasks/<id>.md` brief. Hand it to
-  your primary agent (Claude Code, Codex, etc.); the agent edits the target
-  file, leaving the marker in place.
-- `axctl improve lint` - scan your agent files, reconcile markers with the
-  DB, remove consumed task files, warn on orphans or stale tasks.
+End-to-end flow:
+
+```text
+session ends           axctl retro emit        # structured note: tried · worked · failed · next
+proposals derive       axctl improve recommend # ranked by confidence × recency × frequency
+pick one               axctl improve accept <id>
+                       # default: writes .ax/tasks/<id>.md - hand to your agent
+                       # --auto-scaffold:    skips the brief, writes SKILL.md directly
+                       # --with-agent:       scaffolds + dispatches `claude -p` subagent
+                       #                     to enrich the stub with real triggers + steps
+reconcile              axctl improve lint     # marker ↔ DB ↔ task files
+verdict at +3/+10/+30  axctl improve verdict --set=adopted|ignored|regressed|partial
+sessions               # session-count windows, not calendar days (#83)
+```
+
+Commands:
+
+- `axctl improve recommend [--limit=N] [--form=skill] [--apply]` - print N
+  ranked proposals as paste-ready blocks (already wrapped in `<!--ax:id-->`
+  provenance markers). `--apply` enters an interactive accept loop.
+- `axctl improve accept <id> [--with-agent] [--auto-scaffold] [--force]` -
+  Default emits `.ax/tasks/<id>.md`, a brief your agent (Claude Code,
+  Codex) executes. `--auto-scaffold` writes `SKILL.md` directly.
+  `--with-agent` adds a `claude -p` subagent pass that reads the stub +
+  sibling skills and rewrites it with concrete triggers, steps, and
+  anti-patterns. Optionally writes a sibling `PLAN.md`.
+- `axctl improve lint [--root=<dir>] [--stale-days=N]` - scan grounded agent
+  files, reconcile markers with the DB, remove consumed task files, warn on
+  orphans or tasks older than `--stale-days` (default 7).
 - `axctl improve show <id>` - full evidence trail for one proposal.
+- `axctl improve list [--status=open|accepted|rejected|all]` - browse the
+  proposal queue.
+- `axctl improve verdict <id> [--set=...]` - inspect or lock the +30-session verdict.
+- `axctl improve reject <id> [--reason=...]` - dedupes future re-proposals
+  of the same trigger.
 
 ## Docs
 

@@ -1,5 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import { DB_COMMANDS, insightsOnlyConflicts, resolveIngestStages, rootCommand } from "./index.ts";
+import { DB_COMMANDS, detectRemovedIngestFlag, insightsOnlyConflicts, resolveIngestStages, rootCommand } from "./index.ts";
+import { ALL_STAGES } from "../ingest/stage/registry.ts";
+import type { StageRegistryShape } from "../ingest/stage/registry.ts";
+import type { BaseStageStats, StageDef } from "../ingest/stage/types.ts";
+
+// widened to the registry's canonical erased-R shape (matches StageRegistryLive's parameter)
+const stages: ReadonlyArray<StageDef<BaseStageStats, unknown>> = ALL_STAGES;
+
+const testRegistry: StageRegistryShape = {
+    all: () => stages,
+    byKey: (key) => stages.find((s) => s.meta.key === key),
+    byTag: (tag) => stages.filter((s) => s.meta.tags.includes(tag)),
+};
 
 const topLevelNames = (): string[] =>
     rootCommand.subcommands.flatMap((group) =>
@@ -69,63 +81,85 @@ describe("effect cli", () => {
         ]));
     });
 
-    test("--insights-only rejects other --*-only flags and --since", () => {
-        const base = {
-            skillsOnly: false,
-            transcriptsOnly: false,
-            codexOnly: false,
-            gitOnly: false,
-            claudeOnly: false,
-            hasSince: false,
-        };
+    test("--insights-only rejects --since", () => {
         // No conflicts when --insights-only stands alone.
-        expect(insightsOnlyConflicts(base)).toEqual([]);
-        // Each other --*-only flag is flagged as a conflict.
-        expect(insightsOnlyConflicts({ ...base, codexOnly: true })).toEqual(["--codex-only"]);
-        expect(insightsOnlyConflicts({ ...base, skillsOnly: true })).toEqual(["--skills-only"]);
-        expect(insightsOnlyConflicts({ ...base, transcriptsOnly: true })).toEqual(["--transcripts-only"]);
-        expect(insightsOnlyConflicts({ ...base, gitOnly: true })).toEqual(["--git-only"]);
-        expect(insightsOnlyConflicts({ ...base, claudeOnly: true })).toEqual(["--claude-only"]);
+        expect(insightsOnlyConflicts({ hasSince: false })).toEqual([]);
         // --since does not honour --insights-only, so combining is user-error.
-        expect(insightsOnlyConflicts({ ...base, hasSince: true })).toEqual(["--since"]);
-        // Multiple conflicts list every offender, in stable order.
-        expect(insightsOnlyConflicts({ ...base, codexOnly: true, hasSince: true })).toEqual([
-            "--codex-only",
-            "--since",
-        ]);
+        expect(insightsOnlyConflicts({ hasSince: true })).toEqual(["--since"]);
+    });
+
+    test("detectRemovedIngestFlag: returns null when no removed flag present", () => {
+        expect(detectRemovedIngestFlag([])).toBeNull();
+        expect(detectRemovedIngestFlag(["--stages=codex", "--verbose"])).toBeNull();
+        expect(detectRemovedIngestFlag(["--derive-only", "--reset"])).toBeNull();
+    });
+
+    test("detectRemovedIngestFlag: maps each removed --*-only flag to its --stages= replacement", () => {
+        expect(detectRemovedIngestFlag(["--skills-only"])).toEqual({
+            flag: "--skills-only",
+            replacement: "--stages=skills",
+        });
+        expect(detectRemovedIngestFlag(["--transcripts-only"])).toEqual({
+            flag: "--transcripts-only",
+            replacement: "--stages=claude,codex",
+        });
+        expect(detectRemovedIngestFlag(["--codex-only"])).toEqual({
+            flag: "--codex-only",
+            replacement: "--stages=codex",
+        });
+        expect(detectRemovedIngestFlag(["--git-only"])).toEqual({
+            flag: "--git-only",
+            replacement: "--stages=git",
+        });
+        expect(detectRemovedIngestFlag(["--claude-only"])).toEqual({
+            flag: "--claude-only",
+            replacement: "--stages=claude",
+        });
+    });
+
+    test("detectRemovedIngestFlag: still detects when removed flag is buried in args", () => {
+        expect(detectRemovedIngestFlag(["--verbose", "--codex-only", "--progress=json"])).toEqual({
+            flag: "--codex-only",
+            replacement: "--stages=codex",
+        });
     });
 
     test("resolveIngestStages: default runs every stage", () => {
-        expect(resolveIngestStages([])).toHaveLength(15);
+        expect(resolveIngestStages(testRegistry, [])).toHaveLength(15);
     });
 
     test("resolveIngestStages: --stages= runs exactly the listed stages", () => {
-        expect([...resolveIngestStages(["--stages=signals,outcomes"])].sort()).toEqual([
+        const keys = resolveIngestStages(testRegistry, ["--stages=signals,outcomes"]).map((s) => s.meta.key);
+        expect([...keys].sort()).toEqual([
             "outcomes",
             "signals",
         ]);
     });
 
-    test("resolveIngestStages: --derive-only runs only the DB-derive stages", () => {
-        expect([...resolveIngestStages(["--derive-only"])].sort()).toEqual([
+    test("resolveIngestStages: --derive-only runs only stages tagged 'derive'", () => {
+        const keys = resolveIngestStages(testRegistry, ["--derive-only"]).map((s) => s.meta.key);
+        // All stages in the registry with the "derive" tag:
+        // subagents, spawned, signals, closure, outcomes, session-health,
+        // proposals, opportunities, retro-proposals, harness.
+        expect([...keys].sort()).toEqual([
             "closure",
+            "harness",
             "opportunities",
             "outcomes",
             "proposals",
             "retro-proposals",
             "session-health",
             "signals",
+            "spawned",
+            "subagents",
         ]);
     });
 
-    test("resolveIngestStages: --stages= takes precedence over --derive-only and legacy", () => {
-        expect([...resolveIngestStages(["--stages=git", "--derive-only", "--codex-only"])]).toEqual([
+    test("resolveIngestStages: --stages= takes precedence over --derive-only", () => {
+        const keys = resolveIngestStages(testRegistry, ["--stages=git", "--derive-only"]).map((s) => s.meta.key);
+        expect([...keys]).toEqual([
             "git",
         ]);
-    });
-
-    test("resolveIngestStages: legacy --git-only maps to the git stage alone", () => {
-        expect([...resolveIngestStages(["--git-only"])]).toEqual(["git"]);
     });
 
     test("evidence group exposes guidance/session/weekly", () => {

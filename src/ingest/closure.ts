@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { SurrealClient } from "../lib/db.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
@@ -305,3 +305,39 @@ if (import.meta.main) {
         ) as Effect.Effect<ClosureStats>,
     );
 }
+
+// ---------------------------------------------------------------------------
+// Co-located StageDef
+// ---------------------------------------------------------------------------
+
+import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
+import type { StageDef } from "./stage/registry.ts";
+
+export const ClosureKey = Schema.Literal("closure");
+export type ClosureKey = typeof ClosureKey.Type;
+
+/**
+ * Closure stage - derives Change Set + File Memory rows from commit + session join.
+ * Depends on {@link SignalsKey}. Consumed by {@link ProposalsKey}.
+ */
+// Named ClosureStageStats to avoid collision with the original ClosureStats interface.
+export class ClosureStageStats extends BaseStageStats.extend<ClosureStageStats>("ClosureStageStats")({
+    commitClassifications: Schema.Number,
+    skillCandidates: Schema.Number,
+}) {}
+
+export const closureStage: StageDef<ClosureStageStats, SurrealClient> = {
+    meta: StageMeta.make({ key: "closure", deps: ["signals"], tags: ["derive"] }),
+    run: (ctx: IngestContext) =>
+        Effect.gen(function* () {
+            const t0 = Date.now();
+            const sinceDays = sinceDaysFromCtx(ctx);
+            const result = yield* deriveClosure({ sinceDays });
+            return ClosureStageStats.make({
+                durationMs: Date.now() - t0,
+                summary: `classified ${result.commitClassifications} commits, ${result.skillCandidates} skill candidates`,
+                commitClassifications: result.commitClassifications,
+                skillCandidates: result.skillCandidates,
+            });
+        }),
+};
