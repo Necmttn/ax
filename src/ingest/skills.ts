@@ -1,3 +1,15 @@
+/**
+ * @stage skills
+ * @rationale Skills are the agent's standing instructions. Indexing them
+ *   up-front means later stages can ask "which skills exist" without
+ *   re-walking the filesystem on every query, and the dashboard can show a
+ *   static catalogue without reading transcripts at all.
+ * @inputs ~/.claude/skills/, ~/.agents/skills/, plugin caches
+ * @outputs `skill` rows, `plays_role` edges
+ * @order 10
+ *
+ * @see scripts/extract-stage-rationale.ts for the full annotation contract.
+ */
 import { readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash } from "node:crypto";

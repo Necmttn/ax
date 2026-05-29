@@ -23,3 +23,19 @@ result-*
 
 # SurrealDB CLI scratch
 history.txt
+
+# landing port scratchpad
+site/PORT-NOTES-LANDING.md
+# origin port scratchpad
+site/PORT-NOTES-ORIGIN.md
+
+# site workspace
+site/dist
+site/.tanstack
+site/.wrangler
+site/node_modules
+site/app/routeTree.gen.ts
+site/.content-collections
+
+# generated MDX partial - rebuilt by scripts/extract-stage-rationale.ts on every dev/build
+docs/how-ax-sees-your-work.generated.mdx
