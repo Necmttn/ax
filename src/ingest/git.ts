@@ -12,6 +12,7 @@ import {
     commitRecordKey,
     fileRecordKey,
 } from "./record-keys.ts";
+import { recordLiteral } from "../lib/ids.ts";
 import {
     chooseIdentity,
     classifyCheckoutKind,
@@ -313,8 +314,6 @@ const fetchCommits = (
     });
 
 // ---------- DB writers ----------
-
-const recordLiteral = (table: string, key: string): string => `${table}:\`${key}\``;
 
 const dbRecordLiteral = (fallbackTable: string, id: unknown, fallbackKey: string): string => {
     if (id === null || id === undefined) return recordLiteral(fallbackTable, fallbackKey);
@@ -704,6 +703,12 @@ export interface GitIngestOpts {
     /** Emitted after each repository is written, with cumulative counts, so
      *  the CLI progress bar ticks during the otherwise-silent repo walk. */
     onProgress?: (counts: Record<string, number>) => Effect.Effect<void>;
+    /**
+     * When provided, bypass `discoverRepos()` entirely and process only these
+     * absolute repo paths. Each path must be a git repo root (parent of .git).
+     * Used by `axctl ingest here` to restrict the git stage to $PWD.
+     */
+    repoPaths?: readonly string[];
 }
 
 export interface GitStats {
@@ -722,7 +727,11 @@ export const ingestGit = (
         const requested = opts.sinceDays ?? DEFAULT_SINCE_DAYS;
         const sinceDays = Math.min(Math.max(requested, 1), MAX_SINCE_DAYS);
 
-        const repos = yield* discoverRepos();
+        // When repoPaths is provided, bypass discovery entirely.
+        const repos: RepoInfo[] = opts.repoPaths && opts.repoPaths.length > 0
+            ? yield* Effect.forEach(opts.repoPaths, (p) => buildRepoInfo(p), { concurrency: 4 })
+            : yield* discoverRepos();
+
         if (repos.length === 0) {
             yield* Effect.logDebug("git ingest found no repositories");
             return { repos: 0, commits: 0, files: 0, produced: 0, touched: 0, sessions: 0 };

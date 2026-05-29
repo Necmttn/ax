@@ -127,6 +127,19 @@ DEFINE INDEX commit_sha_uq  ON commit FIELDS repo, sha UNIQUE;
 DEFINE INDEX commit_repository_ts ON commit FIELDS repository, ts;
 REMOVE INDEX IF EXISTS commit_checkout_ts ON commit;
 
+-- Full-text search on commit messages (BM25 + word tokenization) for `ax recall` / `ax commits search`.
+-- Backs friction F4: "recall BM25 covers turns only - not commit messages".
+-- Uses `ascii` filter (same as turn_text) for v0 compatibility with SurrealDB 3.0.
+-- `snowball(english)` stemming is not verified for SurrealDB 3.0 so ascii is the safe fallback.
+-- DEFINE INDEX IF NOT EXISTS re-indexes existing rows automatically on `bun run db:schema`
+-- so no separate backfill code path is needed. HIGHLIGHTS enables SEARCH::highlight() in queries.
+DEFINE ANALYZER IF NOT EXISTS commit_text
+    TOKENIZERS class
+    FILTERS lowercase, ascii;
+DEFINE INDEX IF NOT EXISTS commit_message_fts
+    ON commit FIELDS message
+    FULLTEXT ANALYZER commit_text BM25 HIGHLIGHTS;
+
 DEFINE TABLE repository SCHEMAFULL;
 DEFINE FIELD name           ON repository TYPE option<string>;
 DEFINE FIELD remote_url     ON repository TYPE option<string>;
@@ -810,6 +823,24 @@ DEFINE FIELD rows          ON graph_health_check TYPE option<string>;
 DEFINE FIELD created_at    ON graph_health_check TYPE datetime DEFAULT time::now();
 DEFINE INDEX graph_health_kind_created ON graph_health_check FIELDS kind, created_at;
 
+-- ==== Skill roles (P3.1) ====
+-- Multi-role natural: one skill -> many plays_role edges. Weighted query
+-- joins invoked -> skill -> plays_role -> role.
+
+DEFINE TABLE IF NOT EXISTS role SCHEMAFULL;
+DEFINE FIELD name   ON role TYPE string;
+DEFINE FIELD weight ON role TYPE float DEFAULT 1.0;
+DEFINE INDEX IF NOT EXISTS role_name_uq ON role FIELDS name UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS plays_role TYPE RELATION FROM skill TO role;
+DEFINE FIELD confidence ON plays_role TYPE float DEFAULT 1.0;
+DEFINE FIELD source     ON plays_role TYPE string;
+DEFINE FIELD weight     ON plays_role TYPE option<float>;
+DEFINE FIELD rationale  ON plays_role TYPE option<string>;
+DEFINE FIELD since      ON plays_role TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS plays_role_in  ON plays_role FIELDS in;
+DEFINE INDEX IF NOT EXISTS plays_role_out ON plays_role FIELDS out;
+
 -- ==== Relations (taste graph) ====
 
 DEFINE TABLE invoked      TYPE RELATION FROM turn TO skill;     -- explicit Skill tool call
@@ -827,6 +858,12 @@ DEFINE FIELD ts           ON invoked TYPE datetime;
 -- corrected_by edge is emitted.
 DEFINE FIELD turn_has_error ON invoked TYPE bool DEFAULT false;
 DEFINE FIELD was_corrected  ON invoked TYPE bool DEFAULT false;
+-- Position fields for P3.1: turn_index = seq at write time; total_turns and
+-- is_first are backfilled by the invoked-positions stage after all transcripts
+-- are ingested. option<T> so existing rows carry NONE until the backfill runs.
+DEFINE FIELD turn_index   ON invoked TYPE option<int>;
+DEFINE FIELD total_turns  ON invoked TYPE option<int>;
+DEFINE FIELD is_first     ON invoked TYPE option<bool>;
 -- Most cmdTaste/cmdSearch/cmdUnused subqueries filter
 -- `WHERE out = $skill_id AND ts > time::now() - Nd`. Composite index
 -- covers both predicates from one seek.

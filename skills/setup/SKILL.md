@@ -1,16 +1,17 @@
 ---
 name: setup
-description: Install + verify ax (the agent experience layer). Triggers when the user says "install ax", "set up ax", "ax not found", "ax doctor", "is ax running", "fix ax install", "first-time ax setup", or any setup question about the ax CLI / skills / daemon. Walks the install via the install.sh + skills.sh + first ingest, validates with `ax doctor`, and points the user at ax:retro for the experiment-loop workflow.
+description: Install + verify ax (the agent experience layer). Triggers when the user says "install ax", "set up ax", "ax not found", "ax doctor", "is ax running", "fix ax install", "first-time ax setup", or any setup question about the ax CLI / skills / daemon. Walks the install via the install.sh + skills.sh + first ingest, validates with `ax doctor`, and points the user at ax:retro (experiment loop) and ax:extract-workflow (reconstruct workflow behind shipped artifacts).
 ---
 
 # ax:setup
 
 Install and verify ax - the local agent-experience graph. After this skill
 the user has the `ax` CLI on PATH, a running SurrealDB, the launchd watcher
-reacting to new transcripts, and both ax skills loaded into Claude Code.
+reacting to new transcripts, and the ax skills loaded into Claude Code.
 
 This skill is intentionally narrow: install + verify only. For day-to-day
-use see `ax:retro` (experiment loop) or run the CLI directly.
+use see `ax:retro` (experiment loop), `ax:extract-workflow` (reconstruct
+the recipe behind a shipped artifact), or run the CLI directly.
 
 ## When to fire
 
@@ -30,8 +31,8 @@ an ax workflow (`ax improve list`, `ax recall …`).
 #    Linux works for ingest + CLI without launchd reactivity).
 curl -fsSL https://raw.githubusercontent.com/Necmttn/ax/main/install.sh | bash
 
-# 2. Skills - installs this skill + ax:retro into ~/.claude/skills/
-#    (or wherever skills.sh resolves to in the user's environment).
+# 2. Skills - installs this skill + ax:retro + ax:extract-workflow
+#    into ~/.claude/skills/ (and ~/.agents/skills/ for codex).
 npx skills add Necmttn/ax
 
 # 3. First ingest - seeds the graph from the user's last 7 days of
@@ -68,7 +69,7 @@ Specific failure modes:
 | SurrealDB | `127.0.0.1:8521` (ns=`ax`, db=`main`) | scripts/db-start.sh |
 | Launchd watcher (macOS) | `com.necmttn.ax-watch` reacts to new transcripts | `axctl install` |
 | Weekly checkpoint (optional) | `com.necmttn.ax-checkpoint` runs experiment-loop math | `bun run checkpoint:install` from the repo |
-| Claude skills | `ax:setup` (this one), `ax:retro` (workflow) | `npx skills add Necmttn/ax` |
+| Claude skills | `ax:setup` (this one), `ax:retro` (experiment loop), `ax:extract-workflow` (recipe reconstruction) | `npx skills add Necmttn/ax` |
 
 ## After install
 
@@ -107,6 +108,8 @@ ax project context --json       # grounding for the current repo
 ## What this skill is NOT for
 
 - Experiment-loop workflow → use `ax:retro`.
+- Reconstructing how a shipped artifact was built → use
+  `ax:extract-workflow`.
 - Day-to-day skill queries → run the CLI directly; no skill mediation
   needed.
 - Schema / dev work on the ax repo itself → see `docs/development.md` in

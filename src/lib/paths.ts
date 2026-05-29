@@ -11,7 +11,12 @@ export const SKILL_DIRS = (process.env.AX_SKILLS_DIRS ?? "")
     .filter(Boolean);
 
 export function defaultSkillDirs(): { dir: string; scope: string }[] {
-    const fromEnv = SKILL_DIRS.map((dir) => ({ dir, scope: "user" }));
+    // Re-read at call time so tests can override AX_SKILLS_DIRS after module load.
+    const liveSkillDirs = (process.env.AX_SKILLS_DIRS ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+    const fromEnv = liveSkillDirs.map((dir) => ({ dir, scope: "user" }));
     if (fromEnv.length > 0) return fromEnv;
     return [
         { dir: join(HOME, ".claude", "skills"), scope: "user" },

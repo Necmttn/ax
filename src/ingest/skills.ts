@@ -20,15 +20,18 @@ import { defaultSkillDirs } from "../lib/paths.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
 import { upsertSkillByName } from "./skill-upsert.ts";
+import { relateSkillRoles } from "./skill-role.ts";
 import { discoverProjectRoots } from "./project-discovery.ts";
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
+import { validateRoleName } from "../lib/role-name.ts";
 
 interface ParsedSkill {
     name: string;
     description: string | undefined;
     frontmatter: Record<string, unknown>;
     body: string;
+    roles: string[];
 }
 
 interface SkillItem {
@@ -42,20 +45,59 @@ const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/;
 
 function looseLineParse(raw: string): Record<string, unknown> {
     const out: Record<string, unknown> = {};
-    for (const line of raw.split("\n")) {
+    const lines = raw.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]!;
         const m = line.match(/^([a-zA-Z_][\w-]*)\s*:\s*(.*)$/);
         if (!m) continue;
         const [, key, value] = m;
-        if (value === "") continue;
-        out[key] = value.replace(/^["']|["']$/g, "");
+        if (value !== "") {
+            out[key] = value.replace(/^["']|["']$/g, "");
+            continue;
+        }
+        // Empty value: look ahead for `  - item` list lines.
+        const listItems: string[] = [];
+        while (i + 1 < lines.length) {
+            const next = lines[i + 1]!;
+            const lm = next.match(/^\s+-\s+(.+)$/);
+            if (!lm) break;
+            listItems.push(lm[1]!.trim());
+            i++;
+        }
+        if (listItems.length > 0) {
+            out[key] = listItems;
+        }
+        // If no list items found, key is omitted (empty value stays absent).
     }
     return out;
+}
+
+function extractRoles(fm: Record<string, unknown>, skillName?: string): string[] {
+    const raw = fm["role"];
+    if (raw === undefined || raw === null || raw === "") return [];
+    const items = Array.isArray(raw) ? raw : [raw];
+    const result: string[] = [];
+    for (const item of items) {
+        if (typeof item !== "string") continue;
+        try {
+            const norm = validateRoleName(item);
+            result.push(norm);
+        } catch (err) {
+            // Frontmatter typo - silently skip. The Effect.logWarning call
+            // below is deferred to the ingest pipeline context where an Effect
+            // runtime is available. Here we just omit the bad entry.
+            void Effect.logWarning(
+                `skills: skipping invalid role "${item}" in skill "${skillName ?? "unknown"}" frontmatter: ${err instanceof Error ? err.message : String(err)}`,
+            );
+        }
+    }
+    return result;
 }
 
 function parseSkillFile(content: string, fallbackName: string): ParsedSkill {
     const m = content.match(FRONTMATTER_RE);
     if (!m) {
-        return { name: fallbackName, description: undefined, frontmatter: {}, body: content };
+        return { name: fallbackName, description: undefined, frontmatter: {}, body: content, roles: [] };
     }
     let fm: Record<string, unknown> = {};
     try {
@@ -65,11 +107,13 @@ function parseSkillFile(content: string, fallbackName: string): ParsedSkill {
         // fall back to a tolerant line parser.
         fm = looseLineParse(m[1]);
     }
+    const name = typeof fm.name === "string" ? fm.name : fallbackName;
     return {
-        name: typeof fm.name === "string" ? fm.name : fallbackName,
+        name,
         description: typeof fm.description === "string" ? fm.description : undefined,
         frontmatter: fm,
         body: m[2],
+        roles: extractRoles(fm, name),
     };
 }
 
@@ -186,10 +230,17 @@ const collectSkills = (): Effect.Effect<SkillItem[]> =>
         return [...byName.values()];
     });
 
-export const ingestSkills = (): Effect.Effect<{ count: number }, DbError, SurrealClient> =>
+export const ingestSkills = (): Effect.Effect<
+    { count: number; rolesUpserted: number; edgesWritten: number },
+    DbError,
+    SurrealClient
+> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         const items = yield* collectSkills();
+
+        let rolesUpserted = 0;
+        let edgesWritten = 0;
 
         yield* Effect.forEach(
             items,
@@ -198,27 +249,35 @@ export const ingestSkills = (): Effect.Effect<{ count: number }, DbError, Surrea
                     .update(item.skill.body)
                     .digest("hex")
                     .slice(0, 16);
-                return upsertSkillByName(db, {
-                    name: item.skill.name,
-                    scope: item.scope,
-                    dir_path: item.dir_path,
-                    description: item.skill.description ?? null,
-                    content_hash: hash,
-                    bytes: item.bytes,
+                return Effect.gen(function* () {
+                    const skillId = yield* upsertSkillByName(db, {
+                        name: item.skill.name,
+                        scope: item.scope,
+                        dir_path: item.dir_path,
+                        description: item.skill.description ?? null,
+                        content_hash: hash,
+                        bytes: item.bytes,
+                    });
+                    const roleStats = yield* relateSkillRoles(db, {
+                        skillId,
+                        roles: item.skill.roles,
+                    });
+                    rolesUpserted += roleStats.rolesUpserted;
+                    edgesWritten += roleStats.edgesWritten;
                 });
             },
             { concurrency: 8, discard: true },
         );
 
         const count = items.length;
-        yield* Effect.logDebug("skills upserted", { count });
-        return { count };
+        yield* Effect.logDebug("skills upserted", { count, rolesUpserted, edgesWritten });
+        return { count, rolesUpserted, edgesWritten };
     });
 
 if (import.meta.main) {
     await Effect.runPromise(
         ingestSkills().pipe(Effect.provide(AppLayer), Effect.scoped) as Effect.Effect<
-            { count: number }
+            { count: number; rolesUpserted: number; edgesWritten: number }
         >,
     );
 }

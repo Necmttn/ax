@@ -451,16 +451,44 @@ export interface RecallHit {
     readonly snippet: string;
 }
 
+export interface RecallCommitHit {
+    readonly commit_id: string;     // record id
+    readonly sha: string;
+    readonly repo: string | null;   // stable repo key (repo field on commit)
+    readonly repository: string | null; // record id of repository node, if linked
+    readonly ts: string | null;
+    readonly snippet: string;       // commit message (highlighted)
+    readonly score: number;
+}
+
+export interface RecallSkillHit {
+    readonly skill_id: string;
+    readonly name: string;
+    readonly description: string | null;
+    readonly snippet: string;       // matched portion
+    readonly score: number;
+}
+
 export interface RecallResponse {
     readonly q: string;
-    readonly hits: ReadonlyArray<RecallHit>;
-    /** Back-compat: true when more results exist beyond what was returned.
-     *  Now derived from total_count vs window; older callers may still rely
-     *  on it. */
+    readonly hits: ReadonlyArray<RecallHit>;     // turns, unchanged
+    readonly commits: ReadonlyArray<RecallCommitHit>;  // empty when not requested
+    readonly skills: ReadonlyArray<RecallSkillHit>;    // empty when not requested
+    /** Back-compat: true when more results exist beyond what was returned in
+     *  any source - turns have more pages, OR commit/skill results were
+     *  limit-capped. */
     readonly truncated: boolean;
-    /** Total matches across the whole query (independent of window). */
+    /** Sum of matched records across ALL requested sources (turn + commit +
+     *  skill). When only turns are requested this equals the turn count
+     *  (back-compat). Per-source breakdown is in `total_counts`. */
     readonly total_count: number;
-    /** The slice that was returned. */
+    /** Per-source total counts. */
+    readonly total_counts: {
+        readonly turn: number;
+        readonly commit: number;
+        readonly skill: number;
+    };
+    /** The slice that was returned (applies to turns). */
     readonly window: { readonly offset: number; readonly limit: number };
 }
 
