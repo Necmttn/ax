@@ -27,6 +27,21 @@ import { toBareSessionId, toSessionRid } from "./shared/session-id.ts";
 
 export type Harness = "claude" | "codex";
 
+/**
+ * Encode an absolute filesystem path as the Claude project directory slug.
+ *
+ * Claude stores transcripts under `~/.claude/projects/<slug>/` where slug is
+ * derived by replacing every `/` in the absolute path with `-`, retaining
+ * the leading `-`. For example:
+ *   `/Users/necmttn/Projects/ax` → `-Users-necmttn-Projects-ax`
+ *
+ * Handles trailing slashes by stripping them first.
+ */
+export function encodeClaudeProjectSlug(absolutePath: string): string {
+    const normalized = absolutePath.replace(/\/+$/, ""); // strip trailing slash
+    return normalized.replace(/\//g, "-");
+}
+
 export interface FoundTranscript {
     readonly path: string;
     readonly harness: Harness;

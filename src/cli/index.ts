@@ -2,6 +2,8 @@
 import { Effect, Layer, Option, References } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
+import { listSessionsHere, listSessionsAround, listSessionsNear, type SessionRow } from "../dashboard/sessions-query.ts";
+import { findCommitWindow } from "../lib/git-window.ts";
 import { AxConfig } from "../lib/config.ts";
 import { safeJsonParse } from "../lib/shared/safe-json.ts";
 import { ProcessService } from "../lib/process.ts";
@@ -19,17 +21,40 @@ import { showExperiment, formatShow } from "../improve/show.ts";
 import { cmdRetroReflect } from "./retro-reflect.ts";
 import { cmdRetroMeta } from "./retro-meta.ts";
 import { cmdRetroPlan } from "./retro-plan.ts";
+import { cmdSkillsClassify } from "./skills-classify.ts";
+import { cmdSkillsTag } from "./skills-tag.ts";
+import { cmdSkillsLint } from "./skills-lint.ts";
+import { fetchSkillsWeighted } from "../dashboard/skills-weighted.ts";
+import { renderWeightedTable, renderWeightedJson } from "./skills-weighted-format.ts";
+import {
+    fetchSkillsByRole,
+    fetchRolesForSkill,
+    fetchAllRoles,
+} from "../dashboard/role-queries.ts";
+import {
+    renderSkillsByRoleTable,
+    renderSkillsByRoleJson,
+    renderRolesForSkillTable,
+    renderRolesForSkillJson,
+    renderAllRolesTable,
+    renderAllRolesJson,
+} from "./role-format.ts";
 import { homedir } from "node:os";
 import { recordKeyPart } from "../lib/shared/derive-keys.ts";
 import { recordRef, surrealString } from "../lib/shared/surql.ts";
 import { ingestClaudeInsights } from "../ingest/claude-insights.ts";
+// backfillInvokedPositions - Phase B will register this as invokedPositionsStage.
 import { deriveSignals } from "../ingest/derive-signals.ts";
 import { deriveTurnIntents } from "../ingest/derive-intents.ts";
 import { INSIGHT_VIEWS, insightSqlForView, isInsightView } from "../queries/insights.ts";
 import { writeDashboard } from "../dashboard/report.ts";
 import { serveDashboard } from "../dashboard/server.ts";
-import { fetchRecall } from "../dashboard/recall.ts";
+import { fetchRecall, type RecallSource, type RecallScope } from "../dashboard/recall.ts";
+import { fetchSessionShow } from "../dashboard/session-show.ts";
+import { renderSessionMarkdown, renderSessionJson } from "./session-show-format.ts";
 import { cmdDaemon, cmdDoctor, cmdInstall, cmdUninstall } from "./install.ts";
+import { resolvePwdRepository } from "../lib/pwd.ts";
+import { encodeClaudeProjectSlug } from "../lib/transcript-locator.ts";
 import {
     createProgressReporter,
     parseProgressMode,
@@ -39,6 +64,7 @@ import {
 import { initTuiProgress, shouldUseTui } from "./progress-tui.tsx";
 import { cmdProject } from "./project.ts";
 import { AX_VERSION, liveVersionDeps, printVersion, updateAxctl } from "./version.ts";
+import { wantsJson, catchDbErrorAndExit } from "./output.ts";
 import { cmdDogfoodTerminal } from "../dogfood/wterm.ts";
 import { buildFileContextPack } from "../context/file-context.ts";
 import {
@@ -583,13 +609,67 @@ const cmdReport = (args: string[]) =>
         );
     });
 
+const VALID_SOURCES: ReadonlySet<string> = new Set(["turn", "commit", "skill"]);
+
+function parseSourcesFlag(raw: string | null): ReadonlyArray<RecallSource> | null {
+    if (!raw) return null;
+    const parts = raw.split(",").map((s) => s.trim()).filter(Boolean);
+    const invalid = parts.filter((p) => !VALID_SOURCES.has(p));
+    if (invalid.length > 0) {
+        console.error(
+            `axctl recall: unknown source(s): ${invalid.join(", ")}. Valid: turn, commit, skill`,
+        );
+        process.exit(2);
+    }
+    return parts as RecallSource[];
+}
+
 interface RecallCliOpts {
     readonly query: string;
     readonly project: string | null;
     readonly skill: string | null;
     readonly since: string | null;
+    readonly sources: string | null;
+    readonly scopeFlag: string | null;
     readonly json: boolean;
 }
+
+/**
+ * Resolve `--scope` flag + cwd into a RecallScope.
+ *
+ * Rules:
+ *  - `--scope=all`  → { kind: "all" } (no DB lookup)
+ *  - `--scope=here` → look up cwd repository; error if not a git repo
+ *  - omitted        → auto-detect: try `here`; fall back to `all` silently
+ */
+const resolveScope = (
+    scopeFlag: string | null,
+): Effect.Effect<RecallScope, DbError | import("../lib/process.ts").ProcessError, SurrealClient | ProcessService> =>
+    Effect.gen(function* () {
+        if (scopeFlag === "all") return { kind: "all" } as RecallScope;
+
+        if (scopeFlag === "here" || scopeFlag === null) {
+            const resolution = yield* resolvePwdRepository().pipe(
+                Effect.catchTag("NotAGitRepoError", (err) => {
+                    if (scopeFlag === "here") {
+                        // explicit --scope=here outside a git repo → error
+                        process.stderr.write(`axctl recall: --scope=here requires a git repo (cwd=${err.cwd})\n`);
+                        process.exit(2);
+                    }
+                    // auto-detect: not a git repo → silent fall-through to all
+                    return Effect.succeed(null as import("../lib/pwd.ts").PwdResolution | null);
+                }),
+            );
+            if (resolution === null) return { kind: "all" } as RecallScope;
+            return {
+                kind: "here",
+                repositoryKey: resolution.repositoryRecordId.id as string,
+            } as RecallScope;
+        }
+
+        console.error(`axctl recall: unknown --scope value "${scopeFlag}". Valid: here, all`);
+        process.exit(2);
+    });
 
 /**
  * Resolve a user-supplied filter (project slug, skill name) into the
@@ -741,37 +821,83 @@ const cmdRecall = (opts: RecallCliOpts) =>
         }
         const project = yield* resolveProject(opts.project);
         const skill = yield* resolveSkill(opts.skill);
+        const sources = parseSourcesFlag(opts.sources);
+        const scope = yield* resolveScope(opts.scopeFlag);
         const result = yield* fetchRecall({
             q: opts.query,
             project,
             skill,
             since: opts.since,
+            ...(sources !== null ? { sources } : {}),
+            scope,
         });
         if (opts.json) {
             console.log(JSON.stringify(result, null, 2));
             return;
         }
-        if (result.hits.length === 0) {
+
+        const multiSource = (result.commits.length > 0 || result.skills.length > 0);
+
+        // --- turns section ---
+        if (result.hits.length === 0 && !multiSource) {
             console.log(`no matches for "${opts.query}"`);
             return;
         }
-        const more = result.total_count > result.hits.length
-            ? ` (showing first ${result.hits.length} of ${result.total_count})`
-            : "";
-        console.log(`${result.hits.length} match${result.hits.length === 1 ? "" : "es"}${more}`);
-        for (const hit of result.hits) {
-            const ts = hit.ts ?? "?";
-            const project = hit.project ? prettifyProjectSlug(hit.project) : "?";
-            const sid = hit.session_id
-                .replace(/^session:⟨/, "")
-                .replace(/⟩$/, "")
-                .slice(0, 12);
-            const role = (hit.role ?? "?").padEnd(9);
-            const src = (hit.source ?? "?").padEnd(15);
-            console.log(`\n[2m${ts}  ${src} ${role} ${project}  ${sid}[0m`);
-            const snippet = hit.snippet.replace(/\s+/g, " ").trim();
-            console.log(`  ${snippet}`);
+        if (result.hits.length > 0) {
+            if (multiSource) console.log("\n\x1b[1mturns\x1b[0m");
+            const more = result.total_count > result.hits.length
+                ? ` (showing first ${result.hits.length} of ${result.total_count})`
+                : "";
+            console.log(`${result.hits.length} match${result.hits.length === 1 ? "" : "es"}${more}`);
+            for (const hit of result.hits) {
+                const ts = hit.ts ?? "?";
+                const proj = hit.project ? prettifyProjectSlug(hit.project) : "?";
+                const sid = hit.session_id
+                    .replace(/^session:⟨/, "")
+                    .replace(/⟩$/, "")
+                    .slice(0, 12);
+                const role = (hit.role ?? "?").padEnd(9);
+                const src = (hit.source ?? "?").padEnd(15);
+                console.log(`\n\x1b[2m${ts}  ${src} ${role} ${proj}  ${sid}\x1b[0m`);
+                const snippet = hit.snippet.replace(/\s+/g, " ").trim();
+                console.log(`  ${snippet}`);
+            }
         }
+
+        // --- commits section ---
+        if (result.commits.length > 0) {
+            console.log(`\n\x1b[1mcommits\x1b[0m`);
+            const more = result.total_counts.commit > result.commits.length
+                ? ` (showing first ${result.commits.length} of ${result.total_counts.commit})`
+                : "";
+            console.log(`${result.commits.length} match${result.commits.length === 1 ? "" : "es"}${more}`);
+            for (const hit of result.commits) {
+                const ts = hit.ts ?? "?";
+                const repo = hit.repo ?? "?";
+                const sha = hit.sha.slice(0, 8);
+                console.log(`\n\x1b[2m${ts}  ${repo}  ${sha}\x1b[0m`);
+                const snippet = hit.snippet.replace(/\s+/g, " ").trim();
+                console.log(`  ${snippet}`);
+            }
+        }
+
+        // --- skills section ---
+        if (result.skills.length > 0) {
+            console.log(`\n\x1b[1mskills\x1b[0m`);
+            const more = result.total_counts.skill > result.skills.length
+                ? ` (showing first ${result.skills.length} of ${result.total_counts.skill})`
+                : "";
+            console.log(`${result.skills.length} match${result.skills.length === 1 ? "" : "es"}${more}`);
+            for (const hit of result.skills) {
+                const desc = hit.description ? `  \x1b[2m${hit.description.slice(0, 80)}\x1b[0m` : "";
+                console.log(`  ${hit.name}${desc}`);
+                if (hit.snippet && hit.snippet !== hit.name) {
+                    const snippet = hit.snippet.replace(/\s+/g, " ").trim();
+                    console.log(`    ${snippet}`);
+                }
+            }
+        }
+
     });
 
 const cmdSearch = (args: string[]) =>
@@ -1159,6 +1285,110 @@ SELECT name, scope FROM skill WHERE array::len(<-invoked) = 0;`;
         console.log(`\n${unused.length} skills unused in last ${days} days.`);
     });
 
+const cmdSkillsWeighted = (args: string[]) =>
+    Effect.gen(function* () {
+        const limit = parsePositiveIntFlag("skills weighted", "limit", args, 25);
+        const windowDays = parseOptionalPositiveIntFlag("skills weighted", "window", args);
+        const doctorThreshold = parsePositiveIntFlag("skills weighted", "doctor-threshold", args, 5);
+        const json = args.includes("--json");
+
+        // --window=0 is invalid: parseOptionalPositiveIntFlag rejects it (n <= 0).
+        // If the user passes --window, but 0 or negative, process.exit(2) already fired.
+
+        const result = yield* fetchSkillsWeighted({
+            ...(windowDays !== undefined ? { windowDays } : {}),
+            limit,
+            doctorThreshold,
+        }).pipe(
+            catchDbErrorAndExit("axctl skills weighted"),
+        );
+
+        if (json) {
+            console.log(renderWeightedJson(result));
+        } else {
+            console.log(renderWeightedTable(result));
+        }
+    });
+
+// ---------------------------------------------------------------------------
+// P3.7: Role read commands
+// ---------------------------------------------------------------------------
+
+/**
+ * `ax skills by-role <role> [--json] [--limit=N]`
+ * List skills classified as a given role, ranked by invocations.
+ */
+const cmdSkillsByRole = (args: string[]) =>
+    Effect.gen(function* () {
+        const positionals = args.filter((a) => !a.startsWith("--"));
+        const role = positionals[0];
+        if (!role) {
+            console.error("axctl skills by-role: missing <role-name>");
+            process.exit(2);
+        }
+        const json = wantsJson(args);
+        const limit = parsePositiveIntFlag("skills by-role", "limit", args, 50);
+
+        const result = yield* fetchSkillsByRole({ role, limit }).pipe(
+            catchDbErrorAndExit("axctl skills by-role"),
+        );
+
+        if (json) {
+            console.log(renderSkillsByRoleJson(result, role));
+        } else {
+            console.log(renderSkillsByRoleTable(result, role));
+        }
+    });
+
+/**
+ * `ax skills roles <skill> [--json]`
+ * List all roles for a given skill.
+ */
+const cmdRolesForSkill = (args: string[]) =>
+    Effect.gen(function* () {
+        const positionals = args.filter((a) => !a.startsWith("--"));
+        const skill = positionals[0];
+        if (!skill) {
+            console.error("axctl skills roles: missing <skill-name>");
+            process.exit(2);
+        }
+        const json = wantsJson(args);
+
+        const result = yield* fetchRolesForSkill({ skill }).pipe(
+            catchDbErrorAndExit("axctl skills roles"),
+        );
+
+        if (!result.skillExists) {
+            process.stderr.write(`axctl skills roles: unknown skill "${skill}"\n`);
+            process.exit(2);
+        }
+
+        if (json) {
+            console.log(renderRolesForSkillJson(result, skill));
+        } else {
+            console.log(renderRolesForSkillTable(result, skill));
+        }
+    });
+
+/**
+ * `ax roles [--json]`
+ * List all roles with skill counts.
+ */
+const cmdRoles = (args: string[]) =>
+    Effect.gen(function* () {
+        const json = wantsJson(args);
+
+        const result = yield* fetchAllRoles().pipe(
+            catchDbErrorAndExit("axctl roles"),
+        );
+
+        if (json) {
+            console.log(renderAllRolesJson(result));
+        } else {
+            console.log(renderAllRolesTable(result));
+        }
+    });
+
 const cmdTaste = (args: string[]) =>
     Effect.gen(function* () {
         const limit = parsePositiveIntFlag("taste", "limit", args, 30);
@@ -1452,6 +1682,7 @@ export const insightsOnlyConflicts = (opts: {
     if (opts.hasSince) conflicts.push("--since");
     return conflicts;
 };
+
 
 const ingestCommand = Command.make(
     "ingest",
@@ -2317,6 +2548,318 @@ const improveCheckpointCommand = Command.make(
         cmdImproveCheckpoint([...boolArg("force", force), ...boolArg("json", json)]),
 ).pipe(Command.withDescription("Compute checkpoint snapshots at +3/+10/+30 sessions for active experiments (session-count windows, not calendar days - see issue #83)"));
 
+// ---------------------------------------------------------------------------
+// ax sessions - windowed session queries (F2, F3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Format a list of SessionRows for TTY output as a compact table.
+ * Falls back to 100 columns when process.stdout.columns is unavailable.
+ */
+function formatSessionsTable(rows: SessionRow[]): string {
+    if (rows.length === 0) return "(no sessions found)";
+    const termWidth = (process.stdout.columns ?? 100) as number;
+    const lines: string[] = [];
+    // Header
+    lines.push(
+        `${"started_at".padEnd(26)} ${"source".padEnd(18)} ${"repo".padEnd(16)} ${"project".padEnd(20)} ${"turns".padStart(5)}  summary`,
+    );
+    lines.push("-".repeat(Math.min(termWidth, 120)));
+    for (const row of rows) {
+        const started = (row.started_at ?? "?").slice(0, 25).padEnd(26);
+        const source = (row.source ?? "?").slice(0, 17).padEnd(18);
+        // Extract a short repo key from record id string
+        const repoRaw = row.repository ?? "";
+        const repoShort = repoRaw
+            .replace(/^repository:/, "")
+            .replace(/[⟨⟩]/g, "")
+            .replace(/^(remote|initial)__/, "")
+            .slice(-16)
+            .padEnd(16);
+        const project = prettifyProjectSlug(row.project ?? "").slice(0, 19).padEnd(20);
+        const turns = String(row.turn_count ?? 0).padStart(5);
+        const msg = (row.first_user_message ?? "").replace(/\s+/g, " ").trim();
+        const summaryWidth = Math.max(0, termWidth - 26 - 1 - 18 - 1 - 16 - 1 - 20 - 1 - 5 - 2);
+        const summary = summaryWidth > 0 ? msg.slice(0, summaryWidth) : msg.slice(0, 40);
+        lines.push(`${started} ${source} ${repoShort} ${project} ${turns}  ${summary}`);
+    }
+    return lines.join("\n");
+}
+
+// --- sessions here ---
+
+const cmdSessionsHere = (args: string[]) =>
+    Effect.gen(function* () {
+        const days = parsePositiveIntFlag("sessions here", "days", args, 14);
+        const json = wantsJson(args);
+
+        const pwdResolution = yield* resolvePwdRepository().pipe(
+            Effect.catchTag("NotAGitRepoError", (err) =>
+                Effect.sync(() => {
+                    process.stderr.write(
+                        `axctl sessions here: not in a git repository (cwd=${err.cwd})\n`,
+                    );
+                    process.exit(2);
+                }),
+            ),
+        );
+
+        const repositoryKey = pwdResolution.repositoryRecordId.id as string;
+        const rows = yield* listSessionsHere({ repositoryKey, days });
+
+        if (json) {
+            console.log(JSON.stringify(rows, null, 2));
+            return;
+        }
+        console.log(formatSessionsTable(rows));
+    });
+
+// --- sessions around ---
+
+const cmdSessionsAround = (args: string[]) =>
+    Effect.gen(function* () {
+        const positional = args.filter((a) => !a.startsWith("--"))[0];
+        if (!positional) {
+            console.error("axctl sessions around: missing <date> argument");
+            process.exit(2);
+        }
+        // Parse date: YYYY-MM-DD or full ISO8601
+        let date: Date;
+        if (/^\d{4}-\d{2}-\d{2}$/.test(positional)) {
+            date = new Date(`${positional}T00:00:00.000Z`);
+        } else {
+            date = new Date(positional);
+        }
+        if (isNaN(date.getTime())) {
+            console.error(
+                `axctl sessions around: invalid date "${positional}" (expected YYYY-MM-DD or ISO8601)`,
+            );
+            process.exit(2);
+        }
+
+        const days = parsePositiveIntFlag("sessions around", "days", args, 3);
+        const json = wantsJson(args);
+        const projectRaw = flag("project", args);
+        // Resolve --project: accept encoded slug or absolute path
+        let project: string | null = null;
+        if (projectRaw) {
+            project = projectRaw.startsWith("/")
+                ? encodeClaudeProjectSlug(projectRaw)
+                : projectRaw;
+        }
+
+        const rows = yield* listSessionsAround({ date, days, project });
+
+        if (json) {
+            console.log(JSON.stringify(rows, null, 2));
+            return;
+        }
+        console.log(formatSessionsTable(rows));
+    });
+
+// --- sessions near ---
+
+const cmdSessionsNear = (args: string[]) =>
+    Effect.gen(function* () {
+        const sha = args.filter((a) => !a.startsWith("--"))[0];
+        if (!sha) {
+            console.error("axctl sessions near: missing <sha> argument");
+            process.exit(2);
+        }
+        const json = wantsJson(args);
+
+        // Resolve repository via pwd (near is always pwd-scoped)
+        const pwdResolution = yield* resolvePwdRepository().pipe(
+            Effect.catchTag("NotAGitRepoError", (err) =>
+                Effect.sync(() => {
+                    process.stderr.write(
+                        `axctl sessions near: not in a git repository (cwd=${err.cwd})\n`,
+                    );
+                    process.exit(2);
+                }),
+            ),
+        );
+
+        const repoRoot = pwdResolution.repoRoot;
+        const repositoryKey = pwdResolution.repositoryRecordId.id as string;
+
+        // Resolve commit window
+        const window = yield* findCommitWindow(repoRoot, sha).pipe(
+            Effect.catchTag("ProcessError", () =>
+                Effect.sync(() => {
+                    console.error(`axctl sessions near: unknown sha ${sha}`);
+                    process.exit(2);
+                    return { kind: "not_found" as const };
+                }),
+            ),
+        );
+
+        if (window.kind === "not_found") {
+            console.error(`axctl sessions near: unknown sha ${sha}`);
+            process.exit(2);
+            return;
+        }
+
+        let from: Date;
+        let to: Date;
+        if (window.kind === "orphan") {
+            // root commit: ±3 days around commitTs
+            from = new Date(window.commitTs.getTime() - 3 * 24 * 60 * 60 * 1000);
+            to = new Date(window.commitTs.getTime() + 3 * 24 * 60 * 60 * 1000);
+        } else {
+            from = window.from;
+            to = window.to;
+        }
+
+        const rows = yield* listSessionsNear({ from, to, repositoryKey });
+
+        if (json) {
+            console.log(JSON.stringify(rows, null, 2));
+            return;
+        }
+        console.log(formatSessionsTable(rows));
+    });
+
+// ---------------------------------------------------------------------------
+// ax session show <id> - single-session detail with subagent timeline (P2.2)
+// ---------------------------------------------------------------------------
+
+/**
+ * `ax session show <id> [--expand=<uuid>] [--all] [--by-role] [--json]`
+ *
+ * Displays a session's invoked + tool_call timeline. Collapses subagent
+ * sessions to one-line summaries by default. --expand=<uuid> (repeatable)
+ * or --all drills into subagent contents inline.
+ *
+ * P3.7: --by-role groups the Top skills section by role instead of flat list.
+ * Skills without a role appear in "(unclassified)".
+ *
+ * Auto markdown (TTY) vs JSON (piped). --json forces JSON output.
+ */
+const cmdSessionShow = (args: string[]) =>
+    Effect.gen(function* () {
+        const positionals = args.filter((a) => !a.startsWith("--"));
+        const sessionId = positionals[0];
+        if (!sessionId) {
+            console.error("axctl session show: missing <id>");
+            console.error("  usage: axctl session show <uuid|claude-subagent-<id>|session:⟨...⟩>");
+            process.exit(2);
+        }
+
+        const forceJson = args.includes("--json");
+        const expandAll = args.includes("--all");
+        const byRole = args.includes("--by-role");
+        const useJson = forceJson || process.stdout.isTTY === false;
+
+        // Collect --expand=<uuid> values (repeatable)
+        const expandSet = new Set<string>();
+        for (const a of args) {
+            if (a.startsWith("--expand=")) {
+                const val = a.slice("--expand=".length).trim();
+                if (val.length > 0) expandSet.add(val);
+            }
+        }
+
+        const payload = yield* fetchSessionShow({
+            sessionId,
+            expand: expandSet,
+            expandAll,
+            byRole,
+        }).pipe(
+            catchDbErrorAndExit("axctl session show"),
+        );
+
+        if (payload.session.overview === null) {
+            process.stderr.write(`session ${sessionId} not found\n`);
+            process.exit(1);
+        }
+
+        if (useJson) {
+            console.log(renderSessionJson(payload));
+        } else {
+            console.log(renderSessionMarkdown(payload));
+        }
+    });
+
+const sessionShowCommand = Command.make(
+    "show",
+    {
+        id: Argument.string("id"),
+        expand: Flag.string("expand").pipe(Flag.atLeast(0)),
+        all: Flag.boolean("all").pipe(Flag.withDefault(false)),
+        byRole: Flag.boolean("by-role").pipe(Flag.withDefault(false)),
+        json: jsonFlag,
+    },
+    ({ id, expand, all, byRole, json }) =>
+        cmdSessionShow([
+            id,
+            ...[...expand].map((e) => `--expand=${e}`),
+            ...boolArg("all", all),
+            ...boolArg("by-role", byRole),
+            ...boolArg("json", json),
+        ]),
+).pipe(
+    Command.withDescription(
+        "Display a session's timeline (tool calls + subagent spawns). " +
+        "--expand=<uuid> (repeatable) or --all expands subagent timelines inline. " +
+        "--by-role groups the Top skills section by role. " +
+        "Auto markdown on TTY, JSON when piped. --json forces JSON.",
+    ),
+);
+
+// Effect/CLI Command definitions for sessions subcommands
+
+const sessionsHereCommand = Command.make(
+    "here",
+    {
+        days: Flag.integer("days").pipe(Flag.withDefault(14)),
+        json: jsonFlag,
+    },
+    ({ days, json }) =>
+        cmdSessionsHere([`--days=${days}`, ...boolArg("json", json)]),
+).pipe(Command.withDescription("List sessions for the current git repository (default: last 14 days)"));
+
+const sessionsAroundCommand = Command.make(
+    "around",
+    {
+        date: Argument.string("date"),
+        days: Flag.integer("days").pipe(Flag.withDefault(3)),
+        project: Flag.string("project").pipe(Flag.optional),
+        json: jsonFlag,
+    },
+    ({ date, days, project, json }) =>
+        cmdSessionsAround([
+            date,
+            `--days=${days}`,
+            ...stringArg("project", optionValue(project)),
+            ...boolArg("json", json),
+        ]),
+).pipe(Command.withDescription("List sessions in a ±N-day window around a date (YYYY-MM-DD or ISO8601)"));
+
+const sessionsNearCommand = Command.make(
+    "near",
+    {
+        sha: Argument.string("sha"),
+        json: jsonFlag,
+    },
+    ({ sha, json }) =>
+        cmdSessionsNear([sha, ...boolArg("json", json)]),
+).pipe(Command.withDescription(
+    "List sessions that overlapped with a git commit window (from the predecessor commit's timestamp to this commit's timestamp). " +
+    "Pass a full or short SHA. Must be inside the target git repo. " +
+    "See the ax:extract-workflow skill for narrating workflows around a sha.",
+));
+
+const sessionsCommand = Command.make("sessions").pipe(
+    Command.withDescription("Windowed session queries: here (pwd-repo), around (date), near (sha), show (detail)"),
+    Command.withSubcommands([
+        sessionsHereCommand,
+        sessionsAroundCommand,
+        sessionsNearCommand,
+        sessionShowCommand,
+    ]),
+);
+
 const improveCommand = Command.make("improve").pipe(
     Command.withDescription("Experiment loop: rank proposals (recommend), accept (emit task brief or scaffold + dispatch subagent), lint grounded agent files, track verdicts at +3/+10/+30 sessions after accept."),
     Command.withSubcommands([
@@ -2976,19 +3519,26 @@ const recallCommand = Command.make(
         project: Flag.string("project").pipe(Flag.optional),
         skill: Flag.string("skill").pipe(Flag.optional),
         since: Flag.string("since").pipe(Flag.optional),
+        sources: Flag.string("sources").pipe(Flag.optional),
+        scope: Flag.string("scope").pipe(Flag.optional),
         json: jsonFlag,
     },
-    ({ query, project, skill, since, json }) =>
+    ({ query, project, skill, since, sources, scope, json }) =>
         cmdRecall({
             query: query.join(" "),
             project: Option.getOrNull(project),
             skill: Option.getOrNull(skill),
             since: Option.getOrNull(since),
+            sources: Option.getOrNull(sources),
+            scopeFlag: Option.getOrNull(scope),
             json,
         }),
 ).pipe(
     Command.withDescription(
-        "Cross-session text search over user/assistant turns (BM25 FTS)",
+        "Cross-session text search (BM25). --sources=turn,commit,skill chooses record types (default turn). " +
+        "--scope=here filters to the current repo (auto-detected); --scope=all overrides. " +
+        "--project=? / --skill=? opens an interactive picker. " +
+        "See the ax:extract-workflow skill for narrating workflows behind shipped artifacts.",
     ),
 );
 
@@ -3031,17 +3581,159 @@ const recoveryCommand = Command.make(
     ({ limit }) => cmdRecovery([`--limit=${limit}`]),
 ).pipe(Command.withDescription("Show skills that recovered failed work"));
 
+const classifyCommand = Command.make(
+    "classify",
+    {
+        names: Argument.string("skill").pipe(Argument.variadic({ min: 0 })),
+        outDir: Flag.string("out-dir").pipe(Flag.withDefault(".ax/tasks")),
+        dryRun: Flag.boolean("dry-run").pipe(Flag.withDefault(false)),
+        json: jsonFlag,
+    },
+    ({ names, outDir, dryRun, json }) =>
+        cmdSkillsClassify({
+            names: [...names],
+            outDir,
+            dryRun,
+            json,
+        }),
+).pipe(
+    Command.withDescription(
+        "Emit classify-brief task files for unclassified skills with ≥3 invocations. " +
+        "With skill names: emit briefs for those specific skills (no threshold). " +
+        "--out-dir=<path> (default .ax/tasks)  --dry-run  --json",
+    ),
+);
+
+const tagCommand = Command.make(
+    "tag",
+    {
+        skill: Argument.string("skill"),
+        role: Argument.string("role"),
+        confidence: Flag.float("confidence").pipe(Flag.withDefault(1.0)),
+        rationale: Flag.string("rationale").pipe(Flag.optional),
+        remove: Flag.boolean("remove").pipe(Flag.withDefault(false)),
+    },
+    ({ skill, role, confidence, rationale, remove }) =>
+        cmdSkillsTag({
+            skillName: skill,
+            roleName: role,
+            confidence,
+            rationale: optionValue(rationale),
+            remove,
+        }).pipe(
+            catchDbErrorAndExit("axctl skills tag"),
+        ),
+).pipe(
+    Command.withDescription(
+        "Manually assign a role to a skill (writes a plays_role edge with source=user). " +
+        "Idempotent. Use --remove to delete an existing user-source edge. " +
+        "--confidence=N (0–1, default 1.0)  --rationale=\"...\""
+    ),
+);
+
+const skillsLintCommand = Command.make(
+    "lint",
+    {
+        taskDir: Flag.string("task-dir").pipe(Flag.withDefault(".ax/tasks")),
+        dryRun: Flag.boolean("dry-run").pipe(Flag.withDefault(false)),
+        json: jsonFlag,
+    },
+    ({ taskDir, dryRun, json }) =>
+        cmdSkillsLint({ taskDir, dryRun, json }).pipe(
+            catchDbErrorAndExit("axctl skills lint"),
+        ),
+).pipe(
+    Command.withDescription(
+        "Read filled classify briefs from --task-dir (default .ax/tasks) and write plays_role " +
+        "edges with source=\"brief\". Removes applied brief files. " +
+        "--dry-run  --json  --task-dir=<path>",
+    ),
+);
+
+const weightedCommand = Command.make(
+    "weighted",
+    {
+        window: Flag.integer("window").pipe(Flag.optional),
+        limit: positiveLimit(25),
+        doctorThreshold: Flag.integer("doctor-threshold").pipe(Flag.withDefault(5)),
+        json: jsonFlag,
+    },
+    ({ window, limit, doctorThreshold, json }) =>
+        cmdSkillsWeighted([
+            `--limit=${limit}`,
+            ...intArg("window", optionValue(window)),
+            `--doctor-threshold=${doctorThreshold}`,
+            ...boolArg("json", json),
+        ]),
+).pipe(
+    Command.withDescription(
+        "Rank skills by usage × role-weight (classified skills score higher). " +
+        "Doctor mode warns when many skills are unclassified. " +
+        "--window=Nd  --limit=N  --doctor-threshold=N  --json",
+    ),
+);
+
+// P3.7: ax skills by-role <role>
+const byRoleCommand = Command.make(
+    "by-role",
+    {
+        role: Argument.string("role"),
+        limit: positiveLimit(50),
+        json: jsonFlag,
+    },
+    ({ role, limit, json }) =>
+        cmdSkillsByRole([role, `--limit=${limit}`, ...boolArg("json", json)]),
+).pipe(
+    Command.withDescription(
+        "List skills classified as <role>, ranked by invocations. " +
+        "--limit=N  --json",
+    ),
+);
+
+// P3.7: ax skills roles <skill>
+const rolesForSkillCommand = Command.make(
+    "roles",
+    {
+        skill: Argument.string("skill"),
+        json: jsonFlag,
+    },
+    ({ skill, json }) => cmdRolesForSkill([skill, ...boolArg("json", json)]),
+).pipe(
+    Command.withDescription(
+        "List all roles assigned to <skill>. Exit 2 if skill is unknown. --json",
+    ),
+);
+
 const skillsCommand = Command.make("skills").pipe(
-    Command.withDescription("Skill-graph queries: search, stats, usage, pairs, recovery"),
+    Command.withDescription("Skill-graph queries: search, stats, usage, pairs, recovery, classify, tag, lint, weighted, by-role, roles"),
     Command.withSubcommands([
         searchCommand,
         statsCommand,
         recentCommand,
         unusedCommand,
         tasteCommand,
+        weightedCommand,
         pairsCommand,
         recoveryCommand,
+        classifyCommand,
+        tagCommand,
+        skillsLintCommand,
+        byRoleCommand,
+        rolesForSkillCommand,
     ]),
+);
+
+// P3.7: ax roles (top-level)
+const rolesCommand = Command.make(
+    "roles",
+    { json: jsonFlag },
+    ({ json }) => cmdRoles([...boolArg("json", json)]),
+).pipe(
+    Command.withDescription(
+        "List all roles with skill counts (includes roles with 0 skills). " +
+        "Role labels are semantic categories (framing, execution, verification...) tagged on skills via plays_role edges. " +
+        "--json",
+    ),
 );
 
 const projectContextCommand = Command.make(
@@ -3466,12 +4158,14 @@ export const rootCommand = Command.make("axctl").pipe(
         deriveSignalsCommand,
         deriveIntentsCommand,
         insightsCommand,
+        sessionsCommand,
         improveCommand,
         retroCommand,
         serveCommand,
         reportCommand,
         recallCommand,
         skillsCommand,
+        rolesCommand,
         contextCommand,
         hookCommand,
         hooksCommand,
@@ -3552,11 +4246,13 @@ export const DB_COMMANDS: ReadonlySet<string> = new Set([
     "derive-signals",
     "derive-intents",
     "insights",
+    "sessions",
     "improve",
     "retro",
     "report",
     "recall",
     "skills",
+    "roles",
     "project",
     "context",
     "hook",

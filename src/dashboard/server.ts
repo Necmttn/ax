@@ -536,8 +536,11 @@ export async function handleDashboardRequest(req: Request): Promise<Response> {
             return jsonResponse({
                 q,
                 hits: [],
+                commits: [],
+                skills: [],
                 truncated: false,
                 total_count: 0,
+                total_counts: { turn: 0, commit: 0, skill: 0 },
                 window: { offset, limit },
             });
         }

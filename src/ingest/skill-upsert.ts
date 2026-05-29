@@ -30,7 +30,7 @@ export function skillRecordIdFromLookup(raw: unknown, fallbackName: string): Rec
 export function upsertSkillByName(
     db: SurrealClientShape,
     content: SkillContent,
-): Effect.Effect<void, DbError> {
+): Effect.Effect<RecordId, DbError> {
     return Effect.gen(function* () {
         const result = yield* db.query<[SkillLookupRow[]]>(
             "SELECT id FROM skill WHERE name = $name LIMIT 1;",
@@ -39,5 +39,6 @@ export function upsertSkillByName(
         const existingId = result?.[0]?.[0]?.id;
         const id = skillRecordIdFromLookup(existingId, content.name);
         yield* db.upsert(id, { ...content });
-    }).pipe(Effect.asVoid);
+        return id;
+    });
 }

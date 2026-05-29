@@ -129,3 +129,42 @@ export function mentionedRelationRecordKey(input: MentionedRelationKeyInput): st
 export function toolFileRelationRecordKey(input: ToolFileRelationKeyInput): string {
     return stableDigest(`${input.toolCallKey}|${input.fileKey}|${input.kind}`);
 }
+
+/**
+ * Validate that a record key is safe to embed as a backtick-quoted SurrealDB
+ * record literal (`table:\`key\``). Throws when the key contains characters
+ * that would break or escape the literal: backtick, newline, or null byte.
+ *
+ * Call this early (on user-supplied input) to get a clear error before the
+ * broken key reaches a SQL string.
+ */
+export function safeRecordKey(key: string): string {
+    if (key.length === 0) {
+        throw new Error('recordLiteral: invalid record key "" (empty key)');
+    }
+    for (const ch of key) {
+        const code = ch.codePointAt(0)!;
+        if (ch === "`" || code === 0x0a /* \n */ || code === 0x00 /* \0 */) {
+            const escaped =
+                ch === "`" ? "\\`" :
+                code === 0x0a ? "\\n" :
+                "\\0";
+            throw new Error(`recordLiteral: invalid record key "${escaped}" (forbidden char)`);
+        }
+    }
+    return key;
+}
+
+/**
+ * Build a backtick-quoted SurrealDB record literal: `table:\`key\``.
+ *
+ * This is the canonical way to embed a known record id into a SurrealQL
+ * string. The SDK's RecordId binding silently produces empty results in some
+ * query contexts (see src/lib/shared/graph-query.ts:132).
+ *
+ * @throws {Error} when `key` contains a backtick, newline, or null byte.
+ */
+export function recordLiteral(table: string, key: string): string {
+    safeRecordKey(key);
+    return `${table}:\`${key}\``;
+}
