@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<style>
+  :root{
+    --ink:#14140f; --ink2:#0a0a0a;
+    --cream:#ece9df; --dim:#8a8780;
+    --terra:#d77757; --green:#6fcf80; --blue:#8ec1ff; --violet:#c7a8ff;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Helvetica Neue", sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{background:#000}
+  .card{
+    width:1280px;height:720px;
+    background:
+      radial-gradient(820px 560px at 80% -8%, rgba(215,119,87,.17), transparent 60%),
+      radial-gradient(640px 620px at -5% 115%, rgba(142,193,255,.08), transparent 55%),
+      linear-gradient(160deg,#16160f 0%, #14140f 45%, #100f0b 100%);
+    position:relative;overflow:hidden;
+    font-family:var(--sans);color:var(--cream);
+    padding:88px 92px;display:flex;flex-direction:column;justify-content:space-between;
+  }
+  .card::before{
+    content:"";position:absolute;inset:0;
+    background-image:
+      linear-gradient(rgba(236,233,223,.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(236,233,223,.035) 1px, transparent 1px);
+    background-size:54px 54px;
+    mask:radial-gradient(1000px 760px at 68% 32%, #000 30%, transparent 80%);
+    -webkit-mask:radial-gradient(1000px 760px at 68% 32%, #000 30%, transparent 80%);
+  }
+  .top{position:relative;display:flex;align-items:center;gap:14px}
+  .tag{
+    font-family:var(--mono);font-size:21px;letter-spacing:.04em;
+    color:var(--terra);border:1px solid rgba(215,119,87,.45);
+    padding:8px 17px;border-radius:999px;background:rgba(215,119,87,.08);
+  }
+  .tag .dim{color:var(--dim)}
+  .mid{position:relative;margin-top:8px}
+  h1{
+    font-family:var(--sans);font-weight:800;
+    font-size:96px;line-height:1.02;letter-spacing:-.02em;max-width:1080px;
+  }
+  h1 .accent{color:var(--terra)}
+  .sub{
+    margin-top:34px;font-size:33px;line-height:1.38;color:var(--dim);
+    max-width:920px;font-weight:500;
+  }
+  .bottom{position:relative;display:flex;align-items:center;justify-content:space-between}
+  .brand{display:flex;align-items:center;gap:17px;font-family:var(--mono);font-size:28px}
+  .crab{width:50px;height:50px;display:block;image-rendering:pixelated}
+  .url{color:var(--cream)}
+  .url .scheme{color:var(--dim)}
+  .primitives{
+    font-family:var(--mono);font-size:23px;color:var(--dim);
+    display:flex;gap:24px;align-items:center;
+  }
+  .primitives b{color:var(--green);font-weight:400}
+  .primitives .p2{color:var(--blue)}
+  .primitives .p3{color:var(--violet)}
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="top">
+      <span class="tag">claude code <span class="dim">·</span> research preview</span>
+      <span class="tag" style="color:var(--cream);border-color:rgba(236,233,223,.22);background:rgba(236,233,223,.05)">dynamic workflows</span>
+    </div>
+
+    <div class="mid">
+      <h1>The model writes<br/>its own <span class="accent">harness.</span></h1>
+      <div class="sub">Claude plans the workflow, writes the orchestration, and fans work across hundreds of subagents - then verifies before reporting back.</div>
+    </div>
+
+    <div class="bottom">
+      <div class="primitives">
+        <span><b>agent()</b></span>
+        <span class="p2">parallel()</span>
+        <span class="p3">pipeline()</span>
+      </div>
+      <div class="brand">
+        <svg class="crab" viewBox="0 0 11 11" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges">
+          <g fill="#d77757">
+            <rect x="1" y="2" width="1" height="1"/><rect x="9" y="2" width="1" height="1"/>
+            <rect x="1" y="3" width="1" height="1"/><rect x="9" y="3" width="1" height="1"/>
+            <rect x="2" y="3" width="7" height="1"/>
+            <rect x="2" y="4" width="7" height="3"/>
+            <rect x="3" y="4" width="1" height="1" fill="#14140f"/><rect x="7" y="4" width="1" height="1" fill="#14140f"/>
+            <rect x="2" y="7" width="1" height="2"/><rect x="4" y="7" width="1" height="2"/>
+            <rect x="6" y="7" width="1" height="2"/><rect x="8" y="7" width="1" height="2"/>
+          </g>
+        </svg>
+        <span class="url"><span class="scheme">ax.</span>necmttn.com</span>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

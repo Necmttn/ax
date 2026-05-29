@@ -1,0 +1,552 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ax · hook backtest - showcase 1</title>
+<style>
+  :root {
+    --ink: #0a0a0a;
+    --page: #f6f5f0;
+    --panel: #fbfaf5;
+    --line: #d8d6cf;
+    --muted: #6b6b66;
+    --green: #2f9e44;
+    --blue: #2567a8;
+    --red: #c0392b;
+    --cc-orange: #d77757;
+
+    --term-bg: #14140f;
+    --term-fg: #e8e6dd;
+    --term-muted: #8a8780;
+    --term-line: #2a2823;
+    --term-green: #6fcf80;
+    --term-blue: #8ec1ff;
+    --term-red: #e87a6f;
+    --term-violet: #c7a8ff;
+    --term-yellow: #e8c87a;
+
+    --serif: Georgia, "Times New Roman", serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Helvetica Neue", sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 88px 32px 96px;
+  }
+
+  /* ---------- header ---------- */
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--muted);
+    margin: 0 0 16px;
+  }
+
+  h2 {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: clamp(30px, 4.4vw, 44px);
+    line-height: 1.08;
+    letter-spacing: -0.6px;
+    margin: 0 0 24px;
+    max-width: 24ch;
+  }
+
+  h2 em {
+    font-style: italic;
+    color: var(--muted);
+  }
+
+  p.lede {
+    font-family: var(--serif);
+    font-size: 19px;
+    line-height: 1.6;
+    margin: 0 0 40px;
+    max-width: 62ch;
+    color: var(--ink);
+  }
+
+  /* ---------- split layout ---------- */
+
+  .split {
+    display: grid;
+    grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+    gap: 18px;
+    align-items: stretch;
+  }
+
+  @media (max-width: 820px) {
+    .split { grid-template-columns: 1fr; }
+  }
+
+  /* ---------- hook source card ---------- */
+
+  .hook-card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .hook-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+  }
+
+  .hook-head .filename {
+    color: var(--ink);
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 12px;
+  }
+
+  .hook-head .badge {
+    color: var(--cc-orange);
+    border: 1px solid color-mix(in srgb, var(--cc-orange) 35%, var(--line));
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 10px;
+  }
+
+  .hook-source {
+    margin: 0;
+    padding: 18px 18px 20px;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.65;
+    color: var(--ink);
+    white-space: pre;
+    overflow-x: auto;
+    flex: 1;
+  }
+
+  .hook-source .c-key { color: var(--blue); }
+  .hook-source .c-str { color: var(--green); }
+  .hook-source .c-com { color: var(--muted); font-style: italic; }
+  .hook-source .c-fn  { color: #8a3ffc; }
+  .hook-source .c-num { color: var(--red); }
+
+  .hook-foot {
+    border-top: 1px solid var(--line);
+    padding: 10px 16px;
+    display: flex;
+    justify-content: space-between;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .hook-foot .gut { color: var(--ink); }
+
+  /* ---------- terminal ---------- */
+
+  .term-frame {
+    background: var(--term-bg);
+    border: 1px solid var(--term-line);
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 24px -12px rgba(0,0,0,0.18);
+  }
+
+  .term-chrome {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 12px;
+    height: 34px;
+    border-bottom: 1px solid var(--term-line);
+    background: linear-gradient(to bottom, #1c1c16, #14140f);
+  }
+  .term-dot {
+    width: 11px; height: 11px; border-radius: 50%;
+    box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.25);
+  }
+  .term-dot-r { background: #ec6a5e; }
+  .term-dot-y { background: #f4be4f; }
+  .term-dot-g { background: #61c554; }
+
+  .term-title {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--term-muted);
+    margin-left: 14px;
+  }
+  .term-title .seg { color: var(--term-fg); }
+
+  .term-body {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--term-fg);
+    padding: 16px 18px 18px;
+    white-space: pre;
+    overflow-x: auto;
+    min-height: 360px;
+  }
+
+  .term-line { padding: 1px 0; }
+
+  .t-prompt { color: var(--term-violet); }
+  .t-cmd    { color: var(--term-yellow); }
+  .t-flag   { color: var(--term-blue); }
+  .t-muted  { color: var(--term-muted); }
+  .t-ok     { color: var(--term-green); }
+  .t-bad    { color: var(--term-red); }
+  .t-warn   { color: var(--term-yellow); }
+  .t-id     { color: var(--term-violet); }
+  .t-num    { color: var(--term-blue); }
+  .t-file   { color: var(--term-blue); }
+  .t-strong { color: var(--term-fg); font-weight: 600; }
+  .t-rule   { color: var(--term-line); }
+
+  /* result block divider lines */
+  .term-body .rule {
+    color: #3a3830;
+    letter-spacing: -1px;
+  }
+
+  /* recommendation badge inline */
+  .rec-badge {
+    background: color-mix(in srgb, var(--term-green) 22%, transparent);
+    color: var(--term-green);
+    padding: 0 8px;
+    border-radius: 3px;
+    border: 1px solid color-mix(in srgb, var(--term-green) 38%, transparent);
+  }
+
+  /* ---------- week strip ---------- */
+
+  .week {
+    margin-top: 28px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 20px 22px 22px;
+  }
+
+  .week-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+
+  .week-head .label {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--muted);
+  }
+  .week-head .meta {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .week-head .meta b { color: var(--ink); font-weight: 500; }
+
+  .week-grid {
+    display: grid;
+    grid-template-columns: 110px 1fr;
+    gap: 10px 18px;
+    align-items: center;
+  }
+
+  .day-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    text-align: right;
+    line-height: 1.2;
+  }
+  .day-label b {
+    display: block;
+    color: var(--ink);
+    font-weight: 500;
+    font-size: 11.5px;
+    margin-bottom: 2px;
+  }
+
+  .day-row {
+    display: flex;
+    gap: 3px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .tick {
+    width: 14px;
+    height: 22px;
+    border-radius: 2px;
+    background: #ece9df;
+    border: 1px solid #dedacd;
+    position: relative;
+  }
+  .tick.pass    { background: #ece9df; border-color: #dedacd; }
+  .tick.tp      { background: var(--cc-orange); border-color: #b95f3f; }
+  .tick.fp      { background: #f0d36b; border-color: #c9a93b; }
+  .tick.saved   { background: #2f9e44; border-color: #237a32; }
+
+  .day-row .sep {
+    flex: 1;
+    height: 1px;
+    background: transparent;
+  }
+  .day-count {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    margin-left: auto;
+    padding-left: 10px;
+    min-width: 70px;
+    text-align: right;
+  }
+
+  .legend {
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px dashed var(--line);
+    display: flex;
+    gap: 22px;
+    flex-wrap: wrap;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .legend .sw {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border-radius: 2px;
+    margin-right: 6px;
+    vertical-align: -1px;
+  }
+  .legend .sw.pass  { background: #ece9df; border: 1px solid #dedacd; }
+  .legend .sw.tp    { background: var(--cc-orange); border: 1px solid #b95f3f; }
+  .legend .sw.fp    { background: #f0d36b; border: 1px solid #c9a93b; }
+  .legend .sw.saved { background: var(--green); border: 1px solid #237a32; }
+
+  /* ---------- caption ---------- */
+
+  .caption {
+    margin-top: 30px;
+    padding-top: 22px;
+    border-top: 1px solid var(--line);
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    gap: 28px;
+  }
+  .caption .tag {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--muted);
+    padding-top: 4px;
+  }
+  .caption p {
+    font-family: var(--serif);
+    font-size: 17px;
+    line-height: 1.6;
+    margin: 0;
+    max-width: 60ch;
+  }
+  .caption p em { color: var(--muted); font-style: italic; }
+
+  @media (max-width: 640px) {
+    .caption { grid-template-columns: 1fr; gap: 8px; }
+    .week-grid { grid-template-columns: 90px 1fr; }
+  }
+</style>
+</head>
+<body>
+  <main class="wrap">
+    <p class="eyebrow">before-you-ship · backtest</p>
+    <h2>Ask the graph what your hook <em>would have</em> caught.</h2>
+    <p class="lede">
+      You write a guardrail. You don't know if it'll catch real mistakes or
+      just become noise. ax replays your last week of actual sessions against
+      the hook before you install it, so the decision to ship is evidence,
+      not vibes.
+    </p>
+
+    <div class="split">
+      <!-- ── hook source ─────────────────────────────────────────── -->
+      <article class="hook-card" aria-label="proposed hook">
+        <header class="hook-head">
+          <span class="filename">~/.claude/hooks/<b style="color:var(--ink);font-weight:500">pre-tool-main-branch-guard.ts</b></span>
+          <span class="badge">candidate</span>
+        </header>
+<pre class="hook-source"><span class="c-com">// fires on Bash tool_call before execution</span>
+<span class="c-key">export const</span> hook = {
+  <span class="c-key">on</span>: <span class="c-str">"pre_tool"</span>,
+  <span class="c-key">tool</span>: <span class="c-str">"Bash"</span>,
+  <span class="c-fn">match</span>(call) {
+    <span class="c-key">const</span> cmd = call.input.command ?? <span class="c-str">""</span>;
+    <span class="c-key">if</span> (!<span class="c-str">/^\s*git\s+(push|commit)\b/</span>.test(cmd)) <span class="c-key">return false</span>;
+    <span class="c-key">const</span> branch = call.context.git?.branch ?? <span class="c-str">""</span>;
+    <span class="c-key">return</span> <span class="c-str">/^(main|master|production)$/</span>.test(branch);
+  },
+  <span class="c-fn">action</span>: <span class="c-str">"block"</span>,
+  <span class="c-key">reason</span>: <span class="c-str">"direct write to protected branch"</span>,
+};</pre>
+        <footer class="hook-foot">
+          <span>pre-tool · Bash</span>
+          <span class="gut">12 lines · gut-check before backtest</span>
+        </footer>
+      </article>
+
+      <!-- ── terminal mock ───────────────────────────────────────── -->
+      <section class="term-frame" aria-label="backtest run">
+        <header class="term-chrome">
+          <span class="term-dot term-dot-r"></span>
+          <span class="term-dot term-dot-y"></span>
+          <span class="term-dot term-dot-g"></span>
+          <span class="term-title">ax <span class="seg">·</span> hooks backtest <span class="seg">·</span> ~/Projects/ax</span>
+        </header>
+<pre class="term-body"><span class="term-line"><span class="t-prompt">~/.claude $</span> <span class="t-cmd">axctl hooks backtest</span> pre-tool-main-branch-guard <span class="t-flag">--since=</span><span class="t-num">7d</span></span>
+<span class="term-line"><span class="t-muted">  ↳ replay window  </span> 2026-05-21 → 2026-05-28  <span class="t-muted">(7d)</span></span>
+<span class="term-line"><span class="t-muted">  ↳ sessions       </span> <span class="t-num">14</span> claude_code, <span class="t-num">3</span> codex  <span class="t-muted">(17 total)</span></span>
+<span class="term-line"><span class="t-muted">  ↳ tool_calls     </span> <span class="t-num">1,247</span> bash invocations indexed</span>
+<span class="term-line"> </span>
+<span class="term-line"><span class="t-muted">  replaying…</span> <span class="t-ok">████████████████████</span> <span class="t-muted">1247/1247  4.2s</span></span>
+<span class="term-line"> </span>
+<span class="term-line rule">  ───────────────────────────────────────────────────────────</span>
+<span class="term-line">  <span class="t-strong">verdict</span>          <span class="rec-badge">SHIP · HIGH-CONFIDENCE</span></span>
+<span class="term-line rule">  ───────────────────────────────────────────────────────────</span>
+<span class="term-line"><span class="t-muted">  fires            </span> <span class="t-num">12</span> / 1,247 calls  <span class="t-muted">(0.96%)</span></span>
+<span class="term-line"><span class="t-muted">  ├─ </span><span class="t-bad">true positives </span> <span class="t-num">11</span>  <span class="t-muted">would have blocked actual main-branch pushes</span></span>
+<span class="term-line"><span class="t-muted">  └─ </span><span class="t-warn">false positives</span> <span class="t-num"> 1</span>  <span class="t-muted">legitimate hotfix → production · 2026-05-24</span></span>
+<span class="term-line"> </span>
+<span class="term-line"><span class="t-muted">  precision        </span> <span class="t-ok">0.917</span>   <span class="t-muted">recall</span> <span class="t-ok">0.917</span>   <span class="t-muted">F1</span> <span class="t-ok">0.917</span></span>
+<span class="term-line"><span class="t-muted">  prevented rollbacks </span> <span class="t-num">5</span>     <span class="t-muted">(traced via post-event reverts)</span></span>
+<span class="term-line"> </span>
+<span class="term-line"><span class="t-muted">  by repo</span></span>
+<span class="term-line"><span class="t-muted">    </span><span class="t-file">~/Projects/ax</span>        <span class="t-num"> 8</span>  <span class="t-bad">▮▮▮▮▮▮▮▮</span></span>
+<span class="term-line"><span class="t-muted">    </span><span class="t-file">~/Projects/quera</span>     <span class="t-num"> 3</span>  <span class="t-bad">▮▮▮</span></span>
+<span class="term-line"><span class="t-muted">    </span><span class="t-file">~/Projects/dotfiles</span>  <span class="t-num"> 1</span>  <span class="t-warn">▮</span> <span class="t-muted">← false positive lives here</span></span>
+<span class="term-line"> </span>
+<span class="term-line"><span class="t-muted">  one to review:</span></span>
+<span class="term-line"><span class="t-muted">    </span><span class="t-id">sess_8af3·turn-42</span>  <span class="t-warn">hotfix/prod-token-leak</span>  <span class="t-muted">→ allow-list?</span></span>
+<span class="term-line"> </span>
+<span class="term-line"><span class="t-ok">  install with:</span> <span class="t-cmd">axctl hooks install</span> pre-tool-main-branch-guard <span class="t-flag">--allow=hotfix/*</span></span>
+<span class="term-line"><span class="t-prompt">~/.claude $</span> <span style="display:inline-block;width:8px;height:14px;background:var(--term-fg);vertical-align:-2px;animation:blink 1.1s steps(1) infinite;"></span></span>
+</pre>
+      </section>
+    </div>
+
+    <!-- ── week strip ────────────────────────────────────────────── -->
+    <section class="week" aria-label="7-day session distribution">
+      <header class="week-head">
+        <span class="label">replay window · 17 sessions · 1,247 bash calls</span>
+        <span class="meta">2026-05-21 → 2026-05-28 · <b>12 fires</b> · <b>5 rollbacks prevented</b></span>
+      </header>
+
+      <div class="week-grid">
+        <!-- Each row: day label + 2-3 sessions worth of ticks. Each tick ≈ a tool_call cluster (~10 calls) -->
+        <div class="day-label"><b>Thu 21</b>3 sessions</div>
+        <div class="day-row">
+          <span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick tp" title="true positive · ~/Projects/ax"></span><span class="tick pass"></span><span class="tick pass"></span>
+          <span class="day-count">163 calls</span>
+        </div>
+
+        <div class="day-label"><b>Fri 22</b>2 sessions</div>
+        <div class="day-row">
+          <span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick tp"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick saved" title="prevented rollback"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span>
+          <span class="day-count">131 calls</span>
+        </div>
+
+        <div class="day-label"><b>Sat 23</b>1 session</div>
+        <div class="day-row">
+          <span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span>
+          <span class="day-count">86 calls</span>
+        </div>
+
+        <div class="day-label"><b>Sun 24</b>2 sessions</div>
+        <div class="day-row">
+          <span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick fp" title="false positive · hotfix on production"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span>
+          <span class="day-count">112 calls</span>
+        </div>
+
+        <div class="day-label"><b>Mon 25</b>3 sessions</div>
+        <div class="day-row">
+          <span class="tick pass"></span><span class="tick pass"></span><span class="tick tp"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick saved"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick tp"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span>
+          <span class="day-count">221 calls</span>
+        </div>
+
+        <div class="day-label"><b>Tue 26</b>3 sessions</div>
+        <div class="day-row">
+          <span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick saved"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick tp"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick tp"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span>
+          <span class="day-count">248 calls</span>
+        </div>
+
+        <div class="day-label"><b>Wed 27</b>2 sessions</div>
+        <div class="day-row">
+          <span class="tick pass"></span><span class="tick pass"></span><span class="tick saved"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick tp"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick pass"></span>
+          <span class="day-count">177 calls</span>
+        </div>
+
+        <div class="day-label"><b>Thu 28</b>1 session · today</div>
+        <div class="day-row">
+          <span class="tick pass"></span><span class="tick tp"></span><span class="tick pass"></span><span class="tick pass"></span><span class="tick saved"></span><span class="tick pass"></span><span class="tick tp"></span><span class="tick pass"></span><span class="tick tp"></span><span class="tick pass"></span>
+          <span class="day-count">109 calls</span>
+        </div>
+      </div>
+
+      <div class="legend">
+        <span><span class="sw pass"></span> pass · normal traffic</span>
+        <span><span class="sw tp"></span> would have blocked · true positive</span>
+        <span><span class="sw saved"></span> traced to a later rollback</span>
+        <span><span class="sw fp"></span> false positive · review</span>
+      </div>
+    </section>
+
+    <!-- ── caption ───────────────────────────────────────────────── -->
+    <aside class="caption">
+      <span class="tag">the move</span>
+      <p>
+        Before you install a guardrail, ax replays your last seven days of
+        sessions against it. You see exactly what it would have blocked, what
+        it would have broken, and which calls it traced to a later rollback -
+        so a hook ships with a precision number attached, not a hunch.
+        <em>No other agent tooling can do this; no one else has the typed session graph.</em>
+      </p>
+    </aside>
+  </main>
+
+  <style>
+    @keyframes blink {
+      0%, 49% { opacity: 1; }
+      50%, 100% { opacity: 0; }
+    }
+  </style>
+</body>
+</html>

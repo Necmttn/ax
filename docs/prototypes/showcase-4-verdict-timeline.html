@@ -1,0 +1,944 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ax · verdict timeline · showcase 4</title>
+<style>
+  :root {
+    --ink: #0a0a0a;
+    --page: #f6f5f0;
+    --panel: #fbfaf5;
+    --line: #d8d6cf;
+    --muted: #6b6b66;
+    --green: #2f9e44;
+    --blue: #2567a8;
+    --red: #c0392b;
+    --serif: Georgia, "Times New Roman", serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Helvetica Neue", sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  main { max-width: 980px; margin: 0 auto; padding: 64px 32px 96px; }
+
+  /* ---------- type ---------- */
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--muted);
+    margin: 0 0 16px;
+  }
+
+  h2 {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: 36px;
+    line-height: 1.12;
+    letter-spacing: -0.5px;
+    margin: 0 0 18px;
+    max-width: 22ch;
+  }
+
+  p.lede {
+    font-size: 19px;
+    line-height: 1.55;
+    color: var(--ink);
+    max-width: 64ch;
+    margin: 0 0 36px;
+  }
+
+  p.cap {
+    font-size: 15px;
+    line-height: 1.55;
+    color: var(--muted);
+    max-width: 64ch;
+    margin: 28px 0 0;
+  }
+
+  p.cap strong { color: var(--ink); font-weight: 500; }
+
+  /* ---------- figure shell (mirrors site.css .fig-shell figure) ---------- */
+
+  .figure {
+    width: 100%;
+    margin: 28px 0 8px;
+    padding: 0;
+  }
+
+  .fig-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 18px;
+    padding-bottom: 14px;
+    margin-bottom: 22px;
+    border-bottom: 1px solid var(--ink);
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--muted);
+  }
+
+  .fig-head .fig-id { color: var(--ink); }
+
+  .fig-head .auto-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--muted);
+    background: transparent;
+    border: 1px solid var(--line);
+    padding: 4px 9px;
+    cursor: pointer;
+    line-height: 1;
+    margin-left: auto;
+  }
+
+  .fig-head .auto-pill[data-state="playing"] {
+    color: var(--ink);
+    border-color: var(--ink);
+  }
+  .fig-head .auto-pill[data-state="done"],
+  .fig-head .auto-pill[data-state="idle"] { cursor: pointer; }
+
+  .fig-head .auto-pill .auto-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--green) 30%, transparent);
+    display: inline-block;
+  }
+  .fig-head .auto-pill[data-state="playing"] .auto-dot {
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  .fig-head .auto-pill[data-state="done"] .auto-dot,
+  .fig-head .auto-pill[data-state="idle"] .auto-dot { display: none; }
+  .fig-head .auto-pill[data-state="done"]::before {
+    content: "↻";
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+  }
+
+  /* ---------- timeline stage ---------- */
+
+  .tl-stage {
+    position: relative;
+    padding: 36px 0 28px;
+  }
+
+  .tl-svg {
+    width: 100%;
+    height: 180px;
+    display: block;
+    overflow: visible;
+  }
+
+  /* chips can extend slightly outside the SVG viewbox on the right */
+  .tl-svg .tl-chip { overflow: visible; }
+
+  .tl-track-bg { stroke: var(--line); stroke-width: 2; }
+  .tl-track-fill {
+    stroke: var(--ink);
+    stroke-width: 2;
+    stroke-linecap: butt;
+    transition: none;
+  }
+
+  .tl-node {
+    fill: var(--page);
+    stroke: var(--ink);
+    stroke-width: 1.5;
+    transition: fill 360ms ease, stroke 360ms ease;
+  }
+  .tl-node.is-reached {
+    fill: var(--ink);
+  }
+  .tl-node.is-reached.is-green { fill: var(--green); stroke: var(--green); }
+  .tl-node.is-reached.is-red   { fill: var(--red);   stroke: var(--red); }
+  .tl-node.is-reached.is-blue  { fill: var(--blue);  stroke: var(--blue); }
+
+  .tl-node-halo {
+    fill: var(--green);
+    opacity: 0;
+    transition: opacity 360ms ease;
+  }
+  .tl-node-halo.is-shown { opacity: 0.18; }
+  .tl-node-halo.is-red   { fill: var(--red); }
+  .tl-node-halo.is-blue  { fill: var(--blue); }
+
+  .tl-token {
+    fill: var(--ink);
+    stroke: var(--page);
+    stroke-width: 3;
+  }
+
+  .tl-token-shadow {
+    fill: var(--ink);
+    opacity: 0.10;
+  }
+
+  .tl-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    fill: var(--muted);
+  }
+  .tl-label.is-cp { fill: var(--ink); }
+  .tl-end {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 15px;
+    fill: var(--muted);
+  }
+  .tl-end.left  { text-anchor: start; }
+  .tl-end.right { text-anchor: end; }
+
+  .tl-cp-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    fill: var(--ink);
+  }
+
+  /* evidence chips that fly in at each checkpoint.
+     NOTE: CSS `transform` on SVG elements overrides the SVG `transform=""`
+     attribute, so we MUST animate opacity only here and use a nested <g>
+     element if we want a translate-in effect. */
+  .tl-chip {
+    opacity: 0;
+    transition: opacity 320ms ease-out;
+  }
+  .tl-chip.is-shown { opacity: 1; }
+  .tl-chip .tl-chip-inner {
+    transform: translateY(-6px);
+    transform-box: fill-box;
+    transform-origin: 0 0;
+    transition: transform 320ms ease-out;
+  }
+  .tl-chip.is-shown .tl-chip-inner {
+    transform: translateY(0);
+  }
+
+  .tl-chip-box {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 1;
+  }
+  .tl-chip.is-green .tl-chip-box { stroke: var(--green); }
+  .tl-chip.is-red   .tl-chip-box { stroke: var(--red); }
+  .tl-chip.is-blue  .tl-chip-box { stroke: var(--blue); }
+
+  .tl-chip-text {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    fill: var(--ink);
+    letter-spacing: 0.02em;
+  }
+  .tl-chip-text.is-muted { fill: var(--muted); }
+
+  /* big final verdict chip rendered as HTML over the SVG */
+  .tl-verdict {
+    position: absolute;
+    right: 0;
+    top: 0;
+    transform: translateY(8px);
+    opacity: 0;
+    transition: opacity 360ms ease-out, transform 360ms ease-out;
+    pointer-events: none;
+  }
+  .tl-verdict.is-shown { opacity: 1; transform: translateY(0); }
+  .tl-verdict .v-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--mono);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    padding: 8px 14px;
+    background: var(--green);
+    color: var(--page);
+    border: 1px solid var(--green);
+    line-height: 1;
+  }
+  .tl-verdict .v-pill::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    background: var(--page);
+    border-radius: 50%;
+  }
+
+  /* ---------- inspector ---------- */
+
+  .inspector {
+    display: grid;
+    grid-template-columns: 88px 1fr auto;
+    gap: 20px;
+    align-items: start;
+    border-top: 1px solid var(--ink);
+    border-bottom: 1px solid var(--line);
+    padding: 18px 4px 20px;
+    margin-top: 12px;
+  }
+
+  .insp-cp {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink);
+  }
+
+  .insp-cp .insp-cp-sub {
+    display: block;
+    color: var(--muted);
+    margin-top: 4px;
+    letter-spacing: 0.08em;
+  }
+
+  .insp-body {
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.65;
+    color: var(--ink);
+    min-height: 56px;
+    display: grid;
+    gap: 4px;
+  }
+
+  .insp-body .ev {
+    opacity: 0;
+    transform: translateY(-2px);
+    transition: opacity 320ms ease-out, transform 320ms ease-out;
+  }
+  .insp-body .ev.is-shown { opacity: 1; transform: translateY(0); }
+  .insp-body .ev .lk { color: var(--muted); }
+  .insp-body .ev .ok { color: var(--green); }
+  .insp-body .ev .err { color: var(--red); }
+  .insp-body .ev .ref { color: var(--blue); }
+
+  .insp-state {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    align-self: start;
+    white-space: nowrap;
+  }
+  .insp-state.is-green { border-color: var(--green); color: var(--green); }
+  .insp-state.is-red   { border-color: var(--red);   color: var(--red); }
+  .insp-state.is-blue  { border-color: var(--blue);  color: var(--blue); }
+
+  /* ---------- past-experiments strip ---------- */
+
+  .exp-strip {
+    margin-top: 44px;
+    border-top: 1px solid var(--ink);
+    padding-top: 18px;
+  }
+
+  .exp-strip-head {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 14px;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .exp-strip-head .right { color: var(--muted); }
+
+  .exp-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .exp-list li {
+    display: grid;
+    grid-template-columns: 1fr 64px 1fr auto;
+    gap: 18px;
+    align-items: center;
+    padding: 12px 4px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .exp-name {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--ink);
+    letter-spacing: 0.02em;
+  }
+
+  .exp-cp-tag {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    text-align: center;
+  }
+
+  .exp-reason {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+  .exp-reason .ok  { color: var(--green); }
+  .exp-reason .err { color: var(--red); }
+  .exp-reason .ref { color: var(--blue); }
+
+  /* verdict chips for the strip */
+  .vchip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    padding: 5px 10px;
+    border: 1px solid var(--line);
+    color: var(--muted);
+    background: transparent;
+    line-height: 1;
+    white-space: nowrap;
+  }
+  .vchip.is-adopted {
+    background: var(--green);
+    border-color: var(--green);
+    color: var(--page);
+  }
+  .vchip.is-regressed {
+    background: var(--red);
+    border-color: var(--red);
+    color: var(--page);
+  }
+  .vchip.is-partial {
+    background: linear-gradient(90deg, var(--blue) 50%, var(--page) 50%);
+    border-color: var(--blue);
+    color: var(--ink);
+  }
+  .vchip.is-ignored {
+    background: transparent;
+    border-color: var(--line);
+    color: var(--muted);
+  }
+  .vchip.is-pending {
+    background: transparent;
+    border-color: var(--line);
+    color: var(--muted);
+    font-style: italic;
+  }
+  .vchip.is-pending::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--muted);
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  .vchip.is-no-longer-needed {
+    text-decoration: line-through;
+    text-decoration-color: var(--muted);
+    color: var(--muted);
+    border-color: var(--line);
+  }
+
+  /* legend of verdict states under the strip */
+  .verdict-legend {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 14px;
+    align-items: center;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+  }
+  .verdict-legend .vchip { font-size: 9.5px; padding: 4px 8px; letter-spacing: 0.14em; }
+  .verdict-legend .vleg-label { color: var(--muted); }
+
+  /* ---------- responsive ---------- */
+  @media (max-width: 720px) {
+    main { padding: 40px 20px 64px; }
+    h2 { font-size: 28px; }
+    p.lede { font-size: 17px; }
+    .inspector {
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+    .exp-list li {
+      grid-template-columns: 1fr auto;
+      grid-template-areas:
+        "name verdict"
+        "cp   verdict"
+        "reason reason";
+      gap: 6px 12px;
+    }
+    .exp-name { grid-area: name; }
+    .exp-cp-tag { grid-area: cp; text-align: left; }
+    .exp-reason { grid-area: reason; }
+    .exp-list li > .vchip { grid-area: verdict; }
+    .tl-svg { height: 220px; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+  <p class="eyebrow">the compounding part</p>
+  <h2>Every change earns its place by <em style="font-style:italic;color:var(--muted)">session 30</em>.</h2>
+  <p class="lede">
+    Accepting a proposal doesn't make it true. ax turns each acceptance into an
+    experiment with three forward-looking checkpoints - t+3, t+10, t+30
+    <em style="font-style:italic;color:var(--muted)">sessions</em> - and watches
+    the next runs to see if the change actually held. Days are the wrong unit
+    when an agent ships eight sessions a day. The verdict at t+30 sessions is
+    locked. Future proposals know.
+  </p>
+
+  <figure class="figure fig-timeline" aria-label="ax verdict timeline showcase">
+    <div class="fig-head">
+      <span class="fig-id">Fig · S-04</span>
+      <span>verdict timeline · post-feature-verify</span>
+      <button class="auto-pill" type="button" data-state="idle" id="replay">
+        <span class="auto-dot"></span>
+        <span class="auto-text">play</span>
+      </button>
+    </div>
+
+    <div class="tl-stage" id="stage">
+      <!-- absolute-positioned big verdict chip lives in the top-right corner of the stage,
+           but we draw the headline pill below the inspector for cleaner layout.
+           Keeping this slot for the optional in-track verdict glyph if needed. -->
+      <svg class="tl-svg" viewBox="0 0 900 180" preserveAspectRatio="none" aria-hidden="true">
+        <!-- track baseline -->
+        <line class="tl-track-bg" x1="60" y1="90" x2="840" y2="90" />
+        <line class="tl-track-fill" id="track-fill" x1="60" y1="90" x2="60" y2="90" />
+
+        <!-- end labels -->
+        <text class="tl-end left"  x="60"  y="62">accept</text>
+        <text class="tl-end right" x="840" y="62">lock</text>
+
+        <!-- shadow + token -->
+        <circle class="tl-token-shadow" id="token-shadow" cx="60" cy="98" r="9" />
+        <g id="token-group">
+          <circle class="tl-token" id="token" cx="60" cy="90" r="9" />
+        </g>
+
+        <!-- checkpoint nodes (drawn last so they overlay track) -->
+        <!-- +3 sessions @ x=320 -->
+        <circle class="tl-node-halo" id="halo-7"  cx="320" cy="90" r="18" />
+        <circle class="tl-node"      id="node-7"  cx="320" cy="90" r="7" />
+        <text   class="tl-label is-cp" x="320" y="120" text-anchor="middle">+3 sess</text>
+        <text   class="tl-cp-title"    x="320" y="138" text-anchor="middle">early signal</text>
+
+        <!-- +10 sessions @ x=580 -->
+        <circle class="tl-node-halo" id="halo-30" cx="580" cy="90" r="18" />
+        <circle class="tl-node"      id="node-30" cx="580" cy="90" r="7" />
+        <text   class="tl-label is-cp" x="580" y="120" text-anchor="middle">+10 sess</text>
+        <text   class="tl-cp-title"    x="580" y="138" text-anchor="middle">real-world settled</text>
+
+        <!-- +30 sessions @ x=840 -->
+        <circle class="tl-node-halo" id="halo-90" cx="840" cy="90" r="22" />
+        <circle class="tl-node"      id="node-90" cx="840" cy="90" r="9" />
+        <text   class="tl-label is-cp" x="840" y="120" text-anchor="middle">+30 sess</text>
+        <text   class="tl-cp-title"    x="840" y="138" text-anchor="middle">locked verdict</text>
+
+        <!-- evidence chips above the checkpoints.
+             Outer <g> holds the SVG translate (positioning). Inner <g class="tl-chip-inner">
+             holds the CSS translateY for the fly-in. -->
+        <g class="tl-chip is-green" id="chip-7" transform="translate(220,18)">
+          <g class="tl-chip-inner">
+            <rect class="tl-chip-box" x="0" y="0" width="200" height="38" rx="2" />
+            <text class="tl-chip-text"          x="12" y="16">marker still landed</text>
+            <text class="tl-chip-text is-muted" x="12" y="30">0 fixes across 3 sessions</text>
+          </g>
+        </g>
+
+        <g class="tl-chip is-green" id="chip-30" transform="translate(480,18)">
+          <g class="tl-chip-inner">
+            <rect class="tl-chip-box" x="0" y="0" width="200" height="38" rx="2" />
+            <text class="tl-chip-text"          x="12" y="16">0 rollbacks · 10 sess held</text>
+            <text class="tl-chip-text is-muted" x="12" y="30">1 dependent skill fired</text>
+          </g>
+        </g>
+
+        <!-- t+90: bigger emphasis as the locked verdict -->
+        <g class="tl-chip is-green" id="chip-90" transform="translate(700,4)">
+          <g class="tl-chip-inner">
+            <rect class="tl-chip-box" x="0" y="0" width="200" height="52" rx="2"
+                  style="fill: var(--green); stroke: var(--green);" />
+            <text class="tl-chip-text" x="14" y="22"
+                  style="fill: var(--page); font-weight: 500; letter-spacing: 0.14em; font-size: 12px;">VERDICT: ADOPTED</text>
+            <text class="tl-chip-text" x="14" y="40"
+                  style="fill: color-mix(in srgb, var(--page) 78%, transparent); font-size: 10.5px;">feeds dedupe graph</text>
+          </g>
+        </g>
+      </svg>
+    </div>
+
+    <!-- inspector panel -->
+    <div class="inspector" id="inspector" aria-live="polite">
+      <div class="insp-cp">
+        <span id="insp-cp-name">accept</span>
+        <span class="insp-cp-sub" id="insp-cp-sub">experiment opened</span>
+      </div>
+      <div class="insp-body" id="insp-body">
+        <div class="ev is-shown">
+          <span class="lk">exp_id</span> <span>post-feature-verify · t0</span>
+        </div>
+        <div class="ev is-shown">
+          <span class="lk">marker</span> <span>added · src/cli/run.ts:42</span>
+        </div>
+        <div class="ev is-shown">
+          <span class="lk">watching</span> <span>marker · file · pattern · tests</span>
+        </div>
+      </div>
+      <div class="insp-state" id="insp-state">pending</div>
+    </div>
+
+    <p class="cap">
+      <strong>ax doesn't trust the moment you accept</strong> - it earns the verdict by
+      watching what happens across the next 30 sessions. Marker still landed? File
+      still healthy? Pattern not recurring? Tests still green? Each checkpoint joins
+      evidence from the same graph that generated the proposal. Sessions, not days -
+      a weekend doesn't artificially delay; a productive afternoon doesn't artificially
+      rush. The verdict at +30 sessions is locked and feeds the next round.
+    </p>
+  </figure>
+
+  <!-- past experiments strip -->
+  <section class="exp-strip" aria-label="five past experiments">
+    <p class="exp-strip-head">
+      <span>recent experiments</span>
+      <span class="right">5 of 47</span>
+    </p>
+
+    <ul class="exp-list">
+      <li>
+        <span class="exp-name">post-feature-verify</span>
+        <span class="exp-cp-tag">+30 sess</span>
+        <span class="exp-reason"><span class="ok">marker landed</span> · <span class="ok">0 rollbacks</span> · <span class="ref">1 dependent</span></span>
+        <span class="vchip is-adopted">adopted</span>
+      </li>
+      <li>
+        <span class="exp-name">main-branch-guardrail</span>
+        <span class="exp-cp-tag">+10 sess</span>
+        <span class="exp-reason">marker landed · <span class="err">2 of 4 callsites bypassed</span></span>
+        <span class="vchip is-partial">partial</span>
+      </li>
+      <li>
+        <span class="exp-name">skill-ts-default</span>
+        <span class="exp-cp-tag">+3 sess</span>
+        <span class="exp-reason">awaiting first signal · 1 session remaining</span>
+        <span class="vchip is-pending">pending</span>
+      </li>
+      <li>
+        <span class="exp-name">ingest-regression</span>
+        <span class="exp-cp-tag">+30 sess</span>
+        <span class="exp-reason"><span class="ok">pattern not recurred over 30 sessions</span> · <span class="ok">tests green</span></span>
+        <span class="vchip is-adopted">adopted</span>
+      </li>
+      <li>
+        <span class="exp-name">cache-warm-on-start</span>
+        <span class="exp-cp-tag">+10 sess</span>
+        <span class="exp-reason"><span class="err">added 800ms cold start</span> · reverted at session 6</span>
+        <span class="vchip is-regressed">regressed</span>
+      </li>
+    </ul>
+
+    <div class="verdict-legend" role="list">
+      <span class="vleg-label">verdict states ›</span>
+      <span class="vchip is-adopted" role="listitem">adopted</span>
+      <span class="vchip is-regressed" role="listitem">regressed</span>
+      <span class="vchip is-partial" role="listitem">partial</span>
+      <span class="vchip is-ignored" role="listitem">ignored</span>
+      <span class="vchip is-no-longer-needed" role="listitem">no_longer_needed</span>
+    </div>
+  </section>
+
+</main>
+
+<script>
+  // Verdict-timeline animation: one-shot on first scroll-into-view, replay pill resets.
+  // Geometry mirrors the SVG viewBox coordinates: track from x=60 to x=840.
+  //
+  // Timing chosen so each segment between checkpoints reads ~as one beat:
+  //   accept -> t+7    : 1.4s
+  //   t+7    -> t+30   : 1.6s
+  //   t+30   -> t+90   : 1.8s
+  // Total ~4.8s before final verdict reveal. Easing is cubic-out for the
+  // first leg (token leaving the gate), linear for middle, easing-in at lock.
+
+  const TRACK_X0 = 60;
+  const TRACK_X1 = 840;
+  const TRACK_Y  = 90;
+
+  // checkpoint x-positions matched to SVG
+  const CP = [
+    { id: 3,  x: 320, dur: 1400, ease: easeOutCubic,
+      chipId: 'chip-7',  haloId: 'halo-7',  nodeId: 'node-7',
+      color: 'green',
+      inspect: {
+        name: '+3 sessions', sub: 'early signal',
+        evidence: [
+          ['marker', 'src/cli/run.ts:42 · still landed',         'ok'],
+          ['file',   'no fixes across 3 sessions',               'ok'],
+          ['pattern','target failure: 0 hits',                   'ok'],
+          ['tests',  '0 regressions in adjacent suite',          'ok'],
+        ],
+        state: 'on-track', stateCls: 'is-green',
+      } },
+    { id: 10, x: 580, dur: 1600, ease: linear,
+      chipId: 'chip-30', haloId: 'halo-30', nodeId: 'node-30',
+      color: 'green',
+      inspect: {
+        name: '+10 sessions', sub: 'real-world settled',
+        evidence: [
+          ['marker',     'still landed · 0 rollbacks',           'ok'],
+          ['dependents', '1 downstream skill fired against it',  'ref'],
+          ['pattern',    'target failure: 0 hits over 10 sess',  'ok'],
+          ['tests',      '6 runs · all green',                   'ok'],
+        ],
+        state: 'holding', stateCls: 'is-green',
+      } },
+    { id: 30, x: 840, dur: 1800, ease: easeInCubic,
+      chipId: 'chip-90', haloId: 'halo-90', nodeId: 'node-90',
+      color: 'green',
+      inspect: {
+        name: '+30 sessions', sub: 'locked verdict',
+        evidence: [
+          ['verdict',   'ADOPTED',                                 'ok'],
+          ['evidence',  'marker · file · pattern · tests joined',  'lk'],
+          ['feeds',     'dedupe graph · future proposals',         'ref'],
+          ['locked',    'session 30 reached · cannot be re-proposed', 'lk'],
+        ],
+        state: 'adopted', stateCls: 'is-green',
+      } },
+  ];
+
+  function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+  function easeInCubic(t)  { return t * t * t; }
+  function linear(t)       { return t; }
+
+  const els = {
+    stage:    document.getElementById('stage'),
+    token:    document.getElementById('token'),
+    tokenSh:  document.getElementById('token-shadow'),
+    fill:     document.getElementById('track-fill'),
+    pill:     document.getElementById('replay'),
+    pillText: document.querySelector('#replay .auto-text'),
+    inspCp:   document.getElementById('insp-cp-name'),
+    inspSub:  document.getElementById('insp-cp-sub'),
+    inspBody: document.getElementById('insp-body'),
+    inspState:document.getElementById('insp-state'),
+  };
+
+  let rafId = null;
+  let running = false;
+  let played  = false;
+
+  function setPill(state, text) {
+    els.pill.setAttribute('data-state', state);
+    if (text) els.pillText.textContent = text;
+  }
+
+  function setTokenX(x) {
+    els.token.setAttribute('cx', x);
+    els.tokenSh.setAttribute('cx', x);
+    els.fill.setAttribute('x2', x);
+  }
+
+  function clearVisualState() {
+    cancelAnimationFrame(rafId);
+    setTokenX(TRACK_X0);
+    // chips
+    document.querySelectorAll('.tl-chip').forEach(c => c.classList.remove('is-shown'));
+    // nodes / halos
+    [7, 30, 90].forEach(id => {
+      const n = document.getElementById('node-' + id);
+      const h = document.getElementById('halo-' + id);
+      n.classList.remove('is-reached', 'is-green', 'is-red', 'is-blue');
+      h.classList.remove('is-shown', 'is-red', 'is-blue');
+    });
+    // inspector reset
+    els.inspCp.textContent  = 'accept';
+    els.inspSub.textContent = 'experiment opened';
+    els.inspBody.innerHTML = `
+      <div class="ev is-shown"><span class="lk">exp_id</span> <span>post-feature-verify · t0</span></div>
+      <div class="ev is-shown"><span class="lk">marker</span> <span>added · src/cli/run.ts:42</span></div>
+      <div class="ev is-shown"><span class="lk">watching</span> <span>marker · file · pattern · tests</span></div>
+    `;
+    els.inspState.className = 'insp-state';
+    els.inspState.textContent = 'pending';
+  }
+
+  function updateInspector(cp) {
+    els.inspCp.textContent  = cp.inspect.name;
+    els.inspSub.textContent = cp.inspect.sub;
+    els.inspBody.innerHTML = '';
+    cp.inspect.evidence.forEach((row, i) => {
+      const [label, val, cls] = row;
+      const div = document.createElement('div');
+      div.className = 'ev';
+      div.innerHTML = `<span class="lk">${label}</span> <span class="${cls}">${val}</span>`;
+      els.inspBody.appendChild(div);
+      // stagger evidence reveal
+      setTimeout(() => div.classList.add('is-shown'), 80 + i * 90);
+    });
+    els.inspState.className = 'insp-state ' + cp.inspect.stateCls;
+    els.inspState.textContent = cp.inspect.state;
+  }
+
+  function animateLeg(fromX, toX, durMs, easeFn) {
+    return new Promise(resolve => {
+      const start = performance.now();
+      function step(now) {
+        const t = Math.min(1, (now - start) / durMs);
+        const e = easeFn(t);
+        const x = fromX + (toX - fromX) * e;
+        setTokenX(x);
+        if (t < 1) {
+          rafId = requestAnimationFrame(step);
+        } else {
+          resolve();
+        }
+      }
+      rafId = requestAnimationFrame(step);
+    });
+  }
+
+  async function play() {
+    if (running) return;
+    running = true;
+    setPill('playing', 'playing');
+    clearVisualState();
+
+    let prevX = TRACK_X0;
+    for (let i = 0; i < CP.length; i++) {
+      const cp = CP[i];
+      await animateLeg(prevX, cp.x, cp.dur, cp.ease);
+      prevX = cp.x;
+
+      // checkpoint reached: light node + halo, show chip, update inspector
+      const node = document.getElementById(cp.nodeId);
+      const halo = document.getElementById(cp.haloId);
+      const chip = document.getElementById(cp.chipId);
+      node.classList.add('is-reached', 'is-' + cp.color);
+      halo.classList.add('is-shown');
+      if (cp.color !== 'green') halo.classList.add('is-' + cp.color);
+      chip.classList.add('is-shown');
+      updateInspector(cp);
+
+      // small held beat between checkpoints to let evidence read
+      if (i < CP.length - 1) await wait(420);
+    }
+
+    running = false;
+    played  = true;
+    setPill('done', 'replay');
+  }
+
+  function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+  // play once on first scroll-into-view
+  const io = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (e.isIntersecting && !played && !running) {
+        // tiny stagger so the page settles before kicking off
+        setTimeout(play, 280);
+      }
+    }
+  }, { threshold: 0.45 });
+
+  io.observe(els.stage);
+
+  // dev/screenshot affordances:
+  //   ?autoplay  - kick the animation immediately on load (headless screenshots)
+  //   ?final     - skip straight to the locked verdict state, no animation
+  const qs = new URLSearchParams(location.search);
+  if (qs.has('autoplay')) setTimeout(play, 80);
+  if (qs.has('final')) {
+    io.disconnect();
+    setTokenX(TRACK_X1);
+    CP.forEach(cp => {
+      document.getElementById(cp.nodeId).classList.add('is-reached', 'is-' + cp.color);
+      document.getElementById(cp.haloId).classList.add('is-shown');
+      document.getElementById(cp.chipId).classList.add('is-shown');
+    });
+    updateInspector(CP[CP.length - 1]);
+    // force-show inspector evidence immediately (skip per-row stagger)
+    document.querySelectorAll('#insp-body .ev').forEach(el => el.classList.add('is-shown'));
+    setPill('done', 'replay');
+    played = true;
+  }
+
+  // replay pill
+  els.pill.addEventListener('click', () => {
+    if (running) return;
+    play();
+  });
+
+  // reduce-motion: skip to end state
+  const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (prefersReduced) {
+    io.disconnect();
+    setTokenX(TRACK_X1);
+    CP.forEach(cp => {
+      document.getElementById(cp.nodeId).classList.add('is-reached', 'is-' + cp.color);
+      document.getElementById(cp.haloId).classList.add('is-shown');
+      document.getElementById(cp.chipId).classList.add('is-shown');
+    });
+    updateInspector(CP[CP.length - 1]);
+    setPill('done', 'replay');
+    played = true;
+  }
+</script>
+
+</body>
+</html>

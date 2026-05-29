@@ -1,0 +1,649 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ax - token impact</title>
+  <style>
+    :root {
+      --ink: #0a0a0a;
+      --page: #f6f5f0;
+      --panel: #fbfaf5;
+      --line: #d8d6cf;
+      --muted: #6b6b66;
+      --green: #2f9e44;
+      --blue: #2567a8;
+      --red: #c0392b;
+      --amber: #b8860b;
+      --term-bg: #14140f;
+      --term-fg: #e8e6dd;
+      --term-muted: #8a8780;
+      --term-line: #2a2823;
+      --term-green: #6fcf80;
+      --term-blue: #8ec1ff;
+      --term-yellow: #e8c87a;
+      --term-violet: #c7a8ff;
+      --serif: Georgia, "Times New Roman", serif;
+      --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Helvetica Neue", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      background: var(--page);
+      color: var(--ink);
+      font-family: var(--sans);
+      font-size: 16px;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+      padding: 64px 32px 96px;
+    }
+
+    main {
+      max-width: 980px;
+      margin: 0 auto;
+    }
+
+    .eyebrow {
+      font-family: var(--mono);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      color: var(--muted);
+      margin: 0 0 14px;
+    }
+
+    h2 {
+      font-family: var(--serif);
+      font-weight: 400;
+      font-size: 40px;
+      line-height: 1.1;
+      letter-spacing: -0.6px;
+      margin: 0 0 18px;
+    }
+
+    h2 em {
+      font-style: italic;
+      color: var(--muted);
+    }
+
+    p.lede {
+      margin: 0 0 36px;
+      font-size: 19px;
+      line-height: 1.5;
+      max-width: 60ch;
+      color: #2c2c28;
+    }
+
+    p.lede .cmd {
+      font-family: var(--mono);
+      font-size: 14px;
+      padding: 1px 6px;
+      background: #ebe9e0;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      white-space: nowrap;
+    }
+
+    /* ---------- hero stats ---------- */
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0;
+      border-top: 1px solid var(--ink);
+      border-bottom: 1px solid var(--ink);
+      margin-bottom: 56px;
+    }
+
+    .stat {
+      padding: 24px 24px 22px;
+      border-right: 1px solid var(--line);
+      position: relative;
+    }
+    .stat:last-child { border-right: none; }
+
+    .stat .label {
+      font-family: var(--mono);
+      font-size: 10.5px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 14px;
+    }
+
+    .stat .big {
+      font-family: var(--mono);
+      font-size: 44px;
+      letter-spacing: -1px;
+      line-height: 1;
+      font-weight: 500;
+    }
+    .stat .big .unit {
+      font-size: 14px;
+      color: var(--muted);
+      letter-spacing: 0;
+      margin-left: 4px;
+      font-weight: 400;
+    }
+
+    .stat .delta {
+      font-family: var(--mono);
+      font-size: 12px;
+      margin-top: 12px;
+      color: var(--muted);
+      letter-spacing: 0.01em;
+    }
+
+    .delta .up    { color: var(--red); }
+    .delta .down  { color: var(--red); }
+    .delta .good  { color: var(--green); }
+
+    .stat .submeta {
+      font-family: var(--mono);
+      font-size: 11.5px;
+      color: var(--muted);
+      margin-top: 4px;
+      letter-spacing: 0.01em;
+    }
+
+    /* color tint per metric */
+    .stat[data-kind="tokens"] .big { color: var(--ink); }
+    .stat[data-kind="spend"]  .big { color: var(--blue); }
+    .stat[data-kind="cache"]  .big { color: var(--red); }
+
+    /* mini bar inside spend */
+    .provider-strip {
+      display: flex;
+      height: 6px;
+      margin-top: 14px;
+      background: #ece9df;
+      border-radius: 1px;
+      overflow: hidden;
+    }
+    .provider-strip .seg-claude { background: #d77757; }
+    .provider-strip .seg-codex  { background: var(--blue); }
+    .provider-legend {
+      display: flex;
+      gap: 14px;
+      margin-top: 8px;
+      font-family: var(--mono);
+      font-size: 10.5px;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+    }
+    .provider-legend .swatch {
+      display: inline-block;
+      width: 8px; height: 8px;
+      margin-right: 5px;
+      vertical-align: 1px;
+      border-radius: 1px;
+    }
+
+    /* cache hit target meter */
+    .target {
+      margin-top: 14px;
+      height: 6px;
+      background: #ece9df;
+      border-radius: 1px;
+      position: relative;
+      overflow: visible;
+    }
+    .target .fill {
+      height: 100%;
+      width: 67%;
+      background: var(--red);
+      border-radius: 1px;
+    }
+    .target .tick {
+      position: absolute;
+      top: -4px;
+      bottom: -4px;
+      left: 80%;
+      width: 1.5px;
+      background: var(--ink);
+    }
+    .target-legend {
+      font-family: var(--mono);
+      font-size: 10.5px;
+      color: var(--muted);
+      margin-top: 8px;
+      display: flex;
+      justify-content: space-between;
+      letter-spacing: 0.04em;
+    }
+
+    /* ---------- breakdown ---------- */
+    .section-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      margin: 0 0 22px;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 10px;
+    }
+    .section-head h3 {
+      font-family: var(--serif);
+      font-size: 22px;
+      font-weight: 400;
+      margin: 0;
+      letter-spacing: -0.2px;
+    }
+    .section-head .meta {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+    }
+
+    .breakdown {
+      display: grid;
+      grid-template-columns: 1.05fr 1fr;
+      gap: 48px;
+      margin-bottom: 56px;
+    }
+
+    /* horizontal stacked bars by workflow_epoch */
+    .epoch-row {
+      display: grid;
+      grid-template-columns: 110px 1fr 64px;
+      gap: 14px;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+    .epoch-row .name {
+      font-family: var(--mono);
+      font-size: 12px;
+      letter-spacing: 0.02em;
+    }
+    .epoch-row .name .badge {
+      display: inline-block;
+      width: 8px; height: 8px;
+      margin-right: 7px;
+      vertical-align: 1px;
+      border-radius: 1px;
+    }
+    .epoch-row .bar {
+      height: 22px;
+      background: #ece9df;
+      border-radius: 1px;
+      overflow: hidden;
+      display: flex;
+      position: relative;
+    }
+    .epoch-row .bar .cached {
+      background: var(--green);
+      opacity: 0.85;
+      transition: opacity .2s ease;
+    }
+    .epoch-row .bar .miss {
+      background: var(--red);
+      opacity: 0.78;
+      transition: opacity .2s ease;
+    }
+    .epoch-row:hover .bar .cached,
+    .epoch-row:hover .bar .miss { opacity: 1; }
+
+    .epoch-row .pct {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--muted);
+      text-align: right;
+      letter-spacing: 0.02em;
+    }
+
+    .epoch-key {
+      display: flex;
+      gap: 18px;
+      font-family: var(--mono);
+      font-size: 10.5px;
+      color: var(--muted);
+      margin-top: 10px;
+      letter-spacing: 0.04em;
+    }
+    .epoch-key .sw {
+      display: inline-block;
+      width: 8px; height: 8px;
+      margin-right: 6px;
+      vertical-align: 1px;
+      border-radius: 1px;
+    }
+
+    /* top sessions list */
+    .sessions {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .session {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 6px 12px;
+      padding: 12px 14px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 3px;
+    }
+    .session .sid {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.02em;
+    }
+    .session .path {
+      font-family: var(--mono);
+      font-size: 12.5px;
+      color: var(--ink);
+      letter-spacing: 0;
+      grid-column: 1 / span 2;
+      margin-top: 1px;
+    }
+    .session .path .arrow {
+      color: var(--muted);
+      margin: 0 6px;
+    }
+    .session .right {
+      font-family: var(--mono);
+      font-size: 12px;
+      text-align: right;
+      color: var(--muted);
+    }
+    .session .right .tk {
+      color: var(--ink);
+      font-weight: 500;
+    }
+    .session .cache-mini {
+      grid-column: 1 / span 2;
+      height: 4px;
+      background: #ece9df;
+      border-radius: 1px;
+      overflow: hidden;
+      display: flex;
+      margin-top: 4px;
+    }
+    .session .cache-mini .c { background: var(--green); opacity: 0.85; }
+    .session .cache-mini .m { background: var(--red); opacity: 0.78; }
+    .session .ratio {
+      font-family: var(--mono);
+      font-size: 10.5px;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+      grid-column: 1 / span 2;
+      display: flex;
+      justify-content: space-between;
+      margin-top: 2px;
+    }
+    .session .ratio .bad { color: var(--red); }
+    .session .ratio .ok  { color: var(--green); }
+    .session .ratio .mid { color: var(--amber); }
+
+    /* ---------- insight callout ---------- */
+    .insight {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 18px;
+      padding: 22px 26px;
+      border-left: 3px solid var(--red);
+      background: #f0ece1;
+      margin-bottom: 56px;
+      align-items: center;
+    }
+    .insight .ratio-num {
+      font-family: var(--mono);
+      font-size: 40px;
+      line-height: 1;
+      color: var(--red);
+      font-weight: 500;
+      letter-spacing: -1px;
+    }
+    .insight .ratio-num .x {
+      font-size: 22px;
+      color: var(--muted);
+      letter-spacing: 0;
+      margin-left: 2px;
+    }
+    .insight .body {
+      font-family: var(--serif);
+      font-size: 17px;
+      line-height: 1.45;
+    }
+    .insight .body strong {
+      font-weight: 600;
+    }
+    .insight .body .src {
+      display: block;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+      margin-top: 8px;
+      text-transform: uppercase;
+    }
+
+    /* ---------- caption (terminal-tinted footer) ---------- */
+    .caption {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 32px;
+      padding-top: 22px;
+      border-top: 1px solid var(--line);
+    }
+    .caption .col {
+      font-size: 14px;
+      line-height: 1.55;
+      color: #3a3a35;
+    }
+    .caption .col .h {
+      font-family: var(--mono);
+      font-size: 10.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .caption code {
+      font-family: var(--mono);
+      font-size: 12.5px;
+      background: #ebe9e0;
+      padding: 1px 5px;
+      border-radius: 3px;
+      border: 1px solid var(--line);
+    }
+    .caption .pill {
+      display: inline-block;
+      font-family: var(--mono);
+      font-size: 10.5px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      padding: 2px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      margin-right: 4px;
+      margin-top: 6px;
+    }
+
+    @media (max-width: 760px) {
+      .stats { grid-template-columns: 1fr; }
+      .stat { border-right: none; border-bottom: 1px solid var(--line); }
+      .stat:last-child { border-bottom: none; }
+      .breakdown { grid-template-columns: 1fr; gap: 40px; }
+      .caption { grid-template-columns: 1fr; }
+      h2 { font-size: 32px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">see the bleed · token-impact</p>
+    <h2>Where your agent <em>context</em> goes.</h2>
+    <p class="lede">
+      Every agent user is bleeding money on cache misses they can't see. <span class="cmd">axctl insights token-impact --since=7d</span> joins your local claude + codex transcripts, reconciles provider metadata against transcript bytes, and shows the spend, the hit rate, and the workflows burning the budget.
+    </p>
+
+    <!-- ============ HERO STATS ============ -->
+    <section class="stats" aria-label="hero stats">
+      <div class="stat" data-kind="tokens">
+        <div class="label">tokens · 7d</div>
+        <div class="big">14.2<span class="unit">M</span></div>
+        <div class="delta"><span class="up">▲ +20%</span> &nbsp;vs 11.8M last week</div>
+        <div class="submeta">claude 8.5M · codex 5.7M</div>
+      </div>
+
+      <div class="stat" data-kind="spend">
+        <div class="label">spend · 7d</div>
+        <div class="big">$42<span class="unit">.18</span></div>
+        <div class="provider-strip" aria-hidden="true">
+          <div class="seg-claude" style="width: 57.3%"></div>
+          <div class="seg-codex"  style="width: 42.7%"></div>
+        </div>
+        <div class="provider-legend">
+          <span><span class="swatch" style="background:#d77757"></span>claude $24.18</span>
+          <span><span class="swatch" style="background:var(--blue)"></span>codex $18.00</span>
+        </div>
+      </div>
+
+      <div class="stat" data-kind="cache">
+        <div class="label">cache hit · 7d</div>
+        <div class="big">67<span class="unit">%</span></div>
+        <div class="target" aria-hidden="true">
+          <div class="fill"></div>
+          <div class="tick" title="target 80%"></div>
+        </div>
+        <div class="target-legend">
+          <span class="up">▼ -4pp WoW</span>
+          <span>target 80%</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ BREAKDOWN ============ -->
+    <div class="section-head">
+      <h3>By workflow epoch &amp; expensive sessions</h3>
+      <div class="meta">join: session_token_usage ⋈ session_health</div>
+    </div>
+
+    <section class="breakdown">
+      <!-- LEFT: workflow_epoch stacked bars -->
+      <div>
+        <div class="epoch-row" title="gsd: 5.96M tokens, 71% cached">
+          <div class="name"><span class="badge" style="background:var(--ink)"></span>gsd</div>
+          <div class="bar">
+            <div class="cached" style="width: 29.8%"></div>
+            <div class="miss"   style="width: 12.2%"></div>
+          </div>
+          <div class="pct">42%</div>
+        </div>
+        <div class="epoch-row" title="superpowers: 4.40M tokens, 78% cached">
+          <div class="name"><span class="badge" style="background:#5b5b56"></span>superpowers</div>
+          <div class="bar">
+            <div class="cached" style="width: 24.2%"></div>
+            <div class="miss"   style="width: 6.8%"></div>
+          </div>
+          <div class="pct">31%</div>
+        </div>
+        <div class="epoch-row" title="ad-hoc: 3.83M tokens, 48% cached">
+          <div class="name"><span class="badge" style="background:#aeaca3"></span>ad-hoc</div>
+          <div class="bar">
+            <div class="cached" style="width: 13.0%"></div>
+            <div class="miss"   style="width: 14.0%"></div>
+          </div>
+          <div class="pct">27%</div>
+        </div>
+
+        <div class="epoch-key">
+          <span><span class="sw" style="background:var(--green)"></span>cached</span>
+          <span><span class="sw" style="background:var(--red)"></span>cache miss (paid)</span>
+        </div>
+
+        <p style="font-size:13px; color:var(--muted); margin-top:22px; line-height:1.5; max-width:42ch;">
+          Bar length = share of total tokens. Color split inside each bar = cached vs. paid for the same workload. <strong style="color:var(--ink); font-weight:500;">ad-hoc is half the tokens of gsd but burns more dollars</strong> - fewer rituals, lower cache hit.
+        </p>
+      </div>
+
+      <!-- RIGHT: top expensive sessions -->
+      <div>
+        <div class="sessions">
+          <div class="session">
+            <div class="sid">session 9c2e44 · claude</div>
+            <div class="right"><span class="tk">2.40M</span> tk</div>
+            <div class="path">~/Projects/ax <span class="arrow">›</span> src/ingest/transcripts.ts refactor</div>
+            <div class="cache-mini"><div class="c" style="width:41%"></div><div class="m" style="width:59%"></div></div>
+            <div class="ratio"><span>cache hit <span class="bad">41%</span></span><span>$7.81 · 14 turns</span></div>
+          </div>
+
+          <div class="session">
+            <div class="sid">session 4f1ab0 · codex</div>
+            <div class="right"><span class="tk">1.85M</span> tk</div>
+            <div class="path">~/Projects/ax <span class="arrow">›</span> insights CLI scaffold</div>
+            <div class="cache-mini"><div class="c" style="width:58%"></div><div class="m" style="width:42%"></div></div>
+            <div class="ratio"><span>cache hit <span class="mid">58%</span></span><span>$5.94 · 22 turns</span></div>
+          </div>
+
+          <div class="session">
+            <div class="sid">session a07e91 · claude</div>
+            <div class="right"><span class="tk">1.31M</span> tk</div>
+            <div class="path">~/Projects/ax <span class="arrow">›</span> schema v3 migration</div>
+            <div class="cache-mini"><div class="c" style="width:79%"></div><div class="m" style="width:21%"></div></div>
+            <div class="ratio"><span>cache hit <span class="ok">79%</span></span><span>$3.12 · 9 turns</span></div>
+          </div>
+
+          <div class="session">
+            <div class="sid">session 2bf330 · codex</div>
+            <div class="right"><span class="tk">1.07M</span> tk</div>
+            <div class="path">~/Projects/ax <span class="arrow">›</span> docs/landing rewrite</div>
+            <div class="cache-mini"><div class="c" style="width:36%"></div><div class="m" style="width:64%"></div></div>
+            <div class="ratio"><span>cache hit <span class="bad">36%</span></span><span>$3.78 · 31 turns</span></div>
+          </div>
+
+          <div class="session">
+            <div class="sid">session 7d4c12 · claude</div>
+            <div class="right"><span class="tk">0.92M</span> tk</div>
+            <div class="path">~/Projects/quera <span class="arrow">›</span> live-traces vendor</div>
+            <div class="cache-mini"><div class="c" style="width:74%"></div><div class="m" style="width:26%"></div></div>
+            <div class="ratio"><span>cache hit <span class="ok">74%</span></span><span>$2.34 · 11 turns</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ INSIGHT ============ -->
+    <section class="insight">
+      <div class="ratio-num">3.2<span class="x">×</span></div>
+      <div class="body">
+        <strong>codex burns 3.2× the context of claude code</strong> for equivalent work - same workflow_epoch, same repo, same outcome.
+        Most of that is restated history per turn.
+        <span class="src">workflow-impact says the gsd → superpowers migration is paying off · run <code style="font-family:var(--mono); font-size:12px;">axctl insights workflow-impact</code> for the cohort comparison</span>
+      </div>
+    </section>
+
+    <!-- ============ CAPTION ============ -->
+    <section class="caption">
+      <div class="col">
+        <div class="h">where the numbers come from</div>
+        ax reads provider metadata - <code>cache_creation_input_tokens</code>, <code>cache_read_input_tokens</code>, <code>input_tokens</code>, <code>output_tokens</code> - and falls back to transcript-byte estimates when a turn predates cache reporting.
+      </div>
+      <div class="col">
+        <div class="h">runs on your machine</div>
+        Local SurrealDB instance. Typed Effect pipeline. No outbound calls, no upload. Sibling diagnostics: <span class="pill">cache-health</span><span class="pill">workflow-impact</span><span class="pill">skill-impact</span>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    // gentle bar entrance on load
+    (function () {
+      const bars = document.querySelectorAll('.epoch-row .bar > div, .session .cache-mini > div, .target .fill, .provider-strip > div');
+      bars.forEach((b) => {
+        const w = b.style.width;
+        b.style.width = '0%';
+        requestAnimationFrame(() => {
+          b.style.transition = 'width 700ms cubic-bezier(.2,.7,.2,1)';
+          b.style.width = w;
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

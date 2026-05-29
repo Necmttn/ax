@@ -1,0 +1,639 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ax recall - find what you shipped last time</title>
+<style>
+  :root {
+    --ink: #0a0a0a;
+    --page: #f6f5f0;
+    --panel: #fbfaf5;
+    --line: #d8d6cf;
+    --muted: #6b6b66;
+    --soft: #8a8780;
+    --green: #2f9e44;
+    --blue: #2567a8;
+    --amber: #b07900;
+    --red: #c0392b;
+    --hi: #fff3a8;          /* highlight wash for matched phrase */
+    --hi-stroke: #d4b800;
+    --term-bg: #14140f;
+    --term-fg: #e8e6dd;
+    --term-muted: #8a8780;
+    --term-line: #2a2823;
+    --serif: Georgia, "Times New Roman", serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Helvetica Neue", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  main {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 80px 32px 120px;
+  }
+
+  /* eyebrow + headline */
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--muted);
+    margin: 0 0 16px;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .eyebrow::before {
+    content: "";
+    width: 18px;
+    height: 1px;
+    background: var(--ink);
+    opacity: 0.5;
+  }
+
+  h2 {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: 44px;
+    line-height: 1.08;
+    letter-spacing: -0.6px;
+    margin: 0 0 18px;
+    max-width: 22ch;
+  }
+  h2 em {
+    font-style: italic;
+    color: var(--muted);
+  }
+  .lede {
+    font-family: var(--serif);
+    font-size: 19px;
+    line-height: 1.55;
+    color: var(--ink);
+    max-width: 60ch;
+    margin: 0 0 40px;
+  }
+  .lede .soft { color: var(--muted); }
+
+  /* CLI shape - small terminal preview above the visual search */
+  .cli {
+    background: var(--term-bg);
+    color: var(--term-fg);
+    border-radius: 8px;
+    padding: 14px 18px;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.6;
+    margin: 0 0 22px;
+    box-shadow: 0 8px 24px -16px rgba(0,0,0,0.35);
+    border: 1px solid var(--term-line);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    overflow: hidden;
+  }
+  .cli .dots {
+    display: inline-flex;
+    gap: 6px;
+    margin-right: 8px;
+  }
+  .cli .dot {
+    width: 9px; height: 9px; border-radius: 50%;
+  }
+  .cli .dot.r { background: #ec6a5e; }
+  .cli .dot.y { background: #f4be4f; }
+  .cli .dot.g { background: #61c554; }
+  .cli .prompt { color: var(--term-muted); }
+  .cli .cmd { color: var(--term-fg); }
+  .cli .arg { color: #c5b35b; }
+  .cli .caret {
+    display: inline-block;
+    width: 7px;
+    height: 14px;
+    background: var(--term-fg);
+    margin-left: 2px;
+    transform: translateY(2px);
+    animation: blink 1s steps(2) infinite;
+  }
+  @keyframes blink {
+    50% { opacity: 0; }
+  }
+
+  /* search panel - the primary visual */
+  .search {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 20px;
+    display: grid;
+    grid-template-columns: 24px 1fr auto;
+    align-items: center;
+    gap: 14px;
+    box-shadow: 0 1px 0 #ece9df, 0 24px 60px -40px rgba(20,20,15,0.25);
+    margin: 0 0 14px;
+    position: relative;
+  }
+  .search:focus-within {
+    border-color: var(--ink);
+  }
+  .search .glyph {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+  }
+  .search input {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    font-family: var(--serif);
+    font-size: 22px;
+    color: var(--ink);
+    outline: none;
+    width: 100%;
+    padding: 4px 0;
+    letter-spacing: -0.2px;
+  }
+  .search input::placeholder { color: #b3b1a8; }
+  .search .kbd {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .search .kbd b {
+    font-weight: 500;
+    background: #efece1;
+    border: 1px solid var(--line);
+    border-bottom-width: 2px;
+    padding: 2px 7px;
+    border-radius: 4px;
+    color: var(--ink);
+  }
+
+  .meta-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 0 4px;
+    margin: 0 0 26px;
+  }
+  .meta-row .scope {
+    display: inline-flex; gap: 14px;
+  }
+  .meta-row .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .meta-row .chip::before {
+    content: "";
+    width: 6px; height: 6px;
+    background: var(--ink);
+    border-radius: 50%;
+    opacity: 0.6;
+  }
+
+  /* result list */
+  .results {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .result {
+    padding: 26px 4px 22px;
+    border-bottom: 1px solid var(--line);
+    display: grid;
+    grid-template-columns: 38px 1fr;
+    gap: 18px;
+    transition: background 0.2s;
+  }
+  .result:hover {
+    background: color-mix(in srgb, var(--panel) 60%, transparent);
+  }
+  .result.dim { opacity: 0.55; }
+
+  .rank {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    letter-spacing: 0.04em;
+    padding-top: 4px;
+  }
+  .rank .score {
+    display: block;
+    margin-top: 6px;
+    font-size: 10px;
+    color: var(--soft);
+  }
+
+  .body .excerpt {
+    font-family: var(--serif);
+    font-size: 19px;
+    line-height: 1.55;
+    color: var(--ink);
+    margin: 0 0 14px;
+    max-width: 64ch;
+  }
+  .body .excerpt mark {
+    background: var(--hi);
+    color: var(--ink);
+    padding: 1px 3px;
+    border-radius: 2px;
+    box-shadow: inset 0 -1px 0 var(--hi-stroke);
+  }
+
+  .prov {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--muted);
+    letter-spacing: 0.02em;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+    line-height: 1.7;
+  }
+  .prov .sep { color: #c8c6bd; }
+  .prov .path { color: var(--ink); }
+  .prov .sid { color: var(--blue); }
+  .prov .date { color: var(--ink); }
+  .prov .src {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .prov .src::before {
+    content: "";
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--green);
+  }
+  .prov .src.codex::before {
+    background: var(--blue);
+  }
+
+  .outcome {
+    margin-top: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    padding: 6px 12px 6px 8px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: #fcfbf6;
+  }
+  .outcome .arrow { color: var(--muted); }
+  .outcome .commit {
+    font-weight: 500;
+    color: var(--ink);
+    background: #eee9d6;
+    padding: 1px 6px;
+    border-radius: 3px;
+    border: 1px solid #d8d2bb;
+  }
+  .outcome .verdict {
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 10px;
+  }
+  .outcome.adopted .verdict { color: var(--green); }
+  .outcome.adopted-locked .verdict { color: var(--green); font-weight: 600; }
+  .outcome.rolled .verdict { color: var(--red); }
+  .outcome.rejected .verdict { color: var(--red); }
+
+  .outcome .t-since {
+    color: var(--soft);
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+  }
+
+  /* caption */
+  .caption {
+    margin-top: 48px;
+    padding: 28px 30px;
+    border: 1px dashed var(--line);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--panel) 60%, transparent);
+    display: grid;
+    grid-template-columns: 90px 1fr;
+    gap: 22px;
+    align-items: start;
+  }
+  .caption .label {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: var(--muted);
+    padding-top: 4px;
+  }
+  .caption p {
+    margin: 0 0 10px;
+    font-family: var(--serif);
+    font-size: 16.5px;
+    line-height: 1.6;
+    color: var(--ink);
+    max-width: 60ch;
+  }
+  .caption p:last-child { margin-bottom: 0; }
+  .caption code {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    background: #efece1;
+    padding: 1px 6px;
+    border-radius: 3px;
+    border: 1px solid var(--line);
+  }
+
+  /* footer line */
+  .foot {
+    margin-top: 28px;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--soft);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  @media (max-width: 720px) {
+    h2 { font-size: 32px; }
+    .lede { font-size: 17px; }
+    .search input { font-size: 18px; }
+    .search { padding: 14px 16px; }
+    .result { grid-template-columns: 1fr; gap: 8px; }
+    .rank { padding-top: 0; }
+    .caption { grid-template-columns: 1fr; gap: 10px; }
+  }
+</style>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">search the graph</p>
+    <h2>Find what you shipped <em>last time you did this.</em></h2>
+    <p class="lede">
+      <span>Every transcript ax has ever ingested is full-text searchable -
+      Claude Code, Codex, every turn, every tool call, every reasoning text.</span>
+      <span class="soft"> Ranked excerpts come back with the session, the file,
+      the commit, and whether it stuck.</span>
+    </p>
+
+    <!-- CLI shape -->
+    <div class="cli" aria-hidden="true">
+      <span class="dots"><i class="dot r"></i><i class="dot y"></i><i class="dot g"></i></span>
+      <span class="prompt">~/Projects/ax</span>
+      <span class="prompt">&gt;</span>
+      <span class="cmd">axctl recall</span>
+      <span class="arg" id="cli-arg">"auth middleware oauth refresh token"</span>
+      <span class="caret"></span>
+    </div>
+
+    <!-- search widget -->
+    <div class="search" role="search">
+      <span class="glyph" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="7"></circle>
+          <line x1="20" y1="20" x2="16.5" y2="16.5"></line>
+        </svg>
+      </span>
+      <input id="q" type="text" value="auth middleware oauth refresh token" spellcheck="false" autocomplete="off" />
+      <span class="kbd"><span>search</span> <b>⏎</b></span>
+    </div>
+
+    <div class="meta-row">
+      <div class="scope">
+        <span class="chip">14,832 turns</span>
+        <span class="chip">412 sessions</span>
+        <span class="chip">claude + codex</span>
+      </div>
+      <div>4 matches · 38 ms</div>
+    </div>
+
+    <!-- results -->
+    <div class="results">
+
+      <!-- 1 -->
+      <article class="result">
+        <div class="rank">
+          01
+          <span class="score">0.94</span>
+        </div>
+        <div class="body">
+          <p class="excerpt">
+            Built the <mark>OAuth refresh token</mark> rotation. The
+            <mark>middleware</mark> now checks expiry with <code style="font-family:var(--mono);font-size:15px">&lt;=</code>
+            not <code style="font-family:var(--mono);font-size:15px">&lt;</code> after the bug we hit last quarter -
+            tests cover the boundary tick and the clock-skew window.
+          </p>
+          <div class="prov">
+            <span class="src">claude code</span>
+            <span class="sep">·</span>
+            <span class="sid">session 5a8e9c</span>
+            <span class="sep">·</span>
+            <span class="date">2026-05-21 · 14:02</span>
+            <span class="sep">·</span>
+            <span>~/Projects/ax</span>
+            <span class="sep">·</span>
+            <span class="path">src/auth/middleware.ts</span>
+          </div>
+          <div class="outcome adopted">
+            <span class="arrow">→ shipped in</span>
+            <span class="commit">8b3d1f4</span>
+            <span class="verdict">adopted</span>
+            <span class="t-since">t + 7d</span>
+          </div>
+        </div>
+      </article>
+
+      <!-- 2 -->
+      <article class="result">
+        <div class="rank">
+          02
+          <span class="score">0.81</span>
+        </div>
+        <div class="body">
+          <p class="excerpt">
+            PR #847 - <mark>OAuth refresh</mark> path. Tests cover both expiry edge cases;
+            the <mark>middleware</mark> guards against double-refresh by holding a
+            per-tenant lock for the duration of the rotation.
+          </p>
+          <div class="prov">
+            <span class="src">claude code</span>
+            <span class="sep">·</span>
+            <span class="sid">session 3c1d22</span>
+            <span class="sep">·</span>
+            <span class="date">2026-04-14 · 09:48</span>
+            <span class="sep">·</span>
+            <span>~/Projects/ax</span>
+            <span class="sep">·</span>
+            <span class="path">src/auth/refresh.ts</span>
+          </div>
+          <div class="outcome adopted">
+            <span class="arrow">→ shipped in</span>
+            <span class="commit">2e0a5cc</span>
+            <span class="verdict">adopted</span>
+            <span class="t-since">t + 30d</span>
+          </div>
+        </div>
+      </article>
+
+      <!-- 3 -->
+      <article class="result">
+        <div class="rank">
+          03
+          <span class="score">0.72</span>
+        </div>
+        <div class="body">
+          <p class="excerpt">
+            Initial <mark>OAuth</mark> wiring. Note for future me: don't reuse the access
+            <mark>token</mark> endpoint for <mark>refresh</mark> - separate route, separate
+            rate limit, separate audit log.
+          </p>
+          <div class="prov">
+            <span class="src codex">codex</span>
+            <span class="sep">·</span>
+            <span class="sid">session 7f4b88</span>
+            <span class="sep">·</span>
+            <span class="date">2026-03-02 · 22:11</span>
+            <span class="sep">·</span>
+            <span>~/Projects/ax</span>
+            <span class="sep">·</span>
+            <span class="path">src/auth/routes.ts</span>
+          </div>
+          <div class="outcome adopted-locked">
+            <span class="arrow">→ shipped in</span>
+            <span class="commit">9d1e0a2</span>
+            <span class="verdict">adopted · locked</span>
+            <span class="t-since">t + 90d</span>
+          </div>
+        </div>
+      </article>
+
+      <!-- 4 (dim - rejected) -->
+      <article class="result dim">
+        <div class="rank">
+          04
+          <span class="score">0.41</span>
+        </div>
+        <div class="body">
+          <p class="excerpt">
+            Spike on <mark>OAuth</mark> session-binding inside the <mark>middleware</mark> -
+            rejected, returned to the PR #420 approach. Leaving the diff in
+            <code style="font-family:var(--mono);font-size:15px">scratch/</code> in case the threat
+            model changes.
+          </p>
+          <div class="prov">
+            <span class="src">claude code</span>
+            <span class="sep">·</span>
+            <span class="sid">session 1a2b33</span>
+            <span class="sep">·</span>
+            <span class="date">2025-12-08 · 16:30</span>
+            <span class="sep">·</span>
+            <span>~/Projects/ax</span>
+            <span class="sep">·</span>
+            <span class="path">scratch/oauth-bind.ts</span>
+          </div>
+          <div class="outcome rejected">
+            <span class="arrow">→ rolled back</span>
+            <span class="verdict">rejected</span>
+            <span class="t-since">t + 2d</span>
+          </div>
+        </div>
+      </article>
+
+    </div>
+
+    <!-- caption -->
+    <aside class="caption">
+      <div class="label">how it works</div>
+      <div>
+        <p>
+          Every Claude Code and Codex session ax ingests becomes a row in the unified
+          graph - turn text, tool calls, reasoning, file edits, commit refs.
+          <code>axctl recall</code> runs full-text search over that graph and ranks by
+          <em>recency × relevance × outcome</em>.
+        </p>
+        <p>
+          "Outcome" is the part no other agent layer has: whether the change shipped,
+          was rolled back, or got locked in as a permanent pattern. You're not just
+          searching what you wrote - you're searching what worked.
+        </p>
+      </div>
+    </aside>
+
+    <p class="foot">ax · local taste &amp; telemetry graph · prototype</p>
+  </main>
+
+<script>
+  // tiny idle typing animation on the CLI arg - loops gently.
+  (function () {
+    const el = document.getElementById('cli-arg');
+    if (!el) return;
+    const full = '"auth middleware oauth refresh token"';
+    let i = full.length;
+    let phase = 'idle';
+    let timer;
+
+    function tick() {
+      if (phase === 'idle') {
+        // hold full text briefly, then erase
+        timer = setTimeout(() => { phase = 'erase'; tick(); }, 3500);
+        return;
+      }
+      if (phase === 'erase') {
+        i = Math.max(0, i - 1);
+        el.textContent = full.slice(0, i);
+        if (i === 0) {
+          phase = 'type';
+          timer = setTimeout(tick, 350);
+          return;
+        }
+        timer = setTimeout(tick, 22);
+        return;
+      }
+      if (phase === 'type') {
+        i = Math.min(full.length, i + 1);
+        el.textContent = full.slice(0, i);
+        if (i === full.length) {
+          phase = 'idle';
+          timer = setTimeout(tick, 200);
+          return;
+        }
+        timer = setTimeout(tick, 38);
+        return;
+      }
+    }
+    // start after page settles
+    timer = setTimeout(tick, 1800);
+  })();
+</script>
+</body>
+</html>
