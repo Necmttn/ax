@@ -299,8 +299,9 @@ const progressUpdater = (
  *  Key is the old IngestStageKey string; cast `s.meta.key as IngestStageKeyLegacy`
  *  when looking up (the registry keys are the same string values). */
 type IngestStageKeyLegacy =
-    | "skills" | "commands" | "claude" | "codex" | "pi" | "opencode" | "cursor" | "subagents" | "spawned" | "git"
-    | "signals" | "outcomes" | "session-health" | "closure" | "proposals"
+    | "skills" | "commands" | "claude" | "codex" | "pi" | "opencode" | "cursor"
+    | "subagents" | "invoked-positions" | "spawned" | "git" | "signals"
+    | "outcomes" | "session-health" | "closure" | "proposals"
     | "opportunities" | "retro-proposals" | "harness";
 
 const STAGE_PROGRESS: Record<IngestStageKeyLegacy, ProgressStage> = {
@@ -312,6 +313,7 @@ const STAGE_PROGRESS: Record<IngestStageKeyLegacy, ProgressStage> = {
     opencode: { source: "opencode", stage: "sessions" },
     cursor: { source: "cursor", stage: "sessions" },
     subagents: { source: "claude", stage: "subagents" },
+    "invoked-positions": { source: "invoked", stage: "backfill-positions" },
     spawned: { source: "signals", stage: "spawned" },
     git: { source: "git", stage: "history" },
     signals: { source: "signals", stage: "derive" },
@@ -507,9 +509,17 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) => {
     });
 };
 
-const cmdIngestHere = (args: string[]) =>
-    Effect.gen(function* () {
-        const pwdResolution = yield* resolvePwdRepository().pipe(
+/**
+ * `ax ingest here` - scope ingest to the git repo at $PWD.
+ *
+ * By default, stages without a repository-level filter are skipped to preserve
+ * the meaning of "here". Passing --stages explicitly runs exactly those stages.
+ */
+const cmdIngestHere = (args: string[]) => {
+    const hasStagesArg = args.some((a) => a.startsWith("--stages="));
+    return Effect.gen(function* () {
+        const registry = yield* StageRegistry;
+        const pwd = yield* resolvePwdRepository().pipe(
             Effect.catchTag("NotAGitRepoError", (err) =>
                 Effect.sync(() => {
                     process.stderr.write(
@@ -520,13 +530,30 @@ const cmdIngestHere = (args: string[]) =>
             ),
         );
 
-        return yield* cmdIngest(args, {
-            command: "ingest here",
-            cwd: pwdResolution.cwd,
-            repoPaths: [pwdResolution.repoRoot],
-            claudeProject: encodeClaudeProjectSlug(pwdResolution.repoRoot),
+        const scopedArgs = hasStagesArg
+            ? args
+            : [
+                ...args,
+                `--stages=${registry
+                    .all()
+                    .map((s) => s.meta.key)
+                    .filter((key) => !["codex", "pi", "opencode", "cursor"].includes(key))
+                    .join(",")}`,
+            ];
+        if (!hasStagesArg) {
+            process.stderr.write(
+                "axctl ingest here: codex, pi, opencode, cursor stages skipped - no cwd filter yet\n",
+            );
+        }
+
+        return yield* cmdIngest(scopedArgs, {
+            command: "ingest-here",
+            cwd: pwd.cwd,
+            repoPaths: [pwd.repoRoot],
+            claudeProject: encodeClaudeProjectSlug(pwd.repoRoot),
         });
     });
+};
 
 const cmdDeriveSignals = (args: string[]) =>
     Effect.gen(function* () {
@@ -1720,25 +1747,25 @@ export const insightsOnlyConflicts = (opts: {
 const ingestHereCommand = Command.make(
     "here",
     {
-        stages: Flag.string("stages").pipe(Flag.optional),
-        deriveOnly: Flag.boolean("derive-only").pipe(Flag.withDefault(false)),
         since: optionalSince,
+        stages: Flag.string("stages").pipe(Flag.optional),
         progress: progressFlag,
         verbose: verboseFlag,
         debug: debugFlag,
     },
-    ({ stages, deriveOnly, since, progress, verbose, debug }) =>
+    ({ since, stages, progress, verbose, debug }) =>
         cmdIngestHere([
-            ...stringArg("stages", optionValue(stages)),
-            ...boolArg("derive-only", deriveOnly),
             ...intArg("since", optionValue(since)),
+            ...stringArg("stages", optionValue(stages)),
             `--progress=${progress}`,
             ...boolArg("verbose", verbose),
             ...boolArg("debug", debug),
         ]),
 ).pipe(Command.withDescription(
-    "Run ingest scoped to the current git repository. " +
-        "The git stage is restricted to $PWD's repo; Claude transcripts are restricted to the matching project slug.",
+    "Ingest only the git repository at $PWD. Restricts the claude stage to the matching " +
+        "~/.claude/projects/<slug>/ transcript dir, restricts git history to this repo path. " +
+        "Codex, Pi, OpenCode, and Cursor are skipped by default (no cwd filter yet). " +
+        "--stages=<a,b,c> overrides the default set.",
 ));
 
 const ingestCommand = Command.make(
@@ -1791,11 +1818,12 @@ const ingestCommand = Command.make(
             ...boolArg("debug", debug),
         ]);
     },
-).pipe(Command.withDescription(
-    "Ingest skills, local agent transcripts, git history, and insight artifacts. " +
-        "Use --stages=<a,b,c> for a custom subset, or --derive-only to run every stage tagged `derive` " +
-        "(see ADR-0009; canonical list lives in src/ingest/stage/registry.ts). " +
-        "Use --reset to wipe the skill graph first and rebuild it clean.",
+).pipe(
+    Command.withDescription(
+        "Ingest skills, local agent transcripts, git history, and insight artifacts. " +
+            "Use --stages=<a,b,c> for a custom subset, or --derive-only to run every stage tagged `derive` " +
+            "(see ADR-0009; canonical list lives in src/ingest/stage/registry.ts). " +
+            "Use --reset to wipe the skill graph first and rebuild it clean.",
     ),
     Command.withSubcommands([ingestHereCommand]),
 );
