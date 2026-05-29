@@ -62,6 +62,37 @@ Run `bun refs:setup` after fresh clone to populate `.references/`.
 
 - LaunchAgent watcher (`com.necmttn.ax-watch`, installed by `axctl install`) tails `~/.claude/projects/` + `~/.codex/sessions/` and runs `axctl ingest --since=1` in the background on new transcripts. Do NOT add a Stop hook - Stop fires per turn and blocks Claude until ingest returns.
 - Weekly self-improve cron (`~/.claude/self-improve/run.sh`) does deep-scan backfill (planned wire-up)
+- `ax-extract-workflow` skill (installable via `npx skills add Necmttn/ax`) frames "what made X work" investigations - triggers retro + session queries to surface the actual sequence of events behind a result.
+
+## Workflow extraction commands
+
+### Scoped ingest
+
+`ax ingest here [--since=Nd] [--stages=<list>]` - scope ingest to the git repo at `$PWD`. Claude transcripts filtered to the matching `~/.claude/projects/<slug>/` dir; git history restricted to this repo; Codex skipped. `--stages=` overrides the default stage set (uses StageRegistry).
+
+### Session queries
+
+`ax sessions here [--days=N]` - pwd-scoped sessions, default 14d.
+`ax sessions around <date> [--days=N] [--project=PATH]` - date window, default ±3d.
+`ax sessions near <sha>` - predecessor→commit window (adaptive); falls back to ±3d for orphan commits.
+`ax sessions show <id> [--expand=<uuid>|--all] [--by-role] [--json]` - drill into one session.
+
+### Cross-source recall
+
+`ax recall <q> [--sources=turn,commit,skill] [--scope=here|all]` - full-text search across turns, commits, and skills. `--scope` auto-detects to current repo when run inside a git tree.
+
+### Skills classification
+
+`ax skills classify [<skill>...]` - bulk-emit `.ax/tasks/classify-*.md` briefs for unclassified skills with ≥3 invocations.
+`ax skills tag <skill> <role> [--confidence=N] [--rationale="..."] [--remove]` - one-shot role override.
+`ax skills lint [--task-dir=<path>] [--dry-run]` - apply filled classify briefs to `plays_role` edges.
+`ax skills weighted [--window=Nd] [--limit=N]` - usage × role-weight ranking; enters doctor mode when many skills are unclassified.
+`ax skills by-role <role>` - list skills tagged with a given role.
+`ax skills roles <skill>` - list roles for a skill.
+
+### Role registry
+
+`ax roles` - list known role labels.
 
 ## Recommend + apply guidance to your own agent files
 
