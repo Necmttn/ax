@@ -8,6 +8,7 @@ export function SiteHeader() {
       <span className="live" title="agent experience layer is alive">live</span>
       <nav className="top-nav">
         <a href="#what">What</a>
+        <a href="#agents">Agents</a>
         <a href="#how">How</a>
         <a href="#change">Change</a>
         <a href="#demo">Demo</a>

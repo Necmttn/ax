@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>ax - make your AI coding agent better.</title>
+<style>
+  :root {
+    --page: #f6f5f0;
+    --ink: #0a0a0a;
+    --muted: #6b6b66;
+    --line: #d8d6cf;
+    --green: #2f9e44;
+    --green-soft: #e3f1e3;
+    --warm: #d9b341;
+    --dim: #ecebe5;
+    --serif: Georgia, "Times New Roman", serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--ink); text-decoration: none; }
+  a:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+  /* ---- top nav ---- */
+  .nav {
+    border-bottom: 1px solid var(--line);
+    padding: 14px 32px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-size: 13px;
+    background: var(--page);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  .nav .brand {
+    font-family: var(--mono);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .nav .brand small { color: var(--muted); font-weight: 400; margin-left: 6px; }
+  .nav .live {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 8px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    background: #fff;
+  }
+  .nav .live::before {
+    content: "";
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 0 3px var(--green-soft);
+  }
+  .nav .spacer { flex: 1; }
+  .nav .links { display: flex; gap: 22px; color: var(--muted); }
+  .nav .links a:hover { color: var(--ink); }
+
+  /* ---- container ---- */
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0 32px; }
+
+  /* ---- hero ---- */
+  .hero { padding: 96px 0 112px; text-align: left; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    display: inline-block;
+    padding: 4px 10px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: #fff;
+    margin: 0 0 28px;
+  }
+  h1 {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: clamp(40px, 6vw, 64px);
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    margin: 0 0 24px;
+    max-width: 18ch;
+  }
+  .lede {
+    font-size: 18px;
+    color: var(--muted);
+    max-width: 52ch;
+    margin: 0 0 40px;
+  }
+
+  .install {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px 18px;
+    font-family: var(--mono);
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    max-width: 720px;
+    overflow-x: auto;
+  }
+  .install .prompt { color: var(--green); user-select: none; }
+  .install code { white-space: nowrap; color: var(--ink); }
+  .install-meta {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    margin: 12px 0 0;
+    letter-spacing: 0.02em;
+  }
+
+  /* ---- demo ---- */
+  .demo { padding: 64px 0 96px; border-top: 1px solid var(--line); }
+  .demo .eyebrow { margin-bottom: 20px; }
+  .demo h2 {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: clamp(28px, 3.6vw, 38px);
+    letter-spacing: -0.015em;
+    margin: 0 0 36px;
+    line-height: 1.15;
+  }
+  .demo h2 em { font-style: italic; color: var(--muted); }
+
+  .fig {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 22px;
+    position: relative;
+  }
+  .fig-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding-bottom: 16px;
+    border-bottom: 1px dashed var(--line);
+    margin-bottom: 18px;
+  }
+  .fig-id {
+    background: var(--ink);
+    color: var(--page);
+    padding: 3px 8px;
+    border-radius: 4px;
+    letter-spacing: 0.06em;
+  }
+  .fig-head .sub { color: var(--muted); }
+  .fig-body {
+    display: grid;
+    grid-template-columns: 1fr 200px;
+    gap: 28px;
+    align-items: start;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+  }
+  .tile {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px 12px 10px;
+    background: var(--dim);
+    min-height: 78px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    transition: transform 0.15s ease;
+    cursor: default;
+  }
+  .tile:hover { transform: translateY(-1px); }
+  .tile .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: #c6c4bd;
+    margin-bottom: 8px;
+  }
+  .tile .name {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tile .meta {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    margin-top: 6px;
+    opacity: 0.7;
+  }
+
+  .tile.lit {
+    background: var(--green-soft);
+    border-color: #b8dcb8;
+  }
+  .tile.lit .dot {
+    background: var(--green);
+    box-shadow: 0 0 0 3px rgba(47, 158, 68, 0.12);
+  }
+  .tile.lit .name { color: var(--ink); }
+  .tile.lit .meta { color: #4a7a4a; opacity: 1; }
+
+  /* warm-tier (heavy fires) */
+  .tile.hot {
+    background: #f3e9c8;
+    border-color: #e2cf90;
+  }
+  .tile.hot .dot { background: var(--warm); box-shadow: 0 0 0 3px rgba(217, 179, 65, 0.18); }
+  .tile.hot .meta { color: #8a6b1f; }
+
+  .side {
+    border-left: 1px dashed var(--line);
+    padding-left: 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+  }
+  .side .stat .label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .side .stat .num {
+    font-family: var(--serif);
+    font-size: 38px;
+    line-height: 1;
+    letter-spacing: -0.02em;
+  }
+  .side .stat .num .denom { color: var(--muted); font-size: 22px; }
+  .side .stat.dead .num { color: var(--muted); }
+
+  .fig-cap {
+    font-size: 14px;
+    color: var(--muted);
+    margin: 22px 0 0;
+    padding-top: 18px;
+    border-top: 1px dashed var(--line);
+  }
+  .fig-cap strong { color: var(--ink); font-weight: 600; }
+
+  /* ---- footer cards ---- */
+  .cards-section { padding: 56px 0 96px; border-top: 1px solid var(--line); }
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+  }
+  .card {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 22px;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-height: 140px;
+    transition: all 0.15s ease;
+    text-decoration: none !important;
+  }
+  .card:hover {
+    border-color: var(--ink);
+    transform: translateY(-2px);
+  }
+  .card .ctitle {
+    font-family: var(--serif);
+    font-size: 22px;
+    letter-spacing: -0.01em;
+  }
+  .card .cmeta {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-top: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .card .arr { font-family: var(--serif); font-size: 18px; }
+
+  /* ---- footer ---- */
+  footer {
+    border-top: 1px solid var(--line);
+    padding: 24px 32px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+  }
+
+  /* ---- responsive ---- */
+  @media (max-width: 760px) {
+    .nav { padding: 12px 18px; flex-wrap: wrap; gap: 10px; }
+    .nav .links { gap: 14px; font-size: 12px; }
+    .wrap { padding: 0 18px; }
+    .hero { padding: 64px 0 72px; }
+    .fig-body { grid-template-columns: 1fr; }
+    .side { border-left: none; border-top: 1px dashed var(--line); padding-left: 0; padding-top: 20px; flex-direction: row; gap: 32px; }
+    .grid { grid-template-columns: repeat(3, 1fr); }
+    .cards { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 420px) {
+    .grid { grid-template-columns: repeat(2, 1fr); }
+  }
+
+  /* tasteful reveal - once, on first paint */
+  @keyframes tilein {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: none; }
+  }
+  .tile { animation: tilein 0.45s ease both; }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <span class="brand">ax<small>· agent experience</small></span>
+  <span class="live"><span class="live-label">live</span></span>
+  <span class="spacer"></span>
+  <span class="links">
+    <a href="/showcases">Showcases</a>
+    <a href="/origin">Origin</a>
+    <a href="/docs">Docs</a>
+    <a href="https://github.com/Necmttn/ax">GitHub →</a>
+  </span>
+</nav>
+
+<main class="wrap">
+
+  <!-- HERO -->
+  <section class="hero">
+    <p class="eyebrow">for claude code + codex</p>
+    <h1>Make your AI coding agent better.</h1>
+    <p class="lede">
+      ax watches what your coding agent actually does on your laptop, and shows you the parts worth keeping.
+    </p>
+
+    <div class="install">
+      <span class="prompt">$</span>
+      <code>curl -fsSL https://raw.githubusercontent.com/Necmttn/ax/main/install.sh | bash</code>
+    </div>
+    <p class="install-meta">macOS first · MIT · runs on your laptop</p>
+  </section>
+
+  <!-- DEMO -->
+  <section class="demo">
+    <p class="eyebrow">what you actually use</p>
+    <h2>Installed isn't used. <em>ax tells you which is which.</em></h2>
+
+    <figure class="fig" aria-label="Skill heatmap: 11 of 20 installed skills fired this week, 9 sat unused.">
+      <div class="fig-head">
+        <span class="fig-id">Heatmap</span>
+        <span class="sub">installed skills · last 7 days</span>
+      </div>
+
+      <div class="fig-body">
+        <div class="grid" id="grid"><!-- tiles injected --></div>
+
+        <aside class="side">
+          <div class="stat">
+            <div class="label">fired this week</div>
+            <div class="num">11<span class="denom"> / 20</span></div>
+          </div>
+          <div class="stat dead">
+            <div class="label">dead weight</div>
+            <div class="num">9</div>
+          </div>
+        </aside>
+      </div>
+
+      <p class="fig-cap">
+        <strong>Installed isn't used.</strong> The graph knows which is which.
+      </p>
+    </figure>
+  </section>
+
+  <!-- FOOTER CARDS -->
+  <section class="cards-section">
+    <div class="cards">
+      <a class="card" href="/how-it-works">
+        <span class="ctitle">How it works</span>
+        <span class="cmeta"><span>30 sec read</span><span class="arr">→</span></span>
+      </a>
+      <a class="card" href="/showcases">
+        <span class="ctitle">Showcases</span>
+        <span class="cmeta"><span>real graphs</span><span class="arr">→</span></span>
+      </a>
+      <a class="card" href="/origin">
+        <span class="ctitle">Origin</span>
+        <span class="cmeta"><span>why it exists</span><span class="arr">→</span></span>
+      </a>
+      <a class="card" href="/docs">
+        <span class="ctitle">Docs</span>
+        <span class="cmeta"><span>install · use</span><span class="arr">→</span></span>
+      </a>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <span>ax · MIT · 2026</span>
+  <span>v0.1 · local-first</span>
+</footer>
+
+<script>
+  // Data borrowed from the existing demo.tsx so the prototype feels real.
+  const SKILLS = [
+    { name: "superpowers",          lit: true,  fires: 14, last: "05-26", hot: true  },
+    { name: "gsd",                  lit: false, fires:  0, last: "-"     },
+    { name: "multica",              lit: false, fires:  0, last: "-"     },
+    { name: "worktree-first",       lit: true,  fires:  9, last: "05-25" },
+    { name: "tdd-first",            lit: false, fires:  0, last: "-"     },
+    { name: "ax-retro",             lit: true,  fires: 23, last: "05-26", hot: true  },
+    { name: "codex-companion",      lit: false, fires:  0, last: "-"     },
+    { name: "retro-emit",           lit: false, fires:  0, last: "-"     },
+    { name: "grillme",              lit: true,  fires:  4, last: "05-24" },
+    { name: "spec-ops",             lit: false, fires:  0, last: "-"     },
+    { name: "parallel-task-helper", lit: true,  fires:  7, last: "05-25" },
+    { name: "scope-bot",            lit: false, fires:  0, last: "-"     },
+    { name: "brainstorming",        lit: true,  fires:  3, last: "05-23" },
+    { name: "debugging",            lit: false, fires:  0, last: "-"     },
+    { name: "write-a-skill",        lit: true,  fires:  2, last: "05-22" },
+    { name: "ralph",                lit: false, fires:  0, last: "-"     },
+    { name: "executing-plans",      lit: true,  fires: 11, last: "05-26", hot: true  },
+    { name: "dispatching-parallel", lit: true,  fires:  6, last: "05-25" },
+    { name: "retro-meta",           lit: true,  fires:  5, last: "05-24" },
+    { name: "verify",               lit: true,  fires:  8, last: "05-25" },
+  ];
+
+  const grid = document.getElementById("grid");
+  SKILLS.forEach((s, i) => {
+    const t = document.createElement("div");
+    const klass = ["tile"];
+    if (s.lit) klass.push("lit");
+    if (s.hot) klass.push("hot");
+    t.className = klass.join(" ");
+    t.style.animationDelay = (i * 18) + "ms";
+    t.title = s.lit ? `${s.name} · fires: ${s.fires} · last: ${s.last}` : `${s.name} · not used this week`;
+
+    const dot = document.createElement("span"); dot.className = "dot"; t.appendChild(dot);
+    const name = document.createElement("span"); name.className = "name"; name.textContent = s.name; t.appendChild(name);
+    const meta = document.createElement("span"); meta.className = "meta";
+    meta.textContent = s.lit ? `${s.fires}× · ${s.last}` : "-";
+    t.appendChild(meta);
+
+    grid.appendChild(t);
+  });
+</script>
+
+</body>
+</html>

@@ -54,6 +54,8 @@ import { fetchSessionShow } from "../dashboard/session-show.ts";
 import { renderSessionMarkdown, renderSessionJson } from "./session-show-format.ts";
 import { cmdDaemon, cmdDoctor, cmdInstall, cmdUninstall } from "./install.ts";
 import { resolvePwdRepository } from "../lib/pwd.ts";
+import { detectStaleness } from "../lib/transcript-staleness.ts";
+import { ingestTranscripts } from "../ingest/transcripts.ts";
 import { encodeClaudeProjectSlug } from "../lib/transcript-locator.ts";
 import {
     createProgressReporter,
@@ -2675,6 +2677,52 @@ function formatSessionsTable(rows: SessionRow[]): string {
 
 // --- sessions here ---
 
+/**
+ * Auto-delta ingest: when the project's transcript dir has new jsonl files
+ * the DB hasn't seen yet, either silently backfill (small delta) or warn
+ * the user (large delta). Threshold default 5; tunable via --stale-threshold=N.
+ * Pass --no-stale-check to skip entirely. (P1.4)
+ */
+const STALE_THRESHOLD_DEFAULT = 5;
+
+const maybeAutoIngestStale = (
+    cmdLabel: string,
+    repoRoot: string,
+    args: ReadonlyArray<string>,
+): Effect.Effect<void, DbError, SurrealClient | AxConfig> =>
+    Effect.gen(function* () {
+        if (args.includes("--no-stale-check")) return;
+        const threshold = parsePositiveIntFlag(
+            cmdLabel,
+            "stale-threshold",
+            args,
+            STALE_THRESHOLD_DEFAULT,
+        );
+
+        const cfg = yield* AxConfig;
+        const project = encodeClaudeProjectSlug(repoRoot);
+        const report = yield* detectStaleness({
+            transcriptsDir: cfg.paths.transcriptsDir,
+            project,
+        });
+
+        if (report.newFiles.length === 0) return;
+
+        if (report.newFiles.length <= threshold) {
+            // Silent backfill: ingest only this project, recent transcripts.
+            process.stderr.write(
+                `axctl ${cmdLabel}: backfilling ${report.newFiles.length} new transcript(s) for ${project}\n`,
+            );
+            yield* ingestTranscripts({ project, sinceDays: 7 });
+        } else {
+            process.stderr.write(
+                `axctl ${cmdLabel}: ${report.newFiles.length} new transcript(s) on disk not yet ingested ` +
+                    `(threshold=${threshold}). Run \`axctl ingest here --since=7\` to backfill, ` +
+                    `or pass --no-stale-check to suppress this warning.\n`,
+            );
+        }
+    });
+
 const cmdSessionsHere = (args: string[]) =>
     Effect.gen(function* () {
         const days = parsePositiveIntFlag("sessions here", "days", args, 14);
@@ -2692,6 +2740,7 @@ const cmdSessionsHere = (args: string[]) =>
         );
 
         const repositoryKey = pwdResolution.repositoryRecordId.id as string;
+        yield* maybeAutoIngestStale("sessions here", pwdResolution.repoRoot, args);
         const rows = yield* listSessionsHere({ repositoryKey, days });
 
         if (json) {
@@ -2769,6 +2818,8 @@ const cmdSessionsNear = (args: string[]) =>
 
         const repoRoot = pwdResolution.repoRoot;
         const repositoryKey = pwdResolution.repositoryRecordId.id as string;
+
+        yield* maybeAutoIngestStale("sessions near", repoRoot, args);
 
         // Resolve commit window
         const window = yield* findCommitWindow(repoRoot, sha).pipe(

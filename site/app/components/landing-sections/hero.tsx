@@ -15,6 +15,7 @@ export function HeroSection() {
 
       <div className="claims">
         <span>retro at every session-end</span>
+        <span>Claude · Codex · Pi · OpenCode · Cursor</span>
         <span>experiments with +3 / +10 / +30 session verdicts</span>
         <span>100% local</span>
       </div>

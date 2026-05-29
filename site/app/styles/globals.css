@@ -396,6 +396,68 @@ p code, li code {
   color: var(--muted);
 }
 
+/* ---------- provider ledger ---------- */
+
+.provider-ledger {
+  margin: 28px 0 20px;
+  border-top: 2px solid var(--ink);
+}
+
+.provider-row {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.75fr) minmax(260px, 1fr) auto;
+  gap: 20px;
+  align-items: baseline;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.provider-row strong {
+  display: block;
+  font-family: var(--serif);
+  font-size: 22px;
+  font-weight: 400;
+  line-height: 1.1;
+}
+
+.provider-row span {
+  display: block;
+  margin-top: 5px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.provider-row p {
+  margin: 0;
+  font-size: 15px;
+  color: var(--muted);
+}
+
+.provider-row em {
+  min-width: 52px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-style: normal;
+  letter-spacing: 0.12em;
+  text-align: center;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.provider-row em[data-state="deep"] {
+  border-color: color-mix(in srgb, var(--green) 40%, var(--line));
+  color: var(--green);
+}
+
+.provider-note {
+  margin-top: 18px;
+  font-size: 16px;
+  color: var(--muted);
+}
+
 /* ---------- manifesto pull ---------- */
 
 blockquote.pull {
@@ -515,6 +577,13 @@ footer .right {
     grid-column: 1 / -1;
     border-top: 1px solid var(--line);
     padding-top: 10px;
+  }
+  .provider-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .provider-row em {
+    justify-self: start;
   }
   section { padding: 56px 0; }
   section.hero { padding: 64px 0 56px; }

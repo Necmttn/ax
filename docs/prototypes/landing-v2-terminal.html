@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>ax - make your AI coding agent better</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<style>
+  :root{
+    --page:#f6f5f0;
+    --ink:#0a0a0a;
+    --muted:#6b6b66;
+    --line:#d8d6cf;
+    --green:#2f9e44;
+    --serif:Georgia, 'Times New Roman', serif;
+    --mono:ui-monospace, SFMono-Regular, Menlo, Monaco, 'JetBrains Mono', Consolas, monospace;
+
+    --term-bg:#14140f;
+    --term-fg:#e8e6dd;
+    --term-muted:#8a8780;
+    --term-green:#6fcf80;
+    --term-blue:#8ec1ff;
+    --term-yellow:#e8c87a;
+    --term-violet:#c7a8ff;
+    --term-red:#e88a7a;
+    --claude:#d77757;
+  }
+
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--page);
+    color:var(--ink);
+    font-family:-apple-system, BlinkMacSystemFont, 'Inter', 'Helvetica Neue', Arial, sans-serif;
+    font-size:16px;
+    line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+  }
+  a{color:inherit;text-decoration:none}
+  a:hover{text-decoration:underline; text-underline-offset:3px; text-decoration-thickness:1px}
+
+  /* ─────────── nav ─────────── */
+  .nav{
+    max-width:1120px;
+    margin:0 auto;
+    padding:22px 28px 0;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:24px;
+  }
+  .brand{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    font-family:var(--serif);
+    font-size:18px;
+    letter-spacing:-0.01em;
+  }
+  .brand b{font-weight:700}
+  .brand .dot{
+    width:6px;height:6px;border-radius:50%;background:var(--ink);display:inline-block;
+  }
+  .brand .sub{
+    color:var(--muted);
+    font-style:italic;
+    font-size:15px;
+  }
+  .live{
+    display:inline-flex; align-items:center; gap:6px;
+    font-family:var(--mono);
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:0.08em;
+    color:var(--muted);
+    border:1px solid var(--line);
+    border-radius:999px;
+    padding:3px 9px 3px 8px;
+    background:#fff;
+  }
+  .live .pulse{
+    width:6px;height:6px;border-radius:50%;
+    background:var(--green);
+    box-shadow:0 0 0 0 rgba(47,158,68,0.45);
+    animation:pulse 2.2s ease-out infinite;
+  }
+  @keyframes pulse{
+    0%{box-shadow:0 0 0 0 rgba(47,158,68,0.55)}
+    70%{box-shadow:0 0 0 8px rgba(47,158,68,0)}
+    100%{box-shadow:0 0 0 0 rgba(47,158,68,0)}
+  }
+  .nav-links{
+    display:flex; gap:22px;
+    font-size:14px;
+    color:var(--muted);
+  }
+  .nav-links a:hover{color:var(--ink)}
+  .nav-left{display:flex;align-items:center;gap:14px}
+
+  /* ─────────── hero ─────────── */
+  .hero{
+    max-width:1120px;
+    margin:0 auto;
+    padding:88px 28px 60px;
+    text-align:center;
+  }
+  .eyebrow{
+    display:inline-block;
+    font-family:var(--mono);
+    font-size:11px;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    color:var(--muted);
+    border:1px solid var(--line);
+    border-radius:999px;
+    padding:6px 12px;
+    background:#fff;
+    margin-bottom:32px;
+  }
+  h1.headline{
+    font-family:var(--serif);
+    font-weight:400;
+    font-size:clamp(40px, 6.2vw, 76px);
+    line-height:1.04;
+    letter-spacing:-0.02em;
+    margin:0 auto 22px;
+    max-width:14ch;
+  }
+  h1.headline em{
+    font-style:italic;
+    color:var(--ink);
+  }
+  .lede{
+    max-width:560px;
+    margin:0 auto 40px;
+    color:#3a3a35;
+    font-size:18px;
+    line-height:1.55;
+  }
+  .install{
+    max-width:720px;
+    margin:0 auto 14px;
+    display:flex;
+    align-items:stretch;
+    background:#fff;
+    border:1px solid var(--line);
+    border-radius:10px;
+    overflow:hidden;
+    font-family:var(--mono);
+    font-size:14px;
+    text-align:left;
+  }
+  .install .prompt{
+    padding:14px 8px 14px 16px;
+    color:var(--muted);
+    user-select:none;
+  }
+  .install code{
+    flex:1;
+    padding:14px 4px;
+    color:var(--ink);
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    background:transparent;
+  }
+  .install button{
+    flex:0 0 auto;
+    border:0;
+    border-left:1px solid var(--line);
+    background:#fff;
+    color:var(--ink);
+    font-family:var(--mono);
+    font-size:12px;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    padding:0 16px;
+    cursor:pointer;
+    transition:background 120ms ease;
+  }
+  .install button:hover{background:#efeee7}
+  .install button.copied{color:var(--green)}
+  .meta{
+    font-family:var(--mono);
+    font-size:12px;
+    color:var(--muted);
+    letter-spacing:0.02em;
+  }
+  .meta .sep{margin:0 8px;opacity:0.55}
+
+  /* ─────────── terminal section ─────────── */
+  .demo{
+    max-width:1040px;
+    margin:0 auto;
+    padding:24px 28px 80px;
+  }
+  .caption{
+    text-align:center;
+    font-family:var(--serif);
+    font-style:italic;
+    color:var(--muted);
+    font-size:16px;
+    margin-top:20px;
+  }
+
+  .term-frame{
+    background:var(--term-bg);
+    border-radius:14px;
+    box-shadow:
+      0 1px 0 rgba(255,255,255,0.04) inset,
+      0 30px 60px -30px rgba(10,10,10,0.35),
+      0 8px 20px -10px rgba(10,10,10,0.25);
+    overflow:hidden;
+    border:1px solid #2a2a22;
+  }
+  .term-chrome{
+    display:flex; align-items:center;
+    padding:10px 14px;
+    background:#1c1c16;
+    border-bottom:1px solid #28281f;
+    gap:14px;
+  }
+  .term-dots{display:flex;gap:7px}
+  .term-dots span{
+    width:11px;height:11px;border-radius:50%;
+    display:inline-block;
+  }
+  .term-dots .d1{background:#ff5f57}
+  .term-dots .d2{background:#febc2e}
+  .term-dots .d3{background:#28c840}
+  .term-tab{
+    display:inline-flex; align-items:center; gap:8px;
+    background:var(--term-bg);
+    color:var(--term-fg);
+    font-family:var(--mono);
+    font-size:12px;
+    padding:5px 12px;
+    border-radius:6px 6px 0 0;
+    margin-left:6px;
+    margin-bottom:-11px;
+    border:1px solid #28281f;
+    border-bottom:0;
+  }
+  .term-tab .tab-dot{
+    width:6px;height:6px;border-radius:50%;
+    background:var(--claude);
+  }
+
+  .term-banner{
+    padding:18px 22px 14px;
+  }
+  .term-logo{
+    margin:0;
+    font-family:var(--mono);
+    font-size:13px;
+    line-height:1.4;
+    color:var(--term-fg);
+    white-space:pre;
+  }
+  .cc-fill{color:var(--claude)}
+  .cc-name{color:var(--term-fg); font-weight:600}
+  .cc-meta{color:var(--term-muted)}
+  .term-rule{
+    height:1px;
+    background:linear-gradient(to right, transparent, #2a2a22 8%, #2a2a22 92%, transparent);
+    margin:10px 0 0;
+  }
+
+  .term-body{
+    padding:16px 22px 22px;
+    font-family:var(--mono);
+    font-size:13px;
+    line-height:1.65;
+    color:var(--term-fg);
+  }
+  .term-line{
+    white-space:pre-wrap;
+    word-break:break-word;
+    opacity:1;
+  }
+  .term-body[data-autoplay] .term-line{
+    opacity:0;
+    transform:translateY(2px);
+  }
+  .term-body[data-autoplay] .term-line.is-in{
+    opacity:1;
+    transform:none;
+    transition:opacity 160ms ease, transform 160ms ease;
+  }
+
+  .t-sys{color:var(--term-muted); font-style:italic}
+  .t-bullet{color:var(--term-violet)}
+  .t-cmd{color:var(--term-blue)}
+  .t-arm{color:var(--term-muted)}
+  .t-err{color:var(--term-red)}
+  .t-id{color:var(--term-yellow)}
+  .t-num{color:var(--term-violet)}
+  .t-arrow{color:var(--term-muted)}
+  .t-prompt{color:var(--term-green); font-weight:600}
+  .t-file{color:var(--term-blue); text-decoration:underline; text-decoration-color:#3a4a5a; text-underline-offset:3px}
+  .t-diff-meta{color:var(--term-muted)}
+  .t-add{color:var(--term-green)}
+  .t-ok{color:var(--term-green); font-weight:600}
+  .t-userin{color:var(--term-fg); font-weight:600}
+
+  .term-input{
+    padding:0 22px 14px;
+  }
+  .term-input .term-rule{margin:0 0 10px}
+  .term-input-row{
+    display:flex; align-items:center; gap:8px;
+    font-family:var(--mono); font-size:13px;
+    color:var(--term-muted);
+    padding:6px 0;
+  }
+  .term-input .placeholder{color:var(--term-muted); font-style:italic}
+
+  .term-status{
+    display:flex; align-items:center; gap:10px;
+    padding:10px 22px 14px;
+    border-top:1px solid #20201a;
+    font-family:var(--mono); font-size:11px;
+    color:var(--term-muted);
+  }
+  .cs-dot{
+    width:7px;height:7px;border-radius:50%;
+    background:var(--term-yellow);
+    display:inline-block;
+    margin-right:6px;
+    vertical-align:1px;
+  }
+  .cs-sep{opacity:0.5}
+
+  /* ─────────── footer cards ─────────── */
+  .cards{
+    max-width:1120px;
+    margin:0 auto;
+    padding:0 28px 72px;
+    display:grid;
+    grid-template-columns:repeat(4, 1fr);
+    gap:16px;
+  }
+  .card{
+    background:#fff;
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:24px 22px 22px;
+    display:flex;
+    flex-direction:column;
+    justify-content:space-between;
+    min-height:130px;
+    transition:transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+  }
+  .card:hover{
+    transform:translateY(-2px);
+    border-color:#bdbab2;
+    box-shadow:0 8px 18px -10px rgba(10,10,10,0.18);
+    text-decoration:none;
+  }
+  .card .ctitle{
+    font-family:var(--serif);
+    font-size:22px;
+    letter-spacing:-0.01em;
+  }
+  .card .cmeta{
+    font-family:var(--mono);
+    font-size:11px;
+    color:var(--muted);
+    text-transform:uppercase;
+    letter-spacing:0.1em;
+  }
+
+  .footnote{
+    max-width:1120px;
+    margin:0 auto;
+    padding:0 28px 40px;
+    font-family:var(--mono);
+    font-size:11px;
+    color:var(--muted);
+    text-transform:uppercase;
+    letter-spacing:0.1em;
+    display:flex;
+    justify-content:space-between;
+    border-top:1px solid var(--line);
+    padding-top:22px;
+  }
+
+  /* ─────────── responsive ─────────── */
+  @media (max-width:780px){
+    .nav-links a:not(.gh){display:none}
+    .hero{padding:60px 22px 40px}
+    .demo{padding:8px 16px 60px}
+    .term-banner{padding:14px 16px 10px}
+    .term-body{padding:12px 16px 18px; font-size:12px}
+    .term-input,.term-status{padding-left:16px; padding-right:16px}
+    .cards{grid-template-columns:1fr 1fr; padding-bottom:48px}
+    .install{font-size:12.5px}
+    .install .prompt{padding-left:12px}
+  }
+  @media (max-width:520px){
+    .cards{grid-template-columns:1fr}
+    .install button{padding:0 12px}
+  }
+  @media (prefers-reduced-motion: reduce){
+    .term-body[data-autoplay] .term-line{opacity:1; transform:none; transition:none}
+    .live .pulse{animation:none}
+  }
+</style>
+</head>
+<body>
+
+<header class="nav" role="banner">
+  <div class="nav-left">
+    <a class="brand" href="/">
+      <span class="dot"></span>
+      <b>ax</b>
+      <span class="sub">· agent experience</span>
+    </a>
+    <span class="live" aria-label="live"><span class="pulse"></span>live</span>
+  </div>
+  <nav class="nav-links" aria-label="primary">
+    <a href="/showcases">Showcases</a>
+    <a href="/origin">Origin</a>
+    <a href="/docs">Docs</a>
+    <a class="gh" href="https://github.com/Necmttn/ax">GitHub →</a>
+  </nav>
+</header>
+
+<!-- ───────────── HERO ───────────── -->
+<section class="hero">
+  <span class="eyebrow">for claude code + codex</span>
+  <h1 class="headline">Make your AI coding <em>agent</em> better.</h1>
+  <p class="lede">
+    ax watches every coding session on your laptop and suggests small fixes your agent should adopt - so the same mistake doesn't happen twice.
+  </p>
+
+  <div class="install" role="group" aria-label="install command">
+    <span class="prompt">$</span>
+    <code id="install-cmd">curl -fsSL https://raw.githubusercontent.com/Necmttn/ax/main/install.sh | bash</code>
+    <button type="button" id="copy-btn" aria-label="copy install command">copy</button>
+  </div>
+  <div class="meta">
+    macOS first <span class="sep">·</span> MIT <span class="sep">·</span> runs on your laptop
+  </div>
+</section>
+
+<!-- ───────────── DEMO ───────────── -->
+<section class="demo" aria-label="terminal demo">
+  <div class="term-frame">
+    <div class="term-chrome">
+      <div class="term-dots" aria-hidden="true">
+        <span class="d1"></span><span class="d2"></span><span class="d3"></span>
+      </div>
+      <div class="term-tab"><span class="tab-dot"></span>claude code</div>
+    </div>
+
+    <div class="term-banner" aria-hidden="true">
+<pre class="term-logo"> ▐<span class="cc-fill">▛███▜</span>▌    <span class="cc-name">Claude Code</span>  <span class="cc-meta">v2.1.153</span>
+▝<span class="cc-fill">▜█████</span>▛▘   <span class="cc-meta">Opus 4.7 · high effort</span>
+   ▘▘  ▝▝   <span class="cc-meta">~/Projects/ax</span></pre>
+      <div class="term-rule"></div>
+    </div>
+
+    <div class="term-body" data-autoplay>
+      <div class="term-line"><span class="t-sys">[ session 4129 wrapping - stop hook fires ]</span></div>
+      <div class="term-line">  <span class="t-bullet">⏺</span> Bash(<span class="t-cmd">axctl retro emit --session=4129</span>)</div>
+      <div class="term-line">    <span class="t-arm">⎿</span>  3 proposals ranked:</div>
+      <div class="term-line">       1. feature→fix chains, same file <span class="t-num">26x</span>  <span class="t-arrow">→</span> <span class="t-id">post-feature-verify</span>      <span class="t-num">hi</span></div>
+      <div class="term-line">       2. main-branch edits, advisory only <span class="t-num">7x</span> <span class="t-arrow">→</span> <span class="t-id">main-branch-guardrail</span>   <span class="t-num">lo</span></div>
+      <div class="term-line">       3. ingest regressions, same file <span class="t-num">3x</span>   <span class="t-arrow">→</span> <span class="t-id">ingest-regression</span>         <span class="t-num">hi</span></div>
+      <div class="term-line">  Top: <span class="t-id">post-feature-verify</span> - 26 fix-chains in 7d. Accept?</div>
+      <div class="term-line"><span class="t-prompt">❯</span> <span class="t-userin">y</span></div>
+      <div class="term-line">  <span class="t-bullet">⏺</span> Bash(<span class="t-cmd">axctl improve accept post-feature-verify --with-agent</span>)</div>
+      <div class="term-line">    <span class="t-arm">⎿</span>  scaffolded ~/.claude/skills/post-feature-verify/</div>
+      <div class="term-line">  <span class="t-bullet">⏺</span> Edit(<span class="t-file">~/.claude/skills/post-feature-verify/SKILL.md</span>)</div>
+      <div class="term-line">    <span class="t-arm">⎿</span>  <span class="t-diff-meta">+6 -0 lines</span></div>
+      <div class="term-line">       <span class="t-add">+ &lt;!--ax:skill-508c34566d2f--&gt;</span></div>
+      <div class="term-line">       <span class="t-add">+ name: post-feature-verify</span></div>
+      <div class="term-line">       <span class="t-add">+ description: query fix-chain history before closure</span></div>
+      <div class="term-line">       <span class="t-add">+ trigger: feature commits followed by overlapping fixes</span></div>
+      <div class="term-line">       <span class="t-add">+ &lt;!--/ax:skill-508c34566d2f--&gt;</span></div>
+      <div class="term-line"><span class="t-ok">       marker landed</span> · verdict pending at +30 sessions</div>
+    </div>
+
+    <div class="term-input" aria-hidden="true">
+      <div class="term-rule"></div>
+      <div class="term-input-row">
+        <span class="t-prompt">❯</span><span class="placeholder">Try "use the ax marker for new skills"</span>
+      </div>
+      <div class="term-rule"></div>
+    </div>
+
+    <div class="term-status" aria-hidden="true">
+      <span>⏵⏵ auto mode on</span>
+      <span class="cs-sep">·</span>
+      <span>shift+tab to cycle</span>
+      <span class="cs-sep">·</span>
+      <span><span class="cs-dot"></span>high</span>
+    </div>
+  </div>
+
+  <p class="caption">What happens at the end of every session.</p>
+</section>
+
+<!-- ───────────── CARDS ───────────── -->
+<nav class="cards" aria-label="explore">
+  <a class="card" href="/how-it-works">
+    <span class="ctitle">How it works →</span>
+    <span class="cmeta">the loop</span>
+  </a>
+  <a class="card" href="/showcases">
+    <span class="ctitle">Showcases →</span>
+    <span class="cmeta">in the wild</span>
+  </a>
+  <a class="card" href="/origin">
+    <span class="ctitle">Origin →</span>
+    <span class="cmeta">why it exists</span>
+  </a>
+  <a class="card" href="/docs">
+    <span class="ctitle">Docs →</span>
+    <span class="cmeta">install · cli · schema</span>
+  </a>
+</nav>
+
+<footer class="footnote">
+  <span>ax · agent experience</span>
+  <span>MIT · 2026</span>
+</footer>
+
+<script>
+  // copy button
+  (function(){
+    var btn = document.getElementById('copy-btn');
+    var code = document.getElementById('install-cmd');
+    if(!btn || !code) return;
+    btn.addEventListener('click', function(){
+      var txt = code.textContent.trim();
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(txt);
+      } else {
+        var r = document.createRange(); r.selectNodeContents(code);
+        var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+        try { document.execCommand('copy'); } catch(e){}
+        s.removeAllRanges();
+      }
+      var prev = btn.textContent;
+      btn.textContent = 'copied';
+      btn.classList.add('copied');
+      setTimeout(function(){ btn.textContent = prev; btn.classList.remove('copied'); }, 1400);
+    });
+  })();
+
+  // typewriter autoplay - staggered fade on scroll-into-view
+  (function(){
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var body = document.querySelector('.term-body[data-autoplay]');
+    if(!body) return;
+    if(reduce){
+      body.removeAttribute('data-autoplay');
+      return;
+    }
+    var lines = Array.prototype.slice.call(body.querySelectorAll('.term-line'));
+    var played = false;
+    function play(){
+      if(played) return; played = true;
+      lines.forEach(function(line, i){
+        // small natural-feeling stagger; emphasize the prompt+accept beat
+        var base = 90;
+        var delay = i * base;
+        // bump pauses around key moments
+        if(i === 1) delay += 120;       // first command
+        if(i === 7) delay += 360;       // before user types y
+        if(i === 8) delay += 220;       // after accept
+        if(i === 18) delay += 280;      // before "marker landed"
+        setTimeout(function(){ line.classList.add('is-in'); }, delay);
+      });
+    }
+    if('IntersectionObserver' in window){
+      var io = new IntersectionObserver(function(entries){
+        entries.forEach(function(e){
+          if(e.isIntersecting){ play(); io.disconnect(); }
+        });
+      }, { threshold: 0.25 });
+      io.observe(body);
+    } else {
+      play();
+    }
+  })();
+</script>
+</body>
+</html>
