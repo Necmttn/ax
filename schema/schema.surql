@@ -53,6 +53,54 @@ DEFINE INDEX session_workspace_started ON session FIELDS workspace, started_at;
 -- indexes above don't cover it. See GitHub issue #76.
 DEFINE INDEX session_started ON session FIELDS started_at;
 
+DEFINE TABLE agent_provider SCHEMAFULL;
+DEFINE FIELD name           ON agent_provider TYPE string;
+DEFINE FIELD display_name   ON agent_provider TYPE string;
+DEFINE FIELD version        ON agent_provider TYPE option<string>;
+DEFINE FIELD capabilities   ON agent_provider TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD created_at     ON agent_provider TYPE datetime DEFAULT time::now();
+DEFINE FIELD updated_at     ON agent_provider TYPE option<datetime>;
+DEFINE INDEX agent_provider_name_uq ON agent_provider FIELDS name UNIQUE;
+
+DEFINE TABLE agent_session SCHEMAFULL;
+DEFINE FIELD provider            ON agent_session TYPE record<agent_provider>;
+DEFINE FIELD provider_session_id ON agent_session TYPE string;
+DEFINE FIELD ax_session          ON agent_session TYPE option<record<session>>;
+DEFINE FIELD cwd                 ON agent_session TYPE option<string>;
+DEFINE FIELD project             ON agent_session TYPE option<string>;
+DEFINE FIELD title               ON agent_session TYPE option<string>;
+DEFINE FIELD model               ON agent_session TYPE option<string>;
+DEFINE FIELD source_path         ON agent_session TYPE option<string>;
+DEFINE FIELD raw                 ON agent_session TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD labels              ON agent_session TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD metrics             ON agent_session TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD started_at          ON agent_session TYPE option<datetime>;
+DEFINE FIELD ended_at            ON agent_session TYPE option<datetime>;
+DEFINE FIELD created_at          ON agent_session TYPE datetime DEFAULT time::now();
+DEFINE FIELD updated_at          ON agent_session TYPE option<datetime>;
+DEFINE INDEX agent_session_provider_native ON agent_session FIELDS provider, provider_session_id UNIQUE;
+DEFINE INDEX agent_session_ax_session ON agent_session FIELDS ax_session;
+
+DEFINE TABLE agent_event SCHEMAFULL;
+DEFINE FIELD agent_session      ON agent_event TYPE record<agent_session>;
+DEFINE FIELD ax_session         ON agent_event TYPE option<record<session>>;
+DEFINE FIELD provider           ON agent_event TYPE record<agent_provider>;
+DEFINE FIELD provider_session_id ON agent_event TYPE string;
+DEFINE FIELD provider_event_id  ON agent_event TYPE option<string>;
+DEFINE FIELD seq                ON agent_event TYPE int;
+DEFINE FIELD ts                 ON agent_event TYPE datetime;
+DEFINE FIELD type               ON agent_event TYPE string;
+DEFINE FIELD role               ON agent_event TYPE option<string>;
+DEFINE FIELD text               ON agent_event TYPE option<string>;
+DEFINE FIELD text_excerpt       ON agent_event TYPE option<string>;
+DEFINE FIELD raw                ON agent_event TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD labels             ON agent_event TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD metrics            ON agent_event TYPE option<string>;  -- JSON-encoded
+DEFINE INDEX agent_event_session_seq ON agent_event FIELDS agent_session, seq UNIQUE;
+DEFINE INDEX agent_event_provider_event ON agent_event FIELDS provider, provider_event_id;
+DEFINE INDEX agent_event_session_ts ON agent_event FIELDS agent_session, ts;
+DEFINE INDEX agent_event_ax_session ON agent_event FIELDS ax_session;
+
 -- ==== File buckets (SurrealDB 3.0 experimental) ====
 -- Requires: surreal start --allow-experimental files
 --           SURREAL_BUCKET_FOLDER_ALLOWLIST=$AX_DATA_DIR/buckets
@@ -66,6 +114,7 @@ DEFINE BUCKET IF NOT EXISTS codex_artifacts
 
 DEFINE TABLE turn SCHEMAFULL;
 DEFINE FIELD session        ON turn TYPE record<session> REFERENCE ON DELETE CASCADE;
+DEFINE FIELD agent_event    ON turn TYPE option<record<agent_event>>;
 DEFINE FIELD seq            ON turn TYPE int;
 DEFINE FIELD ts             ON turn TYPE datetime;
 DEFINE FIELD role           ON turn TYPE string;          -- 'user' | 'assistant' | 'tool_result'
@@ -77,6 +126,7 @@ DEFINE FIELD has_tool_use   ON turn TYPE bool DEFAULT false;
 DEFINE FIELD has_error      ON turn TYPE bool DEFAULT false;
 DEFINE INDEX turn_session_seq ON turn FIELDS session, seq UNIQUE;
 DEFINE INDEX turn_ts        ON turn FIELDS ts;
+DEFINE INDEX turn_agent_event ON turn FIELDS agent_event;
 
 -- Recall (cross-session text search). `class` tokenizer + lowercase filter
 -- gives word-level matches; ascii folds accents. BM25 ranks hits so common
@@ -220,6 +270,7 @@ DEFINE INDEX tool_identity_uq ON tool FIELDS provider, name, identity UNIQUE;
 
 DEFINE TABLE tool_call SCHEMAFULL;
 DEFINE FIELD session        ON tool_call TYPE record<session>;
+DEFINE FIELD agent_event    ON tool_call TYPE option<record<agent_event>>;
 DEFINE FIELD turn           ON tool_call TYPE option<record<turn>>;
 DEFINE FIELD tool           ON tool_call TYPE option<record<tool>>;
 DEFINE FIELD name           ON tool_call TYPE string;
@@ -244,6 +295,7 @@ DEFINE INDEX tool_call_tool_ts ON tool_call FIELDS tool, ts;
 DEFINE INDEX tool_call_command_norm_ts ON tool_call FIELDS command_norm, ts;
 DEFINE INDEX tool_call_command_tool_ts ON tool_call FIELDS command_tool, ts;
 DEFINE INDEX tool_call_error_ts ON tool_call FIELDS has_error, ts;
+DEFINE INDEX tool_call_agent_event ON tool_call FIELDS agent_event;
 
 DEFINE TABLE plan SCHEMAFULL;
 DEFINE FIELD session        ON plan TYPE option<record<session>>;
@@ -298,12 +350,14 @@ DEFINE TABLE plan_snapshot SCHEMAFULL;
 DEFINE FIELD plan           ON plan_snapshot TYPE option<record<plan>>;
 DEFINE FIELD session        ON plan_snapshot TYPE option<record<session>>;
 DEFINE FIELD tool_call      ON plan_snapshot TYPE option<record<tool_call>>;
+DEFINE FIELD agent_event    ON plan_snapshot TYPE option<record<agent_event>>;
 DEFINE FIELD source         ON plan_snapshot TYPE option<string>;
 DEFINE FIELD items          ON plan_snapshot TYPE string;  -- JSON-encoded
 DEFINE FIELD summary        ON plan_snapshot TYPE option<string>;
 DEFINE FIELD explanation    ON plan_snapshot TYPE option<string>;
 DEFINE FIELD ts             ON plan_snapshot TYPE datetime DEFAULT time::now();
 DEFINE INDEX plan_snapshot_plan_ts ON plan_snapshot FIELDS plan, ts;
+DEFINE INDEX plan_snapshot_agent_event ON plan_snapshot FIELDS agent_event;
 
 DEFINE TABLE insight SCHEMAFULL;
 DEFINE FIELD subject_type   ON insight TYPE string;
@@ -1061,6 +1115,14 @@ DEFINE FIELD nickname     ON spawned TYPE option<string>;       -- codex assigns
 DEFINE INDEX spawned_in   ON spawned FIELDS in;
 DEFINE INDEX spawned_out  ON spawned FIELDS out;
 
+DEFINE TABLE agent_event_child TYPE RELATION FROM agent_event TO agent_event SCHEMAFULL;
+DEFINE FIELD agent_session ON agent_event_child TYPE record<agent_session>;
+DEFINE FIELD provider      ON agent_event_child TYPE record<agent_provider>;
+DEFINE FIELD kind          ON agent_event_child TYPE string;
+DEFINE FIELD ts            ON agent_event_child TYPE datetime;
+DEFINE INDEX agent_event_child_in ON agent_event_child FIELDS in;
+DEFINE INDEX agent_event_child_out ON agent_event_child FIELDS out;
+
 -- ==== Materialized views (computed at query time) ====
 
 -- Per-skill counts, recent boost
@@ -1431,4 +1493,3 @@ DEFINE INDEX retro_repository_ts ON retro FIELDS repository, created_at;
 DEFINE TABLE reviewed TYPE RELATION FROM session TO retro SCHEMAFULL;
 DEFINE FIELD created_at ON reviewed TYPE datetime DEFAULT time::now();
 DEFINE INDEX reviewed_in_out_uq ON reviewed FIELDS in, out UNIQUE;
-
