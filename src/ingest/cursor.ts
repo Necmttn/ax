@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { readdir } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
 import { Database } from "bun:sqlite";
 import { Effect, Schema } from "effect";
@@ -11,7 +11,7 @@ import { recordRef, surrealDate, surrealString } from "../lib/shared/surql.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
 import { agentEventRecordKey, buildAgentEventStatements, buildAgentProviderStatements, type AgentEventWrite } from "./provider-events.ts";
 import { identityPart, turnRecordKey } from "./record-keys.ts";
-import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
+import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 
 export const CursorKey = Schema.Literal("cursor");
@@ -475,10 +475,21 @@ const buildCursorBatchStatements = (extract: CursorExtract, sourcePath: string):
     ...buildTurnStatements(extract.turns),
 ];
 
-async function findCursorStateDbs(cursorUserDir: string): Promise<string[]> {
+async function includeDbByMtime(dbPath: string, cutoffMs: number): Promise<boolean> {
+    if (!existsSync(dbPath)) return false;
+    if (cutoffMs <= 0) return true;
+    try {
+        const st = await stat(dbPath);
+        return st.mtimeMs >= cutoffMs;
+    } catch {
+        return false;
+    }
+}
+
+async function findCursorStateDbs(cursorUserDir: string, cutoffMs = 0): Promise<string[]> {
     const dbPaths: string[] = [];
     const globalDb = join(cursorUserDir, "globalStorage", "state.vscdb");
-    if (existsSync(globalDb)) dbPaths.push(globalDb);
+    if (await includeDbByMtime(globalDb, cutoffMs)) dbPaths.push(globalDb);
 
     const workspaceStorage = join(cursorUserDir, "workspaceStorage");
     let entries;
@@ -490,16 +501,25 @@ async function findCursorStateDbs(cursorUserDir: string): Promise<string[]> {
     for (const entry of entries) {
         if (!entry.isDirectory()) continue;
         const dbPath = join(workspaceStorage, entry.name, "state.vscdb");
-        if (existsSync(dbPath)) dbPaths.push(dbPath);
+        if (await includeDbByMtime(dbPath, cutoffMs)) dbPaths.push(dbPath);
     }
     return dbPaths;
 }
 
-export const ingestCursor = (): Effect.Effect<CursorStats, DbError, SurrealClient | AxConfig> =>
+export const __testFindCursorStateDbs = findCursorStateDbs;
+
+interface CursorIngestOpts {
+    sinceDays: number | undefined;
+}
+
+export const ingestCursor = (
+    opts: Partial<CursorIngestOpts> = {},
+): Effect.Effect<CursorStats, DbError, SurrealClient | AxConfig> =>
     Effect.gen(function* () {
         const cfg = yield* AxConfig;
         const db = yield* SurrealClient;
-        const dbPaths = yield* Effect.promise(() => findCursorStateDbs(cfg.paths.cursorUserDir));
+        const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
+        const dbPaths = yield* Effect.promise(() => findCursorStateDbs(cfg.paths.cursorUserDir, cutoff));
         let sessionCount = 0;
         let turnCount = 0;
         let skipped = 0;
@@ -545,10 +565,11 @@ export class CursorStageStats extends BaseStageStats.extend<CursorStageStats>("C
 
 export const cursorStage: StageDef<CursorStageStats, SurrealClient | AxConfig> = {
     meta: StageMeta.make({ key: "cursor", deps: ["skills", "commands"], tags: ["ingest"] }),
-    run: (_ctx: IngestContext) =>
+    run: (ctx: IngestContext) =>
         Effect.gen(function* () {
             const t0 = Date.now();
-            const result = yield* ingestCursor();
+            const sinceDays = sinceDaysFromCtx(ctx);
+            const result = yield* ingestCursor({ sinceDays });
             return CursorStageStats.make({
                 durationMs: Date.now() - t0,
                 summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls, skipped ${result.skipped}, warnings ${result.warnings}`,

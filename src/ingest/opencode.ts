@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { Effect, Schema } from "effect";
@@ -10,7 +11,7 @@ import { recordRef, surrealDate, surrealString } from "../lib/shared/surql.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
 import { agentEventRecordKey, buildAgentEventStatements, buildAgentProviderStatements, type AgentEventWrite } from "./provider-events.ts";
 import { turnRecordKey } from "./record-keys.ts";
-import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
+import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 
 export const OpenCodeKey = Schema.Literal("opencode");
@@ -597,13 +598,36 @@ function failedExtract(dbPath: string, error: unknown): OpenCodeExtract {
     );
 }
 
-export const ingestOpenCode = (): Effect.Effect<OpenCodeStats, DbError, SurrealClient | AxConfig> =>
+async function findOpenCodeDbCandidates(opencodeDir: string, cutoffMs = 0): Promise<string[]> {
+    const dbPath = join(opencodeDir, "opencode.db");
+    if (!existsSync(dbPath)) return [];
+    if (cutoffMs > 0) {
+        try {
+            const st = await stat(dbPath);
+            if (st.mtimeMs < cutoffMs) return [];
+        } catch {
+            return [];
+        }
+    }
+    return [dbPath];
+}
+
+export const __testFindOpenCodeDbCandidates = findOpenCodeDbCandidates;
+
+interface OpenCodeIngestOpts {
+    sinceDays: number | undefined;
+}
+
+export const ingestOpenCode = (
+    opts: Partial<OpenCodeIngestOpts> = {},
+): Effect.Effect<OpenCodeStats, DbError, SurrealClient | AxConfig> =>
     Effect.gen(function* () {
         const cfg = yield* AxConfig;
         const db = yield* SurrealClient;
-        const dbPath = join(cfg.paths.opencodeDir, "opencode.db");
+        const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
+        const dbPaths = yield* Effect.promise(() => findOpenCodeDbCandidates(cfg.paths.opencodeDir, cutoff));
 
-        if (!existsSync(dbPath)) {
+        if (dbPaths.length === 0) {
             return {
                 sessions: 0,
                 turns: 0,
@@ -613,6 +637,7 @@ export const ingestOpenCode = (): Effect.Effect<OpenCodeStats, DbError, SurrealC
             };
         }
 
+        const dbPath = dbPaths[0]!;
         const extract = yield* Effect.sync(() => {
             try {
                 return extractOpenCodeDatabase(dbPath);
@@ -663,10 +688,11 @@ export class OpenCodeStageStats extends BaseStageStats.extend<OpenCodeStageStats
 
 export const opencodeStage: StageDef<OpenCodeStageStats, SurrealClient | AxConfig> = {
     meta: StageMeta.make({ key: "opencode", deps: ["skills", "commands"], tags: ["ingest"] }),
-    run: (_ctx: IngestContext) =>
+    run: (ctx: IngestContext) =>
         Effect.gen(function* () {
             const t0 = Date.now();
-            const result = yield* ingestOpenCode();
+            const sinceDays = sinceDaysFromCtx(ctx);
+            const result = yield* ingestOpenCode({ sinceDays });
             return OpenCodeStageStats.make({
                 durationMs: Date.now() - t0,
                 summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls, skipped ${result.skipped}, warnings ${result.warnings}`,

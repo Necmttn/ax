@@ -1,10 +1,11 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import {
     __testBuildOpenCodeBatchStatements,
+    __testFindOpenCodeDbCandidates,
     extractOpenCodeDatabase,
 } from "./opencode.ts";
 
@@ -287,6 +288,16 @@ describe("OpenCode SQLite extraction", () => {
             expect(sql).toContain("session: session:`session\\`a`");
             expect(sql).toContain("session: session:`session\\nb`");
             expect(sql).not.toContain("session: session:`session`a`");
+        });
+    });
+
+    test("discovery skips old databases when a since cutoff is provided", async () => {
+        await withTempOpenCodeDb(async (_db, dbPath) => {
+            const old = new Date("2026-05-01T00:00:00.000Z");
+            await utimes(dbPath, old, old);
+
+            expect(await __testFindOpenCodeDbCandidates(join(dbPath, ".."), old.getTime() + 1)).toEqual([]);
+            expect(await __testFindOpenCodeDbCandidates(join(dbPath, ".."), old.getTime())).toEqual([dbPath]);
         });
     });
 });

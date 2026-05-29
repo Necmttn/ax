@@ -645,6 +645,47 @@ describe("Claude transcript extraction", () => {
         }
     });
 
+    test("links adjacent transcript provider events with linear parent edges", () => {
+        const extracted = __testExtractClaudeJsonlLines(
+            [
+                JSON.stringify({
+                    type: "user",
+                    uuid: "claude-user-1",
+                    timestamp: "2026-05-09T11:40:00.000Z",
+                    message: { role: "user", content: "First prompt." },
+                }),
+                JSON.stringify({
+                    type: "assistant",
+                    uuid: "claude-assistant-1",
+                    timestamp: "2026-05-09T11:40:01.000Z",
+                    message: { role: "assistant", content: "First answer." },
+                }),
+            ],
+            "-Users-necmttn-Projects-ax",
+            "session-linear-claude",
+        );
+
+        expect(extracted).not.toBeNull();
+        if (!extracted) return;
+
+        expect(extracted.providerEvents.map((event) => ({
+            providerEventId: event.providerEventId,
+            parentProviderEventId: event.parentProviderEventId,
+            parentProviderEventIds: event.parentProviderEventIds,
+        }))).toEqual([
+            {
+                providerEventId: "claude-user-1",
+                parentProviderEventId: undefined,
+                parentProviderEventIds: undefined,
+            },
+            {
+                providerEventId: "claude-assistant-1",
+                parentProviderEventId: "claude-user-1",
+                parentProviderEventIds: undefined,
+            },
+        ]);
+    });
+
     test("turn IDs use centralized turnRecordKey format", () => {
         const extracted = __testExtractClaudeJsonlLines(
             [

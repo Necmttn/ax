@@ -367,6 +367,7 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
     let providerSeq = 0;
     let cwd: string | null = null;
     let model: string | null = null;
+    let lastProviderEventId: string | null = null;
 
     const nextProviderSeq = (): number => {
         providerSeq += 1;
@@ -374,12 +375,31 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
     };
 
     const pushProviderEvent = (event: Omit<AgentEventWrite, "provider" | "providerSessionId" | "axSessionId">): void => {
+        const {
+            parentProviderEventId: eventParentProviderEventId,
+            parentProviderEventIds: eventParentProviderEventIds,
+            ...eventWithoutParents
+        } = event;
+        const parentProviderEventIds = new Set(eventParentProviderEventIds ?? []);
+        if (
+            lastProviderEventId !== null &&
+            lastProviderEventId !== event.providerEventId &&
+            lastProviderEventId !== eventParentProviderEventId
+        ) {
+            parentProviderEventIds.add(lastProviderEventId);
+        }
+        const parentProviderEventId = eventParentProviderEventId ??
+            (parentProviderEventIds.size === 1 ? [...parentProviderEventIds][0] : undefined);
+        if (parentProviderEventId !== undefined) parentProviderEventIds.delete(parentProviderEventId);
         providerEvents.push({
             provider: "claude",
             providerSessionId: sessionId,
             axSessionId: sessionId,
-            ...event,
+            ...eventWithoutParents,
+            ...(parentProviderEventId !== undefined ? { parentProviderEventId } : {}),
+            ...(parentProviderEventIds.size > 0 ? { parentProviderEventIds: [...parentProviderEventIds] } : {}),
         });
+        if (event.providerEventId) lastProviderEventId = event.providerEventId;
     };
 
     const nextPlanSnapshotSeq = (source: string): number => {

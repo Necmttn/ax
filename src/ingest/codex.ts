@@ -418,15 +418,35 @@ function createCodexExtractor(
     const anonymousFunctionCallCountsByTurn = new Map<number, number>();
     const pendingToolCallKeys = new Set<string>();
     const flushedToolCallKeys = new Set<string>();
+    let lastProviderEventId: string | null = null;
     let seq = 0;
 
     const pushProviderEvent = (event: Omit<AgentEventWrite, "provider" | "providerSessionId" | "axSessionId">, currentSession: CodexSession): void => {
+        const {
+            parentProviderEventId: eventParentProviderEventId,
+            parentProviderEventIds: eventParentProviderEventIds,
+            ...eventWithoutParents
+        } = event;
+        const parentProviderEventIds = new Set(eventParentProviderEventIds ?? []);
+        if (
+            lastProviderEventId !== null &&
+            lastProviderEventId !== event.providerEventId &&
+            lastProviderEventId !== eventParentProviderEventId
+        ) {
+            parentProviderEventIds.add(lastProviderEventId);
+        }
+        const parentProviderEventId = eventParentProviderEventId ??
+            (parentProviderEventIds.size === 1 ? [...parentProviderEventIds][0] : undefined);
+        if (parentProviderEventId !== undefined) parentProviderEventIds.delete(parentProviderEventId);
         providerEvents.push({
             provider: "codex",
             providerSessionId: currentSession.id,
             axSessionId: currentSession.id,
-            ...event,
+            ...eventWithoutParents,
+            ...(parentProviderEventId !== undefined ? { parentProviderEventId } : {}),
+            ...(parentProviderEventIds.size > 0 ? { parentProviderEventIds: [...parentProviderEventIds] } : {}),
         });
+        if (event.providerEventId) lastProviderEventId = event.providerEventId;
     };
 
     const nextAnonymousFunctionCallId = (): string => {

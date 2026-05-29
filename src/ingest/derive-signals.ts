@@ -1002,7 +1002,7 @@ export class SignalsStats extends BaseStageStats.extend<SignalsStats>("SignalsSt
 }) {}
 
 export const signalsStage: StageDef<SignalsStats, SurrealClient> = {
-    meta: StageMeta.make({ key: "signals", deps: ["claude", "codex", "subagents", "spawned", "git"], tags: ["derive"] }),
+    meta: StageMeta.make({ key: "signals", deps: ["claude", "codex", "pi", "opencode", "cursor", "subagents", "spawned", "git"], tags: ["derive"] }),
     run: (ctx: IngestContext) =>
         Effect.gen(function* () {
             const t0 = Date.now();

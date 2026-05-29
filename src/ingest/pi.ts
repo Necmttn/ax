@@ -5,17 +5,30 @@ import { AxConfig } from "../lib/config.ts";
 import { RecordId, SurrealClient } from "../lib/db.ts";
 import { decodeJsonOrNull } from "../lib/decode.ts";
 import type { DbError } from "../lib/errors.ts";
+import { safeKeyPart } from "../lib/shared/derive-keys.ts";
 import { executeStatements } from "../lib/shared/statement-exec.ts";
 import {
     recordRef,
     surrealDate,
+    surrealJsonTextOption,
+    surrealObject,
+    surrealOptionInt,
+    surrealOptionString,
     surrealString,
 } from "../lib/shared/surql.ts";
+import { skillRecordKey } from "../lib/skill-id.ts";
+import {
+    buildRelateToolCallSkillStatements,
+    buildToolCallStatements,
+    type ToolCallSkillRelationWrite,
+    type ToolCallWrite,
+} from "./evidence-writers.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
 import { agentEventRecordKey, buildAgentEventStatements, buildAgentProviderStatements, type AgentEventWrite } from "./provider-events.ts";
-import { turnRecordKey } from "./record-keys.ts";
+import { invokedRelationRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
+import { extractCommandTool, normalizeCommand, toolKindForName } from "./tool-calls.ts";
 
 export const PiKey = Schema.Literal("pi");
 export type PiKey = typeof PiKey.Type;
@@ -51,11 +64,22 @@ interface PiTurn {
     has_error: boolean;
 }
 
+interface PiInvocation {
+    session: string;
+    seq: number;
+    ts: string;
+    skill: string;
+    args: unknown;
+}
+
 interface PiExtract {
     session: PiSession;
     sourcePath: string | null;
     turns: PiTurn[];
+    invocations: PiInvocation[];
+    toolCalls: ToolCallWrite[];
     providerEvents: AgentEventWrite[];
+    skillRelations: ToolCallSkillRelationWrite[];
     usage: PiUsage;
     skipped: number;
     warnings: string[];
@@ -140,6 +164,46 @@ function addUsage(total: PiUsage, next: PiUsage): void {
     total.totalTokens += next.totalTokens;
 }
 
+interface ToolResultFields {
+    outputJson?: unknown;
+    outputExcerpt?: string | null;
+    errorText?: string | null;
+    hasError: boolean;
+}
+
+type MutableToolCallWrite = {
+    -readonly [Key in keyof ToolCallWrite]: ToolCallWrite[Key];
+};
+
+function boundedExcerpt(text: string, max = 1200): string {
+    return text.length <= max ? text : text.slice(0, max);
+}
+
+function piToolCallId(block: Record<string, unknown>): string | null {
+    return stringField(block, "id") ??
+        stringField(block, "toolCallId") ??
+        stringField(block, "callId");
+}
+
+function piToolName(input: Record<string, unknown>): string | null {
+    return stringField(input, "name") ??
+        stringField(input, "toolName") ??
+        stringField(input, "tool");
+}
+
+function piToolInput(block: Record<string, unknown>): unknown {
+    const input = block.input ?? block.arguments ?? block.args ?? null;
+    if (typeof input !== "string") return input;
+    return decodeJsonOrNull(input) ?? input;
+}
+
+function applyToolResult(call: MutableToolCallWrite, result: ToolResultFields): void {
+    call.outputJson = result.outputJson ?? null;
+    call.outputExcerpt = result.outputExcerpt ?? null;
+    call.errorText = result.errorText ?? null;
+    call.hasError = result.hasError;
+}
+
 export function textFromPiContent(content: unknown): string | null {
     if (typeof content === "string") return content.length > 0 ? content : null;
     if (!Array.isArray(content)) return null;
@@ -218,7 +282,12 @@ function createPiExtractor(filePath: string) {
     let skipped = 0;
     const warnings: string[] = [];
     const turns: PiTurn[] = [];
+    const invocations: PiInvocation[] = [];
+    const toolCalls: MutableToolCallWrite[] = [];
     const providerEvents: AgentEventWrite[] = [];
+    const skillRelations: ToolCallSkillRelationWrite[] = [];
+    const toolCallsByCallId = new Map<string, MutableToolCallWrite>();
+    const pendingToolResultsByCallId = new Map<string, ToolResultFields>();
     const usage = emptyUsage();
 
     const pushProviderEvent = (
@@ -231,6 +300,123 @@ function createPiExtractor(filePath: string) {
             axSessionId: currentSession.id,
             ...event,
         });
+    };
+
+    const processToolCallBlock = (
+        block: Record<string, unknown>,
+        ts: string,
+        parentProviderEventId: string | null,
+        currentSession: PiSession,
+    ): void => {
+        const toolName = piToolName(block);
+        if (!toolName) return;
+        const callId = piToolCallId(block) ?? `tool_call_${seq.toString(10).padStart(6, "0")}_${toolCalls.length + 1}`;
+        const inputJson = piToolInput(block);
+        const toolCallKey = toolCallRecordKey({
+            sessionId: currentSession.id,
+            seq,
+            callId,
+        });
+        const call: MutableToolCallWrite = {
+            provider: "pi",
+            toolName,
+            toolKind: toolKindForName(toolName),
+            sessionId: currentSession.id,
+            seq,
+            turnKey: turnRecordKey(currentSession.id, seq),
+            agentEventKey: agentEventRecordKey({
+                provider: "pi",
+                providerSessionId: currentSession.id,
+                providerEventId: callId,
+                seq,
+            }),
+            callId,
+            ts,
+            cwd: currentSession.cwd,
+            inputJson,
+            rawJson: block,
+            hasError: false,
+        };
+
+        if (toolName === "exec_command" && isRecord(inputJson)) {
+            const command = stringField(inputJson, "command") ?? stringField(inputJson, "cmd");
+            if (command) {
+                call.commandText = command;
+                call.commandToolName = extractCommandTool(command);
+                call.commandNorm = normalizeCommand(command);
+            }
+        }
+
+        pushProviderEvent({
+            providerEventId: callId,
+            parentProviderEventId,
+            parentKind: "turn_item",
+            seq,
+            ts,
+            type: "toolCall",
+            role: "assistant",
+            text: toolName,
+            textExcerpt: toolName,
+            raw: block,
+            labels: {
+                source: "pi_jsonl",
+                toolName,
+                toolKind: call.toolKind,
+            },
+            metrics: { turnSeq: seq },
+        }, currentSession);
+
+        toolCalls.push(call);
+        toolCallsByCallId.set(callId, call);
+        const pendingResult = pendingToolResultsByCallId.get(callId);
+        if (pendingResult) {
+            applyToolResult(call, pendingResult);
+            pendingToolResultsByCallId.delete(callId);
+        }
+
+        const skillName = `pi:${toolName}`;
+        invocations.push({
+            session: currentSession.id,
+            seq,
+            ts,
+            skill: skillName,
+            args: inputJson ?? {},
+        });
+        skillRelations.push({
+            toolCallKey,
+            skillName,
+            ts,
+            reason: "Pi tool call",
+            labels: {
+                provider: "pi",
+                toolName,
+                source: "pi_jsonl",
+            },
+            metrics: { turnSeq: seq },
+        });
+    };
+
+    const processToolResultMessage = (
+        message: Record<string, unknown>,
+        text: string | null,
+    ): void => {
+        const callId = stringField(message, "toolCallId") ??
+            stringField(message, "tool_call_id") ??
+            stringField(message, "callId");
+        if (!callId) return;
+        const hasError = booleanField(message, "isError") ?? booleanField(message, "is_error") ?? false;
+        const result: ToolResultFields = {
+            outputJson: message.content ?? text,
+            outputExcerpt: text ? boundedExcerpt(text) : null,
+            errorText: hasError && text ? boundedExcerpt(text) : null,
+            hasError,
+        };
+        const call = toolCallsByCallId.get(callId);
+        if (call) {
+            applyToolResult(call, result);
+        } else {
+            pendingToolResultsByCallId.set(callId, result);
+        }
     };
 
     return {
@@ -346,6 +532,16 @@ function createPiExtractor(filePath: string) {
                     usage: entryUsage,
                 },
             }, session);
+
+            if (message && role === "assistant" && Array.isArray(message.content)) {
+                for (const block of message.content) {
+                    if (isRecord(block) && stringField(block, "type") === "toolCall") {
+                        processToolCallBlock(block, ts, providerEventId, session);
+                    }
+                }
+            } else if (message && (role === "toolResult" || role === "tool_result")) {
+                processToolResultMessage(message, text);
+            }
         },
         finish(): PiExtract | null {
             if (!session) {
@@ -356,7 +552,10 @@ function createPiExtractor(filePath: string) {
                 session,
                 sourcePath: filePath,
                 turns,
+                invocations,
+                toolCalls,
                 providerEvents,
+                skillRelations,
                 usage,
                 skipped,
                 warnings,
@@ -417,6 +616,49 @@ const buildTurnStatements = (turns: readonly PiTurn[]): string[] =>
         return `UPSERT turn:\`${turnRecordKey(turn.session, turn.seq)}\` CONTENT { session: ${recordRef("session", turn.session)}, agent_event: ${recordRef("agent_event", eventKey)}, seq: ${turn.seq}, ts: ${surrealDate(turn.ts)}, role: ${surrealString(turn.role)}, message_kind: ${surrealString(turn.message_kind)}, intent_kind: ${surrealString(turn.intent_kind)}, text: ${turn.text === null ? "NONE" : surrealString(turn.text)}, text_excerpt: ${turn.text_excerpt === null ? "NONE" : surrealString(turn.text_excerpt)}, has_tool_use: ${turn.has_tool_use}, has_error: ${turn.has_error} };`;
     });
 
+const buildSyntheticSkillAndInvocationStatements = (
+    invocations: readonly PiInvocation[],
+): string[] => {
+    if (invocations.length === 0) return [];
+    const tools = new Set(invocations.map((invocation) => invocation.skill));
+    const skillStatements = [...tools].map((name) =>
+        `UPSERT skill:\`${skillRecordKey(name)}\` MERGE { name: ${surrealString(name)}, scope: "pi-tool", dir_path: "(synthetic)", content_hash: "pi" };`
+    );
+    const invocationStatements = invocations.map((invocation) => {
+        const turnKey = turnRecordKey(invocation.session, invocation.seq);
+        const skillKey = skillRecordKey(invocation.skill);
+        const args = JSON.stringify(invocation.args ?? {});
+        const edgeKey = invokedRelationRecordKey({ turnKey, skillKey, args });
+        return `RELATE turn:\`${turnKey}\`->invoked:\`${edgeKey}\`->skill:\`${skillKey}\` SET ts = ${surrealDate(invocation.ts)}, args = ${surrealString(args)}, turn_has_error = false, turn_index = ${invocation.seq};`;
+    });
+    return [...skillStatements, ...invocationStatements];
+};
+
+const buildPiTokenUsageStatements = (extract: PiExtract): string[] => {
+    if (!Object.values(extract.usage).some((value) => value > 0)) return [];
+    const estimatedTokens = extract.usage.totalTokens > 0
+        ? extract.usage.totalTokens
+        : extract.usage.input + extract.usage.output;
+    return [
+        `UPSERT ${recordRef("session_token_usage", safeKeyPart(extract.session.id))} MERGE ${surrealObject([
+            ["session", recordRef("session", extract.session.id)],
+            ["source", surrealString("pi")],
+            ["workflow_epoch", "NONE"],
+            ["model", surrealOptionString(extract.session.model)],
+            ["prompt_tokens", surrealOptionInt(extract.usage.input || null)],
+            ["completion_tokens", surrealOptionInt(extract.usage.output || null)],
+            ["cache_creation_input_tokens", surrealOptionInt(extract.usage.cacheWrite || null)],
+            ["cache_read_input_tokens", surrealOptionInt(extract.usage.cacheRead || null)],
+            ["estimated_tokens", Math.trunc(estimatedTokens).toString(10)],
+            ["transcript_bytes", "0"],
+            ["context_window", "NONE"],
+            ["labels", surrealJsonTextOption({ source: "pi_jsonl" })],
+            ["metrics", surrealJsonTextOption({ usage: extract.usage })],
+            ["ts", surrealDate(extract.session.ended_at)],
+        ])};`,
+    ];
+};
+
 const buildPiBatchStatements = (extract: PiExtract): string[] => [
     ...buildAgentProviderStatements([
         {
@@ -449,7 +691,7 @@ const buildPiBatchStatements = (extract: PiExtract): string[] => [
                 },
                 metrics: {
                     turns: extract.turns.length,
-                    toolCalls: 0,
+                    toolCalls: extract.toolCalls.length,
                     providerEvents: extract.providerEvents.length,
                     usage: extract.usage,
                 },
@@ -460,6 +702,12 @@ const buildPiBatchStatements = (extract: PiExtract): string[] => [
         events: extract.providerEvents,
     }),
     ...buildTurnStatements(extract.turns),
+    ...buildToolCallStatements(extract.toolCalls),
+    ...buildSyntheticSkillAndInvocationStatements(extract.invocations),
+    ...extract.skillRelations.flatMap((relation) =>
+        buildRelateToolCallSkillStatements(relation),
+    ),
+    ...buildPiTokenUsageStatements(extract),
 ];
 
 export const __testBuildPiBatchStatements = buildPiBatchStatements;
@@ -480,6 +728,7 @@ export const ingestPi = (
         let sessionCount = 0;
         let eventCount = 0;
         let turnCount = 0;
+        let toolCallCount = 0;
         let skipped = 0;
         let warningCount = 0;
 
@@ -512,6 +761,7 @@ export const ingestPi = (
             sessionCount += 1;
             eventCount += extracted.providerEvents.length;
             turnCount += extracted.turns.length;
+            toolCallCount += extracted.toolCalls.length;
         }
 
         return {
@@ -519,7 +769,7 @@ export const ingestPi = (
             sessions: sessionCount,
             events: eventCount,
             turns: turnCount,
-            toolCalls: 0,
+            toolCalls: toolCallCount,
             skipped,
             warnings: warningCount,
         };

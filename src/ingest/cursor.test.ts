@@ -1,9 +1,10 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import {
+    __testFindCursorStateDbs,
     extractCursorStateDb,
     isAllowedCursorHistoryKey,
 } from "./cursor.ts";
@@ -189,6 +190,28 @@ describe("Cursor state.vscdb extraction", () => {
             );
             expect(JSON.stringify(first.providerEvents[0]?.raw)).not.toContain("secret-a");
             expect(JSON.stringify(second.providerEvents[0]?.raw)).not.toContain("secret-b");
+        } finally {
+            await rm(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("discovery skips old state databases when a since cutoff is provided", async () => {
+        const dir = await mkdtemp(join(tmpdir(), "ax-cursor-since-"));
+        try {
+            const globalDir = join(dir, "globalStorage");
+            const workspaceDir = join(dir, "workspaceStorage", "workspace-a");
+            await mkdir(globalDir, { recursive: true });
+            await mkdir(workspaceDir, { recursive: true });
+            const oldDb = join(globalDir, "state.vscdb");
+            const freshDb = join(workspaceDir, "state.vscdb");
+            await writeFile(oldDb, "");
+            await writeFile(freshDb, "");
+            const old = new Date("2026-05-01T00:00:00.000Z");
+            const fresh = new Date("2026-05-29T00:00:00.000Z");
+            await utimes(oldDb, old, old);
+            await utimes(freshDb, fresh, fresh);
+
+            expect(await __testFindCursorStateDbs(dir, old.getTime() + 1)).toEqual([freshDb]);
         } finally {
             await rm(dir, { recursive: true, force: true });
         }

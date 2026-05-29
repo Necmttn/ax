@@ -3,6 +3,7 @@ import {
     agentEventRecordKey,
     buildAgentEventStatements,
 } from "./provider-events.ts";
+import { toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import {
     __testBuildPiBatchStatements,
     __testExtractPiJsonlLines,
@@ -337,6 +338,126 @@ describe("Pi JSONL extraction", () => {
             expect.stringContaining("invalid entry timestamp"),
             expect.stringContaining("invalid message timestamp"),
         ]);
+    });
+
+    test("projects assistant toolCall blocks, tool results, synthetic skills, and token usage statements", () => {
+        const extracted = __testExtractPiJsonlLines([
+            JSON.stringify({
+                type: "session",
+                version: 3,
+                id: "pi-tools",
+                timestamp: "2026-05-29T07:00:00.000Z",
+                cwd: "/Users/necmttn/Projects/ax",
+            }),
+            JSON.stringify({
+                type: "message",
+                id: "assistant-tools",
+                parentId: null,
+                timestamp: "2026-05-29T07:00:01.000Z",
+                message: {
+                    role: "assistant",
+                    content: [
+                        { type: "text", text: "Reading the file." },
+                        {
+                            type: "toolCall",
+                            id: "call-read",
+                            name: "read",
+                            input: { path: "src/ingest/pi.ts" },
+                        },
+                    ],
+                    model: "gpt-5.5",
+                    usage: {
+                        input: 12,
+                        output: 7,
+                        cacheRead: 2,
+                        cacheWrite: 1,
+                    },
+                },
+            }),
+            JSON.stringify({
+                type: "message",
+                id: "tool-result-read",
+                parentId: "assistant-tools",
+                timestamp: "2026-05-29T07:00:02.000Z",
+                message: {
+                    role: "toolResult",
+                    toolCallId: "call-read",
+                    toolName: "read",
+                    content: [{ type: "text", text: "pi source" }],
+                    isError: false,
+                },
+            }),
+        ]);
+
+        expect(extracted).not.toBeNull();
+        if (!extracted) return;
+
+        const toolCallKey = toolCallRecordKey({
+            sessionId: "pi-tools",
+            seq: 1,
+            callId: "call-read",
+        });
+
+        expect(extracted.turns[0]).toMatchObject({
+            seq: 1,
+            role: "assistant",
+            has_tool_use: true,
+        });
+        expect(extracted.toolCalls).toHaveLength(1);
+        expect(extracted.toolCalls[0]).toMatchObject({
+            provider: "pi",
+            toolName: "read",
+            toolKind: "unknown",
+            sessionId: "pi-tools",
+            seq: 1,
+            turnKey: turnRecordKey("pi-tools", 1),
+            callId: "call-read",
+            inputJson: { path: "src/ingest/pi.ts" },
+            outputExcerpt: "pi source",
+            hasError: false,
+        });
+        expect(extracted.toolCalls[0]?.agentEventKey).toBe(agentEventRecordKey({
+            provider: "pi",
+            providerSessionId: "pi-tools",
+            providerEventId: "call-read",
+            seq: 1,
+        }));
+        expect(extracted.invocations).toEqual([
+            {
+                session: "pi-tools",
+                seq: 1,
+                ts: "2026-05-29T07:00:01.000Z",
+                skill: "pi:read",
+                args: { path: "src/ingest/pi.ts" },
+            },
+        ]);
+        expect(extracted.skillRelations).toEqual([
+            {
+                toolCallKey,
+                skillName: "pi:read",
+                ts: "2026-05-29T07:00:01.000Z",
+                reason: "Pi tool call",
+                labels: {
+                    provider: "pi",
+                    toolName: "read",
+                    source: "pi_jsonl",
+                },
+                metrics: { turnSeq: 1 },
+            },
+        ]);
+
+        const sql = __testBuildPiBatchStatements(extracted).join("\n");
+        expect(sql).toContain("UPSERT tool_call:");
+        expect(sql).toContain("name: \"pi:read\"");
+        expect(sql).toContain("scope: \"pi-tool\"");
+        expect(sql).toContain("->invoked:");
+        expect(sql).toContain("->concerns:");
+        expect(sql).toContain("UPSERT session_token_usage:`pi_tools`");
+        expect(sql).toContain("prompt_tokens: 12");
+        expect(sql).toContain("completion_tokens: 7");
+        expect(sql).toContain("cache_read_input_tokens: 2");
+        expect(sql).toContain("cache_creation_input_tokens: 1");
+        expect(sql).toContain("estimated_tokens: 19");
     });
 
     test("turn statements escape session ids and timestamps through shared Surreal helpers", () => {

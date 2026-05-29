@@ -22,16 +22,20 @@ const fmtDuration = (start: string | null, end: string | null): string => {
     return `${(ms / 3_600_000).toFixed(1)}h`;
 };
 
-const SOURCE_FILTERS = ["all", "claude", "codex"] as const;
+export const SOURCE_FILTERS = ["all", "claude", "codex", "pi", "opencode", "cursor"] as const;
 type SourceFilter = typeof SOURCE_FILTERS[number];
 
+export const SOURCE_BADGE_COLORS: Record<string, { bg: string; fg: string }> = {
+    claude: { bg: "#fef3c7", fg: "#92400e" },
+    codex: { bg: "#dbeafe", fg: "#1e3a8a" },
+    pi: { bg: "#dcfce7", fg: "#166534" },
+    opencode: { bg: "#f3e8ff", fg: "#6b21a8" },
+    cursor: { bg: "#cffafe", fg: "#155e75" },
+    "claude-subagent": { bg: "#fed7aa", fg: "#9a3412" },
+};
+
 function SourceBadge({ source }: { source: string }) {
-    const colors: Record<string, { bg: string; fg: string }> = {
-        claude: { bg: "#fef3c7", fg: "#92400e" },
-        codex: { bg: "#dbeafe", fg: "#1e3a8a" },
-        "claude-subagent": { bg: "#fed7aa", fg: "#9a3412" },
-    };
-    const c = colors[source] ?? { bg: "#e5e7eb", fg: "#475569" };
+    const c = SOURCE_BADGE_COLORS[source] ?? { bg: "#e5e7eb", fg: "#475569" };
     return (
         <span style={{ background: c.bg, color: c.fg, padding: "1px 8px", borderRadius: 3, fontSize: 11, fontWeight: 600 }}>
             {source}

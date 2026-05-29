@@ -211,6 +211,74 @@ describe("Codex transcript extraction", () => {
         ]);
     });
 
+    test("links adjacent provider events with linear parent edges while preserving tool-result parents", () => {
+        const extracted = __testExtractCodexJsonlLines([
+            JSON.stringify({
+                type: "session_meta",
+                timestamp: "2026-05-09T12:00:00.000Z",
+                payload: {
+                    id: "codex-linear",
+                    cwd: "/Users/necmttn/Projects/ax",
+                    timestamp: "2026-05-09T12:00:00.000Z",
+                },
+            }),
+            JSON.stringify({
+                type: "response_item",
+                timestamp: "2026-05-09T12:00:01.000Z",
+                payload: {
+                    type: "message",
+                    id: "msg-user",
+                    role: "user",
+                    content: [{ type: "input_text", text: "Run a command." }],
+                },
+            }),
+            JSON.stringify({
+                type: "response_item",
+                timestamp: "2026-05-09T12:00:02.000Z",
+                payload: {
+                    type: "function_call",
+                    name: "exec_command",
+                    call_id: "call-linear",
+                    arguments: JSON.stringify({ cmd: "pwd" }),
+                },
+            }),
+            JSON.stringify({
+                type: "response_item",
+                timestamp: "2026-05-09T12:00:03.000Z",
+                payload: {
+                    type: "function_call_output",
+                    call_id: "call-linear",
+                    output: "ok",
+                },
+            }),
+        ]);
+
+        expect(extracted).not.toBeNull();
+        if (!extracted) return;
+
+        expect(extracted.providerEvents.map((event) => ({
+            providerEventId: event.providerEventId,
+            parentProviderEventId: event.parentProviderEventId,
+            parentProviderEventIds: event.parentProviderEventIds,
+        }))).toEqual([
+            {
+                providerEventId: "msg-user",
+                parentProviderEventId: undefined,
+                parentProviderEventIds: undefined,
+            },
+            {
+                providerEventId: "call-linear",
+                parentProviderEventId: "msg-user",
+                parentProviderEventIds: undefined,
+            },
+            {
+                providerEventId: "function_call_output:call-linear",
+                parentProviderEventId: "call-linear",
+                parentProviderEventIds: undefined,
+            },
+        ]);
+    });
+
     test("extracts function calls, matched outputs, synthetic skill relations, and update_plan snapshots", () => {
         const execOutput =
             "Chunk ID: abc\nWall time: 0.2000 seconds\nProcess exited with code 1\nOriginal token count: 30\nOutput:\nfatal: not a git repository\n";
