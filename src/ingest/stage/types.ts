@@ -16,6 +16,8 @@ export class IngestContext extends Schema.Class<IngestContext>("IngestContext")(
     cwd: Schema.String,
     since: Schema.Date,
     debug: Schema.Boolean,
+    repoPaths: Schema.optional(Schema.Array(Schema.String)),
+    claudeProject: Schema.optional(Schema.String),
 }) {}
 
 /** Compute `sinceDays` from an {@link IngestContext}, suitable for passing to

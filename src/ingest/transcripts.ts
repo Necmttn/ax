@@ -1582,7 +1582,7 @@ export const claudeStage: StageDef<ClaudeStats, SurrealClient | AxConfig> = {
         Effect.gen(function* () {
             const t0 = Date.now();
             const sinceDays = sinceDaysFromCtx(ctx);
-            const result = yield* ingestTranscripts({ sinceDays });
+            const result = yield* ingestTranscripts({ sinceDays, project: ctx.claudeProject });
             return ClaudeStats.make({
                 durationMs: Date.now() - t0,
                 summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls`,

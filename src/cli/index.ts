@@ -372,13 +372,21 @@ export const detectRemovedIngestFlag = (
     return null;
 };
 
-const cmdIngest = (args: string[]) => {
+interface IngestCommandOpts {
+    readonly command?: string;
+    readonly cwd?: string;
+    readonly repoPaths?: readonly string[];
+    readonly claudeProject?: string;
+}
+
+const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) => {
+    const commandName = opts.command ?? "ingest";
     // Validate args synchronously before any Effect/DB work so that
     // flag errors print even when the daemon is down.
     const hasStagesArg = args.some((a) => a.startsWith("--stages="));
     const hasDeriveOnly = args.includes("--derive-only");
     if (hasStagesArg && hasDeriveOnly) {
-        console.error("axctl ingest: --stages and --derive-only are mutually exclusive");
+        console.error(`axctl ${commandName}: --stages and --derive-only are mutually exclusive`);
         process.exit(2);
     }
     // `--reset` clears the skill graph so a full re-ingest rebuilds it from
@@ -387,7 +395,7 @@ const cmdIngest = (args: string[]) => {
     const wantReset = args.includes("--reset");
     if (wantReset && (hasStagesArg || hasDeriveOnly)) {
         console.error(
-            "axctl ingest: --reset rebuilds the whole skill graph and cannot be combined with stage filters",
+            `axctl ${commandName}: --reset rebuilds the whole skill graph and cannot be combined with stage filters`,
         );
         process.exit(2);
     }
@@ -413,33 +421,35 @@ const cmdIngest = (args: string[]) => {
                 "reset: cleared skill graph (skill, invoked, proposed, concerns, recovered_by, skill_paired)",
             );
         }
-        const runId = runIdFor("ingest");
-        const progressMode = progressModeFor("ingest", args);
+        const runId = runIdFor(commandName);
+        const progressMode = progressModeFor(commandName, args);
         const verbose = args.includes("--verbose");
-        const sinceDays = parseOptionalPositiveIntFlag("ingest", "since", args);
+        const sinceDays = parseOptionalPositiveIntFlag(commandName, "since", args);
         yield* db.query(buildIngestRunStartStatement({
             runId,
-            command: "ingest",
+            command: commandName,
             ...(sinceDays === undefined ? {} : { sinceDays }),
         }));
         const useTui = shouldUseTui(process.stdout.isTTY ?? false, progressMode);
         const tuiHandle = useTui
             ? yield* Effect.tryPromise({
-                try: () => initTuiProgress({ command: "ingest", runId, stages: stageProgressList }),
+                try: () => initTuiProgress({ command: commandName, runId, stages: stageProgressList }),
                 catch: () => undefined,
               }).pipe(Effect.catch(() => Effect.succeed(undefined)))
             : undefined;
         const progress: ProgressReporter = tuiHandle?.progress ?? createProgressReporter({
-            command: "ingest",
+            command: commandName,
             mode: progressMode,
             runId,
             stages: stageProgressList,
         });
 
         const ctx = IngestContext.make({
-            cwd: process.cwd(),
+            cwd: opts.cwd ?? process.cwd(),
             since: sinceDays === undefined ? new Date(0) : new Date(Date.now() - sinceDays * 86400 * 1000),
             debug: args.includes("--debug"),
+            ...(opts.repoPaths ? { repoPaths: [...opts.repoPaths] } : {}),
+            ...(opts.claudeProject ? { claudeProject: opts.claudeProject } : {}),
         });
 
         // Wrap each stage's run with telemetryStage so the existing TUI + DB
@@ -496,6 +506,27 @@ const cmdIngest = (args: string[]) => {
         yield* program;
     });
 };
+
+const cmdIngestHere = (args: string[]) =>
+    Effect.gen(function* () {
+        const pwdResolution = yield* resolvePwdRepository().pipe(
+            Effect.catchTag("NotAGitRepoError", (err) =>
+                Effect.sync(() => {
+                    process.stderr.write(
+                        `axctl ingest here: not in a git repository (cwd=${err.cwd})\n`,
+                    );
+                    process.exit(2);
+                }),
+            ),
+        );
+
+        return yield* cmdIngest(args, {
+            command: "ingest here",
+            cwd: pwdResolution.cwd,
+            repoPaths: [pwdResolution.repoRoot],
+            claudeProject: encodeClaudeProjectSlug(pwdResolution.repoRoot),
+        });
+    });
 
 const cmdDeriveSignals = (args: string[]) =>
     Effect.gen(function* () {
@@ -1686,6 +1717,30 @@ export const insightsOnlyConflicts = (opts: {
 };
 
 
+const ingestHereCommand = Command.make(
+    "here",
+    {
+        stages: Flag.string("stages").pipe(Flag.optional),
+        deriveOnly: Flag.boolean("derive-only").pipe(Flag.withDefault(false)),
+        since: optionalSince,
+        progress: progressFlag,
+        verbose: verboseFlag,
+        debug: debugFlag,
+    },
+    ({ stages, deriveOnly, since, progress, verbose, debug }) =>
+        cmdIngestHere([
+            ...stringArg("stages", optionValue(stages)),
+            ...boolArg("derive-only", deriveOnly),
+            ...intArg("since", optionValue(since)),
+            `--progress=${progress}`,
+            ...boolArg("verbose", verbose),
+            ...boolArg("debug", debug),
+        ]),
+).pipe(Command.withDescription(
+    "Run ingest scoped to the current git repository. " +
+        "The git stage is restricted to $PWD's repo; Claude transcripts are restricted to the matching project slug.",
+));
+
 const ingestCommand = Command.make(
     "ingest",
     {
@@ -1741,7 +1796,9 @@ const ingestCommand = Command.make(
         "Use --stages=<a,b,c> for a custom subset, or --derive-only to run every stage tagged `derive` " +
         "(see ADR-0009; canonical list lives in src/ingest/stage/registry.ts). " +
         "Use --reset to wipe the skill graph first and rebuild it clean.",
-));
+    ),
+    Command.withSubcommands([ingestHereCommand]),
+);
 
 const deriveSignalsCommand = Command.make(
     "derive-signals",
