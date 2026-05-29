@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import { Database } from "bun:sqlite";
 import { Effect, Schema } from "effect";
 import { AxConfig } from "../lib/config.ts";
@@ -10,7 +10,7 @@ import { executeStatements } from "../lib/shared/statement-exec.ts";
 import { recordRef, surrealDate, surrealString } from "../lib/shared/surql.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
 import { agentEventRecordKey, buildAgentEventStatements, buildAgentProviderStatements, type AgentEventWrite } from "./provider-events.ts";
-import { turnRecordKey } from "./record-keys.ts";
+import { identityPart, turnRecordKey } from "./record-keys.ts";
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 
@@ -27,6 +27,8 @@ export interface CursorStats {
 
 interface CursorSession {
     id: string;
+    cursorConversationId: string;
+    dbIdentity: string;
     title: string | null;
     sourcePath: string;
     started_at: string;
@@ -53,6 +55,10 @@ export interface CursorExtract {
     providerEvents: AgentEventWrite[];
     skipped: number;
     warnings: string[];
+}
+
+export interface CursorExtractOptions {
+    readonly cursorUserDir?: string | null;
 }
 
 type SQLiteValue = string | number | bigint | boolean | Uint8Array | ArrayBuffer | null;
@@ -122,6 +128,33 @@ function emptyExtract(warnings: string[] = [], skipped = 0): CursorExtract {
         skipped,
         warnings,
     };
+}
+
+function cursorDbIdentity(dbPath: string, cursorUserDir?: string | null): string {
+    if (cursorUserDir && cursorUserDir.length > 0) {
+        const relativePath = relative(cursorUserDir, dbPath);
+        if (
+            relativePath.length > 0 &&
+            relativePath !== ".." &&
+            !relativePath.startsWith("../") &&
+            !relativePath.startsWith("..\\") &&
+            !isAbsolute(relativePath)
+        ) {
+            return relativePath.replace(/[\\/]/g, "/");
+        }
+    }
+    return dbPath.replace(/[\\/]/g, "/");
+}
+
+function cursorSessionId(input: {
+    readonly dbIdentity: string;
+    readonly cursorConversationId: string;
+}): string {
+    return [
+        "cursor",
+        identityPart(input.dbIdentity, "db"),
+        identityPart(input.cursorConversationId, "conversation"),
+    ].join("__");
 }
 
 function decodeSqliteValue(value: SQLiteValue | undefined): string | null {
@@ -242,6 +275,8 @@ function pushCursorMessage(input: {
         textExcerpt,
         raw: {
             sourceKey: input.sourceKey,
+            cursorConversationId: input.session.cursorConversationId,
+            cursorMessageId: rawId,
             id: rawId,
             role,
             text,
@@ -250,6 +285,9 @@ function pushCursorMessage(input: {
         labels: {
             source: "cursor_state_vscdb",
             sourceKey: input.sourceKey,
+            dbIdentity: input.session.dbIdentity,
+            cursorConversationId: input.session.cursorConversationId,
+            cursorMessageId: rawId,
             messageKind,
             intentKind,
         },
@@ -265,6 +303,7 @@ function extractComposerData(
     data: Record<string, unknown>,
     sourceKey: string,
     sourcePath: string,
+    dbIdentity: string,
     warnings: string[],
 ): Omit<CursorExtract, "warnings"> {
     const sessions: CursorSession[] = [];
@@ -289,7 +328,12 @@ function extractComposerData(
             continue;
         }
         const session: CursorSession = {
-            id,
+            id: cursorSessionId({
+                dbIdentity,
+                cursorConversationId: id,
+            }),
+            cursorConversationId: id,
+            dbIdentity,
             title: stringField(conversation, "title"),
             sourcePath,
             started_at: SAFE_FALLBACK_TS,
@@ -319,9 +363,10 @@ function extractComposerData(
     return { sessions, turns, providerEvents, skipped };
 }
 
-export function extractCursorStateDb(dbPath: string): CursorExtract {
+export function extractCursorStateDb(dbPath: string, options: CursorExtractOptions = {}): CursorExtract {
     const db = new Database(dbPath, { readonly: true });
     try {
+        const dbIdentity = cursorDbIdentity(dbPath, options.cursorUserDir);
         const tables = tableNames(db);
         const kvTables = simpleKvTables(
             db,
@@ -356,7 +401,7 @@ export function extractCursorStateDb(dbPath: string): CursorExtract {
                 }
 
                 if (row.key === "composer.composerData") {
-                    const extracted = extractComposerData(payload, row.key, dbPath, warnings);
+                    const extracted = extractComposerData(payload, row.key, dbPath, dbIdentity, warnings);
                     sessions.push(...extracted.sessions);
                     turns.push(...extracted.turns);
                     providerEvents.push(...extracted.providerEvents);
@@ -409,9 +454,13 @@ const buildCursorBatchStatements = (extract: CursorExtract, sourcePath: string):
             raw: {
                 source: "cursor_state_vscdb",
                 sourcePath,
+                dbIdentity: session.dbIdentity,
+                cursorConversationId: session.cursorConversationId,
             },
             labels: {
                 source: "cursor",
+                dbIdentity: session.dbIdentity,
+                cursorConversationId: session.cursorConversationId,
             },
             metrics: {
                 turns: extract.turns.filter((turn) => turn.session === session.id).length,
@@ -457,7 +506,9 @@ export const ingestCursor = (): Effect.Effect<CursorStats, DbError, SurrealClien
         let warnings = 0;
 
         for (const dbPath of dbPaths) {
-            const extract = yield* Effect.sync(() => extractCursorStateDb(dbPath));
+            const extract = yield* Effect.sync(() =>
+                extractCursorStateDb(dbPath, { cursorUserDir: cfg.paths.cursorUserDir })
+            );
             skipped += extract.skipped;
             warnings += extract.warnings.length;
             if (extract.sessions.length === 0) continue;
