@@ -19,9 +19,11 @@ import {
     type ToolCallWrite,
 } from "./evidence-writers.ts";
 import {
+    buildAgentEventParentEdgeStatement,
     agentEventRecordKey,
     buildAgentEventStatements,
     buildAgentProviderStatements,
+    type AgentEventParentEdgeWrite,
     type AgentEventWrite,
 } from "./provider-events.ts";
 import {
@@ -385,6 +387,7 @@ interface CodexExtract {
     invocations: CodexInvocation[];
     toolCalls: ToolCallWrite[];
     providerEvents: AgentEventWrite[];
+    parentEdges: AgentEventParentEdgeWrite[];
     skillRelations: ToolCallSkillRelationWrite[];
     planSnapshots: PlanSnapshotWrite[];
 }
@@ -396,6 +399,7 @@ interface MutableCodexExtract {
     invocations: CodexInvocation[];
     toolCalls: MutableToolCallWrite[];
     providerEvents: AgentEventWrite[];
+    parentEdges: AgentEventParentEdgeWrite[];
     skillRelations: ToolCallSkillRelationWrite[];
     planSnapshots: PlanSnapshotWrite[];
 }
@@ -409,6 +413,7 @@ function createCodexExtractor(
     const invocations: CodexInvocation[] = [];
     const toolCalls: MutableToolCallWrite[] = [];
     const providerEvents: AgentEventWrite[] = [];
+    const parentEdges: AgentEventParentEdgeWrite[] = [];
     const skillRelations: ToolCallSkillRelationWrite[] = [];
     const planSnapshots: PlanSnapshotWrite[] = [];
     const toolCallsByCallId = new Map<string, MutableToolCallWrite>();
@@ -418,6 +423,8 @@ function createCodexExtractor(
     const anonymousFunctionCallCountsByTurn = new Map<number, number>();
     const pendingToolCallKeys = new Set<string>();
     const flushedToolCallKeys = new Set<string>();
+    const providerEventKeysById = new Map<string, string>();
+    const pendingProviderEventIds = new Set<string>();
     let lastProviderEventId: string | null = null;
     let seq = 0;
 
@@ -438,15 +445,38 @@ function createCodexExtractor(
         const parentProviderEventId = eventParentProviderEventId ??
             (parentProviderEventIds.size === 1 ? [...parentProviderEventIds][0] : undefined);
         if (parentProviderEventId !== undefined) parentProviderEventIds.delete(parentProviderEventId);
-        providerEvents.push({
+        const finalEvent: AgentEventWrite = {
             provider: "codex",
             providerSessionId: currentSession.id,
             axSessionId: currentSession.id,
             ...eventWithoutParents,
             ...(parentProviderEventId !== undefined ? { parentProviderEventId } : {}),
             ...(parentProviderEventIds.size > 0 ? { parentProviderEventIds: [...parentProviderEventIds] } : {}),
-        });
-        if (event.providerEventId) lastProviderEventId = event.providerEventId;
+        };
+        const childEventKey = agentEventRecordKey(finalEvent);
+        const finalParentIds = [
+            ...(parentProviderEventId !== undefined ? [parentProviderEventId] : []),
+            ...parentProviderEventIds,
+        ];
+        for (const parentId of finalParentIds) {
+            if (pendingProviderEventIds.has(parentId)) continue;
+            const parentEventKey = providerEventKeysById.get(parentId);
+            if (!parentEventKey) continue;
+            parentEdges.push({
+                provider: "codex",
+                providerSessionId: currentSession.id,
+                parentEventKey,
+                childEventKey,
+                kind: finalEvent.parentKind ?? "parent",
+                ts: finalEvent.ts,
+            });
+        }
+        providerEvents.push(finalEvent);
+        if (event.providerEventId) {
+            lastProviderEventId = event.providerEventId;
+            pendingProviderEventIds.add(event.providerEventId);
+            providerEventKeysById.set(event.providerEventId, childEventKey);
+        }
     };
 
     const nextAnonymousFunctionCallId = (): string => {
@@ -688,6 +718,10 @@ function createCodexExtractor(
         });
         const drainedTurns = turns.splice(0, turns.length);
         const drainedProviderEvents = providerEvents.splice(0, providerEvents.length);
+        for (const event of drainedProviderEvents) {
+            if (event.providerEventId) pendingProviderEventIds.delete(event.providerEventId);
+        }
+        const drainedParentEdges = parentEdges.splice(0, parentEdges.length);
         const drainedInvocations = take(invocations, (invocation) =>
             flushableToolCallKeys.has(toolCallRecordKey({
                 sessionId: invocation.session,
@@ -708,6 +742,7 @@ function createCodexExtractor(
             invocations: drainedInvocations,
             toolCalls: drainedToolCalls,
             providerEvents: drainedProviderEvents,
+            parentEdges: drainedParentEdges,
             skillRelations: drainedRelations,
             planSnapshots: drainedSnapshots,
         };
@@ -802,6 +837,7 @@ function createCodexExtractor(
                 invocations: remaining.invocations,
                 toolCalls: remaining.toolCalls,
                 providerEvents: remaining.providerEvents,
+                parentEdges: remaining.parentEdges,
                 skillRelations: remaining.skillRelations,
                 planSnapshots: remaining.planSnapshots,
             };
@@ -832,6 +868,7 @@ export function __testStreamCodexJsonlLines(lines: Iterable<string>, every: numb
                 batch.invocations.length > 0 ||
                 batch.toolCalls.length > 0 ||
                 batch.providerEvents.length > 0 ||
+                batch.parentEdges.length > 0 ||
                 batch.skillRelations.length > 0 ||
                 batch.planSnapshots.length > 0
             )) {
@@ -845,6 +882,7 @@ export function __testStreamCodexJsonlLines(lines: Iterable<string>, every: numb
         final.invocations.length > 0 ||
         final.toolCalls.length > 0 ||
         final.providerEvents.length > 0 ||
+        final.parentEdges.length > 0 ||
         final.skillRelations.length > 0 ||
         final.planSnapshots.length > 0
     )) {
@@ -938,6 +976,9 @@ const buildCodexBatchStatements = (
     ...buildToolCallStatements(batch.toolCalls.map((call) =>
         compactCodexToolCall(call, payloadMaxBytes),
     )),
+    ...batch.parentEdges.map((edge) =>
+        buildAgentEventParentEdgeStatement(edge),
+    ),
     ...buildSyntheticSkillAndInvocationStatements(batch.invocations),
     ...batch.skillRelations.flatMap((relation) =>
         buildRelateToolCallSkillStatements(relation),
@@ -946,6 +987,8 @@ const buildCodexBatchStatements = (
         buildPlanSnapshotStatements(snapshot),
     ),
 ];
+
+export const __testBuildCodexBatchStatements = buildCodexBatchStatements;
 
 const queryCodexStatements = (statements: readonly string[]) =>
     executeStatements(statements, { chunkSize: 500 });

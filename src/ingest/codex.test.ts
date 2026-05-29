@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { agentEventRecordKey } from "./provider-events.ts";
 import { toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import {
+    __testBuildCodexBatchStatements,
     __testCompactCodexToolCall,
     __testExtractCodexJsonlLines,
     __testStreamCodexJsonlLines,
@@ -618,6 +619,83 @@ describe("Codex transcript extraction", () => {
         expect(batches[2]?.turns).toHaveLength(0);
         expect(batches[2]?.toolCalls.map((call) => call.callId)).toEqual(["call_two"]);
         expect(batches[2]?.toolCalls[0]?.outputExcerpt).toBeUndefined();
+    });
+
+    test("streaming extraction preserves parent edges when parent event flushed in an earlier batch", () => {
+        const batches = __testStreamCodexJsonlLines([
+            JSON.stringify({
+                type: "session_meta",
+                timestamp: "2026-05-09T12:30:00.000Z",
+                payload: {
+                    id: "codex-stream-parent",
+                    cwd: "/Users/necmttn/Projects/ax",
+                    timestamp: "2026-05-09T12:30:00.000Z",
+                },
+            }),
+            JSON.stringify({
+                type: "response_item",
+                timestamp: "2026-05-09T12:30:01.000Z",
+                payload: {
+                    type: "message",
+                    id: "msg-before-flush",
+                    role: "user",
+                    content: [{ type: "input_text", text: "Run pwd." }],
+                },
+            }),
+            JSON.stringify({
+                type: "response_item",
+                timestamp: "2026-05-09T12:30:02.000Z",
+                payload: {
+                    type: "function_call",
+                    name: "exec_command",
+                    call_id: "call-after-flush",
+                    arguments: JSON.stringify({ cmd: "pwd" }),
+                },
+            }),
+            JSON.stringify({
+                type: "response_item",
+                timestamp: "2026-05-09T12:30:03.000Z",
+                payload: {
+                    type: "function_call_output",
+                    call_id: "call-after-flush",
+                    output: "Chunk ID: out\nProcess exited with code 0\nOutput:\n/tmp\n",
+                },
+            }),
+        ], 2);
+
+        expect(batches).toHaveLength(2);
+        expect(batches[0]?.providerEvents.map((event) => event.providerEventId)).toEqual(["msg-before-flush"]);
+        expect(batches[1]?.providerEvents.map((event) => ({
+            providerEventId: event.providerEventId,
+            parentProviderEventId: event.parentProviderEventId,
+        }))).toEqual([
+            {
+                providerEventId: "call-after-flush",
+                parentProviderEventId: "msg-before-flush",
+            },
+            {
+                providerEventId: "function_call_output:call-after-flush",
+                parentProviderEventId: "call-after-flush",
+            },
+        ]);
+
+        const secondBatchSql = __testBuildCodexBatchStatements(batches[1]!, 1200).join("\n");
+        const parentKey = agentEventRecordKey({
+            provider: "codex",
+            providerSessionId: "codex-stream-parent",
+            providerEventId: "msg-before-flush",
+            seq: 1,
+        });
+        const childKey = agentEventRecordKey({
+            provider: "codex",
+            providerSessionId: "codex-stream-parent",
+            providerEventId: "call-after-flush",
+            seq: 2,
+        });
+
+        expect(secondBatchSql).not.toContain(`UPSERT agent_event:\`${parentKey}\``);
+        expect(secondBatchSql).toContain(`RELATE agent_event:\`${parentKey}\`->agent_event_child:`);
+        expect(secondBatchSql).toContain(`->agent_event:\`${childKey}\``);
     });
 
     test("turn IDs use centralized turnRecordKey format", () => {

@@ -67,6 +67,15 @@ export interface AgentEventBatchWrite {
     readonly events: readonly AgentEventWrite[];
 }
 
+export interface AgentEventParentEdgeWrite {
+    readonly provider: AgentProviderName;
+    readonly providerSessionId: string;
+    readonly parentEventKey: string;
+    readonly childEventKey: string;
+    readonly kind: string;
+    readonly ts: TimestampInput;
+}
+
 export interface AgentEventKeyInput {
     readonly provider: AgentProviderName;
     readonly providerSessionId: string;
@@ -195,7 +204,6 @@ const buildParentEdgeStatements = (
 
     for (const event of events) {
         const childEventKey = agentEventRecordKey(event);
-        const sessionKey = agentSessionRecordKey(event.provider, event.providerSessionId);
         const kind = event.parentKind ?? "parent";
 
         for (const parentProviderEventId of normalizedParentProviderEventIds(event)) {
@@ -208,23 +216,33 @@ const buildParentEdgeStatements = (
             );
             if (parentEventKey === undefined) continue;
 
-            statements.push(
-                `RELATE ${recordRef("agent_event", parentEventKey)}->agent_event_child:\`${parentEdgeRecordKey({
-                    parentEventKey,
-                    childEventKey,
-                    kind,
-                })}\`->${recordRef("agent_event", childEventKey)} SET ${surrealSet([
-                    ["agent_session", recordRef("agent_session", sessionKey)],
-                    ["provider", recordRef("agent_provider", agentProviderRecordKey(event.provider))],
-                    ["kind", surrealString(kind)],
-                    ["ts", surrealDate(event.ts)],
-                ])};`,
-            );
+            statements.push(buildAgentEventParentEdgeStatement({
+                provider: event.provider,
+                providerSessionId: event.providerSessionId,
+                parentEventKey,
+                childEventKey,
+                kind,
+                ts: event.ts,
+            }));
         }
     }
 
     return statements;
 };
+
+export function buildAgentEventParentEdgeStatement(edge: AgentEventParentEdgeWrite): string {
+    const sessionKey = agentSessionRecordKey(edge.provider, edge.providerSessionId);
+    return `RELATE ${recordRef("agent_event", edge.parentEventKey)}->agent_event_child:\`${parentEdgeRecordKey({
+        parentEventKey: edge.parentEventKey,
+        childEventKey: edge.childEventKey,
+        kind: edge.kind,
+    })}\`->${recordRef("agent_event", edge.childEventKey)} SET ${surrealSet([
+        ["agent_session", recordRef("agent_session", sessionKey)],
+        ["provider", recordRef("agent_provider", agentProviderRecordKey(edge.provider))],
+        ["kind", surrealString(edge.kind)],
+        ["ts", surrealDate(edge.ts)],
+    ])};`;
+}
 
 export function buildAgentEventStatements(batch: AgentEventBatchWrite): string[] {
     return [

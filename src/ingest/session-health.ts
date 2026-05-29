@@ -312,16 +312,18 @@ function workflowEpochStatements(firstSuperpowersAt: string | null): string[] {
 }
 
 function tokenUsageStatement(row: SessionTokenUsage): string {
+    const existingActualTokenUsage =
+        "prompt_tokens != NONE OR completion_tokens != NONE OR cache_creation_input_tokens != NONE OR cache_read_input_tokens != NONE";
     return `UPSERT ${recordRef("session_token_usage", safeKeyPart(row.sessionKey))} MERGE ${surrealObject([
         ["session", recordRef("session", row.sessionKey)],
         ["source", surrealString(row.source)],
         ["workflow_epoch", row.workflowEpoch ? recordRef("workflow_epoch", row.workflowEpoch) : "NONE"],
         ["model", surrealOptionString(row.model)],
-        ["prompt_tokens", surrealOptionInt(row.promptTokens)],
-        ["completion_tokens", surrealOptionInt(row.completionTokens)],
-        ["cache_creation_input_tokens", surrealOptionInt(row.cacheCreationInputTokens)],
-        ["cache_read_input_tokens", surrealOptionInt(row.cacheReadInputTokens)],
-        ["estimated_tokens", Math.trunc(row.estimatedTokens).toString(10)],
+        ["prompt_tokens", `IF ${existingActualTokenUsage} THEN prompt_tokens ELSE ${surrealOptionInt(row.promptTokens)} END`],
+        ["completion_tokens", `IF ${existingActualTokenUsage} THEN completion_tokens ELSE ${surrealOptionInt(row.completionTokens)} END`],
+        ["cache_creation_input_tokens", `IF ${existingActualTokenUsage} THEN cache_creation_input_tokens ELSE ${surrealOptionInt(row.cacheCreationInputTokens)} END`],
+        ["cache_read_input_tokens", `IF ${existingActualTokenUsage} THEN cache_read_input_tokens ELSE ${surrealOptionInt(row.cacheReadInputTokens)} END`],
+        ["estimated_tokens", `IF ${existingActualTokenUsage} THEN estimated_tokens ELSE ${Math.trunc(row.estimatedTokens).toString(10)} END`],
         ["transcript_bytes", Math.trunc(row.transcriptBytes).toString(10)],
         ["context_window", surrealOptionInt(row.contextWindow)],
         ["labels", surrealJsonOption(row.labels)],
@@ -329,6 +331,8 @@ function tokenUsageStatement(row: SessionTokenUsage): string {
         ["ts", surrealDate(row.ts)],
     ])};`;
 }
+
+export const __testTokenUsageStatement = tokenUsageStatement;
 
 function sessionHealthStatement(row: SessionHealth): string {
     return `UPSERT ${recordRef("session_health", safeKeyPart(row.sessionKey))} MERGE ${surrealObject([

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { __testBuildSessionHealthRows } from "./session-health.ts";
+import { __testBuildSessionHealthRows, __testTokenUsageStatement } from "./session-health.ts";
 
 describe("session health derivation", () => {
     test("uses Claude usage metrics when available", () => {
@@ -75,5 +75,30 @@ describe("session health derivation", () => {
             toolErrors: 1,
             contextPressure: "low",
         });
+    });
+
+    test("token usage statement preserves existing provider actual token fields over byte estimates", () => {
+        const statement = __testTokenUsageStatement({
+            sessionKey: "pi-session",
+            source: "pi",
+            workflowEpoch: null,
+            model: "gpt-5.5",
+            promptTokens: null,
+            completionTokens: null,
+            cacheCreationInputTokens: null,
+            cacheReadInputTokens: null,
+            estimatedTokens: 42,
+            transcriptBytes: 168,
+            contextWindow: null,
+            labels: { source: "session_health", token_source: "byte_estimate" },
+            metrics: { turn_bytes: 168 },
+            ts: "2026-05-29T07:00:00.000Z",
+        });
+
+        expect(statement).toContain("prompt_tokens: IF prompt_tokens != NONE OR completion_tokens != NONE OR cache_creation_input_tokens != NONE OR cache_read_input_tokens != NONE THEN prompt_tokens ELSE NONE END");
+        expect(statement).toContain("completion_tokens: IF prompt_tokens != NONE OR completion_tokens != NONE OR cache_creation_input_tokens != NONE OR cache_read_input_tokens != NONE THEN completion_tokens ELSE NONE END");
+        expect(statement).toContain("cache_creation_input_tokens: IF prompt_tokens != NONE OR completion_tokens != NONE OR cache_creation_input_tokens != NONE OR cache_read_input_tokens != NONE THEN cache_creation_input_tokens ELSE NONE END");
+        expect(statement).toContain("cache_read_input_tokens: IF prompt_tokens != NONE OR completion_tokens != NONE OR cache_creation_input_tokens != NONE OR cache_read_input_tokens != NONE THEN cache_read_input_tokens ELSE NONE END");
+        expect(statement).toContain("estimated_tokens: IF prompt_tokens != NONE OR completion_tokens != NONE OR cache_creation_input_tokens != NONE OR cache_read_input_tokens != NONE THEN estimated_tokens ELSE 42 END");
     });
 });
