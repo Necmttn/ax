@@ -3,7 +3,11 @@ import {
     agentEventRecordKey,
     buildAgentEventStatements,
 } from "./provider-events.ts";
-import { __testExtractPiJsonlLines, textFromPiContent } from "./pi.ts";
+import {
+    __testBuildPiBatchStatements,
+    __testExtractPiJsonlLines,
+    textFromPiContent,
+} from "./pi.ts";
 
 describe("Pi JSONL extraction", () => {
     test("textFromPiContent joins text blocks and ignores unknown blocks", () => {
@@ -252,5 +256,118 @@ describe("Pi JSONL extraction", () => {
             `RELATE agent_event:\`${customEventKey}\``,
         );
         expect(edgeStatements.join("\n")).toContain(`->agent_event:\`${userEventKey}\``);
+    });
+
+    test("invalid timestamps use safe fallbacks with warnings and do not throw", () => {
+        expect(() => __testExtractPiJsonlLines([
+            JSON.stringify({
+                type: "session",
+                version: 3,
+                id: "pi-invalid-timestamps",
+                timestamp: "not-a-date",
+                cwd: "/tmp/project",
+            }),
+            JSON.stringify({
+                type: "message",
+                id: "user-invalid-string",
+                parentId: null,
+                timestamp: "also-not-a-date",
+                message: {
+                    role: "user",
+                    content: [{ type: "text", text: "First safe fallback." }],
+                },
+            }),
+            JSON.stringify({
+                type: "message",
+                id: "assistant-invalid-number",
+                parentId: "user-invalid-string",
+                message: {
+                    role: "assistant",
+                    timestamp: 1e100,
+                    content: [{ type: "text", text: "Second safe fallback." }],
+                },
+            }),
+        ])).not.toThrow();
+
+        const extracted = __testExtractPiJsonlLines([
+            JSON.stringify({
+                type: "session",
+                version: 3,
+                id: "pi-invalid-timestamps",
+                timestamp: "not-a-date",
+                cwd: "/tmp/project",
+            }),
+            JSON.stringify({
+                type: "message",
+                id: "user-invalid-string",
+                parentId: null,
+                timestamp: "also-not-a-date",
+                message: {
+                    role: "user",
+                    content: [{ type: "text", text: "First safe fallback." }],
+                },
+            }),
+            JSON.stringify({
+                type: "message",
+                id: "assistant-invalid-number",
+                parentId: "user-invalid-string",
+                message: {
+                    role: "assistant",
+                    timestamp: 1e100,
+                    content: [{ type: "text", text: "Second safe fallback." }],
+                },
+            }),
+        ]);
+
+        expect(extracted).not.toBeNull();
+        if (!extracted) return;
+
+        expect(extracted.session.started_at).toBe("1970-01-01T00:00:00.000Z");
+        expect(extracted.session.ended_at).toBe("1970-01-01T00:00:00.000Z");
+        expect(extracted.turns.map((turn) => turn.ts)).toEqual([
+            "1970-01-01T00:00:00.000Z",
+            "1970-01-01T00:00:00.000Z",
+        ]);
+        expect(extracted.providerEvents.map((event) => event.ts)).toEqual([
+            "1970-01-01T00:00:00.000Z",
+            "1970-01-01T00:00:00.000Z",
+        ]);
+        expect(extracted.warnings).toEqual([
+            expect.stringContaining("invalid session timestamp"),
+            expect.stringContaining("invalid entry timestamp"),
+            expect.stringContaining("invalid message timestamp"),
+        ]);
+    });
+
+    test("turn statements escape session ids and timestamps through shared Surreal helpers", () => {
+        const extracted = __testExtractPiJsonlLines([
+            JSON.stringify({
+                type: "session",
+                version: 3,
+                id: "pi`session\nunsafe",
+                timestamp: "2026-05-29T06:00:00.000Z",
+                cwd: "/tmp/project",
+            }),
+            JSON.stringify({
+                type: "message",
+                id: "user-1",
+                parentId: null,
+                timestamp: "2026-05-29T06:00:01.000Z",
+                message: {
+                    role: "user",
+                    content: [{ type: "text", text: "Escaped session id." }],
+                },
+            }),
+        ]);
+
+        expect(extracted).not.toBeNull();
+        if (!extracted) return;
+
+        const turnStatement = __testBuildPiBatchStatements(extracted)
+            .find((statement) => statement.startsWith("UPSERT turn:"));
+
+        expect(turnStatement).toContain("session: session:`pi\\`session\\nunsafe`");
+        expect(turnStatement).toContain('ts: d"2026-05-29T06:00:01.000Z"');
+        expect(turnStatement).not.toContain("session: session:`pi`session");
     });
 });

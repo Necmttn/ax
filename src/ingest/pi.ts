@@ -8,6 +8,7 @@ import type { DbError } from "../lib/errors.ts";
 import { executeStatements } from "../lib/shared/statement-exec.ts";
 import {
     recordRef,
+    surrealDate,
     surrealString,
 } from "../lib/shared/surql.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
@@ -70,6 +71,8 @@ export interface PiStats {
     readonly warnings: number;
 }
 
+const SAFE_FALLBACK_TS = "1970-01-01T00:00:00.000Z";
+
 function isRecord(input: unknown): input is Record<string, unknown> {
     return typeof input === "object" && input !== null && !Array.isArray(input);
 }
@@ -92,6 +95,11 @@ function booleanField(input: Record<string, unknown>, field: string): boolean | 
 function parseJsonl(line: string): Record<string, unknown> | null {
     const decoded = decodeJsonOrNull(line);
     return isRecord(decoded) ? decoded : null;
+}
+
+function validIsoTimestamp(input: string | number): string | null {
+    const date = new Date(input);
+    return Number.isFinite(date.getTime()) ? date.toISOString() : null;
 }
 
 function numericUsageField(input: Record<string, unknown>, field: string): number {
@@ -177,14 +185,31 @@ function piTurnRole(role: string): string {
     return role === "toolResult" ? "tool_result" : role;
 }
 
-function sourceTimestamp(entry: Record<string, unknown>, fallback: string): string {
+function sourceTimestamp(
+    entry: Record<string, unknown>,
+    fallback: string,
+): { ts: string; warning: string | null } {
     const timestamp = stringField(entry, "timestamp");
-    if (timestamp) return timestamp;
+    if (timestamp !== null) {
+        const iso = validIsoTimestamp(timestamp);
+        if (iso) return { ts: iso, warning: null };
+        return {
+            ts: fallback,
+            warning: `invalid entry timestamp for ${stringField(entry, "id") ?? "unknown"}: ${timestamp}`,
+        };
+    }
     if (isRecord(entry.message)) {
         const messageTimestamp = numberField(entry.message, "timestamp");
-        if (messageTimestamp !== null) return new Date(messageTimestamp).toISOString();
+        if (messageTimestamp !== null) {
+            const iso = validIsoTimestamp(messageTimestamp);
+            if (iso) return { ts: iso, warning: null };
+            return {
+                ts: fallback,
+                warning: `invalid message timestamp for ${stringField(entry, "id") ?? "unknown"}: ${messageTimestamp}`,
+            };
+        }
     }
-    return fallback;
+    return { ts: fallback, warning: null };
 }
 
 function createPiExtractor(filePath: string) {
@@ -220,13 +245,19 @@ function createPiExtractor(filePath: string) {
             const type = stringField(entry, "type") ?? "unknown";
             if (type === "session") {
                 if (session) return;
-                const startedAt = stringField(entry, "timestamp") ?? new Date(0).toISOString();
+                const timestamp = stringField(entry, "timestamp");
+                const startedAt = timestamp ? validIsoTimestamp(timestamp) : null;
+                if (!startedAt) {
+                    warnings.push(
+                        `invalid session timestamp for ${stringField(entry, "id") ?? filePath}: ${timestamp ?? "(missing)"}`,
+                    );
+                }
                 session = {
                     id: stringField(entry, "id") ?? filePath,
                     version: numberField(entry, "version"),
                     cwd: stringField(entry, "cwd"),
-                    started_at: startedAt,
-                    ended_at: startedAt,
+                    started_at: startedAt ?? SAFE_FALLBACK_TS,
+                    ended_at: startedAt ?? SAFE_FALLBACK_TS,
                     model: null,
                 };
                 return;
@@ -238,7 +269,9 @@ function createPiExtractor(filePath: string) {
             }
 
             seq += 1;
-            const ts = sourceTimestamp(entry, session.ended_at);
+            const timestamp = sourceTimestamp(entry, session.ended_at);
+            if (timestamp.warning) warnings.push(timestamp.warning);
+            const ts = timestamp.ts;
             session.ended_at = ts;
             const providerEventId = stringField(entry, "id");
             const parentProviderEventId = stringField(entry, "parentId");
@@ -381,7 +414,7 @@ const buildTurnStatements = (turns: readonly PiTurn[]): string[] =>
             providerEventId: turn.providerEventId,
             seq: turn.seq,
         });
-        return `UPSERT turn:\`${turnRecordKey(turn.session, turn.seq)}\` CONTENT { session: session:\`${turn.session}\`, agent_event: ${recordRef("agent_event", eventKey)}, seq: ${turn.seq}, ts: d"${turn.ts}", role: ${surrealString(turn.role)}, message_kind: ${surrealString(turn.message_kind)}, intent_kind: ${surrealString(turn.intent_kind)}, text: ${turn.text === null ? "NONE" : surrealString(turn.text)}, text_excerpt: ${turn.text_excerpt === null ? "NONE" : surrealString(turn.text_excerpt)}, has_tool_use: ${turn.has_tool_use}, has_error: ${turn.has_error} };`;
+        return `UPSERT turn:\`${turnRecordKey(turn.session, turn.seq)}\` CONTENT { session: ${recordRef("session", turn.session)}, agent_event: ${recordRef("agent_event", eventKey)}, seq: ${turn.seq}, ts: ${surrealDate(turn.ts)}, role: ${surrealString(turn.role)}, message_kind: ${surrealString(turn.message_kind)}, intent_kind: ${surrealString(turn.intent_kind)}, text: ${turn.text === null ? "NONE" : surrealString(turn.text)}, text_excerpt: ${turn.text_excerpt === null ? "NONE" : surrealString(turn.text_excerpt)}, has_tool_use: ${turn.has_tool_use}, has_error: ${turn.has_error} };`;
     });
 
 const buildPiBatchStatements = (extract: PiExtract): string[] => [
@@ -428,6 +461,8 @@ const buildPiBatchStatements = (extract: PiExtract): string[] => [
     }),
     ...buildTurnStatements(extract.turns),
 ];
+
+export const __testBuildPiBatchStatements = buildPiBatchStatements;
 
 interface PiIngestOpts {
     sinceDays: number | undefined;
