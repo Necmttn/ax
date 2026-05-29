@@ -14,6 +14,7 @@ import {
 const TOOL_CALL_SCHEMA_FIELDS = new Set([
     "session",
     "turn",
+    "agent_event",
     "tool",
     "name",
     "seq",

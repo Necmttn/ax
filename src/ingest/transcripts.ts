@@ -19,6 +19,12 @@ import {
     type ToolCallWrite,
 } from "./evidence-writers.ts";
 import {
+    agentEventRecordKey,
+    buildAgentEventStatements,
+    buildAgentProviderStatements,
+    type AgentEventWrite,
+} from "./provider-events.ts";
+import {
     extractCommandTool,
     normalizeCommand,
     toolKindForName,
@@ -42,6 +48,7 @@ interface Session {
     id: string;
     project: string;
     cwd: string | null;
+    model: string | null;
     started_at: string | null;
     ended_at: string | null;
     raw_file: string | null;
@@ -304,11 +311,8 @@ function outputText(input: unknown): string | null {
     return jsonText(input);
 }
 
-function outputExcerpt(input: unknown): string | null {
-    const text = outputText(input);
-    if (!text) return null;
-    const excerpt = boundedExcerpt(text);
-    return excerpt.length > 0 ? excerpt : null;
+function providerEventTextExcerpt(input: string | null): string | null {
+    return input === null ? null : input.slice(0, 500);
 }
 
 type MutableToolCallWrite = {
@@ -331,10 +335,12 @@ function applyToolResult(call: MutableToolCallWrite, result: ToolResultFields): 
 
 interface FileExtract {
     session: Session;
+    sourcePath: string | null;
     turns: Turn[];
     invocations: Invocation[];
     edits: Edit[];
     toolCalls: ToolCallWrite[];
+    providerEvents: AgentEventWrite[];
     skillRelations: ToolCallSkillRelationWrite[];
     planSnapshots: PlanSnapshotWrite[];
     hookEvents: HarnessHookEventWrite[];
@@ -347,6 +353,7 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
     const invocations: Invocation[] = [];
     const edits: Edit[] = [];
     const toolCalls: MutableToolCallWrite[] = [];
+    const providerEvents: AgentEventWrite[] = [];
     const skillRelations: ToolCallSkillRelationWrite[] = [];
     const planSnapshots: PlanSnapshotWrite[] = [];
     const hookEventsByKey = new Map<string, HarnessHookEventWrite>();
@@ -358,6 +365,16 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
     const anonymousToolUseCountsByTurn = new Map<number, number>();
     let seq = 0;
     let cwd: string | null = null;
+    let model: string | null = null;
+
+    const pushProviderEvent = (event: Omit<AgentEventWrite, "provider" | "providerSessionId" | "axSessionId">): void => {
+        providerEvents.push({
+            provider: "claude",
+            providerSessionId: sessionId,
+            axSessionId: sessionId,
+            ...event,
+        });
+    };
 
     const nextPlanSnapshotSeq = (source: string): number => {
         const next = (planSnapshotCountsBySource.get(source) ?? 0) + 1;
@@ -376,6 +393,8 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
         block: Record<string, unknown>,
         ts: string,
         turnCwd: string | null,
+        role: string,
+        parentProviderEventId: string | null,
     ): void => {
         const name = stringField(block, "name");
         if (!name) return;
@@ -408,6 +427,12 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
             sessionId,
             seq,
             turnKey: currentTurnKey,
+            agentEventKey: agentEventRecordKey({
+                provider: "claude",
+                providerSessionId: sessionId,
+                providerEventId: callId,
+                seq,
+            }),
             callId,
             ts,
             cwd: turnCwd,
@@ -415,6 +440,25 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
             rawJson: block,
             hasError: false,
         };
+
+        pushProviderEvent({
+            providerEventId: callId,
+            parentProviderEventId,
+            parentKind: "turn_item",
+            seq,
+            ts,
+            type: "tool_use",
+            role,
+            text: name,
+            textExcerpt: name,
+            raw: block,
+            labels: {
+                source: "claude_transcript",
+                toolName: name,
+                toolKind: call.toolKind,
+            },
+            metrics: { turnSeq: seq },
+        });
 
         if (name === "Bash") {
             const command = input ? stringField(input, "command") : null;
@@ -761,15 +805,40 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
         }
     };
 
-    const processToolResult = (block: Record<string, unknown>): boolean => {
+    const processToolResult = (
+        block: Record<string, unknown>,
+        ts: string,
+        role: string,
+        parentProviderEventId: string | null,
+    ): boolean => {
         const callId = stringField(block, "tool_use_id");
         const hasError = block.is_error === true;
+        const text = outputText(block.content ?? null);
         const result: ToolResultFields = {
             outputJson: block.content ?? null,
-            outputExcerpt: outputExcerpt(block.content ?? null),
-            errorText: hasError ? outputExcerpt(block.content ?? null) : null,
+            outputExcerpt: text ? boundedExcerpt(text) : null,
+            errorText: hasError && text ? boundedExcerpt(text) : null,
             hasError,
         };
+
+        pushProviderEvent({
+            providerEventId: callId ? `tool_result:${callId}` : null,
+            parentProviderEventId: callId ?? parentProviderEventId,
+            parentKind: callId ? "tool_result" : "turn_item",
+            seq,
+            ts,
+            type: "tool_result",
+            role,
+            text,
+            textExcerpt: providerEventTextExcerpt(text),
+            raw: block,
+            labels: {
+                source: "claude_transcript",
+                toolUseId: callId,
+                hasError,
+            },
+            metrics: { turnSeq: seq },
+        });
 
         if (callId) {
             const call = toolCallsByCallId.get(callId);
@@ -811,6 +880,7 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
                     id: sessionId,
                     project: deriveProject(projectDir),
                     cwd,
+                    model,
                     started_at: ts,
                     ended_at: ts,
                     raw_file: null,
@@ -822,6 +892,13 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
             seq += 1;
             const role = (type as string) ?? "unknown";
             const message = isRecord(entry.message) ? entry.message : null;
+            const entryModel =
+                (message ? stringField(message, "model") : null) ??
+                stringField(entry, "model");
+            if (entryModel) {
+                model = entryModel;
+                if (session) session.model = entryModel;
+            }
             const messageContent = message?.content;
             const content = asContentBlocks(messageContent);
 
@@ -834,14 +911,36 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
             // block later in the same content array can flip it after the
             // tool_use that emitted the invocation).
             const turnInvStart = invocations.length;
+            const providerEventId = stringField(entry, "uuid");
+            const kind = messageKind(role, messageContent, textExcerpt);
+            const intentKind = classifyTurnIntent({ role, messageKind: kind, source: "claude", text });
+            pushProviderEvent({
+                providerEventId,
+                seq,
+                ts,
+                type: role,
+                role,
+                text,
+                textExcerpt,
+                raw: entry,
+                labels: {
+                    source: "claude_transcript",
+                    messageKind: kind,
+                    intentKind,
+                },
+                metrics: {
+                    turnSeq: seq,
+                    contentBlocks: content.length,
+                },
+            });
 
             for (const block of content) {
                 const blockType = stringField(block, "type");
                 if (blockType === "tool_use") {
                     hasToolUse = true;
-                    processToolUse(block, ts, turnCwd);
+                    processToolUse(block, ts, turnCwd, role, providerEventId);
                 }
-                if (blockType === "tool_result" && processToolResult(block)) {
+                if (blockType === "tool_result" && processToolResult(block, ts, role, providerEventId)) {
                     hasError = true;
                 }
             }
@@ -855,14 +954,13 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
                 }
             }
 
-            const kind = messageKind(role, messageContent, textExcerpt);
             turns.push({
                 session: sessionId,
                 seq,
                 ts,
                 role,
                 message_kind: kind,
-                intent_kind: classifyTurnIntent({ role, messageKind: kind, source: "claude", text }),
+                intent_kind: intentKind,
                 text,
                 text_excerpt: textExcerpt,
                 has_tool_use: hasToolUse,
@@ -881,10 +979,12 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
             }));
             return {
                 session,
+                sourcePath: null,
                 turns,
                 invocations,
                 edits,
                 toolCalls,
+                providerEvents,
                 skillRelations,
                 planSnapshots,
                 hookEvents,
@@ -931,7 +1031,9 @@ export async function extractFileWithSessionId(
     } finally {
         await fh.close();
     }
-    return extractor.finish();
+    const extracted = extractor.finish();
+    if (!extracted) return null;
+    return { ...extracted, sourcePath: filePath };
 }
 
 export {
@@ -955,6 +1057,7 @@ const upsertSessions = (sessions: Session[]) =>
                 db.upsert(new RecordId("session", s.id), {
                     project: s.project ?? undefined,
                     cwd: s.cwd ?? undefined,
+                    model: s.model ?? undefined,
                     source: "claude",
                     started_at: s.started_at ? new Date(s.started_at) : undefined,
                     ended_at: s.ended_at ? new Date(s.ended_at) : undefined,
@@ -1153,6 +1256,51 @@ const writeHookEvidence = (
         ...buildHookCommandInvocationStatements(invocations),
     ]);
 
+const buildClaudeProviderStatements = (extracted: FileExtract): string[] => [
+    ...buildAgentProviderStatements([
+        {
+            name: "claude",
+            displayName: "Claude Code",
+            capabilities: {
+                transcripts: true,
+                toolCalls: true,
+            },
+        },
+    ]),
+    ...buildAgentEventStatements({
+        sessions: [
+            {
+                provider: "claude",
+                providerSessionId: extracted.session.id,
+                axSessionId: extracted.session.id,
+                cwd: extracted.session.cwd,
+                project: extracted.session.project,
+                model: extracted.session.model,
+                sourcePath: extracted.sourcePath,
+                raw: {
+                    source: "claude_transcript",
+                    rawFile: extracted.session.raw_file,
+                },
+                labels: {
+                    source: "transcript",
+                    project: extracted.session.project,
+                },
+                metrics: {
+                    turns: extracted.turns.length,
+                    toolCalls: extracted.toolCalls.length,
+                    providerEvents: extracted.providerEvents.length,
+                },
+                startedAt: extracted.session.started_at,
+                endedAt: extracted.session.ended_at,
+            },
+        ],
+        events: extracted.providerEvents,
+    }),
+];
+
+const writeProviderEvidence = (extracted: FileExtract) =>
+    queryTranscriptStatements(buildClaudeProviderStatements(extracted));
+
 interface IngestOpts {
     sinceDays: number | undefined;
     project: string | undefined;
@@ -1280,6 +1428,7 @@ export const ingestTranscripts = (
             sessions += 1;
             yield* upsertTurns(extracted.turns);
             turnCount += extracted.turns.length;
+            yield* writeProviderEvidence(extracted);
             yield* writeToolCallStatements(extracted.toolCalls);
             toolCallCount += extracted.toolCalls.length;
             // Resolve invoked names onto the catalog before writing so the

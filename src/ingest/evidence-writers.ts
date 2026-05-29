@@ -27,6 +27,7 @@ type TimestampInput = Date | string;
 export interface ToolCallWrite {
     readonly sessionId: string;
     readonly turnKey?: string | null;
+    readonly agentEventKey?: string | null;
     readonly provider: string;
     readonly toolName: string;
     readonly toolKind: string;
@@ -152,6 +153,7 @@ export function buildToolCallStatements(calls: readonly ToolCallWrite[]): string
             `UPSERT ${recordRef("tool_call", toolCallKey)} CONTENT ${surrealObject([
                 ["session", recordRef("session", call.sessionId)],
                 ["turn", surrealOptionRecord("turn", call.turnKey)],
+                ["agent_event", surrealOptionRecord("agent_event", call.agentEventKey)],
                 ["tool", recordRef("tool", toolKey)],
                 ["name", surrealString(call.toolName)],
                 ["seq", call.seq.toString(10)],

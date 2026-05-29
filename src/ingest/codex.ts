@@ -19,6 +19,12 @@ import {
     type ToolCallWrite,
 } from "./evidence-writers.ts";
 import {
+    agentEventRecordKey,
+    buildAgentEventStatements,
+    buildAgentProviderStatements,
+    type AgentEventWrite,
+} from "./provider-events.ts";
+import {
     extractCommandTool,
     normalizeCommand,
     parseCodexFunctionOutput,
@@ -363,18 +369,22 @@ async function walkJsonlFiles(root: string, cutoffMs: number): Promise<CodexFile
 
 interface CodexExtract {
     session: CodexSession;
+    sourcePath: string | null;
     turns: CodexTurn[];
     invocations: CodexInvocation[];
     toolCalls: ToolCallWrite[];
+    providerEvents: AgentEventWrite[];
     skillRelations: ToolCallSkillRelationWrite[];
     planSnapshots: PlanSnapshotWrite[];
 }
 
 interface MutableCodexExtract {
     session: CodexSession | null;
+    sourcePath: string | null;
     turns: CodexTurn[];
     invocations: CodexInvocation[];
     toolCalls: MutableToolCallWrite[];
+    providerEvents: AgentEventWrite[];
     skillRelations: ToolCallSkillRelationWrite[];
     planSnapshots: PlanSnapshotWrite[];
 }
@@ -384,6 +394,7 @@ function createCodexExtractor(filePath: string) {
     const turns: CodexTurn[] = [];
     const invocations: CodexInvocation[] = [];
     const toolCalls: MutableToolCallWrite[] = [];
+    const providerEvents: AgentEventWrite[] = [];
     const skillRelations: ToolCallSkillRelationWrite[] = [];
     const planSnapshots: PlanSnapshotWrite[] = [];
     const toolCallsByCallId = new Map<string, MutableToolCallWrite>();
@@ -394,6 +405,15 @@ function createCodexExtractor(filePath: string) {
     const pendingToolCallKeys = new Set<string>();
     const flushedToolCallKeys = new Set<string>();
     let seq = 0;
+
+    const pushProviderEvent = (event: Omit<AgentEventWrite, "provider" | "providerSessionId" | "axSessionId">, currentSession: CodexSession): void => {
+        providerEvents.push({
+            provider: "codex",
+            providerSessionId: currentSession.id,
+            axSessionId: currentSession.id,
+            ...event,
+        });
+    };
 
     const nextAnonymousFunctionCallId = (): string => {
         const next = (anonymousFunctionCallCountsByTurn.get(seq) ?? 0) + 1;
@@ -440,6 +460,12 @@ function createCodexExtractor(filePath: string) {
             sessionId: currentSession.id,
             seq,
             turnKey,
+            agentEventKey: agentEventRecordKey({
+                provider: "codex",
+                providerSessionId: currentSession.id,
+                providerEventId: callId,
+                seq,
+            }),
             callId,
             ts,
             cwd: currentSession.cwd,
@@ -447,6 +473,23 @@ function createCodexExtractor(filePath: string) {
             rawJson: payload,
             hasError: false,
         };
+
+        pushProviderEvent({
+            providerEventId: callId,
+            seq,
+            ts,
+            type: "function_call",
+            role: "tool_call",
+            text: null,
+            textExcerpt: null,
+            raw: payload,
+            labels: {
+                source: "codex_transcript",
+                toolName,
+                toolKind: call.toolKind,
+            },
+            metrics: { turnSeq: seq },
+        }, currentSession);
 
         if (toolName === "exec_command" && isRecord(inputJson)) {
             const command = stringField(inputJson, "command") ?? stringField(inputJson, "cmd");
@@ -534,11 +577,37 @@ function createCodexExtractor(filePath: string) {
         }
     };
 
-    const processFunctionOutput = (payload: Record<string, unknown>): void => {
+    const processFunctionOutput = (
+        payload: Record<string, unknown>,
+        ts: string,
+        currentSession: CodexSession,
+    ): void => {
         const callId = stringField(payload, "call_id");
         if (!callId) return;
 
         const result = codexOutputFields(payload.output);
+        pushProviderEvent({
+            providerEventId: `function_call_output:${callId}`,
+            parentProviderEventId: callId,
+            parentKind: "function_call_output",
+            seq,
+            ts,
+            type: "function_call_output",
+            role: "function_call_output",
+            text: outputText(payload.output),
+            textExcerpt: result.outputExcerpt,
+            raw: payload,
+            labels: {
+                source: "codex_transcript",
+                callId,
+                hasError: result.hasError,
+            },
+            metrics: {
+                turnSeq: seq,
+                exitCode: result.exitCode,
+                durationMs: result.durationMs,
+            },
+        }, currentSession);
         const call = toolCallsByCallId.get(callId);
         if (call) {
             applyToolResult(call, result);
@@ -584,6 +653,7 @@ function createCodexExtractor(filePath: string) {
             return true;
         });
         const drainedTurns = turns.splice(0, turns.length);
+        const drainedProviderEvents = providerEvents.splice(0, providerEvents.length);
         const drainedInvocations = take(invocations, (invocation) =>
             flushableToolCallKeys.has(toolCallRecordKey({
                 sessionId: invocation.session,
@@ -599,9 +669,11 @@ function createCodexExtractor(filePath: string) {
         );
         return {
             session,
+            sourcePath: filePath,
             turns: drainedTurns,
             invocations: drainedInvocations,
             toolCalls: drainedToolCalls,
+            providerEvents: drainedProviderEvents,
             skillRelations: drainedRelations,
             planSnapshots: drainedSnapshots,
         };
@@ -662,7 +734,27 @@ function createCodexExtractor(filePath: string) {
                 if (isToolCall) {
                     processFunctionCall(payload, ts, session);
                 } else if (itemType === "function_call_output") {
-                    processFunctionOutput(payload);
+                    processFunctionOutput(payload, ts, session);
+                } else {
+                    pushProviderEvent({
+                        providerEventId: stringField(payload, "id") ?? stringField(payload, "item_id"),
+                        seq,
+                        ts,
+                        type: itemType ?? "response_item",
+                        role,
+                        text,
+                        textExcerpt,
+                        raw: payload,
+                        labels: {
+                            source: "codex_transcript",
+                            messageKind: kind,
+                            intentKind: classifyTurnIntent({ role, messageKind: kind, source: "codex", text }),
+                        },
+                        metrics: {
+                            turnSeq: seq,
+                            contentBlocks: Array.isArray(message?.content) ? message.content.length : 0,
+                        },
+                    }, session);
                 }
             }
         },
@@ -671,9 +763,11 @@ function createCodexExtractor(filePath: string) {
             if (!session) return null;
             return {
                 session,
+                sourcePath: remaining.sourcePath,
                 turns: remaining.turns,
                 invocations: remaining.invocations,
                 toolCalls: remaining.toolCalls,
+                providerEvents: remaining.providerEvents,
                 skillRelations: remaining.skillRelations,
                 planSnapshots: remaining.planSnapshots,
             };
@@ -703,6 +797,7 @@ export function __testStreamCodexJsonlLines(lines: Iterable<string>, every: numb
                 batch.turns.length > 0 ||
                 batch.invocations.length > 0 ||
                 batch.toolCalls.length > 0 ||
+                batch.providerEvents.length > 0 ||
                 batch.skillRelations.length > 0 ||
                 batch.planSnapshots.length > 0
             )) {
@@ -715,6 +810,7 @@ export function __testStreamCodexJsonlLines(lines: Iterable<string>, every: numb
         final.turns.length > 0 ||
         final.invocations.length > 0 ||
         final.toolCalls.length > 0 ||
+        final.providerEvents.length > 0 ||
         final.skillRelations.length > 0 ||
         final.planSnapshots.length > 0
     )) {
@@ -753,10 +849,57 @@ const buildSyntheticSkillAndInvocationStatements = (
 
 export const __testCompactCodexToolCall = compactCodexToolCall;
 
+const buildCodexProviderStatements = (batch: MutableCodexExtract): string[] => {
+    if (!batch.session) return [];
+    return [
+        ...buildAgentProviderStatements([
+            {
+                name: "codex",
+                displayName: "Codex",
+                version: batch.session.cli_version,
+                capabilities: {
+                    transcripts: true,
+                    toolCalls: true,
+                },
+            },
+        ]),
+        ...buildAgentEventStatements({
+            sessions: [
+                {
+                    provider: "codex",
+                    providerSessionId: batch.session.id,
+                    axSessionId: batch.session.id,
+                    cwd: batch.session.cwd,
+                    project: batch.session.cwd,
+                    model: batch.session.model_provider,
+                    sourcePath: batch.sourcePath,
+                    raw: {
+                        source: "codex_transcript",
+                        cliVersion: batch.session.cli_version,
+                        modelProvider: batch.session.model_provider,
+                    },
+                    labels: {
+                        source: "transcript",
+                    },
+                    metrics: {
+                        turns: batch.turns.length,
+                        toolCalls: batch.toolCalls.length,
+                        providerEvents: batch.providerEvents.length,
+                    },
+                    startedAt: batch.session.started_at,
+                    endedAt: batch.session.ended_at,
+                },
+            ],
+            events: batch.providerEvents,
+        }),
+    ];
+};
+
 const buildCodexBatchStatements = (
     batch: MutableCodexExtract,
     payloadMaxBytes: number,
 ): string[] => [
+    ...buildCodexProviderStatements(batch),
     ...buildTurnStatements(batch.turns),
     ...buildToolCallStatements(batch.toolCalls.map((call) =>
         compactCodexToolCall(call, payloadMaxBytes),

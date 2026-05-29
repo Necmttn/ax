@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { agentEventRecordKey } from "./provider-events.ts";
 import { toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import {
     __testCompactCodexToolCall,
@@ -175,6 +176,39 @@ describe("Codex transcript extraction", () => {
                 intent_kind: "organic_task",
             },
         ]);
+        expect(extracted.providerEvents.map((event) => ({
+            provider: event.provider,
+            providerSessionId: event.providerSessionId,
+            seq: event.seq,
+            type: event.type,
+            role: event.role,
+            textExcerpt: event.textExcerpt,
+        }))).toEqual([
+            {
+                provider: "codex",
+                providerSessionId: "codex-user-text",
+                seq: 1,
+                type: "message",
+                role: "developer",
+                textExcerpt: "<permissions instructions>\nFilesystem sandboxing is read-only.",
+            },
+            {
+                provider: "codex",
+                providerSessionId: "codex-user-text",
+                seq: 2,
+                type: "message",
+                role: "user",
+                textExcerpt: "# AGENTS.md instructions for /tmp/project\n\n<INSTRUCTIONS>Use Bun.</INSTRUCTIONS>",
+            },
+            {
+                provider: "codex",
+                providerSessionId: "codex-user-text",
+                seq: 3,
+                type: "message",
+                role: "user",
+                textExcerpt: longTaskText.slice(0, 500),
+            },
+        ]);
     });
 
     test("extracts function calls, matched outputs, synthetic skill relations, and update_plan snapshots", () => {
@@ -297,6 +331,41 @@ describe("Codex transcript extraction", () => {
             name: "exec_command",
             call_id: "call_exec",
         });
+        expect(execCall?.agentEventKey).toBe(agentEventRecordKey({
+            provider: "codex",
+            providerSessionId: "codex-session",
+            providerEventId: "call_exec",
+            seq: 1,
+        }));
+        expect(extracted.providerEvents.map((event) => ({
+            providerEventId: event.providerEventId,
+            seq: event.seq,
+            type: event.type,
+            role: event.role,
+            textExcerpt: event.textExcerpt,
+        }))).toEqual([
+            {
+                providerEventId: "call_exec",
+                seq: 1,
+                type: "function_call",
+                role: "tool_call",
+                textExcerpt: null,
+            },
+            {
+                providerEventId: "function_call_output:call_exec",
+                seq: 2,
+                type: "function_call_output",
+                role: "function_call_output",
+                textExcerpt: "fatal: not a git repository",
+            },
+            {
+                providerEventId: "call_plan",
+                seq: 3,
+                type: "function_call",
+                role: "tool_call",
+                textExcerpt: null,
+            },
+        ]);
 
         const updatePlanKey = toolCallRecordKey({
             sessionId: "codex-session",
