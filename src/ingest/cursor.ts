@@ -78,6 +78,7 @@ interface SQLiteColumnRow {
 
 const SAFE_FALLBACK_TS = "1970-01-01T00:00:00.000Z";
 const CURSOR_HISTORY_KEYS = new Set(["composer.composerData"]);
+const CURSOR_COMPOSER_DATA_PREFIX = "composerData:";
 
 export function isAllowedCursorHistoryKey(key: string): boolean {
     const lower = key.toLowerCase();
@@ -88,7 +89,7 @@ export function isAllowedCursorHistoryKey(key: string): boolean {
     ) {
         return false;
     }
-    return CURSOR_HISTORY_KEYS.has(key);
+    return CURSOR_HISTORY_KEYS.has(key) || key.startsWith(CURSOR_COMPOSER_DATA_PREFIX);
 }
 
 function isRecord(input: unknown): input is Record<string, unknown> {
@@ -118,6 +119,12 @@ function cursorMessageKind(role: string): string {
     if (role === "tool" || role === "tool_result") return "tool_result";
     if (role === "user") return "task";
     return "message";
+}
+
+function cursorRoleFromBubbleType(type: unknown): string {
+    if (type === 1) return "user";
+    if (type === 2) return "assistant";
+    return "unknown";
 }
 
 function emptyExtract(warnings: string[] = [], skipped = 0): CursorExtract {
@@ -363,6 +370,88 @@ function extractComposerData(
     return { sessions, turns, providerEvents, skipped };
 }
 
+function extractComposerDiskKvData(
+    data: Record<string, unknown>,
+    sourceKey: string,
+    sourcePath: string,
+    dbIdentity: string,
+    db: Database,
+    table: string,
+    warnings: string[],
+): Omit<CursorExtract, "warnings"> {
+    const sessions: CursorSession[] = [];
+    const turns: CursorTurn[] = [];
+    const providerEvents: AgentEventWrite[] = [];
+    let skipped = 0;
+    const composerId = stringField(data, "composerId") ?? sourceKey.slice(CURSOR_COMPOSER_DATA_PREFIX.length);
+    if (composerId.length === 0) {
+        warnings.push(`${sourceKey}: missing composerId`);
+        return { sessions, turns, providerEvents, skipped: 1 };
+    }
+    const headers = Array.isArray(data.fullConversationHeadersOnly) ? data.fullConversationHeadersOnly : [];
+    if (!Array.isArray(data.fullConversationHeadersOnly)) {
+        warnings.push(`${sourceKey}: missing fullConversationHeadersOnly array`);
+        return { sessions, turns, providerEvents, skipped: 1 };
+    }
+
+    const session: CursorSession = {
+        id: cursorSessionId({
+            dbIdentity,
+            cursorConversationId: composerId,
+        }),
+        cursorConversationId: composerId,
+        dbIdentity,
+        title: stringField(data, "name"),
+        sourcePath,
+        started_at: SAFE_FALLBACK_TS,
+        ended_at: SAFE_FALLBACK_TS,
+    };
+
+    let seq = 0;
+    for (const header of headers) {
+        if (!isRecord(header)) {
+            skipped += 1;
+            continue;
+        }
+        const bubbleId = stringField(header, "bubbleId");
+        if (bubbleId === null || bubbleId.length === 0) {
+            skipped += 1;
+            warnings.push(`${sourceKey}: skipped bubble header with missing bubbleId`);
+            continue;
+        }
+        const bubbleKey = `bubbleId:${composerId}:${bubbleId}`;
+        const bubble = parseJsonRecord(
+            decodeSqliteValue(readValueForKey(db, table, bubbleKey)),
+            `${table}.${bubbleKey}`,
+            warnings,
+        );
+        if (bubble === null) {
+            skipped += 1;
+            continue;
+        }
+        const role = stringField(bubble, "role") ?? cursorRoleFromBubbleType(bubble.type ?? header.type);
+        const timestamp = bubble.createdAt ?? bubble.timestamp ?? data.createdAt;
+        seq += 1;
+        pushCursorMessage({
+            session,
+            message: {
+                id: bubbleId,
+                role,
+                text: stringField(bubble, "text") ?? "",
+                timestamp,
+            },
+            seq,
+            sourceKey,
+            turns,
+            providerEvents,
+            warnings,
+        });
+    }
+    if (seq > 0) sessions.push(session);
+
+    return { sessions, turns, providerEvents, skipped };
+}
+
 export function extractCursorStateDb(dbPath: string, options: CursorExtractOptions = {}): CursorExtract {
     const db = new Database(dbPath, { readonly: true });
     try {
@@ -402,6 +491,12 @@ export function extractCursorStateDb(dbPath: string, options: CursorExtractOptio
 
                 if (row.key === "composer.composerData") {
                     const extracted = extractComposerData(payload, row.key, dbPath, dbIdentity, warnings);
+                    sessions.push(...extracted.sessions);
+                    turns.push(...extracted.turns);
+                    providerEvents.push(...extracted.providerEvents);
+                    skipped += extracted.skipped;
+                } else if (row.key.startsWith(CURSOR_COMPOSER_DATA_PREFIX)) {
+                    const extracted = extractComposerDiskKvData(payload, row.key, dbPath, dbIdentity, db, table, warnings);
                     sessions.push(...extracted.sessions);
                     turns.push(...extracted.turns);
                     providerEvents.push(...extracted.providerEvents);
@@ -479,8 +574,13 @@ async function includeDbByMtime(dbPath: string, cutoffMs: number): Promise<boole
     if (!existsSync(dbPath)) return false;
     if (cutoffMs <= 0) return true;
     try {
-        const st = await stat(dbPath);
-        return st.mtimeMs >= cutoffMs;
+        const paths = [dbPath, `${dbPath}-wal`, `${dbPath}-shm`];
+        for (const path of paths) {
+            if (!existsSync(path)) continue;
+            const st = await stat(path);
+            if (st.mtimeMs >= cutoffMs) return true;
+        }
+        return false;
     } catch {
         return false;
     }

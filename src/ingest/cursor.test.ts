@@ -65,6 +65,7 @@ function createCursorFixtureDb(
 describe("Cursor history key allowlist", () => {
     test("allows composer history and rejects auth/privacy keys", () => {
         expect(isAllowedCursorHistoryKey("composer.composerData")).toBe(true);
+        expect(isAllowedCursorHistoryKey("composerData:composer-live-1")).toBe(true);
         expect(isAllowedCursorHistoryKey("cursorAuth/accessToken")).toBe(false);
         expect(isAllowedCursorHistoryKey("cursorai/donotchange/privacyMode")).toBe(false);
     });
@@ -125,6 +126,59 @@ describe("Cursor state.vscdb extraction", () => {
                 cursorMessageId: "cursor-message-1",
             });
             expect(JSON.stringify(extracted.providerEvents[0]?.raw)).not.toContain("cursor-secret-token");
+        });
+    });
+
+    test("extracts observed cursorDiskKV composerData and bubbleId rows", async () => {
+        await withTempCursorStateDb((db, dbPath) => {
+            db.run("CREATE TABLE cursorDiskKV (key text primary key, value blob)");
+            db.query("INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)").run(
+                "composerData:composer-live-1",
+                JSON.stringify({
+                    composerId: "composer-live-1",
+                    name: "Projects in projects folder",
+                    createdAt: 1780051788552,
+                    lastUpdatedAt: 1780051839967,
+                    fullConversationHeadersOnly: [
+                        { bubbleId: "bubble-user-1", type: 1, grouping: { hasText: true } },
+                        { bubbleId: "bubble-assistant-1", type: 2, grouping: { hasText: true } },
+                    ],
+                }),
+            );
+            db.query("INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)").run(
+                "bubbleId:composer-live-1:bubble-user-1",
+                JSON.stringify({
+                    bubbleId: "bubble-user-1",
+                    type: 1,
+                    text: "what projects i have in my projects folder",
+                    createdAt: "2026-05-29T10:49:48.611Z",
+                }),
+            );
+            db.query("INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)").run(
+                "bubbleId:composer-live-1:bubble-assistant-1",
+                JSON.stringify({
+                    bubbleId: "bubble-assistant-1",
+                    type: 2,
+                    text: "I’ll quickly check your projects folder.",
+                    createdAt: "2026-05-29T10:49:55.458Z",
+                }),
+            );
+
+            const extracted = extractCursorStateDb(dbPath);
+
+            expect(extracted.sessions).toHaveLength(1);
+            expect(extracted.turns).toHaveLength(2);
+            expect(extracted.providerEvents).toHaveLength(2);
+            expect(extracted.sessions[0]).toMatchObject({
+                title: "Projects in projects folder",
+                cursorConversationId: "composer-live-1",
+                started_at: "2026-05-29T10:49:48.611Z",
+                ended_at: "2026-05-29T10:49:55.458Z",
+            });
+            expect(extracted.providerEvents.map((event) => [event.providerEventId, event.role, event.text])).toEqual([
+                ["bubble-user-1", "user", "what projects i have in my projects folder"],
+                ["bubble-assistant-1", "assistant", "I’ll quickly check your projects folder."],
+            ]);
         });
     });
 
@@ -212,6 +266,26 @@ describe("Cursor state.vscdb extraction", () => {
             await utimes(freshDb, fresh, fresh);
 
             expect(await __testFindCursorStateDbs(dir, old.getTime() + 1)).toEqual([freshDb]);
+        } finally {
+            await rm(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("discovery treats fresh SQLite WAL sidecars as fresh database activity", async () => {
+        const dir = await mkdtemp(join(tmpdir(), "ax-cursor-wal-"));
+        try {
+            const globalDir = join(dir, "globalStorage");
+            await mkdir(globalDir, { recursive: true });
+            const dbPath = join(globalDir, "state.vscdb");
+            const walPath = `${dbPath}-wal`;
+            await writeFile(dbPath, "");
+            await writeFile(walPath, "");
+            const old = new Date("2026-05-01T00:00:00.000Z");
+            const fresh = new Date("2026-05-29T00:00:00.000Z");
+            await utimes(dbPath, old, old);
+            await utimes(walPath, fresh, fresh);
+
+            expect(await __testFindCursorStateDbs(dir, old.getTime() + 1)).toEqual([dbPath]);
         } finally {
             await rm(dir, { recursive: true, force: true });
         }
