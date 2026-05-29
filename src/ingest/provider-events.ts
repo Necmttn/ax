@@ -47,6 +47,7 @@ export interface AgentEventWrite {
     readonly provider: AgentProviderName;
     readonly providerSessionId: string;
     readonly providerEventId?: string | null;
+    readonly parentProviderEventId?: string | null;
     readonly parentProviderEventIds?: readonly string[] | null;
     readonly parentKind?: string | null;
     readonly axSessionId?: string | null;
@@ -140,13 +141,15 @@ const buildAgentSessionStatement = (session: AgentSessionWrite): string => {
 const buildAgentEventStatement = (event: AgentEventWrite): string => {
     const sessionKey = agentSessionRecordKey(event.provider, event.providerSessionId);
     const eventKey = agentEventRecordKey(event);
+    const parentProviderEventId =
+        event.parentProviderEventId ?? event.parentProviderEventIds?.[0] ?? null;
 
     return `UPSERT ${recordRef("agent_event", eventKey)} CONTENT ${surrealObject([
         ["agent_session", recordRef("agent_session", sessionKey)],
         ["ax_session", surrealOptionRecord("session", event.axSessionId)],
         ["provider", recordRef("agent_provider", agentProviderRecordKey(event.provider))],
-        ["provider_session_id", surrealString(event.providerSessionId)],
         ["provider_event_id", surrealOptionString(event.providerEventId)],
+        ["parent_provider_event_id", surrealOptionString(parentProviderEventId)],
         ["seq", Math.trunc(event.seq).toString(10)],
         ["ts", surrealDate(event.ts)],
         ["type", surrealString(event.type)],

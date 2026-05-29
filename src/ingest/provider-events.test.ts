@@ -110,6 +110,12 @@ describe("provider event writer statement builders", () => {
         });
 
         const sql = statements.join("\n");
+        const parentEventStatement = statements.find((statement) =>
+            statement.startsWith("UPSERT agent_event:") && statement.includes("evt-1/unsafe"),
+        );
+        const childEventStatement = statements.find((statement) =>
+            statement.startsWith("UPSERT agent_event:") && statement.includes("evt-2/unsafe"),
+        );
         const sessionKey = agentSessionRecordKey("codex", "session-1/unsafe");
         const parentKey = agentEventRecordKey({
             provider: "codex",
@@ -134,6 +140,10 @@ describe("provider event writer statement builders", () => {
         expect(sql).toContain(`UPSERT agent_event:\`${parentKey}\` CONTENT`);
         expect(sql).toContain(`agent_session: agent_session:\`${sessionKey}\``);
         expect(sql).toContain("provider_event_id: \"evt-1/unsafe\"");
+        expect(parentEventStatement).toContain("parent_provider_event_id: NONE");
+        expect(parentEventStatement).not.toContain("provider_session_id:");
+        expect(childEventStatement).toContain("parent_provider_event_id: \"evt-1/unsafe\"");
+        expect(childEventStatement).not.toContain("provider_session_id:");
         expect(sql).toContain("seq: 1");
         expect(sql).toContain("ts: d\"2026-05-29T01:00:01.000Z\"");
         expect(sql).toContain("text_excerpt: \"Implement Task 1\"");

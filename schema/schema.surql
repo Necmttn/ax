@@ -78,15 +78,15 @@ DEFINE FIELD started_at          ON agent_session TYPE option<datetime>;
 DEFINE FIELD ended_at            ON agent_session TYPE option<datetime>;
 DEFINE FIELD created_at          ON agent_session TYPE datetime DEFAULT time::now();
 DEFINE FIELD updated_at          ON agent_session TYPE option<datetime>;
-DEFINE INDEX agent_session_provider_native ON agent_session FIELDS provider, provider_session_id UNIQUE;
+DEFINE INDEX agent_session_provider_id ON agent_session FIELDS provider, provider_session_id UNIQUE;
 DEFINE INDEX agent_session_ax_session ON agent_session FIELDS ax_session;
 
 DEFINE TABLE agent_event SCHEMAFULL;
 DEFINE FIELD agent_session      ON agent_event TYPE record<agent_session>;
 DEFINE FIELD ax_session         ON agent_event TYPE option<record<session>>;
 DEFINE FIELD provider           ON agent_event TYPE record<agent_provider>;
-DEFINE FIELD provider_session_id ON agent_event TYPE string;
 DEFINE FIELD provider_event_id  ON agent_event TYPE option<string>;
+DEFINE FIELD parent_provider_event_id ON agent_event TYPE option<string>;
 DEFINE FIELD seq                ON agent_event TYPE int;
 DEFINE FIELD ts                 ON agent_event TYPE datetime;
 DEFINE FIELD type               ON agent_event TYPE string;
@@ -97,9 +97,8 @@ DEFINE FIELD raw                ON agent_event TYPE option<string>;  -- JSON-enc
 DEFINE FIELD labels             ON agent_event TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD metrics            ON agent_event TYPE option<string>;  -- JSON-encoded
 DEFINE INDEX agent_event_session_seq ON agent_event FIELDS agent_session, seq UNIQUE;
-DEFINE INDEX agent_event_provider_event ON agent_event FIELDS provider, provider_event_id;
+DEFINE INDEX agent_event_provider_id ON agent_event FIELDS provider, provider_event_id;
 DEFINE INDEX agent_event_session_ts ON agent_event FIELDS agent_session, ts;
-DEFINE INDEX agent_event_ax_session ON agent_event FIELDS ax_session;
 
 -- ==== File buckets (SurrealDB 3.0 experimental) ====
 -- Requires: surreal start --allow-experimental files
@@ -1118,8 +1117,8 @@ DEFINE INDEX spawned_out  ON spawned FIELDS out;
 DEFINE TABLE agent_event_child TYPE RELATION FROM agent_event TO agent_event SCHEMAFULL;
 DEFINE FIELD agent_session ON agent_event_child TYPE record<agent_session>;
 DEFINE FIELD provider      ON agent_event_child TYPE record<agent_provider>;
-DEFINE FIELD kind          ON agent_event_child TYPE string;
-DEFINE FIELD ts            ON agent_event_child TYPE datetime;
+DEFINE FIELD kind          ON agent_event_child TYPE string DEFAULT "parent";
+DEFINE FIELD ts            ON agent_event_child TYPE datetime DEFAULT time::now();
 DEFINE INDEX agent_event_child_in ON agent_event_child FIELDS in;
 DEFINE INDEX agent_event_child_out ON agent_event_child FIELDS out;
 
