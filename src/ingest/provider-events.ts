@@ -103,6 +103,19 @@ const parentEdgeRecordKey = (input: {
 }): string =>
     stableDigest(`${input.parentEventKey}|${input.childEventKey}|${input.kind}`);
 
+const normalizedParentProviderEventIds = (
+    event: AgentEventWrite,
+): readonly string[] => {
+    const parentIds = new Set<string>();
+    if (event.parentProviderEventId !== null && event.parentProviderEventId !== undefined) {
+        parentIds.add(event.parentProviderEventId);
+    }
+    for (const parentProviderEventId of event.parentProviderEventIds ?? []) {
+        parentIds.add(parentProviderEventId);
+    }
+    return [...parentIds];
+};
+
 export function buildAgentProviderStatements(
     providers: readonly AgentProviderWrite[],
 ): string[] {
@@ -120,7 +133,7 @@ export function buildAgentProviderStatements(
 const buildAgentSessionStatement = (session: AgentSessionWrite): string => {
     const sessionKey = agentSessionRecordKey(session.provider, session.providerSessionId);
 
-    return `UPSERT ${recordRef("agent_session", sessionKey)} CONTENT ${surrealObject([
+    return `UPSERT ${recordRef("agent_session", sessionKey)} MERGE ${surrealObject([
         ["provider", recordRef("agent_provider", agentProviderRecordKey(session.provider))],
         ["provider_session_id", surrealString(session.providerSessionId)],
         ["ax_session", surrealOptionRecord("session", session.axSessionId)],
@@ -141,8 +154,7 @@ const buildAgentSessionStatement = (session: AgentSessionWrite): string => {
 const buildAgentEventStatement = (event: AgentEventWrite): string => {
     const sessionKey = agentSessionRecordKey(event.provider, event.providerSessionId);
     const eventKey = agentEventRecordKey(event);
-    const parentProviderEventId =
-        event.parentProviderEventId ?? event.parentProviderEventIds?.[0] ?? null;
+    const parentProviderEventId = normalizedParentProviderEventIds(event)[0] ?? null;
 
     return `UPSERT ${recordRef("agent_event", eventKey)} CONTENT ${surrealObject([
         ["agent_session", recordRef("agent_session", sessionKey)],
@@ -186,7 +198,7 @@ const buildParentEdgeStatements = (
         const sessionKey = agentSessionRecordKey(event.provider, event.providerSessionId);
         const kind = event.parentKind ?? "parent";
 
-        for (const parentProviderEventId of event.parentProviderEventIds ?? []) {
+        for (const parentProviderEventId of normalizedParentProviderEventIds(event)) {
             const parentEventKey = eventKeysByProviderId.get(
                 sameBatchEventLookupKey(
                     event.provider,

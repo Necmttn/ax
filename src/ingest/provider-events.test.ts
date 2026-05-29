@@ -130,7 +130,7 @@ describe("provider event writer statement builders", () => {
             seq: 2,
         });
 
-        expect(sql).toContain(`UPSERT agent_session:\`${sessionKey}\` CONTENT`);
+        expect(sql).toContain(`UPSERT agent_session:\`${sessionKey}\` MERGE`);
         expect(sql).toContain("provider: agent_provider:`codex`");
         expect(sql).toContain("provider_session_id: \"session-1/unsafe\"");
         expect(sql).toContain("ax_session: session:`ax-session-1`");
@@ -158,5 +158,51 @@ describe("provider event writer statement builders", () => {
         expect(sql).toContain("kind = \"reply\"");
         expect(sql).toContain("ts = d\"2026-05-29T01:00:02.000Z\"");
         expect(sql).not.toContain("missing-parent");
+    });
+
+    test("scalar parent event ids create de-duped parent edges", () => {
+        const statements = buildAgentEventStatements({
+            sessions: [],
+            events: [
+                {
+                    provider: "codex",
+                    providerSessionId: "session-1",
+                    providerEventId: "evt-parent",
+                    seq: 1,
+                    ts: "2026-05-29T01:00:01.000Z",
+                    type: "message",
+                },
+                {
+                    provider: "codex",
+                    providerSessionId: "session-1",
+                    providerEventId: "evt-child",
+                    parentProviderEventId: "evt-parent",
+                    parentProviderEventIds: ["evt-parent"],
+                    seq: 2,
+                    ts: "2026-05-29T01:00:02.000Z",
+                    type: "message",
+                },
+            ],
+        });
+
+        const parentKey = agentEventRecordKey({
+            provider: "codex",
+            providerSessionId: "session-1",
+            providerEventId: "evt-parent",
+            seq: 1,
+        });
+        const childKey = agentEventRecordKey({
+            provider: "codex",
+            providerSessionId: "session-1",
+            providerEventId: "evt-child",
+            seq: 2,
+        });
+        const edgeStatements = statements.filter((statement) =>
+            statement.startsWith("RELATE agent_event:"),
+        );
+
+        expect(edgeStatements).toHaveLength(1);
+        expect(edgeStatements[0]).toContain(`RELATE agent_event:\`${parentKey}\``);
+        expect(edgeStatements[0]).toContain(`->agent_event:\`${childKey}\``);
     });
 });
