@@ -467,7 +467,7 @@ Flags:
 
 ### `axctl improve verdict <id>`
 
-Inspect or lock the t+90 verdict.
+Inspect or lock the +30-session verdict.
 
 Flags:
 
@@ -486,8 +486,10 @@ Flags:
 
 ### `axctl improve checkpoint`
 
-Compute checkpoint snapshots at t+7/t+30/t+90 for active experiments. Cron-
-runnable; the weekly self-improve cron will call this.
+Compute checkpoint snapshots at +3/+10/+30 sessions for active experiments
+(session-count windows, not calendar days - see issue #83). Cron-runnable;
+the weekly self-improve cron calls this. Legacy day-based rows (t+7/t+30/t+90)
+from before #83 stay in the DB as historical data and are not re-derived.
 
 ### `axctl improve reset --yes`
 
