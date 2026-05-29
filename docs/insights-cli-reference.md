@@ -627,6 +627,263 @@ removes the session from the next `ax retro pending` result.
 These briefs live next to the older `.ax/tasks/<id>.md` improve briefs
 but in their own subdir to keep listings clean.
 
+## Workflow extraction queries
+
+These commands were shipped in the `feat/workflow-extraction-port-2026-05-29`
+branch. They cover scoped ingest, session navigation, cross-session recall,
+skill classification, role tagging, and role-aware skill views.
+
+### `ax ingest here [--since=Nd] [--stages=...]`
+
+Scope a full ingest run to the git repository at `$PWD`. The claude stage is
+restricted to the matching `~/.claude/projects/<slug>/` transcript directory;
+git history is restricted to this repo path. Codex, Pi, OpenCode, and Cursor
+stages are skipped by default because they have no per-repo cwd filter yet.
+
+Flags:
+
+- `--since=Nd` (e.g. `--since=7`) - only ingest transcripts newer than N days
+- `--stages=<a,b,c>` - run exactly these stages instead of the auto-filtered set
+- `--progress=<plain|json|tui>` - progress reporting mode
+
+```bash
+axctl ingest here --since=3
+axctl ingest here --stages=claude,git,signals
+```
+
+Errors with a clear message when `$PWD` is not inside a git repository.
+
+### `ax sessions here [--days=N] [--json]`
+
+List sessions whose `repository` matches the git repo at `$PWD`, reverse
+chronological, within the last N days.
+
+Flags:
+
+- `--days=N` (default 14) - lookback window
+- `--json` - machine-readable array
+
+```bash
+axctl sessions here
+axctl sessions here --days=7 --json
+```
+
+### `ax sessions around <date> [--days=N --project=PATH] [--json]`
+
+List sessions that started within ±N days of `<date>`. Accepts `YYYY-MM-DD`
+or full ISO 8601.
+
+Flags:
+
+- `--days=N` (default 3) - half-window around the anchor date
+- `--project=PATH` - filter by project slug or absolute repo path
+- `--json`
+
+```bash
+axctl sessions around 2026-05-23
+axctl sessions around 2026-05-23 --days=7 --project=/Users/me/Projects/acme
+```
+
+### `ax sessions near <sha> [--json]`
+
+List sessions whose time range overlaps the commit window around `<sha>` in the
+git repository at `$PWD`. The window is derived from the commit's author date
+and the surrounding parent/child timestamps. Root commits fall back to ±3 days.
+
+Flags:
+
+- `--json`
+
+```bash
+axctl sessions near d923fcc
+axctl sessions near HEAD --json
+```
+
+### `ax sessions show <id> [--expand=<uuid> | --all] [--by-role] [--json]`
+
+Display the invoked-skill and tool-call timeline for one session. Subagent
+sessions are collapsed to one-line summaries by default.
+
+Flags:
+
+- `--expand=<uuid>` (repeatable) - inline the named subagent's contents
+- `--all` - inline all subagent contents
+- `--by-role` - group the Top Skills section by role instead of a flat list;
+  skills without a role appear under "(unclassified)"
+- `--json` - machine-readable; also the default when stdout is not a TTY
+
+`<id>` accepts a bare UUID, a `claude-subagent-<id>` string, or a full
+`session:⟨...⟩` record id.
+
+```bash
+axctl sessions show a1b2c3d4-e5f6-...
+axctl sessions show a1b2c3d4 --expand=f9e8d7c6 --by-role
+axctl sessions show a1b2c3d4 --all --json
+```
+
+### `ax recall <q> [--sources=turn,commit,skill] [--scope=here|all] [--project=? --skill=? --since=ISO] [--json]`
+
+Full-text BM25 recall across sessions, commits, and skill invocations. Returns
+ranked hits with timestamps, project slugs, and excerpt snippets.
+
+Flags:
+
+- `--sources=<turn,commit,skill>` (default all) - comma-separated source types
+- `--scope=here|all` - `here` restricts results to the git repo at `$PWD`;
+  omitting auto-detects (tries `here`, silently falls back to `all`)
+- `--project=<slug|?>` - filter by project slug; `?` opens an interactive picker
+- `--skill=<name|?>` - filter sessions that invoked the named skill; `?` picks
+- `--since=<ISO>` - only results newer than this ISO timestamp
+- `--json`
+
+```bash
+axctl recall "auth middleware"
+axctl recall "schema migration" --scope=here --sources=turn,commit
+axctl recall "retry loop" --project=acme-app --since=2026-05-01 --json
+```
+
+Pass `--project=?` or `--skill=?` on a TTY to get a numbered interactive
+picker; these flags require a value when stdin is not a TTY.
+
+### `ax skills classify [<skill>...] [--out-dir=<path> --dry-run --json]`
+
+Emit one classify brief per unclassified skill into `.ax/tasks/classify-<slug>.md`.
+In default mode (no names), targets all skills with ≥ 3 invocations that have
+no `plays_role` edge with `source` in `("frontmatter", "brief", "user")`. In
+explicit mode (one or more names provided), targets exactly those skills with no
+invocation threshold and no unclassified guard.
+
+Flags:
+
+- `<skill>...` - optional list of skill names to target explicitly
+- `--out-dir=<path>` (default `.ax/tasks/`) - directory to write briefs into
+- `--dry-run` - print briefs to stdout without writing files
+- `--json` - print a JSON array of `{skill, invocations, sessions, path}` records
+
+```bash
+axctl skills classify
+axctl skills classify retro simplify --dry-run
+axctl skills classify --out-dir=.ax/tasks --json
+```
+
+Skips files that already exist (idempotent). The generated briefs are consumed
+by `axctl skills lint` once an agent fills in the `primary_role` frontmatter
+field.
+
+### `ax skills tag <skill> <role> [--confidence=N --rationale="..." --remove]`
+
+Write (or remove) a `plays_role` edge with `source="user"` between a skill and
+a role. Idempotent: any prior user-source edge for the same pair is deleted
+before the new one is created. Run multiple times with different roles to attach
+multiple roles to the same skill.
+
+Flags:
+
+- `--confidence=N` (float 0–1, default 1.0) - confidence score on the edge
+- `--rationale="..."` - free-form rationale stored on the edge
+- `--remove` - delete the user-source edge instead of creating it
+
+Role and skill names are validated at the boundary (alphanumeric, `_` or `-`,
+optionally plugin-namespaced for skills; lowercase alphanumeric and `_` or `-`
+for roles).
+
+```bash
+axctl skills tag retro reflection
+axctl skills tag simplify cleanup --confidence=0.8 --rationale="consistent usage pattern"
+axctl skills tag simplify cleanup --remove
+```
+
+### `ax skills lint [--task-dir=<path> --dry-run --json]`
+
+Scan `.ax/tasks/classify-*.md` for filled briefs (YAML frontmatter with a
+non-empty `primary_role` field), write `plays_role` edges with `source="brief"`,
+and remove each brief file after a successful write. Pending briefs (no
+`primary_role`) are silently skipped. This is the counterpart to `skills
+classify` - classify emits the brief, lint consumes it.
+
+Flags:
+
+- `--task-dir=<path>` (default `.ax/tasks/`) - directory to scan for briefs
+- `--dry-run` - report what would be applied without writing edges or removing files
+- `--json` - machine-readable `LintReport` with `briefs`, `applied`, `pending`,
+  `errors`, and `dryRun` fields
+
+```bash
+axctl skills lint
+axctl skills lint --dry-run
+axctl skills lint --task-dir=.ax/tasks --json
+```
+
+Sweeps all prior `source="brief"` edges for a skill before writing the current
+set, so role shrinkage is handled atomically.
+
+### `ax skills weighted [--window=Nd --limit=N --doctor-threshold=N --json]`
+
+Rank skills by a composite weighted score over a rolling time window. The score
+blends invocations (positive), errors near invocation (negative), user
+corrections within 3 turns (negative), commits produced by sessions that
+invoked the skill (positive), and proposed-but-not-invoked counts (negative).
+
+Flags:
+
+- `--window=Nd` (e.g. `--window=30`) - rolling window in days; omit to use the
+  default window defined by `fetchSkillsWeighted`
+- `--limit=N` (default 25) - rows to show
+- `--doctor-threshold=N` (default 5) - correction count above which a skill is
+  flagged for review
+- `--json`
+
+```bash
+axctl skills weighted
+axctl skills weighted --window=7 --limit=10
+axctl skills weighted --doctor-threshold=3 --json
+```
+
+### `ax skills by-role <role> [--json --limit=N]`
+
+List all skills classified as `<role>`, ranked by invocation count.
+
+Flags:
+
+- `--limit=N` (default 50)
+- `--json`
+
+```bash
+axctl skills by-role reflection
+axctl skills by-role cleanup --limit=20 --json
+```
+
+### `ax skills roles <skill> [--json]`
+
+List all roles assigned to `<skill>` (from any source: `frontmatter`, `brief`,
+`user`, or `inferred`), with confidence scores and sources.
+
+Flags:
+
+- `--json`
+
+Exits with a non-zero status and an error message when the skill name is not
+found in the DB.
+
+```bash
+axctl skills roles retro
+axctl skills roles "superpowers:systematic-debugging" --json
+```
+
+### `ax roles [--json]`
+
+List every role in the DB with the count of skills assigned to it. Useful for
+exploring the taxonomy before tagging or classifying.
+
+Flags:
+
+- `--json`
+
+```bash
+axctl roles
+axctl roles --json
+```
+
 ## Empty DB Benchmarks
 
 Use `scripts/bench-empty-db.sh` for cold ingest timing without mutating
