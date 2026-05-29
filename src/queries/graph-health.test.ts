@@ -5,6 +5,7 @@ import {
     graphHealthSql,
     legacySkillCollisionSql,
     missingProducedScopeSql,
+    providerEventIntegritySql,
     repositorySiblingSql,
 } from "./graph-health.ts";
 
@@ -43,5 +44,12 @@ describe("graph health SQL", () => {
     test("graphHealthSql embeds subqueries without inner terminators", () => {
         expect(graphHealthSql(10)).not.toContain(";),");
         expect(graphHealthSql(10)).toContain("duplicate_relation_edges");
+    });
+
+    test("providerEventIntegritySql reads provider event graph tables", () => {
+        const sql = providerEventIntegritySql(10);
+        expect(sql).toContain("FROM agent_event");
+        expect(sql).toContain("FROM agent_session");
+        expect(sql).toContain("FROM agent_provider");
     });
 });

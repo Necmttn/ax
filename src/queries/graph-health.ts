@@ -88,12 +88,37 @@ export function duplicateRelationEdgesSql(limit: number): string {
 }`;
 }
 
+export function providerEventIntegritySql(limit: number): string {
+    const safeLimit = checkedLimit(limit);
+    return `{
+    events_missing_session: (
+        SELECT id, agent_session, provider, seq, type
+        FROM agent_event
+        WHERE agent_session IS NONE OR provider IS NONE
+        LIMIT ${safeLimit}
+    ),
+    sessions_missing_provider: (
+        SELECT id, provider, provider_session_id, ax_session
+        FROM agent_session
+        WHERE provider IS NONE OR provider_session_id IS NONE
+        LIMIT ${safeLimit}
+    ),
+    providers_without_sessions: (
+        SELECT id, name
+        FROM agent_provider
+        WHERE count(<-agent_session.provider) = 0
+        LIMIT ${safeLimit}
+    )
+}`;
+}
+
 export function graphHealthSql(limit: number): string {
     return `RETURN {
     duplicate_file_identity: (${withoutTerminator(duplicateFileIdentitySql(limit))}),
     repository_sibling: (${withoutTerminator(repositorySiblingSql(limit))}),
     missing_produced_scope: (${withoutTerminator(missingProducedScopeSql(limit))}),
     legacy_skill_collision: (${withoutTerminator(legacySkillCollisionSql(limit))}),
-    duplicate_relation_edges: ${duplicateRelationEdgesSql(limit)}
+    duplicate_relation_edges: ${duplicateRelationEdgesSql(limit)},
+    provider_event_integrity: ${providerEventIntegritySql(limit)}
 };`;
 }
