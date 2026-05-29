@@ -430,6 +430,75 @@ describe("Codex transcript extraction", () => {
         ]);
     });
 
+    test("bounds large function output provider event payloads", () => {
+        const largeOutputBody = "z".repeat(5000);
+        const largeOutput = [
+            "Chunk ID: large",
+            "Wall time: 0.1000 seconds",
+            "Process exited with code 0",
+            "Output:",
+            largeOutputBody,
+        ].join("\n");
+        const extracted = __testExtractCodexJsonlLines([
+            JSON.stringify({
+                type: "session_meta",
+                timestamp: "2026-05-09T10:00:00.000Z",
+                payload: {
+                    id: "codex-large-output",
+                    cwd: "/Users/necmttn/Projects/ax",
+                    timestamp: "2026-05-09T10:00:00.000Z",
+                },
+            }),
+            JSON.stringify({
+                type: "response_item",
+                timestamp: "2026-05-09T10:00:01.000Z",
+                payload: {
+                    type: "function_call",
+                    name: "exec_command",
+                    call_id: "call_large",
+                    arguments: JSON.stringify({ cmd: "printf large" }),
+                },
+            }),
+            JSON.stringify({
+                type: "response_item",
+                timestamp: "2026-05-09T10:00:02.000Z",
+                payload: {
+                    type: "function_call_output",
+                    call_id: "call_large",
+                    output: largeOutput,
+                },
+            }),
+        ]);
+
+        expect(extracted).not.toBeNull();
+        if (!extracted) return;
+
+        const outputEvent = extracted.providerEvents.find(
+            (event) => event.type === "function_call_output",
+        );
+        expect(outputEvent).toBeDefined();
+        if (!outputEvent) return;
+
+        expect(outputEvent.text).toHaveLength(1200);
+        expect(outputEvent.text).toBe(outputEvent.textExcerpt);
+        expect(outputEvent.text).not.toBe(largeOutput);
+        const raw = outputEvent.raw as { output?: unknown };
+        expect(raw).toMatchObject({
+            type: "function_call_output",
+            call_id: "call_large",
+        });
+
+        expect(raw.output).toMatchObject({
+            truncated: true,
+            bytes: expect.any(Number),
+        });
+        const compactedOutput = raw.output as { excerpt?: unknown };
+        expect(typeof compactedOutput.excerpt).toBe("string");
+        if (typeof compactedOutput.excerpt === "string") {
+            expect(compactedOutput.excerpt.length).toBeLessThan(largeOutput.length);
+        }
+    });
+
     test("streaming extraction drains completed tool calls after their output arrives", () => {
         const batches = __testStreamCodexJsonlLines([
             JSON.stringify({

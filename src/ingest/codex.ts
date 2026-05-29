@@ -241,6 +241,17 @@ function compactCodexToolCall(call: MutableToolCallWrite, maxBytes: number): Mut
     };
 }
 
+function compactCodexFunctionOutputEventRaw(
+    payload: Record<string, unknown>,
+    maxBytes: number,
+): Record<string, unknown> {
+    return {
+        type: stringField(payload, "type") ?? "function_call_output",
+        call_id: stringField(payload, "call_id"),
+        output: compactPayload(payload.output, maxBytes),
+    };
+}
+
 function recordKeyPart(input: string, fallback = "_"): string {
     const sanitized = input
         .replace(/[^a-zA-Z0-9]/g, "_")
@@ -389,7 +400,10 @@ interface MutableCodexExtract {
     planSnapshots: PlanSnapshotWrite[];
 }
 
-function createCodexExtractor(filePath: string) {
+function createCodexExtractor(
+    filePath: string,
+    payloadMaxBytes = DEFAULT_CODEX_PAYLOAD_MAX_BYTES,
+) {
     let session: CodexSession | null = null;
     const turns: CodexTurn[] = [];
     const invocations: CodexInvocation[] = [];
@@ -594,9 +608,9 @@ function createCodexExtractor(filePath: string) {
             ts,
             type: "function_call_output",
             role: "function_call_output",
-            text: outputText(payload.output),
+            text: result.outputExcerpt,
             textExcerpt: result.outputExcerpt,
-            raw: payload,
+            raw: compactCodexFunctionOutputEventRaw(payload, payloadMaxBytes),
             labels: {
                 source: "codex_transcript",
                 callId,
@@ -992,7 +1006,7 @@ export const ingestCodex = (
                 });
             }
 
-            const extractor = createCodexExtractor(filePath);
+            const extractor = createCodexExtractor(filePath, payloadMaxBytes);
             let lineCount = 0;
             let currentSession: CodexSession | null = null;
             let sessionUpserted = false;

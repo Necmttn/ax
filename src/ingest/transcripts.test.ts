@@ -629,8 +629,9 @@ describe("Claude transcript extraction", () => {
         expect(new Set(providerSeqs).size).toBe(providerSeqs.length);
 
         for (const call of extracted.toolCalls) {
+            const providerEventId = call.callId ?? null;
             const event = extracted.providerEvents.find(
-                (providerEvent) => providerEvent.providerEventId === call.callId,
+                (providerEvent) => providerEvent.providerEventId === providerEventId,
             );
             expect(event).toBeDefined();
             if (!event) continue;
@@ -638,7 +639,7 @@ describe("Claude transcript extraction", () => {
             expect(call.agentEventKey).toBe(agentEventRecordKey({
                 provider: "claude",
                 providerSessionId: "session-provider-seq",
-                providerEventId: call.callId,
+                providerEventId,
                 seq: event.seq,
             }));
         }
