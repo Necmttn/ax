@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { Effect, Layer } from "effect";
 import { RecordId } from "surrealdb";
 import { SurrealClient } from "../lib/db.ts";
-import { AxConfig } from "../lib/config.ts";
+import { AxConfig, makeTestConfig } from "../lib/config.ts";
 import { deriveClaudeSubagents } from "./derive-claude-subagents.ts";
 
 // ---------------------------------------------------------------------------
@@ -64,23 +64,19 @@ function makeMockDb(queryResponses: Map<string, unknown[][]> = new Map()) {
  * (so discover() returns [] immediately) plus dummy DB config.
  */
 function makeEmptyTranscriptsConfig() {
-    return Layer.succeed(AxConfig, {
+    return Layer.succeed(AxConfig, makeTestConfig({
         paths: {
             home: "/nonexistent",
             transcriptsDir: "/nonexistent-path-for-tests",
             skillDirs: [],
             commandDirs: [],
             codexDir: "/nonexistent-path-for-tests",
+            piDir: "/nonexistent-path-for-tests",
+            opencodeDir: "/nonexistent-path-for-tests",
+            cursorUserDir: "/nonexistent-path-for-tests",
             dataDir: "/nonexistent",
             claudeUsageDir: "/nonexistent",
             repoListFile: "/nonexistent",
-        },
-        db: {
-            url: "ws://127.0.0.1:8521",
-            ns: "ax",
-            db: "main",
-            user: "root",
-            pass: "root",
         },
         knobs: {
             claudeConcurrency: 4,
@@ -90,7 +86,7 @@ function makeEmptyTranscriptsConfig() {
             codexRawMaxBytes: 5 * 1024 * 1024,
             codexPayloadMaxBytes: 1200,
         },
-    } as import("../lib/config.ts").AxConfigShape);
+    }));
 }
 
 /** Convenience: merge db+config layers and run the stage. */
@@ -282,23 +278,19 @@ async function buildFixture(opts: {
 
 /** Config layer that points transcriptsDir at a real temp root. */
 function makeFixtureConfig(transcriptsDir: string) {
-    return Layer.succeed(AxConfig, {
+    return Layer.succeed(AxConfig, makeTestConfig({
         paths: {
             home: "/nonexistent",
             transcriptsDir,
             skillDirs: [],
             commandDirs: [],
             codexDir: "/nonexistent",
+            piDir: "/nonexistent",
+            opencodeDir: "/nonexistent",
+            cursorUserDir: "/nonexistent",
             dataDir: "/nonexistent",
             claudeUsageDir: "/nonexistent",
             repoListFile: "/nonexistent",
-        },
-        db: {
-            url: "ws://127.0.0.1:8521",
-            ns: "ax",
-            db: "main",
-            user: "root",
-            pass: "root",
         },
         knobs: {
             claudeConcurrency: 4,
@@ -308,7 +300,7 @@ function makeFixtureConfig(transcriptsDir: string) {
             codexRawMaxBytes: 5 * 1024 * 1024,
             codexPayloadMaxBytes: 1200,
         },
-    } as import("../lib/config.ts").AxConfigShape);
+    }));
 }
 
 // ---------------------------------------------------------------------------
