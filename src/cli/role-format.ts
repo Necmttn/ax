@@ -12,6 +12,9 @@ import type {
     RoleForSkillRow,
     RoleRow,
 } from "../dashboard/role-queries.ts";
+import type { SessionSkillRoleGroup } from "../lib/shared/dashboard-types.ts";
+
+export type { SessionSkillRoleGroup as ByRoleGroup } from "../lib/shared/dashboard-types.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -280,16 +283,11 @@ export function renderAllRolesJson(result: FetchAllRolesResult): string {
 // ax sessions show --by-role helpers
 // ---------------------------------------------------------------------------
 
-export interface ByRoleGroup {
-    readonly role: string | null;
-    readonly skills: ReadonlyArray<{ readonly skill: string; readonly count: number }>;
-}
-
 /**
  * Render the by-role section for a session show.
  * Groups are ordered: named roles first (by total count DESC), then (unclassified).
  */
-export function renderByRoleSection(groups: ReadonlyArray<ByRoleGroup>): string {
+export function renderByRoleSection(groups: ReadonlyArray<SessionSkillRoleGroup>): string {
     const lines: string[] = [];
     lines.push("## By role");
 
