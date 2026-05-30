@@ -231,6 +231,16 @@ nav.top-nav a.primary {
   margin-top: 20px;
 }
 
+.release-entry-link {
+  display: inline-flex;
+  margin-top: 4px;
+  font-family: var(--mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
 .release-body h3,
 .generated-changelog h2,
 .generated-changelog h3 {
@@ -252,6 +262,55 @@ nav.top-nav a.primary {
 .generated-changelog {
   border-top: 2px solid var(--ink);
   padding-top: 22px;
+}
+
+.generated-changelog summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  cursor: pointer;
+  list-style: none;
+  font-family: var(--mono);
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.generated-changelog summary::-webkit-details-marker {
+  display: none;
+}
+
+.generated-changelog summary::before {
+  content: "+";
+  color: var(--green);
+  margin-right: 8px;
+}
+
+.generated-changelog[open] summary::before {
+  content: "-";
+}
+
+.generated-changelog summary span {
+  flex: 1;
+}
+
+.generated-changelog summary small {
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
+}
+
+.generated-changelog article {
+  padding-top: 22px;
+}
+
+.generated-changelog strong {
+  font-weight: 700;
+}
+
+.release-detail-body {
+  border-top: 2px solid var(--ink);
+  padding-top: 24px;
 }
 
 /* ---------- sections ---------- */
