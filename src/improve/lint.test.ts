@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { Effect, Layer } from "effect";
 import { SurrealClient } from "../lib/db.ts";
 import { DbError } from "../lib/errors.ts";
-import { discoverFiles, lintFiles, type LintTarget, type LintReport } from "./lint.ts";
+import { discoverFiles, lintFiles, type LintTarget } from "./lint.ts";
 
 const make = () => {
     const root = mkdtempSync(join(tmpdir(), "ax-lint-"));

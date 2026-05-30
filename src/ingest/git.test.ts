@@ -233,9 +233,10 @@ describe("ingestGit repoPaths bypass", () => {
             raw: {} as never,
         };
 
-        // Use the current worktree's own repo root as the target - it's a real
-        // git repo so buildRepoInfo succeeds.
-        const repoRoot = "/Users/necmttn/Projects/ax/.claude/worktrees/workflow-extraction-frictions";
+        // Use this test checkout as the target - it is a real git repo in CI
+        // and in local worktrees, so buildRepoInfo succeeds without depending
+        // on a developer-specific path.
+        const repoRoot = process.cwd();
 
         const result = await Effect.runPromise(
             ingestGit({ repoPaths: [repoRoot], sinceDays: 1 }).pipe(
