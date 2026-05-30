@@ -89,11 +89,11 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
             ]),
             codex: supported("Codex JSONL path is stored on normalized session and agent_session rows.", [
                 { path: "src/ingest/codex.ts", contains: "sourcePath: batch.sourcePath" },
-                { path: "src/ingest/codex.ts", contains: "rawFile: rawPointer" },
+                { path: "src/ingest/codex.ts", contains: "raw_file: rawPointer" },
             ]),
             pi: supported("Pi JSONL path is stored on normalized session and agent_session rows.", [
                 { path: "src/ingest/pi.ts", contains: "sourcePath: extract.sourcePath" },
-                { path: "src/ingest/pi.ts", contains: "rawFile: extracted.sourcePath" },
+                { path: "src/ingest/pi.ts", contains: "raw_file: extracted.sourcePath" },
             ]),
             opencode: supported("OpenCode database path is stored on normalized session and agent_session rows.", [
                 { path: "src/ingest/opencode.ts", contains: "sourcePath" },
@@ -226,18 +226,16 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
         key: "token-usage",
         label: "Token/cost usage",
         sharedRecords: ["session_token_usage"],
-        relatedRecords: ["agent_model", "used_model", "agent_used_model"],
         readEvidence: [
-            { path: "src/dashboard/cost-query.ts", contains: "FROM session_token_usage" },
+            { path: "src/queries/wrapped.ts", contains: "FROM session_token_usage" },
             { path: "src/queries/insights.ts", contains: "FROM session_token_usage" },
         ],
         providers: {
             claude: supported("Claude sessions receive estimated token usage from session-health.", [
                 { path: "src/ingest/session-health.ts", contains: "UPSERT ${recordRef(\"session_token_usage\"" },
             ]),
-            codex: supported("Codex token_count events write explicit token usage and session-health can estimate gaps.", [
-                { path: "src/ingest/codex.ts", contains: "buildCodexTokenUsageStatements" },
-                { path: "src/ingest/codex.ts", contains: "recordRef(\"session_token_usage\"" },
+            codex: supported("Codex sessions receive token usage through session-health metrics and estimates.", [
+                { path: "src/ingest/session-health.ts", contains: "UPSERT ${recordRef(\"session_token_usage\"" },
             ]),
             pi: supported("Pi usage fields write explicit token usage when present.", [
                 { path: "src/ingest/pi.ts", contains: "buildPiTokenUsageStatements" },
@@ -296,30 +294,30 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
     {
         key: "derived-analysis",
         label: "Derived analysis and insights",
-        sharedRecords: ["turn_analysis", "semantic_signal", "friction_event", "command_outcome", "session_health"],
+        sharedRecords: ["friction_event", "command_outcome", "session_health"],
         readEvidence: [
-            { path: "src/queries/insights.ts", contains: "FROM turn_analysis" },
+            { path: "src/queries/insights.ts", contains: "FROM command_outcome" },
             { path: "src/queries/insights.ts", contains: "FROM session_health" },
         ],
         providers: {
             claude: supported("Claude normalized turns and tool calls feed shared derived analysis stages.", [
-                { path: "src/ingest/turn-analysis.ts", contains: "recordRef(\"turn_analysis\"" },
+                { path: "src/ingest/outcomes.ts", contains: "recordRef(\"command_outcome\"" },
                 { path: "src/ingest/session-health.ts", contains: "recordRef(\"session_health\"" },
             ]),
             codex: supported("Codex normalized turns and tool calls feed shared derived analysis stages.", [
-                { path: "src/ingest/turn-analysis.ts", contains: "recordRef(\"turn_analysis\"" },
+                { path: "src/ingest/outcomes.ts", contains: "recordRef(\"command_outcome\"" },
                 { path: "src/ingest/session-health.ts", contains: "recordRef(\"session_health\"" },
             ]),
             pi: supported("Pi normalized turns and tool calls feed shared derived analysis stages.", [
-                { path: "src/ingest/turn-analysis.ts", contains: "recordRef(\"turn_analysis\"" },
+                { path: "src/ingest/outcomes.ts", contains: "recordRef(\"command_outcome\"" },
                 { path: "src/ingest/session-health.ts", contains: "recordRef(\"session_health\"" },
             ]),
             opencode: supported("OpenCode normalized turns feed shared derived analysis stages.", [
-                { path: "src/ingest/turn-analysis.ts", contains: "recordRef(\"turn_analysis\"" },
+                { path: "src/ingest/outcomes.ts", contains: "recordRef(\"command_outcome\"" },
                 { path: "src/ingest/session-health.ts", contains: "recordRef(\"session_health\"" },
             ]),
             cursor: supported("Cursor normalized turns feed shared derived analysis stages.", [
-                { path: "src/ingest/turn-analysis.ts", contains: "recordRef(\"turn_analysis\"" },
+                { path: "src/ingest/outcomes.ts", contains: "recordRef(\"command_outcome\"" },
                 { path: "src/ingest/session-health.ts", contains: "recordRef(\"session_health\"" },
             ]),
         },
