@@ -41,6 +41,11 @@ describe("session health derivation", () => {
             cacheReadInputTokens: 500,
             estimatedTokens: 1250,
             contextWindow: 200000,
+            labels: {
+                token_source_quality: "explicit",
+                token_source_detail: "usage_metadata",
+                model_source_quality: "explicit",
+            },
         });
         expect(rows.health[0]).toMatchObject({
             turns: 2,
@@ -70,6 +75,11 @@ describe("session health derivation", () => {
 
         expect(rows.usages[0]?.workflowEpoch).toBe("gsd");
         expect(rows.usages[0]?.estimatedTokens).toBe(Math.ceil(15 / 4));
+        expect(rows.usages[0]?.labels).toMatchObject({
+            token_source_quality: "estimate",
+            token_source_detail: "transcript_byte_estimate",
+            model_source_quality: "unavailable",
+        });
         expect(rows.health[0]).toMatchObject({
             source: "codex",
             toolErrors: 1,
@@ -100,5 +110,7 @@ describe("session health derivation", () => {
         expect(statement).toContain("cache_creation_input_tokens: IF prompt_tokens != NONE OR completion_tokens != NONE OR cache_creation_input_tokens != NONE OR cache_read_input_tokens != NONE THEN cache_creation_input_tokens ELSE NONE END");
         expect(statement).toContain("cache_read_input_tokens: IF prompt_tokens != NONE OR completion_tokens != NONE OR cache_creation_input_tokens != NONE OR cache_read_input_tokens != NONE THEN cache_read_input_tokens ELSE NONE END");
         expect(statement).toContain("estimated_tokens: IF prompt_tokens != NONE OR completion_tokens != NONE OR cache_creation_input_tokens != NONE OR cache_read_input_tokens != NONE THEN estimated_tokens ELSE 42 END");
+        expect(statement).toContain("labels: IF prompt_tokens != NONE OR completion_tokens != NONE OR cache_creation_input_tokens != NONE OR cache_read_input_tokens != NONE THEN labels ELSE");
+        expect(statement).toContain("metrics: IF prompt_tokens != NONE OR completion_tokens != NONE OR cache_creation_input_tokens != NONE OR cache_read_input_tokens != NONE THEN metrics ELSE");
     });
 });

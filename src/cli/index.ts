@@ -50,6 +50,7 @@ import { INSIGHT_VIEWS, insightSqlForView, isInsightView } from "../queries/insi
 import { writeDashboard } from "../dashboard/report.ts";
 import { serveDashboard } from "../dashboard/server.ts";
 import { fetchRecall, type RecallSource, type RecallScope } from "../dashboard/recall.ts";
+import { fetchCostSummary, type CostSummary } from "../dashboard/cost-query.ts";
 import { fetchSessionShow } from "../dashboard/session-show.ts";
 import { renderSessionMarkdown, renderSessionJson } from "./session-show-format.ts";
 import { cmdDaemon, cmdDoctor, cmdInstall, cmdUninstall } from "./install.ts";
@@ -1877,6 +1878,78 @@ const insightsCommand = Command.make(
     },
     ({ view, limit }) => cmdInsights([view, `--limit=${limit}`]),
 ).pipe(Command.withDescription("Run built-in graph insight queries"));
+
+const integer = (value: unknown): string => {
+    const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+    return Number.isFinite(n) ? Math.trunc(n).toLocaleString("en-US") : "0";
+};
+
+const formatCostSummary = (summary: CostSummary): string => {
+    const lines: string[] = [];
+    lines.push(`sessions ${integer(summary.totals.sessions)}  tokens ${integer(summary.totals.estimatedTokens)}`);
+    lines.push(
+        `prompt ${integer(summary.totals.promptTokens)}  output ${integer(summary.totals.completionTokens)}  cache_write ${integer(summary.totals.cacheCreationInputTokens)}  cache_read ${integer(summary.totals.cacheReadInputTokens)}`,
+    );
+    lines.push("");
+    lines.push(`${"source".padEnd(12)} ${"model".padEnd(30)} ${"quality".padEnd(11)} ${"sessions".padStart(8)} ${"tokens".padStart(14)}  unpriced_reason`);
+    for (const row of summary.byModel) {
+        lines.push(
+            `${row.source.padEnd(12)} ` +
+            `${String(row.model ?? "<none>").slice(0, 30).padEnd(30)} ` +
+            `${row.tokenSourceQuality.padEnd(11)} ` +
+            `${integer(row.sessions).padStart(8)} ` +
+            `${integer(row.estimatedTokens).padStart(14)}  ` +
+            `${row.unpricedModelReason ?? ""}`,
+        );
+    }
+    if (summary.sessions.length > 0) {
+        lines.push("");
+        lines.push("recent");
+        for (const row of summary.sessions.slice(0, 20)) {
+            lines.push(
+                `- ${row.session.replace(/^session:/, "")}  ${row.source}  ${row.model ?? "?"}  ${row.tokenSourceQuality}` +
+                `${row.tokenSourceDetail ? `:${row.tokenSourceDetail}` : ""}  ${integer(row.estimatedTokens)} tokens`,
+            );
+        }
+    }
+    return lines.join("\n");
+};
+
+const cmdCostsSummary = (input: { readonly limit: number; readonly source: string | null; readonly sinceDays: number | null; readonly json: boolean }) =>
+    Effect.gen(function* () {
+        const summary = yield* fetchCostSummary(input);
+        if (input.json) {
+            console.log(prettyPrint(summary));
+            return;
+        }
+        if (summary.totals.sessions === 0) {
+            console.log("(no session token usage yet)");
+            return;
+        }
+        console.log(formatCostSummary(summary));
+    });
+
+const costsSummaryCommand = Command.make(
+    "summary",
+    {
+        limit: positiveLimit(20),
+        source: Flag.string("source").pipe(Flag.optional),
+        since: optionalSince,
+        json: jsonFlag,
+    },
+    ({ limit, source, since, json }) =>
+        cmdCostsSummary({
+            limit,
+            source: optionValue(source) ?? null,
+            sinceDays: optionValue(since) ?? null,
+            json,
+        }),
+).pipe(Command.withDescription("Summarize session token usage quality by provider/model"));
+
+const costsCommand = Command.make("costs").pipe(
+    Command.withDescription("Summarize token usage quality and unpriced model reasons"),
+    Command.withSubcommands([costsSummaryCommand]),
+);
 
 /**
  * axctl improve - surface the experiment-loop proposal shortlist.
@@ -4288,6 +4361,7 @@ export const rootCommand = Command.make("axctl").pipe(
         deriveSignalsCommand,
         deriveIntentsCommand,
         insightsCommand,
+        costsCommand,
         sessionsCommand,
         improveCommand,
         retroCommand,
@@ -4376,6 +4450,7 @@ export const DB_COMMANDS: ReadonlySet<string> = new Set([
     "derive-signals",
     "derive-intents",
     "insights",
+    "costs",
     "sessions",
     "improve",
     "retro",

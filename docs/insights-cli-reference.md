@@ -146,10 +146,13 @@ The session health slice adds:
 observed `superpowers:*` skill invocation. This is a heuristic, but it creates a
 stable comparison anchor for dogfooding workflow migration questions.
 
-`session_token_usage` uses Claude insights usage metadata when available
-(`input_tokens`, `output_tokens`, cache token counters, context window) and
-falls back to a transcript-byte token estimate for Claude/Codex sessions without
-provider metrics.
+`session_token_usage` labels token/model quality in its JSON `labels` field.
+`token_source_quality` is `explicit` for provider counters such as Codex
+`token_count`, Pi usage fields, or Claude usage metadata; `estimate` for
+transcript-byte estimates; and `unavailable` when neither counters nor text
+bytes are present. `model_source_quality` distinguishes provider model names
+from missing model metadata. Cost reads also surface `unpriced_model_reason`
+when pricing is not computed for a row.
 
 `session_health` records turns, tool calls, tool errors, correction-like user
 messages, interruption/status/redirect-like user messages, subagent dispatches,
