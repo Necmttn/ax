@@ -79,7 +79,7 @@ export function interventionSafetyMessage(
 ): string {
     const missing = missingInterventionSafetyGates(contract);
     if (missing.length === 0) {
-        return `${form} proposals remain candidate-only until their accept/scaffold adapter is wired`;
+        return `${form} proposal has complete safety gates; run ax improve accept to emit a manual task brief`;
     }
     return `${form} proposals stay open until safety gates are modeled: ${missing.join(", ")}`;
 }

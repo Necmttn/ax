@@ -91,7 +91,7 @@ describe("showExperiment", () => {
             experiment: null,
             checkpoints: [],
         });
-        expect(out).toContain("automation proposals remain candidate-only until their accept/scaffold adapter is wired");
+        expect(out).toContain("automation proposal has complete safety gates; run ax improve accept to emit a manual task brief");
         expect(out).toContain("Recovery Path: Unload the LaunchAgent");
         expect(out).toContain("Failure Mode: fail_open");
     });

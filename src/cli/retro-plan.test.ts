@@ -212,7 +212,7 @@ describe("buildRetroPlanStatements SQL shape", () => {
         expect(built.proposalStatus).toBe("open");
         expect(built.experimentKey).toBeNull();
         expect(built.safetyMessage).toBe(
-            "hook proposals remain candidate-only until their accept/scaffold adapter is wired",
+            "hook proposal has complete safety gates; run ax improve accept to emit a manual task brief",
         );
         expect(built.statements[1]).toMatch(/CREATE hook_proposal:/);
         expect(built.statements[1]).toContain("event_name");
@@ -252,7 +252,7 @@ describe("buildRetroPlanStatements SQL shape", () => {
         expect(built.proposalStatus).toBe("open");
         expect(built.experimentKey).toBeNull();
         expect(built.safetyMessage).toBe(
-            "automation proposals remain candidate-only until their accept/scaffold adapter is wired",
+            "automation proposal has complete safety gates; run ax improve accept to emit a manual task brief",
         );
         expect(built.statements[1]).toMatch(/CREATE automation_proposal:/);
         expect(built.statements[1]).toContain("trigger_signal");
