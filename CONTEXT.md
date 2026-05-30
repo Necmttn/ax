@@ -216,6 +216,12 @@ Recovery Path, smoke test, disable switch, and fail-open/fail-closed behavior
 are modeled.
 _Avoid_: supported proposal type
 
+**Intervention Safety Contract**:
+The safety gates required before a harness-affecting **Intervention** can move
+from candidate queue to accepted Intervention: Recovery Path, smoke test,
+disable switch, and explicit failure mode (`fail_open` or `fail_closed`).
+_Avoid_: safety note
+
 **Agent Tooling**:
 Developer tooling intentionally exposed to agents to improve perception,
 representation, verification, or boundary control.

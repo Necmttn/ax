@@ -1416,6 +1416,11 @@ DEFINE FIELD event_name     ON hook_proposal TYPE string;
     -- PreToolUse | PostToolUse | SessionStart | ...
 DEFINE FIELD target_tool    ON hook_proposal TYPE option<string>;
 DEFINE FIELD hook_command   ON hook_proposal TYPE string;
+DEFINE FIELD recovery_path      ON hook_proposal TYPE option<string>;
+DEFINE FIELD smoke_test_command ON hook_proposal TYPE option<string>;
+DEFINE FIELD disable_command    ON hook_proposal TYPE option<string>;
+DEFINE FIELD failure_mode       ON hook_proposal TYPE option<string>;
+    -- fail_open | fail_closed
 DEFINE INDEX hook_proposal_uq ON hook_proposal FIELDS proposal UNIQUE;
 
 DEFINE TABLE guidance_proposal SCHEMAFULL;
@@ -1432,6 +1437,11 @@ DEFINE FIELD trigger_signal  ON automation_proposal TYPE string;
 DEFINE FIELD schedule        ON automation_proposal TYPE option<string>;
     -- cron expression, "weekly", etc; null = event-driven
 DEFINE FIELD action          ON automation_proposal TYPE string;
+DEFINE FIELD recovery_path      ON automation_proposal TYPE option<string>;
+DEFINE FIELD smoke_test_command ON automation_proposal TYPE option<string>;
+DEFINE FIELD disable_command    ON automation_proposal TYPE option<string>;
+DEFINE FIELD failure_mode       ON automation_proposal TYPE option<string>;
+    -- fail_open | fail_closed
 DEFINE INDEX automation_proposal_uq ON automation_proposal FIELDS proposal UNIQUE;
 
 -- ==== Typed evidence edges ====

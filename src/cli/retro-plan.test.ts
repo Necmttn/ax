@@ -159,9 +159,13 @@ describe("buildRetroPlanStatements SQL shape", () => {
         );
         expect(built.proposalStatus).toBe("open");
         expect(built.experimentKey).toBeNull();
-        expect(built.safetyMessage).toContain("Recovery Path");
+        expect(built.safetyMessage).toBe(
+            "hook proposals stay open until safety gates are modeled: Recovery Path, smoke test, disable switch, failure mode",
+        );
         expect(built.statements[1]).toMatch(/CREATE hook_proposal:/);
         expect(built.statements[1]).toContain("event_name");
+        expect(built.statements[1]).toContain("recovery_path");
+        expect(built.statements[1]).toContain("failure_mode");
         expect(built.statements.length).toBe(2);
     });
 
@@ -172,9 +176,13 @@ describe("buildRetroPlanStatements SQL shape", () => {
         );
         expect(built.proposalStatus).toBe("open");
         expect(built.experimentKey).toBeNull();
-        expect(built.safetyMessage).toContain("Recovery Path");
+        expect(built.safetyMessage).toBe(
+            "automation proposals stay open until safety gates are modeled: Recovery Path, smoke test, disable switch, failure mode",
+        );
         expect(built.statements[1]).toMatch(/CREATE automation_proposal:/);
         expect(built.statements[1]).toContain("trigger_signal");
+        expect(built.statements[1]).toContain("recovery_path");
+        expect(built.statements[1]).toContain("failure_mode");
         expect(built.statements.length).toBe(2);
     });
 

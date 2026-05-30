@@ -240,6 +240,10 @@ export const buildRetroPlanStatements = (
                 ["event_name", surrealString("PreToolUse")],
                 ["target_tool", surrealOptionString(null)],
                 ["hook_command", surrealString(`see plan: ${args.planPath}`)],
+                ["recovery_path", surrealOptionString(null)],
+                ["smoke_test_command", surrealOptionString(null)],
+                ["disable_command", surrealOptionString(null)],
+                ["failure_mode", surrealOptionString(null)],
             ])};`,
         );
     } else {
@@ -250,6 +254,10 @@ export const buildRetroPlanStatements = (
                 ["trigger_signal", surrealString(`retro_meta·slug=${args.slug}`)],
                 ["schedule", surrealOptionString(null)],
                 ["action", surrealString(`see plan: ${args.planPath}`)],
+                ["recovery_path", surrealOptionString(null)],
+                ["smoke_test_command", surrealOptionString(null)],
+                ["disable_command", surrealOptionString(null)],
+                ["failure_mode", surrealOptionString(null)],
             ])};`,
         );
     }

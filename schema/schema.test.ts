@@ -82,6 +82,22 @@ describe("file evidence schema", () => {
     });
 });
 
+describe("intervention safety contract schema", () => {
+    test("hook proposals carry the four safety gates", () => {
+        expect(schema).toContain("DEFINE FIELD recovery_path      ON hook_proposal TYPE option<string>");
+        expect(schema).toContain("DEFINE FIELD smoke_test_command ON hook_proposal TYPE option<string>");
+        expect(schema).toContain("DEFINE FIELD disable_command    ON hook_proposal TYPE option<string>");
+        expect(schema).toContain("DEFINE FIELD failure_mode       ON hook_proposal TYPE option<string>");
+    });
+
+    test("automation proposals carry the four safety gates", () => {
+        expect(schema).toContain("DEFINE FIELD recovery_path      ON automation_proposal TYPE option<string>");
+        expect(schema).toContain("DEFINE FIELD smoke_test_command ON automation_proposal TYPE option<string>");
+        expect(schema).toContain("DEFINE FIELD disable_command    ON automation_proposal TYPE option<string>");
+        expect(schema).toContain("DEFINE FIELD failure_mode       ON automation_proposal TYPE option<string>");
+    });
+});
+
 describe("turn feedback graph schema", () => {
     test("turn_analysis table and read indexes are defined", () => {
         expect(schema).toContain("DEFINE TABLE IF NOT EXISTS turn_analysis SCHEMAFULL");

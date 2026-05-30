@@ -35,6 +35,54 @@ export type InterventionStrength = "advisory" | "workflow" | "automation" | "gua
 export type InterventionObservationStatus = "not_started" | "observed" | "needs_more_evidence";
 export type InterventionConfidence = "low" | "medium" | "high";
 
+export const INTERVENTION_SAFETY_GATES = [
+    "Recovery Path",
+    "smoke test",
+    "disable switch",
+    "failure mode",
+] as const;
+
+export type InterventionSafetyGate = (typeof INTERVENTION_SAFETY_GATES)[number];
+export type InterventionFailureMode = "fail_open" | "fail_closed";
+
+export interface InterventionSafetyContract {
+    readonly recoveryPath?: string | null;
+    readonly smokeTestCommand?: string | null;
+    readonly disableCommand?: string | null;
+    readonly failureMode?: string | null;
+}
+
+const hasText = (value: string | null | undefined): boolean =>
+    typeof value === "string" && value.trim().length > 0;
+
+export function validateInterventionFailureMode(
+    failureMode: string | null | undefined,
+): failureMode is InterventionFailureMode {
+    return failureMode === "fail_open" || failureMode === "fail_closed";
+}
+
+export function missingInterventionSafetyGates(
+    contract: InterventionSafetyContract | null | undefined,
+): InterventionSafetyGate[] {
+    const missing: InterventionSafetyGate[] = [];
+    if (!hasText(contract?.recoveryPath)) missing.push("Recovery Path");
+    if (!hasText(contract?.smokeTestCommand)) missing.push("smoke test");
+    if (!hasText(contract?.disableCommand)) missing.push("disable switch");
+    if (!validateInterventionFailureMode(contract?.failureMode)) missing.push("failure mode");
+    return missing;
+}
+
+export function interventionSafetyMessage(
+    form: string,
+    contract: InterventionSafetyContract | null | undefined,
+): string {
+    const missing = missingInterventionSafetyGates(contract);
+    if (missing.length === 0) {
+        return `${form} proposals remain candidate-only until their accept/scaffold adapter is wired`;
+    }
+    return `${form} proposals stay open until safety gates are modeled: ${missing.join(", ")}`;
+}
+
 export function isAcceptedProposalForm(form: string): form is AcceptedProposalForm {
     return (ACCEPTED_PROPOSAL_FORMS as readonly string[]).includes(form);
 }
@@ -184,9 +232,6 @@ export function planLockVerdict(input: {
     };
 }
 
-export const RETRO_PLAN_UNSAFE_FORM_MESSAGE =
-    "hook and automation proposals stay open until Recovery Path, smoke test, disable switch, and fail-open/fail-closed behavior are modeled";
-
 export type RetroPlanRegistrationPlan =
     | {
         readonly proposalStatus: typeof PROPOSAL_STATUS_ACCEPTED;
@@ -204,6 +249,7 @@ export type RetroPlanRegistrationPlan =
 export function planRetroPlanRegistration(input: {
     readonly form: string;
     readonly leaveOpen: boolean;
+    readonly safetyContract?: InterventionSafetyContract | null;
 }): RetroPlanRegistrationPlan {
     if (input.leaveOpen) {
         return {
@@ -218,7 +264,7 @@ export function planRetroPlanRegistration(input: {
             proposalStatus: PROPOSAL_STATUS_OPEN,
             createExperiment: false,
             experimentStatus: null,
-            safetyMessage: RETRO_PLAN_UNSAFE_FORM_MESSAGE,
+            safetyMessage: interventionSafetyMessage(input.form, input.safetyContract),
         };
     }
     return {

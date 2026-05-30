@@ -5,6 +5,7 @@ import {
     interventionObservationStatus,
     interventionStrengthForConfidence,
     isAcceptedProposalForm,
+    missingInterventionSafetyGates,
     planAcceptCandidate,
     planLockVerdict,
     planRejectCandidate,
@@ -98,7 +99,7 @@ describe("intervention lifecycle vocabulary", () => {
             proposalStatus: "open",
             createExperiment: false,
             experimentStatus: null,
-            safetyMessage: "hook and automation proposals stay open until Recovery Path, smoke test, disable switch, and fail-open/fail-closed behavior are modeled",
+            safetyMessage: "hook proposals stay open until safety gates are modeled: Recovery Path, smoke test, disable switch, failure mode",
         });
         expect(planRetroPlanRegistration({ form: "skill", leaveOpen: true })).toEqual({
             proposalStatus: "open",
@@ -106,6 +107,27 @@ describe("intervention lifecycle vocabulary", () => {
             experimentStatus: null,
             safetyMessage: null,
         });
+    });
+
+    test("models missing safety gates for candidate-only intervention forms", () => {
+        expect(missingInterventionSafetyGates(null)).toEqual([
+            "Recovery Path",
+            "smoke test",
+            "disable switch",
+            "failure mode",
+        ]);
+        expect(missingInterventionSafetyGates({
+            recoveryPath: "Move hook out of .claude/hooks",
+            smokeTestCommand: "bun test",
+            disableCommand: "chmod -x hook.sh",
+            failureMode: "fail_open",
+        })).toEqual([]);
+        expect(missingInterventionSafetyGates({
+            recoveryPath: "Revert launchd plist",
+            smokeTestCommand: "",
+            disableCommand: "launchctl unload x",
+            failureMode: "block",
+        })).toEqual(["smoke test", "failure mode"]);
     });
 
     test("derives harness intervention strength and observation status from lifecycle evidence", () => {
