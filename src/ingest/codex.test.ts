@@ -87,6 +87,97 @@ describe("Codex transcript extraction", () => {
         expect(compacted.outputExcerpt).toBe("hello");
     });
 
+    test("extracts turn_context model and token_count usage rollup", () => {
+        const extracted = __testExtractCodexJsonlLines([
+            JSON.stringify({
+                type: "session_meta",
+                timestamp: "2026-05-09T10:00:00.000Z",
+                payload: {
+                    id: "codex-usage",
+                    cwd: "/Users/necmttn/Projects/ax",
+                    model_provider: "openai",
+                    timestamp: "2026-05-09T10:00:00.000Z",
+                },
+            }),
+            JSON.stringify({
+                type: "turn_context",
+                timestamp: "2026-05-09T10:00:01.000Z",
+                payload: {
+                    model: "gpt-5.5",
+                },
+            }),
+            JSON.stringify({
+                type: "event_msg",
+                timestamp: "2026-05-09T10:00:02.000Z",
+                payload: {
+                    type: "token_count",
+                    info: {
+                        model_context_window: 258400,
+                        last_token_usage: {
+                            input_tokens: 1000,
+                            cached_input_tokens: 250,
+                            output_tokens: 125,
+                            reasoning_output_tokens: 75,
+                            total_tokens: 1200,
+                        },
+                    },
+                },
+            }),
+        ]);
+
+        expect(extracted?.session.model).toBe("gpt-5.5");
+        expect(extracted?.usage).toEqual({
+            inputTokens: 1000,
+            cachedInputTokens: 250,
+            outputTokens: 200,
+            reasoningOutputTokens: 75,
+            totalTokens: 1200,
+            contextWindow: 258400,
+        });
+
+        const sql = __testBuildCodexBatchStatements(extracted!, 1200).join("\n");
+        expect(sql).toContain("UPSERT session_token_usage:`codex_usage`");
+        expect(sql).toContain("model: \"gpt-5.5\"");
+        expect(sql).toContain("prompt_tokens: 1000");
+        expect(sql).toContain("completion_tokens: 200");
+        expect(sql).toContain("cache_read_input_tokens: 250");
+        expect(sql).toContain("context_window: 258400");
+    });
+
+    test("does not treat model_provider as a concrete model", () => {
+        const extracted = __testExtractCodexJsonlLines([
+            JSON.stringify({
+                type: "session_meta",
+                timestamp: "2026-05-09T10:00:00.000Z",
+                payload: {
+                    id: "codex-provider-only",
+                    cwd: "/Users/necmttn/Projects/ax",
+                    model_provider: "openai",
+                    timestamp: "2026-05-09T10:00:00.000Z",
+                },
+            }),
+            JSON.stringify({
+                type: "event_msg",
+                timestamp: "2026-05-09T10:00:02.000Z",
+                payload: {
+                    type: "token_count",
+                    info: {
+                        last_token_usage: {
+                            input_tokens: 1000,
+                            output_tokens: 125,
+                            total_tokens: 1125,
+                        },
+                    },
+                },
+            }),
+        ]);
+
+        const sql = __testBuildCodexBatchStatements(extracted!, 1200).join("\n");
+        expect(sql).not.toContain("model: \"openai\"");
+        expect(sql).toContain("model: NONE");
+    });
+
+
     test("extracts input_text messages and classifies user task and context turns", () => {
         const longTaskText = `Trace the user prompt ingestion path.\n${"y".repeat(620)}`;
         const extracted = __testExtractCodexJsonlLines([

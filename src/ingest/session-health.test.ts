@@ -36,6 +36,7 @@ describe("session health derivation", () => {
         expect(rows.usages[0]).toMatchObject({
             source: "claude",
             workflowEpoch: "superpowers",
+            modelKey: "opus",
             promptTokens: 1000,
             completionTokens: 250,
             cacheReadInputTokens: 500,
@@ -77,12 +78,42 @@ describe("session health derivation", () => {
         });
     });
 
+    test("falls back to agent_session model when session model is missing", () => {
+        const rows = __testBuildSessionHealthRows({
+            firstSuperpowersAt: null,
+            sessions: [{
+                id: "session:`s-agent`",
+                source: "claude",
+                started_at: "2026-05-02T00:00:00.000Z",
+                ended_at: "2026-05-02T00:10:00.000Z",
+            }],
+            turns: [],
+            toolCalls: [],
+            planSnapshots: [],
+            insightMetrics: [],
+            agentSessions: [{
+                id: "agent_session:`a1`",
+                provider: "agent_provider:claude",
+                ax_session: "session:`s-agent`",
+                model: "claude-opus-4-7",
+            }],
+        });
+
+        expect(rows.usages[0]).toMatchObject({
+            model: "claude-opus-4-7",
+            modelKey: "claude-opus-4-7",
+            modelProvider: "anthropic",
+        });
+    });
+
     test("token usage statement preserves existing provider actual token fields over byte estimates", () => {
         const statement = __testTokenUsageStatement({
             sessionKey: "pi-session",
             source: "pi",
             workflowEpoch: null,
             model: "gpt-5.5",
+            modelKey: "gpt-5.5",
+            modelProvider: "openai",
             promptTokens: null,
             completionTokens: null,
             cacheCreationInputTokens: null,
@@ -90,6 +121,14 @@ describe("session health derivation", () => {
             estimatedTokens: 42,
             transcriptBytes: 168,
             contextWindow: null,
+            cost: {
+                inputUsd: null,
+                outputUsd: null,
+                cacheCreationUsd: null,
+                cacheReadUsd: null,
+                totalUsd: null,
+                pricingSource: null,
+            },
             labels: { source: "session_health", token_source: "byte_estimate" },
             metrics: { turn_bytes: 168 },
             ts: "2026-05-29T07:00:00.000Z",
@@ -100,5 +139,40 @@ describe("session health derivation", () => {
         expect(statement).toContain("cache_creation_input_tokens: IF prompt_tokens != NONE OR completion_tokens != NONE OR cache_creation_input_tokens != NONE OR cache_read_input_tokens != NONE THEN cache_creation_input_tokens ELSE NONE END");
         expect(statement).toContain("cache_read_input_tokens: IF prompt_tokens != NONE OR completion_tokens != NONE OR cache_creation_input_tokens != NONE OR cache_read_input_tokens != NONE THEN cache_read_input_tokens ELSE NONE END");
         expect(statement).toContain("estimated_tokens: IF prompt_tokens != NONE OR completion_tokens != NONE OR cache_creation_input_tokens != NONE OR cache_read_input_tokens != NONE THEN estimated_tokens ELSE 42 END");
+        expect(statement).toContain("model_ref: agent_model:`gpt-5.5`");
+        expect(statement).toContain("estimated_cost_usd: NONE");
+    });
+
+    test("prices cache tokens as separate buckets, not subtracted from input", () => {
+        const rows = __testBuildSessionHealthRows({
+            firstSuperpowersAt: null,
+            sessions: [{
+                id: "session:`s3`",
+                source: "claude",
+                model: "claude-opus-4-7",
+                started_at: "2026-05-02T00:00:00.000Z",
+                ended_at: "2026-05-02T00:10:00.000Z",
+            }],
+            turns: [],
+            toolCalls: [],
+            planSnapshots: [],
+            insightMetrics: [{
+                subject_id: "s3",
+                metrics: JSON.stringify({
+                    input_tokens: 100,
+                    output_tokens: 20,
+                    cache_creation_input_tokens: 10,
+                    cache_read_input_tokens: 5,
+                }),
+            }],
+        });
+
+        expect(rows.usages[0]?.cost).toMatchObject({
+            inputUsd: 0.0005,
+            outputUsd: 0.0005,
+            cacheCreationUsd: 0.0000625,
+            cacheReadUsd: 0.0000025,
+            totalUsd: 0.001065,
+        });
     });
 });

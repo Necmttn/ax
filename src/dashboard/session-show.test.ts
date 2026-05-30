@@ -42,6 +42,7 @@ const makePayload = (
     children,
     parent: null,
     agent_delegations: [],
+    token_usage: null,
 });
 
 // ---------------------------------------------------------------------------

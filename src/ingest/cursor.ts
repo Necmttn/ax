@@ -4,13 +4,16 @@ import { isAbsolute, join, relative } from "node:path";
 import { Database } from "bun:sqlite";
 import { Effect, Schema } from "effect";
 import { AxConfig } from "../lib/config.ts";
-import { RecordId, SurrealClient } from "../lib/db.ts";
+import { SurrealClient } from "../lib/db.ts";
 import type { DbError } from "../lib/errors.ts";
 import { executeStatements } from "../lib/shared/statement-exec.ts";
-import { recordRef, surrealDate, surrealString } from "../lib/shared/surql.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
-import { agentEventRecordKey, buildAgentEventStatements, buildAgentProviderStatements, type AgentEventWrite } from "./provider-events.ts";
-import { identityPart, turnRecordKey } from "./record-keys.ts";
+import type { AgentEventWrite } from "./provider-events.ts";
+import { identityPart } from "./record-keys.ts";
+import {
+    buildNormalizedTranscriptStatements,
+    upsertNormalizedSessions,
+} from "./normalized/transcripts.ts";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 
@@ -516,34 +519,23 @@ export function extractCursorStateDb(dbPath: string, options: CursorExtractOptio
     }
 }
 
-const buildTurnStatements = (turns: readonly CursorTurn[]): string[] =>
-    turns.map((turn) => {
-        const eventKey = agentEventRecordKey({
-            provider: "cursor",
-            providerSessionId: turn.session,
-            providerEventId: turn.providerEventId,
-            seq: turn.seq,
-        });
-        return `UPSERT turn:\`${turnRecordKey(turn.session, turn.seq)}\` CONTENT { session: ${recordRef("session", turn.session)}, agent_event: ${recordRef("agent_event", eventKey)}, seq: ${turn.seq}, ts: ${surrealDate(turn.ts)}, role: ${surrealString(turn.role)}, message_kind: ${surrealString(turn.message_kind)}, intent_kind: ${surrealString(turn.intent_kind)}, text: ${turn.text === null ? "NONE" : surrealString(turn.text)}, text_excerpt: ${turn.text_excerpt === null ? "NONE" : surrealString(turn.text_excerpt)}, has_tool_use: ${turn.has_tool_use}, has_error: ${turn.has_error} };`;
-    });
-
 const buildCursorBatchStatements = (extract: CursorExtract, sourcePath: string): string[] => [
-    ...buildAgentProviderStatements([
-        {
-            name: "cursor",
-            displayName: "Cursor",
-            capabilities: {
-                sqlite: true,
-                transcripts: true,
-                providerGraph: true,
+    ...buildNormalizedTranscriptStatements({
+        providers: [
+            {
+                name: "cursor",
+                displayName: "Cursor",
+                capabilities: {
+                    sqlite: true,
+                    transcripts: true,
+                    providerGraph: true,
+                },
             },
-        },
-    ]),
-    ...buildAgentEventStatements({
+        ],
         sessions: extract.sessions.map((session) => ({
+            id: session.id,
             provider: "cursor",
             providerSessionId: session.id,
-            axSessionId: session.id,
             title: session.title,
             sourcePath,
             raw: {
@@ -566,8 +558,25 @@ const buildCursorBatchStatements = (extract: CursorExtract, sourcePath: string):
             endedAt: session.ended_at,
         })),
         events: extract.providerEvents,
+        turns: extract.turns.map((turn) => ({
+            sessionId: turn.session,
+            seq: turn.seq,
+            ts: turn.ts,
+            role: turn.role,
+            messageKind: turn.message_kind,
+            intentKind: turn.intent_kind,
+            text: turn.text,
+            textExcerpt: turn.text_excerpt,
+            hasToolUse: turn.has_tool_use,
+            hasError: turn.has_error,
+            agentEvent: {
+                provider: "cursor",
+                providerSessionId: turn.session,
+                providerEventId: turn.providerEventId,
+                seq: turn.seq,
+            },
+        })),
     }),
-    ...buildTurnStatements(extract.turns),
 ];
 
 async function includeDbByMtime(dbPath: string, cutoffMs: number): Promise<boolean> {
@@ -617,7 +626,6 @@ export const ingestCursor = (
 ): Effect.Effect<CursorStats, DbError, SurrealClient | AxConfig> =>
     Effect.gen(function* () {
         const cfg = yield* AxConfig;
-        const db = yield* SurrealClient;
         const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
         const dbPaths = yield* Effect.promise(() => findCursorStateDbs(cfg.paths.cursorUserDir, cutoff));
         let sessionCount = 0;
@@ -633,14 +641,13 @@ export const ingestCursor = (
             warnings += extract.warnings.length;
             if (extract.sessions.length === 0) continue;
 
-            for (const session of extract.sessions) {
-                yield* db.upsert(new RecordId("session", session.id), {
-                    source: "cursor",
-                    started_at: new Date(session.started_at),
-                    ended_at: new Date(session.ended_at),
-                    raw_file: session.sourcePath,
-                });
-            }
+            yield* upsertNormalizedSessions(extract.sessions.map((session) => ({
+                id: session.id,
+                provider: "cursor",
+                startedAt: session.started_at,
+                endedAt: session.ended_at,
+                rawFile: session.sourcePath,
+            })));
             yield* executeStatements(buildCursorBatchStatements(extract, dbPath), { chunkSize: 500 });
             sessionCount += extract.sessions.length;
             turnCount += extract.turns.length;

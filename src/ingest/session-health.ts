@@ -8,6 +8,18 @@ import { surrealDate, surrealJsonOption, surrealObject, surrealOptionInt, surrea
 import { executeStatementsWith } from "../lib/shared/statement-exec.ts";
 import { deriveTaskLabel } from "../lib/shared/task-label.ts";
 import { isoTimestamp, recordKeyPart, safeKeyPart, type TimestampInput } from "../lib/shared/derive-keys.ts";
+import {
+    agentModelStatement,
+    builtInPricingCatalog,
+    estimateCost,
+    inferModelProvider,
+    normalizeModelName,
+    pricingForModel,
+    pricingRowsToCatalog,
+    type AgentModelPricingRow,
+    type CostEstimate,
+    type ModelPricing,
+} from "./model-pricing.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -49,11 +61,22 @@ interface InsightMetricRow {
     readonly metrics?: string;
 }
 
+interface AgentSessionModelRow {
+    readonly id: unknown;
+    readonly provider: unknown;
+    readonly ax_session?: unknown;
+    readonly model?: string | null;
+    readonly started_at?: TimestampInput;
+    readonly ended_at?: TimestampInput;
+}
+
 export interface SessionTokenUsage {
     readonly sessionKey: string;
     readonly source: string;
     readonly workflowEpoch: "gsd" | "superpowers" | null;
     readonly model: string | null;
+    readonly modelKey: string | null;
+    readonly modelProvider: string | null;
     readonly promptTokens: number | null;
     readonly completionTokens: number | null;
     readonly cacheCreationInputTokens: number | null;
@@ -61,6 +84,7 @@ export interface SessionTokenUsage {
     readonly estimatedTokens: number;
     readonly transcriptBytes: number;
     readonly contextWindow: number | null;
+    readonly cost: CostEstimate;
     readonly labels: JsonRecord;
     readonly metrics: JsonRecord;
     readonly ts: string;
@@ -98,6 +122,11 @@ export interface SessionHealthStats {
 
 const sqlOptionFloat = (value: number | null | undefined): string =>
     value === null || value === undefined ? "NONE" : Number(value.toFixed(4)).toString();
+
+const sqlOptionUsd = (value: number | null | undefined): string =>
+    value === null || value === undefined || !Number.isFinite(value)
+        ? "NONE"
+        : Number(value.toFixed(8)).toString();
 
 function parseMetrics(input: string | null | undefined): JsonRecord {
     if (!input) return {};
@@ -148,7 +177,9 @@ function buildRows(input: {
     readonly toolCalls: readonly ToolCallRow[];
     readonly planSnapshots: readonly PlanSnapshotRow[];
     readonly insightMetrics: readonly InsightMetricRow[];
+    readonly agentSessions?: readonly AgentSessionModelRow[];
     readonly firstSuperpowersAt: string | null;
+    readonly pricingCatalog?: ReadonlyMap<string, ModelPricing>;
 }): { readonly usages: SessionTokenUsage[]; readonly health: SessionHealth[] } {
     const turnsBySession = new Map<string, TurnRow[]>();
     for (const turn of input.turns) {
@@ -182,6 +213,15 @@ function buildRows(input: {
         metricsBySession.set(key, parseMetrics(row.metrics));
     }
 
+    const agentModelBySession = new Map<string, string>();
+    for (const row of input.agentSessions ?? []) {
+        const sessionKey = recordKeyPart(row.ax_session, "session");
+        const model = normalizeModelName(row.model);
+        if (sessionKey && model && !agentModelBySession.has(sessionKey)) {
+            agentModelBySession.set(sessionKey, model);
+        }
+    }
+
     const usages: SessionTokenUsage[] = [];
     const health: SessionHealth[] = [];
     for (const session of input.sessions) {
@@ -207,6 +247,18 @@ function buildRows(input: {
         const estimatedTokens = promptTokens !== null || completionTokens !== null
             ? (promptTokens ?? 0) + (completionTokens ?? 0)
             : Math.ceil(transcriptBytes / 4);
+        const sessionModel = session.model ?? agentModelBySession.get(sessionKey) ?? null;
+        const modelKey = normalizeModelName(sessionModel);
+        const pricing = pricingForModel(modelKey, input.pricingCatalog);
+        const cost = estimateCost({
+            modelKey,
+            promptTokens,
+            completionTokens,
+            cacheCreationInputTokens,
+            cacheReadInputTokens,
+            estimatedTokens,
+            ...(input.pricingCatalog ? { pricingCatalog: input.pricingCatalog } : {}),
+        });
         const cacheReadRatio = ratio(cacheReadInputTokens, promptTokens);
         const cacheCreationRatio = ratio(cacheCreationInputTokens, promptTokens);
         const epoch = workflowEpochFor(startedAt, input.firstSuperpowersAt);
@@ -231,7 +283,9 @@ function buildRows(input: {
             sessionKey,
             source,
             workflowEpoch: epoch,
-            model: session.model ?? null,
+            model: sessionModel,
+            modelKey,
+            modelProvider: pricing?.provider ?? (modelKey ? inferModelProvider(modelKey) : null),
             promptTokens,
             completionTokens,
             cacheCreationInputTokens,
@@ -239,6 +293,7 @@ function buildRows(input: {
             estimatedTokens,
             transcriptBytes,
             contextWindow,
+            cost,
             labels: {
                 source: "session_health",
                 token_source: promptTokens !== null || completionTokens !== null ? "usage_metadata" : "byte_estimate",
@@ -246,6 +301,8 @@ function buildRows(input: {
             metrics: {
                 cache_read_ratio: cacheReadRatio,
                 cache_creation_ratio: cacheCreationRatio,
+                estimated_cost_usd: cost.totalUsd,
+                pricing_source: cost.pricingSource,
                 turn_bytes: turnBytes,
                 tool_bytes: toolBytes,
             },
@@ -326,6 +383,13 @@ function tokenUsageStatement(row: SessionTokenUsage): string {
         ["estimated_tokens", `IF ${existingActualTokenUsage} THEN estimated_tokens ELSE ${Math.trunc(row.estimatedTokens).toString(10)} END`],
         ["transcript_bytes", Math.trunc(row.transcriptBytes).toString(10)],
         ["context_window", surrealOptionInt(row.contextWindow)],
+        ["model_ref", row.modelKey ? recordRef("agent_model", row.modelKey) : "NONE"],
+        ["estimated_input_cost_usd", sqlOptionUsd(row.cost.inputUsd)],
+        ["estimated_output_cost_usd", sqlOptionUsd(row.cost.outputUsd)],
+        ["estimated_cache_creation_cost_usd", sqlOptionUsd(row.cost.cacheCreationUsd)],
+        ["estimated_cache_read_cost_usd", sqlOptionUsd(row.cost.cacheReadUsd)],
+        ["estimated_cost_usd", sqlOptionUsd(row.cost.totalUsd)],
+        ["pricing_source", surrealOptionString(row.cost.pricingSource)],
         ["labels", surrealJsonOption(row.labels)],
         ["metrics", surrealJsonOption(row.metrics)],
         ["ts", surrealDate(row.ts)],
@@ -333,6 +397,50 @@ function tokenUsageStatement(row: SessionTokenUsage): string {
 }
 
 export const __testTokenUsageStatement = tokenUsageStatement;
+
+function sessionModelEdgeStatement(row: SessionTokenUsage): string | null {
+    if (!row.modelKey) return null;
+    const edgeKey = safeKeyPart(`${row.sessionKey}__${row.modelKey}`);
+    return `RELATE ${recordRef("session", row.sessionKey)}->used_model:\`${edgeKey}\`->${recordRef("agent_model", row.modelKey)} SET ${[
+        `session_token_usage = ${recordRef("session_token_usage", safeKeyPart(row.sessionKey))}`,
+        `source = ${surrealString(row.source)}`,
+        `estimated_tokens = ${Math.trunc(row.estimatedTokens).toString(10)}`,
+        `estimated_cost_usd = ${sqlOptionUsd(row.cost.totalUsd)}`,
+        `pricing_source = ${surrealOptionString(row.cost.pricingSource)}`,
+        `ts = ${surrealDate(row.ts)}`,
+    ].join(", ")};`;
+}
+
+function agentSessionModelStatements(
+    rows: readonly AgentSessionModelRow[],
+    pricingCatalog?: ReadonlyMap<string, ModelPricing>,
+): string[] {
+    const statements: string[] = [];
+    const seenModels = new Set<string>();
+    const seenEdges = new Set<string>();
+    for (const row of rows) {
+        const modelKey = normalizeModelName(row.model);
+        const agentSessionKey = recordKeyPart(row.id, "agent_session");
+        const providerRef = String(row.provider ?? "");
+        if (!modelKey || !agentSessionKey || !providerRef) continue;
+        if (!seenModels.has(modelKey)) {
+            statements.push(agentModelStatement({
+                modelKey,
+                displayName: row.model ?? modelKey,
+                ...(pricingCatalog ? { pricingCatalog } : {}),
+            }));
+            seenModels.add(modelKey);
+        }
+        const edgeKey = safeKeyPart(`${agentSessionKey}__${modelKey}`);
+        if (seenEdges.has(edgeKey)) continue;
+        seenEdges.add(edgeKey);
+        const ts = isoTimestamp(row.ended_at ?? row.started_at);
+        statements.push(
+            `RELATE ${recordRef("agent_session", agentSessionKey)}->agent_used_model:\`${edgeKey}\`->${recordRef("agent_model", modelKey)} SET provider = ${providerRef}, source = "agent_session", ts = ${surrealDate(ts)};`,
+        );
+    }
+    return statements;
+}
 
 function sessionHealthStatement(row: SessionHealth): string {
     return `UPSERT ${recordRef("session_health", safeKeyPart(row.sessionKey))} MERGE ${surrealObject([
@@ -380,7 +488,7 @@ export const deriveSessionHealth = (
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         const firstSuperpowersAt = yield* fetchFirstSuperpowersAt();
-        const [sessions, turns, toolCalls, planSnapshots, insightMetrics] = yield* Effect.all([
+        const [sessions, turns, toolCalls, planSnapshots, insightMetrics, agentSessions, pricingRows] = yield* Effect.all([
             db.query<[SessionRow[]]>(`
 SELECT id, source, model, type::string(started_at) AS started_at, type::string(ended_at) AS ended_at
 FROM session
@@ -402,7 +510,23 @@ ${sinceWhere("ts", opts.sinceDays)};`).pipe(Effect.map((rows) => rows?.[0] ?? []
 SELECT subject_id, metrics
 FROM insight
 WHERE kind = "claude_insights";`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
-        ], { concurrency: 5 });
+            db.query<[AgentSessionModelRow[]]>(`
+SELECT id, provider, ax_session, model, type::string(started_at) AS started_at, type::string(ended_at) AS ended_at
+FROM agent_session
+${sinceWhere("started_at", opts.sinceDays)}
+ORDER BY started_at DESC;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
+            db.query<[AgentModelPricingRow[]]>(`
+SELECT name, provider, input_per_million_usd, output_per_million_usd,
+       cache_creation_per_million_usd, cache_read_per_million_usd,
+       input_above_200k_per_million_usd, output_above_200k_per_million_usd,
+       cache_creation_above_200k_per_million_usd, cache_read_above_200k_per_million_usd,
+       fast_multiplier, context_window, pricing_source
+FROM agent_model;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
+        ], { concurrency: 7 });
+        const pricingCatalog = pricingRowsToCatalog(pricingRows);
+        for (const [modelKey, pricing] of builtInPricingCatalog()) {
+            if (!pricingCatalog.has(modelKey)) pricingCatalog.set(modelKey, pricing);
+        }
 
         const { usages, health } = buildRows({
             sessions,
@@ -410,12 +534,30 @@ WHERE kind = "claude_insights";`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
             toolCalls,
             planSnapshots,
             insightMetrics,
+            agentSessions,
             firstSuperpowersAt,
+            pricingCatalog,
         });
+        const modelStatements = new Map<string, string>();
+        for (const usage of usages) {
+            if (!usage.modelKey) continue;
+            modelStatements.set(
+                usage.modelKey,
+                agentModelStatement({
+                    modelKey: usage.modelKey,
+                    provider: usage.modelProvider,
+                    displayName: usage.model ?? usage.modelKey,
+                    pricingCatalog,
+                }),
+            );
+        }
         const statements = [
             ...workflowEpochStatements(firstSuperpowersAt),
+            ...modelStatements.values(),
             ...usages.map(tokenUsageStatement),
+            ...usages.map(sessionModelEdgeStatement).filter((stmt): stmt is string => stmt !== null),
             ...health.map(sessionHealthStatement),
+            ...agentSessionModelStatements(agentSessions, pricingCatalog),
         ];
         yield* executeStatementsWith(db, statements, { chunkSize: 500 });
         return {
@@ -457,7 +599,7 @@ export class SessionHealthStageStats extends BaseStageStats.extend<SessionHealth
 }) {}
 
 export const sessionHealthStage: StageDef<SessionHealthStageStats, SurrealClient> = {
-    meta: StageMeta.make({ key: "session-health", deps: ["signals"], tags: ["derive", "health"] }),
+    meta: StageMeta.make({ key: "session-health", deps: ["pricing", "signals"], tags: ["derive", "health"] }),
     run: (ctx: IngestContext) =>
         Effect.gen(function* () {
             const t0 = Date.now();

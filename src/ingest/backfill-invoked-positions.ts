@@ -46,6 +46,8 @@ export interface BackfillInvokedPositionsStats {
 type AffectedPairRow = { session: unknown; skill: unknown };
 type GroupRow = {
     id: unknown;
+    session: unknown;
+    skill: unknown;
     seq: unknown;
     turn_index: unknown;
     total_turns: unknown;
@@ -60,11 +62,23 @@ export const backfillInvokedPositions = (): Effect.Effect<
     Effect.gen(function* () {
         const db = yield* SurrealClient;
 
-        const affectedPairs = (yield* db.query<[Array<AffectedPairRow>]>(
-            `SELECT DISTINCT in.session AS session, out AS skill
+        const affectedRows = (yield* db.query<[Array<AffectedPairRow>]>(
+            `SELECT \`in\`.session AS session, out AS skill
              FROM invoked
              WHERE turn_index IS NONE OR total_turns IS NONE OR is_first IS NONE;`,
         ))?.[0] ?? [];
+
+        const affectedPairs = Array.from(
+            new Map(
+                affectedRows
+                    .map((row) => ({
+                        session: String(row.session ?? ""),
+                        skill: String(row.skill ?? ""),
+                    }))
+                    .filter((row) => row.session !== "" && row.skill !== "")
+                    .map((row) => [`${row.session}|||${row.skill}`, row] as const),
+            ).values(),
+        );
 
         if (affectedPairs.length === 0) {
             return { backfilled: 0, sessions: 0 };
@@ -83,6 +97,22 @@ export const backfillInvokedPositions = (): Effect.Effect<
 
         const stmts: string[] = [];
         const seenSessions = new Set<string>();
+        const affectedKeys = new Set(affectedPairs.map((pair) => `${pair.session}|||${pair.skill}`));
+        const allGroupRows = (yield* db.query<[Array<GroupRow>]>(
+            `SELECT id, \`in\`.session AS session, out AS skill, \`in\`.seq AS seq, turn_index, total_turns, is_first
+             FROM invoked
+             ORDER BY \`in\`.session ASC, out ASC, \`in\`.seq ASC;`,
+        ))?.[0] ?? [];
+        const rowsByPair = new Map<string, GroupRow[]>();
+        for (const row of allGroupRows) {
+            const session = String(row.session ?? "");
+            const skill = String(row.skill ?? "");
+            const key = `${session}|||${skill}`;
+            if (!affectedKeys.has(key)) continue;
+            const bucket = rowsByPair.get(key) ?? [];
+            bucket.push(row);
+            rowsByPair.set(key, bucket);
+        }
 
         for (const pair of affectedPairs) {
             const session = String(pair.session ?? "");
@@ -91,13 +121,7 @@ export const backfillInvokedPositions = (): Effect.Effect<
 
             seenSessions.add(session);
 
-            const groupRows = (yield* db.query<[Array<GroupRow>]>(
-                `SELECT id, in.seq AS seq, turn_index, total_turns, is_first
-                 FROM invoked
-                 WHERE in.session = ${session} AND out = ${skill}
-                 ORDER BY in.seq ASC;`,
-            ))?.[0] ?? [];
-
+            const groupRows = rowsByPair.get(`${session}|||${skill}`) ?? [];
             if (groupRows.length === 0) continue;
 
             const totalTurns = turnCountBySession.get(session) ?? null;

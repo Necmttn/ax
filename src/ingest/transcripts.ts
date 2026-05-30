@@ -1,7 +1,7 @@
 import { readdir, stat, open } from "node:fs/promises";
 import { join, basename, isAbsolute, resolve } from "node:path";
 import { Effect, Schema } from "effect";
-import { RecordId, SurrealClient, filePointer } from "../lib/db.ts";
+import { SurrealClient, filePointer } from "../lib/db.ts";
 import { AxConfig } from "../lib/config.ts";
 import { surrealLiteral } from "../lib/json.ts";
 import { decodeJsonOrNull } from "../lib/decode.ts";
@@ -20,8 +20,6 @@ import {
 } from "./evidence-writers.ts";
 import {
     agentEventRecordKey,
-    buildAgentEventStatements,
-    buildAgentProviderStatements,
     type AgentEventWrite,
 } from "./provider-events.ts";
 import {
@@ -38,6 +36,11 @@ import {
     toolCallRecordKey,
     turnRecordKey,
 } from "./record-keys.ts";
+import {
+    buildNormalizedTranscriptStatements,
+    buildNormalizedTurnStatements,
+    upsertNormalizedSessions,
+} from "./normalized/transcripts.ts";
 
 import { executeStatements, executeStatementsWith } from "../lib/shared/statement-exec.ts";
 
@@ -1075,25 +1078,16 @@ export {
 };
 
 const upsertSessions = (sessions: Session[]) =>
-    Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        yield* Effect.forEach(
-            sessions,
-            (s) =>
-                // SurrealDB v3 rejects JS `null` for `option<T>` fields - the
-                // JS client must see `undefined` to encode NONE. See issue #37.
-                db.upsert(new RecordId("session", s.id), {
-                    project: s.project ?? undefined,
-                    cwd: s.cwd ?? undefined,
-                    model: s.model ?? undefined,
-                    source: "claude",
-                    started_at: s.started_at ? new Date(s.started_at) : undefined,
-                    ended_at: s.ended_at ? new Date(s.ended_at) : undefined,
-                    raw_file: s.raw_file ?? undefined,
-                }),
-            { concurrency: 4, discard: true },
-        );
-    });
+    upsertNormalizedSessions(sessions.map((session) => ({
+        id: session.id,
+        provider: "claude",
+        project: session.project,
+        cwd: session.cwd,
+        model: session.model,
+        startedAt: session.started_at,
+        endedAt: session.ended_at,
+        rawFile: session.raw_file,
+    })));
 
 /**
  * Snapshot the original transcript jsonl into the `transcripts` bucket and
@@ -1133,14 +1127,18 @@ const upsertTurns = (turns: Turn[]) =>
     });
 
 const buildTurnStatements = (turns: readonly Turn[]): string[] =>
-    turns.map(
-        (t) =>
-            `UPSERT turn:\`${turnRecordKey(t.session, t.seq)}\` CONTENT { session: session:\`${t.session}\`, seq: ${t.seq}, ts: d"${t.ts}", role: "${t.role}", message_kind: ${surrealLiteral(t.message_kind)}, intent_kind: ${surrealLiteral(t.intent_kind)}, text: ${
-                t.text === null ? "NONE" : surrealLiteral(t.text)
-            }, text_excerpt: ${
-                t.text_excerpt === null ? "NONE" : surrealLiteral(t.text_excerpt)
-            }, has_tool_use: ${t.has_tool_use}, has_error: ${t.has_error} };`,
-    );
+    buildNormalizedTurnStatements(turns.map((turn) => ({
+        sessionId: turn.session,
+        seq: turn.seq,
+        ts: turn.ts,
+        role: turn.role,
+        messageKind: turn.message_kind,
+        intentKind: turn.intent_kind,
+        text: turn.text,
+        textExcerpt: turn.text_excerpt,
+        hasToolUse: turn.has_tool_use,
+        hasError: turn.has_error,
+    })));
 
 const escapeRecordKey = (key: string): string =>
     key
@@ -1285,22 +1283,22 @@ const writeHookEvidence = (
     ]);
 
 const buildClaudeProviderStatements = (extracted: FileExtract): string[] => [
-    ...buildAgentProviderStatements([
-        {
-            name: "claude",
-            displayName: "Claude Code",
-            capabilities: {
-                transcripts: true,
-                toolCalls: true,
+    ...buildNormalizedTranscriptStatements({
+        providers: [
+            {
+                name: "claude",
+                displayName: "Claude Code",
+                capabilities: {
+                    transcripts: true,
+                    toolCalls: true,
+                },
             },
-        },
-    ]),
-    ...buildAgentEventStatements({
+        ],
         sessions: [
             {
+                id: extracted.session.id,
                 provider: "claude",
                 providerSessionId: extracted.session.id,
-                axSessionId: extracted.session.id,
                 cwd: extracted.session.cwd,
                 project: extracted.session.project,
                 model: extracted.session.model,
@@ -1323,6 +1321,7 @@ const buildClaudeProviderStatements = (extracted: FileExtract): string[] => [
             },
         ],
         events: extracted.providerEvents,
+        turns: [],
     }),
 ];
 

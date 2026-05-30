@@ -1,11 +1,20 @@
 import { readdir, stat, open } from "node:fs/promises";
 import { join } from "node:path";
 import { Effect, Schema } from "effect";
-import { RecordId, SurrealClient, filePointer } from "../lib/db.ts";
+import { SurrealClient, filePointer } from "../lib/db.ts";
 import { AxConfig } from "../lib/config.ts";
 import { decodeJsonOrNull } from "../lib/decode.ts";
 import { skillRecordKey } from "../lib/skill-id.ts";
-import { surrealString } from "../lib/shared/surql.ts";
+import { safeKeyPart } from "../lib/shared/derive-keys.ts";
+import {
+    recordRef,
+    surrealDate,
+    surrealJsonTextOption,
+    surrealObject,
+    surrealOptionInt,
+    surrealOptionString,
+    surrealString,
+} from "../lib/shared/surql.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
@@ -21,8 +30,6 @@ import {
 import {
     buildAgentEventParentEdgeStatement,
     agentEventRecordKey,
-    buildAgentEventStatements,
-    buildAgentProviderStatements,
     type AgentEventParentEdgeWrite,
     type AgentEventWrite,
 } from "./provider-events.ts";
@@ -36,6 +43,10 @@ import { classifyTurnIntent } from "./intent-kind.ts";
 import { normalizeCodexUpdatePlan, type PlanStatus } from "./plans.ts";
 import { invokedRelationRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import { executeStatements } from "../lib/shared/statement-exec.ts";
+import {
+    buildNormalizedTranscriptStatements,
+    upsertNormalizedSessions,
+} from "./normalized/transcripts.ts";
 
 const DEFAULT_CODEX_RAW_MAX_BYTES = 5 * 1024 * 1024;
 const DEFAULT_CODEX_PROGRESS_EVERY = 10;
@@ -49,6 +60,7 @@ interface CodexSession {
     cwd: string | null;
     cli_version: string | null;
     model_provider: string | null;
+    model: string | null;
     started_at: string;
     ended_at: string;
 }
@@ -73,6 +85,15 @@ interface CodexInvocation {
     args: unknown;
 }
 
+interface CodexUsage {
+    inputTokens: number;
+    cachedInputTokens: number;
+    outputTokens: number;
+    reasoningOutputTokens: number;
+    totalTokens: number;
+    contextWindow: number | null;
+}
+
 function parseJsonl(line: string): Record<string, unknown> | null {
     const decoded = decodeJsonOrNull(line);
     return isRecord(decoded) ? decoded : null;
@@ -85,6 +106,11 @@ function isRecord(input: unknown): input is Record<string, unknown> {
 function stringField(input: Record<string, unknown>, field: string): string | null {
     const value = input[field];
     return typeof value === "string" ? value : null;
+}
+
+function numberField(input: Record<string, unknown>, field: string): number | null {
+    const value = input[field];
+    return typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : null;
 }
 
 function parseCodexArguments(input: unknown): unknown {
@@ -383,6 +409,7 @@ async function walkJsonlFiles(root: string, cutoffMs: number): Promise<CodexFile
 interface CodexExtract {
     session: CodexSession;
     sourcePath: string | null;
+    usage: CodexUsage;
     turns: CodexTurn[];
     invocations: CodexInvocation[];
     toolCalls: ToolCallWrite[];
@@ -395,6 +422,7 @@ interface CodexExtract {
 interface MutableCodexExtract {
     session: CodexSession | null;
     sourcePath: string | null;
+    usage: CodexUsage;
     turns: CodexTurn[];
     invocations: CodexInvocation[];
     toolCalls: MutableToolCallWrite[];
@@ -425,8 +453,44 @@ function createCodexExtractor(
     const flushedToolCallKeys = new Set<string>();
     const providerEventKeysById = new Map<string, string>();
     const pendingProviderEventIds = new Set<string>();
+    const usage: CodexUsage = {
+        inputTokens: 0,
+        cachedInputTokens: 0,
+        outputTokens: 0,
+        reasoningOutputTokens: 0,
+        totalTokens: 0,
+        contextWindow: null,
+    };
     let lastProviderEventId: string | null = null;
     let seq = 0;
+
+    const applyTokenCount = (payload: Record<string, unknown>): void => {
+        if (stringField(payload, "type") !== "token_count") return;
+        const info = isRecord(payload.info) ? payload.info : null;
+        if (!info) return;
+        const last = isRecord(info.last_token_usage) ? info.last_token_usage : null;
+        const total = isRecord(info.total_token_usage) ? info.total_token_usage : null;
+        const source = last ?? total;
+        if (!source) return;
+        const input = numberField(source, "input_tokens") ?? 0;
+        const cached = numberField(source, "cached_input_tokens")
+            ?? numberField(source, "cache_read_input_tokens")
+            ?? numberField(source, "cached_tokens")
+            ?? 0;
+        const output = numberField(source, "output_tokens") ?? 0;
+        const reasoning = numberField(source, "reasoning_output_tokens")
+            ?? numberField(source, "reasoning_tokens")
+            ?? 0;
+        const totalTokens = numberField(source, "total_tokens") ?? input + output + reasoning;
+        usage.inputTokens += input;
+        usage.cachedInputTokens += Math.min(cached, input);
+        usage.outputTokens += output + reasoning;
+        usage.reasoningOutputTokens += reasoning;
+        usage.totalTokens += totalTokens;
+        usage.contextWindow = numberField(info, "model_context_window") ?? usage.contextWindow;
+        const model = stringField(info, "model") ?? stringField(payload, "model");
+        if (model && session) session.model = model;
+    };
 
     const pushProviderEvent = (event: Omit<AgentEventWrite, "provider" | "providerSessionId" | "axSessionId">, currentSession: CodexSession): void => {
         const {
@@ -738,6 +802,7 @@ function createCodexExtractor(
         return {
             session,
             sourcePath: filePath,
+            usage: { ...usage },
             turns: drainedTurns,
             invocations: drainedInvocations,
             toolCalls: drainedToolCalls,
@@ -764,6 +829,7 @@ function createCodexExtractor(
                     cwd: stringField(payload, "cwd"),
                     cli_version: stringField(payload, "cli_version"),
                     model_provider: stringField(payload, "model_provider"),
+                    model: stringField(payload, "model"),
                     started_at: stringField(payload, "timestamp") ?? ts,
                     ended_at: ts,
                 };
@@ -771,6 +837,21 @@ function createCodexExtractor(
             }
             if (!session) return;
             session.ended_at = ts;
+
+            if (type === "turn_context" && payload) {
+                const model = stringField(payload, "model")
+                    ?? (isRecord(payload.collaboration_mode) &&
+                        isRecord(payload.collaboration_mode.settings)
+                        ? stringField(payload.collaboration_mode.settings, "model")
+                        : null);
+                if (model) session.model = model;
+                return;
+            }
+
+            if (type === "event_msg" && payload) {
+                applyTokenCount(payload);
+                if (stringField(payload, "type") === "token_count") return;
+            }
 
             if (type === "response_item" && payload) {
                 seq += 1;
@@ -833,6 +914,7 @@ function createCodexExtractor(
             return {
                 session,
                 sourcePath: remaining.sourcePath,
+                usage: remaining.usage,
                 turns: remaining.turns,
                 invocations: remaining.invocations,
                 toolCalls: remaining.toolCalls,
@@ -891,12 +973,6 @@ export function __testStreamCodexJsonlLines(lines: Iterable<string>, every: numb
     return batches;
 }
 
-const buildTurnStatements = (turns: readonly CodexTurn[]): string[] =>
-    turns.map(
-        (t) =>
-            `UPSERT turn:\`${turnRecordKey(t.session, t.seq)}\` CONTENT { session: session:\`${t.session}\`, seq: ${t.seq}, ts: d"${t.ts}", role: ${surrealString(t.role)}, message_kind: ${surrealString(t.message_kind)}, intent_kind: ${surrealString(t.intent_kind)}, text: ${t.text === null ? "NONE" : surrealString(t.text)}, text_excerpt: ${t.text_excerpt === null ? "NONE" : surrealString(t.text_excerpt)}, has_tool_use: ${t.has_tool_use}, has_error: false };`,
-    );
-
 const buildSyntheticSkillAndInvocationStatements = (
     invocations: readonly CodexInvocation[],
 ): string[] => {
@@ -923,8 +999,8 @@ export const __testCompactCodexToolCall = compactCodexToolCall;
 
 const buildCodexProviderStatements = (batch: MutableCodexExtract): string[] => {
     if (!batch.session) return [];
-    return [
-        ...buildAgentProviderStatements([
+    return buildNormalizedTranscriptStatements({
+        providers: [
             {
                 name: "codex",
                 displayName: "Codex",
@@ -934,36 +1010,74 @@ const buildCodexProviderStatements = (batch: MutableCodexExtract): string[] => {
                     toolCalls: true,
                 },
             },
-        ]),
-        ...buildAgentEventStatements({
-            sessions: [
-                {
-                    provider: "codex",
-                    providerSessionId: batch.session.id,
-                    axSessionId: batch.session.id,
-                    cwd: batch.session.cwd,
-                    project: batch.session.cwd,
-                    model: batch.session.model_provider,
-                    sourcePath: batch.sourcePath,
-                    raw: {
-                        source: "codex_transcript",
-                        cliVersion: batch.session.cli_version,
-                        modelProvider: batch.session.model_provider,
-                    },
-                    labels: {
-                        source: "transcript",
-                    },
-                    metrics: {
-                        turns: batch.turns.length,
-                        toolCalls: batch.toolCalls.length,
-                        providerEvents: batch.providerEvents.length,
-                    },
-                    startedAt: batch.session.started_at,
-                    endedAt: batch.session.ended_at,
+        ],
+        sessions: [
+            {
+                id: batch.session.id,
+                provider: "codex",
+                providerSessionId: batch.session.id,
+                cwd: batch.session.cwd,
+                project: batch.session.cwd,
+                model: batch.session.model,
+                sourcePath: batch.sourcePath,
+                raw: {
+                    source: "codex_transcript",
+                    cliVersion: batch.session.cli_version,
+                    modelProvider: batch.session.model_provider,
+                    model: batch.session.model,
                 },
-            ],
-            events: batch.providerEvents,
-        }),
+                labels: {
+                    source: "transcript",
+                },
+                metrics: {
+                    turns: batch.turns.length,
+                    toolCalls: batch.toolCalls.length,
+                    providerEvents: batch.providerEvents.length,
+                },
+                startedAt: batch.session.started_at,
+                endedAt: batch.session.ended_at,
+            },
+        ],
+        events: batch.providerEvents,
+        turns: batch.turns.map((turn) => ({
+            sessionId: turn.session,
+            seq: turn.seq,
+            ts: turn.ts,
+            role: turn.role,
+            messageKind: turn.message_kind,
+            intentKind: turn.intent_kind,
+            text: turn.text,
+            textExcerpt: turn.text_excerpt,
+            hasToolUse: turn.has_tool_use,
+            hasError: false,
+        })),
+    });
+};
+
+const buildCodexTokenUsageStatements = (batch: MutableCodexExtract): string[] => {
+    if (!batch.session) return [];
+    const usage = batch.usage;
+    if (!Object.values(usage).some((value) => typeof value === "number" && value > 0)) return [];
+    const estimatedTokens = usage.totalTokens > 0
+        ? usage.totalTokens
+        : usage.inputTokens + usage.outputTokens;
+    return [
+        `UPSERT ${recordRef("session_token_usage", safeKeyPart(batch.session.id))} MERGE ${surrealObject([
+            ["session", recordRef("session", batch.session.id)],
+            ["source", surrealString("codex")],
+            ["workflow_epoch", "NONE"],
+            ["model", surrealOptionString(batch.session.model)],
+            ["prompt_tokens", surrealOptionInt(usage.inputTokens || null)],
+            ["completion_tokens", surrealOptionInt(usage.outputTokens || null)],
+            ["cache_creation_input_tokens", "NONE"],
+            ["cache_read_input_tokens", surrealOptionInt(usage.cachedInputTokens || null)],
+            ["estimated_tokens", Math.trunc(estimatedTokens).toString(10)],
+            ["transcript_bytes", "0"],
+            ["context_window", surrealOptionInt(usage.contextWindow)],
+            ["labels", surrealJsonTextOption({ source: "codex_token_count" })],
+            ["metrics", surrealJsonTextOption({ usage })],
+            ["ts", surrealDate(batch.session.ended_at)],
+        ])};`,
     ];
 };
 
@@ -972,7 +1086,7 @@ const buildCodexBatchStatements = (
     payloadMaxBytes: number,
 ): string[] => [
     ...buildCodexProviderStatements(batch),
-    ...buildTurnStatements(batch.turns),
+    ...buildCodexTokenUsageStatements(batch),
     ...buildToolCallStatements(batch.toolCalls.map((call) =>
         compactCodexToolCall(call, payloadMaxBytes),
     )),
@@ -1105,15 +1219,16 @@ export const ingestCodex = (
                 session: CodexSession,
                 rawPointer: string | null,
             ) =>
-                db.upsert(new RecordId("session", session.id), {
-                    project: session.cwd ?? undefined,
-                    cwd: session.cwd ?? undefined,
-                    model: session.model_provider ?? undefined,
-                    source: "codex",
-                    started_at: new Date(session.started_at),
-                    ended_at: new Date(session.ended_at),
-                    raw_file: rawPointer ?? undefined,
-                });
+                upsertNormalizedSessions([{
+                    id: session.id,
+                    provider: "codex",
+                    project: session.cwd,
+                    cwd: session.cwd,
+                    model: session.model ?? session.model_provider,
+                    startedAt: session.started_at,
+                    endedAt: session.ended_at,
+                    rawFile: rawPointer,
+                }]);
 
             const writeBatch = (batch: MutableCodexExtract) =>
                 Effect.gen(function* () {

@@ -1,0 +1,578 @@
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { Effect, Schema } from "effect";
+import { AxConfig } from "../lib/config.ts";
+import { SurrealClient } from "../lib/db.ts";
+import type { DbError } from "../lib/errors.ts";
+import { executeStatementsWith } from "../lib/shared/statement-exec.ts";
+import { recordRef, surrealObject, surrealOptionInt, surrealOptionString, surrealString } from "../lib/shared/surql.ts";
+import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
+import type { StageDef } from "./stage/registry.ts";
+
+const LITELLM_PRICING_URL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
+const MODELS_DEV_API_URL = "https://models.dev/api.json";
+
+export const MODEL_PRICING_SOURCE = "built_in_catalog_2026-05-29";
+
+export interface ModelPricing {
+    readonly provider: string;
+    readonly inputPerMillionUsd: number | null;
+    readonly outputPerMillionUsd: number | null;
+    readonly cacheCreationPerMillionUsd: number | null;
+    readonly cacheReadPerMillionUsd: number | null;
+    readonly inputAbove200kPerMillionUsd?: number | null;
+    readonly outputAbove200kPerMillionUsd?: number | null;
+    readonly cacheCreationAbove200kPerMillionUsd?: number | null;
+    readonly cacheReadAbove200kPerMillionUsd?: number | null;
+    readonly fastMultiplier: number;
+    readonly contextWindow?: number | null;
+    readonly pricingSource: string | null;
+}
+
+export interface CostEstimate {
+    readonly inputUsd: number | null;
+    readonly outputUsd: number | null;
+    readonly cacheCreationUsd: number | null;
+    readonly cacheReadUsd: number | null;
+    readonly totalUsd: number | null;
+    readonly pricingSource: string | null;
+}
+
+export interface AgentModelPricingRow {
+    readonly name?: string | null;
+    readonly provider?: string | null;
+    readonly input_per_million_usd?: number | null;
+    readonly output_per_million_usd?: number | null;
+    readonly cache_creation_per_million_usd?: number | null;
+    readonly cache_read_per_million_usd?: number | null;
+    readonly input_above_200k_per_million_usd?: number | null;
+    readonly output_above_200k_per_million_usd?: number | null;
+    readonly cache_creation_above_200k_per_million_usd?: number | null;
+    readonly cache_read_above_200k_per_million_usd?: number | null;
+    readonly fast_multiplier?: number | null;
+    readonly context_window?: number | null;
+    readonly pricing_source?: string | null;
+}
+
+const sqlOptionUsd = (value: number | null | undefined): string =>
+    value === null || value === undefined || !Number.isFinite(value)
+        ? "NONE"
+        : Number(value.toFixed(8)).toString();
+
+const dollarsPerTokenToPerMillion = (value: unknown): number | null => {
+    const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+    return Number.isFinite(n) ? n * 1_000_000 : null;
+};
+
+const numberOrNull = (value: unknown): number | null => {
+    const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+    return Number.isFinite(n) ? n : null;
+};
+
+const intOrNull = (value: unknown): number | null => {
+    const n = numberOrNull(value);
+    return n === null ? null : Math.trunc(n);
+};
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+    typeof value === "object" && value !== null && !Array.isArray(value)
+        ? value as Record<string, unknown>
+        : null;
+
+const withCacheDefaults = (pricing: ModelPricing): ModelPricing => ({
+    ...pricing,
+    cacheCreationPerMillionUsd: pricing.cacheCreationPerMillionUsd ?? (pricing.inputPerMillionUsd === null ? null : pricing.inputPerMillionUsd * 1.25),
+    cacheReadPerMillionUsd: pricing.cacheReadPerMillionUsd ?? (pricing.inputPerMillionUsd === null ? null : pricing.inputPerMillionUsd * 0.1),
+});
+
+export const BUILTIN_MODEL_PRICING_CATALOG: Readonly<Record<string, ModelPricing>> = {
+    "gpt-5": {
+        provider: "openai",
+        inputPerMillionUsd: 1.25,
+        outputPerMillionUsd: 10,
+        cacheCreationPerMillionUsd: null,
+        cacheReadPerMillionUsd: 0.125,
+        fastMultiplier: 1,
+        pricingSource: MODEL_PRICING_SOURCE,
+    },
+    "gpt-5-codex": {
+        provider: "openai",
+        inputPerMillionUsd: 1.75,
+        outputPerMillionUsd: 14,
+        cacheCreationPerMillionUsd: 1.75,
+        cacheReadPerMillionUsd: 0.175,
+        fastMultiplier: 1,
+        pricingSource: MODEL_PRICING_SOURCE,
+    },
+    "gpt-5.1-codex": {
+        provider: "openai",
+        inputPerMillionUsd: 1.25,
+        outputPerMillionUsd: 10,
+        cacheCreationPerMillionUsd: 1.25,
+        cacheReadPerMillionUsd: 0.125,
+        fastMultiplier: 1,
+        pricingSource: MODEL_PRICING_SOURCE,
+    },
+    "gpt-5.2-codex": {
+        provider: "openai",
+        inputPerMillionUsd: 1.75,
+        outputPerMillionUsd: 14,
+        cacheCreationPerMillionUsd: 1.75,
+        cacheReadPerMillionUsd: 0.175,
+        fastMultiplier: 1,
+        pricingSource: MODEL_PRICING_SOURCE,
+    },
+    "gpt-5.3-codex": {
+        provider: "openai",
+        inputPerMillionUsd: 1.75,
+        outputPerMillionUsd: 14,
+        cacheCreationPerMillionUsd: 1.75,
+        cacheReadPerMillionUsd: 0.175,
+        fastMultiplier: 2,
+        pricingSource: MODEL_PRICING_SOURCE,
+    },
+    "gpt-5.3-codex-spark": {
+        provider: "openai",
+        inputPerMillionUsd: 1.75,
+        outputPerMillionUsd: 14,
+        cacheCreationPerMillionUsd: 1.75,
+        cacheReadPerMillionUsd: 0.175,
+        fastMultiplier: 2,
+        pricingSource: MODEL_PRICING_SOURCE,
+    },
+    "gpt-5.4": {
+        provider: "openai",
+        inputPerMillionUsd: 2.5,
+        outputPerMillionUsd: 15,
+        cacheCreationPerMillionUsd: 2.5,
+        cacheReadPerMillionUsd: 0.25,
+        fastMultiplier: 2,
+        pricingSource: MODEL_PRICING_SOURCE,
+    },
+    "gpt-5.5": {
+        provider: "openai",
+        inputPerMillionUsd: 5,
+        outputPerMillionUsd: 30,
+        cacheCreationPerMillionUsd: 5,
+        cacheReadPerMillionUsd: 0.5,
+        fastMultiplier: 2.5,
+        pricingSource: MODEL_PRICING_SOURCE,
+    },
+    "gpt-5-mini": {
+        provider: "openai",
+        inputPerMillionUsd: 0.25,
+        outputPerMillionUsd: 2,
+        cacheCreationPerMillionUsd: null,
+        cacheReadPerMillionUsd: 0.025,
+        fastMultiplier: 1,
+        pricingSource: MODEL_PRICING_SOURCE,
+    },
+    "gpt-5-nano": {
+        provider: "openai",
+        inputPerMillionUsd: 0.05,
+        outputPerMillionUsd: 0.4,
+        cacheCreationPerMillionUsd: null,
+        cacheReadPerMillionUsd: 0.005,
+        fastMultiplier: 1,
+        pricingSource: MODEL_PRICING_SOURCE,
+    },
+    "gpt-4.1": {
+        provider: "openai",
+        inputPerMillionUsd: 2,
+        outputPerMillionUsd: 8,
+        cacheCreationPerMillionUsd: null,
+        cacheReadPerMillionUsd: 0.5,
+        fastMultiplier: 1,
+        pricingSource: MODEL_PRICING_SOURCE,
+    },
+    "gpt-4.1-mini": {
+        provider: "openai",
+        inputPerMillionUsd: 0.4,
+        outputPerMillionUsd: 1.6,
+        cacheCreationPerMillionUsd: null,
+        cacheReadPerMillionUsd: 0.1,
+        fastMultiplier: 1,
+        pricingSource: MODEL_PRICING_SOURCE,
+    },
+    "gpt-4.1-nano": {
+        provider: "openai",
+        inputPerMillionUsd: 0.1,
+        outputPerMillionUsd: 0.4,
+        cacheCreationPerMillionUsd: null,
+        cacheReadPerMillionUsd: 0.025,
+        fastMultiplier: 1,
+        pricingSource: MODEL_PRICING_SOURCE,
+    },
+    "claude-opus-4": {
+        provider: "anthropic",
+        inputPerMillionUsd: 15,
+        outputPerMillionUsd: 75,
+        cacheCreationPerMillionUsd: 18.75,
+        cacheReadPerMillionUsd: 1.5,
+        fastMultiplier: 1,
+        pricingSource: MODEL_PRICING_SOURCE,
+    },
+    "claude-opus-4-5": {
+        provider: "anthropic",
+        inputPerMillionUsd: 5,
+        outputPerMillionUsd: 25,
+        cacheCreationPerMillionUsd: 6.25,
+        cacheReadPerMillionUsd: 0.5,
+        fastMultiplier: 1,
+        pricingSource: MODEL_PRICING_SOURCE,
+    },
+    "claude-opus-4-6": {
+        provider: "anthropic",
+        inputPerMillionUsd: 5,
+        outputPerMillionUsd: 25,
+        cacheCreationPerMillionUsd: 6.25,
+        cacheReadPerMillionUsd: 0.5,
+        fastMultiplier: 1,
+        pricingSource: MODEL_PRICING_SOURCE,
+    },
+    "claude-opus-4-7": {
+        provider: "anthropic",
+        inputPerMillionUsd: 5,
+        outputPerMillionUsd: 25,
+        cacheCreationPerMillionUsd: 6.25,
+        cacheReadPerMillionUsd: 0.5,
+        fastMultiplier: 1,
+        pricingSource: MODEL_PRICING_SOURCE,
+    },
+    "claude-opus-4-8": {
+        provider: "anthropic",
+        inputPerMillionUsd: 5,
+        outputPerMillionUsd: 25,
+        cacheCreationPerMillionUsd: 6.25,
+        cacheReadPerMillionUsd: 0.5,
+        fastMultiplier: 1,
+        pricingSource: MODEL_PRICING_SOURCE,
+    },
+    "claude-opus-4.1": {
+        provider: "anthropic",
+        inputPerMillionUsd: 15,
+        outputPerMillionUsd: 75,
+        cacheCreationPerMillionUsd: 18.75,
+        cacheReadPerMillionUsd: 1.5,
+        fastMultiplier: 1,
+        pricingSource: MODEL_PRICING_SOURCE,
+    },
+    "claude-sonnet-4": {
+        provider: "anthropic",
+        inputPerMillionUsd: 3,
+        outputPerMillionUsd: 15,
+        cacheCreationPerMillionUsd: 3.75,
+        cacheReadPerMillionUsd: 0.3,
+        fastMultiplier: 1,
+        pricingSource: MODEL_PRICING_SOURCE,
+    },
+};
+
+export function normalizeModelName(model: string | null | undefined): string | null {
+    const trimmed = model?.trim();
+    if (!trimmed || trimmed === "<synthetic>") return null;
+    const key = trimmed.toLowerCase();
+    if (key === "openai" || key === "anthropic" || key === "google" || key === "deepseek" || key === "qwen") {
+        return null;
+    }
+    return key;
+}
+
+export function inferModelProvider(modelKey: string): string {
+    if (modelKey.startsWith("claude-")) return "anthropic";
+    if (modelKey.startsWith("gpt-") || modelKey.startsWith("o") || modelKey === "openai") return "openai";
+    if (modelKey.includes("gemini")) return "google";
+    if (modelKey.includes("deepseek")) return "deepseek";
+    if (modelKey.includes("qwen")) return "qwen";
+    return "unknown";
+}
+
+export function parseLiteLlmPricingCatalog(input: unknown): Map<string, ModelPricing> {
+    const root = asRecord(input);
+    const catalog = new Map<string, ModelPricing>();
+    if (!root) return catalog;
+    for (const [rawKey, rawValue] of Object.entries(root)) {
+        const modelKey = normalizeModelName(rawKey);
+        const row = asRecord(rawValue);
+        if (!modelKey || !row) continue;
+        const inputPerMillionUsd = dollarsPerTokenToPerMillion(row.input_cost_per_token);
+        const outputPerMillionUsd = dollarsPerTokenToPerMillion(row.output_cost_per_token);
+        if (inputPerMillionUsd === null && outputPerMillionUsd === null) continue;
+        catalog.set(modelKey, withCacheDefaults({
+            provider: typeof row.litellm_provider === "string" ? row.litellm_provider : inferModelProvider(modelKey),
+            inputPerMillionUsd,
+            outputPerMillionUsd,
+            cacheCreationPerMillionUsd: dollarsPerTokenToPerMillion(row.cache_creation_input_token_cost),
+            cacheReadPerMillionUsd: dollarsPerTokenToPerMillion(row.cache_read_input_token_cost),
+            inputAbove200kPerMillionUsd: dollarsPerTokenToPerMillion(row.input_cost_per_token_above_200k_tokens),
+            outputAbove200kPerMillionUsd: dollarsPerTokenToPerMillion(row.output_cost_per_token_above_200k_tokens),
+            cacheCreationAbove200kPerMillionUsd: dollarsPerTokenToPerMillion(row.cache_creation_input_token_cost_above_200k_tokens),
+            cacheReadAbove200kPerMillionUsd: dollarsPerTokenToPerMillion(row.cache_read_input_token_cost_above_200k_tokens),
+            fastMultiplier: 1,
+            contextWindow: intOrNull(row.max_input_tokens ?? row.max_tokens),
+            pricingSource: "litellm",
+        }));
+    }
+    return catalog;
+}
+
+export function parseModelsDevPricingCatalog(input: unknown): Map<string, ModelPricing> {
+    const root = asRecord(input);
+    const catalog = new Map<string, ModelPricing>();
+    if (!root) return catalog;
+    for (const [providerName, providerValue] of Object.entries(root)) {
+        const provider = asRecord(providerValue);
+        const models = asRecord(provider?.models);
+        if (!models) continue;
+        for (const [rawKey, rawModel] of Object.entries(models)) {
+            const model = asRecord(rawModel);
+            const cost = asRecord(model?.cost);
+            const limit = asRecord(model?.limit);
+            const modelKey = normalizeModelName(typeof model?.id === "string" ? model.id : rawKey);
+            if (!modelKey || !cost) continue;
+            const inputPerMillionUsd = numberOrNull(cost.input);
+            const outputPerMillionUsd = numberOrNull(cost.output);
+            if (inputPerMillionUsd === null && outputPerMillionUsd === null) continue;
+            catalog.set(modelKey, withCacheDefaults({
+                provider: providerName,
+                inputPerMillionUsd,
+                outputPerMillionUsd,
+                cacheCreationPerMillionUsd: numberOrNull(cost.cache_write ?? cost.write),
+                cacheReadPerMillionUsd: numberOrNull(cost.cache_read ?? cost.read),
+                fastMultiplier: 1,
+                contextWindow: intOrNull(limit?.context ?? model?.context_window),
+                pricingSource: "models.dev",
+            }));
+        }
+    }
+    return catalog;
+}
+
+export function mergePricingCatalogs(...catalogs: readonly ReadonlyMap<string, ModelPricing>[]): Map<string, ModelPricing> {
+    const merged = new Map<string, ModelPricing>();
+    for (const catalog of catalogs) {
+        for (const [modelKey, pricing] of catalog) merged.set(modelKey, pricing);
+    }
+    return merged;
+}
+
+export function builtInPricingCatalog(): Map<string, ModelPricing> {
+    return new Map(Object.entries(BUILTIN_MODEL_PRICING_CATALOG));
+}
+
+export function pricingRowsToCatalog(rows: readonly AgentModelPricingRow[]): Map<string, ModelPricing> {
+    const catalog = new Map<string, ModelPricing>();
+    for (const row of rows) {
+        const modelKey = normalizeModelName(row.name);
+        if (!modelKey) continue;
+        catalog.set(modelKey, {
+            provider: row.provider ?? inferModelProvider(modelKey),
+            inputPerMillionUsd: row.input_per_million_usd ?? null,
+            outputPerMillionUsd: row.output_per_million_usd ?? null,
+            cacheCreationPerMillionUsd: row.cache_creation_per_million_usd ?? null,
+            cacheReadPerMillionUsd: row.cache_read_per_million_usd ?? null,
+            inputAbove200kPerMillionUsd: row.input_above_200k_per_million_usd ?? null,
+            outputAbove200kPerMillionUsd: row.output_above_200k_per_million_usd ?? null,
+            cacheCreationAbove200kPerMillionUsd: row.cache_creation_above_200k_per_million_usd ?? null,
+            cacheReadAbove200kPerMillionUsd: row.cache_read_above_200k_per_million_usd ?? null,
+            fastMultiplier: row.fast_multiplier ?? 1,
+            contextWindow: row.context_window ?? null,
+            pricingSource: row.pricing_source ?? null,
+        });
+    }
+    return catalog;
+}
+
+export function pricingForModel(
+    modelKey: string | null,
+    catalog: ReadonlyMap<string, ModelPricing> = builtInPricingCatalog(),
+): ModelPricing | null {
+    if (!modelKey) return null;
+    const exact = catalog.get(modelKey);
+    if (exact) return exact;
+    if (modelKey.startsWith("claude-opus-4")) return catalog.get("claude-opus-4") ?? null;
+    if (modelKey.startsWith("claude-sonnet-4")) return catalog.get("claude-sonnet-4") ?? null;
+    return null;
+}
+
+const componentCost = (tokens: number, basePerMillion: number | null, above200kPerMillion?: number | null): number | null => {
+    if (basePerMillion === null) return null;
+    if (!above200kPerMillion || tokens <= 200_000) return tokens * basePerMillion / 1_000_000;
+    return (200_000 * basePerMillion + (tokens - 200_000) * above200kPerMillion) / 1_000_000;
+};
+
+export function estimateCost(input: {
+    readonly modelKey: string | null;
+    readonly promptTokens: number | null;
+    readonly completionTokens: number | null;
+    readonly cacheCreationInputTokens: number | null;
+    readonly cacheReadInputTokens: number | null;
+    readonly estimatedTokens: number;
+    readonly pricingCatalog?: ReadonlyMap<string, ModelPricing>;
+}): CostEstimate {
+    const pricing = pricingForModel(input.modelKey, input.pricingCatalog);
+    if (!pricing) {
+        return {
+            inputUsd: null,
+            outputUsd: null,
+            cacheCreationUsd: null,
+            cacheReadUsd: null,
+            totalUsd: null,
+            pricingSource: null,
+        };
+    }
+    const promptTokens = input.promptTokens ?? input.estimatedTokens;
+    const cacheCreationTokens = input.cacheCreationInputTokens ?? 0;
+    const cacheReadTokens = input.cacheReadInputTokens ?? 0;
+    const inputUsd = componentCost(promptTokens, pricing.inputPerMillionUsd, pricing.inputAbove200kPerMillionUsd);
+    const outputUsd = input.completionTokens === null
+        ? null
+        : componentCost(input.completionTokens, pricing.outputPerMillionUsd, pricing.outputAbove200kPerMillionUsd);
+    const cacheCreationUsd = componentCost(cacheCreationTokens, pricing.cacheCreationPerMillionUsd, pricing.cacheCreationAbove200kPerMillionUsd);
+    const cacheReadUsd = componentCost(cacheReadTokens, pricing.cacheReadPerMillionUsd, pricing.cacheReadAbove200kPerMillionUsd);
+    const totalUsd = [inputUsd, outputUsd, cacheCreationUsd, cacheReadUsd]
+        .filter((value): value is number => value !== null)
+        .reduce((sum, value) => sum + value, 0) * pricing.fastMultiplier;
+    return {
+        inputUsd,
+        outputUsd,
+        cacheCreationUsd,
+        cacheReadUsd,
+        totalUsd,
+        pricingSource: pricing.pricingSource,
+    };
+}
+
+export function agentModelStatement(input: {
+    readonly modelKey: string;
+    readonly provider?: string | null;
+    readonly displayName?: string | null;
+    readonly pricingCatalog?: ReadonlyMap<string, ModelPricing>;
+}): string {
+    const pricing = pricingForModel(input.modelKey, input.pricingCatalog);
+    const provider = pricing?.provider ?? input.provider ?? inferModelProvider(input.modelKey);
+    return `UPSERT ${recordRef("agent_model", input.modelKey)} MERGE ${surrealObject([
+        ["name", surrealString(input.modelKey)],
+        ["provider", surrealString(provider)],
+        ["display_name", surrealString(input.displayName ?? input.modelKey)],
+        ["input_per_million_usd", sqlOptionUsd(pricing?.inputPerMillionUsd)],
+        ["output_per_million_usd", sqlOptionUsd(pricing?.outputPerMillionUsd)],
+        ["cache_creation_per_million_usd", sqlOptionUsd(pricing?.cacheCreationPerMillionUsd)],
+        ["cache_read_per_million_usd", sqlOptionUsd(pricing?.cacheReadPerMillionUsd)],
+        ["input_above_200k_per_million_usd", sqlOptionUsd(pricing?.inputAbove200kPerMillionUsd)],
+        ["output_above_200k_per_million_usd", sqlOptionUsd(pricing?.outputAbove200kPerMillionUsd)],
+        ["cache_creation_above_200k_per_million_usd", sqlOptionUsd(pricing?.cacheCreationAbove200kPerMillionUsd)],
+        ["cache_read_above_200k_per_million_usd", sqlOptionUsd(pricing?.cacheReadAbove200kPerMillionUsd)],
+        ["fast_multiplier", sqlOptionUsd(pricing?.fastMultiplier)],
+        ["context_window", surrealOptionInt(pricing?.contextWindow)],
+        ["pricing_source", surrealOptionString(pricing?.pricingSource)],
+        ["updated_at", "time::now()"],
+    ])};`;
+}
+
+const readJsonFile = async (path: string): Promise<unknown | null> => {
+    try {
+        return JSON.parse(await readFile(path, "utf8"));
+    } catch {
+        return null;
+    }
+};
+
+const fetchJsonWithCache = async (
+    url: string,
+    cachePath: string,
+    opts: { readonly offline: boolean; readonly refresh: boolean },
+): Promise<{ json: unknown | null; source: "network" | "cache" | "missing" }> => {
+    if (!opts.refresh) {
+        const cached = await readJsonFile(cachePath);
+        if (cached !== null) return { json: cached, source: "cache" };
+    }
+    if (!opts.offline) {
+        try {
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const json = await response.json();
+            await mkdir(dirname(cachePath), { recursive: true });
+            await writeFile(cachePath, `${JSON.stringify(json)}\n`, "utf8");
+            return { json, source: "network" };
+        } catch {
+            // Local cache is the fallback; a pricing refresh should not block ingest.
+        }
+    }
+    const cached = await readJsonFile(cachePath);
+    return cached === null ? { json: null, source: "missing" } : { json: cached, source: "cache" };
+};
+
+export interface PricingCatalogLoadResult {
+    readonly catalog: Map<string, ModelPricing>;
+    readonly litellmSource: "network" | "cache" | "missing";
+    readonly modelsDevSource: "network" | "cache" | "missing";
+}
+
+export async function loadPricingCatalog(dataDir: string, env: Record<string, string | undefined> = process.env): Promise<PricingCatalogLoadResult> {
+    const offline = env.AX_PRICING_OFFLINE === "1";
+    const refresh = env.AX_PRICING_REFRESH === "1";
+    const cacheDir = join(dataDir, "pricing");
+    const [litellm, modelsDev] = await Promise.all([
+        fetchJsonWithCache(LITELLM_PRICING_URL, join(cacheDir, "litellm-model-prices.json"), { offline, refresh }),
+        fetchJsonWithCache(MODELS_DEV_API_URL, join(cacheDir, "models-dev-api.json"), { offline, refresh }),
+    ]);
+    const catalog = mergePricingCatalogs(
+        parseModelsDevPricingCatalog(modelsDev.json),
+        parseLiteLlmPricingCatalog(litellm.json),
+        builtInPricingCatalog(),
+    );
+    return { catalog, litellmSource: litellm.source, modelsDevSource: modelsDev.source };
+}
+
+export interface PricingRefreshStats {
+    readonly models: number;
+    readonly litellmSource: "network" | "cache" | "missing";
+    readonly modelsDevSource: "network" | "cache" | "missing";
+}
+
+export const refreshModelPricing = (): Effect.Effect<PricingRefreshStats, DbError, SurrealClient | AxConfig> =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const cfg = yield* AxConfig;
+        const result = yield* Effect.promise(() => loadPricingCatalog(cfg.paths.dataDir));
+        const statements = [...result.catalog.entries()].map(([modelKey, pricing]) =>
+            agentModelStatement({
+                modelKey,
+                provider: pricing.provider,
+                displayName: modelKey,
+                pricingCatalog: result.catalog,
+            })
+        );
+        yield* executeStatementsWith(db, statements, { chunkSize: 500 });
+        return {
+            models: result.catalog.size,
+            litellmSource: result.litellmSource,
+            modelsDevSource: result.modelsDevSource,
+        };
+    });
+
+export const PricingKey = Schema.Literal("pricing");
+export type PricingKey = typeof PricingKey.Type;
+
+export class PricingStageStats extends BaseStageStats.extend<PricingStageStats>("PricingStageStats")({
+    models: Schema.Number,
+    litellmSource: Schema.String,
+    modelsDevSource: Schema.String,
+}) {}
+
+export const pricingStage: StageDef<PricingStageStats, SurrealClient | AxConfig> = {
+    meta: StageMeta.make({ key: "pricing", deps: [], tags: ["ingest"] }),
+    run: (_ctx: IngestContext) =>
+        Effect.gen(function* () {
+            const t0 = Date.now();
+            const result = yield* refreshModelPricing();
+            return PricingStageStats.make({
+                durationMs: Date.now() - t0,
+                summary: `loaded ${result.models} model prices (litellm=${result.litellmSource}, models.dev=${result.modelsDevSource})`,
+                models: result.models,
+                litellmSource: result.litellmSource,
+                modelsDevSource: result.modelsDevSource,
+            });
+        }),
+};
