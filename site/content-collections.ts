@@ -53,6 +53,37 @@ const pages = defineCollection({
   },
 });
 
+const releaseAnnouncements = defineCollection({
+  name: "releaseAnnouncements",
+  directory: "../docs/releases",
+  include: "v*.md",
+  schema: z.object({
+    version: z.string(),
+    date: z.string(),
+    title: z.string(),
+    summary: z.string(),
+    content: z.string(),
+  }),
+  transform: async (doc, ctx) => {
+    const body = await compileMDX(ctx, doc, mdxOptions);
+    const slug = doc._meta.fileName.replace(/\.md$/, "");
+    return { ...doc, slug, body };
+  },
+});
+
+const changelog = defineCollection({
+  name: "changelog",
+  directory: "..",
+  include: "CHANGELOG.md",
+  schema: z.object({
+    content: z.string(),
+  }),
+  transform: async (doc, ctx) => {
+    const body = await compileMDX(ctx, doc, mdxOptions);
+    return { ...doc, slug: "changelog", body };
+  },
+});
+
 const howItWorks = defineCollection({
   name: "howItWorks",
   directory: "../docs",
@@ -106,4 +137,4 @@ const howItWorks = defineCollection({
   },
 });
 
-export default defineConfig({ content: [adrs, pages, howItWorks] });
+export default defineConfig({ content: [adrs, pages, howItWorks, releaseAnnouncements, changelog] });

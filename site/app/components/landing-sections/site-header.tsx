@@ -14,6 +14,7 @@ export function SiteHeader() {
         <a href="#demo">Demo</a>
         <a href="#install">Install</a>
         <a href="/showcases">Showcases</a>
+        <a href="/changelog">Changelog</a>
         {/* /origin route lands in Task 5; plain <a> for now */}
         <a href="/origin">Origin</a>
         <a className="primary" href="https://github.com/Necmttn/ax" target="_blank" rel="noopener noreferrer">GitHub →</a>
