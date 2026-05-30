@@ -62,6 +62,26 @@ DEFINE FIELD created_at     ON agent_provider TYPE datetime DEFAULT time::now();
 DEFINE FIELD updated_at     ON agent_provider TYPE option<datetime>;
 DEFINE INDEX agent_provider_name_uq ON agent_provider FIELDS name UNIQUE;
 
+DEFINE TABLE agent_model SCHEMAFULL;
+DEFINE FIELD name                  ON agent_model TYPE string;
+DEFINE FIELD provider              ON agent_model TYPE string;
+DEFINE FIELD display_name          ON agent_model TYPE string;
+DEFINE FIELD input_per_million_usd ON agent_model TYPE option<float>;
+DEFINE FIELD output_per_million_usd ON agent_model TYPE option<float>;
+DEFINE FIELD cache_creation_per_million_usd ON agent_model TYPE option<float>;
+DEFINE FIELD cache_read_per_million_usd ON agent_model TYPE option<float>;
+DEFINE FIELD input_above_200k_per_million_usd ON agent_model TYPE option<float>;
+DEFINE FIELD output_above_200k_per_million_usd ON agent_model TYPE option<float>;
+DEFINE FIELD cache_creation_above_200k_per_million_usd ON agent_model TYPE option<float>;
+DEFINE FIELD cache_read_above_200k_per_million_usd ON agent_model TYPE option<float>;
+DEFINE FIELD fast_multiplier     ON agent_model TYPE option<float>;
+DEFINE FIELD context_window       ON agent_model TYPE option<int>;
+DEFINE FIELD pricing_source        ON agent_model TYPE option<string>;
+DEFINE FIELD created_at            ON agent_model TYPE datetime DEFAULT time::now();
+DEFINE FIELD updated_at            ON agent_model TYPE option<datetime>;
+DEFINE INDEX agent_model_name_uq ON agent_model FIELDS name UNIQUE;
+DEFINE INDEX agent_model_provider ON agent_model FIELDS provider;
+
 DEFINE TABLE agent_session SCHEMAFULL;
 DEFINE FIELD provider            ON agent_session TYPE record<agent_provider>;
 DEFINE FIELD provider_session_id ON agent_session TYPE string;
@@ -333,17 +353,118 @@ DEFINE FIELD created_at     ON artifact TYPE datetime DEFAULT time::now();
 DEFINE FIELD updated_at     ON artifact TYPE option<datetime>;
 DEFINE INDEX artifact_hash  ON artifact FIELDS content_hash;
 
-DEFINE TABLE self_improve_run SCHEMAFULL;
-DEFINE FIELD run_id        ON self_improve_run TYPE string;
-DEFINE FIELD path          ON self_improve_run TYPE string;
-DEFINE FIELD event_count   ON self_improve_run TYPE int DEFAULT 0;
-DEFINE FIELD cluster_count ON self_improve_run TYPE int DEFAULT 0;
-DEFINE FIELD proposal_path ON self_improve_run TYPE option<string>;
-DEFINE FIELD spend_total   ON self_improve_run TYPE option<float>;
-DEFINE FIELD labels        ON self_improve_run TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD metrics       ON self_improve_run TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD created_at    ON self_improve_run TYPE datetime DEFAULT time::now();
-DEFINE INDEX self_improve_run_id ON self_improve_run FIELDS run_id UNIQUE;
+DEFINE TABLE content_document SCHEMAFULL;
+DEFINE FIELD source_kind    ON content_document TYPE string;
+DEFINE FIELD source_ref     ON content_document TYPE option<string>;
+DEFINE FIELD turn           ON content_document TYPE option<record<turn>>;
+DEFINE FIELD session        ON content_document TYPE option<record<session>>;
+DEFINE FIELD agent_event    ON content_document TYPE option<record<agent_event>>;
+DEFINE FIELD skill          ON content_document TYPE option<record<skill>>;
+DEFINE FIELD artifact       ON content_document TYPE option<record<artifact>>;
+DEFINE FIELD plan_snapshot  ON content_document TYPE option<record<plan_snapshot>>;
+DEFINE FIELD path           ON content_document TYPE option<string>;
+DEFINE FIELD uri            ON content_document TYPE option<string>;
+DEFINE FIELD title          ON content_document TYPE option<string>;
+DEFINE FIELD content_hash   ON content_document TYPE string;
+DEFINE FIELD parse_fingerprint ON content_document TYPE string;
+DEFINE FIELD registry_version ON content_document TYPE string;
+DEFINE FIELD parser_id      ON content_document TYPE string;
+DEFINE FIELD parser_version ON content_document TYPE string;
+DEFINE FIELD classifier_versions ON content_document TYPE option<string>;
+DEFINE FIELD blockset_hash  ON content_document TYPE option<string>;
+DEFINE FIELD raw_text       ON content_document TYPE option<string>;
+DEFINE FIELD raw            ON content_document TYPE option<string>;
+DEFINE FIELD labels         ON content_document TYPE option<string>;
+DEFINE FIELD metrics        ON content_document TYPE option<string>;
+DEFINE FIELD ts             ON content_document TYPE datetime DEFAULT time::now();
+DEFINE INDEX content_document_source ON content_document FIELDS source_kind, source_ref;
+DEFINE INDEX content_document_hash ON content_document FIELDS content_hash;
+DEFINE INDEX content_document_parse ON content_document FIELDS parse_fingerprint;
+
+DEFINE TABLE content_block SCHEMAFULL;
+DEFINE FIELD document       ON content_block TYPE record<content_document> REFERENCE ON DELETE CASCADE;
+DEFINE FIELD source_kind    ON content_block TYPE string;
+DEFINE FIELD kind           ON content_block TYPE string;
+DEFINE FIELD seq            ON content_block TYPE int;
+DEFINE FIELD parent_seq     ON content_block TYPE option<int>;
+DEFINE FIELD role           ON content_block TYPE option<string>;
+DEFINE FIELD heading        ON content_block TYPE option<string>;
+DEFINE FIELD text           ON content_block TYPE option<string>;
+DEFINE FIELD text_excerpt   ON content_block TYPE option<string>;
+DEFINE FIELD search_text    ON content_block TYPE option<string>;
+DEFINE FIELD block_hash     ON content_block TYPE string;
+DEFINE FIELD start_offset   ON content_block TYPE option<int>;
+DEFINE FIELD end_offset     ON content_block TYPE option<int>;
+DEFINE FIELD confidence     ON content_block TYPE float DEFAULT 1.0;
+DEFINE FIELD parser         ON content_block TYPE string;
+DEFINE FIELD raw            ON content_block TYPE option<string>;
+DEFINE FIELD labels         ON content_block TYPE option<string>;
+DEFINE FIELD metrics        ON content_block TYPE option<string>;
+DEFINE FIELD ts             ON content_block TYPE datetime DEFAULT time::now();
+DEFINE INDEX content_block_document_seq ON content_block FIELDS document, seq UNIQUE;
+DEFINE INDEX content_block_kind ON content_block FIELDS kind, ts;
+DEFINE INDEX content_block_hash ON content_block FIELDS document, block_hash;
+
+DEFINE ANALYZER IF NOT EXISTS content_text
+    TOKENIZERS class
+    FILTERS lowercase, ascii;
+DEFINE INDEX IF NOT EXISTS content_block_text_fts
+    ON content_block FIELDS search_text
+    FULLTEXT ANALYZER content_text BM25 HIGHLIGHTS;
+
+DEFINE TABLE content_atom SCHEMAFULL;
+DEFINE FIELD block          ON content_atom TYPE record<content_block> REFERENCE ON DELETE CASCADE;
+DEFINE FIELD document       ON content_atom TYPE record<content_document>;
+DEFINE FIELD source_kind    ON content_atom TYPE string;
+DEFINE FIELD session        ON content_atom TYPE option<record<session>>;
+DEFINE FIELD agent_session  ON content_atom TYPE option<record<agent_session>>;
+DEFINE FIELD repository     ON content_atom TYPE option<record<repository>>;
+DEFINE FIELD workspace      ON content_atom TYPE option<record<workspace>>;
+DEFINE FIELD artifact_kind  ON content_atom TYPE option<string>;
+DEFINE FIELD kind           ON content_atom TYPE string;
+DEFINE FIELD value          ON content_atom TYPE string;
+DEFINE FIELD normalized     ON content_atom TYPE option<string>;
+DEFINE FIELD start_offset   ON content_atom TYPE option<int>;
+DEFINE FIELD end_offset     ON content_atom TYPE option<int>;
+DEFINE FIELD confidence     ON content_atom TYPE float DEFAULT 1.0;
+DEFINE FIELD raw            ON content_atom TYPE option<string>;
+DEFINE FIELD ts             ON content_atom TYPE datetime DEFAULT time::now();
+DEFINE INDEX content_atom_kind_value ON content_atom FIELDS kind, normalized;
+DEFINE INDEX content_atom_block ON content_atom FIELDS block;
+DEFINE INDEX content_atom_document_kind ON content_atom FIELDS document, kind;
+DEFINE INDEX content_atom_source_kind_value ON content_atom FIELDS source_kind, kind, normalized;
+DEFINE INDEX content_atom_session_kind ON content_atom FIELDS session, kind;
+DEFINE INDEX content_atom_workspace_kind_value ON content_atom FIELDS workspace, kind, normalized;
+
+DEFINE TABLE mentions_file TYPE RELATION FROM content_atom TO file SCHEMAFULL;
+DEFINE FIELD document      ON mentions_file TYPE record<content_document>;
+DEFINE FIELD block         ON mentions_file TYPE record<content_block>;
+DEFINE FIELD confidence    ON mentions_file TYPE float DEFAULT 1.0;
+DEFINE FIELD source_kind   ON mentions_file TYPE string;
+DEFINE FIELD workspace     ON mentions_file TYPE option<record<workspace>>;
+DEFINE FIELD ts            ON mentions_file TYPE datetime DEFAULT time::now();
+DEFINE INDEX mentions_file_in ON mentions_file FIELDS in;
+DEFINE INDEX mentions_file_out ON mentions_file FIELDS out;
+DEFINE INDEX mentions_file_document ON mentions_file FIELDS document;
+
+DEFINE TABLE mentions_commit TYPE RELATION FROM content_atom TO commit SCHEMAFULL;
+DEFINE FIELD document      ON mentions_commit TYPE record<content_document>;
+DEFINE FIELD block         ON mentions_commit TYPE record<content_block>;
+DEFINE FIELD confidence    ON mentions_commit TYPE float DEFAULT 1.0;
+DEFINE FIELD source_kind   ON mentions_commit TYPE string;
+DEFINE FIELD workspace     ON mentions_commit TYPE option<record<workspace>>;
+DEFINE FIELD ts            ON mentions_commit TYPE datetime DEFAULT time::now();
+DEFINE INDEX mentions_commit_in ON mentions_commit FIELDS in;
+DEFINE INDEX mentions_commit_out ON mentions_commit FIELDS out;
+
+DEFINE TABLE mentions_artifact TYPE RELATION FROM content_atom TO artifact SCHEMAFULL;
+DEFINE FIELD document      ON mentions_artifact TYPE record<content_document>;
+DEFINE FIELD block         ON mentions_artifact TYPE record<content_block>;
+DEFINE FIELD confidence    ON mentions_artifact TYPE float DEFAULT 1.0;
+DEFINE FIELD source_kind   ON mentions_artifact TYPE string;
+DEFINE FIELD ts            ON mentions_artifact TYPE datetime DEFAULT time::now();
+DEFINE INDEX mentions_artifact_in ON mentions_artifact FIELDS in;
+DEFINE INDEX mentions_artifact_out ON mentions_artifact FIELDS out;
 
 DEFINE TABLE plan_snapshot SCHEMAFULL;
 DEFINE FIELD plan           ON plan_snapshot TYPE option<record<plan>>;
@@ -379,17 +500,98 @@ DEFINE FIELD raw            ON friction_event TYPE option<string>;  -- JSON-enco
 DEFINE FIELD ts             ON friction_event TYPE datetime DEFAULT time::now();
 DEFINE INDEX friction_session_kind ON friction_event FIELDS session, kind;
 
-DEFINE TABLE feedback_event SCHEMAFULL;
-DEFINE FIELD session        ON feedback_event TYPE option<record<session>>;
-DEFINE FIELD turn           ON feedback_event TYPE option<record<turn>>;
-DEFINE FIELD kind           ON feedback_event TYPE string;
-DEFINE FIELD sentiment      ON feedback_event TYPE option<string>;
-DEFINE FIELD text           ON feedback_event TYPE option<string>;
-DEFINE FIELD labels         ON feedback_event TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD metrics        ON feedback_event TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD raw            ON feedback_event TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD ts             ON feedback_event TYPE datetime DEFAULT time::now();
-DEFINE INDEX feedback_session_kind ON feedback_event FIELDS session, kind;
+DEFINE TABLE IF NOT EXISTS turn_analysis SCHEMAFULL;
+DEFINE FIELD turn           ON turn_analysis TYPE record<turn> REFERENCE ON DELETE CASCADE;
+DEFINE FIELD session        ON turn_analysis TYPE option<record<session>>;
+DEFINE FIELD speaker        ON turn_analysis TYPE string;
+DEFINE FIELD act            ON turn_analysis TYPE string;
+DEFINE FIELD sentiment      ON turn_analysis TYPE string;
+DEFINE FIELD polarity       ON turn_analysis TYPE string;
+DEFINE FIELD confidence     ON turn_analysis TYPE float;
+DEFINE FIELD method         ON turn_analysis TYPE string;
+DEFINE FIELD signals        ON turn_analysis TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD text           ON turn_analysis TYPE option<string>;
+DEFINE FIELD ts             ON turn_analysis TYPE datetime;
+DEFINE FIELD updated_at     ON turn_analysis TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS turn_analysis_turn ON turn_analysis FIELDS turn UNIQUE;
+DEFINE INDEX IF NOT EXISTS turn_analysis_session_act ON turn_analysis FIELDS session, act;
+DEFINE INDEX IF NOT EXISTS turn_analysis_polarity_ts ON turn_analysis FIELDS polarity, ts;
+
+DEFINE TABLE IF NOT EXISTS reaction_event SCHEMAFULL;
+DEFINE FIELD user_turn      ON reaction_event TYPE record<turn> REFERENCE ON DELETE CASCADE;
+DEFINE FIELD assistant_turn ON reaction_event TYPE option<record<turn>>;
+DEFINE FIELD session        ON reaction_event TYPE option<record<session>>;
+DEFINE FIELD reaction_type  ON reaction_event TYPE string;
+DEFINE FIELD target         ON reaction_event TYPE string;
+DEFINE FIELD polarity       ON reaction_event TYPE string;
+DEFINE FIELD durability     ON reaction_event TYPE string;
+DEFINE FIELD confidence     ON reaction_event TYPE float;
+DEFINE FIELD method         ON reaction_event TYPE string;
+DEFINE FIELD signals        ON reaction_event TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD user_text      ON reaction_event TYPE option<string>;
+DEFINE FIELD assistant_text ON reaction_event TYPE option<string>;
+DEFINE FIELD context_json   ON reaction_event TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD ts             ON reaction_event TYPE datetime;
+DEFINE FIELD updated_at     ON reaction_event TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS reaction_event_user_turn ON reaction_event FIELDS user_turn UNIQUE;
+DEFINE INDEX IF NOT EXISTS reaction_event_session_ts ON reaction_event FIELDS session, ts;
+DEFINE INDEX IF NOT EXISTS reaction_event_theme ON reaction_event FIELDS reaction_type, target, durability;
+
+DEFINE TABLE IF NOT EXISTS classifier_definition SCHEMAFULL;
+DEFINE FIELD classifier_key ON classifier_definition TYPE string;
+DEFINE FIELD version        ON classifier_definition TYPE string;
+DEFINE FIELD kind           ON classifier_definition TYPE string;
+DEFINE FIELD description    ON classifier_definition TYPE string;
+DEFINE FIELD input          ON classifier_definition TYPE string;
+DEFINE FIELD labels         ON classifier_definition TYPE string;  -- JSON-encoded
+DEFINE FIELD targets        ON classifier_definition TYPE string;  -- JSON-encoded
+DEFINE FIELD updated_at     ON classifier_definition TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS classifier_definition_key_version ON classifier_definition FIELDS classifier_key, version UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS classifier_run SCHEMAFULL;
+DEFINE FIELD started_at      ON classifier_run TYPE datetime;
+DEFINE FIELD finished_at     ON classifier_run TYPE option<datetime>;
+DEFINE FIELD status          ON classifier_run TYPE string;
+DEFINE FIELD classifier_keys ON classifier_run TYPE string;  -- JSON-encoded
+DEFINE FIELD since_days      ON classifier_run TYPE option<int>;
+DEFINE FIELD window_count    ON classifier_run TYPE int;
+DEFINE FIELD result_count    ON classifier_run TYPE int;
+DEFINE INDEX IF NOT EXISTS classifier_run_started ON classifier_run FIELDS started_at;
+
+DEFINE TABLE IF NOT EXISTS classifier_result SCHEMAFULL;
+DEFINE FIELD classifier_definition ON classifier_result TYPE record<classifier_definition> REFERENCE ON DELETE CASCADE;
+DEFINE FIELD classifier_run        ON classifier_result TYPE option<record<classifier_run>>;
+DEFINE FIELD classifier_key        ON classifier_result TYPE string;
+DEFINE FIELD classifier_version    ON classifier_result TYPE string;
+DEFINE FIELD subject_type          ON classifier_result TYPE string;
+DEFINE FIELD subject_id            ON classifier_result TYPE string;
+DEFINE FIELD session               ON classifier_result TYPE option<record<session>>;
+DEFINE FIELD turn                  ON classifier_result TYPE option<record<turn>>;
+DEFINE FIELD label                 ON classifier_result TYPE string;
+DEFINE FIELD target                ON classifier_result TYPE string;
+DEFINE FIELD polarity              ON classifier_result TYPE string;
+DEFINE FIELD durability            ON classifier_result TYPE string;
+DEFINE FIELD confidence            ON classifier_result TYPE float;
+DEFINE FIELD method                ON classifier_result TYPE string;
+DEFINE FIELD evidence_json         ON classifier_result TYPE string;
+DEFINE FIELD signals               ON classifier_result TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD ts                    ON classifier_result TYPE datetime;
+DEFINE FIELD updated_at            ON classifier_result TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS classifier_result_classifier ON classifier_result FIELDS classifier_key, classifier_version;
+DEFINE INDEX IF NOT EXISTS classifier_result_turn ON classifier_result FIELDS turn;
+DEFINE INDEX IF NOT EXISTS classifier_result_theme ON classifier_result FIELDS classifier_key, label, target, durability;
+
+DEFINE TABLE IF NOT EXISTS semantic_signal SCHEMAFULL;
+DEFINE FIELD kind           ON semantic_signal TYPE string;
+DEFINE FIELD label          ON semantic_signal TYPE string;
+DEFINE FIELD canonical_text ON semantic_signal TYPE string;
+DEFINE FIELD description    ON semantic_signal TYPE option<string>;
+DEFINE FIELD method         ON semantic_signal TYPE string;
+DEFINE FIELD confidence     ON semantic_signal TYPE float;
+DEFINE FIELD first_seen     ON semantic_signal TYPE option<datetime>;
+DEFINE FIELD last_seen      ON semantic_signal TYPE option<datetime>;
+DEFINE FIELD metrics        ON semantic_signal TYPE option<string>;  -- JSON-encoded
+DEFINE INDEX IF NOT EXISTS semantic_signal_kind_label ON semantic_signal FIELDS kind, label UNIQUE;
 
 DEFINE TABLE diagnostic_event SCHEMAFULL;
 DEFINE FIELD session        ON diagnostic_event TYPE option<record<session>>;
@@ -402,19 +604,6 @@ DEFINE FIELD metrics        ON diagnostic_event TYPE option<string>;  -- JSON-en
 DEFINE FIELD raw            ON diagnostic_event TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD ts             ON diagnostic_event TYPE datetime DEFAULT time::now();
 DEFINE INDEX diagnostic_session_kind ON diagnostic_event FIELDS session, kind;
-
-DEFINE TABLE recommendation SCHEMAFULL;
-DEFINE FIELD subject_type   ON recommendation TYPE option<string>;
-DEFINE FIELD subject_id     ON recommendation TYPE option<string>;
-DEFINE FIELD status         ON recommendation TYPE string DEFAULT 'open';
-DEFINE FIELD text           ON recommendation TYPE string;
-DEFINE FIELD rationale      ON recommendation TYPE option<string>;
-DEFINE FIELD labels         ON recommendation TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD metrics        ON recommendation TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD created_at     ON recommendation TYPE datetime DEFAULT time::now();
-DEFINE FIELD updated_at     ON recommendation TYPE option<datetime>;
-DEFINE INDEX recommendation_status ON recommendation FIELDS status;
-DEFINE INDEX recommendation_subject ON recommendation FIELDS subject_type, subject_id;
 
 DEFINE TABLE guidance SCHEMAFULL;
 DEFINE FIELD slug           ON guidance TYPE string;
@@ -473,58 +662,6 @@ DEFINE FIELD created_at  ON stack TYPE datetime DEFAULT time::now();
 DEFINE FIELD updated_at  ON stack TYPE option<datetime>;
 DEFINE INDEX stack_name_uq ON stack FIELDS name UNIQUE;
 
-DEFINE TABLE agent_tooling SCHEMAFULL;
-DEFINE FIELD name        ON agent_tooling TYPE string;
-DEFINE FIELD layer       ON agent_tooling TYPE string;
-DEFINE FIELD source      ON agent_tooling TYPE string;
-DEFINE FIELD evidence    ON agent_tooling TYPE option<string>;
-DEFINE FIELD labels      ON agent_tooling TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD created_at  ON agent_tooling TYPE datetime DEFAULT time::now();
-DEFINE FIELD updated_at  ON agent_tooling TYPE option<datetime>;
-DEFINE INDEX agent_tooling_name_layer ON agent_tooling FIELDS name, layer UNIQUE;
-
-DEFINE TABLE harness_learning SCHEMAFULL;
-DEFINE FIELD title                  ON harness_learning TYPE string;
-DEFINE FIELD status                 ON harness_learning TYPE string DEFAULT 'local';
-DEFINE FIELD problem                ON harness_learning TYPE string;
-DEFINE FIELD pattern                ON harness_learning TYPE string;
-DEFINE FIELD harness_layer          ON harness_learning TYPE string;
-DEFINE FIELD applicability          ON harness_learning TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD counterconditions      ON harness_learning TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD evidence_summary       ON harness_learning TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD observed_effect        ON harness_learning TYPE option<string>;
-DEFINE FIELD side_effects           ON harness_learning TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD confidence             ON harness_learning TYPE string;
-DEFINE FIELD privacy_level          ON harness_learning TYPE option<string>;
-DEFINE FIELD suggested_intervention ON harness_learning TYPE option<string>;
-DEFINE FIELD risk                   ON harness_learning TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD created_at             ON harness_learning TYPE datetime DEFAULT time::now();
-DEFINE FIELD updated_at             ON harness_learning TYPE option<datetime>;
-DEFINE INDEX harness_learning_status ON harness_learning FIELDS status, harness_layer;
-
-DEFINE TABLE intervention SCHEMAFULL;
-DEFINE FIELD title           ON intervention TYPE string;
-DEFINE FIELD status          ON intervention TYPE string DEFAULT 'suggested';
-DEFINE FIELD strength        ON intervention TYPE string;
-DEFINE FIELD risk            ON intervention TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD expected_effect ON intervention TYPE option<string>;
-DEFINE FIELD review_criteria ON intervention TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD approval_required ON intervention TYPE bool DEFAULT true;
-DEFINE FIELD created_at      ON intervention TYPE datetime DEFAULT time::now();
-DEFINE FIELD updated_at      ON intervention TYPE option<datetime>;
-DEFINE INDEX intervention_status ON intervention FIELDS status, strength;
-
-DEFINE TABLE intervention_observation SCHEMAFULL;
-DEFINE FIELD intervention ON intervention_observation TYPE option<record<intervention>>;
-DEFINE FIELD target       ON intervention_observation TYPE string;
-DEFINE FIELD status       ON intervention_observation TYPE string;
-DEFINE FIELD metrics_before ON intervention_observation TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD metrics_after  ON intervention_observation TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD metrics      ON intervention_observation TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD notes        ON intervention_observation TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD observed_at  ON intervention_observation TYPE datetime DEFAULT time::now();
-DEFINE INDEX intervention_observation_target ON intervention_observation FIELDS target, observed_at;
-
 DEFINE TABLE command_outcome SCHEMAFULL;
 DEFINE FIELD tool_call     ON command_outcome TYPE option<record<tool_call>>;
 DEFINE FIELD session       ON command_outcome TYPE option<record<session>>;
@@ -574,11 +711,19 @@ DEFINE FIELD cache_read_input_tokens ON session_token_usage TYPE option<int>;
 DEFINE FIELD estimated_tokens ON session_token_usage TYPE int;
 DEFINE FIELD transcript_bytes ON session_token_usage TYPE int;
 DEFINE FIELD context_window ON session_token_usage TYPE option<int>;
+DEFINE FIELD model_ref      ON session_token_usage TYPE option<record<agent_model>>;
+DEFINE FIELD estimated_input_cost_usd ON session_token_usage TYPE option<float>;
+DEFINE FIELD estimated_output_cost_usd ON session_token_usage TYPE option<float>;
+DEFINE FIELD estimated_cache_creation_cost_usd ON session_token_usage TYPE option<float>;
+DEFINE FIELD estimated_cache_read_cost_usd ON session_token_usage TYPE option<float>;
+DEFINE FIELD estimated_cost_usd ON session_token_usage TYPE option<float>;
+DEFINE FIELD pricing_source ON session_token_usage TYPE option<string>;
 DEFINE FIELD labels        ON session_token_usage TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD metrics       ON session_token_usage TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD ts            ON session_token_usage TYPE datetime DEFAULT time::now();
 DEFINE INDEX session_token_usage_session ON session_token_usage FIELDS session UNIQUE;
 DEFINE INDEX session_token_usage_epoch ON session_token_usage FIELDS workflow_epoch, source, ts;
+DEFINE INDEX session_token_usage_model ON session_token_usage FIELDS model_ref, ts;
 
 DEFINE TABLE session_health SCHEMAFULL;
 DEFINE FIELD session       ON session_health TYPE record<session>;
@@ -726,36 +871,6 @@ DEFINE FIELD metrics        ON phase_span TYPE option<string>;
 DEFINE FIELD evidence       ON phase_span TYPE option<string>;
 DEFINE INDEX phase_span_session_phase ON phase_span FIELDS session, phase;
 
-DEFINE TABLE ask_outcome SCHEMAFULL;
-DEFINE FIELD session        ON ask_outcome TYPE record<session>;
-DEFINE FIELD ask_turn       ON ask_outcome TYPE record<turn>;
-DEFINE FIELD intent_kind    ON ask_outcome TYPE string;
-DEFINE FIELD feedback_kind  ON ask_outcome TYPE option<string>;
-DEFINE FIELD outcome_status ON ask_outcome TYPE string DEFAULT 'unknown';
-DEFINE FIELD delivery       ON ask_outcome TYPE option<record<delivery_outcome>>;
-DEFINE FIELD text_excerpt   ON ask_outcome TYPE option<string>;
-DEFINE FIELD metrics        ON ask_outcome TYPE option<string>;
-DEFINE FIELD evidence       ON ask_outcome TYPE option<string>;
-DEFINE FIELD ts             ON ask_outcome TYPE datetime;
-DEFINE INDEX ask_outcome_session ON ask_outcome FIELDS session, ts;
-DEFINE INDEX ask_outcome_intent ON ask_outcome FIELDS intent_kind, outcome_status, ts;
-
-DEFINE TABLE pattern_candidate SCHEMAFULL;
-DEFINE FIELD kind           ON pattern_candidate TYPE string;
-DEFINE FIELD title          ON pattern_candidate TYPE string;
-DEFINE FIELD summary        ON pattern_candidate TYPE string;
-DEFINE FIELD score          ON pattern_candidate TYPE float DEFAULT 0;
-DEFINE FIELD status         ON pattern_candidate TYPE string DEFAULT 'candidate';
-DEFINE FIELD sessions       ON pattern_candidate TYPE option<string>;
-DEFINE FIELD files          ON pattern_candidate TYPE option<string>;
-DEFINE FIELD messages       ON pattern_candidate TYPE option<string>;
-DEFINE FIELD metrics        ON pattern_candidate TYPE option<string>;
-DEFINE FIELD evidence       ON pattern_candidate TYPE option<string>;
-DEFINE FIELD created_at     ON pattern_candidate TYPE datetime DEFAULT time::now();
-DEFINE FIELD updated_at     ON pattern_candidate TYPE option<datetime>;
-DEFINE INDEX pattern_candidate_kind_score ON pattern_candidate FIELDS kind, score;
-DEFINE INDEX pattern_candidate_status ON pattern_candidate FIELDS status, updated_at;
-
 DEFINE TABLE skill_candidate SCHEMAFULL;
 DEFINE FIELD name          ON skill_candidate TYPE string;
 DEFINE FIELD trigger_pattern ON skill_candidate TYPE string;
@@ -769,61 +884,6 @@ DEFINE FIELD metrics       ON skill_candidate TYPE option<string>;  -- JSON-enco
 DEFINE FIELD created_at    ON skill_candidate TYPE datetime DEFAULT time::now();
 DEFINE INDEX skill_candidate_name ON skill_candidate FIELDS name UNIQUE;
 DEFINE INDEX skill_candidate_status ON skill_candidate FIELDS status, created_at;
-
-DEFINE TABLE gotcha SCHEMAFULL;
-DEFINE FIELD name          ON gotcha TYPE string;
-DEFINE FIELD kind          ON gotcha TYPE string;
-DEFINE FIELD pattern       ON gotcha TYPE string;
-DEFINE FIELD mitigation    ON gotcha TYPE string;
-DEFINE FIELD strength      ON gotcha TYPE string;
-DEFINE FIELD labels        ON gotcha TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD metrics       ON gotcha TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD created_at    ON gotcha TYPE datetime DEFAULT time::now();
-DEFINE INDEX gotcha_name ON gotcha FIELDS name UNIQUE;
-
-DEFINE TABLE taste_signal SCHEMAFULL;
-DEFINE FIELD subject       ON taste_signal TYPE string;
-DEFINE FIELD preference    ON taste_signal TYPE string;
-DEFINE FIELD polarity      ON taste_signal TYPE string;
-DEFINE FIELD strength      ON taste_signal TYPE string;
-DEFINE FIELD evidence      ON taste_signal TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD created_at    ON taste_signal TYPE datetime DEFAULT time::now();
-DEFINE INDEX taste_signal_subject ON taste_signal FIELDS subject, created_at;
-
-DEFINE TABLE workflow SCHEMAFULL;
-DEFINE FIELD name          ON workflow TYPE string;
-DEFINE FIELD kind          ON workflow TYPE string;
-DEFINE FIELD description   ON workflow TYPE option<string>;
-DEFINE FIELD labels        ON workflow TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD metrics       ON workflow TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD created_at    ON workflow TYPE datetime DEFAULT time::now();
-DEFINE INDEX workflow_name ON workflow FIELDS name UNIQUE;
-
-DEFINE TABLE learning_feedback SCHEMAFULL;
-DEFINE FIELD target        ON learning_feedback TYPE string;
-DEFINE FIELD signal        ON learning_feedback TYPE string;
-DEFINE FIELD sentiment     ON learning_feedback TYPE string;
-DEFINE FIELD evidence      ON learning_feedback TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD created_at    ON learning_feedback TYPE datetime DEFAULT time::now();
-DEFINE INDEX learning_feedback_target ON learning_feedback FIELDS target, created_at;
-
-DEFINE TABLE learning_match SCHEMAFULL;
-DEFINE FIELD learning      ON learning_match TYPE option<record<harness_learning>>;
-DEFINE FIELD skill_candidate ON learning_match TYPE option<record<skill_candidate>>;
-DEFINE FIELD stack         ON learning_match TYPE option<record<stack>>;
-DEFINE FIELD workflow      ON learning_match TYPE option<record<workflow>>;
-DEFINE FIELD score         ON learning_match TYPE float DEFAULT 0;
-DEFINE FIELD reason        ON learning_match TYPE option<string>;
-DEFINE FIELD labels        ON learning_match TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD created_at    ON learning_match TYPE datetime DEFAULT time::now();
-
-DEFINE TABLE adoption SCHEMAFULL;
-DEFINE FIELD target        ON adoption TYPE string;
-DEFINE FIELD scope         ON adoption TYPE string;
-DEFINE FIELD status        ON adoption TYPE string;
-DEFINE FIELD evidence      ON adoption TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD created_at    ON adoption TYPE datetime DEFAULT time::now();
-DEFINE INDEX adoption_target ON adoption FIELDS target, scope, status;
 
 -- ==== Ingest telemetry tables ====
 
@@ -988,6 +1048,37 @@ DEFINE FIELD ts           ON corrected_by TYPE datetime;
 -- (the assistant turn that was corrected).
 DEFINE INDEX IF NOT EXISTS corrected_by_in ON corrected_by FIELDS in;
 
+DEFINE TABLE IF NOT EXISTS expresses TYPE RELATION FROM turn TO semantic_signal SCHEMAFULL;
+DEFINE FIELD analysis     ON expresses TYPE record<turn_analysis>;
+DEFINE FIELD session      ON expresses TYPE option<record<session>>;
+DEFINE FIELD confidence   ON expresses TYPE float;
+DEFINE FIELD method       ON expresses TYPE string;
+DEFINE FIELD ts           ON expresses TYPE datetime;
+DEFINE INDEX IF NOT EXISTS expresses_in ON expresses FIELDS in;
+DEFINE INDEX IF NOT EXISTS expresses_out ON expresses FIELDS out;
+DEFINE INDEX IF NOT EXISTS expresses_session_ts ON expresses FIELDS session, ts;
+
+DEFINE TABLE IF NOT EXISTS reacts_to TYPE RELATION FROM turn TO turn SCHEMAFULL;
+DEFINE FIELD session      ON reacts_to TYPE option<record<session>>;
+DEFINE FIELD polarity     ON reacts_to TYPE string;
+DEFINE FIELD act          ON reacts_to TYPE string;
+DEFINE FIELD confidence   ON reacts_to TYPE float;
+DEFINE FIELD signal       ON reacts_to TYPE option<record<semantic_signal>>;
+DEFINE FIELD ts           ON reacts_to TYPE datetime;
+DEFINE INDEX IF NOT EXISTS reacts_to_in ON reacts_to FIELDS in;
+DEFINE INDEX IF NOT EXISTS reacts_to_out ON reacts_to FIELDS out;
+DEFINE INDEX IF NOT EXISTS reacts_to_session_ts ON reacts_to FIELDS session, ts;
+
+DEFINE TABLE IF NOT EXISTS has_classification TYPE RELATION FROM turn TO classifier_result SCHEMAFULL;
+DEFINE FIELD classifier_key ON has_classification TYPE string;
+DEFINE FIELD label          ON has_classification TYPE string;
+DEFINE FIELD target         ON has_classification TYPE string;
+DEFINE FIELD confidence     ON has_classification TYPE float;
+DEFINE FIELD ts             ON has_classification TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS has_classification_in ON has_classification FIELDS in;
+DEFINE INDEX IF NOT EXISTS has_classification_out ON has_classification FIELDS out;
+DEFINE INDEX IF NOT EXISTS has_classification_theme ON has_classification FIELDS classifier_key, label, target;
+
 DEFINE TABLE produced TYPE RELATION FROM session TO commit;
 DEFINE FIELD repository   ON produced TYPE option<record<repository>>;
 DEFINE FIELD checkout     ON produced TYPE option<record<checkout>>;
@@ -1122,6 +1213,23 @@ DEFINE FIELD ts            ON agent_event_child TYPE datetime DEFAULT time::now(
 DEFINE INDEX agent_event_child_in ON agent_event_child FIELDS in;
 DEFINE INDEX agent_event_child_out ON agent_event_child FIELDS out;
 
+DEFINE TABLE used_model TYPE RELATION FROM session TO agent_model SCHEMAFULL;
+DEFINE FIELD session_token_usage ON used_model TYPE option<record<session_token_usage>>;
+DEFINE FIELD source              ON used_model TYPE string;
+DEFINE FIELD estimated_tokens    ON used_model TYPE int DEFAULT 0;
+DEFINE FIELD estimated_cost_usd  ON used_model TYPE option<float>;
+DEFINE FIELD pricing_source      ON used_model TYPE option<string>;
+DEFINE FIELD ts                  ON used_model TYPE datetime DEFAULT time::now();
+DEFINE INDEX used_model_in ON used_model FIELDS in;
+DEFINE INDEX used_model_out ON used_model FIELDS out;
+
+DEFINE TABLE agent_used_model TYPE RELATION FROM agent_session TO agent_model SCHEMAFULL;
+DEFINE FIELD provider ON agent_used_model TYPE record<agent_provider>;
+DEFINE FIELD source   ON agent_used_model TYPE string;
+DEFINE FIELD ts       ON agent_used_model TYPE datetime DEFAULT time::now();
+DEFINE INDEX agent_used_model_in ON agent_used_model FIELDS in;
+DEFINE INDEX agent_used_model_out ON agent_used_model FIELDS out;
+
 -- ==== Materialized views (computed at query time) ====
 
 -- Per-skill counts, recent boost
@@ -1255,30 +1363,6 @@ DEFINE INDEX hook_fire_by_session ON hook_fire FIELDS session;
 DEFINE INDEX hook_fire_by_file    ON hook_fire FIELDS file;
 DEFINE INDEX hook_fire_by_reason  ON hook_fire FIELDS reason;
 
--- =====================================================================
--- Phase B: experiment-loop schema migration (2026-05-25)
--- See docs/superpowers/plans/2026-05-25-experiment-loop-cleanup-and-rebuild.md
--- =====================================================================
-
--- Drop superseded write-only orphan tables. Data was never read by any
--- consumer; safe to drop. See the plan doc + archaeology agent output
--- for cluster-by-cluster justification.
-REMOVE TABLE IF EXISTS pattern_candidate;
-REMOVE TABLE IF EXISTS feedback_event;
-REMOVE TABLE IF EXISTS ask_outcome;
-REMOVE TABLE IF EXISTS adoption;
-REMOVE TABLE IF EXISTS gotcha;
-REMOVE TABLE IF EXISTS learning_match;
-REMOVE TABLE IF EXISTS learning_feedback;
-REMOVE TABLE IF EXISTS taste_signal;
-REMOVE TABLE IF EXISTS workflow;
-REMOVE TABLE IF EXISTS agent_tooling;
-REMOVE TABLE IF EXISTS recommendation;
-REMOVE TABLE IF EXISTS self_improve_run;
-REMOVE TABLE IF EXISTS harness_learning;
-REMOVE TABLE IF EXISTS intervention;
-REMOVE TABLE IF EXISTS intervention_observation;
-
 -- ==== Proposal (polymorphic shortlist) ====
 -- One row per repeated workflow we might package. `form` selects which
 -- per-form payload table carries the typed details. `dedupe_sig` is a
@@ -1358,6 +1442,7 @@ DEFINE INDEX automation_proposal_uq ON automation_proposal FIELDS proposal UNIQU
 --  hook_command_invocation | spawned | ...).
 DEFINE TABLE cites_evidence TYPE RELATION SCHEMAFULL;
 DEFINE FIELD count ON cites_evidence TYPE int DEFAULT 1;
+DEFINE FIELD kind  ON cites_evidence TYPE option<string>;
 DEFINE FIELD ts    ON cites_evidence TYPE datetime DEFAULT time::now();
 DEFINE INDEX cites_evidence_in     ON cites_evidence FIELDS in;
 DEFINE INDEX cites_evidence_out    ON cites_evidence FIELDS out;
@@ -1429,9 +1514,7 @@ DEFINE FIELD observed_at  ON checkpoint TYPE datetime DEFAULT time::now();
 DEFINE INDEX checkpoint_experiment_kind ON checkpoint FIELDS experiment, kind, observed_at;
 
 -- ==== dogfood_run (Phase C12) ====
--- Replaces the intervention_observation overload that wterm previously used
--- to record test-scenario results (intervention=NONE was the smell). One row
--- per dogfood scenario invocation. Owned by src/dogfood/wterm.ts.
+-- One row per dogfood scenario invocation. Owned by src/dogfood/wterm.ts.
 DEFINE TABLE dogfood_run SCHEMAFULL;
 DEFINE FIELD run_id           ON dogfood_run TYPE string;
 DEFINE FIELD scenario         ON dogfood_run TYPE string;

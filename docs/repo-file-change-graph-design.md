@@ -421,7 +421,8 @@ Evidence/event layer:
 - `plan_snapshot`
 - `diagnostic_event`
 - `friction_event`
-- `feedback_event`
+- `turn_analysis`
+- `semantic_signal`
 - `artifact`
 - `guidance`
 - `guidance_version`
@@ -600,7 +601,7 @@ Recommended normalized friction kinds:
 - `abandoned_edit`
 - `unknown`
 
-Candidate table: `feedback_event`
+Candidate tables: `turn_analysis`, `semantic_signal`, and `reacts_to`
 
 Candidate fields:
 

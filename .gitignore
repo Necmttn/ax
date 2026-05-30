@@ -35,6 +35,7 @@ result-*
 
 # SurrealDB CLI scratch
 history.txt
+.surmlcache/
 
 # landing port scratchpad
 site/PORT-NOTES-LANDING.md

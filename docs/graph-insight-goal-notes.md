@@ -172,7 +172,7 @@ The CLI should not say "this failed a lot" as a conclusion. It should explain wh
 
 Git commits and user feedback remain strong signals, but they are not the only high-value sources. The graph should model how agent work unfolds:
 
-- `feedback_event`: explicit user acceptance, correction, interruption, or preference.
+- `turn_analysis` / `semantic_signal` / `reacts_to`: explicit user acceptance, correction, interruption, or preference.
 - `delegation_event`: subagent/task dispatch, task size, ownership clarity, return status, and integration outcome.
 - `experiment_event`: hypothesis, edit, verification command, result, follow-up edit, accepted/reverted/abandoned.
 - `context_pressure_event`: long sessions, large transcript bytes/token estimates, compaction, status churn, and repeated "what's left?" moments.
@@ -508,8 +508,8 @@ Recommended unification:
 - Add a legacy self-improve artifact importer for `runs/*/events.jsonl`, `clusters.json`, `proposed-claudemd.md`, and `_spend.log`.
   Implemented in `src/ingest/legacy-self-improve.ts` and wired into
   `ax ingest-insights`; imported rows are modeled as evidence artifacts
-  with `self_improve_run`, `artifact`, `friction_event`, `insight`,
-  `has_artifact`, and `derived_from`.
+  with `artifact`, `friction_event`, `insight`, `has_artifact`, and
+  `derived_from`.
 - Move reusable detectors from dotfiles into `ax` signal derivation or a shared package.
 - Model both sources as evidence, not final truth, so graph insights can compare Claude's classification against local transcript-derived signals.
 
@@ -664,7 +664,7 @@ To implement our own equivalent, build these pieces:
 
 6. Evidence graph writer
    - Store each facet as `insight`.
-   - Store each event as `friction_event`, `feedback_event`, `intervention_event`, `verification_event`, etc.
+   - Store each event as `friction_event`, `turn_analysis`, `semantic_signal`, `reacts_to`, verification-shaped `command_outcome`, etc.
    - Link facets/events back to sessions, turns, tools, files, commits, repositories, skills, and workflow epochs.
 
 7. Confidence and disagreement model
@@ -823,8 +823,8 @@ intervention
 ```
 
 ```text
-intervention_observation
-- intervention
+checkpoint
+- experiment
 - window_start
 - window_end
 - metric
@@ -846,7 +846,7 @@ intervention -> targets -> skill_candidate
 intervention -> observed_in -> session
 intervention -> associated_with -> workflow_epoch
 intervention -> supersedes -> intervention
-intervention_observation -> evaluates -> intervention
+checkpoint -> measures -> experiment
 ```
 
 What to monitor:
@@ -1247,11 +1247,11 @@ Implemented tracer bullet:
 - The server supports `--transport=auto|pty|process`; PTY runs through a Node `node-pty` sidecar because Bun 1.3.10 does not reliably run `node-pty` directly.
 - The server streams the scripted terminal session to the browser over WebSocket and runs a scratch-HOME setup demo.
 - The scenario demonstrates `ax --help`, `ax onboarding --json`, host-agent git tracking of `.claude`, `.codex`, and `.agents`, then a second onboarding check.
-- The terminal transcript is persisted as `artifact` and the pass/fail result is persisted as `intervention_observation` when the local DB is reachable.
+- The terminal transcript is persisted as `artifact` and the pass/fail result is persisted as `dogfood_run` when the local DB is reachable.
 - This is intentionally not yet a free-running Claude driver; it proves the PTY-backed wterm/browser evidence path before recursive agent control.
 - `--scenario=interactive --command="bash -l"` opens a steerable PTY shell in a scratch HOME. A human or another agent can drive it through the browser; transcript evidence is persisted with `status=completed`.
 - Interactive mode supports `--agent=shell|claude|codex|opencode` presets. `--command=...` overrides the preset command while retaining the selected agent label in run metadata.
-- Repeatable outcome criteria: `--success-marker=STR` classifies a run as `status=passed` when the transcript contains STR (else `failed`); `--timeout=SECONDS` enforces a wall-clock bound that produces `status=timed_out` with `timed_out=true` in persisted metrics. Marker + timeout flags survive in `intervention_observation` so headless agents can assert pass/fail rather than read transcripts.
+- Repeatable outcome criteria: `--success-marker=STR` classifies a run as `status=passed` when the transcript contains STR (else `failed`); `--timeout=SECONDS` enforces a wall-clock bound that produces `status=timed_out` with `timed_out=true` in persisted metrics. Marker + timeout flags survive in `dogfood_run` so headless agents can assert pass/fail rather than read transcripts.
 
 ## Hosted Taste / Skill Hub Monetization Sketch
 
