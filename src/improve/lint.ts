@@ -19,9 +19,8 @@ import type { DbError } from "../lib/errors.ts";
 import { recordRef } from "../lib/shared/surql.ts";
 import { recordKeyPart } from "../lib/shared/derive-keys.ts";
 import {
-    EXPERIMENT_STATUS_SCAFFOLDED,
     EXPERIMENT_STATUS_TASK_EMITTED,
-    LIFECYCLE_VERDICT_REGRESSED,
+    planTaskScaffolded,
 } from "./lifecycle.ts";
 
 export type LintForm = "guidance" | "skill" | "subagent";
@@ -277,13 +276,18 @@ export const lintFiles = (
                 shortId: string;
                 experimentId: string;
                 previousStatus: string;
+                nextStatus: string;
                 taskPath: string | null;
             }
             const updates: string[] = [];
             const pending: PendingReconcile[] = [];
 
             const reconcileRow = (id: string, tgt: IdTarget, row: ExperimentRow): void => {
-                if (row.locked_verdict === LIFECYCLE_VERDICT_REGRESSED) {
+                const plan = planTaskScaffolded({
+                    experimentStatus: row.status,
+                    lockedVerdict: row.locked_verdict,
+                });
+                if (plan.regressed) {
                     infos.push({
                         rule: "regressed_verdict",
                         severity: "info",
@@ -292,19 +296,20 @@ export const lintFiles = (
                         message: `experiment ${id} locked as regressed - consider removing the marker`,
                     });
                 }
-                if (row.status === EXPERIMENT_STATUS_TASK_EMITTED) {
+                if (plan.status === "scaffold") {
                     // Use recordRef to build the UPDATE target consistently with
                     // actions.ts (which always wraps record IDs via recordRef rather
                     // than interpolating the raw type::string id).
                     const key = recordKeyPart(row.id, "experiment");
                     const updateTarget = key ? recordRef("experiment", key) : row.id;
                     updates.push(
-                        `UPDATE ${updateTarget} SET status = '${EXPERIMENT_STATUS_SCAFFOLDED}', scaffolded_at = time::now(), artifact_path = ${surrealLiteral(tgt.path)};`,
+                        `UPDATE ${updateTarget} SET status = '${plan.nextStatus}', scaffolded_at = time::now(), artifact_path = ${surrealLiteral(tgt.path)};`,
                     );
                     pending.push({
                         shortId: id,
                         experimentId: row.id,
                         previousStatus: row.status,
+                        nextStatus: plan.nextStatus,
                         taskPath: (row.task_path && existsSync(row.task_path)) ? row.task_path : null,
                     });
                 }
@@ -374,7 +379,7 @@ export const lintFiles = (
                         shortId: p.shortId,
                         experimentId: p.experimentId,
                         previousStatus: p.previousStatus,
-                        nextStatus: EXPERIMENT_STATUS_SCAFFOLDED,
+                        nextStatus: p.nextStatus,
                         taskDeleted,
                     });
                 }

@@ -9,11 +9,13 @@
  *   4. gotten explicit user yes.
  *
  * This command takes that approved plan and inserts:
- *   - a `proposal` row (status = 'accepted' since user already said yes)
+ *   - a `proposal` row (`guidance` / `skill` can be accepted immediately;
+ *     `hook` / `automation` stay open until their safety model exists)
  *   - the matching per-form payload row (skill_proposal /
  *     guidance_proposal / hook_proposal / automation_proposal)
- *   - an `experiment` row pointing at `--plan-path` (no on-disk scaffold;
- *     the plan markdown IS the artifact for the meta-retro path)
+ *   - for accepted forms, an `experiment` row pointing at `--plan-path`
+ *     (no on-disk scaffold; the plan markdown IS the artifact for the
+ *     meta-retro path)
  *
  * The `cites_evidence` edge table doesn't include `retro` in its TO
  * union, so `--evidence-retros=<ids>` is embedded into `proposal.baseline`
@@ -34,6 +36,10 @@ import {
 } from "../lib/shared/surql.ts";
 import { safeKeyPart } from "../lib/shared/derive-keys.ts";
 import { dedupeSig, normalizeTitle } from "../ingest/derive-proposals.ts";
+import {
+    planRetroPlanRegistration,
+    type RetroPlanRegistrationPlan,
+} from "../improve/lifecycle.ts";
 
 export type PlanForm = "skill" | "hook" | "guidance" | "automation";
 
@@ -51,9 +57,9 @@ export interface RetroPlanArgs {
     /**
      * When true, register the proposal with status='open' and DO NOT create
      * an experiment row. Lets external agents compose with
-     * `ax improve accept --with-agent` afterwards (which refuses to operate
-     * on already-accepted proposals). Default is back-compat: status='accepted'
-     * + experiment row created immediately.
+     * `ax improve accept --with-agent` afterwards. Even without --leave-open,
+     * unsafe forms (hook / automation) stay open until Recovery Path and
+     * disable semantics are modeled.
      */
     readonly leaveOpen: boolean;
 }
@@ -149,6 +155,9 @@ export interface PlanBuildResult {
      * args.leaveOpen is set - no experiment row is created in that mode.
      */
     readonly experimentKey: string | null;
+    readonly proposalStatus: RetroPlanRegistrationPlan["proposalStatus"];
+    readonly experimentStatus: RetroPlanRegistrationPlan["experimentStatus"];
+    readonly safetyMessage: string | null;
     readonly sig: string;
     readonly statements: readonly string[];
 }
@@ -169,8 +178,11 @@ export const buildRetroPlanStatements = (
     const normTitle = normalizeTitle(args.title);
     const sig = dedupeSig(args.form, normTitle);
     const proposalKey = proposalKeyFor(args.slug, sig);
-    // No experiment row exists in --leave-open mode, so don't reserve a key.
-    const experimentKey = args.leaveOpen ? null : `${proposalKey}__${nowMs.toString(36)}`;
+    const registration = planRetroPlanRegistration({
+        form: args.form,
+        leaveOpen: args.leaveOpen,
+    });
+    const experimentKey = registration.createExperiment ? `${proposalKey}__${nowMs.toString(36)}` : null;
 
     const proposalRef = recordRef("proposal", proposalKey);
 
@@ -195,7 +207,7 @@ export const buildRetroPlanStatements = (
             ["dedupe_sig", surrealString(sig)],
             ["frequency", String(args.frequency)],
             ["confidence", surrealString(args.confidence)],
-            ["status", surrealString(args.leaveOpen ? "open" : "accepted")],
+            ["status", surrealString(registration.proposalStatus)],
             ["baseline", surrealOptionString(baseline)],
             ["updated_at", "time::now()"],
         ])};`,
@@ -249,11 +261,20 @@ export const buildRetroPlanStatements = (
                 ["proposal", proposalRef],
                 ["artifact_path", surrealString(args.artifactPath ?? args.planPath)],
                 ["scaffolded_at", "time::now()"],
+                ["status", surrealString(registration.experimentStatus ?? "scaffolded")],
             ])};`,
         );
     }
 
-    return { proposalKey, experimentKey, sig, statements };
+    return {
+        proposalKey,
+        experimentKey,
+        proposalStatus: registration.proposalStatus,
+        experimentStatus: registration.experimentStatus,
+        safetyMessage: registration.safetyMessage,
+        sig,
+        statements,
+    };
 };
 
 export const cmdRetroPlan = (
@@ -282,24 +303,17 @@ export const cmdRetroPlan = (
         yield* db.query(built.statements.join("\n"));
 
         if (parsed.json || !process.stdout.isTTY) {
-            if (parsed.leaveOpen) {
-                console.log(prettyPrint({
-                    proposal_id: `proposal:${built.proposalKey}`,
-                    dedupe_sig: built.sig,
-                    form: parsed.form,
-                    status: "open",
-                }));
-            } else {
-                console.log(prettyPrint({
-                    proposal_id: `proposal:${built.proposalKey}`,
-                    experiment_id: `experiment:${built.experimentKey}`,
-                    dedupe_sig: built.sig,
-                    form: parsed.form,
-                }));
-            }
-        } else if (parsed.leaveOpen) {
+            console.log(prettyPrint({
+                proposal_id: `proposal:${built.proposalKey}`,
+                ...(built.experimentKey === null ? {} : { experiment_id: `experiment:${built.experimentKey}` }),
+                dedupe_sig: built.sig,
+                form: parsed.form,
+                status: built.proposalStatus,
+                ...(built.safetyMessage === null ? {} : { message: built.safetyMessage }),
+            }));
+        } else if (built.experimentKey === null) {
             console.log(
-                `proposal proposal:${built.proposalKey} created (status=open) - run \`ax improve accept --with-agent ${built.sig}\` to scaffold + enrich`,
+                `proposal proposal:${built.proposalKey} created (status=open) - ${built.safetyMessage ?? `run \`ax improve accept --with-agent ${built.sig}\` to scaffold + enrich`}`,
             );
         } else {
             console.log(`proposal proposal:${built.proposalKey} created (status=accepted)`);

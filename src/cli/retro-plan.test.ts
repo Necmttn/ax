@@ -129,6 +129,7 @@ describe("buildRetroPlanStatements SQL shape", () => {
 
     test("proposal row uses status='accepted'", () => {
         const built = buildRetroPlanStatements(baseArgs(), 1_700_000_000_000);
+        expect(built.proposalStatus).toBe("accepted");
         expect(built.statements[0]).toContain('status: "accepted"');
     });
 
@@ -156,8 +157,12 @@ describe("buildRetroPlanStatements SQL shape", () => {
             baseArgs({ form: "hook", title: "Pre-Bash guard hook" }),
             1,
         );
+        expect(built.proposalStatus).toBe("open");
+        expect(built.experimentKey).toBeNull();
+        expect(built.safetyMessage).toContain("Recovery Path");
         expect(built.statements[1]).toMatch(/CREATE hook_proposal:/);
         expect(built.statements[1]).toContain("event_name");
+        expect(built.statements.length).toBe(2);
     });
 
     test("automation form writes automation_proposal payload", () => {
@@ -165,14 +170,19 @@ describe("buildRetroPlanStatements SQL shape", () => {
             baseArgs({ form: "automation", title: "Weekly cleanup" }),
             1,
         );
+        expect(built.proposalStatus).toBe("open");
+        expect(built.experimentKey).toBeNull();
+        expect(built.safetyMessage).toContain("Recovery Path");
         expect(built.statements[1]).toMatch(/CREATE automation_proposal:/);
         expect(built.statements[1]).toContain("trigger_signal");
+        expect(built.statements.length).toBe(2);
     });
 
     test("experiment row uses planPath when artifactPath is null", () => {
         const built = buildRetroPlanStatements(baseArgs({ artifactPath: null }), 1);
         const expStmt = built.statements[2];
         expect(expStmt).toContain("/tmp/ax-plan.md");
+        expect(expStmt).toContain('status: "scaffolded"');
     });
 
     test("experiment row prefers artifactPath when provided", () => {
@@ -198,6 +208,7 @@ describe("buildRetroPlanStatements SQL shape", () => {
         );
         expect(built.statements[0]).toContain('status: "open"');
         expect(built.statements[0]).not.toContain('status: "accepted"');
+        expect(built.proposalStatus).toBe("open");
     });
 
     test("--leave-open: NO experiment row emitted", () => {

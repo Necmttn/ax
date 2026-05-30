@@ -13,7 +13,7 @@ import { AppLayer } from "../lib/layers.ts";
 import { deriveCheckpoints } from "../ingest/derive-checkpoints.ts";
 import { retroFromSession, upsertRetro, type RetroSource } from "../ingest/retro.ts";
 import { runAgentAccept } from "../improve/agent-accept.ts";
-import { acceptProposal } from "../improve/actions.ts";
+import { acceptProposal, rejectProposal } from "../improve/actions.ts";
 import { lintFiles } from "../improve/lint.ts";
 import { recommend, formatRecommendations, copyToClipboard, selectByIndices, parseIndexInput } from "../improve/recommend.ts";
 import { showExperiment, formatShow } from "../improve/show.ts";
@@ -46,7 +46,6 @@ import {
     renderAllRolesJson,
 } from "./role-format.ts";
 import { homedir } from "node:os";
-import { recordKeyPart } from "../lib/shared/derive-keys.ts";
 import { recordRef, surrealString } from "../lib/shared/surql.ts";
 import { ingestClaudeInsights } from "../ingest/claude-insights.ts";
 // backfillInvokedPositions - Phase B will register this as invokedPositionsStage.
@@ -2050,24 +2049,12 @@ const cmdImproveReject = (args: string[]) =>
             process.exit(2);
         }
         const reason = flag("reason", args) ?? "not_worth_packaging";
-        const db = yield* SurrealClient;
-        const idLiteral = surrealLiteral(positional);
-        const sel = yield* db.query<[Array<Record<string, unknown>>]>(
-            `SELECT id, status FROM proposal WHERE dedupe_sig = ${idLiteral} OR id = ${idLiteral} LIMIT 1;`,
-        );
-        const row = (sel?.[0] ?? [])[0];
-        if (!row) { console.error(`no proposal matched ${positional}`); process.exit(2); }
-        const status = String(row.status ?? "");
-        if (status !== "open") {
-            console.error(`proposal already ${status}`);
+        const result = yield* rejectProposal({ sigOrId: positional, reason });
+        if (result.status !== "ok") {
+            console.error(result.message ?? `failed to reject proposal ${positional}`);
             process.exit(2);
         }
-        const proposalKey = recordKeyPart(row.id, "proposal");
-        if (!proposalKey) { console.error("internal: proposal.id unexpected"); process.exit(2); }
-        yield* db.query(
-            `UPDATE ${recordRef("proposal", proposalKey)} SET status = 'rejected', reject_reason = ${surrealLiteral(reason)}, updated_at = time::now();`,
-        );
-        console.log(`proposal status -> rejected (reason: ${reason})`);
+        console.log(`proposal status -> rejected (reason: ${result.reason})`);
     });
 
 const improveAcceptCommand = Command.make(

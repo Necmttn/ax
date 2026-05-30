@@ -126,6 +126,13 @@ A controlled, scoped behavior-change experiment that creates, edits, enables,
 disables, or removes one or more **Guidance** artifacts.
 _Avoid_: suggestion
 
+**Intervention Lifecycle**:
+The state path of an accepted **Intervention**, beginning when a
+**Retrospective Candidate** is accepted and represented by an experiment row.
+The proposal row is the candidate queue; the experiment row is the active
+Intervention instance.
+_Avoid_: proposal status
+
 **Intervention Observation**:
 A measured before/after effect of an **Intervention** on targeted signals and
 side effects.
@@ -200,6 +207,14 @@ _Avoid_: recommendation report
 A user-available way to disable or revert an Intervention even when the active
 agent harness is broken by that Intervention.
 _Avoid_: rollback note
+
+**Acceptable Intervention Form**:
+A proposal form that the current **Intervention Lifecycle** can safely promote
+from candidate queue to accepted Intervention. `guidance` and `skill` are
+acceptable today. `hook` and `automation` remain candidate-only until their
+Recovery Path, smoke test, disable switch, and fail-open/fail-closed behavior
+are modeled.
+_Avoid_: supported proposal type
 
 **Agent Tooling**:
 Developer tooling intentionally exposed to agents to improve perception,

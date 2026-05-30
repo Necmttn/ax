@@ -16,13 +16,11 @@ import { recordRef, surrealString } from "../lib/shared/surql.ts";
 import { surrealLiteral } from "../lib/json.ts";
 import { recordKeyPart } from "../lib/shared/derive-keys.ts";
 import {
-    acceptanceFormError,
-    acceptedExperimentStatus,
     PROPOSAL_STATUS_ACCEPTED,
-    PROPOSAL_STATUS_OPEN,
     PROPOSAL_STATUS_REJECTED,
-    isAcceptedProposalForm,
-    validateLifecycleVerdict,
+    planAcceptCandidate,
+    planLockVerdict,
+    planRejectCandidate,
 } from "./lifecycle.ts";
 import { scaffoldSkill, type ScaffoldResult } from "./skill-scaffold.ts";
 import { renderTaskFile, type TaskInput } from "./task-template.ts";
@@ -213,7 +211,12 @@ export const acceptProposal = (
         if (!proposalKey) {
             return { status: "not_found", message: "proposal.id has unexpected shape" };
         }
-        if (row.status !== PROPOSAL_STATUS_OPEN) {
+        const acceptPlan = planAcceptCandidate({
+            form: row.form,
+            proposalStatus: row.status,
+            autoScaffold: Boolean(opts.autoScaffold),
+        });
+        if (acceptPlan.status === "wrong_status") {
             const db = yield* SurrealClient;
             const existingResult = yield* db.query<[Array<Record<string, unknown>>]>(
                 `SELECT id, artifact_path, type::string(scaffolded_at) AS scaffolded_at, locked_verdict FROM experiment WHERE proposal = ${recordRef("proposal", proposalKey)} LIMIT 1;`,
@@ -221,7 +224,7 @@ export const acceptProposal = (
             const existing = (existingResult?.[0] ?? [])[0];
             const result: AcceptResult = {
                 status: "wrong_status",
-                message: `proposal already ${row.status}`,
+                message: acceptPlan.message,
             };
             if (existing) {
                 return {
@@ -236,13 +239,13 @@ export const acceptProposal = (
             }
             return result;
         }
-
-        if (!isAcceptedProposalForm(row.form)) {
+        if (acceptPlan.status !== "ok") {
             return {
-                status: "unsupported_form",
-                message: acceptanceFormError(row.form),
+                status: acceptPlan.status,
+                message: acceptPlan.message,
             };
         }
+        const experimentStatus = acceptPlan.experimentStatus;
 
         const experimentKey = `${proposalKey}__${Date.now().toString(36)}_${KEY_COUNTER()}`;
         const experimentId = `experiment:${experimentKey}`;
@@ -276,7 +279,7 @@ export const acceptProposal = (
                     proposal: ${recordRef("proposal", proposalKey)},
                     artifact_path: ${surrealLiteral(scaffold.path)},
                     scaffolded_at: time::now(),
-                    status: '${acceptedExperimentStatus({ form: row.form, autoScaffold: true })}'
+                    status: '${experimentStatus}'
                 };
             `);
             return {
@@ -324,7 +327,7 @@ export const acceptProposal = (
             UPSERT ${recordRef("experiment", experimentKey)} MERGE {
                 proposal: ${recordRef("proposal", proposalKey)},
                 task_path: ${surrealLiteral(taskPath)},
-                status: '${acceptedExperimentStatus({ form: row.form, autoScaffold: Boolean(opts.autoScaffold) })}'
+                status: '${experimentStatus}'
             };
         `).pipe(
             Effect.tapError(() => Effect.sync(() => {
@@ -354,18 +357,23 @@ export const rejectProposal = (
         const idLiteral = surrealLiteral(opts.sigOrId);
         const row = yield* fetchFullProposal(idLiteral);
         if (!row) return { status: "not_found", message: `no proposal matched ${opts.sigOrId}` };
-        if (row.status !== PROPOSAL_STATUS_OPEN) return { status: "wrong_status", message: `proposal already ${row.status}` };
+        const rejectPlan = planRejectCandidate({
+            proposalStatus: row.status,
+            ...(opts.reason === undefined ? {} : { reason: opts.reason }),
+        });
+        if (rejectPlan.status === "wrong_status") {
+            return { status: "wrong_status", message: rejectPlan.message };
+        }
         const proposalKey = recordKeyPart(row.id, "proposal");
         if (!proposalKey) return { status: "not_found", message: "proposal.id unexpected" };
-        const reason = opts.reason ?? "not_worth_packaging";
         const db = yield* SurrealClient;
         yield* db.query(
-            `UPDATE ${recordRef("proposal", proposalKey)} SET status = '${PROPOSAL_STATUS_REJECTED}', reject_reason = ${surrealString(reason)}, updated_at = time::now();`,
+            `UPDATE ${recordRef("proposal", proposalKey)} SET status = '${PROPOSAL_STATUS_REJECTED}', reject_reason = ${surrealString(rejectPlan.reason)}, updated_at = time::now();`,
         );
         return {
             status: "ok",
             proposal_id: `proposal:${proposalKey}`,
-            reason,
+            reason: rejectPlan.reason,
         };
     });
 
@@ -378,11 +386,14 @@ export const setVerdict = (
     opts: SetVerdictOptions,
 ): Effect.Effect<VerdictResult, DbError, SurrealClient> =>
     Effect.gen(function* () {
-        const verdict = validateLifecycleVerdict(opts.verdict);
-        if (!verdict.valid) {
+        const verdictPlan = planLockVerdict({
+            requestedVerdict: opts.verdict,
+            lockedVerdict: null,
+        });
+        if (verdictPlan.status === "invalid_verdict") {
             return {
                 status: "invalid_verdict",
-                message: verdict.message,
+                message: verdictPlan.message,
             };
         }
         const idLiteral = surrealLiteral(opts.sigOrId);
@@ -395,15 +406,20 @@ export const setVerdict = (
         if (!row) {
             return { status: "not_found", message: `no experiment matched ${opts.sigOrId}` };
         }
-        if (row.locked_verdict) {
-            return { status: "verdict_locked", message: `experiment already locked: ${String(row.locked_verdict)}` };
+        const lockPlan = planLockVerdict({
+            requestedVerdict: opts.verdict,
+            lockedVerdict: row.locked_verdict == null ? null : String(row.locked_verdict),
+        });
+        if (lockPlan.status !== "ok") {
+            return { status: lockPlan.status, message: lockPlan.message };
         }
+        const lockedVerdict = lockPlan.verdict;
         const experimentId = String(row.id ?? "");
-        const stmts = [`UPDATE ${experimentId} SET locked_verdict = ${surrealString(verdict.verdict)};`];
+        const stmts = [`UPDATE ${experimentId} SET locked_verdict = ${surrealString(lockedVerdict)};`];
         const latestCp = row.latest_checkpoint;
         if (latestCp) {
-            stmts.push(`UPDATE ${String(latestCp)} SET user_verdict = ${surrealString(verdict.verdict)};`);
+            stmts.push(`UPDATE ${String(latestCp)} SET user_verdict = ${surrealString(lockedVerdict)};`);
         }
         yield* db.query(stmts.join(""));
-        return { status: "ok", experiment_id: experimentId, verdict: verdict.verdict };
+        return { status: "ok", experiment_id: experimentId, verdict: lockedVerdict };
     });

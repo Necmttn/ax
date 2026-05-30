@@ -5,6 +5,11 @@ import {
     interventionObservationStatus,
     interventionStrengthForConfidence,
     isAcceptedProposalForm,
+    planAcceptCandidate,
+    planLockVerdict,
+    planRejectCandidate,
+    planRetroPlanRegistration,
+    planTaskScaffolded,
     validateLifecycleVerdict,
 } from "./lifecycle.ts";
 
@@ -24,11 +29,82 @@ describe("intervention lifecycle vocabulary", () => {
         expect(acceptedExperimentStatus({ form: "skill", autoScaffold: true })).toBe("scaffolded");
     });
 
+    test("plans accept transitions before callers touch persistence", () => {
+        expect(planAcceptCandidate({ form: "skill", proposalStatus: "open", autoScaffold: true })).toEqual({
+            status: "ok",
+            experimentStatus: "scaffolded",
+        });
+        expect(planAcceptCandidate({ form: "hook", proposalStatus: "open", autoScaffold: false })).toEqual({
+            status: "unsupported_form",
+            message: "accept supports form=guidance and form=skill (got hook); subagent/hook/automation land in later phases",
+        });
+        expect(planAcceptCandidate({ form: "skill", proposalStatus: "accepted", autoScaffold: false })).toEqual({
+            status: "wrong_status",
+            message: "proposal already accepted",
+        });
+    });
+
+    test("plans reject transitions with the default reject reason", () => {
+        expect(planRejectCandidate({ proposalStatus: "open" })).toEqual({
+            status: "ok",
+            reason: "not_worth_packaging",
+        });
+        expect(planRejectCandidate({ proposalStatus: "accepted", reason: "dupe" })).toEqual({
+            status: "wrong_status",
+            message: "proposal already accepted",
+        });
+    });
+
+    test("plans marker reconciliation without hiding regressed verdicts", () => {
+        expect(planTaskScaffolded({ experimentStatus: "task_emitted", lockedVerdict: null })).toEqual({
+            status: "scaffold",
+            nextStatus: "scaffolded",
+            regressed: false,
+        });
+        expect(planTaskScaffolded({ experimentStatus: "scaffolded", lockedVerdict: "regressed" })).toEqual({
+            status: "noop",
+            regressed: true,
+        });
+    });
+
     test("validates final experiment verdict vocabulary with stable CLI message", () => {
         expect(validateLifecycleVerdict("adopted")).toEqual({ valid: true, verdict: "adopted" });
         expect(validateLifecycleVerdict("better")).toEqual({
             valid: false,
             message: "verdict must be one of: adopted, ignored, no_longer_needed, partial, regressed",
+        });
+        expect(planLockVerdict({ requestedVerdict: "adopted", lockedVerdict: null })).toEqual({
+            status: "ok",
+            verdict: "adopted",
+        });
+        expect(planLockVerdict({ requestedVerdict: "adopted", lockedVerdict: "ignored" })).toEqual({
+            status: "verdict_locked",
+            message: "experiment already locked: ignored",
+        });
+        expect(planLockVerdict({ requestedVerdict: "better", lockedVerdict: null })).toEqual({
+            status: "invalid_verdict",
+            message: "verdict must be one of: adopted, ignored, no_longer_needed, partial, regressed",
+        });
+    });
+
+    test("plans retro plan registration with safety-gated accepted forms", () => {
+        expect(planRetroPlanRegistration({ form: "skill", leaveOpen: false })).toEqual({
+            proposalStatus: "accepted",
+            createExperiment: true,
+            experimentStatus: "scaffolded",
+            safetyMessage: null,
+        });
+        expect(planRetroPlanRegistration({ form: "hook", leaveOpen: false })).toEqual({
+            proposalStatus: "open",
+            createExperiment: false,
+            experimentStatus: null,
+            safetyMessage: "hook and automation proposals stay open until Recovery Path, smoke test, disable switch, and fail-open/fail-closed behavior are modeled",
+        });
+        expect(planRetroPlanRegistration({ form: "skill", leaveOpen: true })).toEqual({
+            proposalStatus: "open",
+            createExperiment: false,
+            experimentStatus: null,
+            safetyMessage: null,
         });
     });
 

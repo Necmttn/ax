@@ -52,6 +52,91 @@ export function acceptedExperimentStatus(input: {
         : EXPERIMENT_STATUS_TASK_EMITTED;
 }
 
+export type AcceptCandidatePlan =
+    | {
+        readonly status: "ok";
+        readonly experimentStatus: ExperimentStatus;
+    }
+    | {
+        readonly status: "wrong_status" | "unsupported_form";
+        readonly message: string;
+    };
+
+export function planAcceptCandidate(input: {
+    readonly form: string;
+    readonly proposalStatus: string;
+    readonly autoScaffold: boolean;
+}): AcceptCandidatePlan {
+    if (input.proposalStatus !== PROPOSAL_STATUS_OPEN) {
+        return {
+            status: "wrong_status",
+            message: `proposal already ${input.proposalStatus}`,
+        };
+    }
+    if (!isAcceptedProposalForm(input.form)) {
+        return {
+            status: "unsupported_form",
+            message: acceptanceFormError(input.form),
+        };
+    }
+    return {
+        status: "ok",
+        experimentStatus: acceptedExperimentStatus(input),
+    };
+}
+
+export type RejectCandidatePlan =
+    | {
+        readonly status: "ok";
+        readonly reason: string;
+    }
+    | {
+        readonly status: "wrong_status";
+        readonly message: string;
+    };
+
+export function planRejectCandidate(input: {
+    readonly proposalStatus: string;
+    readonly reason?: string;
+}): RejectCandidatePlan {
+    if (input.proposalStatus !== PROPOSAL_STATUS_OPEN) {
+        return {
+            status: "wrong_status",
+            message: `proposal already ${input.proposalStatus}`,
+        };
+    }
+    return {
+        status: "ok",
+        reason: input.reason ?? "not_worth_packaging",
+    };
+}
+
+export type TaskScaffoldPlan =
+    | {
+        readonly status: "scaffold";
+        readonly nextStatus: typeof EXPERIMENT_STATUS_SCAFFOLDED;
+        readonly regressed: boolean;
+    }
+    | {
+        readonly status: "noop";
+        readonly regressed: boolean;
+    };
+
+export function planTaskScaffolded(input: {
+    readonly experimentStatus: string;
+    readonly lockedVerdict: string | null;
+}): TaskScaffoldPlan {
+    const regressed = input.lockedVerdict === LIFECYCLE_VERDICT_REGRESSED;
+    if (input.experimentStatus === EXPERIMENT_STATUS_TASK_EMITTED) {
+        return {
+            status: "scaffold",
+            nextStatus: EXPERIMENT_STATUS_SCAFFOLDED,
+            regressed,
+        };
+    }
+    return { status: "noop", regressed };
+}
+
 export type VerdictValidation =
     | { readonly valid: true; readonly verdict: LifecycleVerdict }
     | { readonly valid: false; readonly message: string };
@@ -63,6 +148,84 @@ export function validateLifecycleVerdict(verdict: string): VerdictValidation {
     return {
         valid: false,
         message: `verdict must be one of: ${LIFECYCLE_VERDICTS.join(", ")}`,
+    };
+}
+
+export type LockVerdictPlan =
+    | {
+        readonly status: "ok";
+        readonly verdict: LifecycleVerdict;
+    }
+    | {
+        readonly status: "invalid_verdict" | "verdict_locked";
+        readonly message: string;
+    };
+
+export function planLockVerdict(input: {
+    readonly requestedVerdict: string;
+    readonly lockedVerdict: string | null;
+}): LockVerdictPlan {
+    const verdict = validateLifecycleVerdict(input.requestedVerdict);
+    if (!verdict.valid) {
+        return {
+            status: "invalid_verdict",
+            message: verdict.message,
+        };
+    }
+    if (input.lockedVerdict) {
+        return {
+            status: "verdict_locked",
+            message: `experiment already locked: ${input.lockedVerdict}`,
+        };
+    }
+    return {
+        status: "ok",
+        verdict: verdict.verdict,
+    };
+}
+
+export const RETRO_PLAN_UNSAFE_FORM_MESSAGE =
+    "hook and automation proposals stay open until Recovery Path, smoke test, disable switch, and fail-open/fail-closed behavior are modeled";
+
+export type RetroPlanRegistrationPlan =
+    | {
+        readonly proposalStatus: typeof PROPOSAL_STATUS_ACCEPTED;
+        readonly createExperiment: true;
+        readonly experimentStatus: typeof EXPERIMENT_STATUS_SCAFFOLDED;
+        readonly safetyMessage: null;
+    }
+    | {
+        readonly proposalStatus: typeof PROPOSAL_STATUS_OPEN;
+        readonly createExperiment: false;
+        readonly experimentStatus: null;
+        readonly safetyMessage: string | null;
+    };
+
+export function planRetroPlanRegistration(input: {
+    readonly form: string;
+    readonly leaveOpen: boolean;
+}): RetroPlanRegistrationPlan {
+    if (input.leaveOpen) {
+        return {
+            proposalStatus: PROPOSAL_STATUS_OPEN,
+            createExperiment: false,
+            experimentStatus: null,
+            safetyMessage: null,
+        };
+    }
+    if (!isAcceptedProposalForm(input.form)) {
+        return {
+            proposalStatus: PROPOSAL_STATUS_OPEN,
+            createExperiment: false,
+            experimentStatus: null,
+            safetyMessage: RETRO_PLAN_UNSAFE_FORM_MESSAGE,
+        };
+    }
+    return {
+        proposalStatus: PROPOSAL_STATUS_ACCEPTED,
+        createExperiment: true,
+        experimentStatus: EXPERIMENT_STATUS_SCAFFOLDED,
+        safetyMessage: null,
     };
 }
 
