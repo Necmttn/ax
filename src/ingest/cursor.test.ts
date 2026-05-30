@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import {
+    __testBuildCursorBatchStatements,
     __testFindCursorStateDbs,
     extractCursorStateDb,
     isAllowedCursorHistoryKey,
@@ -182,6 +183,88 @@ describe("Cursor state.vscdb extraction", () => {
         });
     });
 
+    test("extracts Cursor toolFormerData into shared tool calls and invocation edges", async () => {
+        await withTempCursorStateDb((db, dbPath) => {
+            db.run("CREATE TABLE cursorDiskKV (key text primary key, value blob)");
+            db.query("INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)").run(
+                "composerData:composer-tools-1",
+                JSON.stringify({
+                    composerId: "composer-tools-1",
+                    name: "Tool run fixture",
+                    createdAt: "2026-05-29T10:49:48.611Z",
+                    fullConversationHeadersOnly: [
+                        { bubbleId: "bubble-user-1", type: 1, grouping: { hasText: true } },
+                        { bubbleId: "bubble-tool-1", type: 2, grouping: { hasText: true } },
+                    ],
+                }),
+            );
+            db.query("INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)").run(
+                "bubbleId:composer-tools-1:bubble-user-1",
+                JSON.stringify({
+                    bubbleId: "bubble-user-1",
+                    type: 1,
+                    text: "check git status",
+                    createdAt: "2026-05-29T10:49:48.611Z",
+                }),
+            );
+            db.query("INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)").run(
+                "bubbleId:composer-tools-1:bubble-tool-1",
+                JSON.stringify({
+                    bubbleId: "bubble-tool-1",
+                    type: 2,
+                    text: "Running git status.",
+                    createdAt: "2026-05-29T10:49:55.458Z",
+                    toolFormerData: {
+                        toolCallId: "cursor-tool-call-1",
+                        status: "completed",
+                        name: "run_terminal_command_v2",
+                        rawArgs: "",
+                        params: JSON.stringify({ command: "git status --short" }),
+                        result: JSON.stringify({ output: " M src/ingest/cursor.ts\n" }),
+                    },
+                }),
+            );
+
+            const extracted = extractCursorStateDb(dbPath);
+
+            expect(extracted.sessions).toHaveLength(1);
+            expect(extracted.turns).toHaveLength(2);
+            expect(extracted.toolCalls).toHaveLength(1);
+            expect(extracted.invocations).toHaveLength(1);
+            expect(extracted.skillRelations).toHaveLength(1);
+            expect(extracted.providerEvents).toHaveLength(3);
+            expect(extracted.turns[1]).toMatchObject({
+                role: "assistant",
+                message_kind: "tool_call",
+                has_tool_use: true,
+                has_error: false,
+            });
+            expect(extracted.toolCalls[0]).toMatchObject({
+                provider: "cursor",
+                toolName: "run_terminal_command_v2",
+                toolKind: "unknown",
+                callId: "cursor-tool-call-1",
+                commandText: "git status --short",
+                commandNorm: "git status",
+                commandToolName: "git",
+                outputExcerpt: JSON.stringify({ output: " M src/ingest/cursor.ts\n" }),
+                hasError: false,
+            });
+            expect(extracted.invocations[0]).toMatchObject({
+                session: extracted.sessions[0]?.id,
+                seq: 2,
+                skill: "cursor:run_terminal_command_v2",
+            });
+
+            const statements = __testBuildCursorBatchStatements(extracted, dbPath);
+            expect(statements.some((statement) => statement.includes("tool_call"))).toBe(true);
+            expect(statements.some((statement) => statement.includes("cursor:run_terminal_command_v2"))).toBe(true);
+            expect(statements.some((statement) => statement.includes("->invoked:"))).toBe(true);
+            expect(statements.some((statement) => statement.includes("->concerns:"))).toBe(true);
+            expect(statements.join("\n")).toContain("git status");
+        });
+    });
+
     test("namespaces repeated conversation and message ids by database identity", async () => {
         const dir = await mkdtemp(join(tmpdir(), "ax-cursor-collision-"));
         try {
@@ -284,6 +367,26 @@ describe("Cursor state.vscdb extraction", () => {
             const fresh = new Date("2026-05-29T00:00:00.000Z");
             await utimes(dbPath, old, old);
             await utimes(walPath, fresh, fresh);
+
+            expect(await __testFindCursorStateDbs(dir, old.getTime() + 1)).toEqual([dbPath]);
+        } finally {
+            await rm(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("discovery treats fresh SQLite SHM sidecars as fresh database activity", async () => {
+        const dir = await mkdtemp(join(tmpdir(), "ax-cursor-shm-"));
+        try {
+            const workspaceDir = join(dir, "workspaceStorage", "workspace-a");
+            await mkdir(workspaceDir, { recursive: true });
+            const dbPath = join(workspaceDir, "state.vscdb");
+            const shmPath = `${dbPath}-shm`;
+            await writeFile(dbPath, "");
+            await writeFile(shmPath, "");
+            const old = new Date("2026-05-01T00:00:00.000Z");
+            const fresh = new Date("2026-05-29T00:00:00.000Z");
+            await utimes(dbPath, old, old);
+            await utimes(shmPath, fresh, fresh);
 
             expect(await __testFindCursorStateDbs(dir, old.getTime() + 1)).toEqual([dbPath]);
         } finally {

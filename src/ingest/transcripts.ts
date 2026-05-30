@@ -31,7 +31,12 @@ import {
     toolKindForName,
 } from "./tool-calls.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
-import { normalizeClaudeTodoWrite, type PlanStatus } from "./plans.ts";
+import { providerDelegationSignalAvailability } from "./delegation.ts";
+import {
+    normalizeProviderPlanSnapshot,
+    providerPlanSignalAvailability,
+    toPlanSnapshotWrite,
+} from "./plans.ts";
 import {
     fileRecordKey,
     invokedRelationRecordKey,
@@ -209,59 +214,6 @@ function stringField(input: Record<string, unknown>, field: string): string | nu
 
 function stableHash(input: string): string {
     return Bun.hash(input).toString(16).padStart(16, "0");
-}
-
-function recordKeyPart(input: string, fallback = "_"): string {
-    const sanitized = input
-        .replace(/[^a-zA-Z0-9]/g, "_")
-        .replace(/_+/g, "_")
-        .replace(/^_+|_+$/g, "");
-    return sanitized.length > 0 ? sanitized : fallback;
-}
-
-function planKey(sessionId: string, source: string): string {
-    return [
-        "claude",
-        recordKeyPart(sessionId, "session").slice(0, 80),
-        recordKeyPart(source, "source"),
-        stableHash(`${sessionId}:${source}`).slice(0, 16),
-    ].join("__");
-}
-
-function planSnapshotKey(input: {
-    sessionId: string;
-    source: string;
-    snapshotSeq: number;
-    toolCallKey: string;
-}): string {
-    return [
-        planKey(input.sessionId, input.source),
-        `snapshot_${input.snapshotSeq.toString(10).padStart(6, "0")}`,
-        stableHash(input.toolCallKey).slice(0, 12),
-    ].join("__");
-}
-
-function planItemKey(input: {
-    sessionId: string;
-    source: string;
-    seq: number;
-}): string {
-    return [
-        planKey(input.sessionId, input.source),
-        `item_${input.seq.toString(10).padStart(3, "0")}`,
-    ].join("__");
-}
-
-function planStatus(items: readonly { status: PlanStatus }[]): PlanStatus {
-    if (items.some((item) => item.status === "in_progress")) return "in_progress";
-    if (items.length > 0 && items.every((item) => item.status === "completed")) {
-        return "completed";
-    }
-    if (items.some((item) => item.status === "pending")) return "pending";
-    if (items.length > 0 && items.every((item) => item.status === "abandoned")) {
-        return "abandoned";
-    }
-    return "pending";
 }
 
 function boundedExcerpt(input: string): string {
@@ -557,48 +509,24 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
         }
 
         if (name === "TodoWrite" && input) {
-            const normalized = normalizeClaudeTodoWrite({
+            const normalized = normalizeProviderPlanSnapshot({
+                provider: "claude",
+                toolName: name,
                 sessionId,
                 ts,
                 input,
             });
-            if (normalized.items.length > 0) {
+            if (normalized && normalized.items.length > 0) {
                 const source = normalized.source;
                 const snapshotSeq = nextPlanSnapshotSeq(source);
                 const createdAt = rememberPlanCreatedAt(source, ts);
-                const currentPlanKey = planKey(sessionId, source);
-                const items = normalized.items.map((item) => ({
-                    key: planItemKey({
-                        sessionId,
-                        source,
-                        seq: item.seq,
-                    }),
-                    externalId: item.externalId,
-                    seq: item.seq,
-                    content: item.content,
-                    activeForm: item.activeForm,
-                    status: item.status,
-                }));
 
-                planSnapshots.push({
-                    planKey: currentPlanKey,
-                    sessionId,
-                    source,
-                    status: planStatus(normalized.items),
+                planSnapshots.push(toPlanSnapshotWrite({
+                    snapshot: normalized,
+                    snapshotSeq,
                     createdAt,
-                    updatedAt: ts,
-                    snapshotKey: planSnapshotKey({
-                        sessionId,
-                        source,
-                        snapshotSeq,
-                        toolCallKey,
-                    }),
                     toolCallKey,
-                    itemsJson: normalized.items,
-                    explanation: normalized.explanation,
-                    ts: normalized.ts,
-                    items,
-                });
+                }));
             }
         }
     };
@@ -1273,6 +1201,8 @@ const buildClaudeProviderStatements = (extracted: FileExtract): string[] => [
             capabilities: {
                 transcripts: true,
                 toolCalls: true,
+                planSignals: providerPlanSignalAvailability.claude,
+                delegationSignals: providerDelegationSignalAvailability.claude,
             },
         },
     ]),

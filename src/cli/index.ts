@@ -120,7 +120,7 @@ const stringArg = (name: string, value: string | undefined): string[] =>
 const optionValue = <A>(value: Option.Option<A>): A | undefined =>
     Option.getOrUndefined(value);
 
-function flag(name: string, args: string[]): string | undefined {
+function flag(name: string, args: readonly string[]): string | undefined {
     const found = args.find((a) => a.startsWith(`--${name}=`));
     return found?.split("=")[1];
 }
@@ -134,7 +134,7 @@ function flag(name: string, args: string[]): string | undefined {
 function parsePositiveIntFlag(
     cmd: string,
     flagName: string,
-    args: string[],
+    args: readonly string[],
     fallback?: number,
 ): number {
     const raw = flag(flagName, args);
@@ -162,7 +162,7 @@ function parsePositiveIntFlag(
 function parseOptionalPositiveIntFlag(
     cmd: string,
     flagName: string,
-    args: string[],
+    args: readonly string[],
 ): number | undefined {
     const raw = flag(flagName, args);
     if (raw === undefined) return undefined;
@@ -1896,13 +1896,6 @@ interface ProposalRow {
     readonly created_at?: string;
 }
 
-interface SkillProposalRow {
-    readonly trigger_pattern: string;
-    readonly suspected_gap: string;
-    readonly proposed_behavior: string;
-    readonly expected_impact: string | null;
-}
-
 const formatProposalLine = (row: ProposalRow): string => {
     const freq = String(row.frequency).padStart(6);
     const conf = (row.confidence ?? "").padEnd(6);
@@ -1971,10 +1964,8 @@ const cmdImproveLint = (args: string[]) =>
         for (const a of args) {
             if (a.startsWith("--root=")) roots.push(a.slice("--root=".length));
         }
-        const report = yield* lintFiles({
-            roots: roots.length > 0 ? roots : undefined,
-            staleDays,
-        });
+        const lintOptions = roots.length > 0 ? { roots, staleDays } : { staleDays };
+        const report = yield* lintFiles(lintOptions);
         if (json) {
             console.log(JSON.stringify(report, null, 2));
         } else {
@@ -2022,11 +2013,12 @@ const cmdImproveRecommend = (args: string[]) =>
                 }
             }
         }
-        const items = yield* recommend({
+        const recommendInput = {
             limit,
-            forms: forms.length > 0 ? forms : undefined,
-            sinceDays,
-        });
+            ...(forms.length > 0 ? { forms } : {}),
+            ...(sinceDays === undefined ? {} : { sinceDays }),
+        };
+        const items = yield* recommend(recommendInput);
         if (json) {
             console.log(JSON.stringify(items, null, 2));
             return;
@@ -2128,7 +2120,7 @@ const improveShowCommand = Command.make(
     ({ id, json }) => cmdImproveShow([id, ...boolArg("json", json)]),
 ).pipe(Command.withDescription("Show experiment evidence + status for one proposal id"));
 
-const cmdImproveAccept = (args: string[]) =>
+export const cmdImproveAccept = (args: string[]) =>
     Effect.gen(function* () {
         const positional = args.filter((a) => !a.startsWith("--"))[0];
         if (positional === undefined) {
@@ -4404,6 +4396,10 @@ async function main() {
     const [, , ...args] = process.argv;
     if (args[0] === undefined || args[0] === "help" || args[0] === "--help" || args[0] === "-h") {
         await Effect.runPromise(withoutDb(["--help"]));
+        return;
+    }
+    if (args.includes("--help") || args.includes("-h")) {
+        await Effect.runPromise(withoutDb(args));
         return;
     }
     if (args[0] === "-V" || args[0] === "-v" || args[0] === "--version") {

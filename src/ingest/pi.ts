@@ -25,7 +25,9 @@ import {
     type ToolCallWrite,
 } from "./evidence-writers.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
+import { providerDelegationSignalAvailability } from "./delegation.ts";
 import { agentEventRecordKey, buildAgentEventStatements, buildAgentProviderStatements, type AgentEventWrite } from "./provider-events.ts";
+import { providerPlanSignalAvailability } from "./plans.ts";
 import { invokedRelationRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
@@ -677,6 +679,8 @@ const buildPiBatchStatements = (extract: PiExtract): string[] => [
             capabilities: {
                 transcripts: true,
                 providerGraph: true,
+                planSignals: providerPlanSignalAvailability.pi,
+                delegationSignals: providerDelegationSignalAvailability.pi,
             },
         },
     ]),

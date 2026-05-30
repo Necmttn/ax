@@ -34,7 +34,12 @@ import {
     toolKindForName,
 } from "./tool-calls.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
-import { normalizeCodexUpdatePlan, type PlanStatus } from "./plans.ts";
+import { providerDelegationSignalAvailability } from "./delegation.ts";
+import {
+    normalizeProviderPlanSnapshot,
+    providerPlanSignalAvailability,
+    toPlanSnapshotWrite,
+} from "./plans.ts";
 import { invokedRelationRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
 import { executeStatements } from "../lib/shared/statement-exec.ts";
@@ -153,10 +158,6 @@ function codexMessageKind(role: string, itemType: string | null, textExcerpt: st
     return itemType ?? role;
 }
 
-function stableHash(input: string): string {
-    return Bun.hash(input).toString(16).padStart(16, "0");
-}
-
 export function shouldSnapshotCodexRaw(
     sizeBytes: number,
     maxBytes = DEFAULT_CODEX_RAW_MAX_BYTES,
@@ -254,59 +255,6 @@ function compactCodexFunctionOutputEventRaw(
         call_id: stringField(payload, "call_id"),
         output: compactPayload(payload.output, maxBytes),
     };
-}
-
-function recordKeyPart(input: string, fallback = "_"): string {
-    const sanitized = input
-        .replace(/[^a-zA-Z0-9]/g, "_")
-        .replace(/_+/g, "_")
-        .replace(/^_+|_+$/g, "");
-    return sanitized.length > 0 ? sanitized : fallback;
-}
-
-function planKey(sessionId: string, source: string): string {
-    return [
-        "codex",
-        recordKeyPart(sessionId, "session").slice(0, 80),
-        recordKeyPart(source, "source"),
-        stableHash(`${sessionId}:${source}`).slice(0, 16),
-    ].join("__");
-}
-
-function planSnapshotKey(input: {
-    sessionId: string;
-    source: string;
-    snapshotSeq: number;
-    toolCallKey: string;
-}): string {
-    return [
-        planKey(input.sessionId, input.source),
-        `snapshot_${input.snapshotSeq.toString(10).padStart(6, "0")}`,
-        stableHash(input.toolCallKey).slice(0, 12),
-    ].join("__");
-}
-
-function planItemKey(input: {
-    sessionId: string;
-    source: string;
-    seq: number;
-}): string {
-    return [
-        planKey(input.sessionId, input.source),
-        `item_${input.seq.toString(10).padStart(3, "0")}`,
-    ].join("__");
-}
-
-function planStatus(items: readonly { status: PlanStatus }[]): PlanStatus {
-    if (items.some((item) => item.status === "in_progress")) return "in_progress";
-    if (items.length > 0 && items.every((item) => item.status === "completed")) {
-        return "completed";
-    }
-    if (items.some((item) => item.status === "pending")) return "pending";
-    if (items.length > 0 && items.every((item) => item.status === "abandoned")) {
-        return "abandoned";
-    }
-    return "pending";
 }
 
 type MutableToolCallWrite = {
@@ -598,47 +546,24 @@ function createCodexExtractor(
         });
 
         if (toolName === "update_plan") {
-            const normalized = normalizeCodexUpdatePlan({
+            const normalized = normalizeProviderPlanSnapshot({
+                provider: "codex",
+                toolName,
                 sessionId: currentSession.id,
                 ts,
                 input: payload.arguments,
             });
-            if (normalized.items.length > 0) {
+            if (normalized && normalized.items.length > 0) {
                 const source = normalized.source;
                 const snapshotSeq = nextPlanSnapshotSeq(source);
                 const createdAt = rememberPlanCreatedAt(source, ts);
-                const items = normalized.items.map((item) => ({
-                    key: planItemKey({
-                        sessionId: currentSession.id,
-                        source,
-                        seq: item.seq,
-                    }),
-                    externalId: item.externalId,
-                    seq: item.seq,
-                    content: item.content,
-                    activeForm: item.activeForm,
-                    status: item.status,
-                }));
 
-                planSnapshots.push({
-                    planKey: planKey(currentSession.id, source),
-                    sessionId: currentSession.id,
-                    source,
-                    status: planStatus(normalized.items),
+                planSnapshots.push(toPlanSnapshotWrite({
+                    snapshot: normalized,
+                    snapshotSeq,
                     createdAt,
-                    updatedAt: ts,
-                    snapshotKey: planSnapshotKey({
-                        sessionId: currentSession.id,
-                        source,
-                        snapshotSeq,
-                        toolCallKey,
-                    }),
                     toolCallKey,
-                    itemsJson: normalized.items,
-                    explanation: normalized.explanation,
-                    ts: normalized.ts,
-                    items,
-                });
+                }));
             }
         }
     };
@@ -934,6 +859,8 @@ const buildCodexProviderStatements = (batch: MutableCodexExtract): string[] => {
                 capabilities: {
                     transcripts: true,
                     toolCalls: true,
+                    planSignals: providerPlanSignalAvailability.codex,
+                    delegationSignals: providerDelegationSignalAvailability.codex,
                 },
             },
         ]),

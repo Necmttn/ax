@@ -5,14 +5,25 @@ import { Database } from "bun:sqlite";
 import { Effect, Schema } from "effect";
 import { AxConfig } from "../lib/config.ts";
 import { RecordId, SurrealClient } from "../lib/db.ts";
+import { decodeJsonOrNull } from "../lib/decode.ts";
 import type { DbError } from "../lib/errors.ts";
+import { skillRecordKey } from "../lib/skill-id.ts";
 import { executeStatements } from "../lib/shared/statement-exec.ts";
 import { recordRef, surrealDate, surrealString } from "../lib/shared/surql.ts";
+import {
+    buildRelateToolCallSkillStatements,
+    buildToolCallStatements,
+    type ToolCallSkillRelationWrite,
+    type ToolCallWrite,
+} from "./evidence-writers.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
+import { providerDelegationSignalAvailability } from "./delegation.ts";
 import { agentEventRecordKey, buildAgentEventStatements, buildAgentProviderStatements, type AgentEventWrite } from "./provider-events.ts";
-import { turnRecordKey } from "./record-keys.ts";
+import { providerPlanSignalAvailability } from "./plans.ts";
+import { invokedRelationRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
+import { extractCommandTool, normalizeCommand, toolKindForName } from "./tool-calls.ts";
 
 export const OpenCodeKey = Schema.Literal("opencode");
 export type OpenCodeKey = typeof OpenCodeKey.Type;
@@ -44,8 +55,19 @@ export interface OpenCodeExtract {
     sessions: OpenCodeSession[];
     turns: OpenCodeTurn[];
     providerEvents: AgentEventWrite[];
+    toolCalls: ToolCallWrite[];
+    invocations: OpenCodeInvocation[];
+    skillRelations: ToolCallSkillRelationWrite[];
     skipped: number;
     warnings: string[];
+}
+
+interface OpenCodeInvocation {
+    session: string;
+    seq: number;
+    ts: string;
+    skill: string;
+    args: unknown;
 }
 
 export interface OpenCodeStats {
@@ -104,6 +126,26 @@ interface ObservedPartRow extends SQLiteRow {
     readonly data: string | null;
 }
 
+interface ParsedObservedPart {
+    readonly row: ObservedPartRow;
+    readonly data: Record<string, unknown>;
+}
+
+interface ToolResultFields {
+    readonly outputJson: unknown;
+    readonly outputExcerpt: string | null;
+    readonly errorText: string | null;
+    readonly hasError: boolean;
+    readonly durationMs: number | null;
+}
+
+type MutableToolCallWrite = {
+    -readonly [Key in keyof ToolCallWrite]: ToolCallWrite[Key];
+};
+
+const SYNTHETIC_PROVIDER_SEQ_OFFSET = 1_000_000_000;
+const MAX_OUTPUT_EXCERPT_CHARS = 1200;
+
 function validTimestamp(input: SQLiteValue | undefined, fallback: string): { ts: string; warning: string | null } {
     if (input === null || input === undefined) {
         return { ts: fallback, warning: "missing timestamp" };
@@ -140,6 +182,9 @@ function emptyExtract(warnings: string[] = [], skipped = 0): OpenCodeExtract {
         sessions: [],
         turns: [],
         providerEvents: [],
+        toolCalls: [],
+        invocations: [],
+        skillRelations: [],
         skipped,
         warnings,
     };
@@ -187,6 +232,20 @@ function stringField(input: Record<string, unknown>, field: string): string | nu
     return typeof value === "string" ? value : null;
 }
 
+function numberField(input: Record<string, unknown>, field: string): number | null {
+    const value = input[field];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "bigint") return Number(value);
+    if (typeof value !== "string" || value.trim().length === 0) return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function booleanField(input: Record<string, unknown>, field: string): boolean | null {
+    const value = input[field];
+    return typeof value === "boolean" ? value : null;
+}
+
 function nestedStringField(
     input: Record<string, unknown>,
     objectField: string,
@@ -201,11 +260,89 @@ function hasErrorFlag(input: Record<string, unknown>): boolean {
     return input.error !== null && input.error !== undefined;
 }
 
+function boundedExcerpt(text: string, max = MAX_OUTPUT_EXCERPT_CHARS): string {
+    return text.length <= max ? text : text.slice(0, max);
+}
+
+function parseMaybeJson(input: unknown): unknown {
+    if (typeof input !== "string") return input ?? null;
+    return decodeJsonOrNull(input) ?? input;
+}
+
 function textFromPartData(data: Record<string, unknown>): string | null {
     const type = stringField(data, "type");
     if (type !== "text" && type !== "input_text" && type !== "output_text") return null;
     const text = stringField(data, "text");
     return text && text.length > 0 ? text : null;
+}
+
+function toolNameFromPartData(data: Record<string, unknown>): string | null {
+    if (stringField(data, "type") !== "tool") return null;
+    return stringField(data, "tool") ??
+        stringField(data, "name") ??
+        stringField(data, "toolName");
+}
+
+function toolCallIdFromPartData(data: Record<string, unknown>, row: ObservedPartRow): string {
+    return stringField(data, "callID") ??
+        stringField(data, "callId") ??
+        stringField(data, "toolCallId") ??
+        row.id;
+}
+
+function toolState(data: Record<string, unknown>): Record<string, unknown> | null {
+    return isRecord(data.state) ? data.state : null;
+}
+
+function toolInputFromPartData(data: Record<string, unknown>): unknown {
+    const state = toolState(data);
+    const input = state?.input ?? data.input ?? data.arguments ?? data.args ?? null;
+    return parseMaybeJson(input);
+}
+
+function outputText(input: unknown): string | null {
+    if (typeof input === "string") return input;
+    if (input === null || input === undefined) return null;
+    try {
+        return JSON.stringify(input);
+    } catch {
+        return String(input);
+    }
+}
+
+function toolResultFromPartData(data: Record<string, unknown>): ToolResultFields {
+    const state = toolState(data);
+    const status = state ? stringField(state, "status") : stringField(data, "status");
+    const outputJson = state?.output ?? data.output ?? null;
+    const errorJson = state?.error ?? data.error ?? null;
+    const text = outputText(outputJson);
+    const errorText = outputText(errorJson);
+    const hasError = status === "error" ||
+        status === "failed" ||
+        booleanField(data, "isError") === true ||
+        booleanField(data, "is_error") === true ||
+        errorJson !== null;
+    const time = state && isRecord(state.time) ? state.time : null;
+    const start = time ? numberField(time, "start") : null;
+    const end = time ? numberField(time, "end") : null;
+
+    return {
+        outputJson,
+        outputExcerpt: text && text.length > 0 ? boundedExcerpt(text) : null,
+        errorText: errorText && errorText.length > 0
+            ? boundedExcerpt(errorText)
+            : hasError && text && text.length > 0
+                ? boundedExcerpt(text)
+                : null,
+        hasError,
+        durationMs: start !== null && end !== null && end >= start ? Math.round(end - start) : null,
+    };
+}
+
+function toolPartTimestamp(row: ObservedPartRow, data: Record<string, unknown>, fallback: string): string {
+    const state = toolState(data);
+    const time = state && isRecord(state.time) ? state.time : null;
+    return validTimestamp(time?.start as SQLiteValue | undefined ?? row.time_created, fallback).ts;
 }
 
 function syntheticRows(db: Database): {
@@ -248,6 +385,7 @@ function pushMessage(input: {
         created: SQLiteValue | undefined;
         role: string;
         text: string | null;
+        hasToolUse?: boolean;
         raw: unknown;
         parentProviderEventId?: string | null;
         labels: Record<string, unknown>;
@@ -258,7 +396,7 @@ function pushMessage(input: {
     providerEvents: AgentEventWrite[];
     seqBySession: Map<string, number>;
     warnings: string[];
-}): void {
+}): number {
     const seq = (input.seqBySession.get(input.row.session_id) ?? 0) + 1;
     input.seqBySession.set(input.row.session_id, seq);
     const timestamp = validTimestamp(input.row.created, input.session.ended_at);
@@ -285,7 +423,7 @@ function pushMessage(input: {
         intent_kind: intentKind,
         text: input.row.text,
         text_excerpt: textExcerpt,
-        has_tool_use: false,
+        has_tool_use: input.row.hasToolUse === true,
         has_error: input.row.metrics?.isError === true,
     });
     input.providerEvents.push({
@@ -310,9 +448,122 @@ function pushMessage(input: {
         },
         metrics: {
             turnSeq: seq,
-            hasToolUse: false,
+            hasToolUse: input.row.hasToolUse === true,
             isError: false,
             ...input.row.metrics,
+        },
+    });
+    return seq;
+}
+
+function processToolPart(input: {
+    part: ParsedObservedPart;
+    session: OpenCodeSession;
+    turnSeq: number;
+    ordinal: number;
+    parentProviderEventId: string;
+    toolCalls: MutableToolCallWrite[];
+    invocations: OpenCodeInvocation[];
+    skillRelations: ToolCallSkillRelationWrite[];
+    providerEvents: AgentEventWrite[];
+}): void {
+    const toolName = toolNameFromPartData(input.part.data);
+    if (!toolName) return;
+
+    const callId = toolCallIdFromPartData(input.part.data, input.part.row);
+    const ts = toolPartTimestamp(input.part.row, input.part.data, input.session.ended_at);
+    const eventSeq = SYNTHETIC_PROVIDER_SEQ_OFFSET + (input.turnSeq * 1000) + input.ordinal;
+    const providerEventId = input.part.row.id;
+    const inputJson = toolInputFromPartData(input.part.data);
+    const result = toolResultFromPartData(input.part.data);
+    const toolCallKey = toolCallRecordKey({
+        sessionId: input.session.id,
+        seq: input.turnSeq,
+        callId,
+    });
+    const call: MutableToolCallWrite = {
+        provider: "opencode",
+        toolName,
+        toolKind: toolKindForName(toolName),
+        sessionId: input.session.id,
+        seq: input.turnSeq,
+        turnKey: turnRecordKey(input.session.id, input.turnSeq),
+        agentEventKey: agentEventRecordKey({
+            provider: "opencode",
+            providerSessionId: input.session.id,
+            providerEventId,
+            seq: eventSeq,
+        }),
+        callId,
+        ts,
+        cwd: input.session.cwd,
+        inputJson,
+        outputJson: result.outputJson,
+        rawJson: input.part.data,
+        outputExcerpt: result.outputExcerpt,
+        errorText: result.errorText,
+        durationMs: result.durationMs,
+        hasError: result.hasError,
+    };
+
+    if (isRecord(inputJson)) {
+        const command = stringField(inputJson, "command") ?? stringField(inputJson, "cmd");
+        if (command) {
+            call.commandText = command;
+            call.commandToolName = extractCommandTool(command);
+            call.commandNorm = normalizeCommand(command);
+        }
+    }
+
+    input.providerEvents.push({
+        provider: "opencode",
+        providerSessionId: input.session.id,
+        axSessionId: input.session.id,
+        providerEventId,
+        parentProviderEventId: input.parentProviderEventId,
+        parentKind: "message_part",
+        seq: eventSeq,
+        ts,
+        type: "tool",
+        role: "assistant",
+        text: toolName,
+        textExcerpt: toolName,
+        raw: input.part.data,
+        labels: {
+            source: "opencode_sqlite",
+            toolName,
+            toolKind: call.toolKind,
+        },
+        metrics: {
+            turnSeq: input.turnSeq,
+            partOrdinal: input.ordinal,
+            durationMs: result.durationMs ?? null,
+            hasError: result.hasError,
+        },
+    });
+
+    input.toolCalls.push(call);
+    const skillName = `opencode:${toolName}`;
+    input.invocations.push({
+        session: input.session.id,
+        seq: input.turnSeq,
+        ts,
+        skill: skillName,
+        args: inputJson ?? {},
+    });
+    input.skillRelations.push({
+        toolCallKey,
+        skillName,
+        ts,
+        reason: "OpenCode tool part",
+        labels: {
+            provider: "opencode",
+            toolName,
+            source: "opencode_sqlite",
+        },
+        metrics: {
+            turnSeq: input.turnSeq,
+            partOrdinal: input.ordinal,
         },
     });
 }
@@ -343,6 +594,9 @@ export function extractOpenCodeDatabase(dbPath: string): OpenCodeExtract {
         let skipped = 0;
         const turns: OpenCodeTurn[] = [];
         const providerEvents: AgentEventWrite[] = [];
+        const toolCalls: MutableToolCallWrite[] = [];
+        const invocations: OpenCodeInvocation[] = [];
+        const skillRelations: ToolCallSkillRelationWrite[] = [];
         const seqBySession = new Map<string, number>();
 
         if (isSynthetic) {
@@ -464,6 +718,7 @@ export function extractOpenCodeDatabase(dbPath: string): OpenCodeExtract {
                     warnings.push(`skipped message ${row.id}: invalid message JSON`);
                     continue;
                 }
+                const parsedParts: ParsedObservedPart[] = [];
                 const texts: string[] = [];
                 for (const part of partsByMessage.get(row.id) ?? []) {
                     const partData = parseJsonRecord(part.data, `part ${part.id}`, warnings);
@@ -471,28 +726,32 @@ export function extractOpenCodeDatabase(dbPath: string): OpenCodeExtract {
                         skipped += 1;
                         continue;
                     }
+                    parsedParts.push({ row: part, data: partData });
                     const text = textFromPartData(partData);
                     if (text !== null) texts.push(text);
                 }
+                const toolParts = parsedParts.filter((part) => toolNameFromPartData(part.data) !== null);
                 const role = stringField(messageData, "role") ?? "unknown";
                 const model = nestedStringField(messageData, "model", "modelID") ??
                     stringField(messageData, "modelID") ??
                     session.model;
                 const provider = nestedStringField(messageData, "model", "providerID") ??
                     stringField(messageData, "providerID");
-                pushMessage({
+                const toolPartsHaveError = toolParts.some((part) => toolResultFromPartData(part.data).hasError);
+                const turnSeq = pushMessage({
                     row: {
                         id: row.id,
                         session_id: row.session_id,
                         created: row.time_created,
                         role,
                         text: texts.length > 0 ? texts.join("\n") : null,
+                        hasToolUse: toolParts.length > 0,
                         raw: {
                             id: row.id,
                             sessionId: row.session_id,
                             data: messageData,
-                            parts: partsByMessage.get(row.id)?.map((part) => ({
-                                id: part.id,
+                            parts: parsedParts.map((part) => ({
+                                id: part.row.id,
                                 data: part.data,
                             })) ?? [],
                         },
@@ -504,7 +763,8 @@ export function extractOpenCodeDatabase(dbPath: string): OpenCodeExtract {
                             agent: stringField(messageData, "agent"),
                         },
                         metrics: {
-                            isError: hasErrorFlag(messageData),
+                            isError: hasErrorFlag(messageData) || toolPartsHaveError,
+                            toolCalls: toolParts.length,
                         },
                     },
                     session,
@@ -513,6 +773,19 @@ export function extractOpenCodeDatabase(dbPath: string): OpenCodeExtract {
                     seqBySession,
                     warnings,
                 });
+                toolParts.forEach((part, index) =>
+                    processToolPart({
+                        part,
+                        session,
+                        turnSeq,
+                        ordinal: index + 1,
+                        parentProviderEventId: row.id,
+                        toolCalls,
+                        invocations,
+                        skillRelations,
+                        providerEvents,
+                    })
+                );
             }
         }
 
@@ -520,6 +793,9 @@ export function extractOpenCodeDatabase(dbPath: string): OpenCodeExtract {
             sessions: [...sessions.values()],
             turns,
             providerEvents,
+            toolCalls,
+            invocations,
+            skillRelations,
             skipped,
             warnings,
         };
@@ -544,6 +820,24 @@ const buildTurnStatements = (turns: readonly OpenCodeTurn[]): string[] =>
         return `UPSERT turn:\`${turnRecordKey(turn.session, turn.seq)}\` CONTENT { session: ${recordRef("session", turn.session)}, agent_event: ${recordRef("agent_event", eventKey)}, seq: ${turn.seq}, ts: ${surrealDate(turn.ts)}, role: ${surrealString(turn.role)}, message_kind: ${surrealString(turn.message_kind)}, intent_kind: ${surrealString(turn.intent_kind)}, text: ${turn.text === null ? "NONE" : surrealString(turn.text)}, text_excerpt: ${turn.text_excerpt === null ? "NONE" : surrealString(turn.text_excerpt)}, has_tool_use: ${turn.has_tool_use}, has_error: ${turn.has_error} };`;
     });
 
+const buildSyntheticSkillAndInvocationStatements = (
+    invocations: readonly OpenCodeInvocation[],
+): string[] => {
+    if (invocations.length === 0) return [];
+    const skills = new Set(invocations.map((invocation) => invocation.skill));
+    const skillStatements = [...skills].map((name) =>
+        `UPSERT skill:\`${skillRecordKey(name)}\` MERGE { name: ${surrealString(name)}, scope: "opencode-tool", dir_path: "(synthetic)", content_hash: "opencode" };`
+    );
+    const invocationStatements = invocations.map((invocation) => {
+        const turnKey = turnRecordKey(invocation.session, invocation.seq);
+        const skillKey = skillRecordKey(invocation.skill);
+        const args = JSON.stringify(invocation.args ?? {});
+        const edgeKey = invokedRelationRecordKey({ turnKey, skillKey, args });
+        return `RELATE turn:\`${turnKey}\`->invoked:\`${edgeKey}\`->skill:\`${skillKey}\` SET ts = ${surrealDate(invocation.ts)}, args = ${surrealString(args)}, turn_has_error = false, turn_index = ${invocation.seq};`;
+    });
+    return [...skillStatements, ...invocationStatements];
+};
+
 const buildOpenCodeBatchStatements = (
     extract: OpenCodeExtract,
     sourcePath: string,
@@ -556,6 +850,9 @@ const buildOpenCodeBatchStatements = (
                 sqlite: true,
                 transcripts: true,
                 providerGraph: true,
+                toolCalls: true,
+                planSignals: providerPlanSignalAvailability.opencode,
+                delegationSignals: providerDelegationSignalAvailability.opencode,
             },
         },
     ]),
@@ -578,7 +875,7 @@ const buildOpenCodeBatchStatements = (
             },
             metrics: {
                 turns: extract.turns.filter((turn) => turn.session === session.id).length,
-                toolCalls: 0,
+                toolCalls: extract.toolCalls.filter((call) => call.sessionId === session.id).length,
                 providerEvents: extract.providerEvents.filter((event) => event.providerSessionId === session.id).length,
             },
             startedAt: session.started_at,
@@ -587,6 +884,11 @@ const buildOpenCodeBatchStatements = (
         events: extract.providerEvents,
     }),
     ...buildTurnStatements(extract.turns),
+    ...buildToolCallStatements(extract.toolCalls),
+    ...buildSyntheticSkillAndInvocationStatements(extract.invocations),
+    ...extract.skillRelations.flatMap((relation) =>
+        buildRelateToolCallSkillStatements(relation)
+    ),
 ];
 
 export const __testBuildOpenCodeBatchStatements = buildOpenCodeBatchStatements;
@@ -672,7 +974,7 @@ export const ingestOpenCode = (
         return {
             sessions: extract.sessions.length,
             turns: extract.turns.length,
-            toolCalls: 0,
+            toolCalls: extract.toolCalls.length,
             skipped: extract.skipped,
             warnings: extract.warnings.length,
         };
