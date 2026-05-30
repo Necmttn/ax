@@ -191,6 +191,7 @@ axctl recall <query> [--sources=turn,commit,skill] [--scope=here|all]
 axctl context [file] [<query>]              # file/agent-context grounding
 axctl skills <search|taste|unused|pairs|recovery|classify|tag|lint|weighted|by-role|roles>
 axctl insights <view>                       # 16 read-only graph views
+axctl costs <summary>                       # token/cost usage by provider/model quality
 axctl sessions <here|around <date>|near <sha>|show <id>>
                                             # windowed session queries
 axctl roles                                 # list role labels with skill counts
