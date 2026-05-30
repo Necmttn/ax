@@ -37,8 +37,10 @@ import {
 import { safeKeyPart } from "../lib/shared/derive-keys.ts";
 import { dedupeSig, normalizeTitle } from "../ingest/derive-proposals.ts";
 import {
+    type InterventionSafetyContract,
     planRetroPlanRegistration,
     type RetroPlanRegistrationPlan,
+    validateInterventionFailureMode,
 } from "../improve/lifecycle.ts";
 
 export type PlanForm = "skill" | "hook" | "guidance" | "automation";
@@ -54,6 +56,7 @@ export interface RetroPlanArgs {
     readonly confidence: "low" | "medium" | "high";
     readonly frequency: number;
     readonly json: boolean;
+    readonly safety: InterventionSafetyContract;
     /**
      * When true, register the proposal with status='open' and DO NOT create
      * an experiment row. Lets external agents compose with
@@ -105,6 +108,12 @@ export const parseRetroPlanArgs = (
     const frequencyRaw = flagValue(args, "frequency") ?? "1";
     const json = args.includes("--json");
     const leaveOpen = args.includes("--leave-open");
+    const safety: InterventionSafetyContract = {
+        recoveryPath: flagValue(args, "recovery-path") ?? null,
+        smokeTestCommand: flagValue(args, "smoke-test-command") ?? null,
+        disableCommand: flagValue(args, "disable-command") ?? null,
+        failureMode: flagValue(args, "failure-mode") ?? null,
+    };
 
     if (!slug) fail("--slug is required");
     if (!form) fail("--form is required (skill|hook|guidance|automation)");
@@ -116,6 +125,9 @@ export const parseRetroPlanArgs = (
     if (!planPath) fail("--plan-path is required");
     if (!ALLOWED_CONFIDENCE.has(confidenceRaw)) {
         fail(`--confidence must be one of: low, medium, high (got ${confidenceRaw})`);
+    }
+    if (safety.failureMode !== null && !validateInterventionFailureMode(safety.failureMode)) {
+        fail("--failure-mode must be one of: fail_open, fail_closed");
     }
     const frequency = Math.max(1, Math.floor(Number(frequencyRaw)));
     if (!Number.isFinite(frequency) || frequency <= 0) {
@@ -141,6 +153,7 @@ export const parseRetroPlanArgs = (
         confidence: confidenceRaw as "low" | "medium" | "high",
         frequency,
         json,
+        safety,
         leaveOpen,
     };
 };
@@ -181,6 +194,7 @@ export const buildRetroPlanStatements = (
     const registration = planRetroPlanRegistration({
         form: args.form,
         leaveOpen: args.leaveOpen,
+        safetyContract: args.safety,
     });
     const experimentKey = registration.createExperiment ? `${proposalKey}__${nowMs.toString(36)}` : null;
 
@@ -240,10 +254,10 @@ export const buildRetroPlanStatements = (
                 ["event_name", surrealString("PreToolUse")],
                 ["target_tool", surrealOptionString(null)],
                 ["hook_command", surrealString(`see plan: ${args.planPath}`)],
-                ["recovery_path", surrealOptionString(null)],
-                ["smoke_test_command", surrealOptionString(null)],
-                ["disable_command", surrealOptionString(null)],
-                ["failure_mode", surrealOptionString(null)],
+                ["recovery_path", surrealOptionString(args.safety.recoveryPath ?? null)],
+                ["smoke_test_command", surrealOptionString(args.safety.smokeTestCommand ?? null)],
+                ["disable_command", surrealOptionString(args.safety.disableCommand ?? null)],
+                ["failure_mode", surrealOptionString(args.safety.failureMode ?? null)],
             ])};`,
         );
     } else {
@@ -254,10 +268,10 @@ export const buildRetroPlanStatements = (
                 ["trigger_signal", surrealString(`retro_meta·slug=${args.slug}`)],
                 ["schedule", surrealOptionString(null)],
                 ["action", surrealString(`see plan: ${args.planPath}`)],
-                ["recovery_path", surrealOptionString(null)],
-                ["smoke_test_command", surrealOptionString(null)],
-                ["disable_command", surrealOptionString(null)],
-                ["failure_mode", surrealOptionString(null)],
+                ["recovery_path", surrealOptionString(args.safety.recoveryPath ?? null)],
+                ["smoke_test_command", surrealOptionString(args.safety.smokeTestCommand ?? null)],
+                ["disable_command", surrealOptionString(args.safety.disableCommand ?? null)],
+                ["failure_mode", surrealOptionString(args.safety.failureMode ?? null)],
             ])};`,
         );
     }

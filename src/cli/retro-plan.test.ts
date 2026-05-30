@@ -17,6 +17,12 @@ const baseArgs = (overrides: Partial<RetroPlanArgs> = {}): RetroPlanArgs => ({
     confidence: "medium",
     frequency: 3,
     json: true,
+    safety: {
+        recoveryPath: null,
+        smokeTestCommand: null,
+        disableCommand: null,
+        failureMode: null,
+    },
     leaveOpen: false,
     ...overrides,
 });
@@ -34,6 +40,10 @@ describe("parseRetroPlanArgs", () => {
                 "--artifact-path=/tmp/art.md",
                 "--confidence=high",
                 "--frequency=5",
+                "--recovery-path=Move generated hook out of ~/.claude/settings.json",
+                "--smoke-test-command=bun test src/improve/lifecycle.test.ts",
+                "--disable-command=mv hook.sh hook.sh.disabled",
+                "--failure-mode=fail_open",
                 "--json",
             ],
             { checkPlanPath: false },
@@ -45,6 +55,12 @@ describe("parseRetroPlanArgs", () => {
         expect(parsed.artifactPath).toBe("/tmp/art.md");
         expect(parsed.confidence).toBe("high");
         expect(parsed.frequency).toBe(5);
+        expect(parsed.safety).toEqual({
+            recoveryPath: "Move generated hook out of ~/.claude/settings.json",
+            smokeTestCommand: "bun test src/improve/lifecycle.test.ts",
+            disableCommand: "mv hook.sh hook.sh.disabled",
+            failureMode: "fail_open",
+        });
         expect(parsed.json).toBe(true);
     });
 
@@ -106,6 +122,33 @@ describe("parseRetroPlanArgs", () => {
             console.error = origErr;
         }
     });
+
+    test("rejects invalid failure mode", () => {
+        const origExit = process.exit;
+        const origErr = console.error;
+        (process as { exit: unknown }).exit = ((code?: number) => {
+            throw new Error(`exited:${code ?? 0}`);
+        }) as never;
+        console.error = () => undefined;
+        try {
+            expect(() =>
+                parseRetroPlanArgs(
+                    [
+                        "--slug=s",
+                        "--form=hook",
+                        "--title=t",
+                        "--hypothesis=h",
+                        "--plan-path=/dev/null",
+                        "--failure-mode=block",
+                    ],
+                    { checkPlanPath: false },
+                )
+            ).toThrow();
+        } finally {
+            process.exit = origExit;
+            console.error = origErr;
+        }
+    });
 });
 
 describe("buildRetroPlanStatements dedupeSig", () => {
@@ -154,34 +197,70 @@ describe("buildRetroPlanStatements SQL shape", () => {
 
     test("hook form writes hook_proposal payload", () => {
         const built = buildRetroPlanStatements(
-            baseArgs({ form: "hook", title: "Pre-Bash guard hook" }),
+            baseArgs({
+                form: "hook",
+                title: "Pre-Bash guard hook",
+                safety: {
+                    recoveryPath: "Remove the hook entry from settings.json",
+                    smokeTestCommand: "bun test src/improve/lifecycle.test.ts",
+                    disableCommand: "mv hook.sh hook.sh.disabled",
+                    failureMode: "fail_open",
+                },
+            }),
             1,
         );
         expect(built.proposalStatus).toBe("open");
         expect(built.experimentKey).toBeNull();
         expect(built.safetyMessage).toBe(
-            "hook proposals stay open until safety gates are modeled: Recovery Path, smoke test, disable switch, failure mode",
+            "hook proposals remain candidate-only until their accept/scaffold adapter is wired",
         );
         expect(built.statements[1]).toMatch(/CREATE hook_proposal:/);
         expect(built.statements[1]).toContain("event_name");
         expect(built.statements[1]).toContain("recovery_path");
+        expect(built.statements[1]).toContain("Remove the hook entry from settings.json");
+        expect(built.statements[1]).toContain("bun test src/improve/lifecycle.test.ts");
+        expect(built.statements[1]).toContain("mv hook.sh hook.sh.disabled");
+        expect(built.statements[1]).toContain("fail_open");
         expect(built.statements[1]).toContain("failure_mode");
         expect(built.statements.length).toBe(2);
     });
 
+    test("hook form without safety values stays open with missing gates", () => {
+        const built = buildRetroPlanStatements(
+            baseArgs({ form: "hook", title: "Pre-Bash guard hook" }),
+            1,
+        );
+        expect(built.safetyMessage).toBe(
+            "hook proposals stay open until safety gates are modeled: Recovery Path, smoke test, disable switch, failure mode",
+        );
+    });
+
     test("automation form writes automation_proposal payload", () => {
         const built = buildRetroPlanStatements(
-            baseArgs({ form: "automation", title: "Weekly cleanup" }),
+            baseArgs({
+                form: "automation",
+                title: "Weekly cleanup",
+                safety: {
+                    recoveryPath: "Unload the LaunchAgent",
+                    smokeTestCommand: "launchctl print gui/$UID/com.ax.weekly",
+                    disableCommand: "launchctl unload ~/Library/LaunchAgents/com.ax.weekly.plist",
+                    failureMode: "fail_open",
+                },
+            }),
             1,
         );
         expect(built.proposalStatus).toBe("open");
         expect(built.experimentKey).toBeNull();
         expect(built.safetyMessage).toBe(
-            "automation proposals stay open until safety gates are modeled: Recovery Path, smoke test, disable switch, failure mode",
+            "automation proposals remain candidate-only until their accept/scaffold adapter is wired",
         );
         expect(built.statements[1]).toMatch(/CREATE automation_proposal:/);
         expect(built.statements[1]).toContain("trigger_signal");
         expect(built.statements[1]).toContain("recovery_path");
+        expect(built.statements[1]).toContain("Unload the LaunchAgent");
+        expect(built.statements[1]).toContain("launchctl print gui/$UID/com.ax.weekly");
+        expect(built.statements[1]).toContain("launchctl unload ~/Library/LaunchAgents/com.ax.weekly.plist");
+        expect(built.statements[1]).toContain("fail_open");
         expect(built.statements[1]).toContain("failure_mode");
         expect(built.statements.length).toBe(2);
     });
