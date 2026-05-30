@@ -1,35 +1,105 @@
 export function MarkdownLite({ content }: { content: string }) {
-  const blocks = content
-    .replace(/^---[\s\S]*?---\s*/, "")
-    .split(/\n{2,}/)
-    .map((block) => block.trim())
-    .filter(Boolean);
+  const blocks = parseBlocks(content.replace(/^---[\s\S]*?---\s*/, ""));
 
   return (
     <>
       {blocks.map((block, index) => {
-        if (block.startsWith("# ")) {
-          return <h2 key={index}>{renderInline(block.slice(2))}</h2>;
+        if (block.kind === "code") {
+          return (
+            <pre key={index} className="release-code">
+              <code>{block.value}</code>
+            </pre>
+          );
         }
-        if (block.startsWith("## ")) {
-          return <h3 key={index}>{renderInline(block.slice(3))}</h3>;
+        const image = parseImage(block.value);
+        if (image) {
+          return (
+            <figure key={index} className="release-figure">
+              <img src={image.src} alt={image.alt} />
+              {image.alt ? <figcaption>{image.alt}</figcaption> : null}
+            </figure>
+          );
         }
-        if (block.startsWith("### ")) {
-          return <h4 key={index}>{renderInline(block.slice(4))}</h4>;
+        const { value } = block;
+        if (value.startsWith("# ")) {
+          return <h2 key={index}>{renderInline(value.slice(2))}</h2>;
         }
-        if (block.split("\n").every((line) => line.trim().startsWith("* "))) {
+        if (value.startsWith("## ")) {
+          return <h3 key={index}>{renderInline(value.slice(3))}</h3>;
+        }
+        if (value.startsWith("### ")) {
+          return <h4 key={index}>{renderInline(value.slice(4))}</h4>;
+        }
+        if (value.split("\n").every((line) => line.trim().startsWith("* "))) {
           return (
             <ul key={index}>
-              {block.split("\n").map((line, itemIndex) => (
+              {value.split("\n").map((line, itemIndex) => (
                 <li key={itemIndex}>{renderInline(line.trim().slice(2))}</li>
               ))}
             </ul>
           );
         }
-        return <p key={index}>{renderInline(block.replace(/\n/g, " "))}</p>;
+        return <p key={index}>{renderInline(value.replace(/\n/g, " "))}</p>;
       })}
     </>
   );
+}
+
+export function MarkdownInline({ text }: { text: string }) {
+  return <>{renderInline(text)}</>;
+}
+
+type Block = { kind: "text" | "code"; value: string };
+
+function parseBlocks(content: string): Block[] {
+  const blocks: Block[] = [];
+  const textBuffer: string[] = [];
+  let codeBuffer: string[] | null = null;
+
+  const flushText = () => {
+    const value = textBuffer.join("\n").trim();
+    if (value) {
+      blocks.push({ kind: "text", value });
+    }
+    textBuffer.length = 0;
+  };
+
+  for (const line of content.split("\n")) {
+    if (line.trim().startsWith("```")) {
+      if (codeBuffer) {
+        blocks.push({ kind: "code", value: codeBuffer.join("\n").replace(/\n$/, "") });
+        codeBuffer = null;
+      } else {
+        flushText();
+        codeBuffer = [];
+      }
+      continue;
+    }
+
+    if (codeBuffer) {
+      codeBuffer.push(line);
+      continue;
+    }
+
+    if (line.trim() === "") {
+      flushText();
+    } else {
+      textBuffer.push(line);
+    }
+  }
+
+  if (codeBuffer) {
+    blocks.push({ kind: "code", value: codeBuffer.join("\n").replace(/\n$/, "") });
+  }
+  flushText();
+
+  return blocks;
+}
+
+function parseImage(text: string): { alt: string; src: string } | null {
+  const match = text.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+  if (!match) return null;
+  return { alt: match[1] ?? "", src: match[2] ?? "" };
 }
 
 function renderInline(text: string) {

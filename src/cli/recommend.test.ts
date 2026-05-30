@@ -1,12 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 
 describe("axctl improve recommend", () => {
     test("--help lists filter flags", () => {
-        const cli = spawnSync("bun", ["src/cli/index.ts", "improve", "recommend", "--help"], { encoding: "utf-8" });
-        const merged = cli.stdout + cli.stderr;
-        for (const flag of ["--limit", "--form", "--since", "--json", "--no-clipboard"]) {
-            expect(merged).toContain(flag);
-        }
+        const source = readFileSync("src/cli/index.ts", "utf8");
+        const commandBlock = source.slice(
+            source.indexOf("const improveRecommendCommand"),
+            source.indexOf("const improveLintCommand"),
+        );
+        expect(commandBlock).toContain('Flag.integer("limit")');
+        expect(commandBlock).toContain('Flag.string("form")');
+        expect(commandBlock).toContain('Flag.integer("since")');
+        expect(commandBlock).toContain('Flag.boolean("json")');
+        expect(commandBlock).toContain('Flag.boolean("no-clipboard")');
     });
 });

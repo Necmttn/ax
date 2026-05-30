@@ -21,6 +21,9 @@ export const Route = createFileRoute("/changelog")({
 function ChangelogPage() {
   const { announcements, changelog } = Route.useLoaderData();
   const latest = announcements[0];
+  const previousAnnouncements = latest
+    ? announcements.filter((release) => release.version !== latest.version)
+    : announcements;
 
   return (
     <>
@@ -59,24 +62,26 @@ function ChangelogPage() {
             <p className="muted">No release announcements have been published yet.</p>
           )}
 
-          <div className="release-list">
-            {announcements.map((release) => (
-              <article id={`v${release.version}`} key={release.version} className="release-entry">
-                <div className="release-meta">
-                  <span>v{release.version}</span>
-                  <span>{release.date}</span>
-                </div>
-                <h3>{release.title}</h3>
-                <p className="release-summary">{release.summary}</p>
-                <Link to="/changelog/$version" params={{ version: `v${release.version}` }} className="release-entry-link">
-                  Open release page
-                </Link>
-                <div className="release-body">
-                  <MarkdownLite content={release.content} />
-                </div>
-              </article>
-            ))}
-          </div>
+          {previousAnnouncements.length > 0 ? (
+            <div className="release-list">
+              {previousAnnouncements.map((release) => (
+                <article id={`v${release.version}`} key={release.version} className="release-entry">
+                  <div className="release-meta">
+                    <span>v{release.version}</span>
+                    <span>{release.date}</span>
+                  </div>
+                  <h3>{release.title}</h3>
+                  <p className="release-summary">{release.summary}</p>
+                  <Link to="/changelog/$version" params={{ version: `v${release.version}` }} className="release-entry-link">
+                    Open release page
+                  </Link>
+                  <div className="release-body">
+                    <MarkdownLite content={release.content} />
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : null}
         </section>
 
         <section id="generated" className="release-section">
