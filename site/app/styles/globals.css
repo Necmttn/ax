@@ -133,6 +133,127 @@ nav.top-nav a.primary {
   border-color: var(--ink);
 }
 
+/* ---------- releases ---------- */
+
+.release-page {
+  padding-bottom: 80px;
+}
+
+.release-hero {
+  padding: 88px 0 56px;
+}
+
+.release-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 28px;
+}
+
+.release-actions a,
+.release-anchor {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 6px 12px;
+  border: 1px solid var(--ink);
+  text-decoration: none;
+  font-family: var(--mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.release-actions a:hover,
+.release-anchor:hover {
+  background: var(--ink);
+  color: var(--page);
+}
+
+.release-section {
+  padding: 56px 0;
+}
+
+.section-kicker,
+.release-meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+}
+
+.section-kicker {
+  margin-bottom: 18px;
+}
+
+.release-feature {
+  border-top: 2px solid var(--ink);
+  border-bottom: 1px solid var(--line);
+  padding: 26px 0 30px;
+  margin-bottom: 28px;
+}
+
+.release-feature h2 {
+  margin-top: 8px;
+}
+
+.release-meta {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.release-list {
+  display: grid;
+  gap: 28px;
+}
+
+.release-entry {
+  border-top: 1px solid var(--line);
+  padding-top: 24px;
+  scroll-margin-top: 24px;
+}
+
+.release-entry h3 {
+  font-family: var(--serif);
+  font-size: 28px;
+  font-weight: 400;
+  line-height: 1.2;
+  margin: 8px 0 10px;
+}
+
+.release-summary {
+  color: var(--muted);
+}
+
+.release-body {
+  margin-top: 20px;
+}
+
+.release-body h3,
+.generated-changelog h2,
+.generated-changelog h3 {
+  font-family: var(--serif);
+  font-weight: 400;
+}
+
+.release-body ul,
+.generated-changelog ul {
+  padding-left: 20px;
+  margin: 10px 0 18px;
+}
+
+.release-body li,
+.generated-changelog li {
+  margin-bottom: 8px;
+}
+
+.generated-changelog {
+  border-top: 2px solid var(--ink);
+  padding-top: 22px;
+}
+
 /* ---------- sections ---------- */
 
 section {

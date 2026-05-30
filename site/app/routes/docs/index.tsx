@@ -20,6 +20,7 @@ function DocsIndex() {
         <ul className="space-y-2">
           <li><Link to="/docs/language" className="underline">Language</Link></li>
           <li><Link to="/docs/cli-reference" className="underline">CLI reference</Link></li>
+          <li><Link to="/changelog" className="underline">Changelog</Link></li>
           <li><Link to="/manifesto" className="underline">Manifesto</Link></li>
           <li><Link to="/brand" className="underline">Brand</Link></li>
         </ul>
