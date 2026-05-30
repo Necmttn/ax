@@ -7,6 +7,10 @@ import { Effect } from "effect";
 import { SurrealClient } from "../lib/db.ts";
 import { ProcessService } from "../lib/process.ts";
 import type { DbError } from "../lib/errors.ts";
+import {
+    interventionObservationStatus,
+    interventionStrengthForConfidence,
+} from "../improve/lifecycle.ts";
 import { getGitState } from "./git.ts";
 import { loadProjectStack } from "./stack.ts";
 import { queryLiveDiagnostics } from "./diagnostics.ts";
@@ -292,7 +296,7 @@ export function mainBranchLearning(
 export function interventionForMainBranch(candidate: HarnessLearningCandidate): InterventionSuggestion {
     return {
         title: candidate.title,
-        strength: candidate.confidence === "medium" ? "workflow" : "advisory",
+        strength: interventionStrengthForConfidence(candidate.confidence),
         approvalRequired: true,
         expectedEffect: "Reduce write-risk actions on main/master during multi-agent work.",
         reviewCriteria: [
@@ -316,7 +320,7 @@ export function observationForMainBranch(
     const graphRisk = graph.editedOnMain > 0 || graph.commitsFromMain > 0;
     return {
         target: "main-branch guardrail",
-        status: currentRisk || graphRisk ? "observed" : "needs_more_evidence",
+        status: interventionObservationStatus({ currentRisk, graphRisk }),
         metrics: {
             dirtyFiles: git.changes.length,
             writeRiskOnMain: currentRisk ? 1 : 0,

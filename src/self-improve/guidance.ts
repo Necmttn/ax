@@ -1,5 +1,6 @@
 import type { DerivedSignal } from "./signals.ts";
 import { surrealJson, surrealString } from "../lib/shared/surql.ts";
+import { GUIDANCE_STATUS_PROPOSED } from "../improve/lifecycle.ts";
 
 export interface GuidanceDraft {
     readonly key: string;
@@ -7,7 +8,7 @@ export interface GuidanceDraft {
     readonly slug: string;
     readonly title: string;
     readonly text: string;
-    readonly status: "proposed";
+    readonly status: typeof GUIDANCE_STATUS_PROPOSED;
     readonly scope: "project" | "repository" | "checkout" | "global";
     readonly risk: "low" | "medium" | "high";
     readonly evidenceIds: readonly string[];
@@ -33,7 +34,7 @@ export function guidanceFromSignal(signal: DerivedSignal): GuidanceDraft {
         slug,
         title,
         text,
-        status: "proposed",
+        status: GUIDANCE_STATUS_PROPOSED,
         scope: "project",
         risk: "low",
         evidenceIds: signal.evidenceIds,
@@ -51,7 +52,7 @@ export function buildGuidanceWriteStatements(guidance: GuidanceDraft): string[] 
         return `RELATE guidance_version:\`${guidance.versionKey}\`->derived_from:\`${edgeKey}\`->artifact:\`${hashKey(evidenceId)}\` SET kind = "signal_evidence", labels = ${surrealJson({ evidenceId })};`;
     });
     return [
-        `UPSERT guidance:\`${guidance.key}\` MERGE { slug: ${surrealString(guidance.slug)}, title: ${surrealString(guidance.title)}, status: "proposed", updated_at: time::now() };`,
+        `UPSERT guidance:\`${guidance.key}\` MERGE { slug: ${surrealString(guidance.slug)}, title: ${surrealString(guidance.title)}, status: ${surrealString(GUIDANCE_STATUS_PROPOSED)}, updated_at: time::now() };`,
         `UPSERT guidance_version:\`${guidance.versionKey}\` CONTENT { guidance: guidance:\`${guidance.key}\`, version: "v1", text: ${surrealString(guidance.text)}, status: ${surrealString(guidance.status)}, scope: ${surrealString(guidance.scope)}, risk: ${surrealString(guidance.risk)}, evidence: ${surrealJson(guidance.evidenceIds)}, metrics_before: ${surrealJson(guidance.metrics)}, metrics_after: NONE, raw: ${surrealJson(guidance)}, created_at: d${surrealString(guidance.createdAt)} };`,
         ...artifactStatements,
         ...derivedFromStatements,

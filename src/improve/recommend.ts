@@ -7,6 +7,7 @@
 import { Effect } from "effect";
 import { SurrealClient } from "../lib/db.ts";
 import type { DbError } from "../lib/errors.ts";
+import { PROPOSAL_STATUS_OPEN } from "./lifecycle.ts";
 
 export interface RecommendInput {
     readonly limit: number;
@@ -56,7 +57,7 @@ export const recommend = (
             confidence: string; frequency: number; updated_at: string;
         }>]>(`SELECT dedupe_sig, title, form, hypothesis, confidence, frequency,
                 type::string(updated_at) AS updated_at
-            FROM proposal WHERE status = 'open';`);
+            FROM proposal WHERE status = '${PROPOSAL_STATUS_OPEN}';`);
         let rows = result?.[0] ?? [];
         if (input.forms && input.forms.length > 0) {
             const set = new Set(input.forms);

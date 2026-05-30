@@ -18,6 +18,11 @@ import { parseInlineMarkers, parseFrontmatterMarker } from "./markers.ts";
 import type { DbError } from "../lib/errors.ts";
 import { recordRef } from "../lib/shared/surql.ts";
 import { recordKeyPart } from "../lib/shared/derive-keys.ts";
+import {
+    EXPERIMENT_STATUS_SCAFFOLDED,
+    EXPERIMENT_STATUS_TASK_EMITTED,
+    LIFECYCLE_VERDICT_REGRESSED,
+} from "./lifecycle.ts";
 
 export type LintForm = "guidance" | "skill" | "subagent";
 
@@ -278,7 +283,7 @@ export const lintFiles = (
             const pending: PendingReconcile[] = [];
 
             const reconcileRow = (id: string, tgt: IdTarget, row: ExperimentRow): void => {
-                if (row.locked_verdict === "regressed") {
+                if (row.locked_verdict === LIFECYCLE_VERDICT_REGRESSED) {
                     infos.push({
                         rule: "regressed_verdict",
                         severity: "info",
@@ -287,14 +292,14 @@ export const lintFiles = (
                         message: `experiment ${id} locked as regressed - consider removing the marker`,
                     });
                 }
-                if (row.status === "task_emitted") {
+                if (row.status === EXPERIMENT_STATUS_TASK_EMITTED) {
                     // Use recordRef to build the UPDATE target consistently with
                     // actions.ts (which always wraps record IDs via recordRef rather
                     // than interpolating the raw type::string id).
                     const key = recordKeyPart(row.id, "experiment");
                     const updateTarget = key ? recordRef("experiment", key) : row.id;
                     updates.push(
-                        `UPDATE ${updateTarget} SET status = 'scaffolded', scaffolded_at = time::now(), artifact_path = ${surrealLiteral(tgt.path)};`,
+                        `UPDATE ${updateTarget} SET status = '${EXPERIMENT_STATUS_SCAFFOLDED}', scaffolded_at = time::now(), artifact_path = ${surrealLiteral(tgt.path)};`,
                     );
                     pending.push({
                         shortId: id,
@@ -369,7 +374,7 @@ export const lintFiles = (
                         shortId: p.shortId,
                         experimentId: p.experimentId,
                         previousStatus: p.previousStatus,
-                        nextStatus: "scaffolded",
+                        nextStatus: EXPERIMENT_STATUS_SCAFFOLDED,
                         taskDeleted,
                     });
                 }
@@ -391,7 +396,7 @@ export const lintFiles = (
                 task_path,
                 locked_verdict
             FROM experiment
-            WHERE status = 'task_emitted'
+            WHERE status = '${EXPERIMENT_STATUS_TASK_EMITTED}'
               AND task_path IS NOT NONE
               AND created_at < d"${staleCutoff}";
         `);

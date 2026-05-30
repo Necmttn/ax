@@ -1,3 +1,8 @@
+import type {
+    InterventionObservationStatus,
+    InterventionStrength,
+} from "../improve/lifecycle.ts";
+
 export type ProjectCommandName =
     | "typecheck"
     | "test"
@@ -165,7 +170,7 @@ export interface HarnessLearningCandidate {
 
 export interface InterventionSuggestion {
     readonly title: string;
-    readonly strength: "advisory" | "workflow" | "automation" | "guardrail" | "hard_boundary";
+    readonly strength: InterventionStrength;
     readonly approvalRequired: boolean;
     readonly expectedEffect: string;
     readonly reviewCriteria: ReadonlyArray<string>;
@@ -173,7 +178,7 @@ export interface InterventionSuggestion {
 
 export interface InterventionObservation {
     readonly target: string;
-    readonly status: "not_started" | "observed" | "needs_more_evidence";
+    readonly status: InterventionObservationStatus;
     readonly before: Readonly<Record<string, number>>;
     readonly after: Readonly<Record<string, number>> | null;
     readonly metrics: Readonly<Record<string, number>>;
