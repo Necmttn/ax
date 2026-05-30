@@ -1,0 +1,756 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ax - make your AI coding agent better</title>
+  <style>
+    :root {
+      --page: #f6f5f0;
+      --panel: #fbfaf5;
+      --chrome: #ecebe4;
+      --chrome-2: #e3e1d8;
+      --ink: #0a0a0a;
+      --muted: #6b6b66;
+      --line: #d8d6cf;
+      --line-soft: #e6e4dc;
+      --green: #2f9e44;
+      --red: #c0392b;
+      --blue: #2567a8;
+      --amber: #b8860b;
+      --serif: Georgia, "Times New Roman", serif;
+      --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Helvetica Neue", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      background: var(--page);
+      color: var(--ink);
+      font-family: var(--sans);
+      font-size: 16px;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: inherit; }
+
+    /* ---------- nav ---------- */
+    .nav {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 22px 32px;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+    }
+    .brand {
+      font-family: var(--serif);
+      font-size: 18px;
+      letter-spacing: -0.01em;
+      text-decoration: none;
+    }
+    .brand .dot { color: var(--muted); margin: 0 6px; }
+    .brand .sub { color: var(--muted); font-style: italic; }
+    .live {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 3px 8px 3px 16px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      background: var(--panel);
+      position: relative;
+    }
+    .live::before {
+      content: "";
+      position: absolute;
+      left: 7px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 0 2px rgba(47,158,68,0.18);
+    }
+    .nav-right {
+      margin-left: auto;
+      display: flex;
+      gap: 22px;
+      font-size: 14px;
+    }
+    .nav-right a { text-decoration: none; color: var(--ink); }
+    .nav-right a:hover { color: var(--muted); }
+
+    /* ---------- main ---------- */
+    main {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 0 32px;
+    }
+
+    /* ---------- hero ---------- */
+    .hero {
+      padding: 72px 0 84px;
+      max-width: 760px;
+    }
+    .eyebrow {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      display: inline-block;
+      padding: 5px 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      margin-bottom: 28px;
+    }
+    h1 {
+      font-family: var(--serif);
+      font-weight: 400;
+      font-size: 64px;
+      line-height: 1.04;
+      letter-spacing: -0.02em;
+      margin: 0 0 22px;
+    }
+    .lede {
+      font-size: 19px;
+      color: var(--muted);
+      max-width: 560px;
+      margin: 0 0 36px;
+    }
+    .lede strong { color: var(--ink); font-weight: 500; }
+
+    .install {
+      display: flex;
+      align-items: stretch;
+      background: var(--ink);
+      color: #f1efe6;
+      border-radius: 8px;
+      font-family: var(--mono);
+      font-size: 13.5px;
+      max-width: 680px;
+      overflow: hidden;
+    }
+    .install .prompt {
+      padding: 14px 6px 14px 16px;
+      color: #6f6f68;
+      user-select: none;
+    }
+    .install code {
+      padding: 14px 16px 14px 6px;
+      flex: 1;
+      overflow-x: auto;
+      white-space: nowrap;
+      scrollbar-width: none;
+    }
+    .install code::-webkit-scrollbar { display: none; }
+    .install button {
+      border: none;
+      background: #1c1c17;
+      color: #e8e6dd;
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 0 18px;
+      cursor: pointer;
+      border-left: 1px solid #2a2823;
+    }
+    .install button:hover { background: #24241e; }
+    .install button.copied { color: var(--green); }
+
+    .meta {
+      margin-top: 16px;
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--muted);
+      letter-spacing: 0.02em;
+    }
+    .meta .sep { opacity: 0.5; margin: 0 8px; }
+
+    /* ---------- dashboard preview (browser chrome) ---------- */
+    .dash-wrap {
+      padding: 0 0 88px;
+    }
+    .browser {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--panel);
+      box-shadow:
+        0 1px 0 rgba(10,10,10,0.02),
+        0 18px 40px -22px rgba(10,10,10,0.18);
+    }
+    .browser-bar {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 10px 14px;
+      background: var(--chrome);
+      border-bottom: 1px solid var(--line);
+    }
+    .traffic {
+      display: flex;
+      gap: 6px;
+    }
+    .traffic span {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      background: #d4d2c8;
+      border: 1px solid rgba(0,0,0,0.05);
+    }
+    .url-pill {
+      flex: 1;
+      max-width: 340px;
+      margin: 0 auto;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 4px 12px 4px 10px;
+      font-family: var(--mono);
+      font-size: 11.5px;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      letter-spacing: 0.01em;
+    }
+    .url-pill .lock {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 0 2px rgba(47,158,68,0.15);
+      flex-shrink: 0;
+    }
+    .url-pill b { color: var(--ink); font-weight: 500; }
+    .browser-tools {
+      width: 60px; /* balances traffic dots so url-pill stays centered */
+      display: flex;
+      justify-content: flex-end;
+      gap: 6px;
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .dash-tabs {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      padding: 0 24px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .dash-tabs .tab {
+      padding: 12px 14px;
+      color: var(--muted);
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+    }
+    .dash-tabs .tab.active {
+      color: var(--ink);
+      border-bottom-color: var(--ink);
+    }
+    .dash-tabs .scope {
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 10.5px;
+      letter-spacing: 0.04em;
+      text-transform: none;
+    }
+    .dash-tabs .scope b { color: var(--ink); font-weight: 500; }
+    .dash-tabs .scope .live-dot {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--green);
+      margin-right: 6px;
+      vertical-align: middle;
+      box-shadow: 0 0 0 2px rgba(47,158,68,0.18);
+    }
+
+    .dash-body {
+      padding: 36px 40px 30px;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0;
+    }
+    .stat {
+      padding: 4px 28px;
+      border-left: 1px solid var(--line);
+    }
+    .stat:first-child {
+      border-left: none;
+      padding-left: 4px;
+    }
+    .stat-label {
+      font-family: var(--mono);
+      font-size: 10.5px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+    .stat-value {
+      font-family: var(--mono);
+      font-size: 42px;
+      letter-spacing: -0.02em;
+      line-height: 1;
+      color: var(--ink);
+      font-variant-numeric: tabular-nums;
+    }
+    .stat-value .unit {
+      font-size: 14px;
+      color: var(--muted);
+      margin-left: 6px;
+      letter-spacing: 0;
+    }
+    .stat-scope {
+      font-family: var(--mono);
+      font-size: 10.5px;
+      color: var(--muted);
+      margin-top: 6px;
+      letter-spacing: 0.04em;
+    }
+    .stat-chart {
+      margin-top: 20px;
+      height: 38px;
+      display: flex;
+      align-items: flex-end;
+    }
+    .stat-sub {
+      margin-top: 16px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.02em;
+      line-height: 1.5;
+    }
+    .stat-sub .pos { color: var(--green); }
+    .stat-sub .neg { color: var(--red); }
+    .stat-sub .blu { color: var(--blue); }
+    .stat-sub .amb { color: var(--amber); }
+    .stat-sub b { color: var(--ink); font-weight: 500; }
+
+    svg.spark { width: 100%; height: 100%; overflow: visible; display: block; }
+
+    .dotgrid {
+      display: grid;
+      grid-template-columns: repeat(10, 1fr);
+      gap: 4px;
+      width: 100%;
+      max-width: 150px;
+    }
+    .dotgrid span {
+      aspect-ratio: 1;
+      border-radius: 2px;
+      background: var(--line);
+    }
+    .dotgrid span.lit { background: var(--ink); }
+
+    .heatrow {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 5px;
+      width: 100%;
+      max-width: 190px;
+    }
+    .heatrow span {
+      aspect-ratio: 1;
+      border-radius: 2px;
+      background: var(--line);
+      position: relative;
+    }
+    .heatrow span[data-i="1"] { background: #c3c0b6; }
+    .heatrow span[data-i="2"] { background: #888377; }
+    .heatrow span[data-i="3"] { background: #4a4640; }
+    .heatrow span[data-i="4"] { background: var(--ink); }
+    .heatrow span.now::after {
+      content: "";
+      position: absolute;
+      inset: -3px;
+      border: 1.5px solid var(--green);
+      border-radius: 4px;
+    }
+
+    .stackbar {
+      display: flex;
+      width: 100%;
+      max-width: 190px;
+      height: 10px;
+      border-radius: 3px;
+      overflow: hidden;
+      background: var(--line);
+    }
+    .stackbar .seg { height: 100%; }
+    .stackbar .adopted { background: var(--green); }
+    .stackbar .partial { background: var(--amber); }
+    .stackbar .regressed { background: var(--red); }
+    .stack-legend {
+      font-family: var(--mono);
+      font-size: 9.5px;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+      margin-top: 6px;
+    }
+
+    .dash-foot {
+      margin-top: 30px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .dash-foot .cap {
+      font-family: var(--serif);
+      font-style: italic;
+      font-size: 14px;
+      color: var(--muted);
+    }
+    .dash-foot .cap code {
+      font-family: var(--mono);
+      font-style: normal;
+      font-size: 12px;
+      color: var(--ink);
+      background: var(--chrome);
+      border: 1px solid var(--line);
+      padding: 1px 6px;
+      border-radius: 4px;
+      margin: 0 2px;
+    }
+    .dash-foot .stamp {
+      font-family: var(--mono);
+      font-size: 10.5px;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-left: auto;
+    }
+
+    /* ---------- footer cards ---------- */
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      padding-bottom: 80px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 22px 22px 20px;
+      text-decoration: none;
+      color: var(--ink);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      transition: background 0.12s, border-color 0.12s, transform 0.12s;
+    }
+    .card:hover {
+      background: #fdfcf8;
+      border-color: #bdbab1;
+      transform: translateY(-1px);
+    }
+    .card .label {
+      font-family: var(--mono);
+      font-size: 10.5px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .card .title {
+      font-family: var(--serif);
+      font-size: 22px;
+      letter-spacing: -0.01em;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .card .title .arrow {
+      color: var(--muted);
+      transition: transform 0.15s;
+    }
+    .card:hover .title .arrow { transform: translateX(3px); color: var(--ink); }
+
+    /* ---------- bottom band ---------- */
+    .band {
+      border-top: 1px solid var(--line);
+      padding: 22px 32px;
+      max-width: 1120px;
+      margin: 0 auto;
+      display: flex;
+      gap: 18px;
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .band .right { margin-left: auto; }
+
+    /* ---------- mobile ---------- */
+    @media (max-width: 860px) {
+      .nav { padding: 18px 20px; flex-wrap: wrap; gap: 12px; }
+      .nav-right { width: 100%; order: 3; gap: 16px; font-size: 13px; }
+      main { padding: 0 20px; }
+      .hero { padding: 40px 0 56px; }
+      h1 { font-size: 40px; }
+      .lede { font-size: 16px; }
+      .install { font-size: 12px; }
+      .install code { white-space: normal; word-break: break-all; }
+
+      .url-pill { max-width: none; font-size: 10.5px; }
+      .browser-tools { display: none; }
+      .dash-tabs { padding: 0 14px; overflow-x: auto; }
+      .dash-tabs .scope { display: none; }
+      .dash-body { padding: 24px 18px 22px; }
+
+      .stats { grid-template-columns: 1fr 1fr; gap: 0; }
+      .stat {
+        padding: 20px 16px;
+        border-left: 1px solid var(--line);
+        border-top: 1px solid var(--line);
+      }
+      .stat:nth-child(odd) {
+        border-left: none;
+        padding-left: 4px;
+      }
+      .stat:nth-child(-n+2) {
+        border-top: none;
+        padding-top: 4px;
+      }
+      .stat-value { font-size: 30px; }
+
+      .cards { grid-template-columns: 1fr 1fr; }
+      .band { flex-wrap: wrap; }
+      .band .right { margin-left: 0; }
+    }
+    @media (max-width: 520px) {
+      h1 { font-size: 34px; }
+      .stats { grid-template-columns: 1fr; }
+      .stat {
+        border-left: none !important;
+        padding: 22px 4px !important;
+        border-top: 1px solid var(--line);
+      }
+      .stat:first-child { border-top: none; padding-top: 4px !important; }
+      .cards { grid-template-columns: 1fr; }
+      .dash-foot { flex-direction: column; align-items: flex-start; gap: 8px; }
+      .dash-foot .stamp { margin-left: 0; }
+    }
+  </style>
+</head>
+<body>
+
+  <nav class="nav">
+    <a href="/" class="brand">
+      ax<span class="dot">·</span><span class="sub">agent experience</span>
+    </a>
+    <span class="live">live</span>
+    <div class="nav-right">
+      <a href="/showcases">Showcases</a>
+      <a href="/origin">Origin</a>
+      <a href="/docs">Docs</a>
+      <a href="https://github.com/Necmttn/ax">GitHub &rarr;</a>
+    </div>
+  </nav>
+
+  <main>
+    <!-- HERO -->
+    <section class="hero">
+      <span class="eyebrow">local agent telemetry · claude code + codex</span>
+      <h1>Make your AI coding<br/>agent better.</h1>
+      <p class="lede">
+        ax keeps a private log of what your coding agent actually does &mdash; so you can see what's <strong>working</strong>, and prune what isn't.
+      </p>
+
+      <div class="install" id="install">
+        <span class="prompt">$</span>
+        <code id="install-code">curl -fsSL https://raw.githubusercontent.com/Necmttn/ax/main/install.sh | bash</code>
+        <button id="copy" aria-label="Copy install command">Copy</button>
+      </div>
+      <div class="meta">
+        macOS first<span class="sep">·</span>MIT<span class="sep">·</span>runs on your laptop
+      </div>
+    </section>
+
+    <!-- DASHBOARD PREVIEW -->
+    <section class="dash-wrap">
+      <div class="browser" role="img" aria-label="ax local dashboard preview">
+        <div class="browser-bar">
+          <div class="traffic" aria-hidden="true"><span></span><span></span><span></span></div>
+          <div class="url-pill">
+            <span class="lock" aria-hidden="true"></span>
+            <span><b>127.0.0.1</b>:8520</span>
+            <span style="opacity:0.6">/ dashboard</span>
+          </div>
+          <div class="browser-tools" aria-hidden="true">local</div>
+        </div>
+
+        <div class="dash-tabs">
+          <span class="tab active">Overview</span>
+          <span class="tab">Skills</span>
+          <span class="tab">Experiments</span>
+          <span class="tab">Sessions</span>
+          <span class="scope">
+            <span class="live-dot"></span>
+            since <b>2026-04-10</b> &middot; synced <b>2 min ago</b>
+          </span>
+        </div>
+
+        <div class="dash-body">
+          <div class="stats">
+
+            <!-- 1: tokens -->
+            <div class="stat">
+              <div class="stat-label">Tokens, this week</div>
+              <div class="stat-value">14.2<span class="unit">M</span></div>
+              <div class="stat-scope">claude + codex combined</div>
+              <div class="stat-chart">
+                <svg class="spark" viewBox="0 0 100 38" preserveAspectRatio="none" aria-hidden="true">
+                  <polyline points="0,30 12,28 24,26 36,22 48,24 60,18 72,14 84,10 100,6"
+                            fill="none" stroke="#0a0a0a" stroke-width="1.2" />
+                  <polyline points="0,30 12,28 24,26 36,22 48,24 60,18 72,14 84,10 100,6 100,38 0,38"
+                            fill="rgba(10,10,10,0.05)" stroke="none" />
+                  <circle cx="100" cy="6" r="2.2" fill="#2f9e44" />
+                </svg>
+              </div>
+              <div class="stat-sub"><span class="pos">+20% WoW</span> &middot; <b>3.4M</b> daily peak</div>
+            </div>
+
+            <!-- 2: skills firing -->
+            <div class="stat">
+              <div class="stat-label">Skills firing</div>
+              <div class="stat-value">11<span class="unit">/ 20</span></div>
+              <div class="stat-scope">earning their place</div>
+              <div class="stat-chart">
+                <div class="dotgrid" aria-hidden="true">
+                  <span class="lit"></span><span class="lit"></span><span></span><span class="lit"></span><span class="lit"></span>
+                  <span></span><span class="lit"></span><span class="lit"></span><span></span><span class="lit"></span>
+                  <span class="lit"></span><span></span><span class="lit"></span><span></span><span class="lit"></span>
+                  <span></span><span></span><span class="lit"></span><span></span><span></span>
+                </div>
+              </div>
+              <div class="stat-sub"><span class="neg">9 dead weight</span> &middot; candidate for prune</div>
+            </div>
+
+            <!-- 3: experiments -->
+            <div class="stat">
+              <div class="stat-label">Experiments</div>
+              <div class="stat-value">47</div>
+              <div class="stat-scope">all-time &middot; verdict logged</div>
+              <div class="stat-chart">
+                <div style="width:100%; display:flex; flex-direction:column; gap:6px; justify-content:flex-end;">
+                  <div class="stackbar" aria-hidden="true">
+                    <div class="seg adopted" style="width:80.9%"></div>
+                    <div class="seg partial" style="width:12.8%"></div>
+                    <div class="seg regressed" style="width:6.3%"></div>
+                  </div>
+                  <div class="stack-legend">
+                    <span style="color:var(--green)">&#9632;</span> ADOPTED
+                    &nbsp;<span style="color:var(--amber)">&#9632;</span> PARTIAL
+                    &nbsp;<span style="color:var(--red)">&#9632;</span> REGRESSED
+                  </div>
+                </div>
+              </div>
+              <div class="stat-sub"><b>38</b> adopted &middot; <b>6</b> partial &middot; <b>3</b> regressed</div>
+            </div>
+
+            <!-- 4: sessions -->
+            <div class="stat">
+              <div class="stat-label">Sessions</div>
+              <div class="stat-value">412</div>
+              <div class="stat-scope">since 04-10</div>
+              <div class="stat-chart">
+                <div class="heatrow" aria-hidden="true">
+                  <span data-i="2" title="Mon"></span>
+                  <span data-i="3" title="Tue"></span>
+                  <span data-i="4" title="Wed"></span>
+                  <span data-i="3" title="Thu"></span>
+                  <span data-i="4" title="Fri"></span>
+                  <span data-i="1" title="Sat"></span>
+                  <span data-i="2" class="now" title="Sun · now"></span>
+                </div>
+              </div>
+              <div class="stat-sub"><span class="pos">live</span> &middot; last <b>2 min ago</b></div>
+            </div>
+
+          </div>
+
+          <div class="dash-foot">
+            <span class="cap">Run <code>axctl serve</code> to see yours.</span>
+            <span class="stamp">read-only &middot; never leaves your laptop</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FOOTER CARDS -->
+    <section class="cards">
+      <a href="/how-it-works" class="card">
+        <span class="label">01</span>
+        <span class="title">How it works <span class="arrow">&rarr;</span></span>
+      </a>
+      <a href="/showcases" class="card">
+        <span class="label">02</span>
+        <span class="title">Showcases <span class="arrow">&rarr;</span></span>
+      </a>
+      <a href="/origin" class="card">
+        <span class="label">03</span>
+        <span class="title">Origin <span class="arrow">&rarr;</span></span>
+      </a>
+      <a href="/docs" class="card">
+        <span class="label">04</span>
+        <span class="title">Docs <span class="arrow">&rarr;</span></span>
+      </a>
+    </section>
+
+  </main>
+
+  <div class="band">
+    <span>ax &middot; v0.1</span>
+    <span class="right">MIT &middot; Necmttn / ax</span>
+  </div>
+
+  <script>
+    (function () {
+      var btn = document.getElementById('copy');
+      var code = document.getElementById('install-code');
+      if (!btn || !code) return;
+      btn.addEventListener('click', function () {
+        var text = code.textContent.trim();
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(text).then(function () {
+            btn.textContent = 'Copied';
+            btn.classList.add('copied');
+            setTimeout(function () {
+              btn.textContent = 'Copy';
+              btn.classList.remove('copied');
+            }, 1400);
+          });
+        }
+      });
+    })();
+  </script>
+
+</body>
+</html>
