@@ -39,7 +39,7 @@ export class SessionInspectReadError extends Data.TaggedError("SessionInspectRea
     readonly cause: unknown;
 }> {}
 
-interface JsonlContentBlock {
+export interface JsonlContentBlock {
     type: string;
     text?: string;
     content?: unknown;
@@ -58,15 +58,28 @@ interface JsonlMessage {
     };
 }
 
-function blockToText(block: JsonlContentBlock): string {
+function isSubagentLifecycleText(text: string): boolean {
+    const trimmed = text.trimStart();
+    return trimmed.startsWith("<task-notification>") ||
+        trimmed.startsWith("<subagent_notification>");
+}
+
+function toolResultContentToText(content: unknown): string {
+    if (typeof content === "string") return content;
+    if (Array.isArray(content)) {
+        return (content as Array<{ text?: string }>)
+            .map((b) => b.text ?? "")
+            .join("");
+    }
+    return "";
+}
+
+export function jsonlBlockToInspectorText(block: JsonlContentBlock): string {
     if (block.type === "text" && typeof block.text === "string") return block.text;
     if (block.type === "tool_result") {
-        const inner = block.content;
-        if (typeof inner === "string") return `<local-command-stdout>${inner}</local-command-stdout>`;
-        if (Array.isArray(inner)) {
-            const joined = (inner as Array<{ text?: string }>).map((b) => b.text ?? "").join("");
-            return `<local-command-stdout>${joined}</local-command-stdout>`;
-        }
+        const innerText = toolResultContentToText(block.content);
+        if (isSubagentLifecycleText(innerText)) return innerText;
+        if (innerText) return `<local-command-stdout>${innerText}</local-command-stdout>`;
         return "<local-command-stdout></local-command-stdout>";
     }
     if (block.type === "tool_use") {
@@ -139,7 +152,7 @@ function parseClaudeLine(line: string): CanonicalTurn | null {
     const content = entry.message?.content;
     const text = typeof content === "string"
         ? content
-        : Array.isArray(content) ? content.map(blockToText).join("") : "";
+        : Array.isArray(content) ? content.map(jsonlBlockToInspectorText).join("") : "";
     if (!text) return null;
     return {
         role: entry.message?.role ?? entry.type,
@@ -163,6 +176,14 @@ interface CodexLine {
     };
 }
 
+export function codexContentToInspectorText(content: unknown): string {
+    if (!Array.isArray(content)) return "";
+    return content
+        .map((b) => (b.type === "input_text" || b.type === "output_text") ? (b.text ?? "") : "")
+        .filter((text) => text.length > 0)
+        .join("\n");
+}
+
 function parseCodexLine(line: string): CanonicalTurn | null {
     const entry = decodeJsonRecordOrNull(line) as CodexLine | null;
     if (entry === null) return null;
@@ -170,9 +191,7 @@ function parseCodexLine(line: string): CanonicalTurn | null {
     if (!p) return null;
     if (p.type === "message") {
         if (p.role !== "user" && p.role !== "assistant" && p.role !== "developer") return null;
-        const text = Array.isArray(p.content)
-            ? p.content.map((b) => (b.type === "input_text" || b.type === "output_text") ? (b.text ?? "") : "").join("")
-            : "";
+        const text = codexContentToInspectorText(p.content);
         if (!text) return null;
         return { role: p.role, text, ts: entry.timestamp ?? null };
     }
@@ -627,6 +646,7 @@ export const fetchSessionInspect = (
                     semantic_role: semantic,
                     ts,
                     char_count: text.length,
+                    raw_text: text,
                     spans: spans.map(toSpanDto),
                     content: findTurnContent(turnContent, currentSeq, text),
                 });

@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { api } from "../api.ts";
 import type { HookFireDto, InspectSpanDto, InspectSpanKind, InspectTurnDto } from "@shared/dashboard-types.ts";
-import { spawnAnchorSet } from "./inspector-filters.ts";
+import { childrenByAnchorTurn, spawnAnchorSet, turnText } from "./inspector-filters.ts";
 import { spliceHookFires } from "@shared/hook-fire-splice.ts";
 import { FilterBar } from "./inspector-filter-bar.tsx";
 import { shortSessionId } from "@shared/session-id.ts";
@@ -517,12 +517,12 @@ function SpawnMarker({ child }: { child: SpawnChildDto }) {
 
     return (
         <div onMouseEnter={onIntent} onFocus={onIntent} style={{
-            margin: "4px 0", padding: "6px 10px", background: "#ffe4e6",
-            borderLeft: "3px solid #e11d48", borderRadius: 3, fontSize: 11,
+            margin: "4px 0", padding: "7px 10px", background: "#fff1f2",
+            border: "1px solid #fecdd3", borderLeft: "4px solid #e11d48", borderRadius: 3, fontSize: 11,
             fontFamily: "ui-monospace, monospace", color: "#9f1239",
         }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <span>→ spawned</span>
+                <span style={{ fontWeight: 700 }}>↳ child session spawned</span>
                 <Link
                     to="/sessions/$sessionId/inspect"
                     params={{ sessionId: childBare }}
@@ -657,6 +657,7 @@ function Turn({ turn, anchored, childrenSpawnedHere }: { turn: InspectTurnDto; a
     )) : [];
     const ts = turn.ts ? new Date(turn.ts).toISOString().slice(11, 19) : "";
     const sizeStr = turn.char_count > 1000 ? `${(turn.char_count / 1000).toFixed(1)}k` : `${turn.char_count}`;
+    const spawnedChildCount = childrenSpawnedHere?.length ?? 0;
     const jsonlBadge = turn.role !== turn.semantic_role.replace(/_text$|_input$/, "")
         ? <span style={{ color: "#94a3b8", fontSize: 10 }}>(jsonl: {turn.role})</span>
         : null;
@@ -677,6 +678,15 @@ function Turn({ turn, anchored, childrenSpawnedHere }: { turn: InspectTurnDto; a
                 <span style={{ background: s.bg, color: s.fg, padding: "1px 8px", borderRadius: 3, fontWeight: 600, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.04em" }}>
                     {s.label}
                 </span>
+                {spawnedChildCount > 0 ? (
+                    <span style={{
+                        background: "#ffe4e6", color: "#9f1239", border: "1px solid #fecdd3",
+                        padding: "1px 8px", borderRadius: 3, fontWeight: 700, fontSize: 10,
+                        textTransform: "uppercase",
+                    }}>
+                        spawned child x{spawnedChildCount}
+                    </span>
+                ) : null}
                 {jsonlBadge}
                 <span style={{ color: "#94a3b8" }}>{ts}</span>
                 <span style={{ color: "#94a3b8" }}>{sizeStr}c · {turn.spans.length}span</span>
@@ -696,6 +706,13 @@ function Turn({ turn, anchored, childrenSpawnedHere }: { turn: InspectTurnDto; a
                     {aliasChips.length > 0 ? aliasChips : chips}
                 </span>
             </div>
+            {childrenSpawnedHere && childrenSpawnedHere.length > 0 ? (
+                <div style={{ padding: "6px 0 2px" }}>
+                    {childrenSpawnedHere.map((c) => (
+                        <SpawnMarker key={c.session_id} child={c} />
+                    ))}
+                </div>
+            ) : null}
             {turn.content ? (
                 <>
                     <AliasMiniMap
@@ -711,7 +728,7 @@ function Turn({ turn, anchored, childrenSpawnedHere }: { turn: InspectTurnDto; a
                     }}>
                         <AnnotatedRawText
                             content={turn.content}
-                            rawText={turn.spans.map((span) => span.text).join("")}
+                            rawText={turnText(turn)}
                             activeTarget={activeTarget}
                             setActiveTarget={setActiveTarget}
                             maxHeight={400}
@@ -730,13 +747,6 @@ function Turn({ turn, anchored, childrenSpawnedHere }: { turn: InspectTurnDto; a
                     {turn.spans.map((sp, i) => <Span key={i} span={sp} />)}
                 </pre>
             )}
-            {childrenSpawnedHere && childrenSpawnedHere.length > 0 ? (
-                <div style={{ padding: "0 0 4px" }}>
-                    {childrenSpawnedHere.map((c) => (
-                        <SpawnMarker key={c.session_id} child={c} />
-                    ))}
-                </div>
-            ) : null}
         </div>
     );
 }
@@ -950,13 +960,7 @@ export function SessionInspectRoute() {
                     </div>
                     <div>
                         {(() => {
-                            const childrenByTurn = new Map<number, typeof data.children[number][]>();
-                            for (const c of data.children) {
-                                if (c.anchor_turn_seq == null) continue;
-                                const list = childrenByTurn.get(c.anchor_turn_seq) ?? [];
-                                list.push(c);
-                                childrenByTurn.set(c.anchor_turn_seq, list);
-                            }
+                            const childrenByTurn = childrenByAnchorTurn(data.children);
                             const items = spliceHookFires(data.turns, data.hook_fires);
                             return items.map((item) => {
                                 if (item.kind === "hook_fire") {

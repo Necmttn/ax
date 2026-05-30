@@ -43,7 +43,7 @@ const CLOSED_TAGS: readonly ClosedTag[] = [
     { pattern: /<local-command-stdout>[\s\S]*?<\/local-command-stdout>/g, kind: "tool_result", label: "local-command-stdout" },
     { pattern: /<tool_use(?:\s+name="([^"]*)")?>[\s\S]*?<\/tool_use>/g, kind: "tool_use", label: (m) => m[1] ?? "tool_use" },
     { pattern: /<task>[\s\S]*?<\/task>/g, kind: "wrapper_instruction", label: "task" },
-    { pattern: /<task-notification>[\s\S]*?<\/task-notification>/g, kind: "wrapper_instruction", label: "task-notification" },
+    { pattern: /<task-notification>[\s\S]*?<\/task-notification>/g, kind: "subagent_notification", label: "task-notification" },
     { pattern: /<system-reminder>[\s\S]*?<\/system-reminder>/g, kind: "system_context", label: "system-reminder" },
     { pattern: /<ax_file_memory>[\s\S]*?<\/ax_file_memory>/g, kind: "hook_injection", label: "ax_file_memory" },
     { pattern: /<ax_file_context>[\s\S]*?<\/ax_file_context>/g, kind: "hook_injection", label: "ax_file_context" },

@@ -4,8 +4,11 @@ import {
     isCorrectionPhrase,
 } from "@shared/correction-phrase.ts";
 
-/** Concatenated text of every span in a turn. Used for free-text search. */
+/** Canonical text of a turn. Prefer `raw_text` because spans intentionally
+ * omit whitespace-only gaps between detected sections, while content-block
+ * offsets are anchored to the original provider text. */
 export function turnText(turn: InspectTurnDto): string {
+    if (turn.raw_text !== undefined) return turn.raw_text;
     let out = "";
     for (const s of turn.spans) out += s.text;
     return out;
@@ -38,6 +41,7 @@ export function isRoleTurn(turn: InspectTurnDto, kind: InspectSpanKind): boolean
 export function matchesSearch(turn: InspectTurnDto, query: string): boolean {
     const needle = query.trim().toLowerCase();
     if (needle.length === 0) return false;
+    if (turn.raw_text?.toLowerCase().includes(needle)) return true;
     for (const s of turn.spans) {
         if (s.text.toLowerCase().includes(needle)) return true;
     }
@@ -77,4 +81,18 @@ export function spawnAnchorSet(
         if (c.anchor_turn_seq != null) set.add(c.anchor_turn_seq);
     }
     return set;
+}
+
+/** Group spawned children by their parent turn anchor, preserving child order. */
+export function childrenByAnchorTurn<T extends { readonly anchor_turn_seq: number | null }>(
+    children: ReadonlyArray<T>,
+): ReadonlyMap<number, ReadonlyArray<T>> {
+    const byTurn = new Map<number, T[]>();
+    for (const child of children) {
+        if (child.anchor_turn_seq == null) continue;
+        const list = byTurn.get(child.anchor_turn_seq) ?? [];
+        list.push(child);
+        byTurn.set(child.anchor_turn_seq, list);
+    }
+    return byTurn;
 }

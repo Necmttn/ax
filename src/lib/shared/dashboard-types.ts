@@ -701,6 +701,8 @@ export interface InspectTurnDto {
     readonly semantic_role: InspectSpanKind;
     readonly ts: string | null;
     readonly char_count: number;
+    /** Canonical turn text that parser offsets are anchored to. */
+    readonly raw_text?: string;
     readonly spans: ReadonlyArray<InspectSpanDto>;
     readonly content?: InspectTurnContentDto | null;
 }

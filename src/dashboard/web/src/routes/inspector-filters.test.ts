@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { InspectSpanDto, InspectSpanKind, InspectTurnDto } from "../../../../lib/shared/dashboard-types.ts";
 import {
+    childrenByAnchorTurn,
     isCorrectionTurn,
     isRoleTurn,
     isSpawnAnchorTurn,
@@ -30,6 +31,17 @@ describe("turnText", () => {
     test("concatenates every span", () => {
         expect(turnText(turn(0, "user_input", [span("user_input", "hello "), span("user_input", "world")])))
             .toBe("hello world");
+    });
+
+    test("prefers raw_text so content-block offsets stay anchored to provider text", () => {
+        const t = {
+            ...turn(0, "system_context", [
+                span("system_context", "<skills_instructions>x</skills_instructions>"),
+                span("system_context", "<plugins_instructions>y</plugins_instructions>"),
+            ]),
+            raw_text: "<skills_instructions>x</skills_instructions>\n<plugins_instructions>y</plugins_instructions>",
+        };
+        expect(turnText(t)).toContain("</skills_instructions>\n<plugins_instructions>");
     });
 });
 
@@ -85,6 +97,19 @@ describe("isSpawnAnchorTurn / spawnAnchorSet", () => {
         expect(isSpawnAnchorTurn(turn(10, "tool_use", [span("tool_use", "Task")]), set)).toBe(true);
         expect(isSpawnAnchorTurn(turn(11, "tool_use", [span("tool_use", "Bash")]), set)).toBe(false);
     });
+
+    test("childrenByAnchorTurn groups spawned children by parent turn", () => {
+        const grouped = childrenByAnchorTurn([
+            { session_id: "a", anchor_turn_seq: 10 },
+            { session_id: "orphan", anchor_turn_seq: null },
+            { session_id: "b", anchor_turn_seq: 42 },
+            { session_id: "c", anchor_turn_seq: 10 },
+        ]);
+
+        expect(grouped.get(10)?.map((child) => child.session_id)).toEqual(["a", "c"]);
+        expect(grouped.get(42)?.map((child) => child.session_id)).toEqual(["b"]);
+        expect(grouped.has(0)).toBe(false);
+    });
 });
 
 describe("matchesSearch", () => {
@@ -104,6 +129,17 @@ describe("matchesSearch", () => {
         expect(matchesSearch(t, "second half")).toBe(true);
         // Cross-span boundary is NOT supported; documenting current behavior.
         expect(matchesSearch(t, "First half second")).toBe(false);
+    });
+
+    test("matches text that only exists across raw_text whitespace gaps", () => {
+        const t = {
+            ...turn(2, "system_context", [
+                span("system_context", "<skills_instructions>x</skills_instructions>"),
+                span("system_context", "<plugins_instructions>y</plugins_instructions>"),
+            ]),
+            raw_text: "<skills_instructions>x</skills_instructions>\n<plugins_instructions>y</plugins_instructions>",
+        };
+        expect(matchesSearch(t, "</skills_instructions>\n<plugins_instructions>")).toBe(true);
     });
 
     test("empty / whitespace queries never match", () => {

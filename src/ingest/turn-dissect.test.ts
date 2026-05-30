@@ -56,6 +56,19 @@ describe("dissectTurn", () => {
         expect(spans[0]!.label).toBe("Read");
     });
 
+    test("Claude task notifications are subagent notifications, not wrapper instructions", () => {
+        const text = [
+            "<task-notification>",
+            "<task-id>abc</task-id>",
+            "<status>completed</status>",
+            "<summary>Agent completed</summary>",
+            "</task-notification>",
+        ].join("\n");
+        const spans = dissectTurn(text);
+        expect(spans).toHaveLength(1);
+        expect(spans[0]).toMatchObject({ kind: "subagent_notification", label: "task-notification" });
+    });
+
     test("defaultKind override applies to unmatched text", () => {
         const spans = dissectTurn("a long assistant response with no tags", { defaultKind: "assistant_text" });
         expect(spans).toHaveLength(1);
