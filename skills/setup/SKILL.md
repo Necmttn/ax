@@ -69,7 +69,7 @@ Specific failure modes:
 | SurrealDB | `127.0.0.1:8521` (ns=`ax`, db=`main`) | scripts/db-start.sh |
 | Launchd watcher (macOS) | `com.necmttn.ax-watch` reacts to new transcripts | `axctl install` |
 | Weekly checkpoint (optional) | `com.necmttn.ax-checkpoint` runs experiment-loop math | `bun run checkpoint:install` from the repo |
-| Claude skills | `ax:setup` (this one), `ax:retro` (experiment loop), `ax:extract-workflow` (recipe reconstruction) | `npx skills add Necmttn/ax` |
+| Claude skills | `ax:setup` (this one), `ax:retro` (experiment loop), `ax:extract-workflow` (recipe reconstruction), `ax:release-announcement` (release notes from git + session evidence) | `npx skills add Necmttn/ax` |
 
 ## After install
 
@@ -110,6 +110,8 @@ ax project context --json       # grounding for the current repo
 - Experiment-loop workflow → use `ax:retro`.
 - Reconstructing how a shipped artifact was built → use
   `ax:extract-workflow`.
+- Drafting release notes or changelog pages → use
+  `ax:release-announcement`.
 - Day-to-day skill queries → run the CLI directly; no skill mediation
   needed.
 - Schema / dev work on the ax repo itself → see `docs/development.md` in

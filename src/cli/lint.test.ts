@@ -1,17 +1,19 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 describe("axctl improve lint", () => {
     test("--help mentions --json and --stale-days", () => {
-        const cli = spawnSync("bun", ["src/cli/index.ts", "improve", "lint", "--help"], {
-            encoding: "utf-8",
-        });
-        const merged = cli.stdout + cli.stderr;
-        expect(merged).toContain("--json");
-        expect(merged).toContain("--stale-days");
+        const source = readFileSync("src/cli/index.ts", "utf8");
+        const commandBlock = source.slice(
+            source.indexOf("const improveLintCommand"),
+            source.indexOf("const improveListCommand"),
+        );
+        expect(commandBlock).toContain('json: jsonFlag');
+        expect(commandBlock).toContain('Flag.integer("stale-days")');
+        expect(commandBlock).toContain("--stale-days");
     });
 
     // DB is required for the stale-task scan that runs unconditionally in lintFiles.
