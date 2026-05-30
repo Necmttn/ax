@@ -156,7 +156,8 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
                 { path: "src/ingest/pi.ts", contains: "buildToolCallStatements(extract.toolCalls)" },
             ]),
             opencode: supported("OpenCode structured tool parts write shared tool_call rows.", [
-                { path: "src/ingest/opencode.ts", contains: "buildToolCallStatements(extract.toolCalls)" },
+                { path: "src/ingest/opencode.ts", contains: "toolCalls: extract.toolCalls" },
+                { path: "src/ingest/normalized/transcripts.ts", contains: "buildToolCallStatements(batch.toolCalls" },
             ]),
             cursor: extractorGap("Cursor state parsing does not yet extract concrete tool calls."),
         },
@@ -184,8 +185,10 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
                 { path: "src/ingest/pi.ts", contains: "buildRelateToolCallSkillStatements" },
             ]),
             opencode: supported("OpenCode tool parts write synthetic opencode:<tool> skill invocations.", [
-                { path: "src/ingest/opencode.ts", contains: "->invoked:" },
-                { path: "src/ingest/opencode.ts", contains: "buildRelateToolCallSkillStatements" },
+                { path: "src/ingest/opencode.ts", contains: "syntheticSkillInvocations" },
+                { path: "src/ingest/opencode.ts", contains: "toolCallSkillRelations: extract.skillRelations" },
+                { path: "src/ingest/normalized/transcripts.ts", contains: "->invoked:" },
+                { path: "src/ingest/normalized/transcripts.ts", contains: "buildRelateToolCallSkillStatements" },
             ]),
             cursor: extractorGap("Cursor tool invocations are not emitted until concrete tool calls are extracted."),
         },
