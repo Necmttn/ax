@@ -357,8 +357,12 @@ Projection:
 
 - Conversations become `agent_session` and projected `session` rows.
 - Chat messages become `agent_event` and `turn` rows.
-- Tool calls, file edits, and terminal commands are projected only when the
-  local blob shape is known.
+- `bubbleId:*` rows with `toolFormerData` become shared `tool_call` rows,
+  stable `cursor:<tool>` synthetic skill invocations, and tool-call provenance
+  edges.
+- Generic `tool_calls`/`function_call` message fields are parsed best-effort
+  when the tool name is explicit. Cursor tool activity is skipped when the raw
+  blob does not expose a clear tool identity.
 
 Risk:
 
