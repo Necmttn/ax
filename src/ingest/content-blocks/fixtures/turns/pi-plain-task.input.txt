@@ -1,0 +1,1 @@
+Can you inspect CursorSessionStore and src/ingest/pi.ts, then explain how the provider turn shape maps into the shared graph?

@@ -1,0 +1,18 @@
+[
+  {
+    "kind": "frontmatter",
+    "heading": "frontmatter"
+  },
+  {
+    "kind": "section",
+    "heading": "Verification"
+  },
+  {
+    "kind": "section",
+    "heading": "Required Artifacts"
+  },
+  {
+    "kind": "section",
+    "heading": "Commits Verified"
+  }
+]

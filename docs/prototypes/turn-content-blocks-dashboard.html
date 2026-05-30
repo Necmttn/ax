@@ -1,0 +1,580 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ax turn content blocks</title>
+  <style>
+    :root {
+      --bg: #11110f;
+      --ink: #f4efe4;
+      --muted: #a9a196;
+      --line: #34312b;
+      --panel: #191815;
+      --panel-2: #222019;
+      --amber: #d6a13d;
+      --cyan: #6ab7c8;
+      --green: #83b672;
+      --red: #dc6b58;
+      --blue: #7e9ccf;
+      --violet: #b68ed5;
+      --shadow: 0 18px 50px rgba(0,0,0,.35);
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      --serif: Georgia, "Times New Roman", serif;
+      --sans: Avenir Next, Helvetica Neue, Helvetica, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background:
+        linear-gradient(90deg, rgba(214,161,61,.08) 1px, transparent 1px),
+        linear-gradient(0deg, rgba(244,239,228,.035) 1px, transparent 1px),
+        radial-gradient(circle at 15% 10%, rgba(106,183,200,.16), transparent 28rem),
+        radial-gradient(circle at 85% 20%, rgba(220,107,88,.13), transparent 24rem),
+        var(--bg);
+      background-size: 54px 54px, 54px 54px, auto, auto, auto;
+      font-family: var(--sans);
+      letter-spacing: 0;
+    }
+
+    button, textarea { font: inherit; }
+
+    .shell {
+      width: min(1680px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 20px 0 28px;
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 16px;
+      align-items: end;
+      padding: 12px 0 18px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    h1 {
+      margin: 0;
+      font: 700 clamp(28px, 4vw, 64px)/.9 var(--serif);
+      max-width: 900px;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+      color: var(--muted);
+      font: 12px/1 var(--mono);
+      text-transform: uppercase;
+    }
+
+    .pill {
+      border: 1px solid var(--line);
+      background: rgba(25,24,21,.82);
+      padding: 8px 10px;
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: stretch;
+      margin: 14px 0;
+    }
+
+    .query {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      border: 1px solid var(--line);
+      background: rgba(25,24,21,.78);
+      box-shadow: var(--shadow);
+      padding: 8px;
+    }
+
+    .query code {
+      overflow: auto;
+      white-space: nowrap;
+      color: #e8dcc7;
+      font: 12px/32px var(--mono);
+      padding: 0 8px;
+    }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn {
+      border: 1px solid var(--line);
+      color: var(--ink);
+      background: var(--panel-2);
+      min-height: 38px;
+      padding: 0 12px;
+      cursor: pointer;
+    }
+
+    .btn:hover { border-color: var(--amber); color: #ffe0a0; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(360px, 1.05fr) minmax(300px, .84fr) minmax(320px, .9fr);
+      gap: 14px;
+      align-items: start;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      background: rgba(25,24,21,.88);
+      box-shadow: var(--shadow);
+      min-height: 620px;
+    }
+
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 13px 14px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(90deg, rgba(255,255,255,.035), transparent);
+    }
+
+    .panel-title {
+      margin: 0;
+      color: #eee2ce;
+      font: 700 13px/1 var(--mono);
+      text-transform: uppercase;
+    }
+
+    .count {
+      color: var(--muted);
+      font: 12px/1 var(--mono);
+    }
+
+    .raw {
+      position: relative;
+      padding: 18px;
+      font: 13px/1.64 var(--mono);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .span {
+      position: relative;
+      display: inline;
+      padding: 2px 0;
+      border-bottom: 1px solid transparent;
+      transition: background .12s ease, color .12s ease, box-shadow .12s ease;
+      cursor: crosshair;
+    }
+
+    .span.system_context { background: rgba(126,156,207,.15); border-color: rgba(126,156,207,.8); }
+    .span.user_input { background: rgba(131,182,114,.13); border-color: rgba(131,182,114,.8); }
+    .span.assistant_text { background: rgba(106,183,200,.12); border-color: rgba(106,183,200,.75); }
+    .span.tool_use { background: rgba(214,161,61,.16); border-color: rgba(214,161,61,.85); }
+    .span.tool_result { background: rgba(182,142,213,.16); border-color: rgba(182,142,213,.8); }
+    .span.hook_injection { background: rgba(220,107,88,.13); border-color: rgba(220,107,88,.8); }
+    .span.is-active {
+      color: white;
+      box-shadow: 0 0 0 2px rgba(244,239,228,.24), 0 0 22px rgba(214,161,61,.22);
+      background: rgba(214,161,61,.24);
+    }
+
+    .span.offset-mismatch {
+      outline: 2px solid var(--red);
+      outline-offset: 2px;
+    }
+
+    .blocks, .atoms { padding: 12px; }
+
+    .block-row, .atom-row {
+      border: 1px solid rgba(255,255,255,.08);
+      background: rgba(255,255,255,.025);
+      padding: 10px 11px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: transform .12s ease, border-color .12s ease, background .12s ease;
+    }
+
+    .block-row:hover, .atom-row:hover,
+    .block-row.is-active, .atom-row.is-active {
+      border-color: var(--amber);
+      background: rgba(214,161,61,.09);
+      transform: translateX(2px);
+    }
+
+    .block-row.child {
+      margin-left: 22px;
+      border-left: 3px solid rgba(106,183,200,.65);
+    }
+
+    .row-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 7px;
+    }
+
+    .kind {
+      font: 700 12px/1 var(--mono);
+      color: #f0d9a9;
+    }
+
+    .seq, .confidence {
+      font: 11px/1 var(--mono);
+      color: var(--muted);
+    }
+
+    .excerpt {
+      color: #d8d0c0;
+      font: 12px/1.45 var(--mono);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .atom-kind {
+      display: inline-block;
+      min-width: 104px;
+      color: var(--cyan);
+      font: 700 11px/1 var(--mono);
+      text-transform: uppercase;
+    }
+
+    .atom-value {
+      color: #ede4d4;
+      font: 12px/1.45 var(--mono);
+      overflow-wrap: anywhere;
+    }
+
+    .legend {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      padding: 12px;
+      border-top: 1px solid var(--line);
+    }
+
+    .legend span {
+      font: 11px/1 var(--mono);
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .dot {
+      display: inline-block;
+      width: 9px;
+      height: 9px;
+      margin-right: 6px;
+      border-radius: 50%;
+      vertical-align: -1px;
+    }
+
+    .dot.system { background: var(--blue); }
+    .dot.user { background: var(--green); }
+    .dot.assistant { background: var(--cyan); }
+    .dot.tool { background: var(--amber); }
+    .dot.hook { background: var(--red); }
+    .dot.result { background: var(--violet); }
+
+    .drawer {
+      margin-top: 14px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: start;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 120px;
+      resize: vertical;
+      color: var(--ink);
+      background: rgba(10,10,9,.82);
+      border: 1px solid var(--line);
+      padding: 12px;
+      font: 12px/1.5 var(--mono);
+    }
+
+    .status {
+      color: var(--muted);
+      font: 12px/1.4 var(--mono);
+      padding: 8px 0;
+    }
+
+    @media (max-width: 1120px) {
+      header, .topbar, .grid, .drawer { grid-template-columns: 1fr; }
+      .meta, .actions { justify-content: flex-start; }
+      .panel { min-height: auto; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <h1>Turn text becomes blocks, atoms, and graph edges.</h1>
+      <div class="meta">
+        <span class="pill" id="docId">content_document:turn__sample</span>
+        <span class="pill" id="parser">provider_turn@turn-blocks-v1</span>
+        <span class="pill" id="shape">0 blocks / 0 atoms</span>
+      </div>
+    </header>
+
+    <section class="topbar">
+      <div class="query">
+        <code>Run: bun scripts/prototypes/turn-content-blocks-dashboard.ts. This page fetches /api/turn-content/latest automatically.</code>
+        <button class="btn" id="refreshData">Refresh</button>
+      </div>
+      <div class="actions">
+        <button class="btn" id="loadSample">Sample</button>
+        <button class="btn" id="togglePaste">Paste JSON</button>
+        <button class="btn" id="clearActive">Clear</button>
+      </div>
+    </section>
+
+    <section class="grid">
+      <article class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Raw Turn</h2>
+          <span class="count" id="rawCount"></span>
+        </div>
+        <div class="raw" id="raw"></div>
+        <div class="legend">
+          <span><i class="dot system"></i>system</span>
+          <span><i class="dot user"></i>user</span>
+          <span><i class="dot assistant"></i>assistant</span>
+          <span><i class="dot tool"></i>tool</span>
+          <span><i class="dot hook"></i>hook</span>
+          <span><i class="dot result"></i>result</span>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Content Blocks</h2>
+          <span class="count" id="blockCount"></span>
+        </div>
+        <div class="blocks" id="blocks"></div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Atoms</h2>
+          <span class="count" id="atomCount"></span>
+        </div>
+        <div class="atoms" id="atoms"></div>
+      </article>
+    </section>
+
+    <section class="drawer" id="pasteDrawer" hidden>
+      <textarea id="jsonInput" spellcheck="false" placeholder='Fallback: paste the RETURN { document, blocks, atoms } result from Surrealist here'></textarea>
+      <button class="btn" id="renderJson">Render</button>
+    </section>
+    <div class="status" id="status"></div>
+  </main>
+
+  <script>
+    const sample = {
+      document: {
+        id: "content_document:turn__sample_01",
+        source_kind: "turn",
+        source_ref: "sample-session__000001",
+        parser_id: "provider_turn",
+        parser_version: "turn-blocks-v1",
+        raw_text: "<permissions instructions>sandbox=danger-full-access</permissions instructions>\n<skills_instructions>## Skills\n- tdd\n- frontend-design</skills_instructions>\nCan you update src/ingest/content-blocks/parse-turn.ts?\n\n## Acceptance\n- extract CursorSessionStore\n- run `bun test src/ingest/content-blocks/parse-turn.test.ts`\n\n<tool_use name=\"Read\">{\"file_path\":\"src/ingest/turn-dissect.ts\"}</tool_use>\nSee [design](https://example.com/spec) and https://example.com/raw."
+      },
+      blocks: [
+        { id: "content_block:sample__block_000001", seq: 1, parent_seq: null, kind: "system_context", role: "user", heading: "permissions", text: "<permissions instructions>sandbox=danger-full-access</permissions instructions>", text_excerpt: "<permissions instructions>sandbox=danger-full-access</permissions instructions>", start_offset: 0, end_offset: 79, confidence: 1 },
+        { id: "content_block:sample__block_000002", seq: 2, parent_seq: null, kind: "system_context", role: "user", heading: "skills_instructions", text: "<skills_instructions>## Skills\n- tdd\n- frontend-design</skills_instructions>", text_excerpt: "<skills_instructions>## Skills\n- tdd\n- frontend-design</skills_instructions>", start_offset: 80, end_offset: 156, confidence: 1 },
+        { id: "content_block:sample__block_000003", seq: 3, parent_seq: null, kind: "user_input", role: "user", heading: null, text: "\nCan you update src/ingest/content-blocks/parse-turn.ts?\n\n## Acceptance\n- extract CursorSessionStore\n- run `bun test src/ingest/content-blocks/parse-turn.test.ts`\n\n", text_excerpt: "\nCan you update src/ingest/content-blocks/parse-turn.ts?\n\n## Acceptance\n- extract CursorSessionStore\n- run `bun test src/ingest/content-blocks/parse-turn.test.ts`\n\n", start_offset: 156, end_offset: 320, confidence: 1 },
+        { id: "content_block:sample__block_000004", seq: 4, parent_seq: 3, kind: "user_input_paragraph", role: "user", heading: null, text: "Can you update src/ingest/content-blocks/parse-turn.ts?\n", text_excerpt: "Can you update src/ingest/content-blocks/parse-turn.ts?\n", start_offset: 157, end_offset: 213, confidence: .95 },
+        { id: "content_block:sample__block_000005", seq: 5, parent_seq: 3, kind: "user_input_heading", role: "user", heading: "Acceptance", text: "## Acceptance\n", text_excerpt: "## Acceptance\n", start_offset: 214, end_offset: 228, confidence: .95 },
+        { id: "content_block:sample__block_000006", seq: 6, parent_seq: 3, kind: "user_input_list_item", role: "user", heading: null, text: "- extract CursorSessionStore\n", text_excerpt: "- extract CursorSessionStore\n", start_offset: 228, end_offset: 257, confidence: .95 },
+        { id: "content_block:sample__block_000007", seq: 7, parent_seq: 3, kind: "user_input_list_item", role: "user", heading: null, text: "- run `bun test src/ingest/content-blocks/parse-turn.test.ts`\n", text_excerpt: "- run `bun test src/ingest/content-blocks/parse-turn.test.ts`\n", start_offset: 257, end_offset: 319, confidence: .95 },
+        { id: "content_block:sample__block_000008", seq: 8, parent_seq: null, kind: "tool_use", role: "user", heading: "Read", text: "<tool_use name=\"Read\">{\"file_path\":\"src/ingest/turn-dissect.ts\"}</tool_use>", text_excerpt: "<tool_use name=\"Read\">{\"file_path\":\"src/ingest/turn-dissect.ts\"}</tool_use>", start_offset: 320, end_offset: 395, confidence: 1 },
+        { id: "content_block:sample__block_000009", seq: 9, parent_seq: null, kind: "user_input", role: "user", heading: null, text: "\nSee [design](https://example.com/spec) and https://example.com/raw.", text_excerpt: "\nSee [design](https://example.com/spec) and https://example.com/raw.", start_offset: 395, end_offset: 463, confidence: 1 }
+      ],
+      atoms: [
+        { block: "content_block:sample__block_000001", blockSeq: 1, kind: "xml_tag", value: "permissions", normalized: "permissions", confidence: .7 },
+        { block: "content_block:sample__block_000003", blockSeq: 3, kind: "file_ref", value: "src/ingest/content-blocks/parse-turn.ts", normalized: "src/ingest/content-blocks/parse-turn.ts", confidence: .9 },
+        { block: "content_block:sample__block_000006", blockSeq: 6, kind: "symbol_ref", value: "CursorSessionStore", normalized: "CursorSessionStore", confidence: .75 },
+        { block: "content_block:sample__block_000007", blockSeq: 7, kind: "command_ref", value: "bun test src/ingest/content-blocks/parse-turn.test.ts", normalized: "bun test src/ingest/content-blocks/parse-turn.test.ts", confidence: .8 },
+        { block: "content_block:sample__block_000008", blockSeq: 8, kind: "tool_name", value: "Read", normalized: "Read", confidence: .95 },
+        { block: "content_block:sample__block_000008", blockSeq: 8, kind: "file_ref", value: "src/ingest/turn-dissect.ts", normalized: "src/ingest/turn-dissect.ts", confidence: .9 },
+        { block: "content_block:sample__block_000009", blockSeq: 9, kind: "citation_ref", value: "https://example.com/spec", normalized: "https://example.com/spec", confidence: .9, raw: { label: "design" } },
+        { block: "content_block:sample__block_000009", blockSeq: 9, kind: "url_ref", value: "https://example.com/raw", normalized: "https://example.com/raw", confidence: .85 }
+      ]
+    };
+
+    let state = sample;
+    let activeSeq = null;
+
+    const $ = (id) => document.getElementById(id);
+    const blockSeq = (blockRef) => {
+      const match = String(blockRef || "").match(/block_0*([0-9]+)/);
+      return match ? Number(match[1]) : null;
+    };
+    const atomBlockSeq = (atom) => atom.blockSeq ?? atom.block_seq ?? blockSeq(atom.block);
+    const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+    const cleanRecord = (value) => typeof value === "object" && value && "id" in value ? value.id : value;
+
+    function normalizePayload(payload) {
+      const envelope = payload && payload.ok && payload.payload ? payload.payload : payload;
+      const root = Array.isArray(envelope) ? envelope.at(-1)?.result ?? envelope.at(-1) : envelope;
+      return {
+        document: root.document ?? root.result?.document ?? sample.document,
+        blocks: root.blocks ?? root.result?.blocks ?? [],
+        atoms: root.atoms ?? root.result?.atoms ?? []
+      };
+    }
+
+    function kindClass(kind) {
+      if (kind.includes("system")) return "system_context";
+      if (kind.includes("assistant")) return "assistant_text";
+      if (kind.includes("tool_use")) return "tool_use";
+      if (kind.includes("tool_result")) return "tool_result";
+      if (kind.includes("hook")) return "hook_injection";
+      return "user_input";
+    }
+
+    function setActive(seq) {
+      activeSeq = seq;
+      const activeBlock = state.blocks.find((block) => Number(block.seq) === Number(seq));
+      const rawSeq = activeBlock ? Number(activeBlock.parent_seq ?? activeBlock.parentSeq ?? activeBlock.seq) : Number(seq);
+      document.querySelectorAll("[data-seq]").forEach((node) => {
+        const nodeSeq = Number(node.dataset.seq);
+        const isRaw = node.classList.contains("span");
+        node.classList.toggle("is-active", isRaw ? nodeSeq === rawSeq : nodeSeq === Number(seq));
+      });
+      document.querySelectorAll("[data-atom-seq]").forEach((node) => {
+        node.classList.toggle("is-active", Number(node.dataset.atomSeq) === Number(seq));
+      });
+    }
+
+    function renderRaw() {
+      const raw = state.document.raw_text ?? state.document.rawText ?? state.blocks.map((b) => b.text ?? "").join("");
+      const roots = state.blocks
+        .filter((block) => block.parent_seq == null && block.parentSeq == null)
+        .filter((block) => Number.isFinite(block.start_offset ?? block.startOffset) && Number.isFinite(block.end_offset ?? block.endOffset))
+        .sort((a, b) => (a.start_offset ?? a.startOffset) - (b.start_offset ?? b.startOffset));
+      let cursor = 0;
+      const parts = [];
+      for (const block of roots) {
+        const start = block.start_offset ?? block.startOffset;
+        const end = block.end_offset ?? block.endOffset;
+        if (start > cursor) parts.push(esc(raw.slice(cursor, start)));
+        const rawSlice = raw.slice(start, end);
+        const mismatch = block.text && rawSlice !== block.text;
+        parts.push(`<span class="span ${kindClass(block.kind)} ${mismatch ? "offset-mismatch" : ""}" data-seq="${block.seq}" title="${esc(mismatch ? "offset mismatch: " + block.kind : block.kind)}">${esc(rawSlice)}</span>`);
+        cursor = end;
+      }
+      if (cursor < raw.length) parts.push(esc(raw.slice(cursor)));
+      $("raw").innerHTML = parts.join("");
+      $("rawCount").textContent = `${raw.length} chars`;
+    }
+
+    function renderBlocks() {
+      $("blocks").innerHTML = state.blocks.map((block) => {
+        const child = block.parent_seq != null || block.parentSeq != null;
+        return `<div class="block-row ${child ? "child" : ""}" data-seq="${block.seq}">
+          <div class="row-top">
+            <span class="kind">${esc(block.kind)}</span>
+            <span class="seq">#${esc(block.seq)} ${child ? "child of " + esc(block.parent_seq ?? block.parentSeq) : "root"}</span>
+          </div>
+          <div class="excerpt">${esc(block.heading ? block.heading + " - " : "")}${esc(block.text_excerpt ?? block.textExcerpt ?? block.text ?? "")}</div>
+        </div>`;
+      }).join("");
+      $("blockCount").textContent = `${state.blocks.length} rows`;
+    }
+
+    function renderAtoms() {
+      $("atoms").innerHTML = state.atoms.map((atom) => {
+        const seq = atomBlockSeq(atom);
+        return `<div class="atom-row" data-atom-seq="${esc(seq)}">
+          <div class="row-top">
+            <span><span class="atom-kind">${esc(atom.kind)}</span><span class="atom-value">${esc(atom.value)}</span></span>
+            <span class="confidence">${Math.round(Number(atom.confidence ?? 1) * 100)}%</span>
+          </div>
+          <div class="excerpt">block #${esc(seq)} ${atom.raw ? " / " + esc(JSON.stringify(atom.raw)) : ""}</div>
+        </div>`;
+      }).join("");
+      $("atomCount").textContent = `${state.atoms.length} rows`;
+    }
+
+    function bindHover() {
+      document.querySelectorAll("[data-seq]").forEach((node) => {
+        node.addEventListener("mouseenter", () => setActive(node.dataset.seq));
+        node.addEventListener("click", () => setActive(node.dataset.seq));
+      });
+      document.querySelectorAll("[data-atom-seq]").forEach((node) => {
+        node.addEventListener("mouseenter", () => setActive(node.dataset.atomSeq));
+        node.addEventListener("click", () => setActive(node.dataset.atomSeq));
+      });
+    }
+
+    function render() {
+      state.document.id = cleanRecord(state.document.id);
+      $("docId").textContent = state.document.id ?? "content_document";
+      $("parser").textContent = `${state.document.parser_id ?? "provider_turn"}@${state.document.parser_version ?? "turn-blocks-v1"}`;
+      $("shape").textContent = `${state.blocks.length} blocks / ${state.atoms.length} atoms`;
+      renderRaw();
+      renderBlocks();
+      renderAtoms();
+      bindHover();
+      if (activeSeq != null) setActive(activeSeq);
+    }
+
+    async function refreshFromServer() {
+      $("status").textContent = "Fetching latest parsed turn from /api/turn-content/latest...";
+      try {
+        const response = await fetch("/api/turn-content/latest", { headers: { "accept": "application/json" } });
+        const payload = await response.json();
+        if (!response.ok || payload.ok === false) {
+          throw new Error(payload.message || `HTTP ${response.status}`);
+        }
+        state = normalizePayload(payload);
+        activeSeq = null;
+        render();
+        $("status").textContent = `Loaded ${state.document.id ?? "latest turn"} from SurrealDB.`;
+      } catch (error) {
+        state = sample;
+        activeSeq = null;
+        render();
+        $("status").textContent = `Live fetch failed: ${error.message}. Showing sample data.`;
+      }
+    }
+
+    $("loadSample").addEventListener("click", () => {
+      state = sample;
+      activeSeq = null;
+      render();
+      $("status").textContent = "Loaded sample turn.";
+    });
+    $("refreshData").addEventListener("click", refreshFromServer);
+    $("clearActive").addEventListener("click", () => setActive(null));
+    $("togglePaste").addEventListener("click", () => {
+      $("pasteDrawer").hidden = !$("pasteDrawer").hidden;
+    });
+    $("renderJson").addEventListener("click", () => {
+      try {
+        state = normalizePayload(JSON.parse($("jsonInput").value));
+        activeSeq = null;
+        render();
+        $("status").textContent = "Rendered Surrealist payload.";
+      } catch (error) {
+        $("status").textContent = `JSON parse failed: ${error.message}`;
+      }
+    });
+
+    render();
+    refreshFromServer();
+  </script>
+</body>
+</html>

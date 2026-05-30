@@ -1,0 +1,9 @@
+## Plan
+- Inspect `src/ingest/content-blocks/parse-turn.ts`
+- [ ] Add fixture coverage
+- Run `bun test src/ingest/content-blocks/turn-section-aliases.test.ts`
+
+Verification:
+- `bun run typecheck`
+
+<tool_use name="Read">{"file_path":"src/ingest/content-blocks/parse-turn.ts"}</tool_use>

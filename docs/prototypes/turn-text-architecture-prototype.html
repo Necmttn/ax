@@ -1,0 +1,2462 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Turn Text Architecture Prototype</title>
+  <style>
+    :root {
+      --ink: #101214;
+      --muted: #59616b;
+      --paper: #f7f3ea;
+      --paper-2: #ebe4d6;
+      --line: #1f242b;
+      --red: #d24a3d;
+      --blue: #256d85;
+      --green: #47745f;
+      --gold: #c48b2b;
+      --violet: #6c5c91;
+      --shadow: 0 16px 48px rgba(25, 22, 16, .16);
+      --mono: "SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace;
+      --serif: Georgia, "Times New Roman", serif;
+      --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(rgba(16, 18, 20, .045) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(16, 18, 20, .035) 1px, transparent 1px),
+        var(--paper);
+      background-size: 22px 22px;
+      font-family: var(--sans);
+    }
+
+    .page {
+      min-height: 100vh;
+      padding: 28px;
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: minmax(260px, 1fr) minmax(300px, 620px);
+      gap: 28px;
+      align-items: end;
+      padding: 18px 0 28px;
+      border-bottom: 3px solid var(--line);
+    }
+
+    h1 {
+      margin: 0;
+      font-family: var(--serif);
+      font-size: clamp(40px, 6vw, 92px);
+      line-height: .88;
+      letter-spacing: 0;
+      max-width: 900px;
+    }
+
+    .lead {
+      margin: 0 0 4px;
+      color: var(--muted);
+      font-size: 17px;
+      line-height: 1.45;
+    }
+
+    .tagbar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 18px;
+    }
+
+    .tag {
+      border: 2px solid var(--line);
+      padding: 6px 10px;
+      font-family: var(--mono);
+      font-size: 12px;
+      background: #fffaf0;
+      box-shadow: 3px 3px 0 var(--line);
+    }
+
+    .stage {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      margin-top: 22px;
+    }
+
+    .panel {
+      border: 3px solid var(--line);
+      background: rgba(255, 250, 240, .92);
+      box-shadow: var(--shadow);
+      min-width: 0;
+    }
+
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 3px solid var(--line);
+      padding: 13px 14px;
+      background: var(--paper-2);
+    }
+
+    .panel h2,
+    .panel h3 {
+      margin: 0;
+      font-family: var(--mono);
+      font-size: 15px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+
+    .stamp {
+      padding: 5px 8px;
+      font-family: var(--mono);
+      font-size: 11px;
+      border: 2px solid var(--line);
+      background: white;
+    }
+
+    .panel-body {
+      padding: 16px;
+    }
+
+    .flow {
+      display: grid;
+      gap: 12px;
+    }
+
+    .node {
+      position: relative;
+      border: 2px solid var(--line);
+      background: white;
+      padding: 12px;
+      min-height: 74px;
+    }
+
+    .node::after {
+      content: "";
+      position: absolute;
+      left: 28px;
+      bottom: -15px;
+      width: 2px;
+      height: 13px;
+      background: var(--line);
+    }
+
+    .node:last-child::after { display: none; }
+
+    .node-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .node p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.35;
+    }
+
+    .current .node:nth-child(1) { border-left: 10px solid var(--red); }
+    .current .node:nth-child(2) { border-left: 10px solid var(--gold); }
+    .current .node:nth-child(3) { border-left: 10px solid var(--violet); }
+    .current .node:nth-child(4) { border-left: 10px solid var(--blue); }
+    .proposed .node:nth-child(1) { border-left: 10px solid var(--blue); }
+    .proposed .node:nth-child(2) { border-left: 10px solid var(--green); }
+    .proposed .node:nth-child(3) { border-left: 10px solid var(--gold); }
+    .proposed .node:nth-child(4) { border-left: 10px solid var(--violet); }
+
+    .sample-wrap {
+      display: grid;
+      grid-template-columns: minmax(320px, .9fr) minmax(420px, 1.1fr);
+      gap: 18px;
+      margin-top: 18px;
+    }
+
+    .terminal {
+      border: 3px solid var(--line);
+      background: #101214;
+      color: #e9e1ce;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .terminal-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 12px;
+      border-bottom: 2px solid #353b43;
+      font-family: var(--mono);
+      font-size: 12px;
+      color: #b8b1a4;
+    }
+
+    pre {
+      margin: 0;
+      padding: 16px;
+      overflow: auto;
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+    }
+
+    .blob-highlight {
+      background: rgba(210, 74, 61, .24);
+      color: #fff;
+      border-bottom: 1px solid #d24a3d;
+    }
+
+    .block-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .block {
+      border: 2px solid var(--line);
+      background: #fffaf0;
+      padding: 12px;
+      display: grid;
+      grid-template-columns: 100px 1fr auto;
+      gap: 12px;
+      align-items: start;
+      cursor: pointer;
+      transition: transform .16s ease, background .16s ease, box-shadow .16s ease;
+    }
+
+    .block:hover,
+    .block.active {
+      transform: translate(-2px, -2px);
+      box-shadow: 5px 5px 0 var(--line);
+      background: white;
+    }
+
+    .kind {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      border: 2px solid var(--line);
+      padding: 5px 6px;
+      text-align: center;
+      background: var(--paper-2);
+    }
+
+    .block strong {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 14px;
+    }
+
+    .block span {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .metric {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .matrix {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(180px, 1fr));
+      gap: 12px;
+    }
+
+    .mini {
+      border: 2px solid var(--line);
+      background: white;
+      padding: 12px;
+      min-height: 128px;
+    }
+
+    .mini h4 {
+      margin: 0 0 8px;
+      font-family: var(--mono);
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+
+    .mini p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .mini code {
+      display: inline-block;
+      margin-top: 8px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--ink);
+      background: #f0eadf;
+      border: 1px solid #c9bdab;
+      padding: 3px 5px;
+    }
+
+    .diagram {
+      margin-top: 18px;
+      border: 3px solid var(--line);
+      background: #fffaf0;
+      padding: 16px;
+      box-shadow: var(--shadow);
+    }
+
+    .diagram-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 14px;
+      align-items: stretch;
+    }
+
+    .stack {
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+
+    .pill {
+      border: 2px solid var(--line);
+      padding: 9px 10px;
+      background: white;
+      font-family: var(--mono);
+      font-size: 12px;
+      min-height: 40px;
+    }
+
+    .pill.hot { background: #ffe9e3; }
+    .pill.good { background: #e1f0e5; }
+    .pill.search { background: #e5f2f5; }
+    .pill.edge { background: #f7ead0; }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .legend button {
+      border: 2px solid var(--line);
+      background: white;
+      padding: 8px 10px;
+      font-family: var(--mono);
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .legend button.active {
+      background: var(--line);
+      color: white;
+    }
+
+    .explain {
+      margin-top: 12px;
+      border: 2px solid var(--line);
+      background: #101214;
+      color: #e9e1ce;
+      padding: 14px;
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.5;
+      min-height: 76px;
+    }
+
+    .parser-lab {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: minmax(320px, .9fr) minmax(420px, 1.1fr);
+      gap: 18px;
+    }
+
+    .steps {
+      counter-reset: step;
+      display: grid;
+      gap: 10px;
+    }
+
+    .step {
+      counter-increment: step;
+      border: 2px solid var(--line);
+      background: white;
+      padding: 12px 12px 12px 52px;
+      position: relative;
+      min-height: 76px;
+    }
+
+    .step::before {
+      content: counter(step);
+      position: absolute;
+      left: 12px;
+      top: 12px;
+      width: 26px;
+      height: 26px;
+      display: grid;
+      place-items: center;
+      background: var(--line);
+      color: white;
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .step strong {
+      display: block;
+      margin-bottom: 5px;
+      font-family: var(--mono);
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+
+    .step span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .splitter {
+      display: grid;
+      gap: 10px;
+    }
+
+    .split-row {
+      display: grid;
+      grid-template-columns: 120px 1fr 88px;
+      gap: 10px;
+      align-items: center;
+      border: 2px solid var(--line);
+      padding: 10px;
+      background: #fffaf0;
+    }
+
+    .rule {
+      font-family: var(--mono);
+      font-size: 11px;
+      text-transform: uppercase;
+      font-weight: 800;
+    }
+
+    .confidence {
+      font-family: var(--mono);
+      font-size: 11px;
+      border: 2px solid var(--line);
+      padding: 4px 6px;
+      text-align: center;
+      background: #e1f0e5;
+    }
+
+    .confidence.low {
+      background: #ffe9e3;
+    }
+
+    .parse-toggle {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .parse-toggle button {
+      border: 2px solid var(--line);
+      background: white;
+      padding: 8px 10px;
+      font-family: var(--mono);
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .parse-toggle button.active {
+      background: var(--line);
+      color: white;
+    }
+
+    .json-card {
+      border: 3px solid var(--line);
+      background: #101214;
+      color: #e9e1ce;
+      overflow: hidden;
+    }
+
+    .json-card pre {
+      max-height: 560px;
+      overflow: auto;
+    }
+
+    .taxonomy {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(220px, 1fr));
+      gap: 12px;
+    }
+
+    .atom {
+      border: 2px solid var(--line);
+      background: white;
+      padding: 12px;
+      min-height: 112px;
+    }
+
+    .atom h4 {
+      margin: 0 0 8px;
+      font-family: var(--mono);
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+
+    .atom p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .atom code {
+      display: inline-block;
+      margin-top: 8px;
+      padding: 3px 5px;
+      border: 1px solid #c9bdab;
+      background: #f0eadf;
+      font-family: var(--mono);
+      font-size: 11px;
+    }
+
+    .provider-grid {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      gap: 18px;
+    }
+
+    .provider-list {
+      display: grid;
+      gap: 8px;
+      align-content: start;
+    }
+
+    .provider-list button {
+      border: 2px solid var(--line);
+      background: white;
+      padding: 12px;
+      text-align: left;
+      font-family: var(--mono);
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .provider-list button.active {
+      background: var(--line);
+      color: white;
+    }
+
+    .provider-detail {
+      border: 3px solid var(--line);
+      background: #fffaf0;
+      min-width: 0;
+    }
+
+    .provider-detail .cols {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0;
+      border-top: 3px solid var(--line);
+    }
+
+    .provider-detail .col {
+      padding: 14px;
+      min-width: 0;
+    }
+
+    .provider-detail .col + .col {
+      border-left: 3px solid var(--line);
+    }
+
+    .provider-detail h3 {
+      margin: 0;
+      padding: 14px;
+      font-family: var(--mono);
+      font-size: 14px;
+      text-transform: uppercase;
+      background: var(--paper-2);
+    }
+
+    .provider-detail h4 {
+      margin: 0 0 8px;
+      font-family: var(--mono);
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+
+    .provider-detail ul {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .provider-code {
+      margin-top: 12px;
+      border-top: 3px solid var(--line);
+      background: #101214;
+      color: #e9e1ce;
+    }
+
+    .role-map {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(260px, 1fr));
+      gap: 12px;
+    }
+
+    .role-card {
+      border: 3px solid var(--line);
+      background: white;
+      min-width: 0;
+    }
+
+    .role-card h3 {
+      margin: 0;
+      padding: 12px;
+      border-bottom: 3px solid var(--line);
+      background: var(--paper-2);
+      font-family: var(--mono);
+      font-size: 13px;
+      text-transform: uppercase;
+    }
+
+    .role-card .body {
+      padding: 12px;
+    }
+
+    .role-card p {
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+
+    .chip {
+      border: 2px solid var(--line);
+      background: #fffaf0;
+      padding: 5px 7px;
+      font-family: var(--mono);
+      font-size: 11px;
+    }
+
+    .role-card pre {
+      border-top: 2px solid var(--line);
+      background: #101214;
+      color: #e9e1ce;
+      max-height: 300px;
+    }
+
+    .session-ui {
+      margin-top: 18px;
+      border: 3px solid var(--line);
+      background: #fffaf0;
+      box-shadow: var(--shadow);
+    }
+
+    .session-ui-grid {
+      display: grid;
+      grid-template-columns: 240px minmax(420px, 1fr) 300px;
+      min-height: 620px;
+    }
+
+    .session-rail,
+    .session-side {
+      background: var(--paper-2);
+      padding: 12px;
+    }
+
+    .session-rail {
+      border-right: 3px solid var(--line);
+    }
+
+    .session-side {
+      border-left: 3px solid var(--line);
+    }
+
+    .session-main {
+      padding: 14px;
+      background: white;
+      min-width: 0;
+    }
+
+    .turn-row {
+      border: 2px solid var(--line);
+      background: white;
+      padding: 9px;
+      margin-bottom: 8px;
+      font-family: var(--mono);
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .turn-row.active {
+      background: #101214;
+      color: white;
+    }
+
+    .turn-row .sub {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-family: var(--sans);
+      font-size: 12px;
+    }
+
+    .turn-row.active .sub {
+      color: #d8d0c2;
+    }
+
+    .block-render {
+      border: 2px solid var(--line);
+      margin-bottom: 12px;
+      background: #fffaf0;
+    }
+
+    .block-render header {
+      display: flex;
+      grid-template-columns: none;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 9px 10px;
+      border-bottom: 2px solid var(--line);
+      background: var(--paper-2);
+    }
+
+    .block-render header strong {
+      font-family: var(--mono);
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+
+    .block-render .content {
+      padding: 12px;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .block-render code {
+      font-family: var(--mono);
+      font-size: 12px;
+      background: #eee3d4;
+      border: 1px solid #c9bdab;
+      padding: 1px 4px;
+    }
+
+    .xml-tag {
+      color: var(--blue);
+      font-family: var(--mono);
+      font-weight: 800;
+      background: #e5f2f5;
+      padding: 1px 3px;
+    }
+
+    .policy {
+      background: #ffe9e3;
+      border-bottom: 2px solid var(--red);
+      padding: 1px 3px;
+    }
+
+    .ref {
+      background: #f7ead0;
+      border-bottom: 2px solid var(--gold);
+      padding: 1px 3px;
+    }
+
+    .verify {
+      background: #e1f0e5;
+      border-bottom: 2px solid var(--green);
+      padding: 1px 3px;
+    }
+
+    .side-group {
+      border: 2px solid var(--line);
+      background: white;
+      margin-bottom: 10px;
+    }
+
+    .side-group h4 {
+      margin: 0;
+      padding: 8px;
+      border-bottom: 2px solid var(--line);
+      background: #101214;
+      color: white;
+      font-family: var(--mono);
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+
+    .side-group ul {
+      margin: 0;
+      padding: 9px 9px 9px 24px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .code-graph {
+      margin-top: 18px;
+      border: 3px solid var(--line);
+      background: white;
+      box-shadow: var(--shadow);
+    }
+
+    .code-graph-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 0;
+      border-top: 3px solid var(--line);
+    }
+
+    .code-col {
+      padding: 14px;
+      min-width: 0;
+    }
+
+    .code-col + .code-col {
+      border-left: 3px solid var(--line);
+    }
+
+    .code-col h3 {
+      margin: 0 0 10px;
+      font-family: var(--mono);
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+
+    .code-node {
+      border: 2px solid var(--line);
+      background: #fffaf0;
+      padding: 10px;
+      margin-bottom: 8px;
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+
+    .code-node small {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-family: var(--sans);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .code-node.match {
+      background: #e5f2f5;
+      box-shadow: 4px 4px 0 var(--line);
+    }
+
+    .code-node.health {
+      background: #ffe9e3;
+    }
+
+    .code-pipeline {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(120px, 1fr));
+      gap: 8px;
+      padding: 14px;
+      background: var(--paper-2);
+      border-top: 3px solid var(--line);
+    }
+
+    .pipe-step {
+      border: 2px solid var(--line);
+      background: white;
+      padding: 9px;
+      min-height: 78px;
+      font-family: var(--mono);
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+
+    .pipe-step span {
+      display: block;
+      margin-top: 6px;
+      color: var(--muted);
+      font-family: var(--sans);
+      font-size: 12px;
+      line-height: 1.3;
+      text-transform: none;
+    }
+
+    footer {
+      margin-top: 22px;
+      padding: 16px 0 6px;
+      border-top: 3px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 980px) {
+      .stage,
+      .sample-wrap,
+      .parser-lab,
+      header {
+        grid-template-columns: 1fr;
+      }
+
+      .matrix,
+      .taxonomy,
+      .diagram-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .provider-grid,
+      .role-map,
+      .session-ui-grid,
+      .code-graph-grid,
+      .code-pipeline,
+      .provider-detail .cols {
+        grid-template-columns: 1fr;
+      }
+
+      .provider-detail .col + .col {
+        border-left: 0;
+        border-top: 3px solid var(--line);
+      }
+
+      .session-rail,
+      .session-side {
+        border: 0;
+      }
+
+      .session-rail {
+        border-bottom: 3px solid var(--line);
+      }
+
+      .session-side {
+        border-top: 3px solid var(--line);
+      }
+
+      .code-col + .code-col {
+        border-left: 0;
+        border-top: 3px solid var(--line);
+      }
+    }
+
+    @media (max-width: 640px) {
+      .page { padding: 16px; }
+      .matrix,
+      .taxonomy,
+      .diagram-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .block {
+        grid-template-columns: 1fr;
+      }
+
+      h1 {
+        font-size: 42px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header>
+      <div>
+        <h1>Turn text is not a blob.</h1>
+        <div class="tagbar">
+          <span class="tag">BM25 stays</span>
+          <span class="tag">blocks first</span>
+          <span class="tag">references become edges</span>
+          <span class="tag">dashboard stops regexing</span>
+        </div>
+      </div>
+      <p class="lead">
+        Prototype view of the architectural difference between the current
+        `turn.text` pipeline and a richer model where user messages, tool
+        outputs, file refs, citations, and sections become queryable records.
+      </p>
+    </header>
+
+    <section class="stage">
+      <article class="panel current">
+        <div class="panel-head">
+          <h2>Current shape</h2>
+          <span class="stamp">works, but lossy</span>
+        </div>
+        <div class="panel-body">
+          <div class="flow">
+            <div class="node">
+              <div class="node-title">Provider transcript <span>raw-ish</span></div>
+              <p>Claude, Codex, Pi, OpenCode, Cursor each produce nested blocks and metadata.</p>
+            </div>
+            <div class="node">
+              <div class="node-title">turn.text <span>big rendered string</span></div>
+              <p>Sections, citations, pasted docs, tool output, code, and user intent collapse into one text blob.</p>
+            </div>
+            <div class="node">
+              <div class="node-title">text_excerpt BM25 <span>first 500 chars</span></div>
+              <p>Fast keyword recall, but misses late mentions and cannot tell which part of the text matched.</p>
+            </div>
+            <div class="node">
+              <div class="node-title">Dashboard regex <span>fragile</span></div>
+              <p>Rendering tries to rediscover structure using string patterns after structure was already lost.</p>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel proposed">
+        <div class="panel-head">
+          <h2>Suggested shape</h2>
+          <span class="stamp">analyzable graph</span>
+        </div>
+        <div class="panel-body">
+          <div class="flow">
+            <div class="node">
+              <div class="node-title">turn <span>raw preserved</span></div>
+              <p>Keep `turn.text` as the reconstructed source, but stop treating it as the only source of truth.</p>
+            </div>
+            <div class="node">
+              <div class="node-title">turn_block <span>ordered parts</span></div>
+              <p>User message, tool result, citation, file ref, code block, plan, error, and context become rows.</p>
+            </div>
+            <div class="node">
+              <div class="node-title">edges + projections <span>many uses</span></div>
+              <p>References, files, URLs, tools, models, costs, and chunks get their own indexed graph paths.</p>
+            </div>
+            <div class="node">
+              <div class="node-title">dashboard renders records <span>not regex</span></div>
+              <p>Highlights come from block kind, references, citations, and token spans instead of guessing from text.</p>
+            </div>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="sample-wrap">
+      <article class="terminal">
+        <div class="terminal-head">
+          <span>today: one rendered `turn.text`</span>
+          <span>regex + excerpt search</span>
+        </div>
+        <pre><span class="blob-highlight">User: can you check ccusage npm library</span>
+
+Context:
+- previous task: calculate cost for LiveTrace PR
+- branch: main
+- repo: /Users/necmttn/Projects/ax
+
+Reference:
+https://github.com/ryoppippi/ccusage
+
+Tool output:
+package exposes pricing tables, cache tokens,
+model aliases, and daily/monthly reports...
+
+Assistant:
+I'll inspect the library and compare its pricing model.
+
+Citation:
+ccusage/src/pricing.ts lines 12-97
+
+Files touched:
+src/ingest/model-pricing.ts
+src/dashboard/cost-query.ts</pre>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head">
+          <h2>tomorrow: parsed blocks</h2>
+          <span class="stamp">click a block</span>
+        </div>
+        <div class="panel-body">
+          <div class="block-list" id="blocks">
+            <div class="block active" data-kind="intent">
+              <div class="kind">intent</div>
+              <div>
+                <strong>User request</strong>
+                <span>can you check ccusage npm library</span>
+              </div>
+              <div class="metric">seq 14</div>
+            </div>
+            <div class="block" data-kind="context">
+              <div class="kind">context</div>
+              <div>
+                <strong>Task memory</strong>
+                <span>calculate cost for LiveTrace PR, repo path, branch, active scope</span>
+              </div>
+              <div class="metric">4 refs</div>
+            </div>
+            <div class="block" data-kind="url">
+              <div class="kind">url</div>
+              <div>
+                <strong>External reference</strong>
+                <span>github.com/ryoppippi/ccusage</span>
+              </div>
+              <div class="metric">edge</div>
+            </div>
+            <div class="block" data-kind="tool">
+              <div class="kind">tool</div>
+              <div>
+                <strong>Tool output</strong>
+                <span>pricing tables, cache tokens, model aliases, usage reports</span>
+              </div>
+              <div class="metric">chunk 0</div>
+            </div>
+            <div class="block" data-kind="citation">
+              <div class="kind">cite</div>
+              <div>
+                <strong>Code citation</strong>
+                <span>ccusage/src/pricing.ts lines 12-97</span>
+              </div>
+              <div class="metric">span</div>
+            </div>
+            <div class="block" data-kind="file">
+              <div class="kind">file</div>
+              <div>
+                <strong>Files touched</strong>
+                <span>model-pricing.ts, cost-query.ts</span>
+              </div>
+              <div class="metric">2 edges</div>
+            </div>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="matrix">
+      <div class="mini">
+        <h4>BM25 search</h4>
+        <p>Search indexes block/chunk text, not only the first 500 chars.</p>
+        <code>turn_block_text_fts</code>
+      </div>
+      <div class="mini">
+        <h4>User analysis</h4>
+        <p>Intent classifiers run only on `user_message` blocks, avoiding tool output noise.</p>
+        <code>block_kind = user_message</code>
+      </div>
+      <div class="mini">
+        <h4>References</h4>
+        <p>URLs, files, citations, and code spans become edges the graph can traverse.</p>
+        <code>turn_block -> references -> file</code>
+      </div>
+      <div class="mini">
+        <h4>Dashboard</h4>
+        <p>Session detail renders typed blocks with stable highlighting and filters.</p>
+        <code>render(block.kind)</code>
+      </div>
+    </section>
+
+    <section class="diagram">
+      <div class="panel-head" style="margin: -16px -16px 16px;">
+        <h2>Proposed records and indexes</h2>
+        <span class="stamp">BM25 is one projection</span>
+      </div>
+      <div class="diagram-grid">
+        <div class="stack">
+          <div class="pill hot">turn</div>
+          <div class="pill">raw_text</div>
+          <div class="pill">source provider</div>
+          <div class="pill">session + seq + ts</div>
+        </div>
+        <div class="stack">
+          <div class="pill good">turn_block</div>
+          <div class="pill good">kind: user_message</div>
+          <div class="pill good">kind: tool_result</div>
+          <div class="pill good">kind: citation</div>
+          <div class="pill good">kind: file_ref</div>
+        </div>
+        <div class="stack">
+          <div class="pill search">BM25 on block.text</div>
+          <div class="pill edge">edge to file/url/tool</div>
+          <div class="pill edge">edge to model/cost</div>
+          <div class="pill search">chunk index for long blocks</div>
+        </div>
+      </div>
+
+      <div class="legend">
+        <button class="active" data-explain="search">keyword search</button>
+        <button data-explain="dashboard">dashboard render</button>
+        <button data-explain="cost">cost question</button>
+        <button data-explain="analysis">user analysis</button>
+      </div>
+      <div class="explain" id="explain">
+        Search path: BM25 matches `turn_block.text`, returns block ids, then follows block -> turn -> session. Result can show the exact block that matched, not just the session.
+      </div>
+    </section>
+
+    <section class="parser-lab">
+      <article class="panel">
+        <div class="panel-head">
+          <h2>How parsing actually works</h2>
+          <span class="stamp">not magic</span>
+        </div>
+        <div class="panel-body">
+          <div class="steps">
+            <div class="step">
+              <strong>Prefer provider-native structure</strong>
+              <span>Claude/Codex/Pi/OpenCode transcripts already contain message arrays, tool calls, tool results, roles, timestamps, files, and sometimes citations. We parse those before touching rendered text.</span>
+            </div>
+            <div class="step">
+              <strong>Normalize to block candidates</strong>
+              <span>Every native message part becomes a candidate: user text, assistant text, tool call, tool result, code block, URL, file mention, citation, system/developer context.</span>
+            </div>
+            <div class="step">
+              <strong>Use text parser only as fallback</strong>
+              <span>If a provider only gives us `turn.text`, we split by stable markers: fenced code, headings, URL lines, file paths, XML-ish tags, tool output prefixes, and quoted transcript wrappers.</span>
+            </div>
+            <div class="step">
+              <strong>Attach confidence and provenance</strong>
+              <span>Native blocks get high confidence. Regex-inferred blocks get lower confidence plus the rule name, byte span, and source field. The UI can show uncertain blocks differently.</span>
+            </div>
+            <div class="step">
+              <strong>Derive edges after blocks exist</strong>
+              <span>URLs, file paths, model names, tool names, citations, and cost/task keywords become graph edges from the block, not fragile annotations on the whole turn.</span>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="json-card">
+        <div class="terminal-head">
+          <span>same session slice, parsed output</span>
+          <span>block candidates</span>
+        </div>
+        <div class="parse-toggle">
+          <button class="active" data-parse="native">provider-native</button>
+          <button data-parse="fallback">text fallback</button>
+          <button data-parse="stored">stored records</button>
+        </div>
+        <pre id="parseView">[
+  {
+    "kind": "user_message",
+    "source": "provider.message.content[0]",
+    "confidence": 1,
+    "text": "can you check ccusage npm library"
+  },
+  {
+    "kind": "url",
+    "source": "provider.message.content[1]",
+    "confidence": 1,
+    "text": "https://github.com/ryoppippi/ccusage",
+    "edges": [{ "to": "url:https://github.com/ryoppippi/ccusage" }]
+  },
+  {
+    "turn_role": "assistant",
+    "kind": "tool_call",
+    "source": "provider.assistant.content[tool_use]",
+    "confidence": 1,
+    "text": "read_file({ path: 'src/ingest/model-pricing.ts' })"
+  },
+  {
+    "turn_role": "tool_result",
+    "kind": "diagnostic_line",
+    "source": "provider.tool_result.content",
+    "confidence": 1,
+    "text": "src/ingest/model-pricing.ts:42 ..."
+  }
+]</pre>
+      </article>
+    </section>
+
+    <section class="panel" style="margin-top: 18px;">
+      <div class="panel-head">
+        <h2>Fallback splitter rules</h2>
+        <span class="stamp">when only text exists</span>
+      </div>
+      <div class="panel-body">
+        <div class="splitter">
+          <div class="split-row">
+            <div class="rule">fenced code</div>
+            <div>Lines between <code>```</code> become `code_block` or `tool_output` depending on nearby labels.</div>
+            <div class="confidence">high</div>
+          </div>
+          <div class="split-row">
+            <div class="rule">headings</div>
+            <div>`Context:`, `Reference:`, `Files touched:`, `Tool output:` become section boundaries.</div>
+            <div class="confidence">medium</div>
+          </div>
+          <div class="split-row">
+            <div class="rule">paths + urls</div>
+            <div>Absolute paths, repo-relative paths, GitHub URLs, and line ranges become reference blocks and edges.</div>
+            <div class="confidence">high</div>
+          </div>
+          <div class="split-row">
+            <div class="rule">agent wrappers</div>
+            <div>`&lt;goal_context&gt;`, `&lt;INSTRUCTIONS&gt;`, handoff markers, and subagent notifications become context blocks.</div>
+            <div class="confidence">medium</div>
+          </div>
+          <div class="split-row">
+            <div class="rule">plain prose</div>
+            <div>Anything left becomes prose blocks, then gets classified by role: user intent, assistant response, or context.</div>
+            <div class="confidence low">lower</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-top: 18px;">
+      <div class="panel-head">
+        <h2>Low-level text atoms</h2>
+        <span class="stamp">below message_kind</span>
+      </div>
+      <div class="panel-body">
+        <p class="lead" style="margin-bottom: 14px;">
+          This is the terminology split: `message_kind` stays as the high-level
+          turn label. These atoms are smaller spans inside that turn text.
+        </p>
+        <div class="taxonomy">
+          <div class="atom">
+            <h4>section_header</h4>
+            <p>Visible labels that split a turn into regions: Context, Reference, Files touched, Tool output.</p>
+            <code>span + normalized heading</code>
+          </div>
+          <div class="atom">
+            <h4>url_ref</h4>
+            <p>URLs that should become reference nodes, not just searchable text.</p>
+            <code>https://github.com/...</code>
+          </div>
+          <div class="atom">
+            <h4>file_ref</h4>
+            <p>Absolute or repo-relative paths, optionally with line/column ranges.</p>
+            <code>src/ingest/codex.ts:871</code>
+          </div>
+          <div class="atom">
+            <h4>symbol_ref</h4>
+            <p>Function, class, table, command, package, model, or schema names mentioned in prose.</p>
+            <code>session_token_usage</code>
+          </div>
+          <div class="atom">
+            <h4>code_fence</h4>
+            <p>Markdown fenced blocks with language hints and body spans.</p>
+            <code>```ts ... ```</code>
+          </div>
+          <div class="atom">
+            <h4>xml_wrapper</h4>
+            <p>Agent wrappers and injected context tags: goal_context, INSTRUCTIONS, command-name.</p>
+            <code>&lt;goal_context&gt;</code>
+          </div>
+          <div class="atom">
+            <h4>quote_block</h4>
+            <p>Quoted user text, copied docs, shell output, or provider-rendered nested messages.</p>
+            <code>&gt; previous message</code>
+          </div>
+          <div class="atom">
+            <h4>diagnostic_line</h4>
+            <p>Error lines, stack frames, test failures, warnings, and command status.</p>
+            <code>TS2345 / exit code 1</code>
+          </div>
+          <div class="atom">
+            <h4>plain_text</h4>
+            <p>Remaining prose spans. Still searchable, but not promoted to graph edges unless classified later.</p>
+            <code>span fallback</code>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-top: 18px;">
+      <div class="panel-head">
+        <h2>Role × atom reality check</h2>
+        <span class="stamp">sample verified</span>
+      </div>
+      <div class="panel-body">
+        <div class="splitter">
+          <div class="split-row">
+            <div class="rule">human user</div>
+            <div>Mostly prose plus low-level atoms like URLs, paths, headings, code fences, wrappers, and quoted text. Tool calls are not expected here.</div>
+            <div class="confidence">text atoms</div>
+          </div>
+          <div class="split-row">
+            <div class="rule">assistant</div>
+            <div>Assistant prose plus provider-native tool-call blocks. Claude has `tool_use`; Codex has `function_call`; Pi has `toolCall` blocks.</div>
+            <div class="confidence">tool call</div>
+          </div>
+          <div class="split-row">
+            <div class="rule">tool result</div>
+            <div>Separate tool-result turns. Claude stores tool results under role=user at provider level, but ax classifies them as `message_kind=tool_result`, not human task text.</div>
+            <div class="confidence">output atoms</div>
+          </div>
+          <div class="split-row">
+            <div class="rule">context</div>
+            <div>System/developer/AGENTS/instructions are context turns. They contain wrappers, headings, paths, and policy sections, not user task intent.</div>
+            <div class="confidence">context atoms</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-top: 18px;">
+      <div class="panel-head">
+        <h2>Same atoms, different role meaning</h2>
+        <span class="stamp">system + user + assistant</span>
+      </div>
+      <div class="panel-body">
+        <p class="lead" style="margin-bottom: 14px;">
+          The low-level parser can run on every turn role. The atom type is
+          stable, but the interpretation depends on the role and message_kind.
+          A file path in a system message is policy/context; a file path in a
+          user message is usually request scope; a file path in an assistant
+          message is often plan/evidence/progress.
+        </p>
+        <div class="role-map">
+          <article class="role-card">
+            <h3>system / developer / context</h3>
+            <div class="body">
+              <p>Classify instructions, environment, permissions, repo rules, AGENTS.md sections, plugin/skill context.</p>
+              <div class="chips">
+                <span class="chip">section_header</span>
+                <span class="chip">xml_wrapper</span>
+                <span class="chip">policy_clause</span>
+                <span class="chip">file_ref</span>
+                <span class="chip">command_ref</span>
+              </div>
+            </div>
+            <pre>{
+  "turn_role": "developer",
+  "message_kind": "system_or_developer",
+  "atoms": [
+    { "kind": "xml_wrapper", "text": "permissions instructions" },
+    { "kind": "policy_clause", "text": "Do not revert user changes" },
+    { "kind": "file_ref", "text": "AGENTS.md" }
+  ],
+  "meaning": "constraints and environment"
+}</pre>
+          </article>
+
+          <article class="role-card">
+            <h3>human user</h3>
+            <div class="body">
+              <p>Classify request scope, corrections, preferences, examples, referenced files/URLs, and quoted prior context.</p>
+              <div class="chips">
+                <span class="chip">request_phrase</span>
+                <span class="chip">url_ref</span>
+                <span class="chip">file_ref</span>
+                <span class="chip">quote_block</span>
+                <span class="chip">constraint</span>
+              </div>
+            </div>
+            <pre>{
+  "turn_role": "user",
+  "message_kind": "task",
+  "atoms": [
+    { "kind": "request_phrase", "text": "check ccusage npm library" },
+    { "kind": "url_ref", "text": "github.com/ryoppippi/ccusage" },
+    { "kind": "constraint", "text": "compare cost calculation" }
+  ],
+  "meaning": "intent and scope"
+}</pre>
+          </article>
+
+          <article class="role-card">
+            <h3>assistant / AI agent</h3>
+            <div class="body">
+              <p>Classify plan sections, claims, evidence, file mentions, tool-call intent, verification statements, and uncertainty.</p>
+              <div class="chips">
+                <span class="chip">plan_step</span>
+                <span class="chip">claim</span>
+                <span class="chip">evidence_ref</span>
+                <span class="chip">tool_call</span>
+                <span class="chip">verification</span>
+              </div>
+            </div>
+            <pre>{
+  "turn_role": "assistant",
+  "message_kind": "assistant",
+  "atoms": [
+    { "kind": "plan_step", "text": "inspect pricing tables" },
+    { "kind": "file_ref", "text": "src/ingest/model-pricing.ts" },
+    { "kind": "verification", "text": "bun run typecheck exits 0" }
+  ],
+  "meaning": "agent reasoning surface and evidence"
+}</pre>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-top: 18px;">
+      <div class="panel-head">
+        <h2>Provider reference</h2>
+        <span class="stamp">current shapes</span>
+      </div>
+      <div class="panel-body">
+        <p class="lead" style="margin-bottom: 14px;">
+          Current local baseline seen during benchmarking: 369k turns and 4.7k
+          sessions in the 30-day graph. This table is the provider taxonomy
+          reference: how each provider gives us message turns, and what low-level
+          atoms we can classify from it.
+        </p>
+        <div class="provider-grid">
+          <div class="provider-list">
+            <button class="active" data-provider="claude">Claude Code</button>
+            <button data-provider="codex">Codex</button>
+            <button data-provider="pi">Pi</button>
+            <button data-provider="opencode">OpenCode</button>
+            <button data-provider="cursor">Cursor</button>
+          </div>
+          <div class="provider-detail">
+            <h3 id="providerTitle">Claude Code</h3>
+            <div class="cols">
+              <div class="col">
+                <h4>Current message shape</h4>
+                <ul id="providerCurrent"></ul>
+              </div>
+              <div class="col">
+                <h4>Low-level atoms to extract</h4>
+                <ul id="providerAtoms"></ul>
+              </div>
+            </div>
+            <div class="provider-code">
+              <pre id="providerExample"></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="session-ui">
+      <div class="panel-head">
+        <h2>Session dashboard after blocks</h2>
+        <span class="stamp">combined view</span>
+      </div>
+      <div class="session-ui-grid">
+        <aside class="session-rail">
+          <div class="turn-row active">
+            turn 001 · developer
+            <span class="sub">system/context · 8 atoms</span>
+          </div>
+          <div class="turn-row">
+            turn 002 · user
+            <span class="sub">task · 5 atoms</span>
+          </div>
+          <div class="turn-row">
+            turn 003 · assistant
+            <span class="sub">plan + evidence · 6 atoms</span>
+          </div>
+          <div class="turn-row">
+            turn 004 · tool_call
+            <span class="sub">read_file · 2 atoms</span>
+          </div>
+          <div class="turn-row">
+            turn 005 · tool_result
+            <span class="sub">output · 19 atoms</span>
+          </div>
+        </aside>
+
+        <section class="session-main">
+          <div class="block-render">
+            <header>
+              <strong>developer context</strong>
+              <span class="metric">source: codex developer message</span>
+            </header>
+            <div class="content">
+              <span class="xml-tag">&lt;permissions instructions&gt;</span>
+              Filesystem sandboxing defines which files can be read or written.
+              <span class="policy">danger-full-access</span>.
+              Network access is enabled.
+              <span class="xml-tag">&lt;/permissions instructions&gt;</span>
+            </div>
+          </div>
+
+          <div class="block-render">
+            <header>
+              <strong>repo instructions</strong>
+              <span class="metric">source: AGENTS.md context</span>
+            </header>
+            <div class="content">
+              <span class="ref"># AGENTS.md instructions for /Users/necmttn/Projects/ax</span><br />
+              <span class="xml-tag">&lt;INSTRUCTIONS&gt;</span>
+              Do not revert user changes. Use <code>rg</code>. Prefer Effect patterns.
+              <span class="xml-tag">&lt;/INSTRUCTIONS&gt;</span>
+            </div>
+          </div>
+
+          <div class="block-render">
+            <header>
+              <strong>user task</strong>
+              <span class="metric">source: user turn</span>
+            </header>
+            <div class="content">
+              Can you check <span class="ref">ccusage npm library</span> and compare how it calculates
+              <span class="ref">cache tokens</span>, model pricing, and session cost?
+            </div>
+          </div>
+
+          <div class="block-render">
+            <header>
+              <strong>assistant plan/evidence</strong>
+              <span class="metric">source: assistant turn</span>
+            </header>
+            <div class="content">
+              I’ll inspect pricing tables, then update <span class="ref">src/ingest/model-pricing.ts</span>
+              and verify with <span class="verify">bun run typecheck</span>.
+            </div>
+          </div>
+        </section>
+
+        <aside class="session-side">
+          <div class="side-group">
+            <h4>Extracted atoms</h4>
+            <ul>
+              <li>xml_wrapper: 4</li>
+              <li>policy_clause: 2</li>
+              <li>file_ref: 2</li>
+              <li>command_ref: 2</li>
+              <li>request_phrase: 1</li>
+            </ul>
+          </div>
+          <div class="side-group">
+            <h4>Graph edges</h4>
+            <ul>
+              <li>turn_block -> file:AGENTS.md</li>
+              <li>turn_block -> file:model-pricing.ts</li>
+              <li>turn_block -> package:ccusage</li>
+              <li>turn_block -> command:typecheck</li>
+            </ul>
+          </div>
+          <div class="side-group">
+            <h4>Indexes used</h4>
+            <ul>
+              <li>BM25 on block text</li>
+              <li>kind + role filters</li>
+              <li>file/url reference indexes</li>
+              <li>session/order index</li>
+            </ul>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="code-graph">
+      <div class="panel-head">
+        <h2>One layer lower: symbol detection and resolution</h2>
+        <span class="stamp">AST + references</span>
+      </div>
+      <div class="code-graph-grid">
+        <div class="code-col">
+          <h3>Detected symbols in turn text</h3>
+          <div class="code-node match">
+            symbol_ref: AuthenticationService
+            <small>assistant says “I’m building the new authentication service”</small>
+          </div>
+          <div class="code-node match">
+            file_ref: src/auth/server.ts
+            <small>user mentions target file or agent cites it in a plan</small>
+          </div>
+          <div class="code-node">
+            function_ref: createSessionToken
+            <small>inline symbol in user/assistant/tool output text</small>
+          </div>
+        </div>
+
+        <div class="code-col">
+          <h3>AST-backed symbol index</h3>
+          <div class="code-node match">
+            file: src/auth/server.ts
+            <small>imports: db, crypto, session-store</small>
+          </div>
+          <div class="code-node match">
+            class: AuthenticationService
+            <small>methods: login, logout, refreshSession</small>
+          </div>
+          <div class="code-node">
+            fn: createSessionToken(userId)
+            <small>defined in src/auth/tokens.ts, imported by server.ts</small>
+          </div>
+          <div class="code-node">
+            const: SESSION_TTL_MS
+            <small>exported config constant referenced by token helpers</small>
+          </div>
+        </div>
+
+        <div class="code-col">
+          <h3>Resolved edges we gain</h3>
+          <div class="code-node">
+            turn_block -> symbol
+            <small>text mention resolves to canonical code definition</small>
+          </div>
+          <div class="code-node">
+            symbol -> file
+            <small>definition location, imports, exports, callers</small>
+          </div>
+          <div class="code-node health">
+            file -> health signal
+            <small>hotspot, revert history, fix ratio, churn</small>
+          </div>
+          <div class="code-node">
+            session -> touched file -> code node
+            <small>connect what the agent discussed to what it changed</small>
+          </div>
+        </div>
+      </div>
+
+      <div class="code-pipeline">
+        <div class="pipe-step">
+          detect symbols
+          <span>extract file_ref, symbol_ref, command_ref, package_ref spans</span>
+        </div>
+        <div class="pipe-step">
+          build symbol index
+          <span>tree-sitter or TypeScript AST: imports, exports, defs, calls</span>
+        </div>
+        <div class="pipe-step">
+          classify + resolve
+          <span>match mentioned names to definitions with path/import context</span>
+        </div>
+        <div class="pipe-step">
+          write edges
+          <span>turn_block -> code_symbol -> file -> commit/session/cost</span>
+        </div>
+        <div class="pipe-step">
+          render grounding
+          <span>highlight text mention and show the actual code node behind it</span>
+        </div>
+      </div>
+
+      <div class="panel-body">
+        <p class="lead">
+          This is the symbol analyzer layer: detect possible code symbols in
+          turn text, classify what kind of symbol they are, then resolve them
+          against an AST-backed symbol index. Composto-like tools fit behind
+          this layer because they can provide AST/IR extraction and file health
+          signals. For ax, the product primitive is symbol grounding: files,
+          imports, functions, constants, classes, services, and their edges.
+          Then turn text is not only searchable; it can be grounded to actual
+          code definitions.
+        </p>
+      </div>
+    </section>
+
+    <section class="code-graph">
+      <div class="panel-head">
+        <h2>Planning and workflow artifact classifier</h2>
+        <span class="stamp">GSD + rough-loop + skills + Claude workflows</span>
+      </div>
+      <div class="code-graph-grid">
+        <div class="code-col">
+          <h3>Artifact families found in quera</h3>
+          <div class="code-node match">
+            artifact: .planning/STATE.md
+            <small>frontmatter status, milestone, phase progress, blockers, pending todos</small>
+          </div>
+          <div class="code-node match">
+            artifact: .planning/quick/*/*-PLAN.md
+            <small>GSD plan markdown with YAML frontmatter, XML-ish task blocks, checklists</small>
+          </div>
+          <div class="code-node">
+            artifact: *-VERIFICATION.md
+            <small>evidence tables, required artifacts, requirement coverage, commits verified</small>
+          </div>
+          <div class="code-node">
+            artifact: .claude/monitoring/plans/*.md
+            <small>RCA/fix plans with source signal, stack image, code path, risk, verification</small>
+          </div>
+          <div class="code-node">
+            artifact: .planning/config.json / YAML progress files
+            <small>framework config, model profile, workflow flags, todo/progress state</small>
+          </div>
+          <div class="code-node match">
+            artifact: */skills/*/SKILL.md
+            <small>skill frontmatter, trigger language, workflow sections, bundled resources</small>
+          </div>
+          <div class="code-node match">
+            artifact: Deepline cloud workflow recipes / payloads
+            <small>cron/webhook triggers, command graph, tool payloads, run inspection checkpoints</small>
+          </div>
+          <div class="code-node match">
+            artifact: Claude Code Dynamic Workflow script
+            <small>generated JavaScript orchestration, saved under .claude/workflows or ~/.claude/workflows</small>
+          </div>
+          <div class="code-node match">
+            runtime: /workflows run state
+            <small>phase list, agent count, token total, elapsed time, pause/resume/stop/restart/save actions</small>
+          </div>
+          <div class="code-node">
+            artifact: Kubernetes CronJob YAML
+            <small>schedule, concurrency policy, job steps, env refs, commands, resource limits</small>
+          </div>
+          <div class="code-node">
+            code: Effect Workflow source files
+            <small>Workflow.make name, payload schema, idempotency key, Activities, durable step names</small>
+          </div>
+        </div>
+
+        <div class="code-col">
+          <h3>Low-level atoms</h3>
+          <div class="code-node match">
+            frontmatter_field: phase, plan, status, score
+            <small>structured metadata extracted before markdown parsing</small>
+          </div>
+          <div class="code-node match">
+            task_node + checklist_item
+            <small>&lt;task type="auto"&gt;, - [ ] Step 1, done clauses, status transitions</small>
+          </div>
+          <div class="code-node">
+            file_ref + files_modified
+            <small>paths, @path references, required output artifacts, touched files</small>
+          </div>
+          <div class="code-node">
+            plan_ref + requirement_ref + dependency_ref
+            <small>phase links, depends_on, R62-01, key_links, acceptance requirements</small>
+          </div>
+          <div class="code-node">
+            verification_command + evidence_row
+            <small>commands, expected outputs, observable truth tables, verified commits</small>
+          </div>
+          <div class="code-node match">
+            skill_trigger + resource_ref
+            <small>Use when..., Trigger:, references/*.md, scripts/*, assets/*</small>
+          </div>
+          <div class="code-node match">
+            workflow_trigger + workflow_command
+            <small>cron schedule, webhook binding, command alias, tool name, payload shape</small>
+          </div>
+          <div class="code-node match">
+            dynamic_workflow_phase + spawned_agent
+            <small>planned phase, agent prompt, recent tool calls, result, cached completion state</small>
+          </div>
+          <div class="code-node">
+            approval_plan + saved_command
+            <small>phase list shown before run, raw script view, /name command persisted from a run</small>
+          </div>
+          <div class="code-node">
+            run_checkpoint + lifecycle_action
+            <small>workflows get/list/runs/tail, disable/enable/delete, expected output assertions</small>
+          </div>
+          <div class="code-node">
+            durable_activity + idempotency_key
+            <small>Effect Workflow name, Activity.make name, payload schema, replay boundary</small>
+          </div>
+        </div>
+
+        <div class="code-col">
+          <h3>Graph edges we should write</h3>
+          <div class="code-node">
+            artifact -> plan/task/checklist
+            <small>query all open work, finished work, or stalled work across frameworks</small>
+          </div>
+          <div class="code-node">
+            task -> file/symbol/requirement
+            <small>connect plan intent to concrete code references and AST symbols</small>
+          </div>
+          <div class="code-node health">
+            verification -> command/commit/evidence
+            <small>make “was this actually checked?” answerable from the graph</small>
+          </div>
+          <div class="code-node">
+            session -> artifact
+            <small>link the agent conversation that created or updated the plan/state file</small>
+          </div>
+          <div class="code-node">
+            state -> phase/progress/blocker
+            <small>render current project position without re-reading every markdown file</small>
+          </div>
+          <div class="code-node health">
+            skill -> trigger/resource/procedure
+            <small>query which instructions apply, what they load, and which sessions used them</small>
+          </div>
+          <div class="code-node health">
+            workflow -> trigger/command/run
+            <small>query scheduled jobs, webhook workflows, command graphs, and observed runs</small>
+          </div>
+          <div class="code-node health">
+            dynamic_workflow -> phase/agent/result
+            <small>connect generated orchestration to every spawned agent and its token/cost footprint</small>
+          </div>
+          <div class="code-node">
+            saved workflow -> slash command
+            <small>project command wins over personal command when names collide</small>
+          </div>
+          <div class="code-node">
+            command -> tool/payload/output
+            <small>connect workflow command aliases to tools, input JSON, and run result fields</small>
+          </div>
+        </div>
+      </div>
+
+      <div class="session-demo">
+        <aside class="turn-list">
+          <div class="turn active">
+            <strong>STATE.md</strong>
+            <span>project progress + blockers</span>
+          </div>
+          <div class="turn">
+            <strong>62-PLAN.md</strong>
+            <span>GSD execution plan</span>
+          </div>
+          <div class="turn">
+            <strong>62-VERIFICATION.md</strong>
+            <span>evidence report</span>
+          </div>
+          <div class="turn">
+            <strong>contextualizing-service-rca.md</strong>
+            <span>monitoring RCA plan</span>
+          </div>
+          <div class="turn">
+            <strong>config.json</strong>
+            <span>planning framework config</span>
+          </div>
+          <div class="turn">
+            <strong>diagnose/SKILL.md</strong>
+            <span>skill instruction artifact</span>
+          </div>
+          <div class="turn">
+            <strong>workflow recipe</strong>
+            <span>cloud workflow payload</span>
+          </div>
+          <div class="turn">
+            <strong>.claude/workflows/audit.js</strong>
+            <span>Claude dynamic workflow script</span>
+          </div>
+          <div class="turn">
+            <strong>/workflows run</strong>
+            <span>phases + agents + tokens</span>
+          </div>
+          <div class="turn">
+            <strong>cronjob-postgres.yaml</strong>
+            <span>Kubernetes scheduled workflow</span>
+          </div>
+        </aside>
+
+        <section class="session-main">
+          <div class="block-render">
+            <header>
+              <strong>frontmatter</strong>
+              <span class="metric">source: .planning/STATE.md</span>
+            </header>
+            <div class="content">
+              <span class="ref">milestone: 62</span> |
+              <span class="verify">status: in_progress</span> |
+              <span class="ref">progress.phase: quick</span> |
+              <span class="policy">pending_todos: 3</span>
+            </div>
+          </div>
+
+          <div class="block-render">
+            <header>
+              <strong>task block</strong>
+              <span class="metric">source: 62-PLAN.md</span>
+            </header>
+            <div class="content">
+              <span class="xml-tag">&lt;task type="auto"&gt;</span>
+              update <span class="ref">apps/api/src/noktaapp/backend.ts</span>,
+              satisfy <span class="ref">R62-01</span>, then run
+              <span class="verify">bun run typecheck</span>.
+              <span class="xml-tag">&lt;/task&gt;</span>
+            </div>
+          </div>
+
+          <div class="block-render">
+            <header>
+              <strong>verification evidence</strong>
+              <span class="metric">source: 62-VERIFICATION.md</span>
+            </header>
+            <div class="content">
+              evidence_row: required artifact present |
+              commit_ref: <span class="ref">abc1234</span> |
+              score: <span class="verify">pass</span>
+            </div>
+          </div>
+
+          <div class="block-render">
+            <header>
+              <strong>skill metadata + body</strong>
+              <span class="metric">source: diagnose/SKILL.md</span>
+            </header>
+            <div class="content">
+              frontmatter:
+              <span class="ref">name: diagnose</span> |
+              <span class="ref">description: Disciplined diagnosis loop...</span><br />
+              body atoms:
+              <span class="verify">Phase 1 - Build a feedback loop</span>,
+              <span class="verify">Phase 2 - Reproduce</span>,
+              <span class="ref">scripts/hitl-loop.template.sh</span>
+            </div>
+          </div>
+
+          <div class="block-render">
+            <header>
+              <strong>cloud workflow payload</strong>
+              <span class="metric">source: workflow-hello-world recipe</span>
+            </header>
+            <div class="content">
+              workflow:
+              <span class="ref">workflow_cloud_webhook_demo</span> |
+              trigger:
+              <span class="verify">webhook: inbound_demo</span><br />
+              commands:
+              <span class="ref">normalize_input -> run_javascript</span>,
+              <span class="ref">inspect -> run_javascript</span> |
+              checkpoint:
+              <span class="verify">tail run and assert inspect.result.ok</span>
+            </div>
+          </div>
+
+          <div class="block-render">
+            <header>
+              <strong>Claude dynamic workflow</strong>
+              <span class="metric">source: generated workflow run</span>
+            </header>
+            <div class="content">
+              trigger:
+              <span class="ref">prompt contains workflow</span> or
+              <span class="ref">/effort ultracode</span> |
+              saved as:
+              <span class="ref">.claude/workflows/audit.js</span><br />
+              phases:
+              <span class="verify">understand code</span>,
+              <span class="verify">audit endpoints</span>,
+              <span class="verify">cross-check findings</span> |
+              limits:
+              <span class="policy">16 concurrent agents</span>,
+              <span class="policy">1000 total agents</span>
+            </div>
+          </div>
+
+          <div class="block-render">
+            <header>
+              <strong>workflow run state</strong>
+              <span class="metric">source: /workflows progress view</span>
+            </header>
+            <div class="content">
+              phase:
+              <span class="ref">audit endpoints</span> |
+              agents:
+              <span class="verify">12 completed / 2 running</span> |
+              tokens:
+              <span class="ref">184k</span> |
+              elapsed:
+              <span class="ref">8m 41s</span><br />
+              agent detail:
+              <span class="ref">prompt</span>,
+              <span class="ref">recent tool calls</span>,
+              <span class="verify">result</span>,
+              <span class="policy">cached on resume</span>
+            </div>
+          </div>
+
+          <div class="block-render">
+            <header>
+              <strong>scheduled job spec</strong>
+              <span class="metric">source: cronjob-postgres.yaml</span>
+            </header>
+            <div class="content">
+              cron:
+              <span class="verify">0 */2 * * *</span> |
+              concurrency:
+              <span class="ref">Forbid</span> |
+              steps:
+              <span class="ref">pg-dump</span> -> <span class="ref">s3-upload</span>
+            </div>
+          </div>
+        </section>
+
+        <aside class="session-side">
+          <div class="side-group">
+            <h4>Queryable atoms</h4>
+            <ul>
+              <li>frontmatter_field</li>
+              <li>task_node</li>
+              <li>checklist_item</li>
+              <li>verification_command</li>
+              <li>evidence_row</li>
+              <li>todo_status_transition</li>
+              <li>skill_trigger</li>
+              <li>resource_ref</li>
+              <li>procedure_step</li>
+              <li>workflow_trigger</li>
+              <li>workflow_command</li>
+              <li>dynamic_workflow_phase</li>
+              <li>spawned_agent</li>
+              <li>approval_plan</li>
+              <li>saved_command</li>
+              <li>run_checkpoint</li>
+              <li>lifecycle_action</li>
+              <li>durable_activity</li>
+            </ul>
+          </div>
+          <div class="side-group">
+            <h4>Cross-links</h4>
+            <ul>
+              <li>artifact -> file_ref</li>
+              <li>artifact -> plan_ref</li>
+              <li>task -> requirement_ref</li>
+              <li>verification -> commit_ref</li>
+              <li>artifact -> session that edited it</li>
+              <li>skill -> sessions that invoked it</li>
+              <li>skill -> bundled references/scripts/assets</li>
+              <li>workflow -> trigger cron/webhook</li>
+              <li>workflow -> command alias/tool</li>
+              <li>workflow -> run/checkpoint/result</li>
+              <li>workflow source -> Activity names</li>
+              <li>dynamic workflow -> phase</li>
+              <li>phase -> spawned agent</li>
+              <li>agent -> token usage/tool calls/result</li>
+              <li>run -> saved command/script path</li>
+            </ul>
+          </div>
+          <div class="side-group">
+            <h4>Why this matters</h4>
+            <ul>
+              <li>List all active plans</li>
+              <li>Find unchecked tasks</li>
+              <li>Ask which files a plan intended to touch</li>
+              <li>Compare planned vs actual session work</li>
+              <li>Ask which skills define a workflow or trigger</li>
+              <li>List every active cron/webhook workflow</li>
+              <li>Compare workflow plan payloads to observed runs</li>
+              <li>Ask which workflow phase spent the most tokens</li>
+              <li>Find runs that were paused, resumed, stopped, or saved</li>
+            </ul>
+          </div>
+        </aside>
+      </div>
+
+      <div class="panel-body">
+        <p class="lead">
+          These planning files are not ordinary markdown. They are agent-produced
+          state machines encoded as markdown, YAML frontmatter, tables, XML-ish
+          sections, and JSON/YAML config. ax should ingest them as
+          <code>artifact_document</code> records, split them into
+          <code>artifact_block</code> records, and reuse the same atom/edge
+          pipeline as turn text. That gives us searchable project state,
+          plan-to-file links, open checklist items, verification evidence, and
+          skill instructions, cloud workflow definitions, and Claude Code
+          Dynamic Workflow runs. It also gives us a way to compare what the
+          agent planned against what the session actually changed, what skill
+          instructions were available or invoked, whether a scheduled/webhook
+          workflow actually ran as designed, and where a dynamic workflow spent
+          its agents, tokens, time, and tool calls.
+        </p>
+      </div>
+    </section>
+
+    <footer>
+      Prototype only. The intended decision: keep raw `turn.text`, but add
+      typed `turn_block` and `artifact_block` records, then build BM25/graph
+      indexes over those blocks.
+    </footer>
+  </main>
+
+  <script>
+    const explanations = {
+      search: "Search path: BM25 matches `turn_block.text`, returns block ids, then follows block -> turn -> session. Result can show the exact block that matched, not just the session.",
+      dashboard: "Dashboard path: session detail loads ordered blocks and renders by kind. A citation block, file-ref block, and user-message block get different components without regex recovery.",
+      cost: "Cost path: keyword or block filter returns candidate sessions, then cost is calculated with `session_token_usage WHERE session IN [refs]`. This keeps search and cost joins separate.",
+      analysis: "Analysis path: classifiers can target only `user_message` blocks or only `tool_result` blocks. The graph stops mixing intent, context, and generated output into one string."
+    };
+
+    const parseViews = {
+      native: `[
+  {
+    "kind": "user_message",
+    "source": "provider.message.content[0]",
+    "confidence": 1,
+    "text": "can you check ccusage npm library"
+  },
+  {
+    "kind": "url",
+    "source": "provider.message.content[1]",
+    "confidence": 1,
+    "text": "https://github.com/ryoppippi/ccusage",
+    "edges": [{ "to": "url:https://github.com/ryoppippi/ccusage" }]
+  },
+  {
+    "turn_role": "assistant",
+    "kind": "tool_call",
+    "source": "provider.assistant.content[tool_use]",
+    "confidence": 1,
+    "text": "read_file({ path: 'src/ingest/model-pricing.ts' })"
+  },
+  {
+    "turn_role": "tool_result",
+    "kind": "diagnostic_line",
+    "source": "provider.tool_result.content",
+    "confidence": 1,
+    "text": "src/ingest/model-pricing.ts:42 ..."
+  }
+]`,
+      fallback: `[
+  {
+    "kind": "user_message",
+    "source": "turn.text",
+    "span": [0, 39],
+    "rule": "role_prefix:user",
+    "confidence": 0.78,
+    "text": "can you check ccusage npm library"
+  },
+  {
+    "kind": "section",
+    "section": "Reference",
+    "span": [132, 181],
+    "rule": "heading_boundary",
+    "confidence": 0.72,
+    "text": "https://github.com/ryoppippi/ccusage"
+  },
+  {
+    "kind": "file_ref",
+    "span": [438, 463],
+    "rule": "path_pattern",
+    "confidence": 0.91,
+    "text": "src/ingest/model-pricing.ts"
+  }
+]`,
+      stored: `[
+  {
+    "id": "turn_block:session_abc_014_000",
+    "turn": "turn:session_abc_014",
+    "session": "session:abc",
+    "seq": 0,
+    "kind": "user_message",
+    "text": "can you check ccusage npm library",
+    "text_fts": true,
+    "provenance": "provider-native"
+  },
+  {
+    "id": "turn_block:session_abc_014_001",
+    "kind": "url",
+    "text": "https://github.com/ryoppippi/ccusage",
+    "edges": ["references:url_ccusage"]
+  },
+  {
+    "id": "turn_block:session_abc_014_002",
+    "turn": "turn:session_abc_015",
+    "kind": "tool_call",
+    "chunk_index": 0,
+    "text": "read_file({ path: 'src/ingest/model-pricing.ts' })",
+    "edges": ["used_tool:web_search"]
+  },
+  {
+    "id": "turn_block:session_abc_016_000",
+    "turn": "turn:session_abc_016",
+    "kind": "diagnostic_line",
+    "text": "src/ingest/model-pricing.ts:42 ..."
+  }
+]`
+    };
+
+    const providers = {
+      claude: {
+        title: "Claude Code",
+        current: [
+          "JSONL transcript entries with role, uuid, timestamp, and content array.",
+          "Human user turns generally contain text blocks; assistant turns contain text and tool_use blocks.",
+          "Tool results arrive as separate provider user-role messages whose content is tool_result-only; ax classifies those as message_kind=tool_result.",
+          "Current ingest joins text blocks into turn.text and stores content block count in agent_event metrics.",
+          "Tool calls/results are already extracted at high level."
+        ],
+        atoms: [
+          "text block spans inside content array",
+          "tool_result body sections and error lines",
+          "file paths and line refs inside tool output",
+          "XML-ish wrappers from agent instructions",
+          "code fences and quoted docs inside user/assistant text"
+        ],
+        example: `{
+  "type": "assistant",
+  "uuid": "…",
+  "timestamp": "2026-05-30T…",
+  "message": {
+    "role": "assistant",
+    "content": [
+      { "type": "text", "text": "I'll inspect that file." },
+      { "type": "tool_use", "name": "Read", "input": { "file_path": "src/ingest/model-pricing.ts" } }
+    ]
+  }
+}
+
+separate tool result turn:
+{
+  "type": "user",
+  "message": {
+    "role": "user",
+    "content": [
+      { "type": "tool_result", "tool_use_id": "…", "content": "src/ingest/model-pricing.ts:42\\n..." }
+    ]
+  }
+}`
+      },
+      codex: {
+        title: "Codex",
+        current: [
+          "JSONL entries with type=session_meta, turn_context, event_msg, response_item.",
+          "response_item payload can be message, function_call, or function_call_output.",
+          "message.content may be an array of content blocks; current ingest extracts textFromCodexContent.",
+          "function calls/results are already modeled separately."
+        ],
+        atoms: [
+          "response_item message content block spans",
+          "function_call name/arguments as symbol/JSON atoms",
+          "function_call_output sections, diagnostics, paths",
+          "turn_context model/cwd metadata",
+          "URLs/files mentioned in user instructions"
+        ],
+        example: `{
+  "type": "response_item",
+  "timestamp": "2026-05-30T…",
+  "payload": {
+    "type": "message",
+    "id": "item_…",
+    "message": {
+      "role": "user",
+      "content": [
+        { "type": "input_text", "text": "what did LiveTrace cost?" }
+      ]
+    }
+  }
+}`
+      },
+      pi: {
+        title: "Pi",
+        current: [
+          "JSONL message entries with role and content.",
+          "content can be string or array of typed blocks: text, input_text, output_text, toolCall.",
+          "Current ingest joins text-like blocks and records content block count.",
+          "ToolCall blocks become tool calls / synthetic skills."
+        ],
+        atoms: [
+          "typed text blocks from content array",
+          "toolCall name and argument JSON",
+          "toolResult content and error flags",
+          "provider/model metadata on assistant messages",
+          "URLs/files/code spans inside text blocks"
+        ],
+        example: `{
+  "id": "…",
+  "type": "message",
+  "message": {
+    "role": "assistant",
+    "content": [
+      { "type": "output_text", "text": "I found the pricing table..." },
+      { "type": "toolCall", "name": "read_file", "args": { "path": "src/…" } }
+    ]
+  }
+}`
+      },
+      opencode: {
+        title: "OpenCode",
+        current: [
+          "SQLite sessions/messages; observed schemas can also have message parts.",
+          "Basic schema has message.content as text.",
+          "Observed part rows can contain typed JSON data.",
+          "Current ingest creates one turn per message and uses message content as turn.text."
+        ],
+        atoms: [
+          "message.content sections and markdown atoms",
+          "part table typed records when available",
+          "tool JSON from part data",
+          "file/url/path mentions in text",
+          "diagnostic lines from command/tool output"
+        ],
+        example: `message row:
+{
+  "id": "msg_…",
+  "session_id": "ses_…",
+  "role": "user",
+  "content": "Open src/ingest/opencode.ts and check parser",
+  "created_at": "…"
+}
+
+part row, when present:
+{ "message_id": "msg_…", "type": "text", "data": { "text": "..." } }`
+      },
+      cursor: {
+        title: "Cursor",
+        current: [
+          "SQLite state DB from ItemTable/cursorDiskKV and composer data.",
+          "Conversation bubbles have role/type and text.",
+          "Bubble type maps to user or assistant when role is missing.",
+          "Current ingest creates one turn per bubble/message text."
+        ],
+        atoms: [
+          "composer bubble text spans",
+          "file mentions from IDE context",
+          "selection/range references if present in raw composer data",
+          "code fences and inline symbols",
+          "assistant-generated diagnostics or edit summaries"
+        ],
+        example: `{
+  "composerId": "…",
+  "bubble": {
+    "type": 1,
+    "role": "user",
+    "text": "why is src/dashboard/cost-query.ts slow?"
+  },
+  "metadata": {
+    "workspace": "/Users/necmttn/Projects/ax"
+  }
+}`
+      }
+    };
+
+    document.querySelectorAll(".legend button").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll(".legend button").forEach((b) => b.classList.remove("active"));
+        button.classList.add("active");
+        document.getElementById("explain").textContent = explanations[button.dataset.explain];
+      });
+    });
+
+    document.querySelectorAll(".block").forEach((block) => {
+      block.addEventListener("click", () => {
+        document.querySelectorAll(".block").forEach((b) => b.classList.remove("active"));
+        block.classList.add("active");
+      });
+    });
+
+    document.querySelectorAll(".parse-toggle button").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll(".parse-toggle button").forEach((b) => b.classList.remove("active"));
+        button.classList.add("active");
+        document.getElementById("parseView").textContent = parseViews[button.dataset.parse];
+      });
+    });
+
+    function renderProvider(key) {
+      const provider = providers[key];
+      document.getElementById("providerTitle").textContent = provider.title;
+      document.getElementById("providerCurrent").innerHTML = provider.current.map((item) => `<li>${item}</li>`).join("");
+      document.getElementById("providerAtoms").innerHTML = provider.atoms.map((item) => `<li>${item}</li>`).join("");
+      document.getElementById("providerExample").textContent = provider.example;
+    }
+
+    document.querySelectorAll(".provider-list button").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll(".provider-list button").forEach((b) => b.classList.remove("active"));
+        button.classList.add("active");
+        renderProvider(button.dataset.provider);
+      });
+    });
+
+    renderProvider("claude");
+  </script>
+</body>
+</html>

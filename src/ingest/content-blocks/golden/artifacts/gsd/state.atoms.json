@@ -1,0 +1,24 @@
+[
+  {
+    "kind": "frontmatter_field",
+    "normalized": "gsd_state_version"
+  },
+  {
+    "kind": "frontmatter_field",
+    "normalized": "status"
+  },
+  {
+    "kind": "file_ref",
+    "normalized": ".planning/quick/62-fix-backend-types/62-PLAN.md"
+  },
+  {
+    "kind": "checklist_item",
+    "value": "Finish verification report",
+    "checked": false
+  },
+  {
+    "kind": "checklist_item",
+    "value": "Capture failing typecheck",
+    "checked": true
+  }
+]

@@ -1,0 +1,32 @@
+[
+  {
+    "kind": "frontmatter_field",
+    "normalized": "phase"
+  },
+  {
+    "kind": "frontmatter_field",
+    "normalized": "files_modified"
+  },
+  {
+    "kind": "checklist_item",
+    "value": "Run `bun test src/services/auth.test.ts`",
+    "checked": false
+  },
+  {
+    "kind": "file_ref",
+    "normalized": "src/services/auth.ts"
+  },
+  {
+    "kind": "command_ref",
+    "normalized": "bun run typecheck"
+  },
+  {
+    "kind": "objective_block"
+  },
+  {
+    "kind": "task_node"
+  },
+  {
+    "kind": "success_criterion"
+  }
+]
