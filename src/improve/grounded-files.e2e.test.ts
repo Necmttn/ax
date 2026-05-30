@@ -66,7 +66,7 @@ const cleanupProposal = (sig: string) =>
             DELETE experiment WHERE proposal = proposal:e2e_${sig};
             DELETE guidance_proposal WHERE proposal = proposal:e2e_${sig};
             DELETE proposal:e2e_${sig};
-        `).pipe(Effect.orElse(() => Effect.void));
+        `).pipe(Effect.catch(() => Effect.void));
     });
 
 // ---------------------------------------------------------------------------

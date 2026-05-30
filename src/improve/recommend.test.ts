@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
-import { recommend, formatRecommendations, selectByIndices, parseIndexInput, type RecommendInput, type RecommendItem } from "./recommend.ts";
+import { recommend, formatRecommendations, selectByIndices, parseIndexInput, type RecommendItem } from "./recommend.ts";
 import { SurrealClient } from "../lib/db.ts";
 
 const layerWith = (rows: ReadonlyArray<unknown>) =>
