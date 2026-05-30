@@ -45,3 +45,6 @@ export const encodeJsonOrNull = (input: unknown): string | null => {
     const result = encodeJsonString(input);
     return Option.isSome(result) ? result.value : null;
 };
+
+export const encodeJson = (input: unknown): string =>
+    encodeJsonOrNull(input) ?? "null";

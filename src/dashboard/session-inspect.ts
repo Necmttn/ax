@@ -7,10 +7,11 @@
  */
 
 import { readFile } from "node:fs/promises";
-import { Effect } from "effect";
+import { Data, Effect } from "effect";
 import { dissectTurn, type TurnSpan } from "../ingest/turn-dissect.ts";
 import { SurrealClient } from "../lib/db.ts";
-import { locateTranscript } from "../lib/transcript-locator.ts";
+import { decodeJsonRecordOrNull, encodeJson } from "../lib/decode.ts";
+import { locateTranscript, type TranscriptNotFoundError } from "../lib/transcript-locator.ts";
 import type {
     HookFireDto,
     InspectSpanDto,
@@ -28,6 +29,12 @@ import { clampPagination, type PaginationConfig } from "../lib/shared/pagination
 import { toBareSessionId } from "../lib/shared/session-id.ts";
 
 const INSPECT_TURNS_PAGINATION: PaginationConfig = { defaultLimit: 2000, maxLimit: 2000 };
+
+export class SessionInspectReadError extends Data.TaggedError("SessionInspectReadError")<{
+    readonly path: string;
+    readonly message: string;
+    readonly cause: unknown;
+}> {}
 
 interface JsonlContentBlock {
     type: string;
@@ -61,7 +68,7 @@ function blockToText(block: JsonlContentBlock): string {
     }
     if (block.type === "tool_use") {
         const name = block.name ? ` name="${block.name.replace(/"/g, "")}"` : "";
-        const input = JSON.stringify(block.input ?? {});
+        const input = encodeJson(block.input ?? {});
         const clipped = input.length > 400 ? `${input.slice(0, 400)}...` : input;
         return `<tool_use${name}>${clipped}</tool_use>`;
     }
@@ -90,8 +97,8 @@ interface CanonicalTurn {
 }
 
 function parseClaudeLine(line: string): CanonicalTurn | null {
-    let entry: JsonlMessage;
-    try { entry = JSON.parse(line); } catch { return null; }
+    const entry = decodeJsonRecordOrNull(line) as JsonlMessage | null;
+    if (entry === null) return null;
     if (entry.type !== "user" && entry.type !== "assistant") return null;
     const content = entry.message?.content;
     const text = typeof content === "string"
@@ -121,8 +128,8 @@ interface CodexLine {
 }
 
 function parseCodexLine(line: string): CanonicalTurn | null {
-    let entry: CodexLine;
-    try { entry = JSON.parse(line); } catch { return null; }
+    const entry = decodeJsonRecordOrNull(line) as CodexLine | null;
+    if (entry === null) return null;
     const p = entry.payload;
     if (!p) return null;
     if (p.type === "message") {
@@ -144,7 +151,7 @@ function parseCodexLine(line: string): CanonicalTurn | null {
         };
     }
     if (p.type === "function_call_output") {
-        const out = typeof p.output === "string" ? p.output : JSON.stringify(p.output ?? {});
+        const out = typeof p.output === "string" ? p.output : encodeJson(p.output ?? {});
         return {
             role: "user",
             text: `<local-command-stdout>${out}</local-command-stdout>`,
@@ -277,7 +284,9 @@ function parseSpawnArgs(provider: "codex" | "claude", name: string, argsJson: un
     if (!SPAWN_TOOLS.has(name)) return null;
     let args: Record<string, unknown> = {};
     if (typeof argsJson === "string") {
-        try { args = JSON.parse(argsJson) as Record<string, unknown>; } catch { return null; }
+        const parsed = decodeJsonRecordOrNull(argsJson);
+        if (parsed === null) return null;
+        args = parsed;
     } else if (argsJson && typeof argsJson === "object") {
         args = argsJson as Record<string, unknown>;
     }
@@ -370,7 +379,7 @@ export interface FetchSessionInspectOptions {
 export const fetchSessionInspect = (
     sessionId: string,
     opts: FetchSessionInspectOptions = {},
-): Effect.Effect<SessionInspectPayload, Error, SurrealClient> =>
+): Effect.Effect<SessionInspectPayload, SessionInspectReadError | TranscriptNotFoundError, SurrealClient> =>
     Effect.gen(function* () {
         // Normalise inbound id at the seam so the rest of the function operates
         // on a bare id (also what we echo back as payload.session_id).
@@ -431,8 +440,8 @@ export const fetchSessionInspect = (
             for (const line of raw.split("\n")) {
                 if (!line.trim()) continue;
                 if (!line.includes("spawn_agent") && !line.includes("\"Task\"")) continue;
-                let entry: { timestamp?: string; payload?: { type?: string; name?: string; arguments?: string; call_id?: string }; message?: { content?: Array<{ type?: string; name?: string; input?: unknown; id?: string }> } };
-                try { entry = JSON.parse(line); } catch { continue; }
+                const entry = decodeJsonRecordOrNull(line) as { timestamp?: string; payload?: { type?: string; name?: string; arguments?: string; call_id?: string }; message?: { content?: Array<{ type?: string; name?: string; input?: unknown; id?: string }> } } | null;
+                if (entry === null) continue;
                 if (provider === "codex") {
                     const p = entry.payload;
                     if (!p || p.type !== "function_call") continue;
@@ -528,7 +537,12 @@ export const fetchSessionInspect = (
                 total_hook_fires: allHookFires.length,
             };
         },
-        catch: (err) => err instanceof Error ? err : new Error(String(err)),
+        catch: (err) =>
+            new SessionInspectReadError({
+                path: found.path,
+                message: err instanceof Error ? err.message : String(err),
+                cause: err,
+            }),
     });
         return payload;
     });

@@ -2,6 +2,7 @@
 import { Effect, Layer, Option, References } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
+import { decodeJsonRecordOrNull, encodeJson } from "../lib/decode.ts";
 import { listSessionsHere, listSessionsAround, listSessionsNear, type SessionRow } from "../dashboard/sessions-query.ts";
 import { findCommitWindow } from "../lib/git-window.ts";
 import { AxConfig } from "../lib/config.ts";
@@ -440,7 +441,7 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) => {
             ? yield* Effect.tryPromise({
                 try: () => initTuiProgress({ command: commandName, runId, stages: stageProgressList }),
                 catch: () => undefined,
-              }).pipe(Effect.catch(() => Effect.succeed(undefined)))
+              }).pipe(Effect.catch(() => Effect.void))
             : undefined;
         const progress: ProgressReporter = tuiHandle?.progress ?? createProgressReporter({
             command: commandName,
@@ -479,12 +480,10 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) => {
         }));
 
         const traceId = `ingest:${runId}`;
-        const program = Effect.gen(function* () {
-            yield* runPipeline(
-                wrappedStages as ReadonlyArray<StageDef<BaseStageStats, SurrealClient | AxConfig | ProcessService>>,
-                ctx,
-            );
-        }).pipe(
+        const program = runPipeline(
+            wrappedStages as ReadonlyArray<StageDef<BaseStageStats, SurrealClient | AxConfig | ProcessService>>,
+            ctx,
+        ).pipe(
             LiveTrace.withTrace({
                 traceId,
                 label: `ingest ${selectedStages.map((s) => s.meta.key).join(",")}`,
@@ -524,7 +523,7 @@ const cmdIngestHere = (args: string[]) => {
         const registry = yield* StageRegistry;
         const pwd = yield* resolvePwdRepository().pipe(
             Effect.catchTag("NotAGitRepoError", (err) =>
-                Effect.sync(() => {
+                Effect.promise(async () => {
                     process.stderr.write(
                         `axctl ingest here: not in a git repository (cwd=${err.cwd})\n`,
                     );
@@ -619,9 +618,7 @@ const cmdIngestInsights = (args: string[] = []) =>
                 { source: "claude", stage: "insights" },
             ],
         });
-        const program = Effect.gen(function* () {
-            yield* telemetryStage(db, runId, "claude", "insights", ingestClaudeInsights(), progress);
-        });
+        const program = telemetryStage(db, runId, "claude", "insights", ingestClaudeInsights(), progress);
         yield* program.pipe(
             Effect.tap(() => db.query(buildIngestRunFinishStatement({ runId, status: "ok" })).pipe(Effect.asVoid)),
             Effect.catch((error) =>
@@ -895,7 +892,7 @@ const cmdRecall = (opts: RecallCliOpts) =>
             scope,
         });
         if (opts.json) {
-            console.log(JSON.stringify(result, null, 2));
+            console.log(prettyPrint(result));
             return;
         }
 
@@ -2040,7 +2037,7 @@ const cmdImproveLint = (args: string[]) =>
         const lintOptions = roots.length > 0 ? { roots, staleDays } : { staleDays };
         const report = yield* lintFiles(lintOptions);
         if (json) {
-            console.log(JSON.stringify(report, null, 2));
+            console.log(prettyPrint(report));
         } else {
             for (const f of report.errors) {
                 console.log(`error  ${f.rule}: ${f.message} (${f.path})`);
@@ -2093,7 +2090,7 @@ const cmdImproveRecommend = (args: string[]) =>
         };
         const items = yield* recommend(recommendInput);
         if (json) {
-            console.log(JSON.stringify(items, null, 2));
+            console.log(prettyPrint(items));
             return;
         }
         const formatted = formatRecommendations(items);
@@ -2421,12 +2418,12 @@ const improveAcceptCommand = Command.make(
                 let retroSummaries: readonly string[] = [];
                 const baselineRaw = result.proposal.baseline;
                 if (typeof baselineRaw === "string" && baselineRaw.length > 0) {
-                    try {
-                        const parsed = JSON.parse(baselineRaw) as {
-                            tool?: string;
-                            sessionKeys?: unknown;
-                            frequency?: number;
-                        };
+                    const parsed = decodeJsonRecordOrNull(baselineRaw) as {
+                        tool?: string;
+                        sessionKeys?: unknown;
+                        frequency?: number;
+                    } | null;
+                    if (parsed !== null) {
                         if (Array.isArray(parsed.sessionKeys)) {
                             const tool = parsed.tool ?? "tool";
                             retroSummaries = parsed.sessionKeys
@@ -2434,8 +2431,6 @@ const improveAcceptCommand = Command.make(
                                 .slice(0, 5)
                                 .map((s) => `session ${s}: top tool ${tool} failed (cluster freq=${parsed.frequency ?? "?"})`);
                         }
-                    } catch {
-                        // ignore - baseline shape may evolve
                     }
                 }
                 console.log("");
@@ -2795,7 +2790,7 @@ const cmdSessionsHere = (args: string[]) =>
 
         const pwdResolution = yield* resolvePwdRepository().pipe(
             Effect.catchTag("NotAGitRepoError", (err) =>
-                Effect.sync(() => {
+                Effect.promise(async () => {
                     process.stderr.write(
                         `axctl sessions here: not in a git repository (cwd=${err.cwd})\n`,
                     );
@@ -2809,7 +2804,7 @@ const cmdSessionsHere = (args: string[]) =>
         const rows = yield* listSessionsHere({ repositoryKey, days });
 
         if (json) {
-            console.log(JSON.stringify(rows, null, 2));
+            console.log(prettyPrint(rows));
             return;
         }
         console.log(formatSessionsTable(rows));
@@ -2852,7 +2847,7 @@ const cmdSessionsAround = (args: string[]) =>
         const rows = yield* listSessionsAround({ date, days, project });
 
         if (json) {
-            console.log(JSON.stringify(rows, null, 2));
+            console.log(prettyPrint(rows));
             return;
         }
         console.log(formatSessionsTable(rows));
@@ -2872,7 +2867,7 @@ const cmdSessionsNear = (args: string[]) =>
         // Resolve repository via pwd (near is always pwd-scoped)
         const pwdResolution = yield* resolvePwdRepository().pipe(
             Effect.catchTag("NotAGitRepoError", (err) =>
-                Effect.sync(() => {
+                Effect.promise(async () => {
                     process.stderr.write(
                         `axctl sessions near: not in a git repository (cwd=${err.cwd})\n`,
                     );
@@ -2917,7 +2912,7 @@ const cmdSessionsNear = (args: string[]) =>
         const rows = yield* listSessionsNear({ from, to, repositoryKey });
 
         if (json) {
-            console.log(JSON.stringify(rows, null, 2));
+            console.log(prettyPrint(rows));
             return;
         }
         console.log(formatSessionsTable(rows));
@@ -3624,7 +3619,7 @@ const retroCommand = Command.make("retro").pipe(
 const serveCommand = Command.make(
     "serve",
     { port: Flag.integer("port").pipe(Flag.withDefault(1738)) },
-    ({ port }) => Effect.sync(() => serveDashboard([`--port=${port}`])),
+    ({ port }) => Effect.promise(() => serveDashboard([`--port=${port}`])),
 ).pipe(Command.withDescription("Serve the live web dashboard locally"));
 
 const reportCommand = Command.make(
@@ -4068,7 +4063,7 @@ const hookFileContextCommand = Command.make(
                 // something to inject; emit nothing otherwise so Claude Code
                 // doesn't show an empty additionalContext block to the user.
                 if (response.inject && response.context.length > 0) {
-                    console.log(JSON.stringify({
+                    console.log(encodeJson({
                         hookSpecificOutput: {
                             hookEventName: "PreToolUse",
                             additionalContext: response.context,

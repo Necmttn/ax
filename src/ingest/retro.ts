@@ -28,6 +28,7 @@
 
 import { Effect } from "effect";
 import { SurrealClient } from "../lib/db.ts";
+import { encodeJson } from "../lib/decode.ts";
 import type { DbError } from "../lib/errors.ts";
 import { recordRef, surrealDate, surrealJsonOption, surrealObject, surrealOptionString, surrealString } from "../lib/shared/surql.ts";
 import { recordKeyPart, safeKeyPart } from "../lib/shared/derive-keys.ts";
@@ -168,7 +169,7 @@ export const retroFromSession = (
             sessionId: sessionKey,
             source: "heuristic",
             payload,
-            raw: JSON.stringify({ stat }),
+            raw: encodeJson({ stat }),
             ...(repositoryKey ? { repositoryKey } : {}),
         };
     });

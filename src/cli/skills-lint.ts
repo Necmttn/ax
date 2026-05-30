@@ -12,8 +12,10 @@ import { readdir, readFile, unlink } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
 import { RecordId, SurrealClient, type SurrealClientShape } from "../lib/db.ts";
 import type { DbError } from "../lib/errors.ts";
+import { prettyPrint } from "../lib/json.ts";
 import { recordLiteral } from "../lib/ids.ts";
 import { validateRoleName, validateSkillName } from "../lib/role-name.ts";
+import { surrealString } from "../lib/shared/surql.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -258,7 +260,7 @@ const applyBrief = (
         let edgesWritten = 0;
         const rationaleSql =
             rationale !== undefined
-                ? `, rationale = ${JSON.stringify(rationale)}`
+                ? `, rationale = ${surrealString(rationale)}`
                 : "";
         for (const roleName of allRoles) {
             const roleId = new RecordId("role", roleName);
@@ -368,7 +370,7 @@ export const cmdSkillsLint = (opts: SkillsLintOptions): Effect.Effect<void, DbEr
         };
 
         if (opts.json) {
-            console.log(JSON.stringify(report, null, 2));
+            console.log(prettyPrint(report));
             return;
         }
 

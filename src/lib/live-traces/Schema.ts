@@ -19,16 +19,14 @@ export const TraceScopeSchema = Schema.Struct({
 // Events
 // ============================================================================
 
-export const TraceStartSchema = Schema.Struct({
-    _tag: Schema.Literal("TraceStart"),
+export const TraceStartSchema = Schema.TaggedStruct("TraceStart", {
     traceId: Schema.String,
     label: Schema.String,
     scope: TraceScopeSchema,
     timestamp: Schema.Number,
 });
 
-export const SpanStartSchema = Schema.Struct({
-    _tag: Schema.Literal("SpanStart"),
+export const SpanStartSchema = Schema.TaggedStruct("SpanStart", {
     traceId: Schema.String,
     spanId: Schema.String,
     parentSpanId: Schema.optional(Schema.String),
@@ -37,8 +35,7 @@ export const SpanStartSchema = Schema.Struct({
     timestamp: Schema.Number,
 });
 
-export const SpanEndSchema = Schema.Struct({
-    _tag: Schema.Literal("SpanEnd"),
+export const SpanEndSchema = Schema.TaggedStruct("SpanEnd", {
     traceId: Schema.String,
     spanId: Schema.String,
     status: Schema.Union([Schema.Literal("ok"), Schema.Literal("error")]),
@@ -46,8 +43,7 @@ export const SpanEndSchema = Schema.Struct({
     timestamp: Schema.Number,
 });
 
-export const SpanEventSchema = Schema.Struct({
-    _tag: Schema.Literal("SpanEvent"),
+export const SpanEventSchema = Schema.TaggedStruct("SpanEvent", {
     traceId: Schema.String,
     spanId: Schema.String,
     name: Schema.String,
@@ -56,8 +52,7 @@ export const SpanEventSchema = Schema.Struct({
     timestamp: Schema.Number,
 });
 
-export const TraceEndSchema = Schema.Struct({
-    _tag: Schema.Literal("TraceEnd"),
+export const TraceEndSchema = Schema.TaggedStruct("TraceEnd", {
     traceId: Schema.String,
     status: Schema.Union([Schema.Literal("completed"), Schema.Literal("failed")]),
     durationMs: Schema.Number,

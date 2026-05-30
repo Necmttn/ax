@@ -19,7 +19,7 @@ function fakeClient(): { client: SurrealClientShape; statements: string[] } {
             statements.push(sql);
             return Effect.succeed([] as unknown as T);
         },
-        upsert: () => Effect.succeed(undefined),
+        upsert: () => Effect.void,
         relate: () => Effect.void,
         putFile: () => Effect.void,
         getFile: () => Effect.succeed(""),
@@ -177,7 +177,7 @@ describe("recordHookFire", () => {
         const failing: SurrealClientShape = {
             query: () =>
                 Effect.fail(new DbError({ operation: "query", message: "db is down" })),
-            upsert: () => Effect.succeed(undefined),
+            upsert: () => Effect.void,
             relate: () => Effect.void,
             putFile: () => Effect.void,
             getFile: () => Effect.succeed(""),

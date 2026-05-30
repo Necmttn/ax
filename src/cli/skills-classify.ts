@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { mkdir, writeFile, access } from "node:fs/promises";
 import { SurrealClient } from "../lib/db.ts";
 import type { DbError } from "../lib/errors.ts";
+import { prettyPrint } from "../lib/json.ts";
 import { skillNameToSlug, renderClassifyBrief } from "./skills-classify-template.ts";
 import { validateSkillName } from "../lib/role-name.ts";
 
@@ -61,6 +62,14 @@ ORDER BY invocations DESC;
 `.trim();
 };
 
+const safeSkillName = (name: string): string | null => {
+    try {
+        return validateSkillName(name);
+    } catch {
+        return null;
+    }
+};
+
 export interface ClassifyOptions {
     readonly names: readonly string[];
     readonly outDir: string;
@@ -75,9 +84,7 @@ export const cmdSkillsClassify = (opts: ClassifyOptions): Effect.Effect<void, Db
         // Validate any explicitly-provided skill names at the boundary.
         if (opts.names.length > 0) {
             for (const name of opts.names) {
-                try {
-                    validateSkillName(name);
-                } catch {
+                if (safeSkillName(name) === null) {
                     console.error(
                         `axctl skills classify: invalid skill name "${name}" (must be alphanumeric, _ or -, optionally plugin:namespaced)`,
                     );
@@ -107,7 +114,7 @@ export const cmdSkillsClassify = (opts: ClassifyOptions): Effect.Effect<void, Db
                 sessions: r.sessions,
                 path: join(opts.outDir, `classify-${skillNameToSlug(r.name)}.md`),
             }));
-            console.log(JSON.stringify(out, null, 2));
+            console.log(prettyPrint(out));
             return;
         }
 

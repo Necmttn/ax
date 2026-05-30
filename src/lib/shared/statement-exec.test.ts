@@ -11,9 +11,9 @@ const recordingClient = (): { calls: string[]; layer: SurrealClientShape } => {
             calls.push(sql);
             return Effect.succeed([] as unknown as T);
         },
-        upsert: () => Effect.succeed(undefined),
-        relate: () => Effect.succeed(undefined),
-        putFile: () => Effect.succeed(undefined),
+        upsert: () => Effect.void,
+        relate: () => Effect.void,
+        putFile: () => Effect.void,
         getFile: () => Effect.succeed(""),
         raw: {} as never,
     } satisfies SurrealClientShape;

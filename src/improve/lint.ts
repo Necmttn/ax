@@ -62,6 +62,23 @@ export const defaultRoots = (): string[] => [
     join(homedir(), ".claude"),
 ];
 
+const deleteFileIfPresent = (path: string): boolean => {
+    try {
+        unlinkSync(path);
+        return true;
+    } catch {
+        return false;
+    }
+};
+
+const statMtimeMsOrNull = (path: string): number | null => {
+    try {
+        return statSync(path).mtimeMs;
+    } catch {
+        return null;
+    }
+};
+
 export const discoverFiles = (opts: DiscoverOptions = {}): LintTarget[] => {
     const roots = opts.roots ?? defaultRoots();
     const out: LintTarget[] = [];
@@ -336,16 +353,16 @@ export const lintFiles = (
                 for (const p of pending) {
                     let taskDeleted: string | null = null;
                     if (p.taskPath) {
-                        try {
-                            unlinkSync(p.taskPath);
-                            taskDeleted = p.taskPath;
-                        } catch {
+                        const deleted = deleteFileIfPresent(p.taskPath);
+                        if (!deleted) {
                             warnings.push({
                                 rule: "task_cleanup_failed",
                                 severity: "warning",
                                 path: p.taskPath,
                                 message: `failed to delete task file ${p.taskPath} after DB update`,
                             });
+                        } else {
+                            taskDeleted = p.taskPath;
                         }
                     }
                     reconciled.push({
@@ -384,9 +401,8 @@ export const lintFiles = (
             // JS-side mtime cross-check: the task file may have been touched
             // (e.g. by the agent) after the experiment was created, so we still
             // verify the file is actually old before emitting the warning.
-            let mtime: number;
-            try { mtime = statSync(row.task_path).mtimeMs; }
-            catch { continue; }
+            const mtime = statMtimeMsOrNull(row.task_path);
+            if (mtime === null) continue;
             const staleCutoffMs = Date.now() - staleDays * 86_400_000;
             if (mtime < staleCutoffMs) {
                 warnings.push({

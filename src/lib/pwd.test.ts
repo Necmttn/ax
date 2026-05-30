@@ -77,9 +77,9 @@ function makeMockDb(existsResponse: boolean) {
             const rows = existsResponse ? [{ id: "repository:somekey" }] : [];
             return Effect.succeed([[...rows]] as unknown as T);
         },
-        upsert: (_id: RecordId, _content: Record<string, unknown>) => Effect.succeed(undefined),
-        relate: () => Effect.succeed(undefined),
-        putFile: () => Effect.succeed(undefined),
+        upsert: (_id: RecordId, _content: Record<string, unknown>) => Effect.void,
+        relate: () => Effect.void,
+        putFile: () => Effect.void,
         getFile: () => Effect.succeed(""),
         raw: undefined as unknown as import("surrealdb").Surreal,
     };

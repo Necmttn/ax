@@ -5,6 +5,14 @@ import type { DbError } from "../lib/errors.ts";
 import { recordLiteral } from "../lib/ids.ts";
 import { validateRoleName } from "../lib/role-name.ts";
 
+const safeRoleName = (name: string): string | null => {
+    try {
+        return validateRoleName(name);
+    } catch {
+        return null;
+    }
+};
+
 export const relateSkillRoles = (
     db: SurrealClientShape,
     args: { skillId: RecordId; roles: ReadonlyArray<string> },
@@ -14,10 +22,8 @@ export const relateSkillRoles = (
         const cleaned: string[] = [];
         let rolesSkipped = 0;
         for (const r of args.roles) {
-            let norm: string;
-            try {
-                norm = validateRoleName(r);
-            } catch {
+            const norm = safeRoleName(r);
+            if (norm === null) {
                 // Invalid role name (e.g. contains backtick, semicolon, or
                 // doesn't match the allowed pattern). Skip rather than crash
                 // the whole stage - the caller accumulates the skip count.
