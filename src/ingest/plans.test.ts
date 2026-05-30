@@ -2,6 +2,9 @@ import { describe, expect, test } from "bun:test";
 import {
     normalizeClaudeTodoWrite,
     normalizeCodexUpdatePlan,
+    normalizeProviderPlanSnapshot,
+    providerPlanSignalAvailability,
+    toPlanSnapshotWrite,
 } from "./plans.ts";
 
 describe("plan normalization", () => {
@@ -18,6 +21,7 @@ describe("plan normalization", () => {
         });
 
         expect(snapshot.source).toBe("claude_todowrite");
+        expect(snapshot.provider).toBe("claude");
         expect(snapshot.items).toEqual([
             { externalId: null, seq: 1, content: "Inspect schema", activeForm: "Inspecting schema", status: "completed" },
             { externalId: null, seq: 2, content: "Add tests", activeForm: "Adding tests", status: "in_progress" },
@@ -38,6 +42,7 @@ describe("plan normalization", () => {
         });
 
         expect(snapshot.source).toBe("codex_update_plan");
+        expect(snapshot.provider).toBe("codex");
         expect(snapshot.explanation).toBe("Following the plan gate.");
         expect(snapshot.items[1]).toEqual({
             externalId: null,
@@ -78,6 +83,74 @@ describe("plan normalization", () => {
                 status: "in_progress",
             },
         ]);
+    });
+
+    test("provider-neutral detector dispatches Claude and Codex plan tools", () => {
+        expect(
+            normalizeProviderPlanSnapshot({
+                provider: "claude",
+                toolName: "TodoWrite",
+                sessionId: "s1",
+                ts: "2026-05-09T10:00:00.000Z",
+                input: { todos: [{ content: "Use shared contract", status: "in_progress" }] },
+            }),
+        ).toMatchObject({
+            provider: "claude",
+            source: "claude_todowrite",
+            items: [{ content: "Use shared contract", status: "in_progress" }],
+        });
+
+        expect(
+            normalizeProviderPlanSnapshot({
+                provider: "codex",
+                toolName: "update_plan",
+                sessionId: "s1",
+                ts: "2026-05-09T10:00:00.000Z",
+                input: { plan: [{ step: "Use shared contract", status: "completed" }] },
+            }),
+        ).toMatchObject({
+            provider: "codex",
+            source: "codex_update_plan",
+            items: [{ content: "Use shared contract", status: "completed" }],
+        });
+    });
+
+    test("does not invent plan snapshots for unavailable providers", () => {
+        for (const provider of ["pi", "opencode", "cursor"] as const) {
+            expect(providerPlanSignalAvailability[provider].status).toBe("unavailable");
+            expect(providerPlanSignalAvailability[provider].planSources).toEqual([]);
+            expect(
+                normalizeProviderPlanSnapshot({
+                    provider,
+                    toolName: "TodoWrite",
+                    sessionId: "s1",
+                    ts: "2026-05-09T10:00:00.000Z",
+                    input: { todos: [{ content: "looks plan-like", status: "completed" }] },
+                }),
+            ).toBeNull();
+        }
+    });
+
+    test("builds provider-scoped plan snapshot writes from normalized plans", () => {
+        const normalized = normalizeCodexUpdatePlan({
+            sessionId: "codex-plan-session",
+            ts: "2026-05-09T10:00:00.000Z",
+            input: {
+                plan: [{ step: "Write once", status: "in_progress" }],
+            },
+        });
+
+        const write = toPlanSnapshotWrite({
+            snapshot: normalized,
+            snapshotSeq: 1,
+            createdAt: normalized.ts,
+            toolCallKey: "codex-plan-session__tool__call_plan",
+        });
+
+        expect(write.planKey).toMatch(/^codex__codex_plan_session__codex_update_plan__/);
+        expect(write.snapshotKey).toContain("__snapshot_000001__");
+        expect(write.items[0]?.key).toMatch(/__item_001$/);
+        expect(write.status).toBe("in_progress");
     });
 
     test("handles malformed unknown payloads without throwing", () => {

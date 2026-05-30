@@ -9,7 +9,9 @@ import type { DbError } from "../lib/errors.ts";
 import { executeStatements } from "../lib/shared/statement-exec.ts";
 import { recordRef, surrealDate, surrealString } from "../lib/shared/surql.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
+import { providerDelegationSignalAvailability } from "./delegation.ts";
 import { agentEventRecordKey, buildAgentEventStatements, buildAgentProviderStatements, type AgentEventWrite } from "./provider-events.ts";
+import { providerPlanSignalAvailability } from "./plans.ts";
 import { identityPart, turnRecordKey } from "./record-keys.ts";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
@@ -536,6 +538,8 @@ const buildCursorBatchStatements = (extract: CursorExtract, sourcePath: string):
                 sqlite: true,
                 transcripts: true,
                 providerGraph: true,
+                planSignals: providerPlanSignalAvailability.cursor,
+                delegationSignals: providerDelegationSignalAvailability.cursor,
             },
         },
     ]),
