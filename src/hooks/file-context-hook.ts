@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import type { DbError } from "../lib/errors.ts";
 import { SurrealClient } from "../lib/db.ts";
+import { decodeJsonRecordOrNull } from "../lib/decode.ts";
 import {
     buildFileContextHookEvidence,
     type FileContextPack,
@@ -183,13 +184,8 @@ function adaptClaudePayload(payload: Record<string, unknown>): FileContextHookFl
 }
 
 export function parseFileContextHookStdin(text: string): FileContextHookInput {
-    let payload: Record<string, unknown> = {};
-    try {
-        const parsed = JSON.parse(text);
-        if (parsed && typeof parsed === "object") payload = parsed as Record<string, unknown>;
-    } catch {
-        return parseFileContextHookFlags({});
-    }
+    const payload = decodeJsonRecordOrNull(text);
+    if (!payload) return parseFileContextHookFlags({});
 
     if (typeof payload.hook_event_name === "string") {
         return parseFileContextHookFlags(adaptClaudePayload(payload));

@@ -7,6 +7,7 @@ import {
     repositoryOverviewSql,
     schemaCoverageSql,
     sessionEvidenceSql,
+    fileEvidenceSql,
     feedbackLoopsSql,
     userLanguageSql,
     verificationGapsSql,
@@ -130,6 +131,24 @@ describe("insights query builders", () => {
         expect(sql).toContain("ORDER BY last_seen DESC");
         expect(sql).toContain("LIMIT 9");
         expectNoStaleFields(sql);
+    });
+
+    test("fileEvidenceSql summarizes provider-neutral edit/read/search relations", () => {
+        const sql = fileEvidenceSql(4);
+
+        expect(sql).toContain("RETURN [");
+        expect(sql).toContain('relation: "edited"');
+        expect(sql).toContain("FROM edited");
+        expect(sql).toContain("session.source AS source");
+        expect(sql).toContain('relation: "read_file"');
+        expect(sql).toContain("FROM read_file");
+        expect(sql).toContain("in.session.source AS source");
+        expect(sql).toContain('relation: "searched_file"');
+        expect(sql).toContain("FROM searched_file");
+        expect(sql).toContain("GROUP BY source, tool, evidence");
+        expect(sql).toContain("LIMIT 4");
+        expect(sql).not.toContain("raw_kind");
+        expect(sql).not.toContain("identity_kind");
     });
 
     test("schemaCoverageSql returns scalar counts for active and staged tables", () => {

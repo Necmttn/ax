@@ -6,6 +6,7 @@ export const INSIGHT_VIEWS = [
     "friction",
     "tools",
     "sessions",
+    "file-evidence",
     "feedback-loops",
     "verification-gaps",
     "user-language",
@@ -235,6 +236,60 @@ ORDER BY last_seen DESC
 LIMIT ${safeLimit};`.trim();
 }
 
+export function fileEvidenceSql(limit: number): string {
+    const safeLimit = checkedLimit(limit);
+    return `
+RETURN [
+    {
+        relation: "edited",
+        rows: (
+            SELECT
+                "edited" AS relation,
+                session.source AS source,
+                tool,
+                count() AS edge_count,
+                time::max(ts) AS last_seen
+            FROM edited
+            GROUP BY source, tool
+            ORDER BY edge_count DESC, last_seen DESC
+            LIMIT ${safeLimit}
+        )
+    },
+    {
+        relation: "read_file",
+        rows: (
+            SELECT
+                "read_file" AS relation,
+                in.session.source AS source,
+                in.name AS tool,
+                evidence,
+                count() AS edge_count,
+                time::max(ts) AS last_seen
+            FROM read_file
+            GROUP BY source, tool, evidence
+            ORDER BY edge_count DESC, last_seen DESC
+            LIMIT ${safeLimit}
+        )
+    },
+    {
+        relation: "searched_file",
+        rows: (
+            SELECT
+                "searched_file" AS relation,
+                in.session.source AS source,
+                in.name AS tool,
+                evidence,
+                count() AS edge_count,
+                time::max(ts) AS last_seen
+            FROM searched_file
+            GROUP BY source, tool, evidence
+            ORDER BY edge_count DESC, last_seen DESC
+            LIMIT ${safeLimit}
+        )
+    }
+];`.trim();
+}
+
 export function feedbackLoopsSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
     return `
@@ -460,6 +515,8 @@ export function insightSqlForView(view: InsightView, limit: number): string {
             return toolFailuresSql(limit);
         case "sessions":
             return sessionEvidenceSql(limit);
+        case "file-evidence":
+            return fileEvidenceSql(limit);
         case "feedback-loops":
             return feedbackLoopsSql(limit);
         case "verification-gaps":
