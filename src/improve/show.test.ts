@@ -25,7 +25,7 @@ describe("showExperiment", () => {
                 .pipe(Effect.provide(layerWith(
                     [{ dedupe_sig: "e7f3", title: "T", form: "guidance", hypothesis: "h",
                         status: "accepted", confidence: "high", frequency: 3,
-                        updated_at: "2026-05-20T00:00:00Z" }],
+                        updated_at: "2026-05-20T00:00:00Z", hook_payload: null, automation_payload: null }],
                     [{ id: "experiment:abc", status: "scaffolded",
                         artifact_path: "/x/CLAUDE.md", task_path: null, locked_verdict: null }],
                     [{ kind: "early", observed_at: "2026-05-25T00:00:00Z",
@@ -43,6 +43,7 @@ describe("showExperiment", () => {
                 shortId: "e7f3", title: "T", form: "guidance", hypothesis: "h",
                 status: "accepted", confidence: "high", frequency: 3,
                 updatedAt: "2026-05-20T00:00:00Z",
+                safety: null,
             },
             experiment: {
                 id: "experiment:abc", status: "scaffolded",
@@ -53,5 +54,45 @@ describe("showExperiment", () => {
         expect(out).toContain("e7f3");
         expect(out).toContain("scaffolded");
         expect(out).toContain("CLAUDE.md");
+    });
+
+    test("formatShow renders missing safety gates", () => {
+        const out = formatShow({
+            proposal: {
+                shortId: "hook_sig", title: "Hook", form: "hook", hypothesis: "h",
+                status: "open", confidence: "medium", frequency: 1,
+                updatedAt: "2026-05-20T00:00:00Z",
+                safety: {
+                    recoveryPath: null,
+                    smokeTestCommand: null,
+                    disableCommand: null,
+                    failureMode: null,
+                },
+            },
+            experiment: null,
+            checkpoints: [],
+        });
+        expect(out).toContain("Safety gates missing: Recovery Path, smoke test, disable switch, failure mode");
+    });
+
+    test("formatShow renders complete safety contract", () => {
+        const out = formatShow({
+            proposal: {
+                shortId: "auto_sig", title: "Automation", form: "automation", hypothesis: "h",
+                status: "open", confidence: "medium", frequency: 1,
+                updatedAt: "2026-05-20T00:00:00Z",
+                safety: {
+                    recoveryPath: "Unload the LaunchAgent",
+                    smokeTestCommand: "launchctl print gui/$UID/com.ax.weekly",
+                    disableCommand: "launchctl unload ~/Library/LaunchAgents/com.ax.weekly.plist",
+                    failureMode: "fail_open",
+                },
+            },
+            experiment: null,
+            checkpoints: [],
+        });
+        expect(out).toContain("automation proposals remain candidate-only until their accept/scaffold adapter is wired");
+        expect(out).toContain("Recovery Path: Unload the LaunchAgent");
+        expect(out).toContain("Failure Mode: fail_open");
     });
 });

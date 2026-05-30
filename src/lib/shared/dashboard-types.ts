@@ -833,6 +833,10 @@ export interface HookProposalPayload {
     readonly event_name: string;
     readonly target_tool: string | null;
     readonly hook_command: string;
+    readonly recovery_path: string | null;
+    readonly smoke_test_command: string | null;
+    readonly disable_command: string | null;
+    readonly failure_mode: string | null;
 }
 
 export interface GuidanceProposalPayload {
@@ -845,6 +849,10 @@ export interface AutomationProposalPayload {
     readonly trigger_signal: string;
     readonly schedule: string | null;
     readonly action: string;
+    readonly recovery_path: string | null;
+    readonly smoke_test_command: string | null;
+    readonly disable_command: string | null;
+    readonly failure_mode: string | null;
 }
 
 export interface CheckpointSnapshotDto {

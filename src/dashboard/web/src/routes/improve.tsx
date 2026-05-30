@@ -348,5 +348,58 @@ function PayloadView({ proposal }: { proposal: ProposalDto }) {
             </section>
         );
     }
+    if (proposal.form === "hook" && proposal.hook_payload) {
+        return (
+            <section className="panel" style={{ marginTop: 12 }}>
+                <header><h4 style={{ margin: 0 }}>Hook payload</h4></header>
+                <dl className="kv">
+                    <dt>Event</dt><dd>{proposal.hook_payload.event_name}</dd>
+                    <dt>Tool</dt><dd>{proposal.hook_payload.target_tool ?? "-"}</dd>
+                    <dt>Command</dt><dd><code>{proposal.hook_payload.hook_command}</code></dd>
+                    <SafetyFields payload={proposal.hook_payload} />
+                </dl>
+            </section>
+        );
+    }
+    if (proposal.form === "automation" && proposal.automation_payload) {
+        return (
+            <section className="panel" style={{ marginTop: 12 }}>
+                <header><h4 style={{ margin: 0 }}>Automation payload</h4></header>
+                <dl className="kv">
+                    <dt>Trigger</dt><dd>{proposal.automation_payload.trigger_signal}</dd>
+                    <dt>Schedule</dt><dd>{proposal.automation_payload.schedule ?? "-"}</dd>
+                    <dt>Action</dt><dd><code>{proposal.automation_payload.action}</code></dd>
+                    <SafetyFields payload={proposal.automation_payload} />
+                </dl>
+            </section>
+        );
+    }
     return null;
+}
+
+function SafetyFields({
+    payload,
+}: {
+    payload: {
+        readonly recovery_path: string | null;
+        readonly smoke_test_command: string | null;
+        readonly disable_command: string | null;
+        readonly failure_mode: string | null;
+    };
+}) {
+    const missing = [
+        payload.recovery_path ? null : "Recovery Path",
+        payload.smoke_test_command ? null : "smoke test",
+        payload.disable_command ? null : "disable switch",
+        payload.failure_mode === "fail_open" || payload.failure_mode === "fail_closed" ? null : "failure mode",
+    ].filter((item): item is string => item !== null);
+    return (
+        <>
+            <dt>Safety</dt><dd>{missing.length > 0 ? `missing: ${missing.join(", ")}` : "complete"}</dd>
+            <dt>Recovery</dt><dd>{payload.recovery_path ?? "-"}</dd>
+            <dt>Smoke test</dt><dd>{payload.smoke_test_command ?? "-"}</dd>
+            <dt>Disable</dt><dd>{payload.disable_command ?? "-"}</dd>
+            <dt>Failure mode</dt><dd>{payload.failure_mode ?? "-"}</dd>
+        </>
+    );
 }
