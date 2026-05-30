@@ -135,7 +135,6 @@ const defaultTaskDir = (): string =>
  * Map a full proposal row + experimentId to a TaskInput for renderTaskFile.
  */
 const buildTaskInput = (row: FullProposalRow, experimentId: string): TaskInput => {
-    const form = row.form as TaskInput["form"];
     const shortId = row.dedupe_sig;
     if (row.form === "guidance") {
         return {
@@ -287,8 +286,8 @@ export const acceptProposal = (
                     hypothesis: row.hypothesis,
                     triggerPattern: payload.trigger_pattern == null ? null : String(payload.trigger_pattern),
                     proposedBehavior: String(payload.proposed_behavior ?? ""),
-                    baseline: typeof (row as Record<string, unknown>).baseline === "string"
-                        ? String((row as Record<string, unknown>).baseline)
+                    baseline: typeof (row as unknown as Record<string, unknown>).baseline === "string"
+                        ? String((row as unknown as Record<string, unknown>).baseline)
                         : null,
                 },
             };
