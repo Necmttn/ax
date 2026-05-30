@@ -25,13 +25,26 @@
         "@types/react": "^19.2.0",
         "@types/react-dom": "^19.2.0",
         "@vitejs/plugin-react": "^6",
+        "bun-types": "1.3.13",
         "bun2nix": "^2.1.0",
         "typescript": "^5.5.0",
         "vite": "^8",
       },
     },
+    "packages/ax-classifier-direction-event": {
+      "name": "@ax-classifier/direction-event",
+      "version": "0.1.0",
+    },
+    "packages/ax-classifier-verification-event": {
+      "name": "@ax-classifier/verification-event",
+      "version": "0.1.0",
+    },
   },
   "packages": {
+    "@ax-classifier/direction-event": ["@ax-classifier/direction-event@workspace:packages/ax-classifier-direction-event"],
+
+    "@ax-classifier/verification-event": ["@ax-classifier/verification-event@workspace:packages/ax-classifier-verification-event"],
+
     "@babel/code-frame": ["@babel/code-frame@7.29.0", "", { "dependencies": { "@babel/helper-validator-identifier": "^7.28.5", "js-tokens": "^4.0.0", "picocolors": "^1.1.1" } }, "sha512-9NhCeYjq9+3uxgdtp20LSiJXJvN0FeCtNGpJxuMFZ1Kv3cWUNb6DOhJwUvcVCzKGR66cw4njwM6hrJLqgOwbcw=="],
 
     "@babel/compat-data": ["@babel/compat-data@7.29.3", "", {}, "sha512-LIVqM46zQWZhj17qA8wb4nW/ixr2y1Nw+r1etiAWgRM6U1IqP+LNhL1yg440jYZR72jCWcWbLWzIosH+uP1fqg=="],

@@ -1,0 +1,14 @@
+{
+  "schema": "ax.classifier.v1",
+  "key": "direction-event",
+  "version": "0.1.0",
+  "package": "@ax-classifier/direction-event",
+  "entrypoint": "./src/index.ts",
+  "kind": "heuristic",
+  "input": "event_window",
+  "description": "Identifies user instructions that should steer agent workflow or output choices.",
+  "labels": ["direction"],
+  "targets": ["tooling_preference", "review_request", "dev_environment", "output_expectation"],
+  "fixtures": ["./eval-fixtures/direction-event.json"],
+  "assets": []
+}

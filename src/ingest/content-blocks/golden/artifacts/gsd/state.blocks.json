@@ -1,0 +1,18 @@
+[
+  {
+    "kind": "frontmatter",
+    "heading": "frontmatter"
+  },
+  {
+    "kind": "section",
+    "heading": "Project State"
+  },
+  {
+    "kind": "section",
+    "heading": "Current Position"
+  },
+  {
+    "kind": "section",
+    "heading": "Pending Todos"
+  }
+]

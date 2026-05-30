@@ -26,6 +26,6 @@
       }
     ]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts", "packages/**/*.ts"],
   "exclude": ["src/dashboard/web/**"]
 }

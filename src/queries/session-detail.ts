@@ -18,6 +18,7 @@ import type {
     SessionAgentDelegation,
     SessionLink,
     SessionOverview,
+    SessionTokenUsageDetail,
     SessionToolCall,
     SessionTopSkill,
 } from "../lib/shared/dashboard-types.ts";
@@ -97,6 +98,20 @@ WHERE session = $sessionId AND name = "Agent"
 ORDER BY ts ASC
 LIMIT 50;`;
 
+export const SESSION_TOKEN_USAGE_SQL = `
+SELECT
+    model,
+    prompt_tokens,
+    completion_tokens,
+    cache_creation_input_tokens,
+    cache_read_input_tokens,
+    estimated_tokens,
+    estimated_cost_usd,
+    pricing_source
+FROM session_token_usage
+WHERE session = $sessionId
+LIMIT 1;`;
+
 /**
  * Provider-neutral file evidence. Edit evidence is turn-scoped; read/search
  * evidence is tool-call-scoped. All three relation tables point at the shared
@@ -165,6 +180,13 @@ const truncate = (s: string, n: number): string =>
 const numericField = (row: Record<string, unknown>, key: string): number => {
     const v = Number(row[key] ?? 0);
     return Number.isFinite(v) ? v : 0;
+};
+
+const nullableNumberField = (row: Record<string, unknown>, key: string): number | null => {
+    const raw = row[key];
+    if (raw === null || raw === undefined) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
 };
 
 function classifyAgentDescription(
@@ -319,6 +341,28 @@ export const sessionAgentDelegationsQuery = defineQuery<
             prompt_excerpt: prompt,
             output_excerpt: outputRaw ? truncate(outputRaw, 280) : null,
             phase: classifyAgentDescription(description ?? subagent_type),
+        };
+    },
+});
+
+export const sessionTokenUsageQuery = defineSingleQuery<
+    SessionDetailParams,
+    Record<string, unknown>,
+    SessionTokenUsageDetail | null
+>({
+    name: "session-detail.token_usage",
+    sql: (p) => subst(SESSION_TOKEN_USAGE_SQL, p.recordRef),
+    mapRow: (raw) => {
+        if (!isRecord(raw)) return null;
+        return {
+            model: stringField(raw, "model"),
+            prompt_tokens: nullableNumberField(raw, "prompt_tokens"),
+            completion_tokens: nullableNumberField(raw, "completion_tokens"),
+            cache_creation_input_tokens: nullableNumberField(raw, "cache_creation_input_tokens"),
+            cache_read_input_tokens: nullableNumberField(raw, "cache_read_input_tokens"),
+            estimated_tokens: numericField(raw, "estimated_tokens"),
+            estimated_cost_usd: nullableNumberField(raw, "estimated_cost_usd"),
+            pricing_source: stringField(raw, "pricing_source"),
         };
     },
 });

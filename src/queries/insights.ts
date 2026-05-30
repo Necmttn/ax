@@ -8,6 +8,18 @@ export const INSIGHT_VIEWS = [
     "sessions",
     "file-evidence",
     "feedback-loops",
+    "feedback-language",
+    "message-signals",
+    "reactions",
+    "reaction-themes",
+    "reaction-events",
+    "reaction-event-themes",
+    "classifier-results",
+    "classifier-facts",
+    "correction-contexts",
+    "classifier-outcomes",
+    "harness-candidates",
+    "classifier-themes",
     "verification-gaps",
     "user-language",
     "token-impact",
@@ -32,68 +44,117 @@ import { graphHealthSql } from "./graph-health.ts";
 
 export const SCHEMA_TABLES: readonly SchemaTableSpec[] = [
     { table: "skill", stage: "active", note: "Installed skills and slash commands." },
+    { table: "role", stage: "active", note: "Skill role labels used for weighting and grouping." },
     { table: "session", stage: "active", note: "Claude and Codex transcript sessions." },
+    { table: "agent_provider", stage: "active", note: "Agent transcript provider identities." },
+    { table: "agent_model", stage: "active", note: "Agent model catalogue with pricing and context metadata." },
+    { table: "agent_session", stage: "active", note: "Provider-native session rows linked to normalized sessions." },
+    { table: "agent_event", stage: "active", note: "Provider-native event stream rows." },
     { table: "turn", stage: "active", note: "Transcript turns and tool result turns." },
     { table: "file", stage: "active", note: "Canonical repository-relative files plus legacy file rows." },
+    { table: "symbol", stage: "staged", note: "Reserved symbol mention catalogue for code-context queries." },
+    { table: "error_signature", stage: "staged", note: "Reserved normalized error signatures for recurrence queries." },
     { table: "commit", stage: "active", note: "Git commits imported from tracked repositories." },
     { table: "repository", stage: "active", note: "Stable repository identities, preferring normalized remotes." },
     { table: "checkout", stage: "active", note: "Local checkout/worktree paths for repositories." },
+    { table: "workspace", stage: "staged", note: "Reserved for cross-checkout workspace grouping." },
+    { table: "changeset", stage: "staged", note: "Reserved for activity-first semantic memory." },
+    { table: "file_memory", stage: "staged", note: "Reserved for per-file tribal knowledge and BM25 search." },
     { table: "tool", stage: "active", note: "Normalized CLI, MCP, and agent tool identities." },
     { table: "tool_call", stage: "active", note: "Claude and Codex tool calls with errors and command fields." },
     { table: "plan", stage: "active", note: "Current plan state per session/source." },
     { table: "plan_item", stage: "active", note: "Latest stable plan items for each plan." },
+    { table: "artifact", stage: "active", note: "Generated reports, dogfood artifacts, and guidance evidence." },
+    { table: "content_document", stage: "active", note: "Parsed document containers for markdown artifacts and plans." },
+    { table: "content_block", stage: "active", note: "Searchable markdown block chunks with source offsets." },
+    { table: "content_atom", stage: "active", note: "Fine-grained parsed document facts and evidence atoms." },
     { table: "plan_snapshot", stage: "active", note: "Point-in-time TodoWrite/update_plan snapshots." },
     { table: "insight", stage: "active", note: "Imported Claude usage-data insight facets." },
     { table: "friction_event", stage: "active", note: "Tool failures, imported insight friction, and derived friction." },
+    { table: "turn_analysis", stage: "active", note: "Per-turn message analysis for sparse user feedback and assistant behavior." },
+    { table: "reaction_event", stage: "active", note: "Context-aware user reaction events built from prior assistant/tool context." },
+    { table: "classifier_definition", stage: "active", note: "Installed classifier definitions and declared label/target contracts." },
+    { table: "classifier_run", stage: "active", note: "Classifier execution runs over transcript event windows." },
+    { table: "classifier_result", stage: "active", note: "Versioned classifier labels attached to turns and other subjects." },
+    { table: "semantic_signal", stage: "active", note: "Reusable meanings promoted from analyzed turns." },
     { table: "diagnostic_event", stage: "active", note: "Derived diagnostics from failed commands and friction." },
-    { table: "recommendation", stage: "conditional", note: "Only written when repeated friction crosses a threshold." },
-    { table: "invoked", stage: "active", note: "Turn-to-skill invocation edges." },
-    { table: "proposed", stage: "active", note: "Skills mentioned but not invoked." },
-    { table: "edited", stage: "active", note: "Turn-to-file edit edges." },
-    { table: "corrected_by", stage: "active", note: "Assistant turns followed by user correction signals." },
-    { table: "produced", stage: "active", note: "Session-to-commit edges." },
-    { table: "touched", stage: "active", note: "Commit-to-file edges with additions/deletions/status." },
-    { table: "has_checkout", stage: "active", note: "Repository-to-checkout edges." },
-    { table: "concerns", stage: "active", note: "Generic evidence edges, currently used for tool/skill and insight/session links." },
-    { table: "skill_paired", stage: "active", note: "Derived skill co-occurrence edges." },
-    { table: "recovered_by", stage: "active", note: "Derived recovery edges after an error turn." },
-    { table: "workspace", stage: "staged", note: "Reserved for cross-checkout workspace grouping." },
-    { table: "changeset", stage: "staged", note: "Reserved for activity-first semantic memory." },
-    { table: "file_memory", stage: "staged", note: "Reserved for per-file tribal knowledge and BM25 search." },
-    { table: "artifact", stage: "staged", note: "Reserved for generated reports, patches, and external artifacts." },
-    { table: "self_improve_run", stage: "staged", note: "Imported legacy self-improve runs, treated as evidence artifacts." },
-    { table: "feedback_event", stage: "staged", note: "Reserved for explicit user feedback separate from friction." },
     { table: "guidance", stage: "staged", note: "Persisted behavior controls such as rules, skills, hooks, and commands." },
     { table: "guidance_version", stage: "staged", note: "Legacy guidance history table kept until migration to guidance_revision." },
-    { table: "guidance_source", stage: "staged", note: "Observed repo-local and global storage authorities for Guidance." },
-    { table: "guidance_revision", stage: "staged", note: "Content-hashed observed Guidance revisions with evidence strength." },
-    { table: "stack", stage: "staged", note: "Lean technology/platform records for applicability matching." },
-    { table: "agent_tooling", stage: "staged", note: "Tools exposed to agents by harness layer." },
-    { table: "harness_learning", stage: "staged", note: "Local/share-candidate/shared evidence-backed Harness Learnings." },
-    { table: "intervention", stage: "staged", note: "Approval-gated behavior-change experiments." },
-    { table: "intervention_observation", stage: "staged", note: "Measured before/after effects of Interventions." },
-    { table: "command_outcome", stage: "staged", note: "Semantic command result classifications." },
-    { table: "user_message_ngram", stage: "staged", note: "Derived user-language n-grams for preference and correction mining." },
-    { table: "workflow_epoch", stage: "staged", note: "Derived workflow eras for before/after comparisons." },
-    { table: "session_token_usage", stage: "staged", note: "Actual or estimated session token/cache usage." },
-    { table: "session_health", stage: "staged", note: "Derived session-level workflow, context, and interruption health." },
-    { table: "commit_classification", stage: "staged", note: "Commit message lifecycle classification." },
-    { table: "skill_candidate", stage: "staged", note: "Evidence-backed candidate skills or guardrails." },
-    { table: "later_fixed_by", stage: "staged", note: "Feature commit to later overlapping fix commit relation." },
-    { table: "suggests_skill", stage: "staged", note: "Fix or evidence commit to skill candidate relation." },
-    { table: "gotcha", stage: "staged", note: "Known stack/tool/workflow gotchas with mitigation." },
-    { table: "taste_signal", stage: "staged", note: "Evidence-backed user/team taste signals." },
-    { table: "workflow", stage: "staged", note: "Local workflow records for matching learnings." },
-    { table: "learning_feedback", stage: "staged", note: "Feedback records attached to learnings or candidates." },
-    { table: "learning_match", stage: "staged", note: "Lean matches between learnings, stacks, and workflows." },
-    { table: "adoption", stage: "staged", note: "Local draft/adoption state for learnings before sharing." },
+    { table: "guidance_source", stage: "active", note: "Observed repo-local and global storage authorities for Guidance." },
+    { table: "guidance_revision", stage: "active", note: "Content-hashed observed Guidance revisions with evidence strength." },
+    { table: "stack", stage: "active", note: "Lean technology/platform records for applicability matching." },
+    { table: "command_outcome", stage: "active", note: "Semantic command result classifications." },
+    { table: "user_message_ngram", stage: "active", note: "Derived user-language n-grams for preference and correction mining." },
+    { table: "workflow_epoch", stage: "active", note: "Derived workflow eras for before/after comparisons." },
+    { table: "session_token_usage", stage: "active", note: "Actual or estimated session token/cache usage." },
+    { table: "session_health", stage: "active", note: "Derived session-level workflow, context, and interruption health." },
+    { table: "commit_classification", stage: "active", note: "Commit message lifecycle classification." },
+    { table: "branch", stage: "staged", note: "GitHub branch state for delivery analytics." },
+    { table: "pull_request", stage: "staged", note: "GitHub pull request state for delivery analytics." },
+    { table: "review_event", stage: "staged", note: "GitHub review events for delivery analytics." },
+    { table: "check_run", stage: "staged", note: "GitHub check runs for delivery analytics." },
+    { table: "delivery_outcome", stage: "staged", note: "Session delivery/promotion outcome summaries." },
+    { table: "phase_span", stage: "staged", note: "Session workflow phase spans and phase-level counters." },
+    { table: "skill_candidate", stage: "active", note: "Evidence-backed candidate skills or guardrails." },
+    { table: "proposal", stage: "active", note: "Polymorphic shortlist of repeated workflow improvement candidates." },
+    { table: "skill_proposal", stage: "active", note: "Typed payload rows for skill-form proposals." },
+    { table: "subagent_proposal", stage: "active", note: "Typed payload rows for subagent-form proposals." },
+    { table: "hook_proposal", stage: "active", note: "Typed payload rows for hook-form proposals." },
+    { table: "guidance_proposal", stage: "active", note: "Typed payload rows for guidance-file proposals." },
+    { table: "automation_proposal", stage: "active", note: "Typed payload rows for automation-form proposals." },
+    { table: "experiment", stage: "active", note: "Accepted proposals and scaffold/verdict state." },
+    { table: "checkpoint", stage: "active", note: "Experiment measurement snapshots and user verdicts." },
+    { table: "retro", stage: "active", note: "Structured session retrospectives." },
+    { table: "skill_triage_decision", stage: "active", note: "Dashboard keep/archive/review decisions per skill." },
+    { table: "harness_hook_event", stage: "active", note: "Native agent harness hook lifecycle events." },
+    { table: "hook_command_invocation", stage: "active", note: "Commands invoked by native harness hooks." },
+    { table: "feedback_case_type", stage: "active", note: "Feedback backtest case definitions." },
+    { table: "feedback_case_result", stage: "active", note: "Feedback backtest results." },
+    { table: "hook_fire", stage: "active", note: "Runtime file-context hook decisions." },
+    { table: "dogfood_run", stage: "active", note: "Terminal dogfood scenario results." },
+    { table: "ingest_run", stage: "active", note: "Top-level ingest execution telemetry." },
+    { table: "ingest_stage", stage: "active", note: "Per-stage ingest execution telemetry." },
+    { table: "ingest_event", stage: "active", note: "Append-like ingest progress events." },
+    { table: "query_sample", stage: "staged", note: "Reserved query execution samples." },
+    { table: "graph_health_check", stage: "staged", note: "Persisted graph health check rows." },
+    { table: "invoked", stage: "active", note: "Turn-to-skill invocation edges." },
+    { table: "plays_role", stage: "active", note: "Skill-to-role classification edges." },
+    { table: "proposed", stage: "active", note: "Skills mentioned but not invoked." },
+    { table: "edited", stage: "active", note: "Turn-to-file edit edges." },
+    { table: "mentioned_file", stage: "staged", note: "Reserved turn-to-file mention edges." },
+    { table: "mentioned_symbol", stage: "staged", note: "Reserved turn-to-symbol mention edges." },
+    { table: "mentioned_error", stage: "staged", note: "Reserved turn-to-error mention edges." },
+    { table: "read_file", stage: "staged", note: "Reserved tool-call-to-file read evidence edges." },
+    { table: "searched_file", stage: "staged", note: "Reserved tool-call-to-file search evidence edges." },
+    { table: "corrected_by", stage: "active", note: "Assistant turns followed by user correction signals." },
+    { table: "expresses", stage: "active", note: "Turn-to-semantic-signal evidence edges." },
+    { table: "reacts_to", stage: "active", note: "User reaction turns linked to the prior assistant turn they approve, reject, or revise." },
+    { table: "has_classification", stage: "active", note: "Turn-to-classifier-result edges for versioned labels." },
+    { table: "mentions_file", stage: "active", note: "Content atom to file mention edges." },
+    { table: "mentions_commit", stage: "active", note: "Content atom to commit mention edges." },
+    { table: "mentions_artifact", stage: "active", note: "Content atom to artifact mention edges." },
+    { table: "produced", stage: "active", note: "Session-to-commit edges." },
+    { table: "touched", stage: "active", note: "Commit-to-file edges with additions/deletions/status." },
+    { table: "later_fixed_by", stage: "active", note: "Feature commit to later overlapping fix commit relation." },
+    { table: "suggests_skill", stage: "active", note: "Fix or evidence commit to skill candidate relation." },
+    { table: "has_checkout", stage: "active", note: "Repository-to-checkout edges." },
+    { table: "concerns", stage: "active", note: "Generic evidence edges, currently used for tool/skill and insight/session links." },
     { table: "includes", stage: "staged", note: "Reserved changeset-to-file-memory relation." },
     { table: "involves", stage: "staged", note: "Reserved changeset-to-file relation." },
     { table: "resulted_in", stage: "staged", note: "Reserved generic outcome relation." },
     { table: "supersedes", stage: "staged", note: "Reserved memory/guidance replacement relation." },
     { table: "produced_artifact", stage: "staged", note: "Reserved producer-to-artifact relation." },
     { table: "has_artifact", stage: "staged", note: "Reserved owner-to-artifact relation." },
-    { table: "derived_from", stage: "staged", note: "Reserved provenance relation for derived records." },
+    { table: "derived_from", stage: "active", note: "Provenance relation for derived guidance and artifacts." },
+    { table: "skill_paired", stage: "active", note: "Derived skill co-occurrence edges." },
+    { table: "recovered_by", stage: "active", note: "Derived recovery edges after an error turn." },
+    { table: "spawned", stage: "active", note: "Parent-to-child delegated session edges." },
+    { table: "agent_event_child", stage: "active", note: "Provider-event parent-child edges." },
+    { table: "used_model", stage: "active", note: "Session-to-agent-model usage edges." },
+    { table: "agent_used_model", stage: "active", note: "Provider-session-to-agent-model usage edges." },
+    { table: "cites_evidence", stage: "active", note: "Proposal-to-evidence edges." },
+    { table: "opportunity", stage: "active", note: "Experiment trigger recurrence evidence edges." },
+    { table: "reviewed", stage: "active", note: "Session-to-retro review edges." },
 ] as const;
 
 export function isInsightView(value: string): value is InsightView {
@@ -348,6 +409,465 @@ ORDER BY signal_count DESC, count DESC, last_seen DESC
 LIMIT ${safeLimit};`.trim();
 }
 
+export function feedbackLanguageSql(limit: number): string {
+    const safeLimit = checkedLimit(limit);
+    return `
+SELECT
+    id AS signal,
+    kind,
+    label,
+    canonical_text,
+    array::len((SELECT id FROM expresses WHERE out = $parent.id AND in.role = "user")) AS turns,
+    array::len((SELECT session FROM expresses WHERE out = $parent.id AND in.role = "user" GROUP BY session)) AS sessions,
+    last_seen,
+    (
+        SELECT
+            in AS turn,
+            in.session AS session,
+            in.seq AS seq,
+            in.text_excerpt AS text,
+            ts
+        FROM expresses
+        WHERE out = $parent.id AND in.role = "user"
+        ORDER BY ts DESC
+        LIMIT 5
+    ) AS examples
+FROM semantic_signal
+WHERE kind IN ["feedback", "correction"]
+ORDER BY turns DESC, sessions DESC, last_seen DESC
+LIMIT ${safeLimit};`.trim();
+}
+
+export function messageSignalsSql(limit: number): string {
+    const safeLimit = checkedLimit(limit);
+    return `
+SELECT
+    id AS signal,
+    kind,
+    label,
+    canonical_text,
+    array::len((SELECT id FROM expresses WHERE out = $parent.id)) AS turns,
+    array::len((SELECT session FROM expresses WHERE out = $parent.id GROUP BY session)) AS sessions,
+    array::len((SELECT id FROM turn_analysis WHERE turn IN (SELECT in FROM expresses WHERE out = $parent.id).in)) AS analyses,
+    math::mean((SELECT confidence FROM expresses WHERE out = $parent.id).confidence) AS avg_confidence,
+    last_seen,
+    (
+        SELECT
+            in AS turn,
+            in.session AS session,
+            in.role AS role,
+            in.seq AS seq,
+            in.text_excerpt AS text,
+            ts
+        FROM expresses
+        WHERE out = $parent.id
+        ORDER BY ts DESC
+        LIMIT 5
+    ) AS examples
+FROM semantic_signal
+ORDER BY turns DESC, sessions DESC, last_seen DESC
+LIMIT ${safeLimit};`.trim();
+}
+
+export function reactionsSql(limit: number): string {
+    const safeLimit = checkedLimit(limit);
+    return `
+SELECT
+    id,
+    polarity,
+    act,
+    confidence,
+    signal.label AS signal,
+    session,
+    in AS user_turn,
+    in.seq AS user_seq,
+    in.text_excerpt AS user_text,
+    out AS assistant_turn,
+    out.seq AS assistant_seq,
+    out.text_excerpt AS assistant_text,
+    ts
+FROM reacts_to
+ORDER BY ts DESC
+LIMIT ${safeLimit};`.trim();
+}
+
+export function reactionThemesSql(limit: number): string {
+    const safeLimit = checkedLimit(limit);
+    return `
+SELECT
+    id AS signal,
+    kind,
+    label,
+    canonical_text,
+    array::len((SELECT id FROM reacts_to WHERE signal = $parent.id)) AS reactions,
+    array::len((SELECT session FROM reacts_to WHERE signal = $parent.id GROUP BY session)) AS sessions,
+    array::len((SELECT id FROM reacts_to WHERE signal = $parent.id AND polarity = "accept")) AS accept,
+    array::len((SELECT id FROM reacts_to WHERE signal = $parent.id AND polarity = "revise")) AS revise,
+    array::len((SELECT id FROM reacts_to WHERE signal = $parent.id AND polarity = "reject")) AS reject,
+    time::max((SELECT ts FROM reacts_to WHERE signal = $parent.id).ts) AS last_seen,
+    (
+        SELECT
+            polarity,
+            act,
+            in AS user_turn,
+            in.seq AS user_seq,
+            in.text_excerpt AS user_text,
+            out AS assistant_turn,
+            out.seq AS assistant_seq,
+            out.text_excerpt AS assistant_text,
+            ts
+        FROM reacts_to
+        WHERE signal = $parent.id
+        ORDER BY ts DESC
+        LIMIT 3
+    ) AS examples
+FROM semantic_signal
+WHERE kind IN ["feedback", "correction"] AND array::len((SELECT id FROM reacts_to WHERE signal = $parent.id)) > 0
+ORDER BY reactions DESC, sessions DESC, last_seen DESC
+LIMIT ${safeLimit};`.trim();
+}
+
+export function reactionEventsSql(limit: number): string {
+    const safeLimit = checkedLimit(limit);
+    return `
+SELECT
+    id,
+    reaction_type,
+    target,
+    polarity,
+    durability,
+    confidence,
+    user_turn,
+    assistant_turn,
+    session,
+    user_text,
+    assistant_text,
+    context_json,
+    signals,
+    ts
+FROM reaction_event
+ORDER BY ts DESC
+LIMIT ${safeLimit};`.trim();
+}
+
+export function reactionEventThemesSql(limit: number): string {
+    const safeLimit = checkedLimit(limit);
+    return `
+SELECT
+    reaction_type,
+    target,
+    durability,
+    count() AS events,
+    array::len(array::distinct(session)) AS sessions,
+    math::mean(confidence) AS avg_confidence,
+    time::max(ts) AS last_seen
+FROM reaction_event
+GROUP BY reaction_type, target, durability
+ORDER BY events DESC, sessions DESC, last_seen DESC
+LIMIT ${safeLimit};`.trim();
+}
+
+export function classifierResultsSql(limit: number): string {
+    const safeLimit = checkedLimit(limit);
+    return `
+SELECT
+    id,
+    classifier_key,
+    classifier_version,
+    label,
+    target,
+    polarity,
+    durability,
+    confidence,
+    subject_type,
+    subject_id,
+    turn,
+    session,
+    evidence_json,
+    signals,
+    ts
+FROM classifier_result
+ORDER BY ts DESC
+LIMIT ${safeLimit};`.trim();
+}
+
+export function classifierFactsSql(limit: number): string {
+    const safeLimit = checkedLimit(limit);
+    return `
+SELECT
+    id,
+    classifier_key,
+    classifier_version,
+    label,
+    target,
+    polarity,
+    durability,
+    confidence,
+    subject_type,
+    subject_id,
+    turn,
+    turn.seq AS user_seq,
+    turn.text_excerpt AS user_text,
+    session,
+    session.project AS project,
+    session.cwd AS cwd,
+    evidence_json,
+    signals,
+    ts,
+    (
+        SELECT
+            id,
+            seq,
+            text_excerpt AS text
+        FROM turn
+        WHERE session = $parent.session
+          AND role = "assistant"
+          AND seq < $parent.turn.seq
+        ORDER BY seq DESC
+        LIMIT 1
+    )[0] AS previous_assistant,
+    (
+        SELECT
+            id,
+            name,
+            command_norm,
+            error_text,
+            output_excerpt,
+            ts
+        FROM tool_call
+        WHERE session = $parent.session
+          AND has_error = true
+          AND ts <= $parent.ts
+        ORDER BY ts DESC
+        LIMIT 3
+    ) AS recent_tool_failures
+FROM classifier_result
+WHERE turn IS NOT NONE
+ORDER BY ts DESC
+LIMIT ${safeLimit};`.trim();
+}
+
+export function correctionContextsSql(limit: number): string {
+    const safeLimit = checkedLimit(limit);
+    return `
+SELECT
+    id,
+    classifier_key,
+    classifier_version,
+    label,
+    target,
+    polarity,
+    durability,
+    confidence,
+    turn,
+    turn.seq AS user_seq,
+    turn.text_excerpt AS user_text,
+    session,
+    session.project AS project,
+    session.cwd AS cwd,
+    evidence_json,
+    signals,
+    ts,
+    (
+        SELECT
+            id,
+            seq,
+            text_excerpt AS text
+        FROM turn
+        WHERE session = $parent.session
+          AND role = "assistant"
+          AND seq < $parent.turn.seq
+        ORDER BY seq DESC
+        LIMIT 1
+    )[0] AS previous_assistant,
+    (
+        SELECT
+            id,
+            name,
+            command_norm,
+            error_text,
+            output_excerpt,
+            ts
+        FROM tool_call
+        WHERE session = $parent.session
+          AND has_error = true
+          AND ts <= $parent.ts
+        ORDER BY ts DESC
+        LIMIT 5
+    ) AS recent_tool_failures
+FROM classifier_result
+WHERE classifier_key = "correction-event" OR label = "correction"
+ORDER BY ts DESC
+LIMIT ${safeLimit};`.trim();
+}
+
+export function classifierOutcomesSql(limit: number): string {
+    const safeLimit = checkedLimit(limit);
+    return `
+SELECT
+    id,
+    classifier_key,
+    classifier_version,
+    label,
+    target,
+    polarity,
+    durability,
+    confidence,
+    turn,
+    turn.seq AS user_seq,
+    turn.text_excerpt AS user_text,
+    session,
+    session.project AS project,
+    session.cwd AS cwd,
+    ts,
+    (
+        SELECT
+            id,
+            name,
+            command_norm,
+            has_error,
+            status,
+            exit_code,
+            output_excerpt,
+            error_text,
+            ts
+        FROM tool_call
+        WHERE session = $parent.session
+          AND ts > $parent.ts
+        ORDER BY ts ASC
+        LIMIT 5
+    ) AS later_tool_calls,
+    (
+        SELECT
+            id,
+            kind,
+            status,
+            command_norm,
+            command_tool,
+            text,
+            tool_call,
+            ts
+        FROM command_outcome
+        WHERE session = $parent.session
+          AND ts > $parent.ts
+        ORDER BY ts ASC
+        LIMIT 5
+    ) AS later_command_outcomes,
+    (
+        SELECT
+            id,
+            seq,
+            role,
+            text_excerpt AS text,
+            ts
+        FROM turn
+        WHERE session = $parent.session
+          AND role = "user"
+          AND seq > $parent.turn.seq
+        ORDER BY seq ASC
+        LIMIT 3
+    ) AS later_user_turns
+FROM classifier_result
+WHERE turn IS NOT NONE
+ORDER BY ts DESC
+LIMIT ${safeLimit};`.trim();
+}
+
+export function classifierThemesSql(limit: number): string {
+    const safeLimit = checkedLimit(limit);
+    return `
+SELECT
+    classifier_key,
+    label,
+    target,
+    durability,
+    count() AS results,
+    array::len(array::distinct(session)) AS sessions,
+    math::mean(confidence) AS avg_confidence,
+    time::max(ts) AS last_seen
+FROM classifier_result
+GROUP BY classifier_key, label, target, durability
+ORDER BY results DESC, sessions DESC, last_seen DESC
+LIMIT ${safeLimit};`.trim();
+}
+
+export function harnessCandidatesSql(limit: number): string {
+    const safeLimit = checkedLimit(limit);
+    return `
+SELECT
+    ["classifier_harness_candidate", classifier_key, label, target, durability] AS candidate_id,
+    [classifier_key, label, target, durability] AS dedupe_signature,
+    classifier_key,
+    label,
+    target,
+    durability,
+    facts,
+    sessions,
+    avg_confidence,
+    last_seen,
+    IF target IN ["test_required", "output_required", "regression_guard", "verification"] OR label = "verification_request" THEN "verification"
+    ELSE IF target IN ["tooling_preference", "dev_environment", "environment_setup"] THEN "environment"
+    ELSE IF target IN ["wrong_artifact", "wrong_output", "missing_context", "misclassified_intent", "prototype_completeness"] OR label = "correction" THEN "representation"
+    ELSE IF durability IN ["repo_preference", "global_preference"] OR label = "direction" THEN "guidance"
+    ELSE "triage" END AS proposed_layer,
+    IF target IN ["test_required", "output_required", "regression_guard", "verification"] OR label = "verification_request" THEN "add_verification_gate"
+    ELSE IF target IN ["tooling_preference", "dev_environment", "environment_setup"] THEN "record_environment_preference"
+    ELSE IF target IN ["wrong_artifact", "wrong_output", "missing_context", "misclassified_intent", "prototype_completeness"] OR label = "correction" THEN "add_context_guardrail"
+    ELSE IF durability IN ["repo_preference", "global_preference"] OR label = "direction" THEN "record_guidance"
+    ELSE "review_pattern" END AS proposed_action,
+    (
+        SELECT
+            id,
+            classifier_key,
+            label,
+            target,
+            durability,
+            confidence,
+            turn,
+            turn.seq AS user_seq,
+            turn.text_excerpt AS user_text,
+            session,
+            ts,
+            (
+                SELECT
+                    kind,
+                    out AS evidence,
+                    ts
+                FROM cites_evidence
+                WHERE in = $parent.id
+                ORDER BY ts DESC
+                LIMIT 3
+            ) AS evidence
+        FROM classifier_result
+        WHERE classifier_key = $parent.classifier_key
+          AND label = $parent.label
+          AND target = $parent.target
+          AND durability = $parent.durability
+        ORDER BY ts DESC
+        LIMIT 3
+    ) AS examples
+FROM (
+    SELECT
+        classifier_key,
+        label,
+        target,
+        durability,
+        count() AS facts,
+        array::len(array::distinct(session)) AS sessions,
+        math::mean(confidence) AS avg_confidence,
+        time::max(ts) AS last_seen
+    FROM classifier_result
+    WHERE turn IS NOT NONE
+      AND (
+        durability IN ["candidate_guidance", "repo_preference", "global_preference"]
+        OR label IN ["correction", "direction", "verification_request"]
+      )
+    GROUP BY classifier_key, label, target, durability
+)
+ORDER BY facts DESC, sessions DESC, avg_confidence DESC, last_seen DESC
+LIMIT ${safeLimit};`.trim();
+}
+
 export function tokenImpactSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
     return `
@@ -519,6 +1039,30 @@ export function insightSqlForView(view: InsightView, limit: number): string {
             return fileEvidenceSql(limit);
         case "feedback-loops":
             return feedbackLoopsSql(limit);
+        case "feedback-language":
+            return feedbackLanguageSql(limit);
+        case "message-signals":
+            return messageSignalsSql(limit);
+        case "reactions":
+            return reactionsSql(limit);
+        case "reaction-themes":
+            return reactionThemesSql(limit);
+        case "reaction-events":
+            return reactionEventsSql(limit);
+        case "reaction-event-themes":
+            return reactionEventThemesSql(limit);
+        case "classifier-results":
+            return classifierResultsSql(limit);
+        case "classifier-facts":
+            return classifierFactsSql(limit);
+        case "correction-contexts":
+            return correctionContextsSql(limit);
+        case "classifier-outcomes":
+            return classifierOutcomesSql(limit);
+        case "harness-candidates":
+            return harnessCandidatesSql(limit);
+        case "classifier-themes":
+            return classifierThemesSql(limit);
         case "verification-gaps":
             return verificationGapsSql(limit);
         case "user-language":

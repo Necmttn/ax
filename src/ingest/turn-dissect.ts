@@ -26,6 +26,8 @@ export interface TurnSpan {
     readonly kind: TurnSpanKind;
     readonly text: string;
     readonly label?: string;
+    readonly startOffset?: number;
+    readonly endOffset?: number;
 }
 
 interface ClosedTag {
@@ -158,14 +160,15 @@ export function dissectTurn(text: string, opts: DissectOptions = {}): readonly T
     let cursor = 0;
     const pushDefault = (raw: string) => {
         if (raw.trim().length === 0) return;
-        spans.push({ kind: defaultKind, text: raw });
+        const startOffset = cursor;
+        spans.push({ kind: defaultKind, text: raw, startOffset, endOffset: startOffset + raw.length });
     };
 
     for (const iv of kept) {
         if (iv.start > cursor) pushDefault(text.slice(cursor, iv.start));
         const span: TurnSpan = iv.label
-            ? { kind: iv.kind, text: text.slice(iv.start, iv.end), label: iv.label }
-            : { kind: iv.kind, text: text.slice(iv.start, iv.end) };
+            ? { kind: iv.kind, text: text.slice(iv.start, iv.end), label: iv.label, startOffset: iv.start, endOffset: iv.end }
+            : { kind: iv.kind, text: text.slice(iv.start, iv.end), startOffset: iv.start, endOffset: iv.end };
         spans.push(span);
         cursor = iv.end;
     }

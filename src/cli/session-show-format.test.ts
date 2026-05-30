@@ -65,6 +65,7 @@ const MINIMAL_PAYLOAD: SessionShowPayload = {
                 phase: "execute",
             },
         ],
+        token_usage: null,
     },
     expanded_subagents: [],
     by_role: null,
@@ -91,6 +92,29 @@ describe("renderSessionMarkdown - sections", () => {
     it("renders duration", () => {
         const out = renderSessionMarkdown(MINIMAL_PAYLOAD);
         expect(out).toContain("47m"); // 47 minutes
+    });
+
+    it("renders token usage and cost when available", () => {
+        const out = renderSessionMarkdown({
+            ...MINIMAL_PAYLOAD,
+            session: {
+                ...MINIMAL_PAYLOAD.session,
+                token_usage: {
+                    model: "gpt-5.5",
+                    prompt_tokens: 1000,
+                    completion_tokens: 200,
+                    cache_creation_input_tokens: 50,
+                    cache_read_input_tokens: 500,
+                    estimated_tokens: 1200,
+                    estimated_cost_usd: 0.1234,
+                    pricing_source: "test",
+                },
+            },
+        });
+        expect(out).toContain("usage     model gpt-5.5");
+        expect(out).toContain("tokens 1,200");
+        expect(out).toContain("cost $0.1234");
+        expect(out).toContain("cache_read 500");
     });
 
     it("renders project name prettified", () => {
@@ -185,6 +209,7 @@ describe("renderSessionMarkdown - not found", () => {
                 children: [],
                 parent: null,
                 agent_delegations: [],
+                token_usage: null,
             },
             expanded_subagents: [],
             by_role: null,
@@ -208,6 +233,7 @@ describe("renderSessionMarkdown - expansions", () => {
         children: [],
         parent: null,
         agent_delegations: [],
+        token_usage: null,
     };
 
     it("renders expanded timeline header for subagent", () => {
@@ -268,6 +294,7 @@ describe("renderSessionMarkdown - empty session", () => {
                 children: [],
                 parent: null,
                 agent_delegations: [],
+                token_usage: null,
             },
             expanded_subagents: [],
             by_role: null,
@@ -285,6 +312,7 @@ describe("renderSessionMarkdown - empty session", () => {
                 children: [],
                 parent: null,
                 agent_delegations: [],
+                token_usage: null,
             },
             expanded_subagents: [],
             by_role: null,
@@ -325,6 +353,7 @@ describe("renderSessionJson", () => {
             children: [],
             parent: null,
             agent_delegations: [],
+            token_usage: null,
         };
         const payload: SessionShowPayload = {
             ...MINIMAL_PAYLOAD,

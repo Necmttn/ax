@@ -81,3 +81,69 @@ describe("file evidence schema", () => {
         expect(schema).toContain("DEFINE FIELD absolute_path_seen ON searched_file TYPE option<string>");
     });
 });
+
+describe("turn feedback graph schema", () => {
+    test("turn_analysis table and read indexes are defined", () => {
+        expect(schema).toContain("DEFINE TABLE IF NOT EXISTS turn_analysis SCHEMAFULL");
+        expect(schema).toContain("DEFINE FIELD turn           ON turn_analysis TYPE record<turn>");
+        expect(schema).toContain("DEFINE FIELD act            ON turn_analysis TYPE string");
+        expect(schema).toContain("DEFINE FIELD polarity       ON turn_analysis TYPE string");
+        expect(schema).toContain("DEFINE INDEX IF NOT EXISTS turn_analysis_turn ON turn_analysis FIELDS turn UNIQUE");
+        expect(schema).toContain("DEFINE INDEX IF NOT EXISTS turn_analysis_session_act ON turn_analysis FIELDS session, act");
+    });
+
+    test("semantic_signal nodes are defined for promoted meanings", () => {
+        expect(schema).toContain("DEFINE TABLE IF NOT EXISTS semantic_signal SCHEMAFULL");
+        expect(schema).toContain("DEFINE FIELD kind           ON semantic_signal TYPE string");
+        expect(schema).toContain("DEFINE FIELD label          ON semantic_signal TYPE string");
+        expect(schema).toContain("DEFINE INDEX IF NOT EXISTS semantic_signal_kind_label ON semantic_signal FIELDS kind, label UNIQUE");
+    });
+
+    test("expresses and reacts_to graph edges are queryable", () => {
+        expect(schema).toContain("DEFINE TABLE IF NOT EXISTS expresses TYPE RELATION FROM turn TO semantic_signal SCHEMAFULL");
+        expect(schema).toContain("DEFINE TABLE IF NOT EXISTS reacts_to TYPE RELATION FROM turn TO turn SCHEMAFULL");
+        expect(schema).toContain("DEFINE INDEX IF NOT EXISTS expresses_out ON expresses FIELDS out");
+        expect(schema).toContain("DEFINE INDEX IF NOT EXISTS reacts_to_out ON reacts_to FIELDS out");
+    });
+
+    test("generic classifier graph tables are defined", () => {
+        expect(schema).toContain("DEFINE TABLE IF NOT EXISTS classifier_definition SCHEMAFULL");
+        expect(schema).toContain("DEFINE TABLE IF NOT EXISTS classifier_run SCHEMAFULL");
+        expect(schema).toContain("DEFINE TABLE IF NOT EXISTS classifier_result SCHEMAFULL");
+        expect(schema).toContain("DEFINE TABLE IF NOT EXISTS has_classification TYPE RELATION FROM turn TO classifier_result SCHEMAFULL");
+        expect(schema).toContain("DEFINE INDEX IF NOT EXISTS classifier_result_theme ON classifier_result FIELDS classifier_key, label, target, durability");
+    });
+});
+
+describe("content block artifact schema", () => {
+    test("content document, block, and atom tables are defined", () => {
+        expect(schema).toContain("DEFINE TABLE content_document SCHEMAFULL");
+        expect(schema).toContain("DEFINE TABLE content_block SCHEMAFULL");
+        expect(schema).toContain("DEFINE TABLE content_atom SCHEMAFULL");
+        expect(schema).toContain("DEFINE FIELD parse_fingerprint ON content_document TYPE string");
+        expect(schema).toContain("DEFINE FIELD search_text    ON content_block TYPE option<string>");
+        expect(schema).toContain("DEFINE FIELD source_kind    ON content_atom TYPE string");
+    });
+
+    test("content block search indexes capped search text, not raw text", () => {
+        expect(schema).toContain("DEFINE ANALYZER IF NOT EXISTS content_text");
+        expect(schema).toContain("DEFINE INDEX IF NOT EXISTS content_block_text_fts");
+        expect(schema).toContain("ON content_block FIELDS search_text");
+        expect(schema).not.toContain("ON content_block FIELDS text\n    FULLTEXT ANALYZER content_text");
+    });
+
+    test("content atoms denormalize query dimensions", () => {
+        expect(schema).toContain("DEFINE FIELD repository     ON content_atom TYPE option<record<repository>>");
+        expect(schema).toContain("DEFINE FIELD workspace      ON content_atom TYPE option<record<workspace>>");
+        expect(schema).toContain("DEFINE FIELD artifact_kind  ON content_atom TYPE option<string>");
+        expect(schema).toContain("DEFINE INDEX content_atom_source_kind_value ON content_atom FIELDS source_kind, kind, normalized");
+        expect(schema).toContain("DEFINE INDEX content_atom_workspace_kind_value ON content_atom FIELDS workspace, kind, normalized");
+    });
+
+    test("explicit mention relation tables are defined", () => {
+        expect(schema).toContain("DEFINE TABLE mentions_file TYPE RELATION FROM content_atom TO file SCHEMAFULL");
+        expect(schema).toContain("DEFINE TABLE mentions_commit TYPE RELATION FROM content_atom TO commit SCHEMAFULL");
+        expect(schema).toContain("DEFINE TABLE mentions_artifact TYPE RELATION FROM content_atom TO artifact SCHEMAFULL");
+        expect(schema).toContain("DEFINE INDEX mentions_file_document ON mentions_file FIELDS document");
+    });
+});

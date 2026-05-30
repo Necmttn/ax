@@ -13,6 +13,8 @@
   ...
 }:
 {
+  "@ax-classifier/direction-event" = copyPathToStore ./packages/ax-classifier-direction-event;
+  "@ax-classifier/verification-event" = copyPathToStore ./packages/ax-classifier-verification-event;
   "@babel/code-frame@7.29.0" = fetchurl {
     url = "https://registry.npmjs.org/@babel/code-frame/-/code-frame-7.29.0.tgz";
     hash = "sha512-9NhCeYjq9+3uxgdtp20LSiJXJvN0FeCtNGpJxuMFZ1Kv3cWUNb6DOhJwUvcVCzKGR66cw4njwM6hrJLqgOwbcw==";

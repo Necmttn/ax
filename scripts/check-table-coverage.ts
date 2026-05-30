@@ -3,10 +3,8 @@
  * Table coverage CI gate (Phase D, plan
  * docs/superpowers/plans/2026-05-25-experiment-loop-cleanup-and-rebuild.md).
  *
- * Root-cause fix for the documented 5-cluster pattern of write-only orphan
- * tables (learning_match, gotcha, harness_learning, intervention,
- * recommendation, etc) that landed schema + writer + CLI stub then never
- * shipped a real reader. Hard CI fail.
+ * Root-cause fix for write-only orphan tables that land schema + writer + CLI
+ * stub without a real reader. Hard CI fail.
  *
  * Rule: every table that has an `UPSERT <table>` / `CREATE <table>` /
  * `INSERT INTO <table>` / `RELATE ...-><table>` site under src/ingest/

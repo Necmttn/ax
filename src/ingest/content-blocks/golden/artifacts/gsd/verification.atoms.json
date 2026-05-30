@@ -1,0 +1,22 @@
+[
+  {
+    "kind": "frontmatter_field",
+    "normalized": "verified"
+  },
+  {
+    "kind": "frontmatter_field",
+    "normalized": "score"
+  },
+  {
+    "kind": "file_ref",
+    "normalized": "src/services/auth.ts"
+  },
+  {
+    "kind": "commit_ref",
+    "normalized": "8f14e45"
+  },
+  {
+    "kind": "evidence_row",
+    "normalized": "required artifacts"
+  }
+]

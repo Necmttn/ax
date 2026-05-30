@@ -1,0 +1,24 @@
+<permissions instructions>
+Filesystem sandboxing defines which files can be read or written.
+Approval policy is never.
+</permissions instructions>
+<environment_context>
+<cwd>/repo</cwd>
+<shell>zsh</shell>
+<current_date>2026-05-30</current_date>
+</environment_context>
+<apps_instructions>
+## Apps (Connectors)
+Apps can be triggered explicitly.
+</apps_instructions>
+<skills_instructions>
+## Skills
+### Available skills
+- tdd
+- dogfood
+</skills_instructions>
+<plugins_instructions>
+## Plugins
+### Available plugins
+- Superpowers
+</plugins_instructions>

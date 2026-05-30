@@ -1,0 +1,745 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ax · features - what's under the hood</title>
+<style>
+  :root {
+    --page: #f6f5f0;
+    --panel: #fbfaf5;
+    --ink: #0a0a0a;
+    --muted: #6b6b66;
+    --soft: #8a8780;
+    --line: #d8d6cf;
+    --green: #2f9e44;
+    --red: #c0392b;
+    --blue: #2567a8;
+    --amber: #b07900;
+    --serif: Georgia, "Times New Roman", serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Helvetica Neue", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* ------- top nav ------- */
+  nav.top { border-bottom: 1px solid var(--line); background: var(--page); position: sticky; top: 0; z-index: 5; }
+  nav.top .inner {
+    max-width: 1080px; margin: 0 auto; padding: 18px 32px;
+    display: flex; align-items: center; justify-content: space-between; gap: 24px;
+  }
+  .brand {
+    font-family: var(--mono); font-size: 13px; letter-spacing: -0.01em;
+    color: var(--ink); display: inline-flex; align-items: center; gap: 12px; text-decoration: none;
+  }
+  .brand .mark { font-family: var(--serif); font-style: italic; font-size: 18px; line-height: 1; }
+  .brand .dot { color: var(--muted); }
+  .brand .tag { color: var(--muted); font-size: 12px; }
+  .brand-wrap { display: inline-flex; align-items: center; gap: 14px; }
+  .live-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.14em;
+    color: var(--green); padding: 3px 8px 3px 7px;
+    border: 1px solid var(--line); border-radius: 999px; background: var(--panel);
+  }
+  .live-pill::before {
+    content: ""; width: 6px; height: 6px; border-radius: 999px;
+    background: var(--green); box-shadow: 0 0 0 3px rgba(47, 158, 68, 0.18);
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+  nav.top ul { margin: 0; padding: 0; list-style: none; display: flex; align-items: center; gap: 24px; }
+  nav.top a.link { font-family: var(--mono); font-size: 12px; color: var(--ink); text-decoration: none; opacity: 0.78; }
+  nav.top a.link:hover { opacity: 1; }
+  nav.top a.link.active { opacity: 1; border-bottom: 1px solid var(--ink); padding-bottom: 2px; }
+  nav.top a.gh {
+    font-family: var(--mono); font-size: 12px; color: var(--page); text-decoration: none;
+    border: 1px solid var(--ink); padding: 6px 10px; border-radius: 4px; background: var(--ink);
+  }
+
+  /* ------- shared ------- */
+  main { max-width: 1080px; margin: 0 auto; padding: 0 32px; }
+  .eyebrow {
+    font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.18em;
+    color: var(--muted); display: inline-flex; align-items: center; gap: 10px;
+    padding: 6px 12px 6px 14px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel);
+  }
+  .eyebrow::before { content: ""; width: 6px; height: 6px; border-radius: 999px; background: var(--ink); opacity: 0.55; }
+
+  section { padding: 88px 0; border-bottom: 1px solid var(--line); }
+  section:last-of-type { border-bottom: none; }
+
+  .section-head { display: flex; flex-direction: column; gap: 18px; max-width: 720px; margin-bottom: 48px; }
+  .section-num {
+    font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.18em;
+    color: var(--soft);
+  }
+  .section-head h2 {
+    font-family: var(--serif); font-weight: 400;
+    font-size: 44px; line-height: 1.08; letter-spacing: -0.7px;
+    margin: 0;
+  }
+  .section-head h2 em { font-style: italic; color: var(--muted); }
+  .section-lede {
+    font-family: var(--serif); font-size: 18px; line-height: 1.55; color: var(--muted);
+    margin: 0; max-width: 60ch;
+  }
+  .section-body { font-size: 15px; line-height: 1.65; color: #2a2a26; max-width: 64ch; }
+  .section-body p { margin: 0 0 14px; }
+  .section-body code, code.inline {
+    font-family: var(--mono); font-size: 12.5px;
+    background: var(--panel); border: 1px solid var(--line);
+    padding: 1px 6px; border-radius: 4px; color: var(--ink);
+  }
+
+  /* ------- hero ------- */
+  section.hero {
+    padding: 96px 0 84px; border-bottom: 1px solid var(--line);
+  }
+  section.hero .eyebrow { margin-bottom: 28px; }
+  section.hero h1 {
+    font-family: var(--serif); font-weight: 400;
+    font-size: 64px; line-height: 1.04; letter-spacing: -1.2px;
+    margin: 0 0 24px; max-width: 18ch;
+  }
+  section.hero h1 em { font-style: italic; color: var(--muted); }
+  section.hero .lede {
+    font-family: var(--serif); font-size: 20px; line-height: 1.5; color: var(--muted);
+    margin: 0; max-width: 56ch;
+  }
+  section.hero .toc {
+    margin-top: 44px; display: flex; flex-wrap: wrap; gap: 10px;
+  }
+  section.hero .toc a {
+    font-family: var(--mono); font-size: 11px; text-decoration: none; color: var(--muted);
+    padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel);
+    letter-spacing: 0.04em;
+  }
+  section.hero .toc a:hover { color: var(--ink); border-color: var(--ink); }
+
+  /* ============ sources ============ */
+  .sources-diagram {
+    margin: 0 0 32px;
+    border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+    padding: 36px 28px;
+    display: grid; grid-template-columns: 1fr auto 200px; gap: 28px; align-items: center;
+  }
+  .src-tiles {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  }
+  .src-tile {
+    border: 1px solid var(--line); border-radius: 8px; background: var(--page);
+    padding: 12px 14px;
+    display: flex; flex-direction: column; gap: 4px;
+    min-height: 64px;
+  }
+  .src-tile .label {
+    font-family: var(--mono); font-size: 11px; color: var(--ink);
+    letter-spacing: 0.02em; font-weight: 600;
+  }
+  .src-tile .path {
+    font-family: var(--mono); font-size: 10.5px; color: var(--muted); line-height: 1.4;
+    word-break: break-all;
+  }
+  .src-arrow {
+    color: var(--soft); font-family: var(--mono); font-size: 22px;
+    display: flex; flex-direction: column; gap: 4px; align-items: center; justify-content: center;
+  }
+  .src-arrow span { line-height: 1; }
+  .src-graph {
+    border: 1px solid var(--ink); border-radius: 12px; background: var(--page);
+    padding: 22px 16px; text-align: center;
+    display: flex; flex-direction: column; gap: 8px; align-items: center;
+  }
+  .src-graph .gname {
+    font-family: var(--serif); font-style: italic; font-size: 22px;
+    letter-spacing: -0.3px;
+  }
+  .src-graph .gsub {
+    font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.16em;
+    color: var(--muted);
+  }
+  .src-graph svg { display: block; margin: 6px auto 4px; }
+
+  .cadence {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+    margin-top: 8px;
+  }
+  .cadence .item {
+    border: 1px solid var(--line); border-left: 3px solid var(--ink);
+    padding: 14px 16px; background: var(--panel); border-radius: 6px;
+  }
+  .cadence .item .k {
+    font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.16em;
+    color: var(--muted); display: block; margin-bottom: 6px;
+  }
+  .cadence .item .v {
+    font-family: var(--mono); font-size: 12.5px; color: var(--ink); line-height: 1.5;
+  }
+  .cadence .item .v b { color: var(--ink); font-weight: 600; }
+
+  /* ============ graph ============ */
+  .graph-wrap {
+    display: grid; grid-template-columns: 1.15fr 1fr; gap: 28px; align-items: stretch;
+  }
+  .ascii-graph {
+    border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+    padding: 22px 24px;
+    font-family: var(--mono); font-size: 12px; line-height: 1.65;
+    color: var(--ink); white-space: pre; overflow-x: auto;
+  }
+  .ascii-graph .n { color: var(--blue); font-weight: 600; }
+  .ascii-graph .r { color: var(--amber); }
+  .ascii-graph .c { color: var(--muted); }
+  .graph-legend { display: flex; flex-direction: column; gap: 18px; }
+  .legend-block .legend-title {
+    font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.18em;
+    color: var(--muted); margin-bottom: 10px;
+  }
+  .legend-list { display: flex; flex-direction: column; gap: 8px; }
+  .legend-list .row {
+    display: grid; grid-template-columns: 130px 1fr; gap: 14px;
+    font-size: 13.5px; line-height: 1.5;
+    padding: 4px 0; border-bottom: 1px dashed var(--line);
+  }
+  .legend-list .row:last-child { border-bottom: none; }
+  .legend-list .row code {
+    font-family: var(--mono); font-size: 12px; color: var(--blue);
+    background: transparent; border: none; padding: 0;
+  }
+  .legend-list .row.rel code { color: var(--amber); }
+  .legend-list .row .desc { color: var(--muted); }
+
+  /* ============ derive ============ */
+  .derive-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
+  }
+  .stage-card {
+    border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+    padding: 22px 22px 20px;
+    display: flex; flex-direction: column; gap: 12px;
+    transition: border-color 0.18s ease, transform 0.18s ease;
+  }
+  .stage-card:hover { border-color: var(--ink); transform: translateY(-2px); }
+  .stage-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .stage-name {
+    font-family: var(--mono); font-size: 13px; color: var(--ink); font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .stage-tag {
+    font-family: var(--mono); font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.16em;
+    color: var(--muted); padding: 2px 7px; border: 1px solid var(--line); border-radius: 999px;
+    background: var(--page);
+  }
+  .stage-purpose {
+    font-family: var(--serif); font-size: 16px; line-height: 1.4;
+    color: var(--ink); letter-spacing: -0.2px;
+  }
+  .stage-meta {
+    font-family: var(--mono); font-size: 11px; color: var(--soft); letter-spacing: 0.02em;
+    margin-top: auto; padding-top: 8px; border-top: 1px dashed var(--line);
+  }
+  .stage-meta b { color: var(--muted); font-weight: 500; }
+
+  /* ============ hooks ============ */
+  .hooks-wrap { display: grid; grid-template-columns: 1fr 1.05fr; gap: 32px; align-items: start; }
+  .hook-code {
+    border: 1px solid var(--line); border-radius: 10px; background: #1a1916;
+    overflow: hidden;
+  }
+  .hook-code .bar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px; border-bottom: 1px solid #2c2a25;
+    font-family: var(--mono); font-size: 10.5px; color: #aaa6a0;
+    text-transform: uppercase; letter-spacing: 0.14em;
+  }
+  .hook-code .bar .filename { color: #e8e4dc; font-size: 11px; text-transform: none; letter-spacing: 0.02em; }
+  .hook-code pre {
+    margin: 0; padding: 18px 20px;
+    font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+    color: #e8e4dc; overflow-x: auto;
+  }
+  .hook-code .kw { color: #c792ea; }
+  .hook-code .fn { color: #82aaff; }
+  .hook-code .str { color: #c3e88d; }
+  .hook-code .cm { color: #676e7d; font-style: italic; }
+  .hook-code .pn { color: #ffcb6b; }
+
+  .hook-bullets { display: flex; flex-direction: column; gap: 18px; }
+  .hook-bullet {
+    border-left: 2px solid var(--ink); padding: 4px 0 4px 18px;
+  }
+  .hook-bullet .b-title {
+    font-family: var(--mono); font-size: 12px; text-transform: uppercase; letter-spacing: 0.12em;
+    color: var(--ink); margin-bottom: 6px;
+  }
+  .hook-bullet .b-body {
+    font-size: 14px; line-height: 1.55; color: #2a2a26;
+  }
+  .hook-bullet .b-body code { font-size: 12px; }
+
+  /* ============ local-first ============ */
+  .local-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px;
+  }
+  .local-card {
+    border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+    padding: 22px 20px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .local-card .lc-eye {
+    font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.18em;
+    color: var(--muted);
+  }
+  .local-card .lc-val {
+    font-family: var(--mono); font-size: 14px; color: var(--ink); font-weight: 600;
+    word-break: break-all; line-height: 1.4;
+  }
+  .local-card .lc-desc {
+    font-size: 13px; line-height: 1.5; color: var(--muted);
+    margin-top: auto;
+  }
+  .local-quote {
+    margin: 36px auto 0; max-width: 60ch; text-align: center;
+    font-family: var(--serif); font-size: 22px; line-height: 1.4;
+    color: var(--ink); font-style: italic; letter-spacing: -0.2px;
+  }
+  .local-quote::before, .local-quote::after { content: ""; opacity: 0.4; }
+
+  /* ============ footer cards ============ */
+  section.cards { padding: 72px 0 88px; }
+  .cards-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px;
+  }
+  .card {
+    display: flex; flex-direction: column; justify-content: space-between;
+    padding: 24px 22px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 10px;
+    text-decoration: none; color: var(--ink); min-height: 156px;
+    transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+  }
+  .card:hover { transform: translateY(-2px); border-color: var(--ink); background: #fff; }
+  .card .card-title {
+    font-family: var(--serif); font-size: 22px; line-height: 1.15; letter-spacing: -0.3px;
+  }
+  .card .card-foot {
+    margin-top: 18px; display: flex; align-items: center; justify-content: space-between;
+    font-family: var(--mono); font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.16em; color: var(--muted);
+  }
+  .card .arrow { font-family: var(--serif); font-size: 18px; color: var(--ink); opacity: 0.6; }
+  .card:hover .arrow { opacity: 1; }
+
+  footer.bottom { border-top: 1px solid var(--line); }
+  footer.bottom .inner {
+    max-width: 1080px; margin: 0 auto; padding: 24px 32px;
+    display: flex; align-items: center; justify-content: space-between;
+    font-family: var(--mono); font-size: 11px; color: var(--muted); letter-spacing: 0.04em;
+  }
+  footer.bottom a { color: var(--muted); text-decoration: none; }
+  footer.bottom a:hover { color: var(--ink); }
+
+  @media (max-width: 880px) {
+    .sources-diagram { grid-template-columns: 1fr; gap: 20px; }
+    .src-arrow { flex-direction: row; transform: rotate(90deg); }
+    .graph-wrap { grid-template-columns: 1fr; }
+    .derive-grid { grid-template-columns: repeat(2, 1fr); }
+    .hooks-wrap { grid-template-columns: 1fr; }
+    .local-grid { grid-template-columns: repeat(2, 1fr); }
+    .cards-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 600px) {
+    section { padding: 64px 0; }
+    section.hero { padding: 64px 0 56px; }
+    section.hero h1 { font-size: 42px; letter-spacing: -0.7px; }
+    .section-head h2 { font-size: 32px; }
+    .src-tiles { grid-template-columns: 1fr; }
+    .derive-grid { grid-template-columns: 1fr; }
+    .local-grid { grid-template-columns: 1fr; }
+    nav.top ul { display: none; }
+    .cadence { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============= nav ============= -->
+<nav class="top">
+  <div class="inner">
+    <span class="brand-wrap">
+      <a class="brand" href="/">
+        <span class="mark">ax</span>
+        <span class="dot">·</span>
+        <span class="tag">agent experience</span>
+      </a>
+      <span class="live-pill">live</span>
+    </span>
+    <ul>
+      <li><a class="link active" href="/features">Features</a></li>
+      <li><a class="link" href="/showcases">Showcases</a></li>
+      <li><a class="link" href="/origin">Origin</a></li>
+      <li><a class="link" href="/docs">Docs</a></li>
+      <li><a class="gh" href="https://github.com/Necmttn/ax">GitHub &nbsp;→</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+
+<!-- ============= hero ============= -->
+<section class="hero">
+  <span class="eyebrow">what's under the hood</span>
+  <h1>What ax knows about <em>your agent.</em></h1>
+  <p class="lede">
+    A tour of the data ax keeps on your laptop - the transcripts it indexes, the graph it builds,
+    the stages it derives, and the hooks it watches in real time.
+  </p>
+  <div class="toc">
+    <a href="#sources">01 Sources</a>
+    <a href="#graph">02 The graph</a>
+    <a href="#derive">03 Derive stages</a>
+    <a href="#hooks">04 Hooks</a>
+    <a href="#local">05 Local-first</a>
+  </div>
+</section>
+
+<!-- ============= 01 sources ============= -->
+<section id="sources">
+  <div class="section-head">
+    <span class="section-num">01 / Sources</span>
+    <h2>Everything your agent already wrote down.</h2>
+    <p class="section-lede">
+      Your agent leaves a paper trail in five places. ax reads all of them.
+    </p>
+  </div>
+
+  <div class="sources-diagram">
+    <div class="src-tiles">
+      <div class="src-tile">
+        <span class="label">Claude transcripts</span>
+        <span class="path">~/.claude/projects/*.jsonl</span>
+      </div>
+      <div class="src-tile">
+        <span class="label">Codex sessions</span>
+        <span class="path">~/.codex/sessions/*.jsonl</span>
+      </div>
+      <div class="src-tile">
+        <span class="label">Git history</span>
+        <span class="path">commits · file changes</span>
+      </div>
+      <div class="src-tile">
+        <span class="label">Hook fires</span>
+        <span class="path">pre-tool · post-tool · stop</span>
+      </div>
+      <div class="src-tile" style="grid-column: 1 / -1;">
+        <span class="label">Installed skills</span>
+        <span class="path">~/.claude/skills/ · ~/.agents/skills/ · plugin caches</span>
+      </div>
+    </div>
+
+    <div class="src-arrow">
+      <span>→</span>
+      <span>→</span>
+      <span>→</span>
+    </div>
+
+    <div class="src-graph">
+      <svg width="76" height="76" viewBox="0 0 76 76" fill="none" aria-hidden="true">
+        <circle cx="38" cy="14" r="6" fill="#0a0a0a"/>
+        <circle cx="14" cy="44" r="6" fill="#0a0a0a"/>
+        <circle cx="62" cy="44" r="6" fill="#0a0a0a"/>
+        <circle cx="26" cy="64" r="5" fill="#6b6b66"/>
+        <circle cx="50" cy="64" r="5" fill="#6b6b66"/>
+        <line x1="38" y1="14" x2="14" y2="44" stroke="#0a0a0a" stroke-width="1.2"/>
+        <line x1="38" y1="14" x2="62" y2="44" stroke="#0a0a0a" stroke-width="1.2"/>
+        <line x1="14" y1="44" x2="26" y2="64" stroke="#6b6b66" stroke-width="1"/>
+        <line x1="14" y1="44" x2="50" y2="64" stroke="#6b6b66" stroke-width="1"/>
+        <line x1="62" y1="44" x2="50" y2="64" stroke="#6b6b66" stroke-width="1"/>
+        <line x1="62" y1="44" x2="26" y2="64" stroke="#6b6b66" stroke-width="1"/>
+      </svg>
+      <span class="gname">graph</span>
+      <span class="gsub">SurrealDB · local</span>
+    </div>
+  </div>
+
+  <div class="section-body">
+    <p>
+      A LaunchAgent (<code>com.necmttn.ax-watch</code>) tails your transcript directories and
+      runs <code>axctl ingest --since=1</code> in the background within seconds of a new turn.
+      A weekly cron does a deep-scan backfill for anything the watcher missed.
+      Nothing is uploaded, queued, or phoned home - every read stays on the same filesystem
+      your agent already writes to.
+    </p>
+  </div>
+
+  <div class="cadence">
+    <div class="item">
+      <span class="k">live</span>
+      <span class="v"><b>LaunchAgent</b> tails new turns, ingests in ~2s</span>
+    </div>
+    <div class="item">
+      <span class="k">weekly</span>
+      <span class="v"><b>cron</b> deep-scans for missed sessions + drift</span>
+    </div>
+  </div>
+</section>
+
+<!-- ============= 02 graph ============= -->
+<section id="graph">
+  <div class="section-head">
+    <span class="section-num">02 / The graph</span>
+    <h2>A typed graph of <em>who did what, where.</em></h2>
+    <p class="section-lede">
+      Transcripts become nodes and edges. Sessions own turns. Turns invoke tools. Tools touch files.
+      Files end up in commits.
+    </p>
+  </div>
+
+  <div class="graph-wrap">
+    <div class="ascii-graph"><span class="c">// schema sketch - SurrealDB v3, ns=ax, db=main</span>
+
+       <span class="n">session</span> ──owns──▶ <span class="n">turn</span> ──invoked──▶ <span class="n">tool_call</span>
+          │                  │                    │
+          │                  │                    ├──touched──▶ <span class="n">file</span>
+          │                  │                    └──fired────▶ <span class="n">hook_event</span>
+          │                  │
+          │                  └──addressed──▶ <span class="n">skill</span>
+          │
+          └──produced──▶ <span class="n">commit</span> ──changes──▶ <span class="n">file</span>
+
+       <span class="c">// relations are first-class - every edge is queryable</span></div>
+
+    <div class="graph-legend">
+      <div class="legend-block">
+        <div class="legend-title">Nodes - 6 of ~14</div>
+        <div class="legend-list">
+          <div class="row"><code>session</code><span class="desc">one agent conversation, start → end</span></div>
+          <div class="row"><code>turn</code><span class="desc">a single user-assistant exchange</span></div>
+          <div class="row"><code>tool_call</code><span class="desc">Read, Edit, Bash, MCP - one invocation</span></div>
+          <div class="row"><code>skill</code><span class="desc">an installed Claude/Agents skill</span></div>
+          <div class="row"><code>file</code><span class="desc">a path the agent read or wrote</span></div>
+          <div class="row"><code>commit</code><span class="desc">git commit attributed to a session</span></div>
+        </div>
+      </div>
+      <div class="legend-block">
+        <div class="legend-title">Relations - 5</div>
+        <div class="legend-list">
+          <div class="row rel"><code>invoked</code><span class="desc">turn → tool_call</span></div>
+          <div class="row rel"><code>edited</code><span class="desc">tool_call → file (Edit/Write)</span></div>
+          <div class="row rel"><code>touched</code><span class="desc">tool_call → file (Read)</span></div>
+          <div class="row rel"><code>produced</code><span class="desc">session → commit</span></div>
+          <div class="row rel"><code>addressed</code><span class="desc">turn → skill (mentioned/loaded)</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============= 03 derive ============= -->
+<section id="derive">
+  <div class="section-head">
+    <span class="section-num">03 / Derive stages</span>
+    <h2>Raw events become <em>findings.</em></h2>
+    <p class="section-lede">
+      Once the graph is built, ax runs a chain of small derive stages. Each one writes back into
+      the same database, so every later query can ask the typed question instead of the raw one.
+    </p>
+  </div>
+
+  <div class="derive-grid">
+    <div class="stage-card">
+      <div class="stage-head">
+        <span class="stage-name">closure</span>
+        <span class="stage-tag">commit</span>
+      </div>
+      <div class="stage-purpose">Classifies each commit as feature-only or feature-then-fix.</div>
+      <div class="stage-meta">writes <b>commit.closure</b></div>
+    </div>
+
+    <div class="stage-card">
+      <div class="stage-head">
+        <span class="stage-name">skill_candidate</span>
+        <span class="stage-tag">pattern</span>
+      </div>
+      <div class="stage-purpose">Finds fix-chain patterns worth packaging as a skill.</div>
+      <div class="stage-meta">writes <b>skill_candidate</b></div>
+    </div>
+
+    <div class="stage-card">
+      <div class="stage-head">
+        <span class="stage-name">session_health</span>
+        <span class="stage-tag">session</span>
+      </div>
+      <div class="stage-purpose">Tokens, cache hit-rate, and context pressure per session.</div>
+      <div class="stage-meta">writes <b>session.health</b></div>
+    </div>
+
+    <div class="stage-card">
+      <div class="stage-head">
+        <span class="stage-name">friction_event</span>
+        <span class="stage-tag">signal</span>
+      </div>
+      <div class="stage-purpose">Surfaces what failed, where, and how often.</div>
+      <div class="stage-meta">writes <b>friction_event</b></div>
+    </div>
+
+    <div class="stage-card">
+      <div class="stage-head">
+        <span class="stage-name">command_outcome</span>
+        <span class="stage-tag">tool</span>
+      </div>
+      <div class="stage-purpose">Tags tool calls: success · expected-feedback · guardrail · failure.</div>
+      <div class="stage-meta">writes <b>tool_call.outcome</b></div>
+    </div>
+
+    <div class="stage-card">
+      <div class="stage-head">
+        <span class="stage-name">workflow_epoch</span>
+        <span class="stage-tag">window</span>
+      </div>
+      <div class="stage-purpose">Splits your history into eras by toolset and workflow shape.</div>
+      <div class="stage-meta">writes <b>workflow_epoch</b></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============= 04 hooks ============= -->
+<section id="hooks">
+  <div class="section-head">
+    <span class="section-num">04 / Hooks</span>
+    <h2>Watch tool fires in <em>real time.</em></h2>
+    <p class="section-lede">
+      Claude Code and Codex call hook handlers around every tool invocation. ax ships handlers that
+      record each fire as a row, and lets you backtest a candidate hook against your last 7–30 days
+      before turning it on for real.
+    </p>
+  </div>
+
+  <div class="hooks-wrap">
+    <div class="hook-code">
+      <div class="bar">
+        <span class="filename">~/.claude/hooks/ax-record.ts</span>
+        <span style="margin-left:auto">ts</span>
+      </div>
+<pre><span class="kw">import</span> { recordHook } <span class="kw">from</span> <span class="str">"ax/hooks"</span>;
+
+<span class="kw">export default async function</span> <span class="fn">handler</span>(<span class="pn">event</span>) {
+  <span class="cm">// every pre-tool fire becomes one row</span>
+  <span class="kw">await</span> <span class="fn">recordHook</span>({
+    phase:   <span class="str">"pre_tool"</span>,
+    tool:    event.tool_name,
+    session: event.session_id,
+    inputs:  event.tool_input,
+    at:      <span class="kw">new</span> Date(),
+  });
+}</pre>
+    </div>
+
+    <div class="hook-bullets">
+      <div class="hook-bullet">
+        <div class="b-title">Phase coverage</div>
+        <div class="b-body">
+          <code class="inline">pre_tool</code>, <code class="inline">post_tool</code>, and
+          <code class="inline">stop</code> are all captured. Hook rows link back to the
+          <code class="inline">turn</code> and <code class="inline">tool_call</code> that fired them.
+        </div>
+      </div>
+      <div class="hook-bullet">
+        <div class="b-title">Backtest before you ship</div>
+        <div class="b-body">
+          <code class="inline">axctl hooks backtest ./my-hook.ts --days 14</code> replays your
+          last two weeks of tool calls through the candidate and prints what it would have changed.
+        </div>
+      </div>
+      <div class="hook-bullet">
+        <div class="b-title">No daemon, no socket</div>
+        <div class="b-body">
+          Hooks write directly to the local SurrealDB. If ax isn't running, the handler no-ops in
+          under a millisecond - your agent never blocks on us.
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============= 05 local-first ============= -->
+<section id="local">
+  <div class="section-head">
+    <span class="section-num">05 / Local-first</span>
+    <h2>One process, one database, <em>one laptop.</em></h2>
+    <p class="section-lede">
+      ax is a single binary that runs as a LaunchAgent, talks only to localhost, and stores
+      everything in a SurrealDB instance you own.
+    </p>
+  </div>
+
+  <div class="local-grid">
+    <div class="local-card">
+      <span class="lc-eye">database</span>
+      <span class="lc-val">127.0.0.1:8521</span>
+      <span class="lc-desc">SurrealDB v3, schemafull. Namespace <code class="inline">ax</code>, db <code class="inline">main</code>.</span>
+    </div>
+    <div class="local-card">
+      <span class="lc-eye">dashboard</span>
+      <span class="lc-val">127.0.0.1:8520</span>
+      <span class="lc-desc">Web UI for the graph and findings. No auth - it's your loopback.</span>
+    </div>
+    <div class="local-card">
+      <span class="lc-eye">daemon</span>
+      <span class="lc-val">LaunchAgent</span>
+      <span class="lc-desc">macOS native, installed by <code class="inline">axctl install</code>. Survives reboots.</span>
+    </div>
+    <div class="local-card">
+      <span class="lc-eye">license</span>
+      <span class="lc-val">MIT · single binary</span>
+      <span class="lc-desc">No cloud account, no telemetry egress. <code class="inline">brew uninstall ax</code> removes it.</span>
+    </div>
+  </div>
+
+  <p class="local-quote">"Your transcripts are already on your laptop. ax just reads them where they sit."</p>
+</section>
+
+<!-- ============= footer cards ============= -->
+<section class="cards">
+  <div class="cards-grid">
+    <a class="card" href="/how-it-works">
+      <span class="card-title">How it works</span>
+      <span class="card-foot"><span>read</span><span class="arrow">→</span></span>
+    </a>
+    <a class="card" href="/showcases">
+      <span class="card-title">Showcases</span>
+      <span class="card-foot"><span>browse</span><span class="arrow">→</span></span>
+    </a>
+    <a class="card" href="/origin">
+      <span class="card-title">Origin</span>
+      <span class="card-foot"><span>story</span><span class="arrow">→</span></span>
+    </a>
+    <a class="card" href="/docs">
+      <span class="card-title">Docs</span>
+      <span class="card-foot"><span>reference</span><span class="arrow">→</span></span>
+    </a>
+  </div>
+</section>
+
+</main>
+
+<footer class="bottom">
+  <div class="inner">
+    <span>ax · agent experience · MIT</span>
+    <span><a href="https://github.com/Necmttn/ax">github.com/Necmttn/ax</a></span>
+  </div>
+</footer>
+
+</body>
+</html>

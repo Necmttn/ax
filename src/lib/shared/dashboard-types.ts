@@ -226,6 +226,17 @@ export interface SessionAgentDelegation {
     readonly phase: "plan" | "execute" | "review" | "merge" | "other";
 }
 
+export interface SessionTokenUsageDetail {
+    readonly model: string | null;
+    readonly prompt_tokens: number | null;
+    readonly completion_tokens: number | null;
+    readonly cache_creation_input_tokens: number | null;
+    readonly cache_read_input_tokens: number | null;
+    readonly estimated_tokens: number;
+    readonly estimated_cost_usd: number | null;
+    readonly pricing_source: string | null;
+}
+
 export interface SessionDetailPayload {
     readonly overview: SessionOverview | null;
     readonly top_skills: ReadonlyArray<SessionTopSkill>;
@@ -233,6 +244,7 @@ export interface SessionDetailPayload {
     readonly children: ReadonlyArray<SessionLink>;
     readonly parent: SessionLink | null;
     readonly agent_delegations: ReadonlyArray<SessionAgentDelegation>;
+    readonly token_usage: SessionTokenUsageDetail | null;
 }
 
 export interface WorkflowEpisode {
@@ -650,6 +662,36 @@ export interface InspectSpanDto {
     readonly label?: string;
 }
 
+export interface InspectContentAtomDto {
+    readonly kind: string;
+    readonly value: string;
+    readonly normalized: string | null;
+    readonly confidence: number;
+    readonly raw: unknown;
+}
+
+export interface InspectContentBlockDto {
+    readonly seq: number;
+    readonly parent_seq: number | null;
+    readonly kind: string;
+    readonly role: string | null;
+    readonly heading: string | null;
+    readonly text: string | null;
+    readonly text_excerpt: string | null;
+    readonly start_offset: number | null;
+    readonly end_offset: number | null;
+    readonly confidence: number;
+    readonly atoms: ReadonlyArray<InspectContentAtomDto>;
+}
+
+export interface InspectTurnContentDto {
+    readonly document_id: string;
+    readonly parser_id: string;
+    readonly parser_version: string;
+    readonly blockset_hash: string | null;
+    readonly blocks: ReadonlyArray<InspectContentBlockDto>;
+}
+
 export interface InspectTurnDto {
     /** Sequence within session, 0-indexed in JSONL message order. */
     readonly seq: number;
@@ -660,6 +702,7 @@ export interface InspectTurnDto {
     readonly ts: string | null;
     readonly char_count: number;
     readonly spans: ReadonlyArray<InspectSpanDto>;
+    readonly content?: InspectTurnContentDto | null;
 }
 
 export interface SpawnMeta {

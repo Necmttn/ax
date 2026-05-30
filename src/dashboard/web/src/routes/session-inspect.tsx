@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { api } from "../api.ts";
@@ -7,6 +7,7 @@ import { spawnAnchorSet } from "./inspector-filters.ts";
 import { spliceHookFires } from "@shared/hook-fire-splice.ts";
 import { FilterBar } from "./inspector-filter-bar.tsx";
 import { shortSessionId } from "@shared/session-id.ts";
+import type { InspectContentAtomDto, InspectContentBlockDto, InspectTurnContentDto } from "@shared/dashboard-types.ts";
 
 interface KindStyle { bg: string; fg: string; bar: string; label: string }
 const KIND_STYLE: Record<InspectSpanKind, KindStyle> = {
@@ -30,6 +31,445 @@ function Span({ span }: { span: InspectSpanDto }) {
         <span style={{ background: s.bg, color: s.fg, padding: "0 1px", borderRadius: 2 }} title={title}>
             {span.text}
         </span>
+    );
+}
+
+type ContentTone = { bg: string; fg: string; bar: string; label: string };
+
+const ALIAS_STYLE: Record<string, ContentTone> = {
+    objective:             { bg: "#dcfce7", fg: "#166534", bar: "#22c55e", label: "objective" },
+    budget:                { bg: "#ffedd5", fg: "#9a3412", bar: "#f97316", label: "budget" },
+    continuation_behavior: { bg: "#fef3c7", fg: "#854d0e", bar: "#eab308", label: "continuation" },
+    completion_audit:      { bg: "#fee2e2", fg: "#991b1b", bar: "#ef4444", label: "completion audit" },
+    progress_visibility:   { bg: "#dbeafe", fg: "#1e3a8a", bar: "#3b82f6", label: "progress" },
+    work_from_evidence:    { bg: "#ccfbf1", fg: "#115e59", bar: "#14b8a6", label: "evidence" },
+    environment_context:   { bg: "#e0f2fe", fg: "#075985", bar: "#0284c7", label: "environment" },
+    permissions:           { bg: "#e5e7eb", fg: "#1f2937", bar: "#64748b", label: "permissions" },
+    agent_guidance:        { bg: "#f5f3ff", fg: "#5b21b6", bar: "#8b5cf6", label: "agent guidance" },
+    skills_manifest:       { bg: "#dbeafe", fg: "#1e3a8a", bar: "#2563eb", label: "skills" },
+    apps_manifest:         { bg: "#ecfccb", fg: "#3f6212", bar: "#84cc16", label: "apps" },
+    plugins_manifest:      { bg: "#fce7f3", fg: "#9d174d", bar: "#ec4899", label: "plugins" },
+    tool_call:             { bg: "#ede9fe", fg: "#4c1d95", bar: "#8b5cf6", label: "tool call" },
+    tool_output:           { bg: "#e9d5ff", fg: "#5b21b6", bar: "#a855f7", label: "tool output" },
+    plan:                  { bg: "#cffafe", fg: "#155e75", bar: "#06b6d4", label: "plan" },
+    todo:                  { bg: "#fef9c3", fg: "#713f12", bar: "#ca8a04", label: "todo" },
+    verification:          { bg: "#dcfce7", fg: "#14532d", bar: "#16a34a", label: "verification" },
+    reference:             { bg: "#f1f5f9", fg: "#334155", bar: "#64748b", label: "reference" },
+};
+
+function blockFamily(kind: string): ContentTone {
+    if (kind.includes("system") || kind.includes("instruction")) return { bg: "#e5e7eb", fg: "#1f2937", bar: "#64748b", label: "system" };
+    if (kind.includes("environment") || kind.includes("context")) return { bg: "#dbeafe", fg: "#1e3a8a", bar: "#2563eb", label: "context" };
+    if (kind.includes("objective") || kind.includes("goal")) return { bg: "#dcfce7", fg: "#166534", bar: "#22c55e", label: "objective" };
+    if (kind.includes("budget") || kind.includes("metric")) return { bg: "#ffedd5", fg: "#9a3412", bar: "#f97316", label: "budget" };
+    if (kind.includes("assistant")) return { bg: "#cffafe", fg: "#155e75", bar: "#06b6d4", label: "assistant" };
+    if (kind.includes("tool")) return { bg: "#ede9fe", fg: "#4c1d95", bar: "#8b5cf6", label: "tool" };
+    if (kind.includes("hook")) return { bg: "#bbf7d0", fg: "#065f46", bar: "#10b981", label: "hook" };
+    if (kind.includes("code")) return { bg: "#f1f5f9", fg: "#334155", bar: "#475569", label: "code" };
+    if (kind.includes("heading")) return { bg: "#fee2e2", fg: "#991b1b", bar: "#ef4444", label: "heading" };
+    if (kind.includes("paragraph")) return { bg: "#fef9c3", fg: "#78350f", bar: "#eab308", label: "paragraph" };
+    return { bg: "#f8fafc", fg: "#334155", bar: "#94a3b8", label: blockLabel(kind) };
+}
+
+function blockLabel(kind: string): string {
+    return kind.replace(/_/g, " ");
+}
+
+function atomRawObject(atom: InspectContentAtomDto): Record<string, unknown> {
+    if (atom.raw && typeof atom.raw === "object" && !Array.isArray(atom.raw)) return atom.raw as Record<string, unknown>;
+    if (typeof atom.raw === "string") {
+        try {
+            const parsed = JSON.parse(atom.raw);
+            return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+        } catch {
+            return {};
+        }
+    }
+    return {};
+}
+
+function sectionAliasAtoms(block: InspectContentBlockDto): InspectContentAtomDto[] {
+    return block.atoms.filter((atom) => atom.kind === "section_alias");
+}
+
+function primarySectionAlias(block: InspectContentBlockDto): InspectContentAtomDto | null {
+    const aliases = sectionAliasAtoms(block);
+    return aliases.find((atom) => atomRawObject(atom)["primary"] === true) ?? aliases[0] ?? null;
+}
+
+function aliasLabel(atom: InspectContentAtomDto): string {
+    const raw = atomRawObject(atom);
+    return typeof raw["display"] === "string" ? raw["display"] : (ALIAS_STYLE[atom.value]?.label ?? blockLabel(atom.value));
+}
+
+function aliasTitle(atom: InspectContentAtomDto): string {
+    const raw = atomRawObject(atom);
+    const method = typeof raw["method"] === "string" ? raw["method"] : "section_alias";
+    const matched = typeof raw["matched"] === "string" ? raw["matched"] : atom.value;
+    const inherited = raw["inherited"] === true ? " inherited" : "";
+    return `${aliasLabel(atom)} · ${method}${inherited} · ${Math.round(atom.confidence * 100)}% · ${matched}`;
+}
+
+function blockTone(block: InspectContentBlockDto): ContentTone {
+    const alias = primarySectionAlias(block);
+    if (alias) {
+        const style = ALIAS_STYLE[alias.value] ?? ALIAS_STYLE.reference;
+        return { ...style, label: aliasLabel(alias) };
+    }
+    return blockFamily(block.kind);
+}
+
+function displayBlockLabel(block: InspectContentBlockDto): string {
+    const alias = primarySectionAlias(block);
+    return alias ? aliasLabel(alias) : blockLabel(block.kind);
+}
+
+function blockHoverTitle(block: InspectContentBlockDto, mismatch: boolean): string {
+    const alias = primarySectionAlias(block);
+    const base = alias ? aliasTitle(alias) : blockLabel(block.kind);
+    return mismatch ? `offset mismatch: ${base}` : base;
+}
+
+type InspectTarget =
+    | { kind: "block"; blockSeq: number }
+    | { kind: "atom"; blockSeq: number; atomIndex: number };
+
+function sameInspectTarget(a: InspectTarget | null, b: InspectTarget | null): boolean {
+    if (a === b) return true;
+    if (!a || !b) return false;
+    if (a.kind !== b.kind || a.blockSeq !== b.blockSeq) return false;
+    return a.kind === "block" || a.atomIndex === (b as { kind: "atom"; atomIndex: number }).atomIndex;
+}
+
+function targetBlockSeq(target: InspectTarget | null): number | null {
+    return target?.blockSeq ?? null;
+}
+
+function selectedBlock(content: InspectTurnContentDto, target: InspectTarget | null): InspectContentBlockDto | null {
+    const seq = targetBlockSeq(target);
+    return seq == null ? null : content.blocks.find((block) => block.seq === seq) ?? null;
+}
+
+function selectedAtom(block: InspectContentBlockDto | null, target: InspectTarget | null): InspectContentAtomDto | null {
+    if (!block || target?.kind !== "atom") return null;
+    return block.atoms[target.atomIndex] ?? null;
+}
+
+function contentBrief(text: string | null | undefined, max = 520): string {
+    if (!text) return "";
+    return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+function atomDisplayLabel(atom: InspectContentAtomDto): string {
+    return atom.kind === "section_alias" ? aliasLabel(atom) : blockLabel(atom.kind);
+}
+
+function atomTone(atom: InspectContentAtomDto): ContentTone {
+    if (atom.kind === "section_alias") return ALIAS_STYLE[atom.value] ?? ALIAS_STYLE.reference;
+    if (atom.kind.includes("file")) return { bg: "#eff6ff", fg: "#1d4ed8", bar: "#3b82f6", label: "file" };
+    if (atom.kind.includes("url") || atom.kind.includes("citation")) return { bg: "#ecfeff", fg: "#0e7490", bar: "#06b6d4", label: "link" };
+    if (atom.kind.includes("symbol")) return { bg: "#f0fdf4", fg: "#15803d", bar: "#22c55e", label: "symbol" };
+    if (atom.kind.includes("command")) return { bg: "#fef3c7", fg: "#92400e", bar: "#f59e0b", label: "command" };
+    return { bg: "#f8fafc", fg: "#334155", bar: "#94a3b8", label: blockLabel(atom.kind) };
+}
+
+function semanticAliasCounts(content: InspectTurnContentDto): Array<{ alias: string; label: string; count: number; tone: ContentTone }> {
+    const aliases = visibleTextBlocks(content)
+        .map((block) => primarySectionAlias(block))
+        .filter((alias): alias is InspectContentAtomDto => alias !== null);
+    const hasStructuralAlias = aliases.some((alias) => alias.value !== "reference");
+    const counts = new Map<string, { label: string; count: number; tone: ContentTone }>();
+    for (const alias of aliases) {
+        if (hasStructuralAlias && alias.value === "reference") continue;
+        const style = ALIAS_STYLE[alias.value] ?? ALIAS_STYLE.reference;
+        const existing = counts.get(alias.value) ?? { label: aliasLabel(alias), count: 0, tone: { ...style, label: aliasLabel(alias) } };
+        counts.set(alias.value, { ...existing, count: existing.count + 1 });
+    }
+    return [...counts.entries()]
+        .map(([alias, value]) => ({ alias, ...value }))
+        .sort((a, b) => b.count - a.count);
+}
+
+function AliasMiniMap({
+    content,
+    activeTarget,
+    setActiveTarget,
+}: {
+    content: InspectTurnContentDto;
+    activeTarget: InspectTarget | null;
+    setActiveTarget: (target: InspectTarget | null) => void;
+}) {
+    const aliasBlocks = visibleTextBlocks(content)
+        .map((block) => ({ block, alias: primarySectionAlias(block) }))
+        .filter((entry): entry is { block: InspectContentBlockDto; alias: InspectContentAtomDto } => entry.alias !== null);
+    const hasStructuralAlias = aliasBlocks.some((entry) => entry.alias.value !== "reference");
+    const blocks = hasStructuralAlias
+        ? aliasBlocks.filter((entry) => entry.alias.value !== "reference")
+        : aliasBlocks;
+    if (blocks.length === 0) return null;
+
+    return (
+        <div
+            aria-label="turn semantic map"
+            style={{
+                display: "flex",
+                gap: 2,
+                height: 12,
+                padding: "2px 0 5px",
+                minWidth: 0,
+            }}
+        >
+            {blocks.map(({ block, alias }) => {
+                const tone = ALIAS_STYLE[alias.value] ?? ALIAS_STYLE.reference;
+                const start = block.start_offset ?? 0;
+                const end = block.end_offset ?? start;
+                const width = Math.max(10, end - start);
+                const active = targetBlockSeq(activeTarget) === block.seq;
+                const target: InspectTarget = { kind: "block", blockSeq: block.seq };
+                return (
+                    <button
+                        key={`map-${block.seq}-${alias.value}`}
+                        type="button"
+                        onMouseEnter={() => setActiveTarget(target)}
+                        onClick={() => setActiveTarget(target)}
+                        title={aliasTitle(alias)}
+                        style={{
+                            flex: `${width} 1 10px`,
+                            minWidth: 8,
+                            height: 8,
+                            padding: 0,
+                            border: active ? `1px solid ${tone.fg}` : "1px solid transparent",
+                            borderRadius: 2,
+                            background: tone.bar,
+                            opacity: active ? 1 : 0.72,
+                            cursor: "pointer",
+                        }}
+                    />
+                );
+            })}
+        </div>
+    );
+}
+
+function visibleTextBlocks(content: InspectTurnContentDto): InspectContentBlockDto[] {
+    const withOffsets = content.blocks
+        .filter((block) => block.start_offset != null && block.end_offset != null)
+        .filter((block) => (block.end_offset ?? 0) > (block.start_offset ?? 0));
+    const parentsWithChildren = new Set(
+        withOffsets
+            .map((block) => block.parent_seq)
+            .filter((seq): seq is number => seq != null),
+    );
+    const candidates = withOffsets.filter((block) =>
+        block.parent_seq != null || !parentsWithChildren.has(block.seq)
+    );
+    const selected: InspectContentBlockDto[] = [];
+    let cursor = -1;
+    for (const block of candidates
+        .slice()
+        .sort((a, b) => (a.start_offset ?? 0) - (b.start_offset ?? 0))
+    ) {
+        const start = block.start_offset ?? 0;
+        const end = block.end_offset ?? start;
+        if (start < cursor) continue;
+        selected.push(block);
+        cursor = end;
+    }
+    return selected;
+}
+
+function AnnotatedRawText({
+    content,
+    rawText,
+    activeTarget,
+    setActiveTarget,
+    maxHeight,
+}: {
+    content: InspectTurnContentDto;
+    rawText: string;
+    activeTarget: InspectTarget | null;
+    setActiveTarget: (target: InspectTarget | null) => void;
+    maxHeight: number;
+}) {
+    const blocks = visibleTextBlocks(content);
+    const activeSeq = targetBlockSeq(activeTarget);
+
+    const rawParts: ReactNode[] = [];
+    let cursor = 0;
+    for (const block of blocks) {
+        const start = block.start_offset ?? 0;
+        const end = block.end_offset ?? start;
+        if (start > cursor) rawParts.push(rawText.slice(cursor, start));
+        const family = blockTone(block);
+        const slice = rawText.slice(start, end);
+        const mismatch = block.text != null && slice !== block.text;
+        const active = activeSeq === block.seq;
+        const target: InspectTarget = { kind: "block", blockSeq: block.seq };
+        rawParts.push(
+            <span
+                key={`raw-${block.seq}`}
+                onMouseEnter={() => setActiveTarget(target)}
+                onClick={() => setActiveTarget(target)}
+                title={blockHoverTitle(block, mismatch)}
+                style={{
+                    background: active ? "#fef08a" : family.bg,
+                    color: family.fg,
+                    outline: active ? `1px solid ${family.bar}` : "none",
+                    outlineOffset: 2,
+                    borderBottom: mismatch ? "1px dotted #f97316" : `1px solid ${family.bar}`,
+                    borderRadius: 2,
+                    cursor: "pointer",
+                }}
+            >
+                {slice}
+            </span>,
+        );
+        cursor = end;
+    }
+    if (cursor < rawText.length) rawParts.push(rawText.slice(cursor));
+
+    return (
+        <pre style={{
+            margin: 0,
+            padding: 10,
+            maxHeight,
+            overflow: "auto",
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+            font: "11px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace",
+            background: "#fff",
+        }}>
+            {rawParts.length > 0 ? rawParts : rawText}
+        </pre>
+    );
+}
+
+function TurnContentInspector({
+    content,
+    activeTarget,
+    setActiveTarget,
+}: {
+    content: InspectTurnContentDto;
+    activeTarget: InspectTarget | null;
+    setActiveTarget: (target: InspectTarget | null) => void;
+}) {
+    const block = selectedBlock(content, activeTarget) ?? visibleTextBlocks(content)[0] ?? content.blocks[0] ?? null;
+    const atom = selectedAtom(block, activeTarget);
+    const family = block ? blockTone(block) : ALIAS_STYLE.reference;
+    const blockAtoms = block?.atoms ?? [];
+
+    return (
+        <aside style={{ border: "1px solid #d8dee8", background: "#f8fafc", minWidth: 0, maxHeight: 400, overflow: "auto" }}>
+            <div style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
+                <strong style={{ color: "#334155", font: "700 10px/1 ui-monospace, monospace", textTransform: "uppercase" }}>
+                    inspector
+                </strong>
+                <span style={{ color: "#94a3b8", font: "10px/1 ui-monospace, monospace" }}>
+                    {content.parser_id}@{content.parser_version}
+                </span>
+            </div>
+            {!block ? (
+                <div style={{ padding: 10, color: "#94a3b8", font: "11px/1.5 ui-monospace, monospace" }}>No parsed block selected.</div>
+            ) : (
+                <div style={{ padding: 10, display: "grid", gap: 8 }}>
+                    <div style={{ background: "#fff", border: "1px solid #e2e8f0", boxShadow: `inset 4px 0 0 ${family.bar}`, padding: "8px 9px" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
+                            <strong style={{ color: family.fg, font: "700 11px/1 ui-monospace, monospace", textTransform: "uppercase" }}>
+                                {displayBlockLabel(block)}
+                            </strong>
+                            <span style={{ color: "#94a3b8", font: "10px/1 ui-monospace, monospace" }}>
+                                block #{block.seq}{block.parent_seq == null ? "" : ` / parent ${block.parent_seq}`}
+                            </span>
+                        </div>
+                        <div style={{ marginTop: 6, color: "#64748b", font: "10px/1.3 ui-monospace, monospace" }}>
+                            {block.kind} · {Math.round(block.confidence * 100)}% · {block.start_offset ?? "?"}-{block.end_offset ?? "?"}
+                        </div>
+                        {block.heading ? (
+                            <div style={{ marginTop: 7, color: "#334155", font: "700 11px/1.35 ui-monospace, monospace" }}>{block.heading}</div>
+                        ) : null}
+                        <pre style={{ margin: "7px 0 0", color: "#334155", font: "11px/1.45 ui-monospace, monospace", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                            {contentBrief(block.text_excerpt ?? block.text)}
+                        </pre>
+                    </div>
+
+                    {atom ? (
+                        <AtomCard atom={atom} active />
+                    ) : null}
+
+                    <div>
+                        <div style={{ color: "#64748b", font: "700 10px/1 ui-monospace, monospace", textTransform: "uppercase", marginBottom: 5 }}>
+                            atoms in this block · {blockAtoms.length}
+                        </div>
+                        {blockAtoms.length === 0 ? (
+                            <div style={{ color: "#94a3b8", font: "11px/1.5 ui-monospace, monospace" }}>No references or semantic atoms extracted.</div>
+                        ) : (
+                            <div style={{ display: "grid", gap: 5 }}>
+                                {blockAtoms.map((entry, index) => {
+                                    const target: InspectTarget = { kind: "atom", blockSeq: block.seq, atomIndex: index };
+                                    const active = sameInspectTarget(activeTarget, target);
+                                    return (
+                                        <button
+                                            key={`${entry.kind}-${entry.value}-${index}`}
+                                            type="button"
+                                            onMouseEnter={() => setActiveTarget(target)}
+                                            onClick={() => setActiveTarget(target)}
+                                            style={{
+                                                textAlign: "left",
+                                                padding: 0,
+                                                border: "none",
+                                                background: "transparent",
+                                                cursor: "pointer",
+                                            }}
+                                        >
+                                            <AtomCard atom={entry} active={active} compact />
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                    {content.blockset_hash ? (
+                        <div style={{ color: "#94a3b8", font: "10px/1.35 ui-monospace, monospace", borderTop: "1px solid #e2e8f0", paddingTop: 7 }}>
+                            blockset {content.blockset_hash.slice(0, 12)}
+                        </div>
+                    ) : null}
+                </div>
+            )}
+        </aside>
+    );
+}
+
+function AtomCard({ atom, active, compact = false }: { atom: InspectContentAtomDto; active: boolean; compact?: boolean }) {
+    const tone = atomTone(atom);
+    const raw = atomRawObject(atom);
+    const method = typeof raw["method"] === "string" ? raw["method"] : null;
+    const matched = typeof raw["matched"] === "string" ? raw["matched"] : null;
+    return (
+        <div style={{
+            border: `1px solid ${active ? tone.bar : "#e2e8f0"}`,
+            boxShadow: `inset 3px 0 0 ${tone.bar}`,
+            background: active ? tone.bg : "#fff",
+            padding: compact ? "6px 7px" : "8px 9px",
+        }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
+                <strong style={{ color: tone.fg, font: "700 10px/1 ui-monospace, monospace", textTransform: "uppercase" }}>
+                    {atomDisplayLabel(atom)}
+                </strong>
+                <span style={{ color: "#94a3b8", font: "10px/1 ui-monospace, monospace" }}>
+                    {Math.round(atom.confidence * 100)}%
+                </span>
+            </div>
+            <div style={{ marginTop: 4, color: "#334155", font: "11px/1.35 ui-monospace, monospace", overflowWrap: "anywhere" }}>
+                {atom.normalized ?? atom.value}
+            </div>
+            {!compact && (method || matched) ? (
+                <div style={{ marginTop: 5, color: "#64748b", font: "10px/1.35 ui-monospace, monospace" }}>
+                    {method ? `method: ${method}` : null}
+                    {method && matched ? " · " : null}
+                    {matched ? `matched: ${matched}` : null}
+                </div>
+            ) : null}
+        </div>
     );
 }
 
@@ -180,6 +620,8 @@ function HookFireMarker({ hook }: { hook: HookFireDto }) {
 }
 
 function Turn({ turn, anchored, childrenSpawnedHere }: { turn: InspectTurnDto; anchored: boolean; childrenSpawnedHere?: ReadonlyArray<SpawnChildDto> }) {
+    const [showInspector, setShowInspector] = useState(false);
+    const [activeTarget, setActiveTarget] = useState<InspectTarget | null>(null);
     const s = KIND_STYLE[turn.semantic_role];
     const kindCounts = new Map<InspectSpanKind, number>();
     for (const sp of turn.spans) kindCounts.set(sp.kind, (kindCounts.get(sp.kind) ?? 0) + sp.text.length);
@@ -195,6 +637,24 @@ function Turn({ turn, anchored, childrenSpawnedHere }: { turn: InspectTurnDto; a
                 </span>
             );
         });
+    const aliasChips = turn.content ? semanticAliasCounts(turn.content).slice(0, 8).map(({ alias, label, count, tone }) => (
+        <span
+            key={alias}
+            title={`${label} · ${count} block${count === 1 ? "" : "s"}`}
+            style={{
+                background: tone.bg,
+                color: tone.fg,
+                borderLeft: `3px solid ${tone.bar}`,
+                padding: "0 6px",
+                borderRadius: 3,
+                fontSize: 10,
+                fontFamily: "ui-monospace, monospace",
+                fontWeight: 700,
+            }}
+        >
+            {label} {count}
+        </span>
+    )) : [];
     const ts = turn.ts ? new Date(turn.ts).toISOString().slice(11, 19) : "";
     const sizeStr = turn.char_count > 1000 ? `${(turn.char_count / 1000).toFixed(1)}k` : `${turn.char_count}`;
     const jsonlBadge = turn.role !== turn.semantic_role.replace(/_text$|_input$/, "")
@@ -220,11 +680,56 @@ function Turn({ turn, anchored, childrenSpawnedHere }: { turn: InspectTurnDto; a
                 {jsonlBadge}
                 <span style={{ color: "#94a3b8" }}>{ts}</span>
                 <span style={{ color: "#94a3b8" }}>{sizeStr}c · {turn.spans.length}span</span>
-                <span style={{ display: "inline-flex", gap: 3, flexWrap: "wrap", marginLeft: "auto" }}>{chips}</span>
+                {turn.content ? (
+                    <button
+                        onClick={() => setShowInspector((value) => !value)}
+                        style={{
+                            padding: "1px 7px", border: "1px solid #cbd5e1", borderRadius: 3,
+                            background: showInspector ? "#0f172a" : "#fff", color: showInspector ? "#fff" : "#475569",
+                            font: "10px/1.4 ui-monospace, monospace", cursor: "pointer",
+                        }}
+                    >
+                        {showInspector ? "hide inspector" : "inspect"}
+                    </button>
+                ) : null}
+                <span style={{ display: "inline-flex", gap: 3, flexWrap: "wrap", marginLeft: "auto" }}>
+                    {aliasChips.length > 0 ? aliasChips : chips}
+                </span>
             </div>
-            <pre style={{ margin: 0, padding: "4px 0 6px", whiteSpace: "pre-wrap", wordBreak: "break-word", font: "12px/1.55 ui-monospace, monospace", maxHeight: 400, overflow: "auto" }}>
-                {turn.spans.map((sp, i) => <Span key={i} span={sp} />)}
-            </pre>
+            {turn.content ? (
+                <>
+                    <AliasMiniMap
+                        content={turn.content}
+                        activeTarget={activeTarget}
+                        setActiveTarget={setActiveTarget}
+                    />
+                    <div style={{
+                        display: "grid",
+                        gridTemplateColumns: showInspector ? "minmax(0, 1fr) minmax(260px, 340px)" : "1fr",
+                        gap: showInspector ? 8 : 0,
+                        alignItems: "start",
+                    }}>
+                        <AnnotatedRawText
+                            content={turn.content}
+                            rawText={turn.spans.map((span) => span.text).join("")}
+                            activeTarget={activeTarget}
+                            setActiveTarget={setActiveTarget}
+                            maxHeight={400}
+                        />
+                        {showInspector ? (
+                            <TurnContentInspector
+                                content={turn.content}
+                                activeTarget={activeTarget}
+                                setActiveTarget={setActiveTarget}
+                            />
+                        ) : null}
+                    </div>
+                </>
+            ) : (
+                <pre style={{ margin: 0, padding: "4px 0 6px", whiteSpace: "pre-wrap", wordBreak: "break-word", font: "12px/1.55 ui-monospace, monospace", maxHeight: 400, overflow: "auto" }}>
+                    {turn.spans.map((sp, i) => <Span key={i} span={sp} />)}
+                </pre>
+            )}
             {childrenSpawnedHere && childrenSpawnedHere.length > 0 ? (
                 <div style={{ padding: "0 0 4px" }}>
                     {childrenSpawnedHere.map((c) => (

@@ -1,0 +1,1044 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ax shadow classifier lab</title>
+  <style>
+    :root {
+      --paper: #f4f1e8;
+      --paper-2: #ede8db;
+      --ink: #171510;
+      --muted: #686255;
+      --faint: #958d7e;
+      --line: #d4cab8;
+      --line-strong: #b9ae9c;
+      --panel: #fbf8ee;
+      --panel-warm: #f7ead4;
+      --green: #246b4b;
+      --green-soft: #dcecdf;
+      --red: #9b382f;
+      --red-soft: #f0d6cf;
+      --blue: #245f7b;
+      --blue-soft: #d7e5ea;
+      --amber: #94661b;
+      --amber-soft: #f0dfbd;
+      --black: #11100d;
+      --mono: "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+      --serif: Georgia, "Times New Roman", serif;
+      --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      background:
+        linear-gradient(90deg, rgba(23, 21, 16, 0.045) 1px, transparent 1px),
+        linear-gradient(rgba(23, 21, 16, 0.035) 1px, transparent 1px),
+        var(--paper);
+      background-size: 48px 48px;
+      color: var(--ink);
+      font-family: var(--sans);
+      font-size: 15px;
+      line-height: 1.45;
+    }
+
+    button, input, select { font: inherit; }
+    button { cursor: pointer; }
+
+    .shell {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 248px minmax(0, 1fr);
+    }
+
+    aside {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      padding: 22px 20px;
+      background: rgba(251, 248, 238, 0.86);
+      border-right: 1px solid var(--line);
+      backdrop-filter: blur(18px);
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+    }
+
+    .mark {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 14px;
+      padding-bottom: 18px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .mark strong {
+      font-family: var(--serif);
+      font-size: 28px;
+      font-weight: 400;
+      letter-spacing: -0.03em;
+    }
+
+    .mark span {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .nav-group {
+      display: grid;
+      gap: 7px;
+    }
+
+    .nav-group small {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.14em;
+      color: var(--faint);
+      text-transform: uppercase;
+      margin: 8px 0 3px;
+    }
+
+    .nav-item {
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--muted);
+      width: 100%;
+      min-height: 34px;
+      padding: 7px 9px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      text-align: left;
+      border-radius: 6px;
+    }
+
+    .nav-item.active {
+      color: var(--ink);
+      border-color: var(--line);
+      background: var(--panel);
+    }
+
+    .nav-item .count {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--faint);
+    }
+
+    .run-card {
+      margin-top: auto;
+      border: 1px solid var(--line);
+      background: var(--paper-2);
+      padding: 13px;
+      border-radius: 8px;
+    }
+
+    .run-card code {
+      display: block;
+      font-family: var(--mono);
+      font-size: 11px;
+      line-height: 1.55;
+      color: var(--muted);
+      overflow-wrap: anywhere;
+    }
+
+    main {
+      padding: 26px;
+      min-width: 0;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 22px;
+    }
+
+    .crumb {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .actions {
+      display: flex;
+      gap: 9px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .btn {
+      border: 1px solid var(--line-strong);
+      background: var(--panel);
+      color: var(--ink);
+      min-height: 36px;
+      padding: 7px 12px;
+      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 1px 0 rgba(23, 21, 16, 0.05);
+    }
+
+    .btn.primary {
+      background: var(--black);
+      border-color: var(--black);
+      color: #f7f2e5;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+      gap: 18px;
+      align-items: stretch;
+      margin-bottom: 18px;
+    }
+
+    .statement {
+      border: 1px solid var(--line);
+      background: rgba(251, 248, 238, 0.92);
+      padding: 28px;
+      border-radius: 8px;
+      min-height: 290px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    h1 {
+      font-family: var(--serif);
+      font-weight: 400;
+      font-size: clamp(38px, 6vw, 76px);
+      line-height: 0.96;
+      letter-spacing: -0.045em;
+      margin: 0;
+      max-width: 860px;
+    }
+
+    .lede {
+      margin: 26px 0 0;
+      max-width: 730px;
+      color: var(--muted);
+      font-size: 17px;
+    }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 26px;
+    }
+
+    .stat {
+      border-top: 1px solid var(--line);
+      padding-top: 12px;
+    }
+
+    .stat b {
+      display: block;
+      font-family: var(--mono);
+      font-size: 22px;
+      font-weight: 600;
+      letter-spacing: -0.03em;
+    }
+
+    .stat span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .export-panel {
+      border: 1px solid var(--line);
+      background: var(--black);
+      color: #f5efe2;
+      border-radius: 8px;
+      overflow: hidden;
+      min-height: 290px;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+    }
+
+    .panel-head {
+      min-height: 46px;
+      padding: 12px 14px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .panel-title {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #cfc6b6;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 24px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid currentColor;
+      color: var(--green);
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .pill::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .terminal {
+      padding: 18px 16px;
+      font-family: var(--mono);
+      font-size: 12px;
+      color: #d8cfbd;
+      overflow: auto;
+    }
+
+    .terminal .muted { color: #837967; }
+    .terminal .ok { color: #86c28f; }
+    .terminal .warn { color: #e1bd6e; }
+
+    .export-settings {
+      border-top: 1px solid rgba(255, 255, 255, 0.12);
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .setting {
+      padding: 12px;
+      border-right: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    .setting:last-child { border-right: none; }
+    .setting label {
+      display: block;
+      font-family: var(--mono);
+      font-size: 10px;
+      color: #837967;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 6px;
+    }
+
+    .setting output {
+      font-family: var(--mono);
+      font-size: 18px;
+      color: #f5efe2;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      background: rgba(251, 248, 238, 0.94);
+      border-radius: 8px;
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    .card-head {
+      padding: 15px 16px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .card h2 {
+      font-family: var(--serif);
+      font-weight: 400;
+      font-size: 25px;
+      letter-spacing: -0.02em;
+      margin: 0;
+    }
+
+    .card p {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .card-body { padding: 16px; }
+
+    .segmented {
+      display: inline-flex;
+      border: 1px solid var(--line);
+      background: var(--paper-2);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    .segment {
+      border: 0;
+      border-right: 1px solid var(--line);
+      background: transparent;
+      min-height: 30px;
+      padding: 5px 9px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .segment:last-child { border-right: 0; }
+    .segment.active {
+      background: var(--black);
+      color: #f5efe2;
+    }
+
+    .bars {
+      display: grid;
+      gap: 12px;
+    }
+
+    .bar-row {
+      display: grid;
+      grid-template-columns: 116px minmax(0, 1fr) 54px;
+      align-items: center;
+      gap: 12px;
+      font-size: 13px;
+    }
+
+    .track {
+      display: block;
+      height: 12px;
+      background: var(--paper-2);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .fill {
+      display: block;
+      height: 100%;
+      width: var(--w);
+      background: var(--c);
+      border-radius: inherit;
+      transition: width 240ms ease;
+    }
+
+    .score {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--muted);
+      text-align: right;
+    }
+
+    .matrix {
+      display: grid;
+      grid-template-columns: 72px repeat(3, 1fr);
+      gap: 7px;
+      align-items: stretch;
+    }
+
+    .matrix div {
+      min-height: 46px;
+      border: 1px solid var(--line);
+      background: var(--paper-2);
+      display: grid;
+      place-items: center;
+      border-radius: 5px;
+      font-family: var(--mono);
+      font-size: 12px;
+      text-align: center;
+      color: var(--muted);
+    }
+
+    .matrix .label {
+      background: transparent;
+      border-color: transparent;
+      justify-content: end;
+      padding-right: 4px;
+      color: var(--faint);
+    }
+
+    .matrix .hot {
+      background: var(--green-soft);
+      color: var(--green);
+      border-color: #b7d5bc;
+      font-weight: 700;
+    }
+
+    .matrix .miss {
+      background: var(--red-soft);
+      color: var(--red);
+      border-color: #dfb5ad;
+    }
+
+    .pipeline {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .stage {
+      min-height: 124px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      background: var(--paper-2);
+      border-radius: 7px;
+      position: relative;
+    }
+
+    .stage::after {
+      content: "";
+      position: absolute;
+      right: -11px;
+      top: 50%;
+      width: 10px;
+      height: 1px;
+      background: var(--line-strong);
+    }
+
+    .stage:last-child::after { display: none; }
+    .stage b {
+      display: block;
+      margin-bottom: 10px;
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .stage span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .rows {
+      display: grid;
+      gap: 10px;
+    }
+
+    .sample {
+      border: 1px solid var(--line);
+      background: var(--paper-2);
+      border-radius: 7px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 130px 100px;
+      gap: 10px;
+      padding: 12px;
+      align-items: center;
+    }
+
+    .sample blockquote {
+      margin: 0;
+      font-family: var(--serif);
+      font-size: 17px;
+      line-height: 1.25;
+    }
+
+    .sample small {
+      display: block;
+      margin-top: 6px;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 11px;
+    }
+
+    .tag {
+      justify-self: start;
+      padding: 4px 7px;
+      border-radius: 999px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--ink);
+      border: 1px solid var(--line-strong);
+      background: var(--panel);
+    }
+
+    .tag.accept { color: var(--green); background: var(--green-soft); border-color: #b7d5bc; }
+    .tag.reject { color: var(--red); background: var(--red-soft); border-color: #dfb5ad; }
+    .tag.revise { color: var(--amber); background: var(--amber-soft); border-color: #d8bd82; }
+
+    .confidence {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--muted);
+      text-align: right;
+    }
+
+    .review {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      align-items: stretch;
+    }
+
+    .quote-box {
+      border: 1px solid var(--line);
+      background: var(--paper-2);
+      border-radius: 7px;
+      padding: 14px;
+      min-height: 178px;
+    }
+
+    .quote-box h3 {
+      margin: 0 0 10px;
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      color: var(--faint);
+      text-transform: uppercase;
+    }
+
+    .quote-box p {
+      color: var(--ink);
+      font-size: 15px;
+      margin: 0;
+    }
+
+    .verdicts {
+      display: grid;
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .verdict {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 9px 10px;
+      border-radius: 6px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      font-size: 13px;
+    }
+
+    .verdict b {
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .foot-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 18px;
+    }
+
+    .check {
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--paper-2);
+    }
+
+    .check b {
+      display: block;
+      font-family: var(--mono);
+      font-size: 12px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .check span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .toast {
+      position: fixed;
+      right: 20px;
+      bottom: 20px;
+      background: var(--black);
+      color: #f5efe2;
+      padding: 10px 12px;
+      border-radius: 6px;
+      font-family: var(--mono);
+      font-size: 12px;
+      opacity: 0;
+      transform: translateY(8px);
+      pointer-events: none;
+      transition: 180ms ease;
+      z-index: 5;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    @media (max-width: 1040px) {
+      .shell { grid-template-columns: 1fr; }
+      aside {
+        position: static;
+        height: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .nav-group {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+      .run-card { display: none; }
+      .hero, .grid, .review, .foot-grid { grid-template-columns: 1fr; }
+      .pipeline { grid-template-columns: 1fr 1fr; }
+      .stage::after { display: none; }
+    }
+
+    @media (max-width: 640px) {
+      main { padding: 16px; }
+      aside { padding: 16px; }
+      .topbar {
+        align-items: stretch;
+        flex-direction: column;
+      }
+      .actions { justify-content: start; }
+      .nav-group { grid-template-columns: 1fr 1fr; }
+      .statement { padding: 20px; }
+      .status-grid, .export-settings, .pipeline { grid-template-columns: 1fr; }
+      .bar-row { grid-template-columns: 88px 1fr 48px; }
+      .matrix { grid-template-columns: 52px repeat(3, 1fr); gap: 5px; }
+      .matrix div { min-height: 38px; font-size: 10px; }
+      .sample { grid-template-columns: 1fr; }
+      .confidence { text-align: left; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside>
+      <div class="mark">
+        <strong>ax</strong>
+        <span>shadow lab</span>
+      </div>
+
+      <nav class="nav-group" aria-label="prototype sections">
+        <small>Experiment</small>
+        <button class="nav-item active" data-jump="#export"><span>Exporter</span><span class="count">90d</span></button>
+        <button class="nav-item" data-jump="#benchmark"><span>Benchmark</span><span class="count">+0.23</span></button>
+        <button class="nav-item" data-jump="#review"><span>Review queue</span><span class="count">50</span></button>
+        <button class="nav-item" data-jump="#surrealml"><span>SurrealML path</span><span class="count">20</span></button>
+      </nav>
+
+      <div class="run-card">
+        <code>bun scripts/prototypes/ax-shadow-classifier.ts export --out=.ax/ml/turn-shadow.ndjson --since=90 --min-confidence=0.82</code>
+      </div>
+    </aside>
+
+    <main>
+      <div class="topbar">
+        <div>
+          <div class="crumb">prototype / turn feedback graph / classifier sidecar</div>
+        </div>
+        <div class="actions">
+          <button class="btn" id="copyCommand">copy command</button>
+          <button class="btn primary" id="simulateRun">simulate export</button>
+        </div>
+      </div>
+
+      <section class="hero" id="export">
+        <div class="statement">
+          <div>
+            <h1>Train beside the graph, never inside the ingest path.</h1>
+            <p class="lede">A read-only lab for exporting high-confidence user turns, checking whether local ML finds missed feedback signals, and keeping every prediction out of Stage 1 tables until it earns trust.</p>
+          </div>
+          <div class="status-grid">
+            <div class="stat"><b id="rowCount">2,087</b><span>expresses edges available</span></div>
+            <div class="stat"><b>85</b><span>reaction pairs</span></div>
+            <div class="stat"><b id="gateState">pass</b><span>500 row export gate</span></div>
+          </div>
+        </div>
+
+        <div class="export-panel">
+          <div class="panel-head">
+            <span class="panel-title">read-only exporter</span>
+            <span class="pill" id="runState">idle</span>
+          </div>
+          <pre class="terminal" id="terminal"><span class="muted">$</span> ax shadow export --since=90 --min-confidence=0.82
+<span class="ok">selected</span> turn_label_row from turn_analysis + expresses
+<span class="ok">joined</span> semantic_signal labels where available
+<span class="warn">held out</span> sessions for benchmark split
+<span class="muted">output</span> .ax/ml/turn-shadow.ndjson</pre>
+          <div class="export-settings">
+            <div class="setting">
+              <label for="since">window</label>
+              <output id="sinceOut">90 days</output>
+            </div>
+            <div class="setting">
+              <label for="confidence">confidence</label>
+              <output id="confidenceOut">0.82</output>
+            </div>
+            <div class="setting">
+              <label for="split">split</label>
+              <output>session held out</output>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="grid" id="benchmark">
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <h2>Benchmark ladder</h2>
+              <p>Prototype target: beat majority baseline macro F1 by at least 0.15.</p>
+            </div>
+            <div class="segmented" role="tablist" aria-label="benchmark task">
+              <button class="segment active" data-task="reaction">reaction</button>
+              <button class="segment" data-task="polarity">polarity</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="bars" id="bars"></div>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <h2>Polarity confusion</h2>
+              <p>Rows are heuristic labels; columns are shadow predictions.</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="matrix" aria-label="confusion matrix">
+              <div></div><div class="label">accept</div><div class="label">reject</div><div class="label">revise</div>
+              <div class="label">accept</div><div class="hot">41</div><div class="miss">3</div><div>8</div>
+              <div class="label">reject</div><div class="miss">2</div><div class="hot">14</div><div>7</div>
+              <div class="label">revise</div><div>6</div><div class="miss">5</div><div class="hot">29</div>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section class="card" id="review">
+        <div class="card-head">
+          <div>
+            <h2>Disagreement review queue</h2>
+            <p>Manual inspection target: at least 10 plausible heuristic mistakes or missing labels in 50 disagreements.</p>
+          </div>
+          <button class="btn" id="nextReview">next row</button>
+        </div>
+        <div class="card-body">
+          <div class="review">
+            <div class="quote-box">
+              <h3>assistant turn being reacted to</h3>
+              <p id="assistantText">I can wire this through the ingest registry and run the full backfill now.</p>
+              <div class="verdicts">
+                <div class="verdict"><span>heuristic</span><b id="heuristicLabel">accept / implementation preference</b></div>
+                <div class="verdict"><span>shadow</span><b id="shadowLabel">revise / scope correction</b></div>
+              </div>
+            </div>
+            <div class="quote-box">
+              <h3>user reaction</h3>
+              <p id="userText">No, keep this as a prototype. I want to see the exporter shape before it touches the CLI.</p>
+              <div class="verdicts">
+                <div class="verdict"><span>evidence</span><b id="evidenceText">"keep this as a prototype"</b></div>
+                <div class="verdict"><span>review call</span><b id="reviewCall">likely heuristic miss</b></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="grid" id="surrealml" style="margin-top: 18px;">
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <h2>Sidecar pipeline</h2>
+              <p>Everything stays read-only until a separate shadow table is explicitly added.</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="pipeline">
+              <div class="stage"><b>01 export</b><span>turn_label_row and reaction_pair_row from existing graph tables.</span></div>
+              <div class="stage"><b>02 evaluate</b><span>Majority, heuristic, SetFit, zero-shot, and embedding baselines.</span></div>
+              <div class="stage"><b>03 inspect</b><span>Review disagreements for missing labels and regex-only learning.</span></div>
+              <div class="stage"><b>04 shadow</b><span>Optional SurrealML inference into isolated prediction rows.</span></div>
+            </div>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <h2>Sample rows</h2>
+              <p>NDJSON shape preview with bounded text and explicit graph provenance.</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="rows">
+              <div class="sample">
+                <div><blockquote>"yes, ship that exact fix"</blockquote><small>turn_label_row / seq 418 / codex</small></div>
+                <span class="tag accept">accept</span>
+                <span class="confidence">0.94</span>
+              </div>
+              <div class="sample">
+                <div><blockquote>"not sentiment. classify the actual correction."</blockquote><small>reaction_pair_row / distance 1 / claude</small></div>
+                <span class="tag reject">reject</span>
+                <span class="confidence">0.89</span>
+              </div>
+              <div class="sample">
+                <div><blockquote>"make it a sidecar first, then compare F1."</blockquote><small>turn_label_row / seq 77 / codex</small></div>
+                <span class="tag revise">revise</span>
+                <span class="confidence">0.87</span>
+              </div>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section class="foot-grid">
+        <div class="check"><b>Pass gate</b><span>Export at least 500 high-confidence user rows before training.</span></div>
+        <div class="check"><b>Fail gate</b><span>Reject models that only learn phrases already encoded by heuristics.</span></div>
+        <div class="check"><b>Safety gate</b><span>Normal axctl ingest cannot depend on Python, Hugging Face, or SurrealML.</span></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast" id="toast">copied</div>
+
+  <script>
+    const benchmark = {
+      reaction: [
+        ["majority", 0.54, "#958d7e"],
+        ["heuristic", 0.71, "#94661b"],
+        ["SetFit bge-small", 0.77, "#246b4b"],
+        ["zero-shot NLI", 0.64, "#245f7b"]
+      ],
+      polarity: [
+        ["majority", 0.39, "#958d7e"],
+        ["heuristic", 0.58, "#94661b"],
+        ["SetFit bge-small", 0.62, "#246b4b"],
+        ["zero-shot NLI", 0.51, "#245f7b"]
+      ]
+    };
+
+    const reviews = [
+      {
+        assistant: "I can wire this through the ingest registry and run the full backfill now.",
+        user: "No, keep this as a prototype. I want to see the exporter shape before it touches the CLI.",
+        heuristic: "accept / implementation preference",
+        shadow: "revise / scope correction",
+        evidence: '"keep this as a prototype"',
+        call: "likely heuristic miss"
+      },
+      {
+        assistant: "The message-signals command now lists semantic labels next to acts.",
+        user: "The label is right, but the sample should include the previous assistant text too.",
+        heuristic: "accept / approval",
+        shadow: "revise / missing context",
+        evidence: '"should include"',
+        call: "missing revise label"
+      },
+      {
+        assistant: "I treated that as negative sentiment and mapped it to reject.",
+        user: "That is not a rejection, it is me correcting the runtime state.",
+        heuristic: "reject / negative",
+        shadow: "revise / runtime state correction",
+        evidence: '"correcting the runtime state"',
+        call: "label taxonomy gap"
+      }
+    ];
+
+    const bars = document.querySelector("#bars");
+    const toast = document.querySelector("#toast");
+    let reviewIndex = 0;
+
+    function renderBars(task) {
+      bars.innerHTML = "";
+      benchmark[task].forEach(([name, value, color]) => {
+        const row = document.createElement("div");
+        row.className = "bar-row";
+        row.innerHTML = `
+          <span>${name}</span>
+          <span class="track"><span class="fill" style="--w:${Math.round(value * 100)}%; --c:${color}"></span></span>
+          <span class="score">${value.toFixed(2)}</span>
+        `;
+        bars.appendChild(row);
+      });
+    }
+
+    function showToast(text) {
+      toast.textContent = text;
+      toast.classList.add("show");
+      window.setTimeout(() => toast.classList.remove("show"), 1400);
+    }
+
+    function renderReview() {
+      const item = reviews[reviewIndex % reviews.length];
+      document.querySelector("#assistantText").textContent = item.assistant;
+      document.querySelector("#userText").textContent = item.user;
+      document.querySelector("#heuristicLabel").textContent = item.heuristic;
+      document.querySelector("#shadowLabel").textContent = item.shadow;
+      document.querySelector("#evidenceText").textContent = item.evidence;
+      document.querySelector("#reviewCall").textContent = item.call;
+    }
+
+    document.querySelectorAll(".segment").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll(".segment").forEach((item) => item.classList.remove("active"));
+        button.classList.add("active");
+        renderBars(button.dataset.task);
+      });
+    });
+
+    document.querySelectorAll(".nav-item").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll(".nav-item").forEach((item) => item.classList.remove("active"));
+        button.classList.add("active");
+        document.querySelector(button.dataset.jump).scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    });
+
+    document.querySelector("#nextReview").addEventListener("click", () => {
+      reviewIndex += 1;
+      renderReview();
+    });
+
+    document.querySelector("#copyCommand").addEventListener("click", async () => {
+      const command = "bun scripts/prototypes/ax-shadow-classifier.ts export --out=.ax/ml/turn-shadow.ndjson --since=90 --min-confidence=0.82";
+      try {
+        await navigator.clipboard.writeText(command);
+        showToast("copied command");
+      } catch {
+        showToast("copy unavailable");
+      }
+    });
+
+    document.querySelector("#simulateRun").addEventListener("click", () => {
+      document.querySelector("#runState").textContent = "running";
+      document.querySelector("#terminal").innerHTML = `<span class="muted">$</span> ax shadow export --since=90 --min-confidence=0.82
+<span class="ok">selected</span> 2,087 turn_label_row candidates
+<span class="ok">selected</span> 85 reaction_pair_row candidates
+<span class="ok">wrote</span> .ax/ml/turn-shadow.ndjson
+<span class="warn">next</span> run eval against majority baseline`;
+      window.setTimeout(() => {
+        document.querySelector("#runState").textContent = "complete";
+        document.querySelector("#rowCount").textContent = "2,172";
+        document.querySelector("#gateState").textContent = "pass";
+      }, 450);
+    });
+
+    renderBars("reaction");
+    renderReview();
+  </script>
+</body>
+</html>

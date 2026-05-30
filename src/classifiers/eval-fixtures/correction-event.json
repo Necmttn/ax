@@ -1,0 +1,110 @@
+{
+  "name": "correction-event",
+  "cases": [
+    {
+      "name": "wrong-artifact",
+      "classifierKeys": ["correction-event"],
+      "window": {
+        "user": "i dont want just html i want to see the results",
+        "previousAssistant": "I created a static HTML prototype page."
+      },
+      "expect": [
+        {
+          "classifierKey": "correction-event",
+          "label": "correction",
+          "target": "wrong_artifact"
+        }
+      ]
+    },
+    {
+      "name": "missing-previous-context",
+      "classifierKeys": ["correction-event"],
+      "window": {
+        "user": "we needed previous context as well, not only the user message but what agent was done"
+      },
+      "expect": [
+        {
+          "classifierKey": "correction-event",
+          "label": "correction",
+          "target": "missing_context",
+          "durability": "repo_preference"
+        }
+      ]
+    },
+    {
+      "name": "misclassified-intent",
+      "classifierKeys": ["correction-event"],
+      "window": {
+        "user": "actually it's kind of a direction thing I gave it to you, not a correction"
+      },
+      "expect": [
+        {
+          "classifierKey": "correction-event",
+          "label": "correction",
+          "target": "misclassified_intent"
+        }
+      ]
+    },
+    {
+      "name": "wrong-output",
+      "classifierKeys": ["correction-event"],
+      "window": {
+        "user": "no, that is wrong and not what I asked for",
+        "previousAssistant": "I summarized the implementation instead of changing it."
+      },
+      "expect": [
+        {
+          "classifierKey": "correction-event",
+          "label": "correction",
+          "target": "wrong_output",
+          "durability": "session_preference"
+        }
+      ]
+    },
+    {
+      "name": "missing-caused-this-message-context",
+      "classifierKeys": ["correction-event"],
+      "window": {
+        "user": "the classifier needs what agent was done that caused this message, not only the user message"
+      },
+      "expect": [
+        {
+          "classifierKey": "correction-event",
+          "label": "correction",
+          "target": "missing_context",
+          "durability": "repo_preference"
+        }
+      ]
+    },
+    {
+      "name": "negative-next-step-question",
+      "classifierKeys": ["correction-event"],
+      "window": {
+        "user": "what is the next step?"
+      },
+      "expect": [],
+      "reject": [
+        {
+          "classifierKey": "correction-event",
+          "label": "correction",
+          "target": "wrong_output"
+        }
+      ]
+    },
+    {
+      "name": "negative-plan-explanation",
+      "classifierKeys": ["correction-event"],
+      "window": {
+        "user": "can you explain the current plan?"
+      },
+      "expect": [],
+      "reject": [
+        {
+          "classifierKey": "correction-event",
+          "label": "correction",
+          "target": "missing_context"
+        }
+      ]
+    }
+  ]
+}

@@ -17,6 +17,12 @@ axctl insights tools --limit=20
 axctl insights sessions --limit=20
 axctl insights file-evidence --limit=20
 axctl insights feedback-loops --limit=20
+axctl insights feedback-language --limit=20
+axctl insights message-signals --limit=20
+axctl insights reactions --limit=20
+axctl insights reaction-themes --limit=20
+axctl insights reaction-events --limit=20
+axctl insights reaction-event-themes --limit=20
 axctl insights verification-gaps --limit=20
 axctl insights user-language --limit=20
 axctl insights token-impact --limit=20
@@ -28,7 +34,17 @@ axctl insights post-feature-fixes --limit=20
 axctl insights skill-candidates --limit=20
 axctl insights graph-health --limit=10
 axctl dashboard --limit=25
+axctl costs summary --since=2
+axctl costs for --query "live-traces" --limit=20
+axctl costs for --terms "live trace,livetrace,live-traces" --since=2 --limit=50
+axctl costs for --query "checkout bug" --since=7 --here
+axctl costs for --commit 464c80b
+axctl costs for --branch main --limit=20
+axctl pricing --query gpt-5.5
 ```
+
+Use `--json` on any insights view to print the raw query rows. The
+message-analysis views default to compact, scan-friendly output.
 
 The builders target the current schema fields directly:
 
@@ -50,6 +66,12 @@ The builders target the current schema fields directly:
   branches.
 - `feedbackLoopsSql` groups persisted `command_outcome` rows so expected test
   feedback, guardrails, search misses, and real blockers can be separated.
+- `feedbackLanguageSql`, `messageSignalsSql`, and `reactionsSql` read the
+  turn feedback graph: semantic signals, user/assistant examples, and
+  correction or approval pairs linked through `reacts_to`.
+- `reactionThemesSql` groups `reacts_to` edges by promoted semantic signal so
+  recurring correction, rejection, and approval patterns are visible without
+  manually reading every pair.
 - `verificationGapsSql` finds sessions with edits but no verification-shaped
   command outcomes.
 - `userLanguageSql` reads persisted `user_message_ngram` aggregates from user
@@ -70,51 +92,90 @@ The builders target the current schema fields directly:
   or `staged`, so intentionally empty tables are visible instead of surprising
   in Surrealist.
 
+## Cost And Pricing Queries
+
+`axctl costs` is the graph-backed read surface for token spend. It reads
+`session_token_usage` rows produced by provider ingest and `session-health`,
+then groups by provider/model and reports estimated USD. Cost estimates use
+`agent_model` pricing rows imported by the `pricing/models` stage, with a
+built-in local catalog as a fallback for common models.
+
+Supported commands:
+
+```bash
+axctl costs summary [--since=N] [--source=codex|claude|pi|opencode|cursor]
+axctl costs for --session <session-id>
+axctl costs for --query <turn-text> [--since=N] [--project=<path>] [--here] [--limit=N]
+axctl costs for --terms <term-a,term-b> [--since=N] [--project=<path>] [--here] [--limit=N]
+axctl costs for --commit <sha>
+axctl costs for --branch <branch> [--limit=N]
+axctl pricing [--query <model-or-provider>] [--limit=N]
+```
+
+Selectors map onto graph evidence:
+
+- `--session` reads the direct `session_token_usage.session` row.
+- `--query` finds sessions through full-text matching `turn.text_excerpt`.
+- `--terms` matches any comma-separated text term, dedupes sessions, and is
+  useful for spelling variants such as `live trace`, `livetrace`, and
+  `live-traces`.
+- `--commit` follows `session -> produced -> commit`.
+- `--branch` filters `produced.checkout -> checkout.branch` in the current
+  repository.
+
+`--query` and `--terms` accept scope filters:
+
+- `--since=N` restricts matching sessions to the last `N` days.
+- `--project=<path>` restricts matching sessions to a project/cwd path.
+- `--here` restricts matching sessions to the repository at the current working
+  directory, using `session.repository`.
+
+The output includes session count, total estimated tokens, prompt/output/cache
+token buckets, model breakdown, pricing source, and the matching session ids.
+Use `--json` on `costs for` and `pricing` when another tool needs structured
+data.
+
+Known limits:
+
+- Direct `--pr <number>` is not wired yet. Use the PR branch name or a commit
+  SHA until pull-request nodes are populated in the graph.
+- Cost is only as precise as provider model metadata. If a provider records no
+  concrete model, ax avoids pricing bare provider names such as `openai` and
+  reports the row as unpriced rather than inventing a model.
+- Some providers expose actual prompt/output/cache counters; others still fall
+  back to transcript-byte token estimates.
+
 ## Harness Doctor Tables And Ingestion Status
 
-The Harness Doctor slice adds schema support for these tables:
+The Harness Doctor ingest slice currently persists these tables:
 
 - `guidance_source`
 - `guidance_revision`
 - `stack`
-- `agent_tooling`
-- `harness_learning`
-- `intervention`
-- `intervention_observation`
 
 Current implementation status:
 
 - `axctl project harness` scans repo-local and global guidance sources at
   report time.
 - `axctl project harness --json` returns Guidance Sources, Guidance
-  Revisions, Stack signals, Agent Tooling signals, Harness Doctor findings, the
-  first local Harness Learning candidate, an Intervention suggestion, and an
-  Intervention Observation.
+  Revisions, Stack signals, and Harness Doctor findings.
 - `axctl project harness` also reads existing `tool_call`, `edited`, and
   `produced` graph evidence so observed tooling and main-branch write-risk
   signals are grounded in the current database.
-- Default `axctl ingest` persists the Harness Doctor report into the staged
-  Harness Doctor tables via the `harness/doctor` ingest stage.
+- Default `axctl ingest` persists the durable Harness Doctor subset via the
+  `harness/doctor` ingest stage.
 - Default `axctl ingest` also persists command outcome classifications and
   user-message n-grams via the `outcomes/derive` ingest stage.
 - Default `axctl ingest` persists token/cache/workflow health via the
   `session-health/derive` ingest stage.
 - Default `axctl ingest` persists commit lifecycle, post-feature fix-chain,
   and skill-candidate records via the `closure/derive` ingest stage.
-- Default `axctl ingest` persists gotchas, taste signals, workflows,
-  learning feedback, learning matches, and draft adoptions via the
-  `learning-registry/derive` ingest stage.
 
 The harness ingest stage is idempotent and:
 
 1. Upserts `guidance_source` rows keyed by path.
 2. Upserts `guidance_revision` rows keyed by source path plus content hash.
 3. Upserts declared and observed `stack` records.
-4. Upserts `agent_tooling` records from package scripts, global tools, and
-   observed tool calls.
-5. Upserts local `harness_learning` candidates.
-6. Upserts approval-gated `intervention` suggestions.
-7. Upserts `intervention_observation` rows with before/after metric fields.
 
 Use `axctl project harness --json` as the canonical report surface and
 `axctl insights schema` to verify durable table population after ingest.
@@ -186,29 +247,12 @@ signals into candidate skills or guardrails, such as ingest idempotency checks,
 schema-change smoke tests, live query dogfooding, or session closure quality
 gates.
 
-## Learning Registry And Onboarding
-
-The learning-registry slice adds:
-
-- `gotcha`
-- `taste_signal`
-- `workflow`
-- `learning_feedback`
-- `learning_match`
-- `adoption`
-
-`learning-registry/derive` converts local skill candidates and Harness Doctor
-learnings into draft-only local registry rows. Hosted sharing, public taste
-cards, and auto-publishing are intentionally disabled in these seed records.
+## Onboarding
 
 `axctl onboarding --json` checks whether global Claude, Codex, and shared
 agent guidance directories are git-tracked. This gives future guidance and
 skill experiments commit evidence before ax starts recommending harness
 changes.
-
-`axctl interventions list|impact|regressions|candidates --json` is the first
-read surface for intervention lifecycle work: proposed interventions, measured
-observations, high-risk regression sessions, and candidate skills.
 
 SurrealKit workflow takeaway: local development can keep importing the schema
 directly for now. Tests should prefer isolated databases or namespaces so
@@ -264,14 +308,13 @@ Full backlog dogfood ran:
 
 Observed outputs:
 
-- Full ingest reached every derived stage: `outcomes/derive`,
-  `session-health/derive`, `closure/derive`, `learning-registry/derive`, and
+- Full ingest reached every current derived stage: `outcomes/derive`,
+  `session-health/derive`, `closure/derive`, `turn-analysis/derive`, and
   `harness/doctor`.
 - Latest full ingest wrote 3,183 command outcomes, 421 user n-grams, 37 recent
   session-health rows, 1,321 commit classifications, 1,089 fix-chain edges, 5
-  skill candidates, 5 gotchas/adoptions, and 25 learning matches.
-- `project harness --json` found 12 guidance sources and 1 intervention
-  suggestion.
+  skill candidates, plus turn-analysis signal rows.
+- `project harness --json` found 12 guidance sources and stack signals.
 - `onboarding --json` reports Claude and shared agent guidance as git-tracked;
   Codex global guidance is currently a warning because `~/.codex` is not
   tracked.
@@ -290,8 +333,6 @@ Dogfood fixes made during the backlog run:
   cost.
 - Closure derivation now runs full-graph during ingest even when transcript
   ingest is since-scoped, because fix-chain rows are materialized comparisons.
-- `interventions candidates` selects its ordered fields to satisfy SurrealDB
-  ordering rules.
 - `bun test`
 - `bun run typecheck`
 - `bun src/cli/index.ts project verify --json`
@@ -304,12 +345,9 @@ Live dogfood counts after the smoke:
 - `friction_event`: 626
 - `diagnostic_event`: 456
 
-Schema coverage after the smoke: 25 of 40 tables populated. Empty staged
-tables are `workspace`, `changeset`, `file_memory`, `artifact`,
-`feedback_event`, `guidance`, `guidance_version`, and the future
-changeset/artifact/provenance relation tables. `recommendation` is active but
-conditional; it stays empty until repeated friction crosses the current
-threshold.
+Schema coverage after the smoke should be read from `axctl insights schema`.
+The schema view counts current active and staged graph tables and omits tables
+removed by schema migrations.
 
 Legacy self-improve importer behavior:
 
@@ -317,8 +355,6 @@ Legacy self-improve importer behavior:
   `source=legacy_self_improve`.
 - `clusters.json`, `proposed-claudemd.md`, and `_spend.log` become compact
   `artifact` evidence plus `insight` summaries.
-- `self_improve_run` records hold run-level counts, spend metrics, and event
-  type totals.
 - `has_artifact` and `derived_from` edges keep provenance queryable; the
   imported rows are evidence, not authoritative truth.
 
@@ -345,10 +381,8 @@ wterm terminal dogfood:
   `axctl onboarding --json` warnings for `.claude`, `.codex`, and
   `.agents`, host-agent-style git tracking of those harness dirs, and a second
   onboarding check returning all `ok`.
-- Latest passing run wrote
-  `intervention_observation:dogfood_wterm_setup__bea19103cb17318a` with
-  `target=axctl_setup_wterm_dogfood`, `status=passed`, and
-  `transport=pty`.
+- Latest passing run wrote a `dogfood_run` row with `scenario=axctl-setup`,
+  `status=passed`, and `transport=pty`.
 - The transcript was stored as
   `artifact:dogfood_wterm_setup__bea19103cb17318a__transcript`.
 - Native `node-pty` inside Bun 1.3.10 was tested first but did not reliably
@@ -363,9 +397,9 @@ wterm terminal dogfood:
   the typed marker.
 - Agent presets now run with `--agent=shell|claude|codex|opencode`. Live smoke
   `--scenario=interactive --agent=shell --transport=pty --port=1748 --json`
-  produced `intervention_observation:dogfood_wterm_interactive__1ab36f61a56036de`
-  with `agent=shell`, `command=bash -l`, `command_source=preset`,
-  `status=completed`, and a transcript containing `AGENT_PRESET_SHELL_STEERED`.
+  produced a `dogfood_run` row with `agent=shell`, `command=bash -l`,
+  `command_source=preset`, `status=completed`, and a transcript containing
+  `AGENT_PRESET_SHELL_STEERED`.
 - Repeatable success criteria via `--success-marker=STR` and `--timeout=SECONDS`.
   Marker-pass live smoke
   `--scenario=interactive --agent=shell --transport=pty
@@ -375,9 +409,7 @@ wterm terminal dogfood:
   Timeout live smoke
   `--scenario=interactive --agent=shell --transport=pty
   --success-marker=NEVER_SEEN --timeout=2 --port=1750 --json`
-  produced
-  `intervention_observation:dogfood_wterm_interactive__a89b0b1b94e86f02`
-  with `status=timed_out`, `metrics.timed_out=true`,
+  produced a `dogfood_run` row with `status=timed_out`, `metrics.timed_out=true`,
   `metrics.timeout_seconds=2`, `metrics.success_marker=NEVER_SEEN`, and
   `metrics.marker_found=false`.
 

@@ -45,10 +45,9 @@ export interface DeriveProposalsStats {
 /**
  * Phase C11: convert each HarnessLearningCandidate into a guidance-form
  * proposal. The harness report's learning candidates are the
- * project-doctor-derived "you should add a guardrail" suggestions; under
- * the old schema they were written to `harness_learning` (write-only
- * orphan). Now they flow into the proposal pipeline as form='guidance',
- * dedupe by hash of normalized title.
+ * project-doctor-derived "you should add a guardrail" suggestions. They flow
+ * into the proposal pipeline as form='guidance', deduped by hash of normalized
+ * title.
  */
 export interface GuidanceProposalRow {
     readonly proposalKey: string;
@@ -346,9 +345,8 @@ FROM skill_candidate;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
 
         // Phase C11: also derive guidance-form proposals from the harness
         // report. buildProjectHarnessReport is project-doctor logic that
-        // identifies "you should add a guardrail" candidates; we now route
-        // those into the proposal pipeline instead of the dead
-        // harness_learning table.
+        // identifies "you should add a guardrail" candidates; route those
+        // into the proposal pipeline as guidance-form proposals.
         const { buildProjectHarnessReport } = yield* Effect.promise(() =>
             import("../project/harness.ts"),
         );

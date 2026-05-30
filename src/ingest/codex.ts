@@ -58,6 +58,7 @@ interface CodexSession {
     cwd: string | null;
     cli_version: string | null;
     model_provider: string | null;
+    model: string | null;
     started_at: string;
     ended_at: string;
 }
@@ -327,7 +328,7 @@ function codexTokenUsageFromPayload(
 
     return {
         session: currentSession.id,
-        model: currentSession.model_provider,
+        model: concreteCodexModel(currentSession),
         promptTokens,
         completionTokens,
         cacheReadInputTokens,
@@ -339,6 +340,13 @@ function codexTokenUsageFromPayload(
         ts,
     };
 }
+
+const concreteCodexModel = (session: CodexSession): string | null => {
+    if (session.model) return session.model;
+    const provider = session.model_provider;
+    if (!provider || /^(openai|anthropic|google|xai|openrouter|azure)$/i.test(provider)) return null;
+    return provider;
+};
 
 function applyToolResult(call: MutableToolCallWrite, result: ToolResultFields): void {
     call.outputJson = result.outputJson;
@@ -751,6 +759,7 @@ function createCodexExtractor(
                     cwd: stringField(payload, "cwd"),
                     cli_version: stringField(payload, "cli_version"),
                     model_provider: stringField(payload, "model_provider"),
+                    model: stringField(payload, "model"),
                     started_at: stringField(payload, "timestamp") ?? ts,
                     ended_at: ts,
                 };
@@ -758,6 +767,16 @@ function createCodexExtractor(
             }
             if (!session) return;
             session.ended_at = ts;
+
+            if (type === "turn_context" && payload) {
+                const model = stringField(payload, "model")
+                    ?? (isRecord(payload.collaboration_mode) &&
+                        isRecord(payload.collaboration_mode.settings)
+                        ? stringField(payload.collaboration_mode.settings, "model")
+                        : null);
+                if (model) session.model = model;
+                return;
+            }
 
             if (type === "event_msg" && payload && stringField(payload, "type") === "token_count") {
                 tokenCountEvents += 1;
@@ -941,12 +960,13 @@ const buildCodexProviderStatements = (batch: MutableCodexExtract): string[] => {
                     axSessionId: batch.session.id,
                     cwd: batch.session.cwd,
                     project: batch.session.cwd,
-                    model: batch.session.model_provider,
+                    model: concreteCodexModel(batch.session),
                     sourcePath: batch.sourcePath,
                     raw: {
                         source: "codex_transcript",
                         cliVersion: batch.session.cli_version,
                         modelProvider: batch.session.model_provider,
+                        model: batch.session.model,
                     },
                     labels: {
                         source: "transcript",
@@ -1140,7 +1160,7 @@ export const ingestCodex = (
                 db.upsert(new RecordId("session", session.id), {
                     project: session.cwd ?? undefined,
                     cwd: session.cwd ?? undefined,
-                    model: session.model_provider ?? undefined,
+                    model: concreteCodexModel(session) ?? undefined,
                     source: "codex",
                     started_at: new Date(session.started_at),
                     ended_at: new Date(session.ended_at),

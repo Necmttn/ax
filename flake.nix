@@ -95,13 +95,21 @@
             name = "ax-surreal";
             runtimeInputs = [ surrealdb pkgs.coreutils ];
             text = ''
-              data_dir="''${AX_DATA_DIR:-$HOME/.local/share/ax}/db"
+              base_dir="''${AX_DATA_DIR:-$HOME/.local/share/ax}"
+              data_dir="$base_dir/db"
+              buckets_dir="$base_dir/buckets"
               mkdir -p "$data_dir"
+              mkdir -p "$buckets_dir/transcripts" "$buckets_dir/codex_artifacts"
+              export SURREAL_BUCKET_FOLDER_ALLOWLIST="$buckets_dir"
+              export SURREAL_ROCKSDB_BLOCK_CACHE_SIZE="''${AX_DB_ROCKSDB_BLOCK_CACHE_SIZE:-268435456}"
+              export SURREAL_ROCKSDB_WRITE_BUFFER_SIZE="''${AX_DB_ROCKSDB_WRITE_BUFFER_SIZE:-33554432}"
+              export SURREAL_ROCKSDB_MAX_WRITE_BUFFER_NUMBER="''${AX_DB_ROCKSDB_MAX_WRITE_BUFFER_NUMBER:-4}"
               exec surreal start \
                 --user "''${AX_DB_USER:-root}" \
                 --pass "''${AX_DB_PASS:-root}" \
                 --bind "''${AX_DB_HOST:-127.0.0.1}:''${AX_DB_PORT:-8521}" \
                 --log "''${AX_DB_LOG:-info}" \
+                --allow-experimental=files \
                 "rocksdb://$data_dir"
             '';
           };

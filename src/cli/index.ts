@@ -2,7 +2,6 @@
 import { Effect, Layer, Option, References } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
-import { decodeJsonRecordOrNull, encodeJson } from "../lib/decode.ts";
 import { listSessionsHere, listSessionsAround, listSessionsNear, type SessionRow } from "../dashboard/sessions-query.ts";
 import { findCommitWindow } from "../lib/git-window.ts";
 import { AxConfig } from "../lib/config.ts";
@@ -13,7 +12,6 @@ import { prettifyProjectSlug } from "../lib/shared/project-slug.ts";
 import { AppLayer } from "../lib/layers.ts";
 import { deriveCheckpoints } from "../ingest/derive-checkpoints.ts";
 import { retroFromSession, upsertRetro, type RetroSource } from "../ingest/retro.ts";
-import { scaffoldSkill } from "../improve/skill-scaffold.ts";
 import { runAgentAccept } from "../improve/agent-accept.ts";
 import { acceptProposal } from "../improve/actions.ts";
 import { lintFiles } from "../improve/lint.ts";
@@ -25,6 +23,13 @@ import { cmdRetroPlan } from "./retro-plan.ts";
 import { cmdSkillsClassify } from "./skills-classify.ts";
 import { cmdSkillsTag } from "./skills-tag.ts";
 import { cmdSkillsLint } from "./skills-lint.ts";
+import { cmdClassifiersEval } from "./classifiers-eval.ts";
+import { cmdClassifiersList } from "./classifiers-list.ts";
+import { fetchClassifierExplain } from "../dashboard/classifier-explain.ts";
+import {
+    renderClassifierExplainJson,
+    renderClassifierExplainMarkdown,
+} from "./classifiers-explain-format.ts";
 import { fetchSkillsWeighted } from "../dashboard/skills-weighted.ts";
 import { renderWeightedTable, renderWeightedJson } from "./skills-weighted-format.ts";
 import {
@@ -48,11 +53,12 @@ import { ingestClaudeInsights } from "../ingest/claude-insights.ts";
 import { deriveSignals } from "../ingest/derive-signals.ts";
 import { deriveTurnIntents } from "../ingest/derive-intents.ts";
 import { INSIGHT_VIEWS, insightSqlForView, isInsightView } from "../queries/insights.ts";
+import { formatInsightRows } from "./insights-format.ts";
 import { writeDashboard } from "../dashboard/report.ts";
 import { serveDashboard } from "../dashboard/server.ts";
 import { fetchRecall, type RecallSource, type RecallScope } from "../dashboard/recall.ts";
-import { fetchCostSummary, type CostSummary } from "../dashboard/cost-query.ts";
 import { fetchSessionShow } from "../dashboard/session-show.ts";
+import { fetchCostSummary, type CostSummary } from "../dashboard/cost-query.ts";
 import { renderSessionMarkdown, renderSessionJson } from "./session-show-format.ts";
 import { cmdDaemon, cmdDoctor, cmdInstall, cmdUninstall } from "./install.ts";
 import { resolvePwdRepository } from "../lib/pwd.ts";
@@ -63,9 +69,7 @@ import {
     createProgressReporter,
     parseProgressMode,
     type ProgressReporter,
-    type ProgressStage,
 } from "./progress.ts";
-import { initTuiProgress, shouldUseTui } from "./progress-tui.tsx";
 import { cmdProject } from "./project.ts";
 import { AX_VERSION, liveVersionDeps, printVersion, updateAxctl } from "./version.ts";
 import { wantsJson, catchDbErrorAndExit } from "./output.ts";
@@ -106,9 +110,8 @@ import { StageRegistry, type StageRegistryShape } from "../ingest/stage/registry
 import { IngestRuntimeLayer } from "../ingest/stage/runtime.ts";
 import { ConsoleTransportLayer } from "../lib/live-traces/transports/console.ts";
 import { selectByKeys, selectByTag } from "../ingest/stage/select.ts";
-import { runPipeline } from "../ingest/stage/runner.ts";
-import { IngestContext, type BaseStageStats, type StageDef } from "../ingest/stage/types.ts";
-import { LiveTrace } from "../lib/live-traces/index.ts";
+import { type BaseStageStats, type StageDef } from "../ingest/stage/types.ts";
+import { runIngest } from "../ingest/run.ts";
 
 const boolArg = (name: string, enabled: boolean): string[] =>
     enabled ? [`--${name}`] : [];
@@ -122,7 +125,7 @@ const stringArg = (name: string, value: string | undefined): string[] =>
 const optionValue = <A>(value: Option.Option<A>): A | undefined =>
     Option.getOrUndefined(value);
 
-function flag(name: string, args: readonly string[]): string | undefined {
+function flag(name: string, args: string[]): string | undefined {
     const found = args.find((a) => a.startsWith(`--${name}=`));
     return found?.split("=")[1];
 }
@@ -136,7 +139,7 @@ function flag(name: string, args: readonly string[]): string | undefined {
 function parsePositiveIntFlag(
     cmd: string,
     flagName: string,
-    args: readonly string[],
+    args: string[],
     fallback?: number,
 ): number {
     const raw = flag(flagName, args);
@@ -164,7 +167,7 @@ function parsePositiveIntFlag(
 function parseOptionalPositiveIntFlag(
     cmd: string,
     flagName: string,
-    args: readonly string[],
+    args: string[],
 ): number | undefined {
     const raw = flag(flagName, args);
     if (raw === undefined) return undefined;
@@ -299,37 +302,6 @@ const progressUpdater = (
     (counts: Record<string, number>): Effect.Effect<void> =>
         Effect.sync(() => progress?.update({ source, stage }, counts));
 
-/** ProgressStage descriptor for each stage key, in execution order.
- *  Key is the old IngestStageKey string; cast `s.meta.key as IngestStageKeyLegacy`
- *  when looking up (the registry keys are the same string values). */
-type IngestStageKeyLegacy =
-    | "skills" | "commands" | "claude" | "codex" | "pi" | "opencode" | "cursor"
-    | "subagents" | "invoked-positions" | "spawned" | "git" | "signals"
-    | "outcomes" | "session-health" | "closure" | "proposals"
-    | "opportunities" | "retro-proposals" | "harness";
-
-const STAGE_PROGRESS: Record<IngestStageKeyLegacy, ProgressStage> = {
-    skills: { source: "skills", stage: "upsert" },
-    commands: { source: "commands", stage: "upsert" },
-    claude: { source: "claude", stage: "transcripts" },
-    codex: { source: "codex", stage: "sessions" },
-    pi: { source: "pi", stage: "sessions" },
-    opencode: { source: "opencode", stage: "sessions" },
-    cursor: { source: "cursor", stage: "sessions" },
-    subagents: { source: "claude", stage: "subagents" },
-    "invoked-positions": { source: "invoked", stage: "backfill-positions" },
-    spawned: { source: "signals", stage: "spawned" },
-    git: { source: "git", stage: "history" },
-    signals: { source: "signals", stage: "derive" },
-    outcomes: { source: "outcomes", stage: "derive" },
-    "session-health": { source: "session-health", stage: "derive" },
-    closure: { source: "closure", stage: "derive" },
-    proposals: { source: "proposals", stage: "derive" },
-    opportunities: { source: "opportunities", stage: "derive" },
-    "retro-proposals": { source: "retro-proposals", stage: "derive" },
-    harness: { source: "harness", stage: "doctor" },
-};
-
 /** Resolve which ingest stages to run from CLI args. Precedence:
  *  `--stages=` (explicit list) > `--derive-only` > all.
  *  Exits with code 2 on an unknown `--stages=` value. */
@@ -387,128 +359,15 @@ interface IngestCommandOpts {
 
 const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) => {
     const commandName = opts.command ?? "ingest";
-    // Validate args synchronously before any Effect/DB work so that
-    // flag errors print even when the daemon is down.
-    const hasStagesArg = args.some((a) => a.startsWith("--stages="));
-    const hasDeriveOnly = args.includes("--derive-only");
-    if (hasStagesArg && hasDeriveOnly) {
-        console.error(`axctl ${commandName}: --stages and --derive-only are mutually exclusive`);
-        process.exit(2);
-    }
-    // `--reset` clears the skill graph so a full re-ingest rebuilds it from
-    // scratch (drops ghost `scope=unknown` rows whose invocations now resolve
-    // onto real skills). It only makes sense with a complete ingest run.
-    const wantReset = args.includes("--reset");
-    if (wantReset && (hasStagesArg || hasDeriveOnly)) {
-        console.error(
-            `axctl ${commandName}: --reset rebuilds the whole skill graph and cannot be combined with stage filters`,
-        );
-        process.exit(2);
-    }
-
-    return Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const registry = yield* StageRegistry;
-
-        // Single source of truth for which stages run; see resolveIngestStages.
-        const selectedStages = resolveIngestStages(registry, args);
-        const stageProgressList = selectedStages.map((s) => {
-            const ps = STAGE_PROGRESS[s.meta.key as IngestStageKeyLegacy];
-            return ps ?? { source: s.meta.key, stage: "run" };
-        });
-
-        if (wantReset) {
-            // Edges before nodes. `skill_triage_decision` is keyed by skill
-            // name (not a record link) so user keep/archive decisions survive.
-            yield* db.query(
-                "DELETE invoked; DELETE proposed; DELETE concerns; DELETE recovered_by; DELETE skill_paired; DELETE skill;",
-            );
-            console.log(
-                "reset: cleared skill graph (skill, invoked, proposed, concerns, recovered_by, skill_paired)",
-            );
-        }
-        const runId = runIdFor(commandName);
-        const progressMode = progressModeFor(commandName, args);
-        const verbose = args.includes("--verbose");
-        const sinceDays = parseOptionalPositiveIntFlag(commandName, "since", args);
-        yield* db.query(buildIngestRunStartStatement({
-            runId,
-            command: commandName,
-            ...(sinceDays === undefined ? {} : { sinceDays }),
-        }));
-        const useTui = shouldUseTui(process.stdout.isTTY ?? false, progressMode);
-        const tuiHandle = useTui
-            ? yield* Effect.tryPromise({
-                try: () => initTuiProgress({ command: commandName, runId, stages: stageProgressList }),
-                catch: () => undefined,
-              }).pipe(Effect.catch(() => Effect.void))
-            : undefined;
-        const progress: ProgressReporter = tuiHandle?.progress ?? createProgressReporter({
-            command: commandName,
-            mode: progressMode,
-            runId,
-            stages: stageProgressList,
-        });
-
-        const ctx = IngestContext.make({
-            cwd: opts.cwd ?? process.cwd(),
-            since: sinceDays === undefined ? new Date(0) : new Date(Date.now() - sinceDays * 86400 * 1000),
-            debug: args.includes("--debug"),
-            ...(opts.repoPaths ? { repoPaths: [...opts.repoPaths] } : {}),
-            ...(opts.claudeProject ? { claudeProject: opts.claudeProject } : {}),
-        });
-
-        // Wrap each stage's run with telemetryStage so the existing TUI + DB
-        // recording continue working. The stage run(ctx) is the inner Effect;
-        // telemetryStage handles start/end rows. Per-stage onProgress callbacks
-        // are dropped (accepted UX regression; proper fix via TraceEvent streams).
-        const wrappedStages = selectedStages.map((s) => ({
-            ...s,
-            run: (_innerCtx: IngestContext): Effect.Effect<BaseStageStats, DbError, SurrealClient | AxConfig | ProcessService> => {
-                const ps = STAGE_PROGRESS[s.meta.key as IngestStageKeyLegacy] ?? { source: s.meta.key, stage: "run" };
-                // Cast: stage run() returns Effect<S, DbError, R> where R ⊆ SurrealClient|AxConfig|ProcessService;
-                // telemetryStage accepts the full union and the runtime provides all three.
-                return telemetryStage(
-                    db,
-                    runId,
-                    ps.source,
-                    ps.stage,
-                    s.run(_innerCtx) as Effect.Effect<BaseStageStats, DbError, SurrealClient | AxConfig | ProcessService>,
-                    progress,
-                );
-            },
-        }));
-
-        const traceId = `ingest:${runId}`;
-        const program = runPipeline(
-            wrappedStages as ReadonlyArray<StageDef<BaseStageStats, SurrealClient | AxConfig | ProcessService>>,
-            ctx,
-        ).pipe(
-            LiveTrace.withTrace({
-                traceId,
-                label: `ingest ${selectedStages.map((s) => s.meta.key).join(",")}`,
-                scope: { type: "user", id: process.env.USER ?? "local" },
-            }),
-            Effect.tap(() => db.query(buildIngestRunFinishStatement({ runId, status: "ok" })).pipe(Effect.asVoid)),
-            Effect.catch((error) =>
-                Effect.gen(function* () {
-                    yield* db.query(buildIngestRunFinishStatement({
-                        runId,
-                        status: "error",
-                        metrics: { error: errorText(error) },
-                    }));
-                    return yield* error;
-                }),
-            ),
-            Effect.provideService(References.MinimumLogLevel, verbose ? "Debug" : "Info"),
-            Effect.ensuring(
-                tuiHandle
-                    ? Effect.promise(() => tuiHandle.teardown())
-                    : Effect.sync(() => progress.stop()),
-            ),
-        );
-        yield* program;
-    });
+    return runIngest({
+        command: commandName,
+        args,
+        cwd: opts.cwd ?? process.cwd(),
+        ...(opts.repoPaths ? { repoPaths: opts.repoPaths } : {}),
+        ...(opts.claudeProject ? { claudeProject: opts.claudeProject } : {}),
+        debug: args.includes("--debug"),
+        verbose: args.includes("--verbose"),
+    }).pipe(Effect.asVoid);
 };
 
 /**
@@ -523,7 +382,7 @@ const cmdIngestHere = (args: string[]) => {
         const registry = yield* StageRegistry;
         const pwd = yield* resolvePwdRepository().pipe(
             Effect.catchTag("NotAGitRepoError", (err) =>
-                Effect.promise(async () => {
+                Effect.sync(() => {
                     process.stderr.write(
                         `axctl ingest here: not in a git repository (cwd=${err.cwd})\n`,
                     );
@@ -566,7 +425,7 @@ const cmdDeriveSignals = (args: string[]) =>
         const sinceDays = parseOptionalPositiveIntFlag(
             "derive-signals",
             "since",
-            args,
+            [...args],
         );
         yield* db.query(buildIngestRunStartStatement({
             runId,
@@ -618,7 +477,9 @@ const cmdIngestInsights = (args: string[] = []) =>
                 { source: "claude", stage: "insights" },
             ],
         });
-        const program = telemetryStage(db, runId, "claude", "insights", ingestClaudeInsights(), progress);
+        const program = Effect.gen(function* () {
+            yield* telemetryStage(db, runId, "claude", "insights", ingestClaudeInsights(), progress);
+        });
         yield* program.pipe(
             Effect.tap(() => db.query(buildIngestRunFinishStatement({ runId, status: "ok" })).pipe(Effect.asVoid)),
             Effect.catch((error) =>
@@ -647,11 +508,12 @@ const cmdInsights = (args: string[]) =>
             process.exit(2);
         }
         const limit = parsePositiveIntFlag("insights", "limit", args, 20);
+        const json = args.includes("--json");
         const db = yield* SurrealClient;
         const result = yield* db.query<[Array<Record<string, unknown>>]>(
             insightSqlForView(rawView, limit),
         );
-        console.log(prettyPrint(result?.[0] ?? []));
+        console.log(formatInsightRows(rawView, result?.[0] ?? [], { json }));
     });
 
 const cmdReport = (args: string[]) =>
@@ -892,7 +754,7 @@ const cmdRecall = (opts: RecallCliOpts) =>
             scope,
         });
         if (opts.json) {
-            console.log(prettyPrint(result));
+            console.log(JSON.stringify(result, null, 2));
             return;
         }
 
@@ -1872,80 +1734,69 @@ const insightsCommand = Command.make(
     {
         view: insightView,
         limit: positiveLimit(20),
-    },
-    ({ view, limit }) => cmdInsights([view, `--limit=${limit}`]),
-).pipe(Command.withDescription("Run built-in graph insight queries"));
-
-const integer = (value: unknown): string => {
-    const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
-    return Number.isFinite(n) ? Math.trunc(n).toLocaleString("en-US") : "0";
-};
-
-const formatCostSummary = (summary: CostSummary): string => {
-    const lines: string[] = [];
-    lines.push(`sessions ${integer(summary.totals.sessions)}  tokens ${integer(summary.totals.estimatedTokens)}`);
-    lines.push(
-        `prompt ${integer(summary.totals.promptTokens)}  output ${integer(summary.totals.completionTokens)}  cache_write ${integer(summary.totals.cacheCreationInputTokens)}  cache_read ${integer(summary.totals.cacheReadInputTokens)}`,
-    );
-    lines.push("");
-    lines.push(`${"source".padEnd(12)} ${"model".padEnd(30)} ${"quality".padEnd(11)} ${"sessions".padStart(8)} ${"tokens".padStart(14)}  unpriced_reason`);
-    for (const row of summary.byModel) {
-        lines.push(
-            `${row.source.padEnd(12)} ` +
-            `${String(row.model ?? "<none>").slice(0, 30).padEnd(30)} ` +
-            `${row.tokenSourceQuality.padEnd(11)} ` +
-            `${integer(row.sessions).padStart(8)} ` +
-            `${integer(row.estimatedTokens).padStart(14)}  ` +
-            `${row.unpricedModelReason ?? ""}`,
-        );
-    }
-    if (summary.sessions.length > 0) {
-        lines.push("");
-        lines.push("recent");
-        for (const row of summary.sessions.slice(0, 20)) {
-            lines.push(
-                `- ${row.session.replace(/^session:/, "")}  ${row.source}  ${row.model ?? "?"}  ${row.tokenSourceQuality}` +
-                `${row.tokenSourceDetail ? `:${row.tokenSourceDetail}` : ""}  ${integer(row.estimatedTokens)} tokens`,
-            );
-        }
-    }
-    return lines.join("\n");
-};
-
-const cmdCostsSummary = (input: { readonly limit: number; readonly source: string | null; readonly sinceDays: number | null; readonly json: boolean }) =>
-    Effect.gen(function* () {
-        const summary = yield* fetchCostSummary(input);
-        if (input.json) {
-            console.log(prettyPrint(summary));
-            return;
-        }
-        if (summary.totals.sessions === 0) {
-            console.log("(no session token usage yet)");
-            return;
-        }
-        console.log(formatCostSummary(summary));
-    });
-
-const costsSummaryCommand = Command.make(
-    "summary",
-    {
-        limit: positiveLimit(20),
-        source: Flag.string("source").pipe(Flag.optional),
-        since: optionalSince,
         json: jsonFlag,
     },
-    ({ limit, source, since, json }) =>
-        cmdCostsSummary({
-            limit,
-            source: optionValue(source) ?? null,
-            sinceDays: optionValue(since) ?? null,
-            json,
-        }),
-).pipe(Command.withDescription("Summarize session token usage quality by provider/model"));
+    ({ view, limit, json }) => cmdInsights([view, `--limit=${limit}`, ...boolArg("json", json)]),
+).pipe(Command.withDescription("Run built-in graph insight queries"));
 
-const costsCommand = Command.make("costs").pipe(
-    Command.withDescription("Summarize token usage quality and unpriced model reasons"),
-    Command.withSubcommands([costsSummaryCommand]),
+const classifiersEvalCommand = Command.make(
+    "eval",
+    {
+        path: Flag.string("path").pipe(Flag.optional),
+        json: jsonFlag,
+    },
+    ({ path, json }) => Effect.promise(() =>
+        cmdClassifiersEval([...stringArg("path", optionValue(path)), ...boolArg("json", json)]),
+    ),
+).pipe(Command.withDescription("Run classifier golden fixture evaluations"));
+
+const classifiersListCommand = Command.make(
+    "list",
+    {
+        json: jsonFlag,
+    },
+    ({ json }) => Effect.promise(() => cmdClassifiersList(boolArg("json", json))),
+).pipe(Command.withDescription("List registered classifiers and fixture coverage"));
+
+const cmdClassifiersExplain = (args: string[]) =>
+    Effect.gen(function* () {
+        const positionals = args.filter((arg) => !arg.startsWith("--"));
+        const turnId = positionals[0];
+        if (!turnId) {
+            console.error("axctl classifiers explain: missing <turn-id>");
+            console.error("  usage: axctl classifiers explain <turn-id> [--json]");
+            process.exit(2);
+        }
+
+        const forceJson = args.includes("--json");
+        const useJson = forceJson || process.stdout.isTTY === false;
+        const payload = yield* fetchClassifierExplain(turnId).pipe(
+            catchDbErrorAndExit("axctl classifiers explain"),
+        );
+
+        if (payload.turn === null) {
+            process.stderr.write(`turn ${turnId} not found\n`);
+            process.exit(1);
+        }
+
+        console.log(useJson ? renderClassifierExplainJson(payload) : renderClassifierExplainMarkdown(payload));
+    });
+
+const classifiersExplainCommand = Command.make(
+    "explain",
+    {
+        turnId: Argument.string("turn-id"),
+        json: jsonFlag,
+    },
+    ({ turnId, json }) => cmdClassifiersExplain([
+        turnId,
+        ...boolArg("json", json),
+    ]),
+).pipe(Command.withDescription("Explain classifier results attached to a turn"));
+
+const classifiersCommand = Command.make("classifiers").pipe(
+    Command.withDescription("Develop and evaluate ax classifiers"),
+    Command.withSubcommands([classifiersListCommand, classifiersEvalCommand, classifiersExplainCommand]),
 );
 
 /**
@@ -2034,10 +1885,12 @@ const cmdImproveLint = (args: string[]) =>
         for (const a of args) {
             if (a.startsWith("--root=")) roots.push(a.slice("--root=".length));
         }
-        const lintOptions = roots.length > 0 ? { roots, staleDays } : { staleDays };
-        const report = yield* lintFiles(lintOptions);
+        const report = yield* lintFiles({
+            ...(roots.length > 0 ? { roots } : {}),
+            staleDays,
+        });
         if (json) {
-            console.log(prettyPrint(report));
+            console.log(JSON.stringify(report, null, 2));
         } else {
             for (const f of report.errors) {
                 console.log(`error  ${f.rule}: ${f.message} (${f.path})`);
@@ -2083,14 +1936,13 @@ const cmdImproveRecommend = (args: string[]) =>
                 }
             }
         }
-        const recommendInput = {
+        const items = yield* recommend({
             limit,
             ...(forms.length > 0 ? { forms } : {}),
             ...(sinceDays === undefined ? {} : { sinceDays }),
-        };
-        const items = yield* recommend(recommendInput);
+        });
         if (json) {
-            console.log(prettyPrint(items));
+            console.log(JSON.stringify(items, null, 2));
             return;
         }
         const formatted = formatRecommendations(items);
@@ -2190,141 +2042,6 @@ const improveShowCommand = Command.make(
     ({ id, json }) => cmdImproveShow([id, ...boolArg("json", json)]),
 ).pipe(Command.withDescription("Show experiment evidence + status for one proposal id"));
 
-export const cmdImproveAccept = (args: string[]) =>
-    Effect.gen(function* () {
-        const positional = args.filter((a) => !a.startsWith("--"))[0];
-        if (positional === undefined) {
-            console.error("axctl improve accept: missing <id>");
-            process.exit(2);
-        }
-        const force = args.includes("--force");
-        const withAgent = args.includes("--with-agent");
-        const db = yield* SurrealClient;
-        const idLiteral = surrealLiteral(positional);
-        const sql = `
-            SELECT *, (SELECT * FROM skill_proposal WHERE proposal = $parent.id LIMIT 1)[0] AS skill_payload
-            FROM proposal WHERE dedupe_sig = ${idLiteral} OR id = ${idLiteral} LIMIT 1;
-        `;
-        const result = yield* db.query<[Array<Record<string, unknown>>]>(sql);
-        const row = (result?.[0] ?? [])[0];
-        if (!row) {
-            console.error(`no proposal matched ${positional}`);
-            process.exit(2);
-        }
-        const proposalKey = recordKeyPart(row.id, "proposal");
-        if (!proposalKey) {
-            console.error("internal: proposal.id has unexpected shape");
-            process.exit(2);
-        }
-        const status = String(row.status ?? "");
-        if (status !== "open") {
-            // Look up the existing experiment so the user sees what was
-            // scaffolded last time (and where) instead of a bare refusal.
-            // This SELECT also makes `experiment` a legitimately-read table
-            // for the table-coverage CI gate.
-            const existing = yield* db.query<[Array<Record<string, unknown>>]>(
-                `SELECT id, artifact_path, type::string(scaffolded_at) AS scaffolded_at, type::string(created_at) AS created_at, locked_verdict FROM experiment WHERE proposal = ${recordRef("proposal", proposalKey)} LIMIT 1;`,
-            );
-            const existingExperiment = (existing?.[0] ?? [])[0];
-            console.error(`proposal already ${status} (use \`axctl improve list --status=all\` to see)`);
-            if (existingExperiment) {
-                console.error(`  experiment   ${String(existingExperiment.id)}`);
-                if (existingExperiment.artifact_path) {
-                    console.error(`  scaffold     ${String(existingExperiment.artifact_path)}`);
-                }
-                if (existingExperiment.scaffolded_at) {
-                    console.error(`  scaffolded   ${String(existingExperiment.scaffolded_at)}`);
-                }
-                if (existingExperiment.locked_verdict) {
-                    console.error(`  verdict      ${String(existingExperiment.locked_verdict)}`);
-                }
-            }
-            process.exit(2);
-        }
-        const form = String(row.form ?? "");
-        if (form !== "skill") {
-            console.error(`accept currently supports form=skill only (got ${form}); subagent/hook/guidance/automation land in later phases`);
-            process.exit(2);
-        }
-        const payload = row.skill_payload as (Record<string, unknown> | null);
-        if (!payload) {
-            console.error("internal: skill_proposal payload missing for form=skill row");
-            process.exit(2);
-        }
-
-        const scaffold = scaffoldSkill({
-            input: {
-                title: String(row.title),
-                hypothesis: String(row.hypothesis),
-                proposedBehavior: String(payload.proposed_behavior ?? ""),
-                triggerPattern: payload.trigger_pattern == null ? null : String(payload.trigger_pattern),
-                expectedImpact: payload.expected_impact == null ? null : String(payload.expected_impact),
-                dedupeSig: String(row.dedupe_sig),
-                nowIso: new Date().toISOString(),
-            },
-            force,
-        });
-        if (scaffold.skipped) {
-            console.error(`refusing to clobber existing scaffold at ${scaffold.path} (use --force to overwrite)`);
-            process.exit(2);
-        }
-
-        const experimentKey = `${proposalKey}__${Date.now().toString(36)}`;
-        const update = `
-            UPDATE ${recordRef("proposal", proposalKey)} SET status = 'accepted', updated_at = time::now();
-            UPSERT ${recordRef("experiment", experimentKey)} MERGE {
-                proposal: ${recordRef("proposal", proposalKey)},
-                artifact_path: ${surrealLiteral(scaffold.path)},
-                scaffolded_at: time::now()
-            };
-        `;
-        yield* db.query(update);
-        console.log(`scaffolded ${scaffold.path}`);
-        console.log(`experiment ${recordRef("experiment", experimentKey)} created`);
-        console.log(`proposal status -> accepted`);
-
-        if (withAgent) {
-            // Reach back into proposal.baseline (set by derive-retro-proposals)
-            // for retro session summaries. For non-retro proposals it's null
-            // and we just pass an empty list.
-            let retroSummaries: readonly string[] = [];
-            const baselineRaw = row.baseline;
-            if (typeof baselineRaw === "string" && baselineRaw.length > 0) {
-                const parsed = safeJsonParse<{ tool?: string; sessionKeys?: unknown; frequency?: number }>(baselineRaw);
-                if (parsed && Array.isArray(parsed.sessionKeys)) {
-                    const tool = parsed.tool ?? "tool";
-                    retroSummaries = parsed.sessionKeys
-                        .filter((s): s is string => typeof s === "string")
-                        .slice(0, 5)
-                        .map((s) => `session ${s}: top tool ${tool} failed (cluster freq=${parsed.frequency ?? "?"})`);
-                }
-                // baseline shape may evolve - null parse is ignored.
-            }
-            console.log("");
-            console.log("spawning claude subagent to enrich the stub…");
-            const result = yield* Effect.promise(() =>
-                runAgentAccept({
-                    skillPath: scaffold.path,
-                    proposalTitle: String(row.title),
-                    hypothesis: String(row.hypothesis),
-                    triggerPattern: payload.trigger_pattern == null ? "" : String(payload.trigger_pattern),
-                    proposedBehavior: String(payload.proposed_behavior ?? ""),
-                    retroSummaries,
-                    relatedSkillsDir: process.env.AX_SKILLS_SCAFFOLD_DIR ?? `${homedir()}/.claude/skills`,
-                }),
-            );
-            if (result.skillEnriched) {
-                console.log(`agent enriched ${scaffold.path}`);
-            }
-            if (result.planWritten && result.planPath) {
-                console.log(`agent wrote plan ${result.planPath}`);
-            }
-            if (result.exitCode !== 0) {
-                console.log(`agent exit code ${result.exitCode} (stub still scaffolded; experiment row unchanged)`);
-            }
-        }
-    });
-
 const cmdImproveReject = (args: string[]) =>
     Effect.gen(function* () {
         const positional = args.filter((a) => !a.startsWith("--"))[0];
@@ -2418,12 +2135,12 @@ const improveAcceptCommand = Command.make(
                 let retroSummaries: readonly string[] = [];
                 const baselineRaw = result.proposal.baseline;
                 if (typeof baselineRaw === "string" && baselineRaw.length > 0) {
-                    const parsed = decodeJsonRecordOrNull(baselineRaw) as {
-                        tool?: string;
-                        sessionKeys?: unknown;
-                        frequency?: number;
-                    } | null;
-                    if (parsed !== null) {
+                    try {
+                        const parsed = JSON.parse(baselineRaw) as {
+                            tool?: string;
+                            sessionKeys?: unknown;
+                            frequency?: number;
+                        };
                         if (Array.isArray(parsed.sessionKeys)) {
                             const tool = parsed.tool ?? "tool";
                             retroSummaries = parsed.sessionKeys
@@ -2431,6 +2148,8 @@ const improveAcceptCommand = Command.make(
                                 .slice(0, 5)
                                 .map((s) => `session ${s}: top tool ${tool} failed (cluster freq=${parsed.frequency ?? "?"})`);
                         }
+                    } catch {
+                        // ignore - baseline shape may evolve
                     }
                 }
                 console.log("");
@@ -2755,7 +2474,7 @@ const maybeAutoIngestStale = (
         const threshold = parsePositiveIntFlag(
             cmdLabel,
             "stale-threshold",
-            args,
+            [...args],
             STALE_THRESHOLD_DEFAULT,
         );
 
@@ -2790,7 +2509,7 @@ const cmdSessionsHere = (args: string[]) =>
 
         const pwdResolution = yield* resolvePwdRepository().pipe(
             Effect.catchTag("NotAGitRepoError", (err) =>
-                Effect.promise(async () => {
+                Effect.sync(() => {
                     process.stderr.write(
                         `axctl sessions here: not in a git repository (cwd=${err.cwd})\n`,
                     );
@@ -2804,7 +2523,7 @@ const cmdSessionsHere = (args: string[]) =>
         const rows = yield* listSessionsHere({ repositoryKey, days });
 
         if (json) {
-            console.log(prettyPrint(rows));
+            console.log(JSON.stringify(rows, null, 2));
             return;
         }
         console.log(formatSessionsTable(rows));
@@ -2847,7 +2566,7 @@ const cmdSessionsAround = (args: string[]) =>
         const rows = yield* listSessionsAround({ date, days, project });
 
         if (json) {
-            console.log(prettyPrint(rows));
+            console.log(JSON.stringify(rows, null, 2));
             return;
         }
         console.log(formatSessionsTable(rows));
@@ -2867,7 +2586,7 @@ const cmdSessionsNear = (args: string[]) =>
         // Resolve repository via pwd (near is always pwd-scoped)
         const pwdResolution = yield* resolvePwdRepository().pipe(
             Effect.catchTag("NotAGitRepoError", (err) =>
-                Effect.promise(async () => {
+                Effect.sync(() => {
                     process.stderr.write(
                         `axctl sessions near: not in a git repository (cwd=${err.cwd})\n`,
                     );
@@ -2912,7 +2631,7 @@ const cmdSessionsNear = (args: string[]) =>
         const rows = yield* listSessionsNear({ from, to, repositoryKey });
 
         if (json) {
-            console.log(prettyPrint(rows));
+            console.log(JSON.stringify(rows, null, 2));
             return;
         }
         console.log(formatSessionsTable(rows));
@@ -3619,7 +3338,7 @@ const retroCommand = Command.make("retro").pipe(
 const serveCommand = Command.make(
     "serve",
     { port: Flag.integer("port").pipe(Flag.withDefault(1738)) },
-    ({ port }) => Effect.promise(() => serveDashboard([`--port=${port}`])),
+    ({ port }) => Effect.sync(() => serveDashboard([`--port=${port}`])),
 ).pipe(Command.withDescription("Serve the live web dashboard locally"));
 
 const reportCommand = Command.make(
@@ -3630,6 +3349,279 @@ const reportCommand = Command.make(
     },
     ({ limit, out }) => cmdReport([`--limit=${limit}`, ...stringArg("out", optionValue(out))]),
 ).pipe(Command.withDescription("Write a static evidence report (one-shot HTML snapshot)"));
+
+const usd = (value: unknown): string => {
+    const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+    return Number.isFinite(n) ? `$${n.toFixed(4)}` : "$0.0000";
+};
+
+const integer = (value: unknown): string => {
+    const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+    return Number.isFinite(n) ? Math.trunc(n).toLocaleString("en-US") : "0";
+};
+
+const cmdCosts = (input: { readonly limit: number; readonly source: string | null; readonly sinceDays: number | null; readonly json: boolean }) =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const where = ["estimated_cost_usd != NONE"];
+        if (input.source) where.push(`source = ${surrealLiteral(input.source)}`);
+        if (input.sinceDays !== null) {
+            const since = Math.min(Math.max(Math.trunc(input.sinceDays), 1), 3650);
+            where.push(`ts > time::now() - ${since}d`);
+        }
+        const whereClause = `WHERE ${where.join(" AND ")}`;
+        const [totals, byModel, recent] = yield* Effect.all([
+            db.query<[Array<Record<string, unknown>>]>(`
+SELECT count() AS sessions, math::sum(estimated_tokens) AS tokens, math::sum(prompt_tokens) AS prompt_tokens,
+       math::sum(completion_tokens) AS completion_tokens, math::sum(cache_creation_input_tokens) AS cache_creation_input_tokens,
+       math::sum(cache_read_input_tokens) AS cache_read_input_tokens, math::sum(estimated_cost_usd) AS cost
+FROM session_token_usage
+${whereClause}
+GROUP ALL;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
+            db.query<[Array<Record<string, unknown>>]>(`
+SELECT source, model, pricing_source, count() AS sessions, math::sum(estimated_tokens) AS tokens,
+       math::sum(prompt_tokens) AS prompt_tokens, math::sum(completion_tokens) AS completion_tokens,
+       math::sum(cache_creation_input_tokens) AS cache_creation_input_tokens,
+       math::sum(cache_read_input_tokens) AS cache_read_input_tokens,
+       math::sum(estimated_cost_usd) AS cost
+FROM session_token_usage
+${whereClause}
+GROUP BY source, model, pricing_source
+ORDER BY cost DESC
+LIMIT ${Math.min(Math.max(input.limit, 1), 200)};`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
+            db.query<[Array<Record<string, unknown>>]>(`
+SELECT session, source, model, estimated_tokens, estimated_cost_usd, pricing_source, type::string(ts) AS ts
+FROM session_token_usage
+${whereClause}
+ORDER BY ts DESC
+LIMIT ${Math.min(Math.max(input.limit, 1), 200)};`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
+        ], { concurrency: 3 });
+        const payload = { totals: totals[0] ?? null, byModel, recent };
+        if (input.json) {
+            console.log(prettyPrint(payload));
+            return;
+        }
+        const total = totals[0];
+        if (!total) {
+            console.log("(no priced session token usage yet)");
+            return;
+        }
+        console.log(`cost ${usd(total.cost)}  sessions ${integer(total.sessions)}  tokens ${integer(total.tokens)}`);
+        console.log("");
+        console.log(`${"source".padEnd(12)} ${"model".padEnd(30)} ${"sessions".padStart(8)} ${"tokens".padStart(14)} ${"cost".padStart(10)}  pricing`);
+        for (const row of byModel) {
+            console.log(
+                `${String(row.source ?? "").padEnd(12)} ` +
+                `${String(row.model ?? "<none>").slice(0, 30).padEnd(30)} ` +
+                `${integer(row.sessions).padStart(8)} ` +
+                `${integer(row.tokens).padStart(14)} ` +
+                `${usd(row.cost).padStart(10)}  ` +
+                `${String(row.pricing_source ?? "")}`,
+            );
+        }
+    });
+
+const costsSummaryCommand = Command.make(
+    "summary",
+    {
+        limit: positiveLimit(20),
+        source: Flag.string("source").pipe(Flag.optional),
+        since: optionalSince,
+        json: jsonFlag,
+    },
+    ({ limit, source, since, json }) =>
+        cmdCosts({
+            limit,
+            source: optionValue(source) ?? null,
+            sinceDays: optionValue(since) ?? null,
+            json,
+        }),
+).pipe(Command.withDescription("Summarize estimated session token cost by provider/model"));
+
+const formatCostSummary = (summary: CostSummary): string => {
+    const lines: string[] = [];
+    lines.push(`selector ${summary.selector}`);
+    lines.push(`evidence ${summary.evidence}`);
+    lines.push(
+        `cost ${usd(summary.totals.estimatedCostUsd)}  sessions ${integer(summary.totals.sessions)}  tokens ${integer(summary.totals.estimatedTokens)}`,
+    );
+    lines.push(
+        `prompt ${integer(summary.totals.promptTokens)}  output ${integer(summary.totals.completionTokens)}  cache_write ${integer(summary.totals.cacheCreationInputTokens)}  cache_read ${integer(summary.totals.cacheReadInputTokens)}`,
+    );
+    lines.push("");
+    lines.push(`${"source".padEnd(12)} ${"model".padEnd(30)} ${"sessions".padStart(8)} ${"tokens".padStart(14)} ${"cost".padStart(10)}`);
+    for (const row of summary.byModel) {
+        lines.push(
+            `${row.source.padEnd(12)} ` +
+            `${String(row.model ?? "<none>").slice(0, 30).padEnd(30)} ` +
+            `${integer(row.sessions).padStart(8)} ` +
+            `${integer(row.estimatedTokens).padStart(14)} ` +
+            `${usd(row.estimatedCostUsd).padStart(10)}`,
+        );
+    }
+    lines.push("");
+    lines.push("sessions");
+    for (const row of summary.sessions.slice(0, 20)) {
+        lines.push(
+            `- ${row.session.replace(/^session:/, "")}  ${row.source}  ${row.model ?? "?"}  ${integer(row.estimated_tokens)} tokens  ${usd(row.estimated_cost_usd)}`,
+        );
+    }
+    return lines.join("\n");
+};
+
+const splitCostTerms = (value: string | null): string[] =>
+    value === null
+        ? []
+        : value.split(",").map((term) => term.trim()).filter((term) => term.length > 0);
+
+const costQueryTerms = (query: string | null, terms: string | null): string[] => {
+    const parsedTerms = splitCostTerms(terms);
+    if (parsedTerms.length > 0) return parsedTerms;
+    return query === null ? [] : [query];
+};
+
+const cmdCostsFor = (input: {
+    readonly session: string | null;
+    readonly query: string | null;
+    readonly terms: string | null;
+    readonly commit: string | null;
+    readonly branch: string | null;
+    readonly sinceDays: number | null;
+    readonly project: string | null;
+    readonly here: boolean;
+    readonly limit: number;
+    readonly json: boolean;
+}) =>
+    Effect.gen(function* () {
+        let repositoryKey: string | null = null;
+        if (input.commit || input.branch || input.here) {
+            const pwdResolution = yield* resolvePwdRepository().pipe(
+                Effect.catchTag("NotAGitRepoError", (err) =>
+                    Effect.sync(() => {
+                        process.stderr.write(`axctl costs for: --here/--commit/--branch requires a git repository (cwd=${err.cwd})\n`);
+                        process.exit(2);
+                    }),
+                ),
+            );
+            repositoryKey = pwdResolution.repositoryRecordId.id as string;
+        }
+        const since = input.sinceDays === null
+            ? null
+            : new Date(Date.now() - Math.min(Math.max(Math.trunc(input.sinceDays), 1), 3650) * 86400 * 1000);
+        const terms = costQueryTerms(input.query, input.terms);
+        const selected =
+            input.session ? { kind: "session" as const, sessionId: input.session } :
+            terms.length > 0 ? {
+                kind: "query" as const,
+                terms,
+                limit: input.limit,
+                since,
+                project: input.project,
+                repositoryKey,
+            } :
+            input.commit ? { kind: "commit" as const, sha: input.commit, repositoryKey } :
+            input.branch ? { kind: "branch" as const, branch: input.branch, repositoryKey, limit: input.limit } :
+            null;
+        if (!selected) {
+            console.error("axctl costs for: pass one of --session, --query, --terms, --commit, --branch");
+            process.exit(2);
+        }
+        const summary = yield* fetchCostSummary(selected);
+        if (input.json) {
+            console.log(prettyPrint(summary));
+            return;
+        }
+        console.log(formatCostSummary(summary));
+    });
+
+const costsForCommand = Command.make(
+    "for",
+    {
+        session: Flag.string("session").pipe(Flag.optional),
+        query: Flag.string("query").pipe(Flag.optional),
+        terms: Flag.string("terms").pipe(Flag.optional),
+        commit: Flag.string("commit").pipe(Flag.optional),
+        branch: Flag.string("branch").pipe(Flag.optional),
+        since: optionalSince,
+        project: Flag.string("project").pipe(Flag.optional),
+        here: Flag.boolean("here").pipe(Flag.withDefault(false)),
+        limit: positiveLimit(50),
+        json: jsonFlag,
+    },
+    ({ session, query, terms, commit, branch, since, project, here, limit, json }) =>
+        cmdCostsFor({
+            session: optionValue(session) ?? null,
+            query: optionValue(query) ?? null,
+            terms: optionValue(terms) ?? null,
+            commit: optionValue(commit) ?? null,
+            branch: optionValue(branch) ?? null,
+            sinceDays: optionValue(since) ?? null,
+            project: optionValue(project) ?? null,
+            here,
+            limit,
+            json,
+        }),
+).pipe(Command.withDescription("Estimate cost for a session, text query, commit, or branch"));
+
+const costsGroupCommand = Command.make("costs").pipe(
+    Command.withDescription("Summarize and explain estimated token costs"),
+    Command.withSubcommands([costsSummaryCommand, costsForCommand]),
+);
+
+const cmdPricing = (input: { readonly limit: number; readonly query: string | null; readonly json: boolean }) =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const rows = yield* db.query<[Array<Record<string, unknown>>]>(`
+SELECT name, provider, display_name, input_per_million_usd, output_per_million_usd,
+       cache_creation_per_million_usd, cache_read_per_million_usd,
+       fast_multiplier, context_window, pricing_source
+FROM agent_model
+ORDER BY provider, name
+LIMIT 5000;`).pipe(Effect.map((result) => result?.[0] ?? []));
+        const q = input.query?.trim().toLowerCase() ?? "";
+        const filtered = (q.length === 0
+            ? rows
+            : rows.filter((row) =>
+                String(row.name ?? "").toLowerCase().includes(q) ||
+                String(row.provider ?? "").toLowerCase().includes(q) ||
+                String(row.display_name ?? "").toLowerCase().includes(q)
+            )).slice(0, Math.min(Math.max(input.limit, 1), 500));
+        if (input.json) {
+            console.log(prettyPrint(filtered));
+            return;
+        }
+        if (filtered.length === 0) {
+            console.log("(no model prices match)");
+            return;
+        }
+        console.log(`${"provider".padEnd(14)} ${"model".padEnd(36)} ${"in/M".padStart(8)} ${"out/M".padStart(8)} ${"cache/M".padStart(8)} ${"ctx".padStart(8)}  source`);
+        for (const row of filtered) {
+            console.log(
+                `${String(row.provider ?? "").padEnd(14)} ` +
+                `${String(row.name ?? "").slice(0, 36).padEnd(36)} ` +
+                `${String(row.input_per_million_usd ?? "-").padStart(8)} ` +
+                `${String(row.output_per_million_usd ?? "-").padStart(8)} ` +
+                `${String(row.cache_read_per_million_usd ?? "-").padStart(8)} ` +
+                `${String(row.context_window ?? "-").padStart(8)}  ` +
+                `${String(row.pricing_source ?? "")}`,
+            );
+        }
+    });
+
+const pricingCommand = Command.make(
+    "pricing",
+    {
+        query: Flag.string("query").pipe(Flag.optional),
+        limit: positiveLimit(30),
+        json: jsonFlag,
+    },
+    ({ query, limit, json }) =>
+        cmdPricing({
+            query: optionValue(query) ?? null,
+            limit,
+            json,
+        }),
+).pipe(Command.withDescription("Inspect imported model pricing rows"));
 
 const dogfoodTerminalCommand = Command.make(
     "terminal",
@@ -4063,7 +4055,7 @@ const hookFileContextCommand = Command.make(
                 // something to inject; emit nothing otherwise so Claude Code
                 // doesn't show an empty additionalContext block to the user.
                 if (response.inject && response.context.length > 0) {
-                    console.log(encodeJson({
+                    console.log(JSON.stringify({
                         hookSpecificOutput: {
                             hookEventName: "PreToolUse",
                             additionalContext: response.context,
@@ -4356,12 +4348,14 @@ export const rootCommand = Command.make("axctl").pipe(
         deriveSignalsCommand,
         deriveIntentsCommand,
         insightsCommand,
-        costsCommand,
+        classifiersCommand,
         sessionsCommand,
         improveCommand,
         retroCommand,
         serveCommand,
         reportCommand,
+        costsGroupCommand,
+        pricingCommand,
         recallCommand,
         skillsCommand,
         rolesCommand,
@@ -4445,11 +4439,13 @@ export const DB_COMMANDS: ReadonlySet<string> = new Set([
     "derive-signals",
     "derive-intents",
     "insights",
-    "costs",
+    "classifiers",
     "sessions",
     "improve",
     "retro",
     "report",
+    "costs",
+    "pricing",
     "recall",
     "skills",
     "roles",
@@ -4466,10 +4462,6 @@ async function main() {
     const [, , ...args] = process.argv;
     if (args[0] === undefined || args[0] === "help" || args[0] === "--help" || args[0] === "-h") {
         await Effect.runPromise(withoutDb(["--help"]));
-        return;
-    }
-    if (args.includes("--help") || args.includes("-h")) {
-        await Effect.runPromise(withoutDb(args));
         return;
     }
     if (args[0] === "-V" || args[0] === "-v" || args[0] === "--version") {
@@ -4492,6 +4484,10 @@ async function main() {
             process.exit(2);
         }
         await Effect.runPromise(withIngest(args));
+        return;
+    }
+    if (args[0] === "classifiers" && (args[1] === "eval" || args[1] === "list")) {
+        await Effect.runPromise(withoutDb(args));
         return;
     }
     if (DB_COMMANDS.has(args[0] ?? "")) {

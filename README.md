@@ -194,6 +194,13 @@ axctl insights <view>                       # 19 read-only graph views
 axctl costs <summary>                       # token/cost usage by provider/model quality
 axctl sessions <here|around <date>|near <sha>|show <id>>
                                             # windowed session queries
+axctl costs summary [--since=N]             # estimated token cost by provider/model
+axctl costs for --session <id>              # cost for one session
+axctl costs for --query <text> [--limit=N]  # cost for sessions matching turn text
+axctl costs for --terms <a,b,c> [--since=N] # cost for sessions matching any term
+axctl costs for --commit <sha>              # cost for sessions that produced a commit
+axctl costs for --branch <name>             # cost for sessions linked to a branch
+axctl pricing [--query <model>]             # inspect imported model pricing rows
 axctl roles                                 # list role labels with skill counts
 axctl project <context|verify|harness>
 axctl evidence <guidance-next|session-summary|weekly>
@@ -211,6 +218,33 @@ axctl version [--check|--banner]
 ```
 
 Full reference: [`docs/insights-cli-reference.md`](docs/insights-cli-reference.md).
+
+### Token cost queries
+
+`axctl costs` reads the local `session_token_usage` graph. Provider adapters
+write actual token counters when they exist; otherwise ax falls back to a rough
+transcript-byte estimate. `session-health` resolves model names through
+`agent_model` pricing rows and stores prompt, output, cache-read, cache-write,
+and total estimated USD.
+
+Examples:
+
+```bash
+axctl costs summary --since=2
+axctl costs for --query "live-traces" --limit=20
+axctl costs for --terms "live trace,livetrace,live-traces" --since=2 --limit=50
+axctl costs for --terms "live trace,livetrace,live-traces" --since=2 --project /Users/me/project
+axctl costs for --query "checkout bug" --since=7 --here
+axctl costs for --commit 464c80b
+axctl costs for --branch main --limit=20
+axctl sessions show <session-id>
+axctl pricing --query gpt-5.5
+```
+
+`--query` and `--terms` can be constrained with `--since=N`, `--project <path>`,
+or `--here`. `--here`, `--commit`, and `--branch` use repository graph evidence
+from the current git checkout. Direct `--pr <number>` is not wired yet; use the
+PR branch or a commit SHA for now.
 
 ### Grounded agent files
 

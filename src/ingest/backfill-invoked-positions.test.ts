@@ -5,7 +5,8 @@
  * control what the SELECT queries return. No live DB required.
  *
  * R4 algorithm recap:
- *   - SELECT DISTINCT affected (session, skill) pairs (rows with NONE fields).
+ *   - SELECT affected (session, skill) rows (rows with NONE fields), then
+ *     dedupe pairs in TypeScript.
  *   - For each pair, SELECT ALL rows in the group (not just missing ones).
  *   - Compute: turn_index (keep if set, else seq), total_turns (always refresh),
  *     is_first (earliest seq in full group).
@@ -35,10 +36,10 @@ type GroupRow = {
 // Mock builder
 //
 // The new algorithm issues these queries in order:
-//   Q1: SELECT DISTINCT ... FROM invoked WHERE turn_index IS NONE OR ...
+//   Q1: SELECT ... FROM invoked WHERE turn_index IS NONE OR ...
 //   Q2: SELECT session, count() AS n FROM turn GROUP BY session
-//   Q3+: SELECT id, in.seq AS seq, ... FROM invoked WHERE in.session = X AND out = Y
-//   Q4+: UPDATE <id> SET ... (batched via executeStatementsWith)
+//   Q3: SELECT all invoked rows with session/skill/seq for affected groups
+//   Q4: UPDATE <id> SET ... (batched via executeStatementsWith)
 // ---------------------------------------------------------------------------
 
 function makeDb(options: {
@@ -59,7 +60,7 @@ function makeDb(options: {
                 if (
                     sql.includes("FROM invoked") &&
                     sql.includes("turn_index IS NONE") &&
-                    sql.includes("DISTINCT")
+                    sql.includes("`in`.session AS session")
                 ) {
                     return [affectedPairs];
                 }
@@ -69,20 +70,17 @@ function makeDb(options: {
                     return [turnCounts];
                 }
 
-                // Q3: per-pair group fetch
+                // Q3: all invoked rows with group coordinates
                 if (
                     sql.includes("FROM invoked") &&
-                    sql.includes("in.session =") &&
-                    sql.includes("AND out =")
+                    sql.includes("`in`.session AS session") &&
+                    sql.includes("`in`.seq AS seq") &&
+                    !sql.includes("turn_index IS NONE")
                 ) {
-                    // Extract session and skill from the WHERE clause.
-                    // Pattern: in.session = session:X AND out = skill:Y
-                    const sessionMatch = sql.match(/in\.session = (\S+)\s+AND/);
-                    const skillMatch = sql.match(/AND out = (\S+)/);
-                    const session = sessionMatch?.[1] ?? "";
-                    const skill = skillMatch?.[1]?.replace(";", "") ?? "";
-                    const key = `${session}|||${skill}`;
-                    return [groups.get(key) ?? []];
+                    return [Array.from(groups.entries()).flatMap(([key, rows]) => {
+                        const [session, skill] = key.split("|||");
+                        return rows.map((row) => ({ ...row, session, skill }));
+                    })];
                 }
 
                 // UPDATE / executeStatementsWith chunks
@@ -214,7 +212,7 @@ describe("backfillInvokedPositions (R4)", () => {
                     if (
                         sql.includes("FROM invoked") &&
                         sql.includes("turn_index IS NONE") &&
-                        sql.includes("DISTINCT")
+                        sql.includes("`in`.session AS session")
                     ) {
                         return [[]]; // no affected pairs
                     }

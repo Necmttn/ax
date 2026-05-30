@@ -6,6 +6,7 @@ import {
     sessionChildrenQuery,
     sessionOverviewQuery,
     sessionParentQuery,
+    sessionTokenUsageQuery,
     sessionToolCallsQuery,
     sessionTopSkillsQuery,
 } from "../queries/session-detail.ts";
@@ -44,12 +45,13 @@ export const fetchSessionDetail = (
                 children: [],
                 parent: null,
                 agent_delegations: [],
+                token_usage: null,
             };
         }
         const recordRef = `session:⟨${uuid}⟩`;
         const params = { recordRef };
 
-        const [overview, top_skills_raw, tool_calls_raw, children_raw, parent_raw, agent_delegations_raw] =
+        const [overview, top_skills_raw, tool_calls_raw, children_raw, parent_raw, agent_delegations_raw, token_usage] =
             yield* Effect.all([
                 runSingleQuery(sessionOverviewQuery, params),
                 runQuery(sessionTopSkillsQuery, params),
@@ -57,6 +59,7 @@ export const fetchSessionDetail = (
                 runQuery(sessionChildrenQuery, params),
                 runSingleQuery(sessionParentQuery, params),
                 runQuery(sessionAgentDelegationsQuery, params),
+                runSingleQuery(sessionTokenUsageQuery, params),
             ]);
 
         const top_skills = top_skills_raw.filter((s): s is SessionTopSkill => s !== null);
@@ -74,5 +77,6 @@ export const fetchSessionDetail = (
             children,
             parent,
             agent_delegations,
+            token_usage: token_usage as SessionDetailPayload["token_usage"],
         };
     });

@@ -1,0 +1,101 @@
+{
+  "name": "verification-event",
+  "cases": [
+    {
+      "name": "test-required",
+      "classifierKeys": ["verification-event"],
+      "window": {
+        "user": "did you run the tests?"
+      },
+      "expect": [
+        {
+          "classifierKey": "verification-event",
+          "label": "verification_request",
+          "target": "test_required"
+        }
+      ]
+    },
+    {
+      "name": "output-required",
+      "classifierKeys": ["verification-event"],
+      "window": {
+        "user": "I want to see the actual results and output"
+      },
+      "expect": [
+        {
+          "classifierKey": "verification-event",
+          "label": "verification_request",
+          "target": "output_required"
+        }
+      ]
+    },
+    {
+      "name": "regression-guard",
+      "classifierKeys": ["verification-event"],
+      "window": {
+        "user": "we need a test mechanism so we don't fuck up the trained models"
+      },
+      "expect": [
+        {
+          "classifierKey": "verification-event",
+          "label": "verification_request",
+          "target": "regression_guard",
+          "durability": "repo_preference"
+        }
+      ]
+    },
+    {
+      "name": "typecheck-smoke-required",
+      "classifierKeys": ["verification-event"],
+      "window": {
+        "user": "run typecheck and a smoke test before saying this works"
+      },
+      "expect": [
+        {
+          "classifierKey": "verification-event",
+          "label": "verification_request",
+          "target": "test_required"
+        }
+      ]
+    },
+    {
+      "name": "show-output-required",
+      "classifierKeys": ["verification-event"],
+      "window": {
+        "user": "show me the output from the command, not just a summary"
+      },
+      "expect": [
+        {
+          "classifierKey": "verification-event",
+          "label": "verification_request",
+          "target": "output_required"
+        }
+      ]
+    },
+    {
+      "name": "negative-continue",
+      "classifierKeys": ["verification-event"],
+      "window": {
+        "user": "continue with the implementation"
+      },
+      "expect": [],
+      "reject": [
+        {
+          "classifierKey": "verification-event",
+          "label": "verification_request",
+          "target": "test_required"
+        },
+        {
+          "classifierKey": "verification-event",
+          "label": "verification_request",
+          "target": "output_required"
+        },
+        {
+          "classifierKey": "verification-event",
+          "label": "verification_request",
+          "target": "regression_guard"
+        }
+      ]
+    }
+  ]
+}

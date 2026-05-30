@@ -47,4 +47,18 @@ describe("StageRegistry", () => {
             "cursor",
         ]);
     });
+
+    it("runs turn-analysis after outcomes so feedback graph has ngram/outcome context", () => {
+        const keys = ALL_STAGES.map((stage) => stage.meta.key);
+        expect(keys.indexOf("turn-analysis")).toBeGreaterThan(keys.indexOf("outcomes"));
+        expect(keys.indexOf("reaction-events")).toBeGreaterThan(keys.indexOf("turn-analysis"));
+        expect(keys.indexOf("classifier-results")).toBeGreaterThan(keys.indexOf("turn-analysis"));
+        expect(keys.indexOf("session-health")).toBeGreaterThan(keys.indexOf("turn-analysis"));
+    });
+
+    it("parses turn content blocks after provider ingests and before feedback analysis", () => {
+        const keys = ALL_STAGES.map((stage) => stage.meta.key);
+        expect(keys.indexOf("turn-content-blocks")).toBeGreaterThan(keys.indexOf("cursor"));
+        expect(keys.indexOf("turn-analysis")).toBeGreaterThan(keys.indexOf("turn-content-blocks"));
+    });
 });

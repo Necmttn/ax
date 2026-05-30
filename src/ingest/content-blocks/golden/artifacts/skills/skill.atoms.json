@@ -1,0 +1,21 @@
+[
+  {
+    "kind": "frontmatter_field",
+    "normalized": "name"
+  },
+  {
+    "kind": "frontmatter_field",
+    "normalized": "description"
+  },
+  {
+    "kind": "skill_trigger"
+  },
+  {
+    "kind": "procedure_step",
+    "value": "Reproduce the failure."
+  },
+  {
+    "kind": "resource_ref",
+    "normalized": "references/parser-contract.md"
+  }
+]

@@ -1,0 +1,4 @@
+Implementation plan:
+1. Read src/ingest/opencode.ts
+2. Compare tool output handling with the shared turn parser
+3. Verification: run `bun test src/ingest/opencode.test.ts`

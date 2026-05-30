@@ -1,0 +1,770 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ax turn detail alternatives</title>
+  <style>
+    :root {
+      --bg: #f7f7f2;
+      --paper: #fffdf7;
+      --ink: #20211c;
+      --muted: #777a70;
+      --line: #d9d8ce;
+      --line-dark: #9d9f94;
+      --blue: #3569b7;
+      --green: #247a4b;
+      --amber: #a86914;
+      --red: #b64032;
+      --violet: #694db5;
+      --cyan: #157b8a;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --shadow: 0 16px 40px rgba(33, 31, 23, .08);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background:
+        linear-gradient(90deg, rgba(32,33,28,.045) 1px, transparent 1px),
+        linear-gradient(0deg, rgba(32,33,28,.035) 1px, transparent 1px),
+        var(--bg);
+      background-size: 28px 28px;
+      font-family: var(--sans);
+      letter-spacing: 0;
+    }
+
+    button, input { font: inherit; }
+
+    .shell {
+      width: min(1680px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 20px 0 40px;
+    }
+
+    .mast {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 20px;
+      align-items: end;
+      padding: 0 0 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    h1 {
+      margin: 0;
+      font: 740 30px/1.05 var(--sans);
+      letter-spacing: 0;
+    }
+
+    .sub {
+      margin-top: 7px;
+      color: var(--muted);
+      font: 13px/1.45 var(--mono);
+      max-width: 980px;
+    }
+
+    .switcher {
+      display: inline-flex;
+      gap: 4px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      background: rgba(255,253,247,.82);
+      box-shadow: var(--shadow);
+    }
+
+    .switcher button {
+      border: 0;
+      background: transparent;
+      color: #55584f;
+      padding: 8px 11px;
+      cursor: pointer;
+      font: 700 12px/1 var(--mono);
+      text-transform: uppercase;
+    }
+
+    .switcher button.active {
+      background: #20211c;
+      color: #fffdf7;
+    }
+
+    .stage {
+      margin-top: 16px;
+      border: 1px solid var(--line);
+      background: rgba(255,253,247,.76);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .turn-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfaf3;
+      font: 12px/1 var(--mono);
+      color: var(--muted);
+    }
+
+    .badge {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: #4d5148;
+      padding: 5px 7px;
+      font: 750 11px/1 var(--mono);
+      text-transform: uppercase;
+    }
+
+    .badge.user { border-color: #e5c553; background: #fff8ce; color: #6d4a08; }
+    .badge.ai { border-color: #8ec7d1; background: #e8fbff; color: #0f6370; }
+    .badge.refcount { border-color: #b5a6e5; background: #f1edff; color: #51359c; }
+
+    .spacer { margin-left: auto; }
+
+    .ref {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      color: var(--blue);
+      border: 1px solid rgba(53,105,183,.28);
+      background: rgba(53,105,183,.08);
+      padding: 0 4px;
+      border-radius: 3px;
+      text-decoration: none;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .ref.skill { color: var(--violet); border-color: rgba(105,77,181,.32); background: rgba(105,77,181,.09); }
+    .ref.file { color: var(--green); border-color: rgba(36,122,75,.32); background: rgba(36,122,75,.09); }
+    .ref.tag { color: var(--amber); border-color: rgba(168,105,20,.35); background: rgba(168,105,20,.10); }
+    .ref.symbol { color: var(--cyan); border-color: rgba(21,123,138,.32); background: rgba(21,123,138,.10); }
+
+    .block {
+      --tone: var(--amber);
+      --wash: rgba(168,105,20,.10);
+      border-left: 3px solid var(--tone);
+      background: linear-gradient(90deg, var(--wash), transparent 34%);
+    }
+
+    .block.objective { --tone: var(--green); --wash: rgba(36,122,75,.12); }
+    .block.constraint { --tone: var(--red); --wash: rgba(182,64,50,.10); }
+    .block.process { --tone: var(--blue); --wash: rgba(53,105,183,.10); }
+    .block.budget { --tone: #d58b22; --wash: rgba(213,139,34,.13); }
+
+    .inline-text {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font: 12px/1.62 var(--mono);
+    }
+
+    .hover-note {
+      position: fixed;
+      z-index: 20;
+      right: 22px;
+      bottom: 22px;
+      width: 340px;
+      border: 1px solid #cfcab9;
+      background: #fffdf7;
+      padding: 12px;
+      box-shadow: var(--shadow);
+      color: #3d3f38;
+      font: 12px/1.45 var(--mono);
+    }
+
+    .hover-note b { color: var(--ink); }
+
+    .panel-title {
+      margin: 0 0 8px;
+      font: 800 11px/1 var(--mono);
+      color: #4a4d45;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+
+    .small {
+      color: var(--muted);
+      font: 11px/1.4 var(--mono);
+    }
+
+    .mode { display: none; }
+    .mode.active { display: block; }
+
+    /* Mode A: single file viewer */
+    .single-view {
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr) 300px;
+      min-height: 680px;
+    }
+
+    .section-rail {
+      border-right: 1px solid var(--line);
+      background: #f4f2e9;
+      padding: 14px 12px;
+    }
+
+    .rail-item {
+      display: grid;
+      grid-template-columns: 10px 1fr auto;
+      gap: 8px;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(0,0,0,.06);
+      font: 12px/1.25 var(--mono);
+      color: #55584f;
+      cursor: pointer;
+    }
+
+    .rail-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--tone); }
+    .rail-count { color: #9b9d94; font-size: 10px; }
+
+    .file-document {
+      padding: 18px 20px 24px;
+      max-height: 720px;
+      overflow: auto;
+      font: 12px/1.62 var(--mono);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .dom-range {
+      display: block;
+      position: relative;
+      padding: 2px 8px 2px 12px;
+      margin: 0;
+      border-left: 3px solid var(--tone);
+      background: linear-gradient(90deg, var(--wash), transparent 28%);
+      transition: background .12s ease, box-shadow .12s ease, opacity .12s ease;
+    }
+
+    .dom-range:before {
+      content: attr(data-label);
+      display: block;
+      width: max-content;
+      margin: 4px 0 4px;
+      padding: 2px 5px;
+      background: rgba(255,253,247,.72);
+      border: 1px solid rgba(0,0,0,.08);
+      color: #4b4d45;
+      font: 800 10px/1 var(--mono);
+      text-transform: uppercase;
+    }
+
+    .dom-range:hover,
+    .dom-range.is-active {
+      background: linear-gradient(90deg, color-mix(in srgb, var(--tone) 18%, transparent), transparent 46%);
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tone) 44%, transparent);
+    }
+
+    .dom-range.is-muted { opacity: .42; }
+
+    .reader-side {
+      border-left: 1px solid var(--line);
+      background: #fbfaf3;
+      padding: 14px;
+    }
+
+    .entity-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 0 0 14px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      background: #fff;
+      padding: 9px;
+      margin-bottom: 8px;
+    }
+
+    .composition {
+      display: grid;
+      height: 138px;
+      grid-template-columns: 1fr;
+      border: 1px solid var(--line);
+      background: #fff;
+      margin: 0 0 12px;
+      overflow: hidden;
+    }
+
+    .comp-band {
+      background: var(--tone);
+      opacity: .72;
+      min-height: 8px;
+      cursor: pointer;
+      border-bottom: 1px solid rgba(255,255,255,.75);
+    }
+
+    .comp-band:hover { opacity: 1; }
+
+    /* Mode B: anatomy map */
+    .map-view {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 360px;
+      min-height: 700px;
+    }
+
+    .map-main {
+      padding: 18px;
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+
+    .big-map {
+      border: 1px solid var(--line);
+      background: #fff;
+      display: grid;
+      grid-template-columns: 90px minmax(0, 1fr) 110px;
+      min-height: 430px;
+      overflow: hidden;
+    }
+
+    .map-row {
+      display: contents;
+      font: 12px/1 var(--mono);
+    }
+
+    .map-row > div {
+      border-bottom: 1px solid rgba(0,0,0,.06);
+      padding: 8px 10px;
+    }
+
+    .map-label {
+      color: #4b4d45;
+      text-transform: uppercase;
+      font-weight: 800;
+    }
+
+    .map-bar-wrap {
+      background: linear-gradient(90deg, rgba(0,0,0,.04), transparent);
+    }
+
+    .map-bar {
+      height: 14px;
+      background: var(--tone);
+      opacity: .75;
+      border-radius: 2px;
+    }
+
+    .map-copy {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .tools {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+
+    .anatomy-side {
+      border-left: 1px solid var(--line);
+      background: #f4f2e9;
+      padding: 14px;
+    }
+
+    .timeline {
+      margin-top: 12px;
+      position: relative;
+      padding-left: 18px;
+    }
+
+    .timeline:before {
+      content: "";
+      position: absolute;
+      top: 4px;
+      bottom: 4px;
+      left: 5px;
+      width: 1px;
+      background: var(--line-dark);
+    }
+
+    .tick {
+      position: relative;
+      padding: 0 0 12px;
+      font: 11px/1.35 var(--mono);
+      color: #55584f;
+    }
+
+    .tick:before {
+      content: "";
+      position: absolute;
+      left: -17px;
+      top: 3px;
+      width: 9px;
+      height: 9px;
+      background: var(--paper);
+      border: 1px solid var(--tone);
+      border-radius: 50%;
+    }
+
+    /* Mode C: reference lens */
+    .lens-view {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 370px;
+      min-height: 720px;
+    }
+
+    .lens-side {
+      border-left: 1px solid var(--line);
+      background: #f4f2e9;
+      padding: 14px;
+    }
+
+    .relation-panel {
+      min-height: 260px;
+      border: 1px solid var(--line);
+      background: #fff;
+      padding: 12px;
+      margin-bottom: 14px;
+      font: 12px/1.45 var(--mono);
+    }
+
+    .relation-edge {
+      display: grid;
+      grid-template-columns: 78px 1fr;
+      gap: 8px;
+      padding: 7px 0;
+      border-bottom: 1px solid rgba(0,0,0,.06);
+    }
+
+    @media (max-width: 1100px) {
+      .single-view, .map-view, .lens-view { grid-template-columns: 1fr; }
+      .section-rail, .reader-side, .anatomy-side, .lens-side {
+        border: 0;
+        border-top: 1px solid var(--line);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="mast">
+      <div>
+        <h1>Turn Detail Alternatives</h1>
+        <div class="sub">Throwaway prototype. Question: how should ax explain dense turns, parsed blocks, atoms, and future graph references without turning the session inspector into a wall of noisy highlights?</div>
+      </div>
+      <div class="switcher" role="tablist" aria-label="view variants">
+        <button data-mode="single" class="active">Single File</button>
+        <button data-mode="map">Anatomy Map</button>
+        <button data-mode="lens">Reference Lens</button>
+      </div>
+    </header>
+
+    <main class="stage">
+      <div class="turn-head">
+        <span class="badge user">turn #2</span>
+        <span>role: user</span>
+        <span>5.8k chars</span>
+        <span>provider_turn@turn-blocks-v1</span>
+        <span class="badge refcount">18 blocks</span>
+        <span class="badge refcount">6 refs</span>
+        <span class="spacer"></span>
+        <span>click refs: skill/file/tag/symbol</span>
+      </div>
+
+      <section id="single" class="mode active">
+        <div class="single-view">
+          <aside class="section-rail">
+            <h2 class="panel-title">Composition</h2>
+            <div class="composition" id="singleComposition"></div>
+            <div class="rail-item" style="--tone: var(--blue)"><span class="rail-dot"></span><span>goal context</span><span class="rail-count">2 refs</span></div>
+            <div class="rail-item" style="--tone: var(--green)"><span class="rail-dot"></span><span>objective</span><span class="rail-count">3 refs</span></div>
+            <div class="rail-item" style="--tone: var(--blue)"><span class="rail-dot"></span><span>continuation behavior</span><span class="rail-count">0</span></div>
+            <div class="rail-item" style="--tone: #d58b22"><span class="rail-dot"></span><span>budget</span><span class="rail-count">0</span></div>
+            <div class="rail-item" style="--tone: var(--red)"><span class="rail-dot"></span><span>completion audit</span><span class="rail-count">1 ref</span></div>
+            <div class="card" style="margin-top:14px">
+              <div class="panel-title">UX thesis</div>
+              <div class="small">Treat the turn as one continuous file. Blocks are DOM-like ranges in the same document, not separate cards. Hover dims unrelated ranges; references remain clickable.</div>
+            </div>
+          </aside>
+          <article class="file-document" id="singleFile"></article>
+          <aside class="reader-side">
+            <h2 class="panel-title">References</h2>
+            <div class="entity-list" id="singleRefs"></div>
+            <h2 class="panel-title">Inspector</h2>
+            <div class="card" id="singleSelection">Hover a document range or reference to inspect it.</div>
+            <h2 class="panel-title">Navigation Model</h2>
+            <div class="card small">First click selects and explains. Explicit open link navigates to skill/file/detail. This avoids losing the session while exploring.</div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="map" class="mode">
+        <div class="map-view">
+          <div class="map-main">
+            <h2 class="panel-title">One-Turn Composition Map</h2>
+            <div class="big-map" id="bigMap"></div>
+            <div class="map-copy">
+              <div class="card">
+                <div class="panel-title">Useful takeaway</div>
+                <div class="small">This answers “what is inside this turn?” without splitting the turn into separate cards. For a huge message, the map gives proportions: context, objective, process constraints, budget, refs, and unresolved atoms.</div>
+              </div>
+              <div class="card">
+                <div class="panel-title">Interaction</div>
+                <div class="small">Hover a band to highlight that range in the file viewer. Click locks the range and filters references to that block family.</div>
+              </div>
+            </div>
+          </div>
+          <aside class="anatomy-side">
+            <h2 class="panel-title">Block Legend</h2>
+            <div class="timeline" id="timeline"></div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="lens" class="mode">
+        <div class="lens-view">
+          <article class="file-document" id="lensFile"></article>
+          <aside class="lens-side">
+            <h2 class="panel-title">Reference Lens</h2>
+            <div class="entity-list" id="lensRefs"></div>
+            <div class="relation-panel" id="relationPanel">Click a reference to see its local relationships.</div>
+            <h2 class="panel-title">Why not a full graph?</h2>
+            <div class="card small">The graph is most useful as an inspector for selected refs, not as the primary UI. Keep the text primary; show one-hop relationships on demand.</div>
+          </aside>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="hover-note" id="hoverNote"><b>Prototype notes</b><br />Switch variants above. Hover blocks and references. Clickable references are simulated links with route targets.</div>
+
+  <script>
+    const refs = [
+      { kind: "tag", label: "goal_context", route: "?tag=goal_context", section: "goal context" },
+      { kind: "tag", label: "objective", route: "?tag=objective", section: "objective" },
+      { kind: "symbol", label: "READ", route: "?symbol=READ", section: "objective" },
+      { kind: "skill", label: "update_plan", route: "/skills/codex__update_plan", section: "progress visibility" },
+      { kind: "skill", label: "update_goal", route: "/skills/codex__update_goal", section: "completion audit" },
+      { kind: "file", label: "schema/schema.surql", route: "/files/schema/schema.surql", section: "work from evidence" },
+    ];
+
+    const blocks = [
+      {
+        id: 2,
+        kind: "goal context",
+        tone: "process",
+        text: `<goal_context>\nContinue working toward the active thread goal.`,
+        refs: ["goal_context"],
+      },
+      {
+        id: 4,
+        kind: "objective",
+        tone: "objective",
+        text: `<objective>\ni want you to go inspect everything we do ingest write create relations etc in the db and their READ part of it. i want you to list and ultimately create a document for each what it where it's come from how it's classified etc. thing as taxonomy i want to have references where it's come from etc as well like codex/claude etc. stage 2 will be creating more complex graph queries.\n</objective>`,
+        refs: ["objective", "READ"],
+      },
+      {
+        id: 6,
+        kind: "continuation behavior",
+        tone: "process",
+        text: `Continuation behavior:\n- This goal persists across turns.\n- Keep the full objective intact.\n- Temporary rough edges are acceptable while the work is moving in the right direction.`,
+        refs: [],
+      },
+      {
+        id: 9,
+        kind: "budget",
+        tone: "budget",
+        text: `Budget:\n- Tokens used: 0\n- Token budget: none\n- Tokens remaining: unbounded`,
+        refs: [],
+      },
+      {
+        id: 12,
+        kind: "work from evidence",
+        tone: "process",
+        text: `Work from evidence:\nUse the current worktree and external state as authoritative. Inspect current state before relying on previous conversation context.`,
+        refs: ["schema/schema.surql"],
+      },
+      {
+        id: 13,
+        kind: "progress visibility",
+        tone: "process",
+        text: `Progress visibility:\nIf update_plan is available and the next work is meaningfully multi-step, use it to show a concise plan tied to the real objective.`,
+        refs: ["update_plan"],
+      },
+      {
+        id: 16,
+        kind: "completion audit",
+        tone: "constraint",
+        text: `Completion audit:\nBefore deciding that the goal is achieved, treat completion as unproven and verify it against the actual current state. If achieved, call update_goal with status "complete".`,
+        refs: ["update_goal"],
+      },
+    ];
+
+    function refByLabel(label) {
+      return refs.find((ref) => ref.label === label);
+    }
+
+    function refEl(ref) {
+      const a = document.createElement("a");
+      a.className = `ref ${ref.kind}`;
+      a.href = ref.route;
+      a.textContent = `${ref.kind}:${ref.label}`;
+      a.addEventListener("click", (event) => {
+        event.preventDefault();
+        setNote(`<b>${ref.kind}:${ref.label}</b><br />route: <code>${ref.route}</code><br />section: ${ref.section}<br /><br />Production behavior: open side panel first; command-click can navigate.`);
+      });
+      a.addEventListener("mouseenter", () => setNote(`<b>${ref.kind}:${ref.label}</b><br />${ref.route}`));
+      return a;
+    }
+
+    function renderRefs(container) {
+      container.innerHTML = "";
+      refs.forEach((ref) => container.appendChild(refEl(ref)));
+    }
+
+    function decorateText(text, blockRefs) {
+      let escaped = text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+      for (const label of blockRefs) {
+        const ref = refByLabel(label);
+        if (!ref) continue;
+        const safe = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        escaped = escaped.replace(new RegExp(safe, "g"), `<a class="ref ${ref.kind}" href="${ref.route}" data-ref="${label}">${label}</a>`);
+      }
+      return escaped;
+    }
+
+    function wireInlineRefs(root) {
+      root.querySelectorAll("[data-ref]").forEach((el) => {
+        el.addEventListener("click", (event) => {
+          event.preventDefault();
+          const ref = refByLabel(el.dataset.ref);
+          if (ref) setNote(`<b>${ref.kind}:${ref.label}</b><br />route: <code>${ref.route}</code>`);
+        });
+      });
+    }
+
+    function setNote(html) {
+      document.getElementById("hoverNote").innerHTML = html;
+    }
+
+    function toneColor(tone) {
+      if (tone === "objective") return "var(--green)";
+      if (tone === "constraint") return "var(--red)";
+      if (tone === "budget") return "#d58b22";
+      return "var(--blue)";
+    }
+
+    function selectBlock(block, targetId = "singleSelection") {
+      document.querySelectorAll(".dom-range").forEach((el) => {
+        el.classList.toggle("is-active", Number(el.dataset.blockId) === block.id);
+        el.classList.toggle("is-muted", Number(el.dataset.blockId) !== block.id);
+      });
+      const target = document.getElementById(targetId);
+      if (target) {
+        target.innerHTML = `<b>${block.kind}</b><br />block #${block.id}<br />refs: ${block.refs.length ? block.refs.join(", ") : "none"}<br /><br /><span class="small">${block.text.slice(0, 180).replace(/</g, "&lt;")}</span>`;
+      }
+    }
+
+    function clearBlockFocus() {
+      document.querySelectorAll(".dom-range").forEach((el) => {
+        el.classList.remove("is-active", "is-muted");
+      });
+    }
+
+    function renderContinuousDocument(container, selectionTarget) {
+      container.innerHTML = "";
+      blocks.forEach((block) => {
+        const el = document.createElement("span");
+        el.className = `dom-range block ${block.tone}`;
+        el.dataset.blockId = String(block.id);
+        el.dataset.label = `${block.kind} #${block.id}`;
+        el.innerHTML = decorateText(block.text, block.refs) + "\n\n";
+        el.addEventListener("mouseenter", () => selectBlock(block, selectionTarget));
+        el.addEventListener("mouseleave", clearBlockFocus);
+        el.addEventListener("click", () => selectBlock(block, selectionTarget));
+        container.appendChild(el);
+      });
+      wireInlineRefs(container);
+    }
+
+    function renderComposition(container) {
+      const total = blocks.reduce((sum, block) => sum + block.text.length, 0);
+      container.innerHTML = "";
+      blocks.forEach((block) => {
+        const band = document.createElement("div");
+        band.className = "comp-band";
+        band.style.setProperty("--tone", toneColor(block.tone));
+        band.style.height = `${Math.max(8, (block.text.length / total) * 138)}px`;
+        band.title = `${block.kind}: ${block.text.length} chars`;
+        band.addEventListener("mouseenter", () => selectBlock(block));
+        band.addEventListener("mouseleave", clearBlockFocus);
+        container.appendChild(band);
+      });
+    }
+
+    function renderSingle() {
+      renderContinuousDocument(document.getElementById("singleFile"), "singleSelection");
+      renderComposition(document.getElementById("singleComposition"));
+      renderRefs(document.getElementById("singleRefs"));
+    }
+
+    function renderMap() {
+      const total = blocks.reduce((sum, block) => sum + block.text.length, 0);
+      const map = document.getElementById("bigMap");
+      map.innerHTML = blocks.map((block) => {
+        const pct = Math.round((block.text.length / total) * 100);
+        return `<div class="map-row block ${block.tone}">
+          <div class="map-label">${block.kind}</div>
+          <div class="map-bar-wrap"><div class="map-bar" style="--tone:${toneColor(block.tone)};width:${Math.max(4, pct)}%"></div></div>
+          <div class="small">${pct}% · ${block.refs.length} refs</div>
+        </div>`;
+      }).join("");
+
+      const timeline = document.getElementById("timeline");
+      timeline.innerHTML = blocks.map((block) => `<div class="tick block ${block.tone}"><b>${block.kind}</b><br />${block.text.split("\\n")[0].slice(0, 84)}</div>`).join("");
+    }
+
+    function relationHtml(ref) {
+      const relations = [
+        ["source", ref.section],
+        ["kind", ref.kind],
+        ["route", ref.route],
+        ["action", ref.kind === "skill" ? "open skill detail" : ref.kind === "file" ? "open file detail" : "filter current turn"],
+      ];
+      return `<b>${ref.kind}:${ref.label}</b><br /><br />${relations.map(([k, v]) => `<div class="relation-edge"><span class="small">${k}</span><span>${v}</span></div>`).join("")}`;
+    }
+
+    function renderLens() {
+      renderContinuousDocument(document.getElementById("lensFile"), null);
+      const container = document.getElementById("lensRefs");
+      container.innerHTML = "";
+      refs.forEach((ref) => {
+        const el = refEl(ref);
+        el.addEventListener("click", (event) => {
+          event.preventDefault();
+          document.getElementById("relationPanel").innerHTML = relationHtml(ref);
+        });
+        container.appendChild(el);
+      });
+    }
+
+    document.querySelectorAll(".switcher button").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll(".switcher button").forEach((b) => b.classList.remove("active"));
+        document.querySelectorAll(".mode").forEach((m) => m.classList.remove("active"));
+        button.classList.add("active");
+        document.getElementById(button.dataset.mode).classList.add("active");
+      });
+    });
+
+    renderSingle();
+    renderMap();
+    renderLens();
+  </script>
+</body>
+</html>

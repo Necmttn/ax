@@ -1,0 +1,830 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ax - make your AI coding agent better</title>
+  <style>
+    :root {
+      --page: #f6f5f0;
+      --panel: #fbfaf5;
+      --ink: #0a0a0a;
+      --muted: #6b6b66;
+      --soft: #8a8780;
+      --line: #d8d6cf;
+      --green: #2f9e44;
+      --red: #c0392b;
+      --blue: #2567a8;
+      --amber: #b07900;
+      --serif: Georgia, "Times New Roman", serif;
+      --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Helvetica Neue", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: var(--sans);
+      font-size: 16px;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+    a { color: inherit; }
+
+    /* ---------- nav ---------- */
+    nav.top {
+      border-bottom: 1px solid var(--line);
+      background: var(--page);
+    }
+    nav.top .inner {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 18px 32px;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+    }
+    .brand {
+      font-family: var(--mono);
+      font-size: 13px;
+      color: var(--ink);
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+    }
+    .brand .mark {
+      font-family: var(--serif);
+      font-style: italic;
+      font-size: 18px;
+      line-height: 1;
+    }
+    .brand .dot { color: var(--muted); }
+    .brand .tag {
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .live-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: var(--mono);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: var(--green);
+      padding: 3px 8px 3px 7px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--panel);
+    }
+    .live-pill::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--green);
+      box-shadow: 0 0 0 3px rgba(47, 158, 68, 0.18);
+      animation: pulse 2.4s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.45; }
+    }
+    nav.top ul {
+      margin: 0 0 0 auto;
+      padding: 0;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 22px;
+    }
+    nav.top a.link {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--ink);
+      text-decoration: none;
+      opacity: 0.78;
+    }
+    nav.top a.link:hover { opacity: 1; }
+    nav.top a.gh {
+      font-family: var(--mono);
+      font-size: 12px;
+      text-decoration: none;
+      border: 1px solid var(--ink);
+      padding: 6px 10px;
+      border-radius: 4px;
+      background: var(--ink);
+      color: var(--page);
+    }
+
+    main {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 0 32px;
+    }
+
+    /* ---------- hero ---------- */
+    section.hero {
+      padding: 88px 0 80px;
+      text-align: center;
+      border-bottom: 1px solid var(--line);
+    }
+    .eyebrow {
+      font-family: var(--mono);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      color: var(--muted);
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 12px 6px 14px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--panel);
+    }
+    .eyebrow::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--ink);
+      opacity: 0.55;
+    }
+    section.hero h1 {
+      font-family: var(--serif);
+      font-weight: 400;
+      font-size: 72px;
+      line-height: 1.02;
+      letter-spacing: -1.4px;
+      margin: 24px auto 20px;
+      max-width: 14ch;
+    }
+    section.hero .lede {
+      font-family: var(--serif);
+      font-size: 19px;
+      line-height: 1.5;
+      color: var(--muted);
+      margin: 0 auto 34px;
+      max-width: 48ch;
+    }
+
+    .install {
+      display: inline-flex;
+      align-items: stretch;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      overflow: hidden;
+      font-family: var(--mono);
+      font-size: 13px;
+      box-shadow: 0 1px 0 rgba(0, 0, 0, 0.02);
+      max-width: 100%;
+    }
+    .install .prompt {
+      color: var(--muted);
+      padding: 12px 4px 12px 14px;
+      user-select: none;
+    }
+    .install code {
+      color: var(--ink);
+      padding: 12px 16px 12px 6px;
+      white-space: nowrap;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .install code::-webkit-scrollbar { display: none; }
+    .install button {
+      border: none;
+      border-left: 1px solid var(--line);
+      background: transparent;
+      padding: 12px 14px;
+      font-family: var(--mono);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .install button:hover { color: var(--ink); }
+    .install button.copied { color: var(--green); }
+
+    .meta {
+      margin: 22px 0 0;
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--soft);
+      letter-spacing: 0.02em;
+    }
+    .meta .sep { opacity: 0.5; margin: 0 8px; }
+
+    /* ---------- demo: dashboard preview ---------- */
+    section.demo {
+      padding: 80px 0 96px;
+      border-bottom: 1px solid var(--line);
+    }
+    .browser {
+      max-width: 920px;
+      margin: 0 auto;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      box-shadow:
+        0 1px 0 rgba(0,0,0,0.02),
+        0 12px 32px -18px rgba(20, 20, 18, 0.18),
+        0 30px 60px -40px rgba(20, 20, 18, 0.12);
+      overflow: hidden;
+    }
+    .browser-bar {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+      background: #efede5;
+    }
+    .browser-dots {
+      display: flex;
+      gap: 6px;
+    }
+    .browser-dots span {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #d2cfc4;
+      display: block;
+    }
+    .browser-url {
+      font-family: var(--mono);
+      font-size: 11.5px;
+      color: var(--muted);
+      background: var(--page);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 4px 12px;
+      letter-spacing: 0.01em;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0 auto;
+      min-width: 260px;
+      justify-content: center;
+    }
+    .browser-url::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--green);
+      box-shadow: 0 0 0 2px rgba(47, 158, 68, 0.18);
+    }
+    .browser-spacer { width: 38px; }
+
+    .dash {
+      padding: 56px 48px 44px;
+      background: var(--panel);
+    }
+    .dash-head {
+      text-align: center;
+      font-family: var(--mono);
+      font-size: 10.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.22em;
+      color: var(--muted);
+      margin: 0 0 6px;
+    }
+    .score-number {
+      display: flex;
+      align-items: baseline;
+      justify-content: center;
+      gap: 10px;
+      margin: 0;
+    }
+    .score-number .n {
+      font-family: var(--serif);
+      font-weight: 400;
+      font-size: 196px;
+      line-height: 0.9;
+      letter-spacing: -6px;
+      color: var(--amber);
+      font-variant-numeric: tabular-nums;
+    }
+    .score-number .denom {
+      font-family: var(--serif);
+      font-size: 40px;
+      color: var(--muted);
+      letter-spacing: -1px;
+    }
+    .score-band {
+      text-align: center;
+      margin: 16px 0 0;
+    }
+    .score-band .chip {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 999px;
+      background: rgba(176, 121, 0, 0.14);
+      color: var(--amber);
+      font-family: var(--mono);
+      font-size: 10.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+    }
+    .score-band .scope {
+      display: block;
+      margin-top: 8px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+    }
+    .score-band .scope b { color: var(--ink); font-weight: 500; }
+
+    /* the 4 mini-stats UNDER the score */
+    .ministats {
+      margin: 44px 0 0;
+      padding-top: 28px;
+      border-top: 1px solid var(--line);
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0;
+    }
+    .mini {
+      padding: 4px 22px;
+      border-left: 1px solid var(--line);
+    }
+    .mini:first-child {
+      border-left: none;
+      padding-left: 4px;
+    }
+    .mini-label {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+    .mini-value {
+      font-family: var(--mono);
+      font-size: 24px;
+      letter-spacing: -0.01em;
+      line-height: 1;
+      color: var(--ink);
+      font-variant-numeric: tabular-nums;
+    }
+    .mini-value .unit {
+      font-size: 12px;
+      color: var(--muted);
+      margin-left: 4px;
+      letter-spacing: 0;
+    }
+    .mini-chart {
+      margin-top: 14px;
+      height: 28px;
+      display: flex;
+      align-items: flex-end;
+    }
+    .mini-sub {
+      margin-top: 10px;
+      font-family: var(--mono);
+      font-size: 10.5px;
+      color: var(--muted);
+      letter-spacing: 0.02em;
+      line-height: 1.5;
+    }
+    .mini-sub .pos { color: var(--green); }
+    .mini-sub .neg { color: var(--red); }
+    .mini-sub b { color: var(--ink); font-weight: 500; }
+
+    svg.spark { width: 100%; height: 100%; overflow: visible; display: block; }
+
+    .dotgrid {
+      display: grid;
+      grid-template-columns: repeat(10, 1fr);
+      gap: 3px;
+      width: 100%;
+      max-width: 130px;
+    }
+    .dotgrid span {
+      aspect-ratio: 1;
+      border-radius: 2px;
+      background: var(--line);
+    }
+    .dotgrid span.lit { background: var(--ink); }
+
+    .stackbar {
+      display: flex;
+      width: 100%;
+      max-width: 140px;
+      height: 9px;
+      border-radius: 3px;
+      overflow: hidden;
+      background: var(--line);
+    }
+    .stackbar .seg { height: 100%; }
+    .stackbar .adopted { background: var(--green); }
+    .stackbar .partial { background: var(--amber); }
+    .stackbar .regressed { background: var(--red); }
+    .stack-wrap { display: flex; flex-direction: column; gap: 5px; width: 100%; }
+    .stack-legend {
+      font-family: var(--mono);
+      font-size: 9px;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+    }
+
+    .heatrow {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 3px;
+      width: 100%;
+      max-width: 140px;
+    }
+    .heatrow span {
+      aspect-ratio: 1;
+      border-radius: 2px;
+      background: var(--line);
+    }
+    .heatrow span[data-i="1"] { background: #c3c0b6; }
+    .heatrow span[data-i="2"] { background: #888377; }
+    .heatrow span[data-i="3"] { background: #4a4640; }
+    .heatrow span[data-i="4"] { background: var(--ink); }
+
+    .demo-caption {
+      text-align: center;
+      margin: 22px auto 0;
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .demo-caption code {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      color: var(--ink);
+    }
+
+    /* ---------- lineage hint (pattern C: footnote under dashboard) ---------- */
+    .lineage-hint {
+      max-width: 920px;
+      margin: 18px auto 0;
+      padding-top: 16px;
+      position: relative;
+      font-family: var(--sans);
+      font-size: 13px;
+      line-height: 1.55;
+      color: var(--muted);
+      text-align: left;
+    }
+    .lineage-hint::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 56px;
+      height: 1px;
+      background: var(--line);
+    }
+    .lineage-hint code {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--ink);
+      background: transparent;
+      padding: 0;
+    }
+    .lineage-hint .src {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--ink);
+      background: transparent;
+    }
+    .lineage-hint .more {
+      color: var(--ink);
+      text-decoration: none;
+      font-family: var(--mono);
+      font-size: 12px;
+      margin-left: 6px;
+      white-space: nowrap;
+      border-bottom: 1px solid transparent;
+      transition: border-color 0.15s ease;
+    }
+    .lineage-hint .more:hover { border-bottom-color: var(--ink); }
+    .lineage-hint .more .arr { margin-right: 4px; opacity: 0.7; }
+
+    /* ---------- footer cards ---------- */
+    section.cards {
+      padding: 64px 0 80px;
+    }
+    .cards-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+    }
+    .card {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 22px 22px 20px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      text-decoration: none;
+      color: var(--ink);
+      min-height: 140px;
+      transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+    }
+    .card:hover {
+      transform: translateY(-2px);
+      border-color: var(--ink);
+      background: #fff;
+    }
+    .card .num {
+      font-family: var(--mono);
+      font-size: 10.5px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .card .card-title {
+      margin-top: 12px;
+      font-family: var(--serif);
+      font-size: 22px;
+      line-height: 1.15;
+      letter-spacing: -0.3px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .card .arrow {
+      color: var(--muted);
+      transition: transform 0.15s, color 0.15s;
+    }
+    .card:hover .arrow { transform: translateX(3px); color: var(--ink); }
+
+    footer.bottom {
+      border-top: 1px solid var(--line);
+    }
+    footer.bottom .inner {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 22px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+    }
+
+    /* ---------- mobile ---------- */
+    @media (max-width: 860px) {
+      nav.top .inner { padding: 16px 20px; flex-wrap: wrap; gap: 12px; }
+      nav.top ul { margin-left: 0; gap: 16px; }
+      main { padding: 0 20px; }
+      section.hero { padding: 48px 0 56px; }
+      section.hero h1 { font-size: 44px; letter-spacing: -0.8px; }
+      section.hero .lede { font-size: 16px; }
+      .install { font-size: 11px; }
+      .install code { white-space: normal; word-break: break-all; }
+      .dash { padding: 36px 22px 28px; }
+      .score-number .n { font-size: 128px; letter-spacing: -3px; }
+      .score-number .denom { font-size: 28px; }
+      .ministats { grid-template-columns: 1fr 1fr; }
+      .mini {
+        padding: 18px 14px;
+        border-left: 1px solid var(--line);
+        border-top: 1px solid var(--line);
+      }
+      .mini:nth-child(odd) {
+        border-left: none;
+        padding-left: 4px;
+      }
+      .mini:nth-child(-n+2) {
+        border-top: none;
+        padding-top: 4px;
+      }
+      .browser-url { min-width: 0; font-size: 10.5px; }
+      .cards-grid { grid-template-columns: repeat(2, 1fr); }
+      .lineage-hint { font-size: 12.5px; }
+    }
+    @media (max-width: 520px) {
+      section.hero h1 { font-size: 36px; }
+      .score-number .n { font-size: 96px; letter-spacing: -2px; }
+      .ministats { grid-template-columns: 1fr; }
+      .mini {
+        border-left: none !important;
+        padding: 20px 4px !important;
+        border-top: 1px solid var(--line);
+      }
+      .mini:first-child { border-top: none; padding-top: 4px !important; }
+      .cards-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ============= nav ============= -->
+<nav class="top">
+  <div class="inner">
+    <a class="brand" href="#">
+      <span class="mark">ax</span>
+      <span class="dot">·</span>
+      <span class="tag">agent experience</span>
+    </a>
+    <span class="live-pill">live</span>
+    <ul>
+      <li><a class="link" href="/showcases">Showcases</a></li>
+      <li><a class="link" href="/origin">Origin</a></li>
+      <li><a class="link" href="/docs">Docs</a></li>
+      <li><a class="gh" href="https://github.com/Necmttn/ax">GitHub &nbsp;&rarr;</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+
+<!-- ============= hero ============= -->
+<section class="hero">
+  <span class="eyebrow">for claude code + codex</span>
+  <h1>Make your AI coding agent <em style="font-style:italic;color:var(--muted)">better.</em></h1>
+  <p class="lede">A simple weekly score for how your coding agent is actually doing &mdash; on your laptop, not in the cloud.</p>
+
+  <div class="install" id="install">
+    <span class="prompt">$</span>
+    <code id="install-code">curl -fsSL https://raw.githubusercontent.com/Necmttn/ax/main/install.sh | bash</code>
+    <button id="copy-btn" type="button" aria-label="copy install command">copy</button>
+  </div>
+
+  <p class="meta">
+    macOS first<span class="sep">·</span>MIT<span class="sep">·</span>runs on your laptop
+  </p>
+</section>
+
+<!-- ============= demo: dashboard preview ============= -->
+<section class="demo">
+  <div class="browser" role="img" aria-label="ax dashboard preview at 127.0.0.1:8520">
+    <div class="browser-bar">
+      <div class="browser-dots"><span></span><span></span><span></span></div>
+      <div class="browser-url">127.0.0.1:8520</div>
+      <div class="browser-spacer"></div>
+    </div>
+
+    <div class="dash">
+      <p class="dash-head">Agent Health &middot; this week</p>
+
+      <div class="score-number">
+        <span class="n">72</span>
+        <span class="denom">/ 100</span>
+      </div>
+
+      <div class="score-band">
+        <span class="chip">needs work</span>
+        <span class="scope">based on <b>412 sessions</b> &middot; <b>14 days</b> &middot; last sync <b>2m ago</b></span>
+      </div>
+
+      <div class="ministats">
+
+        <!-- 1: tokens -->
+        <div class="mini">
+          <div class="mini-label">Tokens</div>
+          <div class="mini-value">14.2<span class="unit">M</span></div>
+          <div class="mini-chart">
+            <svg class="spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true">
+              <polyline points="0,22 12,20 24,18 36,14 48,16 60,11 72,8 84,5 100,3"
+                        fill="none" stroke="#0a0a0a" stroke-width="1.2" />
+              <polyline points="0,22 12,20 24,18 36,14 48,16 60,11 72,8 84,5 100,3 100,28 0,28"
+                        fill="rgba(10,10,10,0.05)" stroke="none" />
+              <circle cx="100" cy="3" r="2" fill="#2f9e44" />
+            </svg>
+          </div>
+          <div class="mini-sub"><span class="pos">+20%</span> vs last week</div>
+        </div>
+
+        <!-- 2: skills firing -->
+        <div class="mini">
+          <div class="mini-label">Skills firing</div>
+          <div class="mini-value">11<span class="unit">/ 20</span></div>
+          <div class="mini-chart">
+            <div class="dotgrid" aria-hidden="true">
+              <span class="lit"></span><span class="lit"></span><span></span><span class="lit"></span><span class="lit"></span>
+              <span></span><span class="lit"></span><span class="lit"></span><span></span><span class="lit"></span>
+              <span class="lit"></span><span></span><span class="lit"></span><span></span><span class="lit"></span>
+              <span></span><span></span><span class="lit"></span><span></span><span></span>
+            </div>
+          </div>
+          <div class="mini-sub"><span class="neg">9 unused</span></div>
+        </div>
+
+        <!-- 3: experiments tracked -->
+        <div class="mini">
+          <div class="mini-label">Experiments</div>
+          <div class="mini-value">47</div>
+          <div class="mini-chart">
+            <div class="stack-wrap">
+              <div class="stackbar" aria-hidden="true">
+                <div class="seg adopted" style="width:80.9%"></div>
+                <div class="seg partial" style="width:12.8%"></div>
+                <div class="seg regressed" style="width:6.3%"></div>
+              </div>
+              <div class="stack-legend">
+                <span style="color:var(--green)">&#9632;</span> KEPT
+                &nbsp;<span style="color:var(--amber)">&#9632;</span> MIXED
+                &nbsp;<span style="color:var(--red)">&#9632;</span> DROPPED
+              </div>
+            </div>
+          </div>
+          <div class="mini-sub"><b>38</b> kept &middot; <b>3</b> dropped</div>
+        </div>
+
+        <!-- 4: sessions -->
+        <div class="mini">
+          <div class="mini-label">Sessions</div>
+          <div class="mini-value">412</div>
+          <div class="mini-chart">
+            <div class="heatrow" aria-hidden="true">
+              <span data-i="2" title="Mon"></span>
+              <span data-i="3" title="Tue"></span>
+              <span data-i="4" title="Wed"></span>
+              <span data-i="3" title="Thu"></span>
+              <span data-i="4" title="Fri"></span>
+              <span data-i="1" title="Sat"></span>
+              <span data-i="2" title="Sun"></span>
+            </div>
+          </div>
+          <div class="mini-sub">last 7 days</div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <p class="demo-caption">Run <code>axctl serve</code> to see yours.</p>
+
+  <!-- lineage hint (pattern C) -->
+  <p class="lineage-hint">
+    Built from your real sessions: <span class="src">claude code transcripts</span>, <span class="src">codex sessions</span>, <span class="src">hook fires</span>, <span class="src">git history</span>, and <span class="src">installed skills</span> &mdash; indexed live into a typed graph at <code>127.0.0.1</code>. Nothing leaves your laptop.<a class="more" href="/features"><span class="arr">&rarr;</span>/features</a>
+  </p>
+</section>
+
+<!-- ============= footer cards ============= -->
+<section class="cards">
+  <div class="cards-grid">
+    <a class="card" href="/how-it-works">
+      <span class="num">01</span>
+      <span class="card-title">How it works <span class="arrow">&rarr;</span></span>
+    </a>
+    <a class="card" href="/showcases">
+      <span class="num">02</span>
+      <span class="card-title">Showcases <span class="arrow">&rarr;</span></span>
+    </a>
+    <a class="card" href="/origin">
+      <span class="num">03</span>
+      <span class="card-title">Origin <span class="arrow">&rarr;</span></span>
+    </a>
+    <a class="card" href="/docs">
+      <span class="num">04</span>
+      <span class="card-title">Docs <span class="arrow">&rarr;</span></span>
+    </a>
+  </div>
+</section>
+
+</main>
+
+<footer class="bottom">
+  <div class="inner">
+    <span>ax &middot; v0.1</span>
+    <span>MIT &middot; Necmttn / ax</span>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var btn = document.getElementById('copy-btn');
+    var code = document.getElementById('install-code');
+    if (!btn || !code) return;
+    btn.addEventListener('click', function () {
+      var text = code.textContent.trim();
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(function () {
+          btn.textContent = 'copied';
+          btn.classList.add('copied');
+          setTimeout(function () {
+            btn.textContent = 'copy';
+            btn.classList.remove('copied');
+          }, 1500);
+        });
+      }
+    });
+  })();
+</script>
+
+</body>
+</html>

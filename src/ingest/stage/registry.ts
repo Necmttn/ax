@@ -3,6 +3,7 @@ import type { IngestStageTag } from "./tags.ts";
 import type { BaseStageStats, StageDef } from "./types.ts";
 import { SkillsKey, skillsStage } from "../skills.ts";
 import { CommandsKey, commandsStage } from "../commands.ts";
+import { PricingKey, pricingStage } from "../model-pricing.ts";
 import { ClaudeKey, claudeStage } from "../transcripts.ts";
 import { CodexKey, codexStage } from "../codex.ts";
 import { PiKey, piStage } from "../pi.ts";
@@ -14,6 +15,10 @@ import { SpawnedKey, spawnedStage } from "../derive-spawned.ts";
 import { GitKey, gitStage } from "../git.ts";
 import { SignalsKey, signalsStage } from "../derive-signals.ts";
 import { OutcomesKey, outcomesStage } from "../outcomes.ts";
+import { TurnContentBlocksKey, turnContentBlocksStage } from "../turn-content-blocks.ts";
+import { TurnAnalysisKey, turnAnalysisStage } from "../turn-analysis.ts";
+import { ReactionEventsKey, reactionEventsStage } from "../reaction-events.ts";
+import { ClassifierResultsKey, classifierResultsStage } from "../classifier-results.ts";
 import { SessionHealthKey, sessionHealthStage } from "../session-health.ts";
 import { ClosureKey, closureStage } from "../closure.ts";
 import { ProposalsKey, proposalsStage } from "../derive-proposals.ts";
@@ -26,7 +31,7 @@ export type { StageDef } from "./types.ts";
 /** Composed union of every known Ingest Stage key. Each stage file exports its
  *  own `Schema.Literal("<key>")`; this union is reassembled by re-exporting
  *  them here. Adding a stage = one import + one entry in the union below. */
-export const IngestStageKey = Schema.Union([SkillsKey, CommandsKey, ClaudeKey, CodexKey, PiKey, OpenCodeKey, CursorKey, SubagentsKey, InvokedPositionsKey, SpawnedKey, GitKey, SignalsKey, OutcomesKey, SessionHealthKey, ClosureKey, ProposalsKey, OpportunitiesKey, RetroProposalsKey, HarnessKey]);
+export const IngestStageKey = Schema.Union([SkillsKey, CommandsKey, PricingKey, ClaudeKey, CodexKey, PiKey, OpenCodeKey, CursorKey, SubagentsKey, InvokedPositionsKey, SpawnedKey, GitKey, SignalsKey, OutcomesKey, TurnContentBlocksKey, TurnAnalysisKey, ReactionEventsKey, ClassifierResultsKey, SessionHealthKey, ClosureKey, ProposalsKey, OpportunitiesKey, RetroProposalsKey, HarnessKey]);
 export type IngestStageKey = typeof IngestStageKey.Type;
 
 export interface StageRegistryShape {
@@ -50,7 +55,7 @@ export const StageRegistryLive = (
     });
 
 /** The canonical list of stages provided by `StageRegistryDefault`. */
-export const ALL_STAGES = [skillsStage, commandsStage, claudeStage, codexStage, piStage, opencodeStage, cursorStage, subagentsStage, invokedPositionsStage, spawnedStage, gitStage, signalsStage, outcomesStage, sessionHealthStage, closureStage, proposalsStage, opportunitiesStage, retroProposalsStage, harnessStage] as const;
+export const ALL_STAGES = [skillsStage, commandsStage, pricingStage, claudeStage, codexStage, piStage, opencodeStage, cursorStage, subagentsStage, invokedPositionsStage, spawnedStage, gitStage, signalsStage, outcomesStage, turnContentBlocksStage, turnAnalysisStage, reactionEventsStage, classifierResultsStage, sessionHealthStage, closureStage, proposalsStage, opportunitiesStage, retroProposalsStage, harnessStage] as const;
 
 /** Production registry: the canonical list of stages provided by ax. Test code
  *  should prefer `StageRegistryLive([...])` with explicit fixtures. */

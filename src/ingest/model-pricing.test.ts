@@ -1,0 +1,156 @@
+import { describe, expect, it } from "bun:test";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+    builtInPricingCatalog,
+    estimateCost,
+    loadPricingCatalog,
+    mergePricingCatalogs,
+    normalizeModelName,
+    parseLiteLlmPricingCatalog,
+    parseModelsDevPricingCatalog,
+    pricingForModel,
+} from "./model-pricing.ts";
+
+describe("model pricing", () => {
+    it("parses LiteLLM per-token prices into per-million prices", () => {
+        const catalog = parseLiteLlmPricingCatalog({
+            "vendor/model-a": {
+                litellm_provider: "vendor",
+                input_cost_per_token: 0.000001,
+                output_cost_per_token: 0.000003,
+                cache_creation_input_token_cost: 0.00000125,
+                cache_read_input_token_cost: 0.0000001,
+                max_input_tokens: 128000,
+            },
+        });
+
+        const pricing = catalog.get("vendor/model-a");
+        expect(pricing).toMatchObject({
+            provider: "vendor",
+            inputPerMillionUsd: 1,
+            outputPerMillionUsd: 3,
+            cacheCreationPerMillionUsd: 1.25,
+            contextWindow: 128000,
+            pricingSource: "litellm",
+        });
+        expect(pricing?.cacheReadPerMillionUsd).toBeCloseTo(0.1);
+    });
+
+    it("defaults missing cache write/read prices like ccusage", () => {
+        const catalog = parseLiteLlmPricingCatalog({
+            "vendor/model-b": {
+                input_cost_per_token: 0.000002,
+                output_cost_per_token: 0.000008,
+            },
+        });
+
+        expect(catalog.get("vendor/model-b")).toMatchObject({
+            inputPerMillionUsd: 2,
+            outputPerMillionUsd: 8,
+            cacheCreationPerMillionUsd: 2.5,
+            cacheReadPerMillionUsd: 0.2,
+        });
+    });
+
+    it("parses models.dev per-million prices", () => {
+        const catalog = parseModelsDevPricingCatalog({
+            openai: {
+                models: {
+                    "gpt-example": {
+                        id: "gpt-example",
+                        cost: { input: 1.25, output: 10, cache_read: 0.125, cache_write: 1.25 },
+                        limit: { context: 200000 },
+                    },
+                },
+            },
+        });
+
+        expect(catalog.get("gpt-example")).toMatchObject({
+            provider: "openai",
+            inputPerMillionUsd: 1.25,
+            outputPerMillionUsd: 10,
+            cacheCreationPerMillionUsd: 1.25,
+            cacheReadPerMillionUsd: 0.125,
+            contextWindow: 200000,
+            pricingSource: "models.dev",
+        });
+    });
+
+    it("lets built-in aliases override fetched catalogs", () => {
+        const fetched = parseLiteLlmPricingCatalog({
+            "gpt-5.5": {
+                input_cost_per_token: 0.000001,
+                output_cost_per_token: 0.000002,
+            },
+        });
+        const merged = mergePricingCatalogs(fetched, builtInPricingCatalog());
+
+        expect(pricingForModel("gpt-5.5", merged)).toMatchObject({
+            inputPerMillionUsd: 5,
+            outputPerMillionUsd: 30,
+            fastMultiplier: 2.5,
+        });
+    });
+
+    it("does not normalize provider names into model IDs", () => {
+        expect(normalizeModelName("openai")).toBeNull();
+        expect(normalizeModelName("anthropic")).toBeNull();
+        expect(normalizeModelName("gpt-5.5")).toBe("gpt-5.5");
+    });
+
+    it("uses above-200k tier fields when present", () => {
+        const catalog = new Map([
+            ["tiered-model", {
+                provider: "test",
+                inputPerMillionUsd: 1,
+                outputPerMillionUsd: 10,
+                cacheCreationPerMillionUsd: null,
+                cacheReadPerMillionUsd: null,
+                inputAbove200kPerMillionUsd: 2,
+                outputAbove200kPerMillionUsd: 20,
+                fastMultiplier: 1,
+                pricingSource: "test",
+            }],
+        ]);
+
+        const cost = estimateCost({
+            modelKey: "tiered-model",
+            promptTokens: 300000,
+            completionTokens: 250000,
+            cacheCreationInputTokens: null,
+            cacheReadInputTokens: null,
+            estimatedTokens: 550000,
+            pricingCatalog: catalog,
+        });
+
+        expect(cost.inputUsd).toBe(0.4);
+        expect(cost.outputUsd).toBe(3);
+        expect(cost.totalUsd).toBe(3.4);
+    });
+
+    it("loads cached pricing locally when refresh is not requested", async () => {
+        const root = mkdtempSync(join(tmpdir(), "ax-pricing-"));
+        const cache = join(root, "pricing");
+        mkdirSync(cache, { recursive: true });
+        writeFileSync(join(cache, "litellm-model-prices.json"), JSON.stringify({
+            "cached/model": {
+                litellm_provider: "cached",
+                input_cost_per_token: 0.000001,
+                output_cost_per_token: 0.000002,
+            },
+        }));
+        writeFileSync(join(cache, "models-dev-api.json"), JSON.stringify({}));
+
+        const result = await loadPricingCatalog(root, { AX_PRICING_OFFLINE: "1" });
+
+        expect(result.litellmSource).toBe("cache");
+        expect(result.catalog.get("cached/model")).toMatchObject({
+            provider: "cached",
+            inputPerMillionUsd: 1,
+            outputPerMillionUsd: 2,
+        });
+    });
+});

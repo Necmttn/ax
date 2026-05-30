@@ -1,0 +1,14 @@
+{
+  "schema": "ax.classifier.v1",
+  "key": "verification-event",
+  "version": "0.1.0",
+  "package": "@ax-classifier/verification-event",
+  "entrypoint": "./src/index.ts",
+  "kind": "heuristic",
+  "input": "event_window",
+  "description": "Identifies user requests for proof, test output, and regression protection.",
+  "labels": ["verification_request"],
+  "targets": ["test_required", "output_required", "regression_guard"],
+  "fixtures": ["./eval-fixtures/verification-event.json"],
+  "assets": []
+}

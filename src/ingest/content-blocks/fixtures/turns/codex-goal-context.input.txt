@@ -1,0 +1,25 @@
+<goal_context>
+Continue working toward the active thread goal.
+
+<objective>
+Build a semantic alias layer for provider turn sections.
+</objective>
+
+Continuation behavior:
+- This goal persists across turns.
+- Keep the full objective intact.
+
+Budget:
+- Tokens used: 0
+- Token budget: none
+- Tokens remaining: unbounded
+
+Work from evidence:
+Use the current worktree as authoritative.
+
+Progress visibility:
+Use a concise plan when the work is meaningfully multi-step.
+
+Completion audit:
+Before deciding that the goal is achieved, verify the current state.
+</goal_context>
