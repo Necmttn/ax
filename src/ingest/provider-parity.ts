@@ -16,6 +16,7 @@ export const PROVIDER_PARITY_FEATURE_KEYS = [
     "invoked-edges",
     "plans",
     "file-edit-evidence",
+    "file-read-search-evidence",
     "token-usage",
     "hooks",
     "subagent-delegation",
@@ -219,12 +220,47 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
         ],
         providers: {
             claude: supported("Claude edit/write tool arguments write edited edges to file rows.", [
-                { path: "src/ingest/transcripts.ts", contains: "->edited:" },
+                { path: "src/ingest/transcripts.ts", contains: "buildToolFileEvidenceStatements" },
+                { path: "src/ingest/tool-file-evidence.ts", contains: "EDIT_TOOLS" },
             ]),
-            codex: extractorGap("Codex file edit evidence is present in tool arguments but is not mapped to edited edges yet."),
-            pi: extractorGap("Pi file edit evidence depends on provider tool arguments and is not mapped to edited edges yet."),
+            codex: supported("Codex apply_patch tool arguments write edited edges to file rows when structured patch headers are present.", [
+                { path: "src/ingest/codex.ts", contains: "buildToolFileEvidenceStatements(extractToolFileEvidence(batch.toolCalls))" },
+                { path: "src/ingest/tool-file-evidence.ts", contains: "patchPaths" },
+            ]),
+            pi: supported("Pi structured edit/write tool arguments write edited edges to file rows.", [
+                { path: "src/ingest/pi.ts", contains: "buildToolFileEvidenceStatements(extractToolFileEvidence(extract.toolCalls))" },
+                { path: "src/ingest/tool-file-evidence.ts", contains: "EDIT_TOOLS" },
+            ]),
             opencode: extractorGap("OpenCode file edit evidence depends on concrete tool-call extraction."),
             cursor: extractorGap("Cursor file edit evidence depends on concrete tool-call extraction."),
+        },
+    },
+    {
+        key: "file-read-search-evidence",
+        label: "File read/search evidence",
+        sharedRecords: ["file", "read_file", "searched_file"],
+        readEvidence: [
+            { path: "src/queries/session-detail.ts", contains: "FROM read_file" },
+            { path: "src/queries/session-detail.ts", contains: "FROM searched_file" },
+        ],
+        providers: {
+            claude: supported("Claude Read/Grep/Glob tool arguments write read_file and searched_file edges.", [
+                { path: "src/ingest/transcripts.ts", contains: "buildToolFileEvidenceStatements" },
+                { path: "src/ingest/tool-file-evidence.ts", contains: "READ_TOOLS" },
+                { path: "src/ingest/tool-file-evidence.ts", contains: "SEARCH_TOOLS" },
+            ]),
+            codex: supported("Codex structured read/search tool arguments write read_file and searched_file edges.", [
+                { path: "src/ingest/codex.ts", contains: "buildToolFileEvidenceStatements(extractToolFileEvidence(batch.toolCalls))" },
+                { path: "src/ingest/tool-file-evidence.ts", contains: "READ_COMMANDS" },
+                { path: "src/ingest/tool-file-evidence.ts", contains: "SEARCH_COMMANDS" },
+            ]),
+            pi: supported("Pi structured read/search tool arguments write read_file and searched_file edges.", [
+                { path: "src/ingest/pi.ts", contains: "buildToolFileEvidenceStatements(extractToolFileEvidence(extract.toolCalls))" },
+                { path: "src/ingest/tool-file-evidence.ts", contains: "READ_TOOLS" },
+                { path: "src/ingest/tool-file-evidence.ts", contains: "SEARCH_TOOLS" },
+            ]),
+            opencode: extractorGap("OpenCode file read/search evidence is not mapped into file relations yet."),
+            cursor: extractorGap("Cursor file read/search evidence depends on concrete tool-call extraction."),
         },
     },
     {

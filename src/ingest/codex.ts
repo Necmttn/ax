@@ -13,6 +13,7 @@ import type { StageDef } from "./stage/registry.ts";
 import {
     buildPlanSnapshotStatements,
     buildRelateToolCallSkillStatements,
+    buildToolFileEvidenceStatements,
     buildToolCallStatements,
     type PlanSnapshotWrite,
     type ToolCallSkillRelationWrite,
@@ -40,6 +41,7 @@ import {
     toPlanSnapshotWrite,
 } from "./plans.ts";
 import { invokedRelationRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
+import { extractToolFileEvidence } from "./tool-file-evidence.ts";
 import { executeStatements } from "../lib/shared/statement-exec.ts";
 import { safeKeyPart } from "../lib/shared/derive-keys.ts";
 import { tokenQualityLabels } from "./token-quality.ts";
@@ -1005,6 +1007,7 @@ const buildCodexBatchStatements = (
     ...buildToolCallStatements(batch.toolCalls.map((call) =>
         compactCodexToolCall(call, payloadMaxBytes),
     )),
+    ...buildToolFileEvidenceStatements(extractToolFileEvidence(batch.toolCalls)),
     ...batch.parentEdges.map((edge) =>
         buildAgentEventParentEdgeStatement(edge),
     ),

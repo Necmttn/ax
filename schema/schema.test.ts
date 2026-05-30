@@ -72,3 +72,12 @@ describe("skill roles schema (P3.1)", () => {
         expect(schema).toContain("DEFINE FIELD is_first     ON invoked TYPE option<bool>");
     });
 });
+
+describe("file evidence schema", () => {
+    test("tool-call file evidence relations store normalized absolute paths", () => {
+        expect(schema).toContain("DEFINE TABLE read_file TYPE RELATION FROM tool_call TO file");
+        expect(schema).toContain("DEFINE TABLE searched_file TYPE RELATION FROM tool_call TO file");
+        expect(schema).toContain("DEFINE FIELD absolute_path_seen ON read_file TYPE option<string>");
+        expect(schema).toContain("DEFINE FIELD absolute_path_seen ON searched_file TYPE option<string>");
+    });
+});

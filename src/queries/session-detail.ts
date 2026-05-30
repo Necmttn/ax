@@ -97,6 +97,55 @@ WHERE session = $sessionId AND name = "Agent"
 ORDER BY ts ASC
 LIMIT 50;`;
 
+/**
+ * Provider-neutral file evidence. Edit evidence is turn-scoped; read/search
+ * evidence is tool-call-scoped. All three relation tables point at the shared
+ * `file` records, so callers should not branch on Claude/Codex/Pi.
+ */
+export const SESSION_FILE_EVIDENCE_SQL = `
+SELECT
+    "edited" AS relation,
+    out AS file,
+    out.path AS path,
+    tool AS tool,
+    path_seen,
+    absolute_path_seen,
+    ts
+FROM edited
+WHERE in.session = $sessionId
+ORDER BY ts DESC
+LIMIT 100;
+
+SELECT
+    "read_file" AS relation,
+    out AS file,
+    out.path AS path,
+    in.name AS tool,
+    path_seen,
+    absolute_path_seen,
+    evidence,
+    excerpt,
+    ts
+FROM read_file
+WHERE in.session = $sessionId
+ORDER BY ts DESC
+LIMIT 100;
+
+SELECT
+    "searched_file" AS relation,
+    out AS file,
+    out.path AS path,
+    in.name AS tool,
+    path_seen,
+    absolute_path_seen,
+    evidence,
+    excerpt,
+    ts
+FROM searched_file
+WHERE in.session = $sessionId
+ORDER BY ts DESC
+LIMIT 100;`;
+
 // ---------------------------------------------------------------------------
 // Typed Query seam
 // ---------------------------------------------------------------------------

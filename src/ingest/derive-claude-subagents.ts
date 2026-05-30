@@ -12,9 +12,9 @@ import {
     extractFileWithSessionId,
     upsertTurnsForSubagents,
     writeToolCallStatementsForSubagents,
+    writeToolFileEvidenceForSubagents,
     relateInvocationsForSubagents,
     relateToolCallSkillsForSubagents,
-    upsertEditsForSubagents,
     writePlanSnapshotsForSubagents,
 } from "./transcripts.ts";
 import { resolveSkillName } from "../lib/skill-id.ts";
@@ -270,6 +270,7 @@ export const deriveClaudeSubagents = (
 
                 yield* upsertTurnsForSubagents(extracted.turns);
                 yield* writeToolCallStatementsForSubagents(extracted.toolCalls);
+                yield* writeToolFileEvidenceForSubagents(extracted.toolCalls);
                 const resolvedInvocations = extracted.invocations.map((inv) => ({
                     ...inv,
                     skill: resolveSkillName(inv.skill, skillCatalog) ?? inv.skill,
@@ -281,7 +282,6 @@ export const deriveClaudeSubagents = (
                 }));
                 yield* relateToolCallSkillsForSubagents(resolvedSkillRelations);
                 yield* writePlanSnapshotsForSubagents(extracted.planSnapshots);
-                yield* upsertEditsForSubagents(extracted.edits);
 
                 turnsTotal += extracted.turns.length;
                 invocationsTotal += extracted.invocations.length;
