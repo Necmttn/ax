@@ -247,6 +247,17 @@ export interface SessionDetailPayload {
     readonly token_usage: SessionTokenUsageDetail | null;
 }
 
+export interface SessionSkillRoleGroup {
+    readonly role: string | null;
+    readonly skills: ReadonlyArray<{ readonly skill: string; readonly count: number }>;
+}
+
+export interface SessionViewPayload {
+    readonly session: SessionDetailPayload;
+    readonly expanded_subagents: ReadonlyArray<SessionDetailPayload>;
+    readonly by_role: ReadonlyArray<SessionSkillRoleGroup> | null;
+}
+
 export interface WorkflowEpisode {
     readonly parent_session_id: SessionId;
     readonly project: string | null;
