@@ -16,7 +16,9 @@ import {
     type ToolCallWrite,
 } from "./evidence-writers.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
+import { providerDelegationSignalAvailability } from "./delegation.ts";
 import { agentEventRecordKey, buildAgentEventStatements, buildAgentProviderStatements, type AgentEventWrite } from "./provider-events.ts";
+import { providerPlanSignalAvailability } from "./plans.ts";
 import { identityPart, invokedRelationRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
@@ -861,6 +863,8 @@ const buildCursorBatchStatements = (extract: CursorExtract, sourcePath: string):
                 transcripts: true,
                 providerGraph: true,
                 toolCalls: true,
+                planSignals: providerPlanSignalAvailability.cursor,
+                delegationSignals: providerDelegationSignalAvailability.cursor,
             },
         },
     ]),
