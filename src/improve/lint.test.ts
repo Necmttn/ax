@@ -12,10 +12,17 @@ const make = () => {
     const root = mkdtempSync(join(tmpdir(), "ax-lint-"));
     mkdirSync(join(root, "skills", "foo"), { recursive: true });
     mkdirSync(join(root, "agents"), { recursive: true });
+    mkdirSync(join(root, "LaunchAgents"), { recursive: true });
+    mkdirSync(join(root, "cron"), { recursive: true });
     writeFileSync(join(root, "CLAUDE.md"), "# user file");
     writeFileSync(join(root, "AGENTS.md"), "# agents file");
     writeFileSync(join(root, "skills", "foo", "SKILL.md"), "---\n---\nbody");
     writeFileSync(join(root, "agents", "bar.md"), "---\n---\nprompt");
+    writeFileSync(join(root, "settings.json"), JSON.stringify({
+        hooks: { PreToolUse: [{ command: "echo 'ax:hook_sig' && bash hook.sh" }] },
+    }));
+    writeFileSync(join(root, "LaunchAgents", "com.ax.test.plist"), "<!-- ax:auto_sig experiment:experiment:auto -->");
+    writeFileSync(join(root, "cron", "ax-test.cron"), "# ax:cron_sig experiment:experiment:cron\n");
     return root;
 };
 
@@ -27,15 +34,22 @@ describe("discoverFiles", () => {
         expect(paths).toContain(join(root, "CLAUDE.md"));
         expect(paths).toContain(join(root, "AGENTS.md"));
         expect(paths).toContain(join(root, "skills", "foo", "SKILL.md"));
+        expect(paths).toContain(join(root, "settings.json"));
+        expect(paths).toContain(join(root, "LaunchAgents", "com.ax.test.plist"));
+        expect(paths).toContain(join(root, "cron", "ax-test.cron"));
     });
 
-    test("tags each target with form=guidance/skill/subagent", () => {
+    test("tags each target with form=guidance/skill/subagent/hook/automation", () => {
         const root = make();
         const out = discoverFiles({ roots: [root] });
         const claude = out.find((t) => t.path.endsWith("CLAUDE.md"));
         expect(claude?.form).toBe("guidance");
         const skill = out.find((t) => t.path.endsWith("SKILL.md"));
         expect(skill?.form).toBe("skill");
+        const settings = out.find((t) => t.path.endsWith("settings.json"));
+        expect(settings?.form).toBe("hook");
+        const plist = out.find((t) => t.path.endsWith("com.ax.test.plist"));
+        expect(plist?.form).toBe("automation");
     });
 });
 
@@ -200,6 +214,52 @@ describe("lintFiles", () => {
             program.pipe(Effect.provide(recordingLayer(rec, [experimentRowsByExperimentId, []]))),
         );
         expect(report.reconciled.some((r) => r.shortId === "explicit" && r.experimentId === "experiment:explicit__v2")).toBe(true);
+    });
+
+    test("hook command marker reconciles by dedupe_sig", async () => {
+        const root = mkdtempSync(join(tmpdir(), "ax-lint-"));
+        const taskDir = join(root, ".ax", "tasks");
+        mkdirSync(taskDir, { recursive: true });
+        const taskFile = join(taskDir, "hook_sig.md");
+        writeFileSync(taskFile, "# hook task");
+        writeFileSync(join(root, "settings.json"), JSON.stringify({
+            hooks: { PreToolUse: [{ command: "echo 'ax:hook_sig' && bash hook.sh" }] },
+        }));
+        const rec: QueryRecorder = { calls: [] };
+        const experimentFixture = [{
+            id: "experiment:hook",
+            short_id: "hook_sig",
+            status: "task_emitted",
+            task_path: taskFile,
+            locked_verdict: null,
+        }];
+        const report = await Effect.runPromise(
+            lintFiles({ roots: [root] }).pipe(Effect.provide(recordingLayer(rec, [experimentFixture, []]))),
+        );
+        expect(report.reconciled.some((r) => r.shortId === "hook_sig")).toBe(true);
+        expect(fsExists(taskFile)).toBe(false);
+    });
+
+    test("automation marker with explicit experiment routes to exact experiment row", async () => {
+        const root = mkdtempSync(join(tmpdir(), "ax-lint-"));
+        mkdirSync(join(root, "LaunchAgents"), { recursive: true });
+        writeFileSync(
+            join(root, "LaunchAgents", "com.ax.test.plist"),
+            "<!-- ax:auto_sig experiment:experiment:auto -->",
+        );
+        const rec: QueryRecorder = { calls: [] };
+        const experimentFixture = [{
+            id: "experiment:auto",
+            short_id: "auto_sig",
+            status: "task_emitted",
+            task_path: null,
+            locked_verdict: null,
+        }];
+        const report = await Effect.runPromise(
+            lintFiles({ roots: [root] }).pipe(Effect.provide(recordingLayer(rec, [experimentFixture, []]))),
+        );
+        expect(report.reconciled.some((r) => r.shortId === "auto_sig")).toBe(true);
+        expect(rec.calls.some((c) => /type::string\(id\) IN \["experiment:auto"\]/.test(c))).toBe(true);
     });
 
     test("inline guidance marker with multiple matching experiments → multi_experiment_ambiguous warning, no reconcile", async () => {

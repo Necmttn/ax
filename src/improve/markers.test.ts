@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { parseInlineMarkers, parseFrontmatterMarker, type InlineMarker } from "./markers.ts";
+import {
+    parseAutomationMarkers,
+    parseHookCommandMarkers,
+    parseInlineMarkers,
+    parseFrontmatterMarker,
+    type InlineMarker,
+} from "./markers.ts";
 
 describe("parseInlineMarkers", () => {
     test("returns empty array for content with no markers", () => {
@@ -89,5 +95,25 @@ describe("parseFrontmatterMarker", () => {
             id: "e7f3",
             experiment: "experiment:abc",
         });
+    });
+});
+
+describe("external intervention markers", () => {
+    test("extracts hook command ax markers", () => {
+        expect(parseHookCommandMarkers("echo 'ax:hook_sig' && bash hook.sh")).toEqual([
+            { id: "hook_sig" },
+        ]);
+    });
+
+    test("extracts plist automation marker with experiment id", () => {
+        expect(parseAutomationMarkers("<!-- ax:auto_sig experiment:experiment:auto -->")).toEqual([
+            { id: "auto_sig", experiment: "experiment:auto" },
+        ]);
+    });
+
+    test("extracts cron automation marker with experiment id", () => {
+        expect(parseAutomationMarkers("# ax:auto_sig experiment:experiment:auto")).toEqual([
+            { id: "auto_sig", experiment: "experiment:auto" },
+        ]);
     });
 });

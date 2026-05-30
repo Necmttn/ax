@@ -96,3 +96,32 @@ export const parseFrontmatterMarker = (source: string): FrontmatterMarker | null
     if (!id) return null;
     return experiment ? { id, experiment } : { id };
 };
+
+export interface ExternalMarker {
+    readonly id: string;
+    readonly experiment?: string;
+}
+
+const AX_REF = /\bax:([a-z0-9_-]+)\b/g;
+const EXPERIMENT_REF = /\bexperiment:(experiment:[a-z0-9_:-]+)\b/;
+
+const parseExternalMarkers = (source: string): ExternalMarker[] => {
+    const markers: ExternalMarker[] = [];
+    const seen = new Set<string>();
+    let match: RegExpExecArray | null;
+    while ((match = AX_REF.exec(source)) !== null) {
+        const id = match[1]!;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const tail = source.slice(match.index, match.index + 240);
+        const experiment = tail.match(EXPERIMENT_REF)?.[1];
+        markers.push(experiment ? { id, experiment } : { id });
+    }
+    return markers;
+};
+
+export const parseHookCommandMarkers = (source: string): ExternalMarker[] =>
+    parseExternalMarkers(source);
+
+export const parseAutomationMarkers = (source: string): ExternalMarker[] =>
+    parseExternalMarkers(source);

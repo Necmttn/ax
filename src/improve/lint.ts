@@ -2,7 +2,10 @@
  * Lint walker for grounded agent files. v0 discovers:
  *   - <root>/AGENTS.md, <root>/CLAUDE.md       → form=guidance
  *   - <root>/skills/<slug>/SKILL.md            → form=skill
- *   - <root>/agents/<slug>.md                  → form=subagent  (v1 reads only)
+ *   - <root>/agents/<slug>.md                  → form=subagent
+ *   - <root>/settings.json, <root>/.claude/settings.json → form=hook
+ *   - <root>/LaunchAgents/*.plist, <root>/cron/*,
+ *     <root>/automations/*                     → form=automation
  *
  * The default roots are `process.cwd()` (walking up to the git root) and
  * `~/.claude`. Override via `discoverFiles({ roots: [...] })`.
@@ -14,7 +17,12 @@ import { join } from "node:path";
 import { Effect } from "effect";
 import { SurrealClient } from "../lib/db.ts";
 import { surrealLiteral } from "../lib/json.ts";
-import { parseInlineMarkers, parseFrontmatterMarker } from "./markers.ts";
+import {
+    parseAutomationMarkers,
+    parseHookCommandMarkers,
+    parseInlineMarkers,
+    parseFrontmatterMarker,
+} from "./markers.ts";
 import type { DbError } from "../lib/errors.ts";
 import { recordRef } from "../lib/shared/surql.ts";
 import { recordKeyPart } from "../lib/shared/derive-keys.ts";
@@ -23,7 +31,7 @@ import {
     planTaskScaffolded,
 } from "./lifecycle.ts";
 
-export type LintForm = "guidance" | "skill" | "subagent";
+export type LintForm = "guidance" | "skill" | "subagent" | "hook" | "automation";
 
 export interface LintTarget {
     readonly path: string;
@@ -61,6 +69,23 @@ const walkAgentsDir = (out: LintTarget[], agentsDir: string): void => {
     }
 };
 
+const walkFlatFilesDir = (
+    out: LintTarget[],
+    dir: string,
+    form: LintForm,
+    predicate: (entry: string) => boolean,
+): void => {
+    if (!existsSync(dir)) return;
+    for (const entry of readdirSync(dir)) {
+        if (!predicate(entry)) continue;
+        const full = join(dir, entry);
+        try {
+            if (!statSync(full).isFile()) continue;
+        } catch { continue; }
+        tryAddFile(out, full, form);
+    }
+};
+
 export const defaultRoots = (): string[] => [
     process.cwd(),
     join(homedir(), ".claude"),
@@ -93,6 +118,11 @@ export const discoverFiles = (opts: DiscoverOptions = {}): LintTarget[] => {
         }
         walkSkillsDir(out, join(root, "skills"));
         walkAgentsDir(out, join(root, "agents"));
+        tryAddFile(out, join(root, "settings.json"), "hook");
+        tryAddFile(out, join(root, ".claude", "settings.json"), "hook");
+        walkFlatFilesDir(out, join(root, "LaunchAgents"), "automation", (entry) => entry.endsWith(".plist"));
+        walkFlatFilesDir(out, join(root, "cron"), "automation", () => true);
+        walkFlatFilesDir(out, join(root, "automations"), "automation", () => true);
     }
     return out.filter((t) => {
         if (seen.has(t.path)) return false;
@@ -144,6 +174,19 @@ interface IdTarget {
     readonly experiment?: string;
 }
 
+const collectJsonCommandStrings = (value: unknown, out: string[]): void => {
+    if (typeof value === "string") return;
+    if (Array.isArray(value)) {
+        for (const item of value) collectJsonCommandStrings(item, out);
+        return;
+    }
+    if (value && typeof value === "object") {
+        const record = value as Record<string, unknown>;
+        if (typeof record.command === "string") out.push(record.command);
+        for (const item of Object.values(record)) collectJsonCommandStrings(item, out);
+    }
+};
+
 const collectIds = (target: LintTarget, errors: LintFinding[]): Map<string, IdTarget> => {
     const found = new Map<string, IdTarget>();
     let content: string;
@@ -164,9 +207,40 @@ const collectIds = (target: LintTarget, errors: LintFinding[]): Map<string, IdTa
                 message: (err as Error).message,
             });
         }
+    } else if (target.form === "hook") {
+        try {
+            const parsed = JSON.parse(content);
+            const commands: string[] = [];
+            collectJsonCommandStrings(parsed, commands);
+            for (const command of commands) {
+                for (const marker of parseHookCommandMarkers(command)) {
+                    found.set(
+                        marker.id,
+                        marker.experiment === undefined
+                            ? { path: target.path }
+                            : { path: target.path, experiment: marker.experiment },
+                    );
+                }
+            }
+        } catch (err) {
+            errors.push({
+                rule: "marker_parse_error",
+                severity: "error",
+                path: target.path,
+                message: err instanceof Error ? err.message : String(err),
+            });
+        }
+    } else if (target.form === "automation") {
+        for (const marker of parseAutomationMarkers(content)) {
+            found.set(
+                marker.id,
+                marker.experiment === undefined
+                    ? { path: target.path }
+                    : { path: target.path, experiment: marker.experiment },
+            );
+        }
     } else {
         // Skill and subagent files use frontmatter; may carry ax_experiment.
-        // (subagent experiments don't exist yet in v0 but the path is identical.)
         const fm = parseFrontmatterMarker(content);
         if (fm) {
             found.set(
