@@ -4,16 +4,10 @@ import type { DbError } from "../lib/errors.ts";
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 import { surrealLiteral } from "../lib/json.ts";
-import { decodeJsonOrNull } from "../lib/decode.ts";
+import { normalizeDelegationToolCall, type NormalizedDelegationSpawn } from "./delegation.ts";
+import type { AgentProviderName } from "./provider-events.ts";
 
-interface SpawnSource {
-    readonly tool_call_id: string;
-    readonly parent_session_id: string;
-    readonly ts: string;
-    readonly child_id: string | null;
-    readonly nickname: string | null;
-    readonly tool_name: string;
-}
+type SpawnSource = NormalizedDelegationSpawn;
 
 const SPAWN_SOURCES_SQL = `
 SELECT
@@ -25,9 +19,6 @@ SELECT
 FROM tool_call
 WHERE name = "spawn_agent" OR name = "Task"
 ORDER BY ts ASC;`;
-
-const isRecord = (v: unknown): v is Record<string, unknown> =>
-    typeof v === "object" && v !== null && !Array.isArray(v);
 
 const stringField = (row: Record<string, unknown>, key: string): string | null => {
     const v = row[key];
@@ -54,6 +45,9 @@ const recordIdToString = (v: unknown): string | null => {
     return null;
 };
 
+const providerForSpawnTool = (toolName: string): AgentProviderName =>
+    toolName === "Task" ? "claude" : "codex";
+
 /**
  * Pull spawn-like tool calls and extract (parent, child) session pairs.
  * Codex `spawn_agent`: output_excerpt = `{"agent_id":"<uuid>","nickname":"..."}`.
@@ -72,29 +66,14 @@ const collectSources = (
         const ts = dateField(raw, "ts");
         const output = stringField(raw, "output_excerpt");
         if (!id || !session || !name || !ts) continue;
-        const parsed = output ? decodeJsonOrNull(output) : null;
-        if (!isRecord(parsed)) {
-            out.push({
-                tool_call_id: id,
-                parent_session_id: session,
-                ts,
-                child_id: null,
-                nickname: null,
-                tool_name: name,
-            });
-            continue;
-        }
-        // codex spawn_agent: agent_id is the child session id
-        const child = stringField(parsed, "agent_id");
-        const nickname = stringField(parsed, "nickname");
-        out.push({
-            tool_call_id: id,
-            parent_session_id: session,
+        out.push(normalizeDelegationToolCall({
+            provider: providerForSpawnTool(name),
+            toolCallId: id,
+            parentSessionId: session,
             ts,
-            child_id: child,
-            nickname,
-            tool_name: name,
-        });
+            toolName: name,
+            outputExcerpt: output,
+        }));
     }
     return out;
 };
@@ -123,7 +102,7 @@ export const deriveSpawned = (): Effect.Effect<
             SPAWN_SOURCES_SQL,
         );
         const sources = collectSources(rows?.[0] ?? []);
-        const resolved = sources.filter((s) => s.child_id !== null);
+        const resolved = sources.filter((s) => s.childSessionId !== null);
         const unresolved = sources.length - resolved.length;
 
         // Verify each child session record exists. Codex stores subagent
@@ -133,11 +112,11 @@ export const deriveSpawned = (): Effect.Effect<
         let written = 0;
         let missing = 0;
         for (const src of resolved) {
-            if (!src.child_id) continue;
+            if (!src.childSessionId) continue;
             // `parent_session_id` already comes back from SurrealDB as the
             // serialised record id `session:⟨…⟩`. Use it raw, NOT quoted.
-            const parentId = src.parent_session_id;
-            const childId = `session:⟨${src.child_id}⟩`;
+            const parentId = src.parentSessionId;
+            const childId = `session:⟨${src.childSessionId}⟩`;
             // Check existence before RELATE - SurrealDB strict mode rejects
             // edges that point at non-existent records.
             const check = yield* db.query<[Array<Record<string, unknown>>]>(
@@ -148,8 +127,8 @@ export const deriveSpawned = (): Effect.Effect<
                 missing += 1;
                 continue;
             }
-            const callId = src.tool_call_id; // already in tool_call:⟨…⟩ form
-            const toolLit = surrealLiteral(src.tool_name);
+            const callId = src.toolCallId; // already in tool_call:⟨…⟩ form
+            const toolLit = surrealLiteral(src.toolName);
             const nickLit =
                 src.nickname === null ? "NONE" : surrealLiteral(src.nickname);
             // Idempotent: dedupe by (in,out,tool_call) before inserting.
