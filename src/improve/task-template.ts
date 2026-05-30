@@ -1,8 +1,10 @@
 /**
  * Render a self-contained `.ax/tasks/<shortId>.md` brief that the user's
- * primary agent can act on. v0 covers guidance + skill forms; subagent /
- * hook / automation are stubs that throw until their phase lands.
+ * primary agent can act on. Hook and automation forms are manual-only task
+ * briefs; ax never edits user harness files directly for those forms.
  */
+
+import type { InterventionSafetyContract } from "./lifecycle.ts";
 
 export type TaskForm = "guidance" | "skill" | "subagent" | "hook" | "automation";
 
@@ -19,6 +21,7 @@ export interface TaskInput {
     readonly confidence: string;
     readonly frequency: number;
     readonly evidence: string;
+    readonly safety?: InterventionSafetyContract | null;
 }
 
 const guidance = (i: TaskInput): string => `# ax task: ${i.shortId} (form=guidance)
@@ -103,6 +106,140 @@ ${body}
 `;
 };
 
+const subagent = (i: TaskInput): string => `# ax task: ${i.shortId} (form=subagent)
+
+**Action:** create subagent prompt
+**Target:** \`${i.targetPath}\`
+**Provenance:** YAML frontmatter \`ax_id: ${i.shortId}\`
+
+## Why
+${i.evidence}.
+Proposal: ${i.proposalId}
+Experiment: ${i.experimentId}
+Confidence: ${i.confidence}. Frequency: ${i.frequency}/wk.
+
+## Apply
+1. Create \`${i.targetPath}\` with the frontmatter below.
+2. Edit the prompt body freely while preserving \`ax_id\` and \`ax_experiment\`.
+3. Run \`axctl improve lint\`. The task file is removed automatically
+   once the lint pass sees the frontmatter.
+
+## Suggested content
+
+\`\`\`md
+---
+name: ${i.title}
+description: ${i.title}
+ax_id: ${i.shortId}
+ax_experiment: ${i.experimentId}
+---
+
+# ${i.title}
+
+${i.suggestedBody}
+\`\`\`
+
+## References
+- proposal: ${i.proposalId}
+- experiment: ${i.experimentId}
+- evidence-cmd: \`axctl improve show ${i.shortId}\`
+`;
+
+const safetyLines = (i: TaskInput): string => {
+    const safety = i.safety ?? {};
+    return [
+        `Recovery Path: ${safety.recoveryPath ?? "(missing)"}`,
+        `Smoke Test: ${safety.smokeTestCommand ?? "(missing)"}`,
+        `Disable Switch: ${safety.disableCommand ?? "(missing)"}`,
+        `Failure Mode: ${safety.failureMode ?? "(missing)"}`,
+    ].join("\n");
+};
+
+const hook = (i: TaskInput): string => `# ax task: ${i.shortId} (form=hook)
+
+**Action:** add manual hook entry
+**Target:** \`${i.targetPath}\`
+**Marker:** command prefix \`echo 'ax:${i.shortId}'\`
+
+## Why
+${i.evidence}.
+Proposal: ${i.proposalId}
+Experiment: ${i.experimentId}
+Confidence: ${i.confidence}. Frequency: ${i.frequency}/wk.
+
+## Safety Contract
+${safetyLines(i)}
+
+## Apply
+1. Open \`${i.targetPath}\`.
+2. Add or update the hook entry below. The command MUST keep the
+   \`echo 'ax:${i.shortId}'\` prefix so \`axctl improve lint\` can reconcile it.
+3. Run the Smoke Test from the safety contract.
+4. Run \`axctl improve lint\`. Resolve any warnings.
+
+## Suggested hook entry
+
+\`\`\`json
+{
+  "hooks": {
+    "${i.section ?? "PreToolUse"}": [
+      { "command": "echo 'ax:${i.shortId}' && ${i.suggestedBody}" }
+    ]
+  }
+}
+\`\`\`
+
+## References
+- proposal: ${i.proposalId}
+- experiment: ${i.experimentId}
+- evidence-cmd: \`axctl improve show ${i.shortId}\`
+`;
+
+const automation = (i: TaskInput): string => `# ax task: ${i.shortId} (form=automation)
+
+**Action:** create manual automation artifact
+**Target:** \`${i.targetPath}\`
+**Marker:** \`ax:${i.shortId} experiment:${i.experimentId}\`
+
+## Why
+${i.evidence}.
+Proposal: ${i.proposalId}
+Experiment: ${i.experimentId}
+Confidence: ${i.confidence}. Frequency: ${i.frequency}/wk.
+
+## Safety Contract
+${safetyLines(i)}
+
+## Apply
+1. Create the automation only after reviewing the action below.
+2. Add one of the marker headers below to the artifact.
+3. Run the Smoke Test from the safety contract.
+4. Run \`axctl improve lint\`. Resolve any warnings.
+
+## Suggested action
+
+\`\`\`text
+${i.suggestedBody}
+\`\`\`
+
+## Plist marker
+
+\`\`\`xml
+<!-- ax:${i.shortId} experiment:${i.experimentId} -->
+\`\`\`
+
+## Cron marker
+
+\`\`\`cron
+# ax:${i.shortId} experiment:${i.experimentId}
+\`\`\`
+
+## References
+- proposal: ${i.proposalId}
+- experiment: ${i.experimentId}
+- evidence-cmd: \`axctl improve show ${i.shortId}\`
+`;
+
 export const renderTaskFile = (input: TaskInput): string => {
     switch (input.form) {
         case "guidance":
@@ -110,8 +247,10 @@ export const renderTaskFile = (input: TaskInput): string => {
         case "skill":
             return skill(input);
         case "subagent":
+            return subagent(input);
         case "hook":
+            return hook(input);
         case "automation":
-            throw new Error(`task template for form=${input.form} not yet implemented (v1+)`);
+            return automation(input);
     }
 };

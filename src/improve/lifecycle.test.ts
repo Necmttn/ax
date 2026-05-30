@@ -15,12 +15,12 @@ import {
 } from "./lifecycle.ts";
 
 describe("intervention lifecycle vocabulary", () => {
-    test("accepts only v0 proposal forms that can create an experiment", () => {
+    test("separates retro auto-accepted forms from manual task forms", () => {
         expect(isAcceptedProposalForm("guidance")).toBe(true);
         expect(isAcceptedProposalForm("skill")).toBe(true);
         expect(isAcceptedProposalForm("subagent")).toBe(false);
         expect(acceptanceFormError("hook")).toBe(
-            "accept supports form=guidance and form=skill (got hook); subagent/hook/automation land in later phases",
+            "accept supports form=guidance, form=skill, form=subagent, form=hook, and form=automation (got hook)",
         );
     });
 
@@ -35,9 +35,41 @@ describe("intervention lifecycle vocabulary", () => {
             status: "ok",
             experimentStatus: "scaffolded",
         });
-        expect(planAcceptCandidate({ form: "hook", proposalStatus: "open", autoScaffold: false })).toEqual({
+        expect(planAcceptCandidate({ form: "subagent", proposalStatus: "open", autoScaffold: false })).toEqual({
+            status: "ok",
+            experimentStatus: "task_emitted",
+        });
+        expect(planAcceptCandidate({ form: "hook", proposalStatus: "open", autoScaffold: false, safetyContract: null })).toEqual({
             status: "unsupported_form",
-            message: "accept supports form=guidance and form=skill (got hook); subagent/hook/automation land in later phases",
+            message: "hook proposals stay open until safety gates are modeled: Recovery Path, smoke test, disable switch, failure mode",
+        });
+        expect(planAcceptCandidate({
+            form: "hook",
+            proposalStatus: "open",
+            autoScaffold: false,
+            safetyContract: {
+                recoveryPath: "remove settings hook",
+                smokeTestCommand: "bun test",
+                disableCommand: "mv hook.sh hook.sh.disabled",
+                failureMode: "fail_open",
+            },
+        })).toEqual({
+            status: "ok",
+            experimentStatus: "task_emitted",
+        });
+        expect(planAcceptCandidate({
+            form: "automation",
+            proposalStatus: "open",
+            autoScaffold: false,
+            safetyContract: {
+                recoveryPath: "unload LaunchAgent",
+                smokeTestCommand: "launchctl print gui/$UID/com.ax.test",
+                disableCommand: "launchctl unload ~/Library/LaunchAgents/com.ax.test.plist",
+                failureMode: "fail_open",
+            },
+        })).toEqual({
+            status: "ok",
+            experimentStatus: "task_emitted",
         });
         expect(planAcceptCandidate({ form: "skill", proposalStatus: "accepted", autoScaffold: false })).toEqual({
             status: "wrong_status",

@@ -16,6 +16,7 @@ import { recordRef, surrealString } from "../lib/shared/surql.ts";
 import { surrealLiteral } from "../lib/json.ts";
 import { recordKeyPart } from "../lib/shared/derive-keys.ts";
 import {
+    type InterventionSafetyContract,
     PROPOSAL_STATUS_ACCEPTED,
     PROPOSAL_STATUS_REJECTED,
     planAcceptCandidate,
@@ -83,10 +84,33 @@ interface ProposalRow {
 }
 
 interface FullProposalRow extends ProposalRow {
+    readonly subagent_payload?: {
+        readonly bounded_role?: string | null;
+        readonly delegation_trigger?: string | null;
+        readonly example_task_patterns?: readonly string[] | null;
+    } | null;
     readonly guidance_payload?: {
         readonly file_target?: string | null;
         readonly section?: string | null;
         readonly suggested_text?: string | null;
+    } | null;
+    readonly hook_payload?: {
+        readonly event_name?: string | null;
+        readonly target_tool?: string | null;
+        readonly hook_command?: string | null;
+        readonly recovery_path?: string | null;
+        readonly smoke_test_command?: string | null;
+        readonly disable_command?: string | null;
+        readonly failure_mode?: string | null;
+    } | null;
+    readonly automation_payload?: {
+        readonly trigger_signal?: string | null;
+        readonly schedule?: string | null;
+        readonly action?: string | null;
+        readonly recovery_path?: string | null;
+        readonly smoke_test_command?: string | null;
+        readonly disable_command?: string | null;
+        readonly failure_mode?: string | null;
     } | null;
 }
 
@@ -124,7 +148,10 @@ const fetchFullProposal = (idLiteral: string) =>
         const result = yield* db.query<[FullProposalRow[]]>(
             `SELECT *,
                 (SELECT * FROM skill_proposal WHERE proposal = $parent.id LIMIT 1)[0] AS skill_payload,
-                (SELECT * FROM guidance_proposal WHERE proposal = $parent.id LIMIT 1)[0] AS guidance_payload
+                (SELECT * FROM subagent_proposal WHERE proposal = $parent.id LIMIT 1)[0] AS subagent_payload,
+                (SELECT * FROM guidance_proposal WHERE proposal = $parent.id LIMIT 1)[0] AS guidance_payload,
+                (SELECT * FROM hook_proposal WHERE proposal = $parent.id LIMIT 1)[0] AS hook_payload,
+                (SELECT * FROM automation_proposal WHERE proposal = $parent.id LIMIT 1)[0] AS automation_payload
             FROM proposal WHERE dedupe_sig = ${idLiteral} OR id = ${idLiteral} LIMIT 1;`,
         );
         return (result?.[0] ?? [])[0] ?? null;
@@ -139,11 +166,12 @@ const defaultTaskDir = (): string =>
  */
 const buildTaskInput = (row: FullProposalRow, experimentId: string): TaskInput => {
     const shortId = row.dedupe_sig;
+    const proposalId = `proposal:${recordKeyPart(row.id, "proposal") ?? row.dedupe_sig}`;
     if (row.form === "guidance") {
         return {
             form: "guidance",
             experimentId,
-            proposalId: `proposal:${recordKeyPart(row.id, "proposal") ?? row.dedupe_sig}`,
+            proposalId,
             shortId,
             title: row.title,
             targetPath: row.guidance_payload?.file_target ?? "~/.claude/CLAUDE.md",
@@ -155,11 +183,65 @@ const buildTaskInput = (row: FullProposalRow, experimentId: string): TaskInput =
             evidence: row.hypothesis,
         };
     }
+    if (row.form === "subagent") {
+        return {
+            form: "subagent",
+            experimentId,
+            proposalId,
+            shortId,
+            title: row.title,
+            targetPath: `~/.claude/agents/${row.dedupe_sig}.md`,
+            section: null,
+            suggestedBody: [
+                row.subagent_payload?.bounded_role ? `Role: ${row.subagent_payload.bounded_role}` : null,
+                row.subagent_payload?.delegation_trigger ? `Delegation trigger: ${row.subagent_payload.delegation_trigger}` : null,
+                row.hypothesis,
+            ].filter((line): line is string => line !== null).join("\n\n"),
+            proposedBehavior: null,
+            confidence: "medium",
+            frequency: 0,
+            evidence: row.hypothesis,
+        };
+    }
+    if (row.form === "hook") {
+        return {
+            form: "hook",
+            experimentId,
+            proposalId,
+            shortId,
+            title: row.title,
+            targetPath: "~/.claude/settings.json",
+            section: row.hook_payload?.event_name ?? "PreToolUse",
+            suggestedBody: row.hook_payload?.hook_command ?? `see proposal: ${row.dedupe_sig}`,
+            proposedBehavior: row.hook_payload?.target_tool ?? null,
+            confidence: "medium",
+            frequency: 0,
+            evidence: row.hypothesis,
+            safety: safetyContractFromPayload(row.hook_payload),
+        };
+    }
+    if (row.form === "automation") {
+        return {
+            form: "automation",
+            experimentId,
+            proposalId,
+            shortId,
+            title: row.title,
+            targetPath: `.ax/interventions/${row.dedupe_sig}/AUTOMATION.md`,
+            section: row.automation_payload?.schedule ?? null,
+            suggestedBody: row.automation_payload?.action ?? `see proposal: ${row.dedupe_sig}`,
+            proposedBehavior: row.automation_payload?.trigger_signal ?? null,
+            confidence: "medium",
+            frequency: 0,
+            evidence: row.hypothesis,
+            safety: safetyContractFromPayload(row.automation_payload),
+        };
+    }
     // skill form
     return {
         form: "skill",
         experimentId,
-        proposalId: `proposal:${recordKeyPart(row.id, "proposal") ?? row.dedupe_sig}`,
+        proposalId,
         shortId,
         title: row.title,
         targetPath: `~/.claude/skills/${row.dedupe_sig}/SKILL.md`,
@@ -171,6 +253,20 @@ const buildTaskInput = (row: FullProposalRow, experimentId: string): TaskInput =
         evidence: row.hypothesis,
     };
 };
+
+const safetyContractFromPayload = (
+    payload: {
+        readonly recovery_path?: string | null;
+        readonly smoke_test_command?: string | null;
+        readonly disable_command?: string | null;
+        readonly failure_mode?: string | null;
+    } | null | undefined,
+): InterventionSafetyContract => ({
+    recoveryPath: payload?.recovery_path ?? null,
+    smokeTestCommand: payload?.smoke_test_command ?? null,
+    disableCommand: payload?.disable_command ?? null,
+    failureMode: payload?.failure_mode ?? null,
+});
 
 export interface AcceptOptions {
     readonly sigOrId: string;
@@ -215,6 +311,11 @@ export const acceptProposal = (
             form: row.form,
             proposalStatus: row.status,
             autoScaffold: Boolean(opts.autoScaffold),
+            safetyContract: row.form === "hook"
+                ? safetyContractFromPayload(row.hook_payload)
+                : row.form === "automation"
+                    ? safetyContractFromPayload(row.automation_payload)
+                    : null,
         });
         if (acceptPlan.status === "wrong_status") {
             const db = yield* SurrealClient;

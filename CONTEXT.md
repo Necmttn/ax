@@ -210,10 +210,10 @@ _Avoid_: rollback note
 
 **Acceptable Intervention Form**:
 A proposal form that the current **Intervention Lifecycle** can safely promote
-from candidate queue to accepted Intervention. `guidance` and `skill` are
-acceptable today. `hook` and `automation` remain candidate-only until their
-Recovery Path, smoke test, disable switch, and fail-open/fail-closed behavior
-are modeled.
+from candidate queue to accepted Intervention. `guidance`, `skill`, and
+`subagent` are acceptable as manual task briefs. `hook` and `automation` are
+acceptable only as manual task briefs when their **Intervention Safety
+Contract** is complete; direct auto-apply remains unavailable.
 _Avoid_: supported proposal type
 
 **Intervention Safety Contract**:

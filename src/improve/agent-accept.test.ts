@@ -180,6 +180,133 @@ describe("acceptProposal - task emission", () => {
         expect(existsSync(result.artifact_path!)).toBe(true);
     });
 
+    test("subagent form emits a task brief", async () => {
+        const taskDir = mkdtempSync(join(tmpdir(), "ax-task-"));
+        const proposalRow = {
+            id: "proposal:subagent1",
+            form: "subagent",
+            title: "Review specialist",
+            hypothesis: "Reviews recur with the same bounded role",
+            dedupe_sig: "subagent_sig",
+            status: "open",
+            skill_payload: null,
+            subagent_payload: {
+                bounded_role: "Review TypeScript changes",
+                delegation_trigger: "Large TypeScript diff",
+                example_task_patterns: ["review this diff"],
+            },
+            guidance_payload: null,
+        };
+        const result = await Effect.runPromise(
+            acceptProposal({ sigOrId: "subagent_sig", taskDir }).pipe(
+                Effect.provide(fakeRowsLayer([[[proposalRow]], [[]]])),
+            ),
+        );
+        expect(result.status).toBe("ok");
+        expect(result.task_path).toBeDefined();
+        const body = readFileSync(result.task_path!, "utf-8");
+        expect(body).toContain("form=subagent");
+        expect(body).toContain("ax_id: subagent_sig");
+    });
+
+    test("hook form with complete safety contract emits a task brief", async () => {
+        const taskDir = mkdtempSync(join(tmpdir(), "ax-task-"));
+        const proposalRow = {
+            id: "proposal:hook1",
+            form: "hook",
+            title: "Pre-Bash guard hook",
+            hypothesis: "Bash failures recur",
+            dedupe_sig: "hook_sig",
+            status: "open",
+            skill_payload: null,
+            hook_payload: {
+                event_name: "PreToolUse",
+                target_tool: "Bash",
+                hook_command: "bash ~/.claude/hooks/pre-bash-guard.sh",
+                recovery_path: "Remove hook from settings.json",
+                smoke_test_command: "bun test src/improve/lifecycle.test.ts",
+                disable_command: "mv hook.sh hook.sh.disabled",
+                failure_mode: "fail_open",
+            },
+            guidance_payload: null,
+        };
+        const result = await Effect.runPromise(
+            acceptProposal({ sigOrId: "hook_sig", taskDir }).pipe(
+                Effect.provide(fakeRowsLayer([[[proposalRow]], [[]]])),
+            ),
+        );
+        expect(result.status).toBe("ok");
+        expect(result.task_path).toBeDefined();
+        const body = readFileSync(result.task_path!, "utf-8");
+        expect(body).toContain("form=hook");
+        expect(body).toContain("echo 'ax:hook_sig'");
+        expect(body).toContain("Recovery Path: Remove hook from settings.json");
+    });
+
+    test("hook form without complete safety contract is rejected before task emission", async () => {
+        const taskDir = mkdtempSync(join(tmpdir(), "ax-task-"));
+        const proposalRow = {
+            id: "proposal:hook2",
+            form: "hook",
+            title: "Unsafe hook",
+            hypothesis: "Missing safety gates",
+            dedupe_sig: "unsafe_hook",
+            status: "open",
+            skill_payload: null,
+            hook_payload: {
+                event_name: "PreToolUse",
+                target_tool: "Bash",
+                hook_command: "bash hook.sh",
+                recovery_path: null,
+                smoke_test_command: null,
+                disable_command: null,
+                failure_mode: null,
+            },
+            guidance_payload: null,
+        };
+        const result = await Effect.runPromise(
+            acceptProposal({ sigOrId: "unsafe_hook", taskDir }).pipe(
+                Effect.provide(fakeRowsLayer([[[proposalRow]]])),
+            ),
+        );
+        expect(result.status).toBe("unsupported_form");
+        expect(result.message).toContain("Recovery Path");
+    });
+
+    test("automation form with complete safety contract emits a task brief", async () => {
+        const taskDir = mkdtempSync(join(tmpdir(), "ax-task-"));
+        const proposalRow = {
+            id: "proposal:auto1",
+            form: "automation",
+            title: "Weekly cleanup",
+            hypothesis: "Cleanup should happen on a schedule",
+            dedupe_sig: "automation_sig",
+            status: "open",
+            skill_payload: null,
+            automation_payload: {
+                trigger_signal: "weekly",
+                schedule: "0 9 * * 1",
+                action: "bun run cleanup",
+                recovery_path: "Unload the LaunchAgent",
+                smoke_test_command: "bun test src/improve/lifecycle.test.ts",
+                disable_command: "launchctl unload ~/Library/LaunchAgents/com.ax.weekly.plist",
+                failure_mode: "fail_open",
+            },
+            guidance_payload: null,
+        };
+        const result = await Effect.runPromise(
+            acceptProposal({ sigOrId: "automation_sig", taskDir }).pipe(
+                Effect.provide(fakeRowsLayer([[[proposalRow]], [[]]])),
+            ),
+        );
+        expect(result.status).toBe("ok");
+        expect(result.task_path).toBeDefined();
+        const body = readFileSync(result.task_path!, "utf-8");
+        expect(body).toContain("form=automation");
+        expect(body).toContain("<!-- ax:automation_sig experiment:");
+        expect(body).toContain("bun run cleanup");
+    });
+
     test("dedupe_sig with path separator characters is rejected", async () => {
         const taskDir = mkdtempSync(join(tmpdir(), "ax-task-"));
         const badRow = {

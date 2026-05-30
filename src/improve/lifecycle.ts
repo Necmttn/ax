@@ -12,6 +12,7 @@ export const GUIDANCE_STATUS_PROPOSED = "proposed";
 
 export const ACCEPTED_PROPOSAL_FORMS = ["guidance", "skill"] as const;
 export type AcceptedProposalForm = (typeof ACCEPTED_PROPOSAL_FORMS)[number];
+export const MANUAL_TASK_PROPOSAL_FORMS = ["guidance", "skill", "subagent", "hook", "automation"] as const;
 
 export const EXPERIMENT_STATUS_TASK_EMITTED = "task_emitted";
 export const EXPERIMENT_STATUS_SCAFFOLDED = "scaffolded";
@@ -88,7 +89,7 @@ export function isAcceptedProposalForm(form: string): form is AcceptedProposalFo
 }
 
 export function acceptanceFormError(form: string): string {
-    return `accept supports form=guidance and form=skill (got ${form}); subagent/hook/automation land in later phases`;
+    return `accept supports form=guidance, form=skill, form=subagent, form=hook, and form=automation (got ${form})`;
 }
 
 export function acceptedExperimentStatus(input: {
@@ -114,6 +115,7 @@ export function planAcceptCandidate(input: {
     readonly form: string;
     readonly proposalStatus: string;
     readonly autoScaffold: boolean;
+    readonly safetyContract?: InterventionSafetyContract | null;
 }): AcceptCandidatePlan {
     if (input.proposalStatus !== PROPOSAL_STATUS_OPEN) {
         return {
@@ -121,11 +123,20 @@ export function planAcceptCandidate(input: {
             message: `proposal already ${input.proposalStatus}`,
         };
     }
-    if (!isAcceptedProposalForm(input.form)) {
+    if (!(MANUAL_TASK_PROPOSAL_FORMS as readonly string[]).includes(input.form)) {
         return {
             status: "unsupported_form",
             message: acceptanceFormError(input.form),
         };
+    }
+    if (input.form === "hook" || input.form === "automation") {
+        const missing = missingInterventionSafetyGates(input.safetyContract);
+        if (missing.length > 0) {
+            return {
+                status: "unsupported_form",
+                message: interventionSafetyMessage(input.form, input.safetyContract),
+            };
+        }
     }
     return {
         status: "ok",
