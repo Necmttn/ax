@@ -1,0 +1,95 @@
+{
+  "name": "reaction-event",
+  "cases": [
+    {
+      "name": "uv-direction-after-package-failure",
+      "classifierKeys": ["reaction-event"],
+      "window": {
+        "user": "can you use UV ?",
+        "previousAssistant": "I am setting up Python packages with pip for the classifier prototype.",
+        "recentToolFailures": [
+          "ERROR: dependency resolution failed while installing sklearn packages"
+        ]
+      },
+      "expect": [
+        {
+          "classifierKey": "reaction-event",
+          "label": "direction",
+          "target": "environment_setup",
+          "polarity": "revise",
+          "durability": "repo_preference"
+        }
+      ]
+    },
+    {
+      "name": "not-just-html-correction",
+      "classifierKeys": ["reaction-event"],
+      "window": {
+        "user": "i dont want just html i want to see the results. try setting up a classifier and apply to surrealml",
+        "previousAssistant": "I created a static HTML prototype page for you to open."
+      },
+      "expect": [
+        {
+          "classifierKey": "reaction-event",
+          "label": "correction",
+          "target": "prototype_completeness",
+          "polarity": "revise",
+          "durability": "repo_preference"
+        }
+      ]
+    },
+    {
+      "name": "verification-demand",
+      "classifierKeys": ["reaction-event"],
+      "window": {
+        "user": "did you run the tests and can you show output?",
+        "previousAssistant": "I updated the implementation."
+      },
+      "expect": [
+        {
+          "classifierKey": "reaction-event",
+          "label": "direction",
+          "target": "verification",
+          "polarity": "revise",
+          "durability": "session_preference"
+        }
+      ]
+    },
+    {
+      "name": "approval",
+      "classifierKeys": ["reaction-event"],
+      "window": {
+        "user": "yes exactly, keep going"
+      },
+      "expect": [
+        {
+          "classifierKey": "reaction-event",
+          "label": "approval",
+          "target": "unknown",
+          "polarity": "accept",
+          "durability": "one_off"
+        }
+      ]
+    },
+    {
+      "name": "negative-goal-context-wrapper",
+      "classifierKeys": ["reaction-event"],
+      "window": {
+        "user": "<goal_context>\nContinue working toward the active thread goal.\n</goal_context>"
+      },
+      "expect": [],
+      "reject": [
+        {
+          "classifierKey": "reaction-event",
+          "label": "direction",
+          "target": "verification"
+        },
+        {
+          "classifierKey": "reaction-event",
+          "label": "approval",
+          "target": "unknown"
+        }
+      ]
+    }
+  ]
+}

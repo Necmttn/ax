@@ -1,0 +1,51 @@
+{
+  "name": "direction-event",
+  "cases": [
+    {
+      "name": "tooling-preference",
+      "classifierKeys": ["direction-event"],
+      "window": {
+        "user": "can you us UV ?",
+        "previousAssistant": "pip is failing to resolve these packages."
+      },
+      "expect": [
+        {
+          "classifierKey": "direction-event",
+          "label": "direction",
+          "target": "tooling_preference",
+          "polarity": "revise",
+          "durability": "repo_preference"
+        }
+      ]
+    },
+    {
+      "name": "external-review-request",
+      "classifierKeys": ["direction-event"],
+      "window": {
+        "user": "Can you ask Fabijons to review this plan and roast it?"
+      },
+      "expect": [
+        {
+          "classifierKey": "direction-event",
+          "label": "direction",
+          "target": "review_request"
+        }
+      ]
+    },
+    {
+      "name": "predictable-dev-environment",
+      "classifierKeys": ["direction-event"],
+      "window": {
+        "user": "Can we start Surreal through docker compose so we have a predictable dev environment?"
+      },
+      "expect": [
+        {
+          "classifierKey": "direction-event",
+          "label": "direction",
+          "target": "dev_environment",
+          "durability": "repo_preference"
+        }
+      ]
+    }
+  ]
+}

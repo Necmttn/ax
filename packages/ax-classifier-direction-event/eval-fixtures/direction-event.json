@@ -1,0 +1,132 @@
+{
+  "name": "direction-event",
+  "cases": [
+    {
+      "name": "tooling-preference",
+      "classifierKeys": ["direction-event"],
+      "window": {
+        "user": "can you us UV ?",
+        "previousAssistant": "pip is failing to resolve these packages."
+      },
+      "expect": [
+        {
+          "classifierKey": "direction-event",
+          "label": "direction",
+          "target": "tooling_preference",
+          "polarity": "revise",
+          "durability": "repo_preference"
+        }
+      ]
+    },
+    {
+      "name": "package-manager-preference",
+      "classifierKeys": ["direction-event"],
+      "window": {
+        "user": "please use pnpm here, don't use npm for this workspace"
+      },
+      "expect": [
+        {
+          "classifierKey": "direction-event",
+          "label": "direction",
+          "target": "tooling_preference",
+          "durability": "repo_preference"
+        }
+      ]
+    },
+    {
+      "name": "external-review-request",
+      "classifierKeys": ["direction-event"],
+      "window": {
+        "user": "Can you ask Fabijons to review this plan and roast it?"
+      },
+      "expect": [
+        {
+          "classifierKey": "direction-event",
+          "label": "direction",
+          "target": "review_request",
+          "durability": "one_off"
+        }
+      ]
+    },
+    {
+      "name": "predictable-dev-environment",
+      "classifierKeys": ["direction-event"],
+      "window": {
+        "user": "Can we start Surreal through docker compose so we have a predictable dev environment?"
+      },
+      "expect": [
+        {
+          "classifierKey": "direction-event",
+          "label": "direction",
+          "target": "dev_environment",
+          "durability": "repo_preference"
+        }
+      ]
+    },
+    {
+      "name": "nix-dev-environment",
+      "classifierKeys": ["direction-event"],
+      "window": {
+        "user": "we can use nix if that gives us a predictable local dev database"
+      },
+      "expect": [
+        {
+          "classifierKey": "direction-event",
+          "label": "direction",
+          "target": "dev_environment",
+          "durability": "repo_preference"
+        }
+      ]
+    },
+    {
+      "name": "output-expectation-results",
+      "classifierKeys": ["direction-event"],
+      "window": {
+        "user": "I don't want just html, I want to see the results"
+      },
+      "expect": [
+        {
+          "classifierKey": "direction-event",
+          "label": "direction",
+          "target": "output_expectation",
+          "durability": "session_preference"
+        }
+      ]
+    },
+    {
+      "name": "negative-general-status",
+      "classifierKeys": ["direction-event"],
+      "window": {
+        "user": "what is the current status?"
+      },
+      "expect": [],
+      "reject": [
+        {
+          "classifierKey": "direction-event",
+          "label": "direction",
+          "target": "review_request"
+        },
+        {
+          "classifierKey": "direction-event",
+          "label": "direction",
+          "target": "output_expectation"
+        }
+      ]
+    },
+    {
+      "name": "negative-ordinary-review-word",
+      "classifierKeys": ["direction-event"],
+      "window": {
+        "user": "review the latest command output and keep going"
+      },
+      "expect": [],
+      "reject": [
+        {
+          "classifierKey": "direction-event",
+          "label": "direction",
+          "target": "review_request"
+        }
+      ]
+    }
+  ]
+}
