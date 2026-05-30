@@ -5,7 +5,7 @@ import { RecordId, SurrealClient, filePointer } from "../lib/db.ts";
 import { AxConfig } from "../lib/config.ts";
 import { decodeJsonOrNull } from "../lib/decode.ts";
 import { skillRecordKey } from "../lib/skill-id.ts";
-import { surrealString } from "../lib/shared/surql.ts";
+import { recordRef, surrealDate, surrealJsonOption, surrealObject, surrealOptionInt, surrealOptionString, surrealString } from "../lib/shared/surql.ts";
 import { AppLayer } from "../lib/layers.ts";
 import type { DbError } from "../lib/errors.ts";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
@@ -36,6 +36,8 @@ import { classifyTurnIntent } from "./intent-kind.ts";
 import { normalizeCodexUpdatePlan, type PlanStatus } from "./plans.ts";
 import { invokedRelationRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import { executeStatements } from "../lib/shared/statement-exec.ts";
+import { safeKeyPart } from "../lib/shared/derive-keys.ts";
+import { tokenQualityLabels } from "./token-quality.ts";
 
 const DEFAULT_CODEX_RAW_MAX_BYTES = 5 * 1024 * 1024;
 const DEFAULT_CODEX_PROGRESS_EVERY = 10;
@@ -73,6 +75,20 @@ interface CodexInvocation {
     args: unknown;
 }
 
+interface CodexTokenUsage {
+    session: string;
+    model: string | null;
+    promptTokens: number | null;
+    completionTokens: number | null;
+    cacheReadInputTokens: number | null;
+    estimatedTokens: number;
+    contextWindow: number | null;
+    totalTokenUsage: Record<string, unknown>;
+    lastTokenUsage: Record<string, unknown> | null;
+    tokenCountEvents: number;
+    ts: string;
+}
+
 function parseJsonl(line: string): Record<string, unknown> | null {
     const decoded = decodeJsonOrNull(line);
     return isRecord(decoded) ? decoded : null;
@@ -85,6 +101,12 @@ function isRecord(input: unknown): input is Record<string, unknown> {
 function stringField(input: Record<string, unknown>, field: string): string | null {
     const value = input[field];
     return typeof value === "string" ? value : null;
+}
+
+function numberField(input: Record<string, unknown>, field: string): number | null {
+    const value = input[field];
+    const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+    return Number.isFinite(n) ? Math.trunc(n) : null;
 }
 
 function parseCodexArguments(input: unknown): unknown {
@@ -335,6 +357,39 @@ function codexOutputFields(output: unknown): ToolResultFields {
     };
 }
 
+function codexTokenUsageFromPayload(
+    payload: Record<string, unknown>,
+    ts: string,
+    currentSession: CodexSession,
+    tokenCountEvents: number,
+): CodexTokenUsage | null {
+    const info = isRecord(payload.info) ? payload.info : null;
+    if (!info) return null;
+    const totalTokenUsage = isRecord(info.total_token_usage) ? info.total_token_usage : null;
+    if (!totalTokenUsage) return null;
+
+    const promptTokens = numberField(totalTokenUsage, "input_tokens");
+    const completionTokens = numberField(totalTokenUsage, "output_tokens");
+    const cacheReadInputTokens = numberField(totalTokenUsage, "cached_input_tokens");
+    const estimatedTokens = numberField(totalTokenUsage, "total_tokens") ??
+        (promptTokens ?? 0) + (completionTokens ?? 0);
+    const lastTokenUsage = isRecord(info.last_token_usage) ? info.last_token_usage : null;
+
+    return {
+        session: currentSession.id,
+        model: currentSession.model_provider,
+        promptTokens,
+        completionTokens,
+        cacheReadInputTokens,
+        estimatedTokens,
+        contextWindow: numberField(info, "model_context_window"),
+        totalTokenUsage,
+        lastTokenUsage,
+        tokenCountEvents,
+        ts,
+    };
+}
+
 function applyToolResult(call: MutableToolCallWrite, result: ToolResultFields): void {
     call.outputJson = result.outputJson;
     call.outputExcerpt = result.outputExcerpt;
@@ -390,6 +445,7 @@ interface CodexExtract {
     parentEdges: AgentEventParentEdgeWrite[];
     skillRelations: ToolCallSkillRelationWrite[];
     planSnapshots: PlanSnapshotWrite[];
+    tokenUsage: CodexTokenUsage | null;
 }
 
 interface MutableCodexExtract {
@@ -402,6 +458,7 @@ interface MutableCodexExtract {
     parentEdges: AgentEventParentEdgeWrite[];
     skillRelations: ToolCallSkillRelationWrite[];
     planSnapshots: PlanSnapshotWrite[];
+    tokenUsage: CodexTokenUsage | null;
 }
 
 function createCodexExtractor(
@@ -416,6 +473,8 @@ function createCodexExtractor(
     const parentEdges: AgentEventParentEdgeWrite[] = [];
     const skillRelations: ToolCallSkillRelationWrite[] = [];
     const planSnapshots: PlanSnapshotWrite[] = [];
+    let tokenUsage: CodexTokenUsage | null = null;
+    let tokenCountEvents = 0;
     const toolCallsByCallId = new Map<string, MutableToolCallWrite>();
     const pendingToolResultsByCallId = new Map<string, ToolResultFields>();
     const planCreatedAtBySource = new Map<string, string>();
@@ -745,6 +804,7 @@ function createCodexExtractor(
             parentEdges: drainedParentEdges,
             skillRelations: drainedRelations,
             planSnapshots: drainedSnapshots,
+            tokenUsage,
         };
     };
 
@@ -771,6 +831,12 @@ function createCodexExtractor(
             }
             if (!session) return;
             session.ended_at = ts;
+
+            if (type === "event_msg" && payload && stringField(payload, "type") === "token_count") {
+                tokenCountEvents += 1;
+                tokenUsage = codexTokenUsageFromPayload(payload, ts, session, tokenCountEvents) ?? tokenUsage;
+                return;
+            }
 
             if (type === "response_item" && payload) {
                 seq += 1;
@@ -840,6 +906,7 @@ function createCodexExtractor(
                 parentEdges: remaining.parentEdges,
                 skillRelations: remaining.skillRelations,
                 planSnapshots: remaining.planSnapshots,
+                tokenUsage: remaining.tokenUsage,
             };
         },
         drain,
@@ -870,7 +937,8 @@ export function __testStreamCodexJsonlLines(lines: Iterable<string>, every: numb
                 batch.providerEvents.length > 0 ||
                 batch.parentEdges.length > 0 ||
                 batch.skillRelations.length > 0 ||
-                batch.planSnapshots.length > 0
+                batch.planSnapshots.length > 0 ||
+                batch.tokenUsage !== null
             )) {
                 batches.push({ ...batch, session: batch.session });
             }
@@ -884,7 +952,8 @@ export function __testStreamCodexJsonlLines(lines: Iterable<string>, every: numb
         final.providerEvents.length > 0 ||
         final.parentEdges.length > 0 ||
         final.skillRelations.length > 0 ||
-        final.planSnapshots.length > 0
+        final.planSnapshots.length > 0 ||
+        final.tokenUsage !== null
     )) {
         batches.push({ ...final, session: final.session });
     }
@@ -967,11 +1036,44 @@ const buildCodexProviderStatements = (batch: MutableCodexExtract): string[] => {
     ];
 };
 
+const buildCodexTokenUsageStatements = (usage: CodexTokenUsage | null): string[] => {
+    if (!usage) return [];
+    return [
+        `UPSERT ${recordRef("session_token_usage", safeKeyPart(usage.session))} MERGE ${surrealObject([
+            ["session", recordRef("session", usage.session)],
+            ["source", surrealString("codex")],
+            ["workflow_epoch", "NONE"],
+            ["model", surrealOptionString(usage.model)],
+            ["prompt_tokens", surrealOptionInt(usage.promptTokens)],
+            ["completion_tokens", surrealOptionInt(usage.completionTokens)],
+            ["cache_creation_input_tokens", "NONE"],
+            ["cache_read_input_tokens", surrealOptionInt(usage.cacheReadInputTokens)],
+            ["estimated_tokens", Math.trunc(usage.estimatedTokens).toString(10)],
+            ["transcript_bytes", "0"],
+            ["context_window", surrealOptionInt(usage.contextWindow)],
+            ["labels", surrealJsonOption(tokenQualityLabels({
+                source: "codex_token_count",
+                tokenSourceQuality: "explicit",
+                tokenSourceDetail: "codex_token_count.total_token_usage",
+                model: usage.model,
+                modelSourceDetail: usage.model ? "codex_session.model_provider" : "missing_codex_model_provider",
+            }))],
+            ["metrics", surrealJsonOption({
+                total_token_usage: usage.totalTokenUsage,
+                last_token_usage: usage.lastTokenUsage,
+                token_count_events: usage.tokenCountEvents,
+            })],
+            ["ts", surrealDate(usage.ts)],
+        ])};`,
+    ];
+};
+
 const buildCodexBatchStatements = (
     batch: MutableCodexExtract,
     payloadMaxBytes: number,
 ): string[] => [
     ...buildCodexProviderStatements(batch),
+    ...buildCodexTokenUsageStatements(batch.tokenUsage),
     ...buildTurnStatements(batch.turns),
     ...buildToolCallStatements(batch.toolCalls.map((call) =>
         compactCodexToolCall(call, payloadMaxBytes),

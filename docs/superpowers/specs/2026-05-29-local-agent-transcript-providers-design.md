@@ -289,6 +289,9 @@ Projection:
 - Usage data from assistant messages rolls up into `session_token_usage`.
 - Model changes update `agent_session.model`; projected `session.model` uses
   the latest model or the model with the most assistant usage.
+- Token quality is exposed in `session_token_usage.labels`: Codex `token_count`
+  and Pi usage fields are `explicit`; Claude/OpenCode/Cursor rows produced by
+  session-health are `estimate` unless provider counters are present.
 
 Branch semantics:
 
