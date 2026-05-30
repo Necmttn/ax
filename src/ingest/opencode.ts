@@ -7,20 +7,17 @@ import { AxConfig } from "../lib/config.ts";
 import { RecordId, SurrealClient } from "../lib/db.ts";
 import { decodeJsonOrNull } from "../lib/decode.ts";
 import type { DbError } from "../lib/errors.ts";
-import { skillRecordKey } from "../lib/skill-id.ts";
 import { executeStatements } from "../lib/shared/statement-exec.ts";
-import { recordRef, surrealDate, surrealString } from "../lib/shared/surql.ts";
 import {
-    buildRelateToolCallSkillStatements,
-    buildToolCallStatements,
     type ToolCallSkillRelationWrite,
     type ToolCallWrite,
 } from "./evidence-writers.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
 import { providerDelegationSignalAvailability } from "./delegation.ts";
-import { agentEventRecordKey, buildAgentEventStatements, buildAgentProviderStatements, type AgentEventWrite } from "./provider-events.ts";
+import { buildNormalizedTranscriptStatements } from "./normalized/transcripts.ts";
+import { agentEventRecordKey, type AgentEventWrite } from "./provider-events.ts";
 import { providerPlanSignalAvailability } from "./plans.ts";
-import { invokedRelationRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
+import { toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 import { extractCommandTool, normalizeCommand, toolKindForName } from "./tool-calls.ts";
@@ -809,41 +806,12 @@ export function extractOpenCodeDatabase(dbPath: string): OpenCodeExtract {
     }
 }
 
-const buildTurnStatements = (turns: readonly OpenCodeTurn[]): string[] =>
-    turns.map((turn) => {
-        const eventKey = agentEventRecordKey({
-            provider: "opencode",
-            providerSessionId: turn.session,
-            providerEventId: turn.providerEventId,
-            seq: turn.seq,
-        });
-        return `UPSERT turn:\`${turnRecordKey(turn.session, turn.seq)}\` CONTENT { session: ${recordRef("session", turn.session)}, agent_event: ${recordRef("agent_event", eventKey)}, seq: ${turn.seq}, ts: ${surrealDate(turn.ts)}, role: ${surrealString(turn.role)}, message_kind: ${surrealString(turn.message_kind)}, intent_kind: ${surrealString(turn.intent_kind)}, text: ${turn.text === null ? "NONE" : surrealString(turn.text)}, text_excerpt: ${turn.text_excerpt === null ? "NONE" : surrealString(turn.text_excerpt)}, has_tool_use: ${turn.has_tool_use}, has_error: ${turn.has_error} };`;
-    });
-
-const buildSyntheticSkillAndInvocationStatements = (
-    invocations: readonly OpenCodeInvocation[],
-): string[] => {
-    if (invocations.length === 0) return [];
-    const skills = new Set(invocations.map((invocation) => invocation.skill));
-    const skillStatements = [...skills].map((name) =>
-        `UPSERT skill:\`${skillRecordKey(name)}\` MERGE { name: ${surrealString(name)}, scope: "opencode-tool", dir_path: "(synthetic)", content_hash: "opencode" };`
-    );
-    const invocationStatements = invocations.map((invocation) => {
-        const turnKey = turnRecordKey(invocation.session, invocation.seq);
-        const skillKey = skillRecordKey(invocation.skill);
-        const args = JSON.stringify(invocation.args ?? {});
-        const edgeKey = invokedRelationRecordKey({ turnKey, skillKey, args });
-        return `RELATE turn:\`${turnKey}\`->invoked:\`${edgeKey}\`->skill:\`${skillKey}\` SET ts = ${surrealDate(invocation.ts)}, args = ${surrealString(args)}, turn_has_error = false, turn_index = ${invocation.seq};`;
-    });
-    return [...skillStatements, ...invocationStatements];
-};
-
 const buildOpenCodeBatchStatements = (
     extract: OpenCodeExtract,
     sourcePath: string,
-): string[] => [
-    ...buildAgentProviderStatements([
-        {
+): string[] =>
+    buildNormalizedTranscriptStatements({
+        providers: [{
             name: "opencode",
             displayName: "OpenCode",
             capabilities: {
@@ -854,13 +822,11 @@ const buildOpenCodeBatchStatements = (
                 planSignals: providerPlanSignalAvailability.opencode,
                 delegationSignals: providerDelegationSignalAvailability.opencode,
             },
-        },
-    ]),
-    ...buildAgentEventStatements({
+        }],
         sessions: extract.sessions.map((session) => ({
+            id: session.id,
             provider: "opencode",
             providerSessionId: session.id,
-            axSessionId: session.id,
             cwd: session.cwd,
             project: session.cwd,
             title: session.title,
@@ -882,14 +848,36 @@ const buildOpenCodeBatchStatements = (
             endedAt: session.ended_at,
         })),
         events: extract.providerEvents,
-    }),
-    ...buildTurnStatements(extract.turns),
-    ...buildToolCallStatements(extract.toolCalls),
-    ...buildSyntheticSkillAndInvocationStatements(extract.invocations),
-    ...extract.skillRelations.flatMap((relation) =>
-        buildRelateToolCallSkillStatements(relation)
-    ),
-];
+        turns: extract.turns.map((turn) => ({
+            sessionId: turn.session,
+            seq: turn.seq,
+            ts: turn.ts,
+            role: turn.role,
+            messageKind: turn.message_kind,
+            intentKind: turn.intent_kind,
+            text: turn.text,
+            textExcerpt: turn.text_excerpt,
+            hasToolUse: turn.has_tool_use,
+            hasError: turn.has_error,
+            agentEvent: {
+                provider: "opencode",
+                providerSessionId: turn.session,
+                providerEventId: turn.providerEventId,
+                seq: turn.seq,
+            },
+        })),
+        toolCalls: extract.toolCalls,
+        syntheticSkillInvocations: extract.invocations.map((invocation) => ({
+            sessionId: invocation.session,
+            seq: invocation.seq,
+            ts: invocation.ts,
+            skillName: invocation.skill,
+            args: invocation.args,
+            skillScope: "opencode-tool",
+            skillContentHash: "opencode",
+        })),
+        toolCallSkillRelations: extract.skillRelations,
+    });
 
 export const __testBuildOpenCodeBatchStatements = buildOpenCodeBatchStatements;
 
