@@ -27,7 +27,10 @@ describe("effect cli", () => {
             "derive-signals",
             "derive-intents",
             "insights",
+            "classifiers",
             "improve",
+            "costs",
+            "pricing",
             "serve",
             "report",
             "recall",
@@ -81,6 +84,15 @@ describe("effect cli", () => {
         ]));
     });
 
+    test("classifiers group exposes eval", () => {
+        const classifiers = rootCommand.subcommands
+            .flatMap((g) => g.commands)
+            .find((c) => c.name === "classifiers");
+        expect(classifiers).toBeDefined();
+        const subNames = classifiers!.subcommands.flatMap((g) => g.commands.map((c) => c.name));
+        expect(subNames).toEqual(expect.arrayContaining(["list", "eval", "explain"]));
+    });
+
     test("--insights-only rejects --since", () => {
         // No conflicts when --insights-only stands alone.
         expect(insightsOnlyConflicts({ hasSince: false })).toEqual([]);
@@ -125,7 +137,7 @@ describe("effect cli", () => {
     });
 
     test("resolveIngestStages: default runs every stage", () => {
-        expect(resolveIngestStages(testRegistry, [])).toHaveLength(19);
+        expect(resolveIngestStages(testRegistry, [])).toHaveLength(24);
     });
 
     test("resolveIngestStages: local agent provider stages can be selected", () => {
@@ -144,20 +156,22 @@ describe("effect cli", () => {
     test("resolveIngestStages: --derive-only runs only stages tagged 'derive'", () => {
         const keys = resolveIngestStages(testRegistry, ["--derive-only"]).map((s) => s.meta.key);
         // All stages in the registry with the "derive" tag:
-        // subagents, invoked-positions, spawned, signals, closure, outcomes,
-        // session-health, proposals, opportunities, retro-proposals, harness.
         expect([...keys].sort()).toEqual([
+            "classifier-results",
             "closure",
             "harness",
             "invoked-positions",
             "opportunities",
             "outcomes",
             "proposals",
+            "reaction-events",
             "retro-proposals",
             "session-health",
             "signals",
             "spawned",
             "subagents",
+            "turn-analysis",
+            "turn-content-blocks",
         ]);
     });
 
@@ -207,6 +221,17 @@ describe("effect cli", () => {
         const subNames = hooks!.subcommands.flatMap((g) => g.commands.map((c) => c.name));
         expect(subNames).toEqual(expect.arrayContaining(["summary", "invocations", "session", "backtest"]));
         expect(DB_COMMANDS.has("hooks")).toBe(true);
+    });
+
+    test("cost and pricing commands are routed through DB", () => {
+        const costs = rootCommand.subcommands
+            .flatMap((g) => g.commands)
+            .find((c) => c.name === "costs");
+        expect(costs).toBeDefined();
+        const subNames = costs!.subcommands.flatMap((g) => g.commands.map((c) => c.name));
+        expect(subNames).toEqual(expect.arrayContaining(["summary", "for"]));
+        expect(DB_COMMANDS.has("costs")).toBe(true);
+        expect(DB_COMMANDS.has("pricing")).toBe(true);
     });
 });
 

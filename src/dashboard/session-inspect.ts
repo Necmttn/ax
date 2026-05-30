@@ -13,8 +13,11 @@ import { SurrealClient } from "../lib/db.ts";
 import { locateTranscript } from "../lib/transcript-locator.ts";
 import type {
     HookFireDto,
+    InspectContentAtomDto,
+    InspectContentBlockDto,
     InspectSpanDto,
     InspectSpanKind,
+    InspectTurnContentDto,
     InspectTurnDto,
     SessionInspectPayload,
     SpawnMeta,
@@ -82,6 +85,39 @@ function dominantKind(spans: readonly TurnSpan[], fallback: InspectSpanKind): In
 
 const toSpanDto = (s: TurnSpan): InspectSpanDto =>
     s.label !== undefined ? { kind: s.kind, text: s.text, label: s.label } : { kind: s.kind, text: s.text };
+
+function contentMatchesText(content: InspectTurnContentDto | undefined, text: string): boolean {
+    if (!content) return false;
+    const sample = text.trimStart().slice(0, 240);
+    if (!sample) return false;
+    const rootText = content.blocks
+        .filter((block) => block.parent_seq == null)
+        .map((block) => block.text ?? "")
+        .join("\n")
+        .trimStart();
+    if (!rootText) return false;
+    return rootText.startsWith(sample) || sample.startsWith(rootText.slice(0, 240));
+}
+
+function findTurnContent(
+    turnContent: Map<number, InspectTurnContentDto>,
+    currentSeq: number,
+    text: string,
+): InspectTurnContentDto | null {
+    // JSONL inspector turns are zero-based and omit some normalized DB rows
+    // (reasoning frames, provider-native internals). Prefer nearby DB turn
+    // seqs, but only attach when the parsed block text actually matches the
+    // rendered raw text; otherwise a missing DB seq can shift all later blocks.
+    const candidates = [currentSeq + 1, currentSeq, currentSeq + 2, currentSeq - 1];
+    for (const seq of candidates) {
+        const content = turnContent.get(seq);
+        if (contentMatchesText(content, text)) return content ?? null;
+    }
+    for (const content of turnContent.values()) {
+        if (contentMatchesText(content, text)) return content;
+    }
+    return null;
+}
 
 interface CanonicalTurn {
     readonly role: string;       // 'user' | 'assistant' | 'developer' | etc.
@@ -184,6 +220,53 @@ const HOOK_FIRES_SQL = `
     ORDER BY ts ASC;
 `;
 
+const TURN_CONTENT_DOCUMENTS_SQL = `
+    SELECT
+        type::string(id) AS document_id,
+        parser_id,
+        parser_version,
+        blockset_hash,
+        turn.seq AS turn_seq
+    FROM content_document
+    WHERE source_kind = "turn" AND session = $sid
+    ORDER BY turn_seq;
+`;
+
+const TURN_CONTENT_BLOCKS_SQL = `
+    SELECT
+        type::string(id) AS id,
+        type::string(document) AS document_id,
+        seq,
+        parent_seq,
+        kind,
+        role,
+        heading,
+        text,
+        text_excerpt,
+        start_offset,
+        end_offset,
+        confidence
+    FROM content_block
+    WHERE source_kind = "turn"
+      AND document IN $documents
+    ORDER BY document_id, seq;
+`;
+
+const TURN_CONTENT_ATOMS_SQL = `
+    SELECT
+        type::string(document) AS document_id,
+        block.seq AS block_seq,
+        kind,
+        value,
+        normalized,
+        confidence,
+        raw
+    FROM content_atom
+    WHERE source_kind = "turn"
+      AND document IN $documents
+    ORDER BY document_id, block_seq, kind, value;
+`;
+
 interface ParentRow { readonly parent: string | null; readonly nickname: string | null }
 interface ChildEdgeRow {
     readonly child: string;
@@ -201,6 +284,47 @@ interface HookFireRow {
     readonly reason: string;
     readonly latency_ms: number;
     readonly injected_titles: ReadonlyArray<string> | null;
+}
+
+interface TurnContentDocumentRow {
+    readonly document_id: string;
+    readonly parser_id: string;
+    readonly parser_version: string;
+    readonly blockset_hash: string | null;
+    readonly turn_seq: number | null;
+}
+
+interface TurnContentBlockRow {
+    readonly document_id: string;
+    readonly seq: number;
+    readonly parent_seq: number | null;
+    readonly kind: string;
+    readonly role: string | null;
+    readonly heading: string | null;
+    readonly text: string | null;
+    readonly text_excerpt: string | null;
+    readonly start_offset: number | null;
+    readonly end_offset: number | null;
+    readonly confidence: number;
+}
+
+interface TurnContentAtomRow {
+    readonly document_id: string;
+    readonly block_seq: number;
+    readonly kind: string;
+    readonly value: string;
+    readonly normalized: string | null;
+    readonly confidence: number;
+    readonly raw: unknown;
+}
+
+function contentDocumentRid(value: string): string | null {
+    const prefix = "content_document:";
+    if (!value.startsWith(prefix)) return null;
+    const key = value.slice(prefix.length);
+    if (!key) return null;
+    if (/^[A-Za-z0-9_:-]+$/.test(key)) return `${prefix}${key}`;
+    return `${prefix}\`${key.replace(/`/g, "")}\``;
 }
 
 /** Resolve the spawning parent of this session (codex spawn_agent / claude
@@ -253,6 +377,83 @@ const resolveHookFires = (sessionId: string): Effect.Effect<ReadonlyArray<HookFi
         }),
         "session-inspect resolveHookFires",
     );
+
+const resolveTurnContent = (sessionId: string): Effect.Effect<Map<number, InspectTurnContentDto>, never, SurrealClient> =>
+    Effect.gen(function* () {
+        const documentRows = yield* queryMany<TurnContentDocumentRow, TurnContentDocumentRow>(
+            interpolateRid(TURN_CONTENT_DOCUMENTS_SQL, toBareSessionId(sessionId)),
+            (row) => row,
+            "session-inspect resolveTurnContentDocuments",
+        );
+        if (documentRows.length === 0) return new Map<number, InspectTurnContentDto>();
+
+        const documents = documentRows
+            .map((row) => contentDocumentRid(row.document_id))
+            .filter((value): value is string => value !== null);
+        if (documents.length === 0) return new Map<number, InspectTurnContentDto>();
+
+        const documentMetaById = new Map<string, TurnContentDocumentRow>();
+        for (const row of documentRows) documentMetaById.set(row.document_id, row);
+        const documentListSql = `[${documents.join(", ")}]`;
+
+        const [blockRows, atomRows] = yield* Effect.all([
+            queryMany<TurnContentBlockRow, TurnContentBlockRow>(
+                TURN_CONTENT_BLOCKS_SQL.split("$documents").join(documentListSql),
+                (row) => row,
+                "session-inspect resolveTurnContentBlocks",
+            ),
+            queryMany<TurnContentAtomRow, TurnContentAtomRow>(
+                TURN_CONTENT_ATOMS_SQL.split("$documents").join(documentListSql),
+                (row) => row,
+                "session-inspect resolveTurnContentAtoms",
+            ),
+        ], { concurrency: "unbounded" });
+
+        const atomsByDocumentAndBlock = new Map<string, InspectContentAtomDto[]>();
+        for (const atom of atomRows) {
+            const key = `${atom.document_id}\0${atom.block_seq}`;
+            const list = atomsByDocumentAndBlock.get(key) ?? [];
+            list.push({
+                kind: atom.kind,
+                value: atom.value,
+                normalized: atom.normalized ?? null,
+                confidence: atom.confidence,
+                raw: atom.raw ?? null,
+            });
+            atomsByDocumentAndBlock.set(key, list);
+        }
+
+        const byTurn = new Map<number, InspectTurnContentDto>();
+        const blocksByTurn = new Map<number, InspectContentBlockDto[]>();
+        for (const row of blockRows) {
+            const documentMeta = documentMetaById.get(row.document_id);
+            if (!documentMeta || documentMeta.turn_seq === null || documentMeta.turn_seq === undefined) continue;
+            const atoms = atomsByDocumentAndBlock.get(`${row.document_id}\0${row.seq}`) ?? [];
+            const blocks = blocksByTurn.get(documentMeta.turn_seq) ?? [];
+            blocks.push({
+                seq: row.seq,
+                parent_seq: row.parent_seq ?? null,
+                kind: row.kind,
+                role: row.role ?? null,
+                heading: row.heading ?? null,
+                text: row.text ?? null,
+                text_excerpt: row.text_excerpt ?? null,
+                start_offset: row.start_offset ?? null,
+                end_offset: row.end_offset ?? null,
+                confidence: row.confidence,
+                atoms,
+            });
+            blocksByTurn.set(documentMeta.turn_seq, blocks);
+            byTurn.set(documentMeta.turn_seq, {
+                document_id: row.document_id,
+                parser_id: documentMeta.parser_id,
+                parser_version: documentMeta.parser_version,
+                blockset_hash: documentMeta.blockset_hash ?? null,
+                blocks,
+            });
+        }
+        return byTurn;
+    });
 
 /** Spawn args parsed out of a parent tool_use call. Keyed by call_id when
  *  available (codex), else by ts so we can match approximately. */
@@ -375,10 +576,11 @@ export const fetchSessionInspect = (
         // Normalise inbound id at the seam so the rest of the function operates
         // on a bare id (also what we echo back as payload.session_id).
         const bareSessionId = toBareSessionId(sessionId);
-        const [parent, childrenEdges, allHookFires, found] = yield* Effect.all([
+        const [parent, childrenEdges, allHookFires, turnContent, found] = yield* Effect.all([
             resolveParent(bareSessionId),
             resolveChildren(bareSessionId),
             resolveHookFires(bareSessionId),
+            resolveTurnContent(bareSessionId),
             locateTranscript(bareSessionId),
         ], { concurrency: "unbounded" });
         const { offset: turnOffset, limit: turnLimit } = clampPagination(
@@ -409,13 +611,15 @@ export const fetchSessionInspect = (
                 }
                 totalChars += text.length;
 
+                const currentSeq = seq++;
                 turns.push({
-                    seq: seq++,
+                    seq: currentSeq,
                     role,
                     semantic_role: semantic,
                     ts,
                     char_count: text.length,
                     spans: spans.map(toSpanDto),
+                    content: findTurnContent(turnContent, currentSeq, text),
                 });
             }
 

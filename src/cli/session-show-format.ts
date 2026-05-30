@@ -53,6 +53,14 @@ function duration(startedAt: string | null | undefined, endedAt: string | null |
     }
 }
 
+function count(value: number | null | undefined): string {
+    return value == null ? "?" : Math.trunc(value).toLocaleString("en-US");
+}
+
+function money(value: number | null | undefined): string {
+    return value == null ? "?" : `$${value.toFixed(4)}`;
+}
+
 function repoFromCwd(cwd: string | null | undefined): string {
     if (!cwd) return "?";
     const parts = cwd.split("/").filter((p) => p.length > 0);
@@ -141,6 +149,15 @@ export function renderSessionMarkdown(
     );
     const dur = duration(ov.started_at, ov.ended_at);
     lines.push(`ended     ${ov.ended_at ?? "?"}  duration ${dur}`);
+    if (session.token_usage) {
+        const usage = session.token_usage;
+        lines.push(
+            `usage     model ${usage.model ?? ov.model ?? "?"}  tokens ${count(usage.estimated_tokens)}  cost ${money(usage.estimated_cost_usd)}`,
+        );
+        lines.push(
+            `          prompt ${count(usage.prompt_tokens)}  output ${count(usage.completion_tokens)}  cache_write ${count(usage.cache_creation_input_tokens)}  cache_read ${count(usage.cache_read_input_tokens)}`,
+        );
+    }
     lines.push(
         `repo      ${repoFromCwd(ov.cwd).padEnd(20)} cwd ${ov.cwd ?? "?"}`,
     );

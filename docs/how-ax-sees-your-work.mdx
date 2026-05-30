@@ -10,7 +10,7 @@ The core nodes are few. A `session` is one run from start to finish — it knows
 
 Connecting them are graph edges. The schema uses SurrealDB `RELATE` statements to express relationships that would be join-table boilerplate in a relational schema: a turn `invokes` a skill when the agent loads it; a session `produced` a commit; a commit `touched` a file; a turn `corrected_by` the next user turn when the user stepped in to redirect. These edges are the load-bearing primitive. A vector index of turn text would let you find similar moments — it wouldn't tell you that this correction came three turns after that tool error, or that this skill fires in sessions where the commit rate is low.
 
-Derived tables — `session_health`, `proposal`, `retro`, `friction_event`, `pattern_candidate` — sit on top of the core nodes and summarise at session or cross-session scope. They are how the graph accumulates opinion over time, not just fact.
+Derived tables — `session_health`, `proposal`, `retro`, `friction_event`, `command_outcome`, and `semantic_signal` — sit on top of the core nodes and summarise at session or cross-session scope. They are how the graph accumulates opinion over time, not just fact.
 
 ## The stages
 
@@ -25,7 +25,7 @@ Today only the `skills` stage is annotated. As each remaining ingest stage gets 
 
 Once the graph is built, a small set of typed queries drive everything the CLI and dashboard expose. They are not general-purpose queries; each one is shaped to a specific product question.
 
-`ax improve list` reads `proposal` rows ordered by score, joining back to the `friction_event` and `pattern_candidate` evidence that generated them. It answers: *what should I try changing about how I work?*
+`ax improve list` reads `proposal` rows ordered by score, joining back through `cites_evidence` to the friction, command outcome, or session evidence that generated them. It answers: *what should I try changing about how I work?*
 
 `ax retro pending` reads `session` rows that ended without a corresponding `retro` record. It answers: *which recent sessions haven't been reflected on yet?*
 
