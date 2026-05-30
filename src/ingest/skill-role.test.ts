@@ -29,7 +29,7 @@ function makeMockDb() {
         },
         upsert: (id: RecordId, content: Record<string, unknown>) => {
             calls.push({ kind: "upsert", id, content });
-            return Effect.succeed(undefined);
+            return Effect.void;
         },
         relate: () => Effect.void,
         putFile: () => Effect.void,

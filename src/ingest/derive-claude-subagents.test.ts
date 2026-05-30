@@ -47,7 +47,7 @@ function makeMockDb(queryResponses: Map<string, unknown[][]> = new Map()) {
         },
         upsert: (id: RecordId, content: Record<string, unknown>) => {
             calls.push({ kind: "upsert", id: String(id), content });
-            return Effect.succeed(undefined);
+            return Effect.void;
         },
         relate: () => Effect.void,
         putFile: () => Effect.void,

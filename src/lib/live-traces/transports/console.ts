@@ -1,4 +1,5 @@
 import { Effect, Layer } from "effect";
+import { encodeJson } from "../../decode.ts";
 import { TraceTransportTag, type TraceTransport } from "../Sink.ts";
 
 /**
@@ -16,7 +17,7 @@ export const ConsoleTransport: TraceTransport = {
     send: (events) =>
         Effect.sync(() => {
             for (const event of events) {
-                process.stderr.write(`[live-trace] ${event._tag} ${JSON.stringify(event)}\n`);
+                process.stderr.write(`[live-trace] ${event._tag} ${encodeJson(event)}\n`);
             }
         }),
 };

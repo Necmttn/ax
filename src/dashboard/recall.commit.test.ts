@@ -44,7 +44,7 @@ function makeMockDb(queryResponses: Map<string, unknown[][]> = new Map()) {
             }
             return Effect.succeed([[]] as unknown as T);
         },
-        upsert: () => Effect.succeed(undefined),
+        upsert: () => Effect.void,
         relate: () => Effect.void,
         putFile: () => Effect.void,
         getFile: () => Effect.succeed(""),

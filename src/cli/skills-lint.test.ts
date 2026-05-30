@@ -120,7 +120,7 @@ function makeMockDb(knownSkills: Map<string, string>): {
         },
         upsert: (id: unknown, data: unknown) => {
             state.upserts.push({ id, data });
-            return Effect.succeed(undefined as unknown as never);
+            return Effect.void as Effect.Effect<never>;
         },
     } as unknown as SurrealClientShape;
 

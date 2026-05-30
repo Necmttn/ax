@@ -19,6 +19,10 @@ describe("TraceSink", () => {
                 }),
         };
         const Transport = Layer.succeed(TraceTransportTag, TestTransport);
+        const TestLayer = TraceSinkLive({ flushIntervalMs: 200 }).pipe(
+            Layer.provide(Transport),
+            Layer.merge(TestClock.layer()),
+        );
 
         const program = Effect.gen(function* () {
             const sink = yield* TraceSink;
@@ -34,9 +38,7 @@ describe("TraceSink", () => {
 
         await Effect.runPromise(
             program.pipe(
-                Effect.provide(TraceSinkLive({ flushIntervalMs: 200 })),
-                Effect.provide(Transport),
-                Effect.provide(TestClock.layer()),
+                Effect.provide(TestLayer),
                 Effect.scoped,
             ) as Effect.Effect<void, never, never>,
         );

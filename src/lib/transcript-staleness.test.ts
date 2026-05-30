@@ -17,9 +17,9 @@ const makeMockDb = (
             captured.push({ sql, bindings });
             return Effect.succeed([seenRows] as never);
         },
-        upsert: () => Effect.succeed(undefined),
-        relate: () => Effect.succeed(undefined),
-        putFile: () => Effect.succeed(undefined),
+        upsert: () => Effect.void,
+        relate: () => Effect.void,
+        putFile: () => Effect.void,
         getFile: () => Effect.succeed(""),
         raw: undefined as never,
     };

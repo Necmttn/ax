@@ -10,6 +10,7 @@ import { RecordId, SurrealClient, type SurrealClientShape } from "../lib/db.ts";
 import type { DbError } from "../lib/errors.ts";
 import { recordLiteral } from "../lib/ids.ts";
 import { validateRoleName, validateSkillName } from "../lib/role-name.ts";
+import { surrealString } from "../lib/shared/surql.ts";
 
 export interface SkillsTagOptions {
     readonly skillName: string;
@@ -18,6 +19,22 @@ export interface SkillsTagOptions {
     readonly rationale: string | undefined;
     readonly remove: boolean;
 }
+
+const safeSkillName = (name: string): string | null => {
+    try {
+        return validateSkillName(name);
+    } catch {
+        return null;
+    }
+};
+
+const safeRoleName = (name: string): string | null => {
+    try {
+        return validateRoleName(name);
+    } catch {
+        return null;
+    }
+};
 
 /**
  * Resolve a skill record key (id part) by name. Returns null if not found.
@@ -52,10 +69,8 @@ export const cmdSkillsTag = (opts: SkillsTagOptions): Effect.Effect<void, DbErro
         const db = yield* SurrealClient;
 
         // 1. Validate inputs
-        let trimmedSkill: string;
-        try {
-            trimmedSkill = validateSkillName(opts.skillName);
-        } catch {
+        const trimmedSkill = safeSkillName(opts.skillName);
+        if (trimmedSkill === null) {
             console.error(
                 `axctl skills tag: invalid skill name "${opts.skillName}" (must be alphanumeric, _ or -, optionally plugin:namespaced)`,
             );
@@ -63,10 +78,8 @@ export const cmdSkillsTag = (opts: SkillsTagOptions): Effect.Effect<void, DbErro
             return; // unreachable; satisfies TypeScript
         }
 
-        let roleName: string;
-        try {
-            roleName = validateRoleName(opts.roleName);
-        } catch {
+        const roleName = safeRoleName(opts.roleName);
+        if (roleName === null) {
             console.error(
                 `axctl skills tag: invalid role name "${opts.roleName}" (must be lowercase alphanumeric, _ or -)`,
             );
@@ -110,7 +123,7 @@ export const cmdSkillsTag = (opts: SkillsTagOptions): Effect.Effect<void, DbErro
 
         // 6. RELATE skill->plays_role->role with source="user"
         const setSql = opts.rationale !== undefined
-            ? `source = "user", confidence = ${opts.confidence}, rationale = ${JSON.stringify(opts.rationale)}, since = time::now()`
+            ? `source = "user", confidence = ${opts.confidence}, rationale = ${surrealString(opts.rationale)}, since = time::now()`
             : `source = "user", confidence = ${opts.confidence}, since = time::now()`;
 
         yield* db.query(

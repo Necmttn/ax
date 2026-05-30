@@ -56,11 +56,11 @@ function buildMockDb(overrides: {
 
         upsert: mock((id: import("surrealdb").RecordId, content: Record<string, unknown>) => {
             calls.push({ type: "upsert", upsertId: id, upsertContent: content });
-            return Effect.succeed(undefined);
+            return Effect.void;
         }) as SurrealClientShape["upsert"],
 
-        relate: mock(() => Effect.succeed(undefined)) as SurrealClientShape["relate"],
-        putFile: mock(() => Effect.succeed(undefined)) as SurrealClientShape["putFile"],
+        relate: mock(() => Effect.void) as SurrealClientShape["relate"],
+        putFile: mock(() => Effect.void) as SurrealClientShape["putFile"],
         getFile: mock(() => Effect.succeed("")) as SurrealClientShape["getFile"],
         raw: {} as SurrealClientShape["raw"],
     };

@@ -18,6 +18,7 @@
  */
 
 import { Effect } from "effect";
+import { encodeJson } from "../lib/decode.ts";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { SurrealClient } from "../lib/db.ts";
@@ -465,6 +466,6 @@ export const cmdRetroMeta = (
 
         const out = pretty || process.stdout.isTTY
             ? prettyPrint(snapshot)
-            : JSON.stringify(snapshot);
+            : encodeJson(snapshot);
         console.log(out);
     });
