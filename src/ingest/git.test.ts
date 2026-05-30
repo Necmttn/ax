@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { realpathSync } from "node:fs";
 import { Effect, Layer } from "effect";
 import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
 import {
@@ -233,9 +234,9 @@ describe("ingestGit repoPaths bypass", () => {
             raw: {} as never,
         };
 
-        // Use the current worktree's own repo root as the target - it's a real
-        // git repo so buildRepoInfo succeeds.
-        const repoRoot = "/Users/necmttn/Projects/ax/.claude/worktrees/workflow-extraction-frictions";
+        // Use this checkout's own repo root as the target; hard-coded local
+        // worktree paths go stale as soon as the feature worktree is removed.
+        const repoRoot = realpathSync(".");
 
         const result = await Effect.runPromise(
             ingestGit({ repoPaths: [repoRoot], sinceDays: 1 }).pipe(

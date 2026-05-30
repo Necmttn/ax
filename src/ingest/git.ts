@@ -836,7 +836,10 @@ export const gitStage: StageDef<GitStageStats, SurrealClient> = {
         Effect.gen(function* () {
             const t0 = Date.now();
             const sinceDays = sinceDaysFromCtx(ctx);
-            const result = yield* ingestGit({ sinceDays, repoPaths: ctx.repoPaths });
+            const result = yield* ingestGit({
+                ...(sinceDays === undefined ? {} : { sinceDays }),
+                ...(ctx.repoPaths === undefined ? {} : { repoPaths: ctx.repoPaths }),
+            });
             return GitStageStats.make({
                 durationMs: Date.now() - t0,
                 summary: `ingested ${result.commits} commits from ${result.repos} repos`,

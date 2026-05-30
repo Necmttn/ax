@@ -355,8 +355,7 @@ async function persistDogfoodResult(result: DogfoodResult): Promise<boolean> {
     const runKey = `wterm_${scenarioKey}__${result.runId}`;
     const artifactRef = recordRef("artifact", transcriptKey);
     const runRef = recordRef("dogfood_run", runKey);
-    // Phase C12: dogfood_run is the proper home for test-scenario results.
-    // Replaces the intervention_observation overload from before A7.
+    // Phase C12: dogfood_run is the durable home for test-scenario results.
     const statements = [
         `UPSERT ${artifactRef} MERGE ${sqlObject([
             ["kind", sqlString("dogfood_wterm_transcript")],

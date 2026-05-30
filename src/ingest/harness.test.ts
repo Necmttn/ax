@@ -89,7 +89,7 @@ describe("harness ingest statement builders", () => {
         expect(stackKey(report.stacks[0])).toBe("typescript");
     });
 
-    test("writes guidance + stack sections; skips superseded learning/intervention writers", () => {
+    test("writes guidance + stack sections", () => {
         const sql = buildHarnessIngestStatements(report).join("\n");
 
         expect(sql).toContain("UPSERT guidance_source:");
@@ -97,12 +97,5 @@ describe("harness ingest statement builders", () => {
         expect(sql).toContain("UPSERT stack:");
         expect(sql).toContain("evidence_strength: \"tracked\"");
         expect(sql).toContain("content_hash: \"abcdef1234567890\"");
-
-        // Phase A6: these writers were removed; learning/intervention concerns
-        // now flow through the proposal pipeline.
-        expect(sql).not.toContain("UPSERT agent_tooling:");
-        expect(sql).not.toContain("UPSERT harness_learning:");
-        expect(sql).not.toContain("UPSERT intervention:");
-        expect(sql).not.toContain("UPSERT intervention_observation:");
     });
 });

@@ -147,7 +147,12 @@ const collectIds = (target: LintTarget, errors: LintFinding[]): Map<string, IdTa
         // Skill and subagent files use frontmatter; may carry ax_experiment.
         // (subagent experiments don't exist yet in v0 but the path is identical.)
         const fm = parseFrontmatterMarker(content);
-        if (fm) found.set(fm.id, { path: target.path, experiment: fm.experiment });
+        if (fm) {
+            found.set(fm.id, {
+                path: target.path,
+                ...(fm.experiment === undefined ? {} : { experiment: fm.experiment }),
+            });
+        }
     }
     return found;
 };
