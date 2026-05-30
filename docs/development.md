@@ -56,6 +56,8 @@ session    -> produced     -> commit
 commit     -> touched      -> file
 turn       -> edited       -> file
 turn       -> invoked      -> skill
+tool_call  -> read_file    -> file
+tool_call  -> searched_file -> file
 tool_call  -> concerns     -> skill
 insight    -> concerns     -> session
 ```

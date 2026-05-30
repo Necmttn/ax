@@ -3,7 +3,13 @@ import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
 import type { DbError } from "../lib/errors.ts";
 import { skillRecordKey } from "../lib/skill-id.ts";
 import { executeStatements, executeStatementsWith } from "../lib/shared/statement-exec.ts";
-import { toolCallRecordKey, toolRecordKey } from "./record-keys.ts";
+import {
+    editedRelationRecordKey,
+    fileRecordKey,
+    toolCallRecordKey,
+    toolFileRelationRecordKey,
+    toolRecordKey,
+} from "./record-keys.ts";
 import {
     surrealString,
     surrealDate,
@@ -18,6 +24,7 @@ import {
     recordRef,
 } from "../lib/shared/surql.ts";
 import { nonEmptyString } from "../lib/shared/derive-keys.ts";
+import type { ToolFileEvidence } from "./tool-file-evidence.ts";
 
 export { recordRef } from "../lib/shared/surql.ts";
 
@@ -80,6 +87,8 @@ export interface PlanSnapshotWrite {
     readonly ts: TimestampInput;
     readonly items: readonly PlanSnapshotItemWrite[];
 }
+
+export type ToolFileEvidenceWrite = ToolFileEvidence;
 
 const toolIdentity = (provider: string, kind: string, name: string): string =>
     `${provider}:${kind}:${name}`;
@@ -198,6 +207,67 @@ export function buildRelateToolCallSkillStatements(
             ["reason", surrealOptionString(input.reason)],
         ])};`,
     ];
+}
+
+export function toolEvidenceFileRecordKey(path: string): string {
+    return fileRecordKey("_", path);
+}
+
+export function buildToolFileEvidenceStatements(
+    evidence: readonly ToolFileEvidenceWrite[],
+): string[] {
+    const statements: string[] = [];
+    const seenFiles = new Set<string>();
+
+    for (const item of evidence) {
+        const fileKey = toolEvidenceFileRecordKey(item.path);
+        if (!seenFiles.has(fileKey)) {
+            seenFiles.add(fileKey);
+            statements.push(
+                `UPSERT ${recordRef("file", fileKey)} CONTENT ${surrealObject([
+                    ["repo", "NONE"],
+                    ["path", surrealString(item.path)],
+                    ["identity_scope", surrealString("local_path")],
+                ])};`,
+            );
+        }
+
+        if (item.kind === "edited") {
+            if (!item.turnKey) continue;
+            const edgeKey = editedRelationRecordKey({
+                turnKey: item.turnKey,
+                fileKey,
+                tool: item.toolName,
+            });
+            statements.push(
+                `RELATE ${recordRef("turn", item.turnKey)}->edited:\`${edgeKey}\`->${recordRef("file", fileKey)} SET ${surrealSet([
+                    ["tool", surrealString(item.toolName)],
+                    ["ts", surrealDate(item.ts)],
+                    ["path_seen", surrealOptionString(item.pathSeen)],
+                    ["absolute_path_seen", surrealOptionString(item.path)],
+                    ["edit_kind", surrealOptionString(item.editKind)],
+                ])};`,
+            );
+            continue;
+        }
+
+        const edgeKey = toolFileRelationRecordKey({
+            toolCallKey: item.toolCallKey,
+            fileKey,
+            kind: item.kind,
+        });
+        statements.push(
+            `RELATE ${recordRef("tool_call", item.toolCallKey)}->${item.kind}:\`${edgeKey}\`->${recordRef("file", fileKey)} SET ${surrealSet([
+                ["evidence", surrealOptionString(item.evidence)],
+                ["path_seen", surrealOptionString(item.pathSeen)],
+                ["absolute_path_seen", surrealOptionString(item.path)],
+                ["excerpt", surrealOptionString(item.excerpt)],
+                ["ts", surrealDate(item.ts)],
+            ])};`,
+        );
+    }
+
+    return statements;
 }
 
 export function buildSkillPlaceholderStatements(skillName: string): string[] {

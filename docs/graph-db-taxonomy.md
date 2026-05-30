@@ -13,7 +13,7 @@ Agent transcript providers are first-class harnesses. Claude, Codex, Pi, OpenCod
 | Claude transcripts | `claude` | `~/.claude/projects/<project-slug>/*.jsonl` | `AX_TRANSCRIPTS_DIR` | [`src/ingest/transcripts.ts`](../src/ingest/transcripts.ts) walks project transcript dirs, optionally scoped by `ax ingest here`, snapshots raw transcripts, extracts turns/tools/plans/hooks/edits | `session`, `agent_provider`, `agent_session`, `agent_event`, `turn`, `tool`, `tool_call`, `invoked`, `edited`, `plan*`, hook evidence |
 | Codex transcripts | `codex` | `~/.codex/sessions/**/*.jsonl` | `AX_CODEX_DIR` | [`src/ingest/codex.ts`](../src/ingest/codex.ts) recursively walks JSONL session files, snapshots raw payloads within size limits, extracts provider events, turns, tool calls, `update_plan`, synthetic `codex:*` skills, and token usage | `session`, `agent_provider`, `agent_session`, `agent_event`, `turn`, `tool`, `tool_call`, `invoked`, `plan*`, `session_token_usage` |
 | Pi transcripts | `pi` | `~/.pi/agent/sessions/**/*.jsonl` | `AX_PI_DIR` | [`src/ingest/pi.ts`](../src/ingest/pi.ts) recursively walks JSONL files, parses Pi event blocks, normalizes turns/tool calls/provider events, and creates synthetic `pi:<tool>` skills for observed tools | `session`, `agent_provider`, `agent_session`, `agent_event`, `turn`, `tool`, `tool_call`, `invoked`, synthetic Pi tool skills |
-| OpenCode transcripts | `opencode` | `~/.local/share/opencode/opencode.db` | `AX_OPENCODE_DIR` | [`src/ingest/opencode.ts`](../src/ingest/opencode.ts) locates `opencode.db`, reads supported SQLite schemas, normalizes sessions/messages/provider events | `session`, `agent_provider`, `agent_session`, `agent_event`, `turn` |
+| OpenCode transcripts | `opencode` | `~/.local/share/opencode/opencode.db` | `AX_OPENCODE_DIR` | [`src/ingest/opencode.ts`](../src/ingest/opencode.ts) locates `opencode.db`, reads supported SQLite schemas, normalizes sessions/messages/provider events, and maps structured `tool` parts into shared tool calls and synthetic `opencode:<tool>` invocations | `session`, `agent_provider`, `agent_session`, `agent_event`, `turn`, `tool`, `tool_call`, `invoked`, synthetic OpenCode tool skills |
 | Cursor transcripts | `cursor` | `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` and `~/Library/Application Support/Cursor/User/workspaceStorage/*/state.vscdb` | `AX_CURSOR_USER_DIR` | [`src/ingest/cursor.ts`](../src/ingest/cursor.ts) scans Cursor global and workspace `state.vscdb` files, includes WAL/SHM mtimes for `--since`, extracts composer/chat state into normalized sessions/turns/provider events | `session`, `agent_provider`, `agent_session`, `agent_event`, `turn` |
 | Git history | `git` | local git repos/worktrees from current repo and `AX_REPO_LIST` | `AX_REPO_LIST` | [`src/ingest/git.ts`](../src/ingest/git.ts) imports repos/checkouts/commits/files and correlates sessions to commits | `repository`, `checkout`, `commit`, `file`, `has_checkout`, `touched`, `produced` |
 | Derived graph signals | `signals`, `outcomes`, `turn-analysis`, `session-health`, `closure`, `proposals`, `opportunities`, `retro-proposals`, `harness` | existing graph rows | stage filters via `--stages=` / `--derive-only` | Derived stages read normalized provider rows and graph evidence | friction, diagnostics, semantic signals, health, proposals, experiments |
@@ -44,16 +44,30 @@ The machine-readable source of truth is [`src/ingest/provider-parity.ts`](../src
 | Provider identity and source path | Yes, from Claude JSONL path | Yes, from Codex JSONL path | Yes, from Pi JSONL path | Yes, from `opencode.db` path | Yes, from Cursor `state.vscdb` path | `agent_provider`, `agent_session`, `session.raw_file` |
 | Provider event stream | Yes | Yes | Yes | Yes | Yes | `agent_event`, `agent_event_child` where parentage exists |
 | Normalized turns | Yes | Yes | Yes | Yes | Yes | `turn` |
-| Tool calls | Yes, when transcript has tool use/result blocks | Yes, from function/tool events | Yes, from Pi tool blocks | Not emitted yet from current SQLite extractor | Not emitted yet from current state extractor | `tool`, `tool_call` |
-| Skill/tool invocation edges | Yes, Skill tool and resolved skill catalogue | Yes, synthetic `codex:<tool>` | Yes, synthetic `pi:<tool>` | Not emitted yet | Not emitted yet | `skill`, `invoked`, `concerns` |
+| Tool calls | Yes, when transcript has tool use/result blocks | Yes, from function/tool events | Yes, from Pi tool blocks | Yes, from structured SQLite `tool` parts | Not emitted yet from current state extractor | `tool`, `tool_call` |
+| Skill/tool invocation edges | Yes, Skill tool and resolved skill catalogue | Yes, synthetic `codex:<tool>` | Yes, synthetic `pi:<tool>` | Yes, synthetic `opencode:<tool>` | Not emitted yet | `skill`, `invoked`, `concerns` |
 | Plans | Yes, `TodoWrite` | Yes, `update_plan` | Not exposed in current raw format | Not exposed in current extractor | Not exposed in current extractor | `plan`, `plan_item`, `plan_snapshot` |
-| File edit evidence | Yes, edit/write tool paths | Available once provider tool calls expose file edit arguments | Available once provider tool calls expose file edit arguments | Not emitted yet | Not emitted yet | `file`, `edited` |
+| File edit evidence | Yes, edit/write tool paths | Yes, from structured tool arguments and `apply_patch` patch headers | Yes, from structured tool arguments | Not emitted yet | Not emitted yet | `file`, `edited` |
+| File read/search evidence | Yes, Read/Grep/Glob tool paths | Yes, from structured tool arguments and normalized shell reader/search commands | Yes, from structured tool arguments | Not emitted yet | Not emitted yet | `file`, `read_file`, `searched_file` |
 | Token/cost usage | Estimated by session health unless explicit counts exist | Explicit `token_count` events | Explicit Pi usage fields when present | Estimated by session health | Estimated by session health | `session_token_usage` |
 | Hook evidence | Yes, Claude hook transcript attachments | Runtime hook telemetry still normalizes outside transcript ingest | Runtime hook telemetry still normalizes outside transcript ingest | Runtime hook telemetry still normalizes outside transcript ingest | Runtime hook telemetry still normalizes outside transcript ingest | `harness_hook_event`, `hook_command_invocation`, `hook_fire` |
 | Subagent/delegation links | Yes, Claude Task/subagent extraction | Yes, Codex spawn-agent extraction when present | Not exposed in current raw format | Not exposed in current extractor | Not exposed in current extractor | `spawned`, session detail episode views |
 | Derived analysis and insights | Yes | Yes | Yes | Yes | Yes | `friction_event`, `command_outcome`, `session_health`, proposals |
 
 Parity rule: if a provider exposes the raw signal, ingest should map it into the shared graph surface, add tests for that provider, and make existing reads work without a provider-specific read path. Gaps above are extractor limitations or missing raw signals, not second-class harness status. When this table and the matrix disagree, treat the matrix and gate as authoritative.
+
+## File Evidence
+
+File evidence uses shared graph relations regardless of transcript provider:
+
+```text
+turn      -> edited        -> file
+tool_call -> read_file     -> file
+tool_call -> searched_file -> file
+turn      -> mentioned_file -> file
+```
+
+`edited`, `read_file`, and `searched_file` use local-path file identity when transcript tools only expose checkout paths. Writers preserve both the raw `path_seen` from tool arguments and the cwd-resolved `absolute_path_seen`. Read surfaces should query these relation tables directly and avoid branching on provider names to answer which files a session edited, read, or searched.
 
 ## Core Domain Records
 
@@ -69,9 +83,9 @@ Parity rule: if a provider exposes the raw signal, ingest should map it into the
 | `agent_event_child` | Relation | Parent/child event edges inside provider streams. | [`src/ingest/provider-events.ts`](../src/ingest/provider-events.ts), Codex parent edges | Session inspect/detail |
 | `turn` | Node, normalized transcript turn | Ordered session messages with role, message kind, intent kind, text, tool/error flags. | [`src/ingest/normalized/transcripts.ts`](../src/ingest/normalized/transcripts.ts) from provider stages | Recall, sessions show/detail, signals/outcomes/turn-analysis |
 | `tool` | Node, normalized tool identity | Agent tools and local CLI commands used inside shell calls. | [`src/ingest/evidence-writers.ts`](../src/ingest/evidence-writers.ts) | Tool failure views, session detail |
-| `tool_call` | Node, concrete tool execution | Tool call inputs/outputs/raw JSON, command normalization, status/error fields. | Claude, Codex, and Pi stages via `buildToolCallStatements`; OpenCode/Cursor can join when their extractors expose concrete tool events | Tool failures, session detail, outcomes, hooks backtests |
+| `tool_call` | Node, concrete tool execution | Tool call inputs/outputs/raw JSON, command normalization, status/error fields. | Claude, Codex, Pi, and OpenCode stages via `buildToolCallStatements`; Cursor can join when its extractor exposes concrete tool events | Tool failures, session detail, outcomes, hooks backtests |
 | `plan`, `plan_item`, `plan_snapshot` | Nodes, planning evidence | Current plan state, current items, and point-in-time TodoWrite/update_plan snapshots. | Claude `TodoWrite`, Codex `update_plan` via [`src/ingest/evidence-writers.ts`](../src/ingest/evidence-writers.ts) | Session detail, insights `sessions`, session health |
-| `file` | Node, code/file identity | Repository-relative and legacy local file records, language/kind/workspace metadata. | Git ingest, edit ingest placeholders, future file evidence derivation | Git/file views, edited/touched/read/search relations |
+| `file` | Node, code/file identity | Repository-relative and local-path file records, language/kind/workspace metadata. | Git ingest, transcript file evidence, edit/read/search relation writers | Git/file views, edited/touched/read/search relations |
 | `symbol` | Node, code symbol mention | Named symbols extracted from text/tool evidence. | Schema exists; relation writers are not fully wired in current ingest | Intended for code-context graph queries |
 | `error_signature` | Node, normalized error text | Reusable error signatures extracted from text/tool evidence. | Schema exists; relation writers are not fully wired in current ingest | Intended for error recurrence queries |
 | `repository` | Node, stable repo identity | Normalized remote/root/default branch/initial commit. | Git stage | Repository insights, sessions scoping, git correlations |
@@ -86,12 +100,12 @@ Parity rule: if a provider exposes the raw signal, ingest should map it into the
 | --- | --- | --- | --- | --- |
 | `invoked` | `turn -> skill` | Explicit skill/tool invocation. Includes JSON args, timestamp, turn error/correction flags, position metadata. | Claude Skill tool, Codex/Pi synthetic tool skills, other provider tool evidence when available, invoked-position backfill | `ax taste/stats/recent/unused`, weighted skills, wrapped, skill graph |
 | `proposed` | `turn -> skill` | Assistant mentioned a skill but did not invoke it. | `signals` stage | Taste/search diagnostics |
-| `edited` | `turn -> file` | Agent edit/write tool touched a file. | Claude transcript edit extraction | File/session evidence queries |
+| `edited` | `turn -> file` | Agent edit/write tool touched a file. | Claude/Codex/Pi tool file evidence extraction | File/session evidence queries |
 | `mentioned_file` | `turn -> file` | Text/tool evidence mentioned a file. | Schema exists; intended for file-evidence derivation | Future multi-hop file queries |
 | `mentioned_symbol` | `turn -> symbol` | Text/tool evidence mentioned a symbol. | Schema exists | Future code-symbol queries |
 | `mentioned_error` | `turn -> error_signature` | Text/tool evidence mentioned an error. | Schema exists | Future error recurrence queries |
-| `read_file` | `tool_call -> file` | Tool call read a file. | Schema exists; tool-file evidence tests indicate intended derivation | Future "read before edit" and context queries |
-| `searched_file` | `tool_call -> file` | Tool call searched/matched a file. | Schema exists; tool-file evidence tests indicate intended derivation | Future search/context queries |
+| `read_file` | `tool_call -> file` | Tool call read a file. | Claude/Codex/Pi tool file evidence extraction | Session file evidence, "read before edit" and context queries |
+| `searched_file` | `tool_call -> file` | Tool call searched/matched a file. | Claude/Codex/Pi tool file evidence extraction | Session file evidence, search/context queries |
 | `corrected_by` | `turn -> turn` | Assistant turn followed by user correction/pushback. | `signals` stage | Correction rates, friction, turn-analysis |
 | `expresses` | `turn -> semantic_signal` | Turn contains a reusable semantic signal. | `turn-analysis` stage | Message/reaction insights |
 | `reacts_to` | `turn -> turn` | User reaction turn linked to prior assistant turn. | `turn-analysis` stage | Reaction/revision queries |
@@ -200,6 +214,6 @@ These tables are schema-active but not central to the default ingest path yet. T
 ## Gaps To Close Before Stage 2
 
 - Keep [`src/queries/insights.ts`](../src/queries/insights.ts) in lockstep with this taxonomy when schema migrations add or retire graph tables.
-- File evidence relations (`mentioned_file`, `read_file`, `searched_file`, `mentioned_symbol`, `mentioned_error`) are schema-ready but not yet fully documented as default-stage writes.
+- Mention evidence relations (`mentioned_file`, `mentioned_symbol`, `mentioned_error`) are schema-ready but not yet fully documented as default-stage writes.
 - Delivery/GitHub tables (`branch`, `pull_request`, `review_event`, `check_run`, `delivery_outcome`) need a confirmed ingest owner before multi-hop delivery queries depend on them.
 - Stage 2 graph queries should start from the stable high-signal chains: `session -> turn -> tool_call`, `turn -> invoked -> skill -> plays_role -> role`, `session -> produced -> commit -> touched -> file`, `turn -> reacts_to/corrected_by -> turn`, and `proposal -> cites_evidence -> evidence`.
