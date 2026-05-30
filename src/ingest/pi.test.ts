@@ -464,6 +464,8 @@ describe("Pi JSONL extraction", () => {
         expect(sql).toContain("cache_read_input_tokens: 2");
         expect(sql).toContain("cache_creation_input_tokens: 1");
         expect(sql).toContain("estimated_tokens: 19");
+        expect(sql).toContain('\\"token_source_quality\\":\\"explicit\\"');
+        expect(sql).toContain('\\"token_source_detail\\":\\"pi_usage_fields\\"');
     });
 
     test("provider event keys and session seqs are stable and unique across repeated statement generation", () => {

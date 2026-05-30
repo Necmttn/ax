@@ -33,6 +33,7 @@ import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./st
 import type { StageDef } from "./stage/registry.ts";
 import { extractCommandTool, normalizeCommand, toolKindForName } from "./tool-calls.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
+import { tokenQualityLabels } from "./token-quality.ts";
 
 export const PiKey = Schema.Literal("pi");
 export type PiKey = typeof PiKey.Type;
@@ -663,7 +664,15 @@ const buildPiTokenUsageStatements = (extract: PiExtract): string[] => {
             ["estimated_tokens", Math.trunc(estimatedTokens).toString(10)],
             ["transcript_bytes", "0"],
             ["context_window", "NONE"],
-            ["labels", surrealJsonTextOption({ source: "pi_jsonl" })],
+            ["labels", surrealJsonTextOption({
+                ...tokenQualityLabels({
+                    source: "pi_jsonl",
+                    tokenSourceQuality: "explicit",
+                    tokenSourceDetail: "pi_usage_fields",
+                    model: extract.session.model,
+                    modelSourceDetail: extract.session.model ? "pi_session.model" : "missing_pi_session_model",
+                }),
+            })],
             ["metrics", surrealJsonTextOption({ usage: extract.usage })],
             ["ts", surrealDate(extract.session.ended_at)],
         ])};`,

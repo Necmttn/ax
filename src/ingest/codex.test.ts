@@ -212,6 +212,64 @@ describe("Codex transcript extraction", () => {
         ]);
     });
 
+    test("writes explicit Codex token_count usage with source quality labels", () => {
+        const extracted = __testExtractCodexJsonlLines([
+            JSON.stringify({
+                type: "session_meta",
+                timestamp: "2026-05-09T10:00:00.000Z",
+                payload: {
+                    id: "codex-token-count",
+                    cwd: "/Users/necmttn/Projects/ax",
+                    model_provider: "gpt-5-codex",
+                    timestamp: "2026-05-09T10:00:00.000Z",
+                },
+            }),
+            JSON.stringify({
+                type: "event_msg",
+                timestamp: "2026-05-09T10:00:05.000Z",
+                payload: {
+                    type: "token_count",
+                    info: {
+                        total_token_usage: {
+                            input_tokens: 123,
+                            cached_input_tokens: 45,
+                            output_tokens: 67,
+                            reasoning_output_tokens: 8,
+                            total_tokens: 190,
+                        },
+                        last_token_usage: {
+                            input_tokens: 123,
+                            cached_input_tokens: 45,
+                            output_tokens: 67,
+                            reasoning_output_tokens: 8,
+                            total_tokens: 190,
+                        },
+                        model_context_window: 258400,
+                    },
+                },
+            }),
+        ]);
+
+        expect(extracted?.tokenUsage).toMatchObject({
+            promptTokens: 123,
+            completionTokens: 67,
+            cacheReadInputTokens: 45,
+            estimatedTokens: 190,
+            contextWindow: 258400,
+            tokenCountEvents: 1,
+        });
+
+        const sql = __testBuildCodexBatchStatements(extracted!, 1200).join("\n");
+        expect(sql).toContain("UPSERT session_token_usage:`codex_token_count`");
+        expect(sql).toContain("prompt_tokens: 123");
+        expect(sql).toContain("completion_tokens: 67");
+        expect(sql).toContain("cache_read_input_tokens: 45");
+        expect(sql).toContain("estimated_tokens: 190");
+        expect(sql).toContain('\\"token_source_quality\\":\\"explicit\\"');
+        expect(sql).toContain('\\"token_source_detail\\":\\"codex_token_count.total_token_usage\\"');
+        expect(sql).toContain('\\"total_token_usage\\"');
+    });
+
     test("links adjacent provider events with linear parent edges while preserving tool-result parents", () => {
         const extracted = __testExtractCodexJsonlLines([
             JSON.stringify({

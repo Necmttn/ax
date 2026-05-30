@@ -8,6 +8,7 @@ import { surrealDate, surrealJsonOption, surrealObject, surrealOptionInt, surrea
 import { executeStatementsWith } from "../lib/shared/statement-exec.ts";
 import { deriveTaskLabel } from "../lib/shared/task-label.ts";
 import { isoTimestamp, recordKeyPart, safeKeyPart, type TimestampInput } from "../lib/shared/derive-keys.ts";
+import { tokenQualityLabels, type TokenSourceQuality } from "./token-quality.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -204,6 +205,21 @@ function buildRows(input: {
         const cacheCreationInputTokens = numberMetric(metrics, ["cache_creation_input_tokens", "cached_input_tokens"]);
         const cacheReadInputTokens = numberMetric(metrics, ["cache_read_input_tokens", "cache_read_tokens"]);
         const contextWindow = numberMetric(metrics, ["context_window", "context_window_tokens"]);
+        const hasExplicitTokenCounters =
+            promptTokens !== null ||
+            completionTokens !== null ||
+            cacheCreationInputTokens !== null ||
+            cacheReadInputTokens !== null;
+        const tokenSourceQuality: TokenSourceQuality = hasExplicitTokenCounters
+            ? "explicit"
+            : transcriptBytes > 0
+              ? "estimate"
+              : "unavailable";
+        const tokenSourceDetail = hasExplicitTokenCounters
+            ? "usage_metadata"
+            : tokenSourceQuality === "estimate"
+              ? "transcript_byte_estimate"
+              : "no_token_counters_or_transcript_bytes";
         const estimatedTokens = promptTokens !== null || completionTokens !== null
             ? (promptTokens ?? 0) + (completionTokens ?? 0)
             : Math.ceil(transcriptBytes / 4);
@@ -240,6 +256,13 @@ function buildRows(input: {
             transcriptBytes,
             contextWindow,
             labels: {
+                ...tokenQualityLabels({
+                    source: "session_health",
+                    tokenSourceQuality,
+                    tokenSourceDetail,
+                    model: session.model ?? null,
+                    modelSourceDetail: session.model ? "session.model" : "missing_session_model",
+                }),
                 source: "session_health",
                 token_source: promptTokens !== null || completionTokens !== null ? "usage_metadata" : "byte_estimate",
             },
@@ -326,8 +349,8 @@ function tokenUsageStatement(row: SessionTokenUsage): string {
         ["estimated_tokens", `IF ${existingActualTokenUsage} THEN estimated_tokens ELSE ${Math.trunc(row.estimatedTokens).toString(10)} END`],
         ["transcript_bytes", Math.trunc(row.transcriptBytes).toString(10)],
         ["context_window", surrealOptionInt(row.contextWindow)],
-        ["labels", surrealJsonOption(row.labels)],
-        ["metrics", surrealJsonOption(row.metrics)],
+        ["labels", `IF ${existingActualTokenUsage} THEN labels ELSE ${surrealJsonOption(row.labels)} END`],
+        ["metrics", `IF ${existingActualTokenUsage} THEN metrics ELSE ${surrealJsonOption(row.metrics)} END`],
         ["ts", surrealDate(row.ts)],
     ])};`;
 }
