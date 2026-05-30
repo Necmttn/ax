@@ -774,4 +774,46 @@ describe("Codex transcript extraction", () => {
             extracted.planSnapshots[1]?.items[0]?.key,
         );
     });
+
+    test("writes shared edited file evidence for apply_patch tool calls", () => {
+        const extracted = __testExtractCodexJsonlLines([
+            JSON.stringify({
+                type: "session_meta",
+                timestamp: "2026-05-29T06:00:00.000Z",
+                payload: {
+                    id: "codex-file-evidence",
+                    cwd: "/Users/necmttn/Projects/ax",
+                    timestamp: "2026-05-29T06:00:00.000Z",
+                },
+            }),
+            JSON.stringify({
+                type: "response_item",
+                timestamp: "2026-05-29T06:00:01.000Z",
+                payload: {
+                    type: "function_call",
+                    name: "apply_patch",
+                    call_id: "call_patch",
+                    arguments: JSON.stringify({
+                        patch: [
+                            "*** Begin Patch",
+                            "*** Update File: src/ingest/codex.ts",
+                            "@@",
+                            "-old",
+                            "+new",
+                            "*** End Patch",
+                        ].join("\n"),
+                    }),
+                },
+            }),
+        ]);
+
+        expect(extracted).not.toBeNull();
+        if (!extracted) return;
+
+        const sql = __testBuildCodexBatchStatements(extracted, 1200).join("\n");
+        expect(sql).toContain("->edited:`");
+        expect(sql).toContain("tool = \"apply_patch\"");
+        expect(sql).toContain("path_seen = \"src/ingest/codex.ts\"");
+        expect(sql).toContain("absolute_path_seen = \"/Users/necmttn/Projects/ax/src/ingest/codex.ts\"");
+    });
 });

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { agentEventRecordKey } from "./provider-events.ts";
 import { fileRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
+import { extractToolFileEvidence } from "./tool-file-evidence.ts";
 import {
     __testExtractClaudeJsonlLines,
     claudeConcurrency,
@@ -747,6 +748,71 @@ describe("Claude transcript extraction", () => {
         expect(extracted.edits).toHaveLength(1);
         const edit = extracted.edits[0];
         expect(transcriptEditFileRecordKey(edit?.path ?? "")).toBe(expectedFileKey);
+    });
+
+    test("Claude tool calls project shared edit read and search file evidence", () => {
+        const extracted = __testExtractClaudeJsonlLines(
+            [
+                JSON.stringify({
+                    type: "assistant",
+                    timestamp: "2026-05-09T10:00:00.000Z",
+                    cwd: "/Users/necmttn/Projects/ax",
+                    message: {
+                        content: [
+                            {
+                                type: "tool_use",
+                                id: "toolu_edit",
+                                name: "Edit",
+                                input: { file_path: "src/edit.ts" },
+                            },
+                            {
+                                type: "tool_use",
+                                id: "toolu_read",
+                                name: "Read",
+                                input: { file_path: "src/read.ts" },
+                            },
+                            {
+                                type: "tool_use",
+                                id: "toolu_grep",
+                                name: "Grep",
+                                input: { pattern: "needle", path: "src" },
+                            },
+                        ],
+                    },
+                }),
+            ],
+            "-Users-necmttn-Projects-ax",
+            "session-shared-file-evidence",
+        );
+
+        expect(extracted).not.toBeNull();
+        if (!extracted) return;
+
+        expect(extractToolFileEvidence(extracted.toolCalls).map((item) => ({
+            kind: item.kind,
+            toolName: item.toolName,
+            path: item.path,
+            pathSeen: item.pathSeen,
+        }))).toEqual([
+            {
+                kind: "edited",
+                toolName: "Edit",
+                path: "/Users/necmttn/Projects/ax/src/edit.ts",
+                pathSeen: "src/edit.ts",
+            },
+            {
+                kind: "read_file",
+                toolName: "Read",
+                path: "/Users/necmttn/Projects/ax/src/read.ts",
+                pathSeen: "src/read.ts",
+            },
+            {
+                kind: "searched_file",
+                toolName: "Grep",
+                path: "/Users/necmttn/Projects/ax/src",
+                pathSeen: "src",
+            },
+        ]);
     });
 
     test("edited-file IDs merge the same local file across cwd-derived repo labels", () => {

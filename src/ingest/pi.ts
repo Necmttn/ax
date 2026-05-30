@@ -19,6 +19,7 @@ import {
 import { skillRecordKey } from "../lib/skill-id.ts";
 import {
     buildRelateToolCallSkillStatements,
+    buildToolFileEvidenceStatements,
     buildToolCallStatements,
     type ToolCallSkillRelationWrite,
     type ToolCallWrite,
@@ -29,6 +30,7 @@ import { invokedRelationRecordKey, toolCallRecordKey, turnRecordKey } from "./re
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 import { extractCommandTool, normalizeCommand, toolKindForName } from "./tool-calls.ts";
+import { extractToolFileEvidence } from "./tool-file-evidence.ts";
 
 export const PiKey = Schema.Literal("pi");
 export type PiKey = typeof PiKey.Type;
@@ -710,6 +712,7 @@ const buildPiBatchStatements = (extract: PiExtract): string[] => [
     }),
     ...buildTurnStatements(extract.turns),
     ...buildToolCallStatements(extract.toolCalls),
+    ...buildToolFileEvidenceStatements(extractToolFileEvidence(extract.toolCalls)),
     ...buildSyntheticSkillAndInvocationStatements(extract.invocations),
     ...extract.skillRelations.flatMap((relation) =>
         buildRelateToolCallSkillStatements(relation),

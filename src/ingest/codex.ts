@@ -13,6 +13,7 @@ import type { StageDef } from "./stage/registry.ts";
 import {
     buildPlanSnapshotStatements,
     buildRelateToolCallSkillStatements,
+    buildToolFileEvidenceStatements,
     buildToolCallStatements,
     type PlanSnapshotWrite,
     type ToolCallSkillRelationWrite,
@@ -35,6 +36,7 @@ import {
 import { classifyTurnIntent } from "./intent-kind.ts";
 import { normalizeCodexUpdatePlan, type PlanStatus } from "./plans.ts";
 import { invokedRelationRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
+import { extractToolFileEvidence } from "./tool-file-evidence.ts";
 import { executeStatements } from "../lib/shared/statement-exec.ts";
 
 const DEFAULT_CODEX_RAW_MAX_BYTES = 5 * 1024 * 1024;
@@ -976,6 +978,7 @@ const buildCodexBatchStatements = (
     ...buildToolCallStatements(batch.toolCalls.map((call) =>
         compactCodexToolCall(call, payloadMaxBytes),
     )),
+    ...buildToolFileEvidenceStatements(extractToolFileEvidence(batch.toolCalls)),
     ...batch.parentEdges.map((edge) =>
         buildAgentEventParentEdgeStatement(edge),
     ),

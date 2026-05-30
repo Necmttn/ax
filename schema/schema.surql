@@ -968,6 +968,7 @@ DEFINE INDEX IF NOT EXISTS mentioned_error_out ON mentioned_error FIELDS out;
 DEFINE TABLE read_file TYPE RELATION FROM tool_call TO file;
 DEFINE FIELD evidence    ON read_file TYPE option<string>;      -- 'tool_name' | 'command_norm'
 DEFINE FIELD path_seen   ON read_file TYPE option<string>;
+DEFINE FIELD absolute_path_seen ON read_file TYPE option<string>;
 DEFINE FIELD excerpt     ON read_file TYPE option<string>;
 DEFINE FIELD ts          ON read_file TYPE datetime DEFAULT time::now();
 DEFINE INDEX IF NOT EXISTS read_file_in ON read_file FIELDS in;
@@ -976,6 +977,7 @@ DEFINE INDEX IF NOT EXISTS read_file_out ON read_file FIELDS out;
 DEFINE TABLE searched_file TYPE RELATION FROM tool_call TO file;
 DEFINE FIELD evidence    ON searched_file TYPE option<string>;  -- 'tool_name' | 'command_norm' | 'output_match'
 DEFINE FIELD path_seen   ON searched_file TYPE option<string>;
+DEFINE FIELD absolute_path_seen ON searched_file TYPE option<string>;
 DEFINE FIELD excerpt     ON searched_file TYPE option<string>;
 DEFINE FIELD ts          ON searched_file TYPE datetime DEFAULT time::now();
 DEFINE INDEX IF NOT EXISTS searched_file_in ON searched_file FIELDS in;

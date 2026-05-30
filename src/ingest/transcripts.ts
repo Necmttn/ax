@@ -13,6 +13,7 @@ import type { StageDef } from "./stage/registry.ts";
 import {
     buildPlanSnapshotStatements,
     buildRelateToolCallSkillStatements,
+    buildToolFileEvidenceStatements,
     buildToolCallStatements,
     type PlanSnapshotWrite,
     type ToolCallSkillRelationWrite,
@@ -32,12 +33,12 @@ import {
 import { classifyTurnIntent } from "./intent-kind.ts";
 import { normalizeClaudeTodoWrite, type PlanStatus } from "./plans.ts";
 import {
-    editedRelationRecordKey,
     fileRecordKey,
     invokedRelationRecordKey,
     toolCallRecordKey,
     turnRecordKey,
 } from "./record-keys.ts";
+import { extractToolFileEvidence } from "./tool-file-evidence.ts";
 
 import { executeStatements, executeStatementsWith } from "../lib/shared/statement-exec.ts";
 
@@ -1068,10 +1069,10 @@ export {
     upsertSessions as upsertSessionsForSubagents,
     upsertTurns as upsertTurnsForSubagents,
     writeToolCallStatements as writeToolCallStatementsForSubagents,
+    writeToolFileEvidence as writeToolFileEvidenceForSubagents,
     relateInvocations as relateInvocationsForSubagents,
     relateToolCallSkills as relateToolCallSkillsForSubagents,
     writePlanSnapshots as writePlanSnapshotsForSubagents,
-    upsertEdits as upsertEditsForSubagents,
 };
 
 const upsertSessions = (sessions: Session[]) =>
@@ -1231,30 +1232,10 @@ const relateInvocations = (invocations: Invocation[]) =>
         yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
     });
 
-const upsertEdits = (edits: Edit[]) =>
-    Effect.gen(function* () {
-        if (edits.length === 0) return;
-        const db = yield* SurrealClient;
-        const fileStmts: string[] = [];
-        const relStmts: string[] = [];
-        const seenFiles = new Set<string>();
-        for (const e of edits) {
-            const fileKey = transcriptEditFileRecordKey(e.path);
-            if (!seenFiles.has(fileKey)) {
-                seenFiles.add(fileKey);
-                fileStmts.push(
-                    `UPSERT file:\`${fileKey}\` CONTENT { repo: NONE, path: ${surrealLiteral(e.path)}, identity_scope: "local_path" };`,
-                );
-            }
-            const turnKey = turnRecordKey(e.session, e.seq);
-            const edgeKey = editedRelationRecordKey({ turnKey, fileKey, tool: e.tool });
-            relStmts.push(
-                `RELATE turn:\`${turnKey}\`->edited:\`${edgeKey}\`->file:\`${fileKey}\` SET tool = "${e.tool}", ts = d"${e.ts}";`,
-            );
-        }
-        yield* executeStatementsWith(db, fileStmts, { chunkSize: 500 });
-        yield* executeStatementsWith(db, relStmts, { chunkSize: 500 });
-    });
+const writeToolFileEvidence = (toolCalls: readonly ToolCallWrite[]) =>
+    queryTranscriptStatements(buildToolFileEvidenceStatements(
+        extractToolFileEvidence(toolCalls),
+    ));
 
 const relateToolCallSkills = (relations: ToolCallSkillRelationWrite[]) =>
     Effect.gen(function* () {
@@ -1459,6 +1440,7 @@ export const ingestTranscripts = (
             yield* writeProviderEvidence(extracted);
             yield* writeToolCallStatements(extracted.toolCalls);
             toolCallCount += extracted.toolCalls.length;
+            yield* writeToolFileEvidence(extracted.toolCalls);
             // Resolve invoked names onto the catalog before writing so the
             // `invoked` and `concerns` edges land on the real skill row.
             const resolvedInvocations = extracted.invocations.map((inv) => ({
@@ -1477,7 +1459,6 @@ export const ingestTranscripts = (
             yield* writeHookEvidence(extracted.hookEvents, extracted.hookCommandInvocations);
             hookEventCount += extracted.hookEvents.length;
             hookCommandInvocationCount += extracted.hookCommandInvocations.length;
-            yield* upsertEdits(extracted.edits);
             editCount += extracted.edits.length;
             if (opts.onProgress && (files <= 5 || files % 10 === 0)) {
                 yield* opts.onProgress({

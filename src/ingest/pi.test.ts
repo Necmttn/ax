@@ -522,6 +522,54 @@ describe("Pi JSONL extraction", () => {
         expect(firstEvents.map((event) => event.seq).sort((a, b) => a - b)).toEqual([1, 2, 1000001001]);
     });
 
+    test("writes shared read and search file evidence for Pi tool calls", () => {
+        const extracted = __testExtractPiJsonlLines([
+            JSON.stringify({
+                type: "session",
+                version: 3,
+                id: "pi-file-evidence",
+                timestamp: "2026-05-29T06:00:00.000Z",
+                cwd: "/Users/necmttn/Projects/ax",
+            }),
+            JSON.stringify({
+                type: "message",
+                id: "assistant-file-evidence",
+                parentId: null,
+                timestamp: "2026-05-29T06:00:01.000Z",
+                message: {
+                    role: "assistant",
+                    content: [
+                        {
+                            type: "toolCall",
+                            id: "call-read",
+                            name: "read",
+                            input: { path: "src/ingest/pi.ts" },
+                        },
+                        {
+                            type: "toolCall",
+                            id: "call-grep",
+                            name: "grep",
+                            input: { pattern: "needle", path: "src/ingest" },
+                        },
+                    ],
+                },
+            }),
+        ]);
+
+        expect(extracted).not.toBeNull();
+        if (!extracted) return;
+
+        const sql = __testBuildPiBatchStatements(extracted).join("\n");
+        expect(sql).toContain("->read_file:`");
+        expect(sql).toContain("path_seen = \"src/ingest/pi.ts\"");
+        expect(sql).toContain("absolute_path_seen = \"/Users/necmttn/Projects/ax/src/ingest/pi.ts\"");
+        expect(sql).toContain("evidence = \"tool_name:read\"");
+        expect(sql).toContain("->searched_file:`");
+        expect(sql).toContain("path_seen = \"src/ingest\"");
+        expect(sql).toContain("absolute_path_seen = \"/Users/necmttn/Projects/ax/src/ingest\"");
+        expect(sql).toContain("evidence = \"tool_name:grep\"");
+    });
+
     test("turn statements escape session ids and timestamps through shared Surreal helpers", () => {
         const extracted = __testExtractPiJsonlLines([
             JSON.stringify({

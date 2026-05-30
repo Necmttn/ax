@@ -6,6 +6,7 @@ import {
     buildPlanSnapshotStatements,
     buildRelateToolCallSkillStatements,
     buildSkillPlaceholderStatements,
+    buildToolFileEvidenceStatements,
     buildToolCallStatements,
     recordRef,
     relateToolCallSkill,
@@ -150,6 +151,59 @@ describe("evidence writer statement builders", () => {
         expect(sql).not.toContain("UPSERT skill:");
         expect(sql).not.toContain("scope: \"unknown\"");
         expect(sql).not.toContain("->invoked->");
+    });
+
+    test("tool file evidence statements share local file identity across edit read and search edges", () => {
+        const statements = buildToolFileEvidenceStatements([
+            {
+                kind: "edited",
+                sessionId: "session-1",
+                turnKey: "turn-key",
+                toolCallKey: "tool-call-edit",
+                toolName: "apply_patch",
+                ts: "2026-05-29T06:00:00.000Z",
+                path: "/repo/src/a.ts",
+                pathSeen: "src/a.ts",
+                evidence: "tool_name:apply_patch",
+            },
+            {
+                kind: "read_file",
+                sessionId: "session-1",
+                turnKey: "turn-key",
+                toolCallKey: "tool-call-read",
+                toolName: "Read",
+                ts: "2026-05-29T06:00:01.000Z",
+                path: "/repo/src/a.ts",
+                pathSeen: "src/a.ts",
+                evidence: "tool_name:Read",
+                excerpt: "export const a = 1;",
+            },
+            {
+                kind: "searched_file",
+                sessionId: "session-1",
+                turnKey: "turn-key",
+                toolCallKey: "tool-call-grep",
+                toolName: "Grep",
+                ts: "2026-05-29T06:00:02.000Z",
+                path: "/repo/src",
+                pathSeen: "src",
+                evidence: "tool_name:Grep",
+            },
+        ]);
+
+        const sql = statements.join("\n");
+
+        expect(sql.match(/UPSERT file:`/g)).toHaveLength(2);
+        expect(sql).toContain('identity_scope: "local_path"');
+        expect(sql).toContain("->edited:`");
+        expect(sql).toContain("tool = \"apply_patch\"");
+        expect(sql).toContain("path_seen = \"src/a.ts\"");
+        expect(sql).toContain("absolute_path_seen = \"/repo/src/a.ts\"");
+        expect(sql).toContain("->read_file:`");
+        expect(sql).toContain("evidence = \"tool_name:Read\"");
+        expect(sql).toContain("excerpt = \"export const a = 1;\"");
+        expect(sql).toContain("->searched_file:`");
+        expect(sql).toContain("evidence = \"tool_name:Grep\"");
     });
 
     test("placeholder skill statements are separate from relation statements", () => {
