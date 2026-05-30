@@ -6,13 +6,23 @@ import { Effect, Schema } from "effect";
 import { AxConfig } from "../lib/config.ts";
 import { RecordId, SurrealClient } from "../lib/db.ts";
 import type { DbError } from "../lib/errors.ts";
+import { skillRecordKey } from "../lib/skill-id.ts";
 import { executeStatements } from "../lib/shared/statement-exec.ts";
 import { recordRef, surrealDate, surrealString } from "../lib/shared/surql.ts";
+import {
+    buildRelateToolCallSkillStatements,
+    buildToolCallStatements,
+    type ToolCallSkillRelationWrite,
+    type ToolCallWrite,
+} from "./evidence-writers.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
+import { providerDelegationSignalAvailability } from "./delegation.ts";
 import { agentEventRecordKey, buildAgentEventStatements, buildAgentProviderStatements, type AgentEventWrite } from "./provider-events.ts";
-import { identityPart, turnRecordKey } from "./record-keys.ts";
+import { providerPlanSignalAvailability } from "./plans.ts";
+import { identityPart, invokedRelationRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
+import { extractCommandTool, normalizeCommand, toolKindForName } from "./tool-calls.ts";
 
 export const CursorKey = Schema.Literal("cursor");
 export type CursorKey = typeof CursorKey.Type;
@@ -49,10 +59,21 @@ interface CursorTurn {
     has_error: boolean;
 }
 
+interface CursorInvocation {
+    session: string;
+    seq: number;
+    ts: string;
+    skill: string;
+    args: unknown;
+}
+
 export interface CursorExtract {
     sessions: CursorSession[];
     turns: CursorTurn[];
+    invocations: CursorInvocation[];
+    toolCalls: ToolCallWrite[];
     providerEvents: AgentEventWrite[];
+    skillRelations: ToolCallSkillRelationWrite[];
     skipped: number;
     warnings: string[];
 }
@@ -77,6 +98,7 @@ interface SQLiteColumnRow {
 }
 
 const SAFE_FALLBACK_TS = "1970-01-01T00:00:00.000Z";
+const SYNTHETIC_PROVIDER_SEQ_OFFSET = 1_000_000_000;
 const CURSOR_HISTORY_KEYS = new Set(["composer.composerData"]);
 const CURSOR_COMPOSER_DATA_PREFIX = "composerData:";
 
@@ -131,7 +153,10 @@ function emptyExtract(warnings: string[] = [], skipped = 0): CursorExtract {
     return {
         sessions: [],
         turns: [],
+        invocations: [],
+        toolCalls: [],
         providerEvents: [],
+        skillRelations: [],
         skipped,
         warnings,
     };
@@ -187,6 +212,241 @@ function parseJsonRecord(raw: string | null, label: string, warnings: string[]):
     }
 }
 
+function parseJsonValue(input: unknown): unknown {
+    if (typeof input !== "string") return input;
+    const trimmed = input.trim();
+    if (trimmed.length === 0) return null;
+    try {
+        return JSON.parse(trimmed) as unknown;
+    } catch {
+        return input;
+    }
+}
+
+function boundExcerpt(input: unknown, max = 1200): string | null {
+    let text: string | null = null;
+    if (typeof input === "string") {
+        text = input;
+    } else if (input !== null && input !== undefined) {
+        try {
+            text = JSON.stringify(input);
+        } catch {
+            text = String(input);
+        }
+    }
+    if (text === null) return null;
+    const normalized = text.replace(/\r\n/g, "\n").trim();
+    if (normalized.length === 0) return null;
+    return normalized.length <= max ? normalized : `${normalized.slice(0, max - 1)}…`;
+}
+
+function cursorToolCallId(
+    raw: Record<string, unknown>,
+    sessionId: string,
+    seq: number,
+    ordinal: number,
+): string {
+    return stringField(raw, "toolCallId") ??
+        stringField(raw, "tool_call_id") ??
+        stringField(raw, "callId") ??
+        stringField(raw, "id") ??
+        `cursor_tool_call_${identityPart(sessionId, "session")}_${seq.toString(10).padStart(6, "0")}_${ordinal.toString(10).padStart(3, "0")}`;
+}
+
+function cursorToolName(raw: Record<string, unknown>): string | null {
+    const name = stringField(raw, "name") ??
+        stringField(raw, "toolName") ??
+        stringField(raw, "tool_name");
+    if (name !== null && name.trim().length > 0) return name;
+    const fn = raw.function;
+    if (isRecord(fn)) return stringField(fn, "name");
+    return null;
+}
+
+function toolInputFromRaw(raw: Record<string, unknown>): unknown {
+    const fn = raw.function;
+    if (isRecord(fn) && fn.arguments !== undefined) return parseJsonValue(fn.arguments);
+    if (raw.arguments !== undefined) return parseJsonValue(raw.arguments);
+
+    const rawArgs = raw.rawArgs === undefined ? null : parseJsonValue(raw.rawArgs);
+    const params = raw.params === undefined ? null : parseJsonValue(raw.params);
+    if (isRecord(rawArgs) && isRecord(params)) return { ...rawArgs, ...params };
+    if (isRecord(rawArgs) && Object.keys(rawArgs).length === 0 && params !== null) return params;
+    if (rawArgs !== null && rawArgs !== undefined) return rawArgs;
+    if (params !== null && params !== undefined) return params;
+
+    for (const field of ["input", "args"]) {
+        if (raw[field] === undefined) continue;
+        const parsed = parseJsonValue(raw[field]);
+        if (parsed !== null && parsed !== undefined) return parsed;
+    }
+    return null;
+}
+
+function toolOutputFromRaw(raw: Record<string, unknown>): unknown {
+    if (raw.result !== undefined) return parseJsonValue(raw.result);
+    if (raw.output !== undefined) return parseJsonValue(raw.output);
+    if (raw.response !== undefined) return parseJsonValue(raw.response);
+    return null;
+}
+
+function errorTextFromRaw(raw: Record<string, unknown>): string | null {
+    const parsed = parseJsonValue(raw.error);
+    if (isRecord(parsed)) {
+        return stringField(parsed, "modelVisibleErrorMessage") ??
+            stringField(parsed, "clientVisibleErrorMessage") ??
+            boundExcerpt(parsed);
+    }
+    return boundExcerpt(parsed);
+}
+
+function rawToolPayload(raw: Record<string, unknown>): Record<string, unknown> {
+    return {
+        name: cursorToolName(raw),
+        status: raw.status ?? null,
+        toolCallId: raw.toolCallId ?? raw.tool_call_id ?? raw.callId ?? raw.id ?? null,
+        toolIndex: raw.toolIndex ?? null,
+        modelCallId: raw.modelCallId ?? null,
+        tool: raw.tool ?? null,
+        params: parseJsonValue(raw.params),
+        rawArgs: parseJsonValue(raw.rawArgs),
+        additionalData: parseJsonValue(raw.additionalData),
+        error: parseJsonValue(raw.error),
+    };
+}
+
+function cursorToolActivities(raw: Record<string, unknown>): Record<string, unknown>[] {
+    const activities: Record<string, unknown>[] = [];
+    if (isRecord(raw.toolFormerData)) activities.push(raw.toolFormerData);
+
+    for (const field of ["toolCalls", "tool_calls", "functionCalls", "function_calls"]) {
+        const value = raw[field];
+        if (!Array.isArray(value)) continue;
+        for (const item of value) {
+            if (isRecord(item)) activities.push(item);
+        }
+    }
+
+    for (const field of ["toolCall", "tool_call", "functionCall", "function_call"]) {
+        const value = raw[field];
+        if (isRecord(value)) activities.push(value);
+    }
+
+    return activities.filter((activity) => cursorToolName(activity) !== null);
+}
+
+function pushCursorToolCall(input: {
+    session: CursorSession;
+    raw: Record<string, unknown>;
+    seq: number;
+    ordinal: number;
+    ts: string;
+    sourceKey: string;
+    turnKey: string;
+    toolCalls: ToolCallWrite[];
+    providerEvents: AgentEventWrite[];
+    invocations: CursorInvocation[];
+    skillRelations: ToolCallSkillRelationWrite[];
+    parentProviderEventId: string | null;
+}): void {
+    const toolName = cursorToolName(input.raw);
+    if (toolName === null) return;
+
+    const callId = cursorToolCallId(input.raw, input.session.id, input.seq, input.ordinal);
+    const toolCallKey = toolCallRecordKey({
+        sessionId: input.session.id,
+        seq: input.seq,
+        callId,
+    });
+    const inputJson = toolInputFromRaw(input.raw);
+    const outputJson = toolOutputFromRaw(input.raw);
+    const errorText = errorTextFromRaw(input.raw);
+    const status = stringField(input.raw, "status");
+    const hasError = errorText !== null || status === "error" || status === "failed";
+    const commandSource = isRecord(inputJson) ? inputJson : {};
+    const command = (toolName === "run_terminal_command_v2" || toolName === "run_terminal_command")
+        ? stringField(commandSource, "command") ?? stringField(commandSource, "cmd")
+        : null;
+    const eventSeq = SYNTHETIC_PROVIDER_SEQ_OFFSET + (input.seq * 1000) + input.ordinal;
+    const call: ToolCallWrite = {
+        provider: "cursor",
+        toolName,
+        toolKind: toolKindForName(toolName),
+        sessionId: input.session.id,
+        seq: input.seq,
+        turnKey: input.turnKey,
+        agentEventKey: agentEventRecordKey({
+            provider: "cursor",
+            providerSessionId: input.session.id,
+            providerEventId: callId,
+            seq: eventSeq,
+        }),
+        callId,
+        ts: input.ts,
+        inputJson,
+        outputJson,
+        rawJson: {
+            source: "cursor_state_vscdb",
+            sourceKey: input.sourceKey,
+            tool: rawToolPayload(input.raw),
+        },
+        outputExcerpt: boundExcerpt(outputJson),
+        errorText,
+        commandText: command,
+        commandToolName: extractCommandTool(command),
+        commandNorm: normalizeCommand(command),
+        hasError,
+    };
+
+    input.providerEvents.push({
+        provider: "cursor",
+        providerSessionId: input.session.id,
+        axSessionId: input.session.id,
+        providerEventId: callId,
+        parentProviderEventId: input.parentProviderEventId,
+        parentKind: "turn_item",
+        seq: eventSeq,
+        ts: input.ts,
+        type: "toolCall",
+        role: "assistant",
+        text: toolName,
+        textExcerpt: toolName,
+        raw: rawToolPayload(input.raw),
+        labels: {
+            source: "cursor_state_vscdb",
+            toolName,
+            toolKind: call.toolKind,
+        },
+        metrics: {
+            turnSeq: input.seq,
+            hasError,
+        },
+    });
+
+    input.toolCalls.push(call);
+
+    const skillName = `cursor:${toolName}`;
+    input.invocations.push({
+        session: input.session.id,
+        seq: input.seq,
+        ts: input.ts,
+        skill: skillName,
+        args: inputJson ?? {},
+    });
+    input.skillRelations.push({
+        toolCallKey,
+        skillName,
+        ts: input.ts,
+        reason: "Cursor tool call",
+        labels: {
+            provider: "cursor",
+            toolName,
+            source: input.sourceKey,
+        },
+        metrics: { turnSeq: input.seq },
+    });
+}
+
 function tableNames(db: Database): Set<string> {
     const rows = db.query<{ name: string }, []>(
         "SELECT name FROM sqlite_master WHERE type = 'table'",
@@ -225,7 +485,10 @@ function pushCursorMessage(input: {
     seq: number;
     sourceKey: string;
     turns: CursorTurn[];
+    invocations: CursorInvocation[];
+    toolCalls: ToolCallWrite[];
     providerEvents: AgentEventWrite[];
+    skillRelations: ToolCallSkillRelationWrite[];
     warnings: string[];
 }): void {
     const rawId = stringField(input.message, "id");
@@ -234,6 +497,7 @@ function pushCursorMessage(input: {
         : `${input.session.id}:${input.seq}`;
     const role = stringField(input.message, "role") ?? "unknown";
     const text = stringField(input.message, "text");
+    const activities = cursorToolActivities(input.message);
     const timestamp = validTimestamp(input.message.timestamp, input.session.ended_at);
     if (timestamp.warning) input.warnings.push(`message ${providerEventId}: ${timestamp.warning}`);
     const ts = timestamp.ts;
@@ -248,7 +512,7 @@ function pushCursorMessage(input: {
     }
 
     const textExcerpt = text === null ? null : text.slice(0, 500);
-    const messageKind = cursorMessageKind(role);
+    const messageKind = activities.length > 0 ? "tool_call" : cursorMessageKind(role);
     const intentKind = classifyTurnIntent({
         role,
         messageKind,
@@ -266,8 +530,8 @@ function pushCursorMessage(input: {
         intent_kind: intentKind,
         text,
         text_excerpt: textExcerpt,
-        has_tool_use: false,
-        has_error: false,
+        has_tool_use: activities.length > 0,
+        has_error: activities.some((activity) => errorTextFromRaw(activity) !== null),
     });
     input.providerEvents.push({
         provider: "cursor",
@@ -300,9 +564,27 @@ function pushCursorMessage(input: {
         },
         metrics: {
             turnSeq: input.seq,
-            hasToolUse: false,
-            isError: false,
+            hasToolUse: activities.length > 0,
+            isError: activities.some((activity) => errorTextFromRaw(activity) !== null),
         },
+    });
+
+    const turnKey = turnRecordKey(input.session.id, input.seq);
+    activities.forEach((activity, index) => {
+        pushCursorToolCall({
+            session: input.session,
+            raw: activity,
+            seq: input.seq,
+            ordinal: index + 1,
+            ts,
+            sourceKey: input.sourceKey,
+            turnKey,
+            toolCalls: input.toolCalls,
+            providerEvents: input.providerEvents,
+            invocations: input.invocations,
+            skillRelations: input.skillRelations,
+            parentProviderEventId: providerEventId,
+        });
     });
 }
 
@@ -315,12 +597,15 @@ function extractComposerData(
 ): Omit<CursorExtract, "warnings"> {
     const sessions: CursorSession[] = [];
     const turns: CursorTurn[] = [];
+    const invocations: CursorInvocation[] = [];
+    const toolCalls: ToolCallWrite[] = [];
     const providerEvents: AgentEventWrite[] = [];
+    const skillRelations: ToolCallSkillRelationWrite[] = [];
     let skipped = 0;
     const conversations = Array.isArray(data.conversations) ? data.conversations : [];
     if (!Array.isArray(data.conversations)) {
         warnings.push(`${sourceKey}: missing conversations array`);
-        return { sessions, turns, providerEvents, skipped: 1 };
+        return { sessions, turns, invocations, toolCalls, providerEvents, skillRelations, skipped: 1 };
     }
 
     for (const conversation of conversations) {
@@ -360,14 +645,17 @@ function extractComposerData(
                 seq,
                 sourceKey,
                 turns,
+                invocations,
+                toolCalls,
                 providerEvents,
+                skillRelations,
                 warnings,
             });
         }
         if (seq > 0) sessions.push(session);
     }
 
-    return { sessions, turns, providerEvents, skipped };
+    return { sessions, turns, invocations, toolCalls, providerEvents, skillRelations, skipped };
 }
 
 function extractComposerDiskKvData(
@@ -381,17 +669,20 @@ function extractComposerDiskKvData(
 ): Omit<CursorExtract, "warnings"> {
     const sessions: CursorSession[] = [];
     const turns: CursorTurn[] = [];
+    const invocations: CursorInvocation[] = [];
+    const toolCalls: ToolCallWrite[] = [];
     const providerEvents: AgentEventWrite[] = [];
+    const skillRelations: ToolCallSkillRelationWrite[] = [];
     let skipped = 0;
     const composerId = stringField(data, "composerId") ?? sourceKey.slice(CURSOR_COMPOSER_DATA_PREFIX.length);
     if (composerId.length === 0) {
         warnings.push(`${sourceKey}: missing composerId`);
-        return { sessions, turns, providerEvents, skipped: 1 };
+        return { sessions, turns, invocations, toolCalls, providerEvents, skillRelations, skipped: 1 };
     }
     const headers = Array.isArray(data.fullConversationHeadersOnly) ? data.fullConversationHeadersOnly : [];
     if (!Array.isArray(data.fullConversationHeadersOnly)) {
         warnings.push(`${sourceKey}: missing fullConversationHeadersOnly array`);
-        return { sessions, turns, providerEvents, skipped: 1 };
+        return { sessions, turns, invocations, toolCalls, providerEvents, skillRelations, skipped: 1 };
     }
 
     const session: CursorSession = {
@@ -439,17 +730,25 @@ function extractComposerDiskKvData(
                 role,
                 text: stringField(bubble, "text") ?? "",
                 timestamp,
+                toolFormerData: bubble.toolFormerData,
+                toolCalls: bubble.toolCalls,
+                tool_calls: bubble.tool_calls,
+                functionCall: bubble.functionCall,
+                function_call: bubble.function_call,
             },
             seq,
             sourceKey,
             turns,
+            invocations,
+            toolCalls,
             providerEvents,
+            skillRelations,
             warnings,
         });
     }
     if (seq > 0) sessions.push(session);
 
-    return { sessions, turns, providerEvents, skipped };
+    return { sessions, turns, invocations, toolCalls, providerEvents, skillRelations, skipped };
 }
 
 export function extractCursorStateDb(dbPath: string, options: CursorExtractOptions = {}): CursorExtract {
@@ -467,7 +766,10 @@ export function extractCursorStateDb(dbPath: string, options: CursorExtractOptio
 
         const sessions: CursorSession[] = [];
         const turns: CursorTurn[] = [];
+        const invocations: CursorInvocation[] = [];
+        const toolCalls: ToolCallWrite[] = [];
         const providerEvents: AgentEventWrite[] = [];
+        const skillRelations: ToolCallSkillRelationWrite[] = [];
         const warnings: string[] = [];
         let skipped = 0;
 
@@ -493,19 +795,25 @@ export function extractCursorStateDb(dbPath: string, options: CursorExtractOptio
                     const extracted = extractComposerData(payload, row.key, dbPath, dbIdentity, warnings);
                     sessions.push(...extracted.sessions);
                     turns.push(...extracted.turns);
+                    invocations.push(...extracted.invocations);
+                    toolCalls.push(...extracted.toolCalls);
                     providerEvents.push(...extracted.providerEvents);
+                    skillRelations.push(...extracted.skillRelations);
                     skipped += extracted.skipped;
                 } else if (row.key.startsWith(CURSOR_COMPOSER_DATA_PREFIX)) {
                     const extracted = extractComposerDiskKvData(payload, row.key, dbPath, dbIdentity, db, table, warnings);
                     sessions.push(...extracted.sessions);
                     turns.push(...extracted.turns);
+                    invocations.push(...extracted.invocations);
+                    toolCalls.push(...extracted.toolCalls);
                     providerEvents.push(...extracted.providerEvents);
+                    skillRelations.push(...extracted.skillRelations);
                     skipped += extracted.skipped;
                 }
             }
         }
 
-        return { sessions, turns, providerEvents, skipped, warnings };
+        return { sessions, turns, invocations, toolCalls, providerEvents, skillRelations, skipped, warnings };
     } catch (error) {
         return emptyExtract(
             [`failed to extract Cursor state database ${dbPath}: ${error instanceof Error ? error.message : String(error)}`],
@@ -527,6 +835,24 @@ const buildTurnStatements = (turns: readonly CursorTurn[]): string[] =>
         return `UPSERT turn:\`${turnRecordKey(turn.session, turn.seq)}\` CONTENT { session: ${recordRef("session", turn.session)}, agent_event: ${recordRef("agent_event", eventKey)}, seq: ${turn.seq}, ts: ${surrealDate(turn.ts)}, role: ${surrealString(turn.role)}, message_kind: ${surrealString(turn.message_kind)}, intent_kind: ${surrealString(turn.intent_kind)}, text: ${turn.text === null ? "NONE" : surrealString(turn.text)}, text_excerpt: ${turn.text_excerpt === null ? "NONE" : surrealString(turn.text_excerpt)}, has_tool_use: ${turn.has_tool_use}, has_error: ${turn.has_error} };`;
     });
 
+const buildSyntheticSkillAndInvocationStatements = (
+    invocations: readonly CursorInvocation[],
+): string[] => {
+    if (invocations.length === 0) return [];
+    const tools = new Set(invocations.map((invocation) => invocation.skill));
+    const skillStatements = [...tools].map((name) =>
+        `UPSERT skill:\`${skillRecordKey(name)}\` MERGE { name: ${surrealString(name)}, scope: "cursor-tool", dir_path: "(synthetic)", content_hash: "cursor" };`
+    );
+    const invocationStatements = invocations.map((invocation) => {
+        const turnKey = turnRecordKey(invocation.session, invocation.seq);
+        const skillKey = skillRecordKey(invocation.skill);
+        const args = JSON.stringify(invocation.args ?? {});
+        const edgeKey = invokedRelationRecordKey({ turnKey, skillKey, args });
+        return `RELATE turn:\`${turnKey}\`->invoked:\`${edgeKey}\`->skill:\`${skillKey}\` SET ts = ${surrealDate(invocation.ts)}, args = ${surrealString(args)}, turn_has_error = false, turn_index = ${invocation.seq};`;
+    });
+    return [...skillStatements, ...invocationStatements];
+};
+
 const buildCursorBatchStatements = (extract: CursorExtract, sourcePath: string): string[] => [
     ...buildAgentProviderStatements([
         {
@@ -536,6 +862,9 @@ const buildCursorBatchStatements = (extract: CursorExtract, sourcePath: string):
                 sqlite: true,
                 transcripts: true,
                 providerGraph: true,
+                toolCalls: true,
+                planSignals: providerPlanSignalAvailability.cursor,
+                delegationSignals: providerDelegationSignalAvailability.cursor,
             },
         },
     ]),
@@ -559,7 +888,7 @@ const buildCursorBatchStatements = (extract: CursorExtract, sourcePath: string):
             },
             metrics: {
                 turns: extract.turns.filter((turn) => turn.session === session.id).length,
-                toolCalls: 0,
+                toolCalls: extract.toolCalls.filter((call) => call.sessionId === session.id).length,
                 providerEvents: extract.providerEvents.filter((event) => event.providerSessionId === session.id).length,
             },
             startedAt: session.started_at,
@@ -568,7 +897,14 @@ const buildCursorBatchStatements = (extract: CursorExtract, sourcePath: string):
         events: extract.providerEvents,
     }),
     ...buildTurnStatements(extract.turns),
+    ...buildToolCallStatements(extract.toolCalls),
+    ...buildSyntheticSkillAndInvocationStatements(extract.invocations),
+    ...extract.skillRelations.flatMap((relation) =>
+        buildRelateToolCallSkillStatements(relation),
+    ),
 ];
+
+export const __testBuildCursorBatchStatements = buildCursorBatchStatements;
 
 async function includeDbByMtime(dbPath: string, cutoffMs: number): Promise<boolean> {
     if (!existsSync(dbPath)) return false;
@@ -622,6 +958,7 @@ export const ingestCursor = (
         const dbPaths = yield* Effect.promise(() => findCursorStateDbs(cfg.paths.cursorUserDir, cutoff));
         let sessionCount = 0;
         let turnCount = 0;
+        let toolCallCount = 0;
         let skipped = 0;
         let warnings = 0;
 
@@ -644,12 +981,13 @@ export const ingestCursor = (
             yield* executeStatements(buildCursorBatchStatements(extract, dbPath), { chunkSize: 500 });
             sessionCount += extract.sessions.length;
             turnCount += extract.turns.length;
+            toolCallCount += extract.toolCalls.length;
         }
 
         return {
             sessions: sessionCount,
             turns: turnCount,
-            toolCalls: 0,
+            toolCalls: toolCallCount,
             skipped,
             warnings,
         };
