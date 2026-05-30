@@ -1,7 +1,8 @@
 import { Effect } from "effect";
 import { SurrealClient } from "../lib/db.ts";
-import { decodeJsonOrNull } from "../lib/decode.ts";
+import { decodeJsonRecordOrNull } from "../lib/decode.ts";
 import type { DbError } from "../lib/errors.ts";
+import { surrealString } from "../lib/shared/surql.ts";
 import {
     modelQualityFromLabels,
     tokenQualityFromLabels,
@@ -69,10 +70,7 @@ const stringOrNull = (value: unknown): string | null =>
 
 const labelsRecord = (value: unknown): Record<string, unknown> => {
     if (typeof value !== "string") return {};
-    const decoded = decodeJsonOrNull(value);
-    return typeof decoded === "object" && decoded !== null && !Array.isArray(decoded)
-        ? decoded as Record<string, unknown>
-        : {};
+    return decodeJsonRecordOrNull(value) ?? {};
 };
 
 export const mapCostRows = (rows: ReadonlyArray<Record<string, unknown>>): CostSessionRow[] =>
@@ -166,7 +164,7 @@ export const fetchCostSummary = (
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         const where: string[] = [];
-        if (input.source) where.push(`source = ${JSON.stringify(input.source)}`);
+        if (input.source) where.push(`source = ${surrealString(input.source)}`);
         if (input.sinceDays !== null) {
             const since = Math.min(Math.max(Math.trunc(input.sinceDays), 1), 3650);
             where.push(`ts > time::now() - ${since}d`);

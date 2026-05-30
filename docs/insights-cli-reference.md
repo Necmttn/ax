@@ -15,6 +15,7 @@ axctl insights git --limit=25
 axctl insights friction --limit=50
 axctl insights tools --limit=20
 axctl insights sessions --limit=20
+axctl insights file-evidence --limit=20
 axctl insights feedback-loops --limit=20
 axctl insights verification-gaps --limit=20
 axctl insights user-language --limit=20
@@ -44,6 +45,9 @@ The builders target the current schema fields directly:
 - `toolFailuresSql` groups `tool_call` rows with `WHERE has_error = true`.
 - `sessionEvidenceSql` summarizes session-linked tool calls, failures,
   friction events, and plan snapshots.
+- `fileEvidenceSql` summarizes provider-neutral edit, read, and search file
+  relations so Claude/Codex/Pi evidence can be compared without provider
+  branches.
 - `feedbackLoopsSql` groups persisted `command_outcome` rows so expected test
   feedback, guardrails, search misses, and real blockers can be separated.
 - `verificationGapsSql` finds sessions with edits but no verification-shaped

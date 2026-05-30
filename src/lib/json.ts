@@ -14,7 +14,7 @@
  *
  * Real decode boundaries (`JSON.parse` on jsonl lines / file payloads) live in
  * `src/ingest/*` and should use Effect Schema decoders directly - those are
- * tracked in issue #71 ("Add boundary schemas for JSON IO").
+ * tracked in issue #86 ("Effect JSON-boundary Schema decoders").
  */
 
 import { surrealString } from "./shared/surql.ts";
