@@ -8,6 +8,7 @@ import {
     __testFindOpenCodeDbCandidates,
     extractOpenCodeDatabase,
 } from "./opencode.ts";
+import { toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 
 async function withTempOpenCodeDb<T>(fn: (db: Database, dbPath: string) => T | Promise<T>): Promise<T> {
     const dir = await mkdtemp(join(tmpdir(), "ax-opencode-"));
@@ -50,6 +51,7 @@ describe("OpenCode SQLite extraction", () => {
             expect(extracted.sessions).toHaveLength(1);
             expect(extracted.providerEvents).toHaveLength(1);
             expect(extracted.turns).toHaveLength(1);
+            expect(extracted.toolCalls).toHaveLength(0);
             expect(extracted.sessions[0]).toMatchObject({
                 id: "oc-session-1",
                 cwd: "/Users/necmttn/Projects/ax",
@@ -129,6 +131,7 @@ describe("OpenCode SQLite extraction", () => {
             const extracted = extractOpenCodeDatabase(dbPath);
 
             expect(extracted.sessions).toHaveLength(1);
+            expect(extracted.toolCalls).toHaveLength(0);
             expect(extracted.sessions[0]).toMatchObject({
                 id: "ses-observed",
                 cwd: "/Users/necmttn/Projects/ax",
@@ -152,6 +155,103 @@ describe("OpenCode SQLite extraction", () => {
                 ts: "2026-04-07T07:17:42.338Z",
                 text: "Observed schema user text.",
             });
+        });
+    });
+
+    test("extracts observed OpenCode tool parts into shared tool calls and invocation edges", async () => {
+        await withTempOpenCodeDb((db, dbPath) => {
+            db.run(
+                "CREATE TABLE session (id text primary key, directory text, title text, time_created integer, time_updated integer, model text)",
+            );
+            db.run(
+                "CREATE TABLE message (id text primary key, session_id text, time_created integer, time_updated integer, data text)",
+            );
+            db.run(
+                "CREATE TABLE part (id text primary key, message_id text, session_id text, time_created integer, time_updated integer, data text)",
+            );
+            db.query(
+                "INSERT INTO session (id, directory, title, time_created, time_updated, model) VALUES (?, ?, ?, ?, ?, ?)",
+            ).run("ses-tools", "/tmp/project", "Tool schema", 1775546262338, 1775546263000, "gpt-observed");
+            db.query(
+                "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)",
+            ).run(
+                "msg-assistant-tool",
+                "ses-tools",
+                1775546262400,
+                1775546262500,
+                JSON.stringify({ role: "assistant", parentID: "msg-user" }),
+            );
+            db.query(
+                "INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)",
+            ).run(
+                "prt-tool-grep",
+                "msg-assistant-tool",
+                "ses-tools",
+                1775546262401,
+                1775546262415,
+                JSON.stringify({
+                    type: "tool",
+                    tool: "grep",
+                    callID: "call-grep-1",
+                    state: {
+                        status: "completed",
+                        input: {
+                            pattern: "extractOpenCodeDatabase",
+                            path: "src/ingest",
+                            include: "*.ts",
+                        },
+                        output: "src/ingest/opencode.ts:322:export function extractOpenCodeDatabase",
+                        metadata: { matches: 1, truncated: false },
+                        title: "extractOpenCodeDatabase",
+                        time: { start: 1775546262401, end: 1775546262415 },
+                    },
+                }),
+            );
+
+            const extracted = extractOpenCodeDatabase(dbPath);
+
+            expect(extracted.turns[0]).toMatchObject({
+                session: "ses-tools",
+                providerEventId: "msg-assistant-tool",
+                seq: 1,
+                has_tool_use: true,
+                has_error: false,
+            });
+            expect(extracted.toolCalls).toHaveLength(1);
+            expect(extracted.toolCalls[0]).toMatchObject({
+                provider: "opencode",
+                toolName: "grep",
+                toolKind: "cli",
+                sessionId: "ses-tools",
+                seq: 1,
+                turnKey: turnRecordKey("ses-tools", 1),
+                callId: "call-grep-1",
+                ts: "2026-04-07T07:17:42.401Z",
+                cwd: "/tmp/project",
+                inputJson: {
+                    pattern: "extractOpenCodeDatabase",
+                    path: "src/ingest",
+                    include: "*.ts",
+                },
+                outputExcerpt: "src/ingest/opencode.ts:322:export function extractOpenCodeDatabase",
+                durationMs: 14,
+                hasError: false,
+            });
+
+            const toolCallKey = toolCallRecordKey({
+                sessionId: "ses-tools",
+                seq: 1,
+                callId: "call-grep-1",
+            });
+            const sql = __testBuildOpenCodeBatchStatements(extracted, dbPath).join("\n");
+            expect(sql).toContain("UPSERT tool:");
+            expect(sql).toContain("UPSERT tool_call:");
+            expect(sql).toContain(`tool_call:\`${toolCallKey}\``);
+            expect(sql).toContain("RELATE turn:");
+            expect(sql).toContain("->invoked:");
+            expect(sql).toContain("opencode:grep");
+            expect(sql).toContain("RELATE tool_call:");
+            expect(sql).toContain("kind = \"invoked_skill\"");
         });
     });
 
