@@ -15,6 +15,15 @@ import type { DbError } from "../lib/errors.ts";
 import { recordRef, surrealString } from "../lib/shared/surql.ts";
 import { surrealLiteral } from "../lib/json.ts";
 import { recordKeyPart } from "../lib/shared/derive-keys.ts";
+import {
+    acceptanceFormError,
+    acceptedExperimentStatus,
+    PROPOSAL_STATUS_ACCEPTED,
+    PROPOSAL_STATUS_OPEN,
+    PROPOSAL_STATUS_REJECTED,
+    isAcceptedProposalForm,
+    validateLifecycleVerdict,
+} from "./lifecycle.ts";
 import { scaffoldSkill, type ScaffoldResult } from "./skill-scaffold.ts";
 import { renderTaskFile, type TaskInput } from "./task-template.ts";
 
@@ -27,10 +36,6 @@ export type ImproveActionStatus =
     | "scaffold_exists"
     | "verdict_locked"
     | "invalid_verdict";
-
-export const ALLOWED_VERDICTS: ReadonlySet<string> = new Set([
-    "adopted", "ignored", "regressed", "partial", "no_longer_needed",
-]);
 
 export interface AcceptResult {
     readonly status: ImproveActionStatus;
@@ -177,8 +182,6 @@ export interface AcceptOptions {
     readonly taskDir?: string;           // override .ax/tasks/ output dir
 }
 
-const V0_FORMS = new Set(["guidance", "skill"]);
-
 // ---------------------------------------------------------------------------
 // Safety helpers
 // ---------------------------------------------------------------------------
@@ -210,7 +213,7 @@ export const acceptProposal = (
         if (!proposalKey) {
             return { status: "not_found", message: "proposal.id has unexpected shape" };
         }
-        if (row.status !== "open") {
+        if (row.status !== PROPOSAL_STATUS_OPEN) {
             const db = yield* SurrealClient;
             const existingResult = yield* db.query<[Array<Record<string, unknown>>]>(
                 `SELECT id, artifact_path, type::string(scaffolded_at) AS scaffolded_at, locked_verdict FROM experiment WHERE proposal = ${recordRef("proposal", proposalKey)} LIMIT 1;`,
@@ -234,10 +237,10 @@ export const acceptProposal = (
             return result;
         }
 
-        if (!V0_FORMS.has(row.form)) {
+        if (!isAcceptedProposalForm(row.form)) {
             return {
                 status: "unsupported_form",
-                message: `accept supports form=guidance and form=skill (got ${row.form}); subagent/hook/automation land in later phases`,
+                message: acceptanceFormError(row.form),
             };
         }
 
@@ -268,12 +271,12 @@ export const acceptProposal = (
                 };
             }
             yield* db.query(`
-                UPDATE ${recordRef("proposal", proposalKey)} SET status = 'accepted', updated_at = time::now();
+                UPDATE ${recordRef("proposal", proposalKey)} SET status = '${PROPOSAL_STATUS_ACCEPTED}', updated_at = time::now();
                 UPSERT ${recordRef("experiment", experimentKey)} MERGE {
                     proposal: ${recordRef("proposal", proposalKey)},
                     artifact_path: ${surrealLiteral(scaffold.path)},
                     scaffolded_at: time::now(),
-                    status: 'scaffolded'
+                    status: '${acceptedExperimentStatus({ form: row.form, autoScaffold: true })}'
                 };
             `);
             return {
@@ -317,11 +320,11 @@ export const acceptProposal = (
         writeFileSync(tmpPath, taskContent, { encoding: "utf-8" });
 
         yield* db.query(`
-            UPDATE ${recordRef("proposal", proposalKey)} SET status = 'accepted', updated_at = time::now();
+            UPDATE ${recordRef("proposal", proposalKey)} SET status = '${PROPOSAL_STATUS_ACCEPTED}', updated_at = time::now();
             UPSERT ${recordRef("experiment", experimentKey)} MERGE {
                 proposal: ${recordRef("proposal", proposalKey)},
                 task_path: ${surrealLiteral(taskPath)},
-                status: 'task_emitted'
+                status: '${acceptedExperimentStatus({ form: row.form, autoScaffold: Boolean(opts.autoScaffold) })}'
             };
         `).pipe(
             Effect.tapError(() => Effect.sync(() => {
@@ -351,13 +354,13 @@ export const rejectProposal = (
         const idLiteral = surrealLiteral(opts.sigOrId);
         const row = yield* fetchFullProposal(idLiteral);
         if (!row) return { status: "not_found", message: `no proposal matched ${opts.sigOrId}` };
-        if (row.status !== "open") return { status: "wrong_status", message: `proposal already ${row.status}` };
+        if (row.status !== PROPOSAL_STATUS_OPEN) return { status: "wrong_status", message: `proposal already ${row.status}` };
         const proposalKey = recordKeyPart(row.id, "proposal");
         if (!proposalKey) return { status: "not_found", message: "proposal.id unexpected" };
         const reason = opts.reason ?? "not_worth_packaging";
         const db = yield* SurrealClient;
         yield* db.query(
-            `UPDATE ${recordRef("proposal", proposalKey)} SET status = 'rejected', reject_reason = ${surrealString(reason)}, updated_at = time::now();`,
+            `UPDATE ${recordRef("proposal", proposalKey)} SET status = '${PROPOSAL_STATUS_REJECTED}', reject_reason = ${surrealString(reason)}, updated_at = time::now();`,
         );
         return {
             status: "ok",
@@ -375,10 +378,11 @@ export const setVerdict = (
     opts: SetVerdictOptions,
 ): Effect.Effect<VerdictResult, DbError, SurrealClient> =>
     Effect.gen(function* () {
-        if (!ALLOWED_VERDICTS.has(opts.verdict)) {
+        const verdict = validateLifecycleVerdict(opts.verdict);
+        if (!verdict.valid) {
             return {
                 status: "invalid_verdict",
-                message: `verdict must be one of: ${[...ALLOWED_VERDICTS].sort().join(", ")}`,
+                message: verdict.message,
             };
         }
         const idLiteral = surrealLiteral(opts.sigOrId);
@@ -395,11 +399,11 @@ export const setVerdict = (
             return { status: "verdict_locked", message: `experiment already locked: ${String(row.locked_verdict)}` };
         }
         const experimentId = String(row.id ?? "");
-        const stmts = [`UPDATE ${experimentId} SET locked_verdict = ${surrealString(opts.verdict)};`];
+        const stmts = [`UPDATE ${experimentId} SET locked_verdict = ${surrealString(verdict.verdict)};`];
         const latestCp = row.latest_checkpoint;
         if (latestCp) {
-            stmts.push(`UPDATE ${String(latestCp)} SET user_verdict = ${surrealString(opts.verdict)};`);
+            stmts.push(`UPDATE ${String(latestCp)} SET user_verdict = ${surrealString(verdict.verdict)};`);
         }
         yield* db.query(stmts.join(""));
-        return { status: "ok", experiment_id: experimentId, verdict: opts.verdict };
+        return { status: "ok", experiment_id: experimentId, verdict: verdict.verdict };
     });

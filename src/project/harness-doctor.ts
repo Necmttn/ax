@@ -10,6 +10,10 @@ import type {
     ProjectHarnessReport,
     ProjectStack,
 } from "./types.ts";
+import {
+    interventionObservationStatus,
+    interventionStrengthForConfidence,
+} from "../improve/lifecycle.ts";
 
 export interface MainBranchGraphEvidence {
     readonly editedOnMain: number;
@@ -90,7 +94,7 @@ export function mainBranchLearning(
 export function interventionForMainBranch(candidate: HarnessLearningCandidate): InterventionSuggestion {
     return {
         title: candidate.title,
-        strength: candidate.confidence === "medium" ? "workflow" : "advisory",
+        strength: interventionStrengthForConfidence(candidate.confidence),
         approvalRequired: true,
         expectedEffect: "Reduce write-risk actions on main/master during multi-agent work.",
         reviewCriteria: [
@@ -114,7 +118,7 @@ export function observationForMainBranch(
     const graphRisk = graph.editedOnMain > 0 || graph.commitsFromMain > 0;
     return {
         target: "main-branch guardrail",
-        status: currentRisk || graphRisk ? "observed" : "needs_more_evidence",
+        status: interventionObservationStatus({ currentRisk, graphRisk }),
         metrics: {
             dirtyFiles: git.changes.length,
             writeRiskOnMain: currentRisk ? 1 : 0,
