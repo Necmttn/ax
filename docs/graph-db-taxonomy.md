@@ -48,10 +48,10 @@ The machine-readable source of truth is [`src/ingest/provider-parity.ts`](../src
 | Skill/tool invocation edges | Yes, Skill tool and resolved skill catalogue | Yes, synthetic `codex:<tool>` | Yes, synthetic `pi:<tool>` | Yes, synthetic `opencode:<tool>` | Not emitted yet | `skill`, `invoked`, `concerns` |
 | Plans | Yes, `TodoWrite` | Yes, `update_plan` | Not exposed in current raw format | Not exposed in current extractor | Not exposed in current extractor | `plan`, `plan_item`, `plan_snapshot` |
 | File edit evidence | Yes, edit/write tool paths | Available once provider tool calls expose file edit arguments | Available once provider tool calls expose file edit arguments | Not emitted yet | Not emitted yet | `file`, `edited` |
-| Token/cost usage | Estimated by session health unless explicit counts exist | Explicit `token_count` events | Explicit Pi usage fields when present | Estimated by session health | Estimated by session health | `session_token_usage`, `used_model`, `agent_used_model` |
+| Token/cost usage | Estimated by session health unless explicit counts exist | Explicit `token_count` events | Explicit Pi usage fields when present | Estimated by session health | Estimated by session health | `session_token_usage` |
 | Hook evidence | Yes, Claude hook transcript attachments | Runtime hook telemetry still normalizes outside transcript ingest | Runtime hook telemetry still normalizes outside transcript ingest | Runtime hook telemetry still normalizes outside transcript ingest | Runtime hook telemetry still normalizes outside transcript ingest | `harness_hook_event`, `hook_command_invocation`, `hook_fire` |
 | Subagent/delegation links | Yes, Claude Task/subagent extraction | Yes, Codex spawn-agent extraction when present | Not exposed in current raw format | Not exposed in current extractor | Not exposed in current extractor | `spawned`, session detail episode views |
-| Derived analysis and insights | Yes | Yes | Yes | Yes | Yes | `friction_event`, `command_outcome`, `turn_analysis`, `semantic_signal`, `session_health`, proposals |
+| Derived analysis and insights | Yes | Yes | Yes | Yes | Yes | `friction_event`, `command_outcome`, `session_health`, proposals |
 
 Parity rule: if a provider exposes the raw signal, ingest should map it into the shared graph surface, add tests for that provider, and make existing reads work without a provider-specific read path. Gaps above are extractor limitations or missing raw signals, not second-class harness status. When this table and the matrix disagree, treat the matrix and gate as authoritative.
 
@@ -84,7 +84,7 @@ Parity rule: if a provider exposes the raw signal, ingest should map it into the
 
 | Relation | Shape | Meaning | Written from | Main reads |
 | --- | --- | --- | --- | --- |
-| `invoked` | `turn -> skill` | Explicit skill/tool invocation. Includes JSON args, timestamp, turn error/correction flags, position metadata. | Claude Skill tool, Codex/Pi/OpenCode synthetic tool skills, other provider tool evidence when available, invoked-position backfill | `ax taste/stats/recent/unused`, weighted skills, wrapped, skill graph |
+| `invoked` | `turn -> skill` | Explicit skill/tool invocation. Includes JSON args, timestamp, turn error/correction flags, position metadata. | Claude Skill tool, Codex/Pi synthetic tool skills, other provider tool evidence when available, invoked-position backfill | `ax taste/stats/recent/unused`, weighted skills, wrapped, skill graph |
 | `proposed` | `turn -> skill` | Assistant mentioned a skill but did not invoke it. | `signals` stage | Taste/search diagnostics |
 | `edited` | `turn -> file` | Agent edit/write tool touched a file. | Claude transcript edit extraction | File/session evidence queries |
 | `mentioned_file` | `turn -> file` | Text/tool evidence mentioned a file. | Schema exists; intended for file-evidence derivation | Future multi-hop file queries |
