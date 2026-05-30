@@ -24,8 +24,8 @@ const STUDIO_BASE = "https://ax.necmttn.com/studio/";
 
 /**
  * Banner printed on `axctl serve` startup. Surrealist-style: wordmark +
- * the local URL the dashboard is serving on + a deep link to the public
- * studio that auto-connects to this daemon.
+ * the local daemon URL + a deep link to the public studio that auto-connects
+ * to this daemon.
  */
 export function formatServeBanner(port: number): string {
     const localUrl = `http://localhost:${port}`;
@@ -33,7 +33,7 @@ export function formatServeBanner(port: number): string {
     const studioUrl = `${STUDIO_BASE}?endpoint=${encodeURIComponent(localIp)}`;
     return [
         WORDMARK_ASCII,
-        `  local dashboard   ${localUrl}`,
+        `  local daemon      ${localUrl}`,
         `  open in studio    ${studioUrl}`,
         "",
     ].join("\n");

@@ -44,8 +44,8 @@ export function ImproveRoute() {
         [proposals, formFilter, statusFilter],
     );
     const selected = useMemo(
-        () => proposals.find((p) => p.dedupe_sig === selectedSig) ?? null,
-        [proposals, selectedSig],
+        () => filtered.find((p) => p.dedupe_sig === selectedSig) ?? filtered[0] ?? null,
+        [filtered, selectedSig],
     );
 
     const onActionResult = (action: string, res: ImproveActionResponse) => {
@@ -117,7 +117,7 @@ export function ImproveRoute() {
                 <div className="empty">No proposals match the current filters.</div>
             ) : null}
 
-            <div className="improve-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(360px, 480px)", gap: 16 }}>
+            <div className="improve-grid">
                 <table className="skills">
                     <thead>
                         <tr>
@@ -143,7 +143,7 @@ export function ImproveRoute() {
                                     onClick={() => setSelectedSig(p.dedupe_sig)}
                                     style={{
                                         cursor: "pointer",
-                                        background: selectedSig === p.dedupe_sig ? "rgba(0,0,0,0.05)" : undefined,
+                                        background: selected?.dedupe_sig === p.dedupe_sig ? "rgba(0,0,0,0.05)" : undefined,
                                     }}
                                 >
                                     <td style={{ textAlign: "right" }}>{p.frequency}</td>

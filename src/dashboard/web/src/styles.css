@@ -242,6 +242,29 @@ table.skills td {
     vertical-align: top;
 }
 
+.load-more {
+    display: flex;
+    justify-content: center;
+    padding: 14px 0 2px;
+}
+
+.improve-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(360px, 480px);
+    gap: 16px;
+    align-items: start;
+}
+
+.improve-grid > table.skills {
+    align-self: start;
+}
+
+@media (max-width: 900px) {
+    .improve-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
 td.num {
     text-align: right;
     font-variant-numeric: tabular-nums;

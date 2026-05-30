@@ -35,6 +35,8 @@ const DEFAULT_DIR: Record<SortKey, SortDir> = {
     name: "asc",
 };
 
+const SKILL_RENDER_PAGE_SIZE = 80;
+
 const filterByRecommendation = (
     rows: ReadonlyArray<SkillTriageEntry>,
     filter: Filter,
@@ -132,6 +134,7 @@ export function SkillsRoute() {
     const [scope, setScope] = useState<string>("all");
     const [sortKey, setSortKey] = useState<SortKey>("score");
     const [sortDir, setSortDir] = useState<SortDir>("desc");
+    const [renderLimit, setRenderLimit] = useState(SKILL_RENDER_PAGE_SIZE);
     const [lastSaved, setLastSaved] = useState<string | null>(null);
     const [pending, setPending] = useState<string | null>(null);
     const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
@@ -170,10 +173,15 @@ export function SkillsRoute() {
         );
     }, [data, filter, scope, search, sortKey, sortDir]);
 
-    const visibleNames = useMemo(() => new Set(visible.map((v) => v.name)), [visible]);
+    const rendered = useMemo(
+        () => visible.slice(0, renderLimit),
+        [visible, renderLimit],
+    );
+    const hasMoreRows = rendered.length < visible.length;
+    const renderedNames = useMemo(() => new Set(rendered.map((v) => v.name)), [rendered]);
     const selectedVisible = useMemo(
-        () => Array.from(selected).filter((name) => visibleNames.has(name)),
-        [selected, visibleNames],
+        () => Array.from(selected).filter((name) => renderedNames.has(name)),
+        [selected, renderedNames],
     );
 
     const applyNote = (note: SkillTriageNote): void => {
@@ -271,7 +279,7 @@ export function SkillsRoute() {
     };
 
     const selectAllVisible = () => {
-        setSelected(new Set(visible.map((r) => r.name)));
+        setSelected(new Set(rendered.map((r) => r.name)));
     };
 
     const clearSelection = () => setSelected(new Set());
@@ -314,14 +322,18 @@ export function SkillsRoute() {
         }
     };
 
-    // Clamp highlight when the visible set changes (filter/search/sort).
     useEffect(() => {
-        if (visible.length === 0) {
+        setRenderLimit(SKILL_RENDER_PAGE_SIZE);
+    }, [filter, scope, search, sortKey, sortDir]);
+
+    // Clamp highlight when the rendered set changes (filter/search/sort/load).
+    useEffect(() => {
+        if (rendered.length === 0) {
             if (highlight !== -1) setHighlight(-1);
             return;
         }
-        if (highlight >= visible.length) setHighlight(visible.length - 1);
-    }, [visible, highlight]);
+        if (highlight >= rendered.length) setHighlight(rendered.length - 1);
+    }, [rendered, highlight]);
 
     // Scroll the highlighted row into view when keyboard navigation moves it.
     useEffect(() => {
@@ -356,7 +368,7 @@ export function SkillsRoute() {
                     setShowHelp((v) => !v);
                     return;
                 case "j":
-                    setHighlight((h) => Math.min(visible.length - 1, h < 0 ? 0 : h + 1));
+                    setHighlight((h) => Math.min(rendered.length - 1, h < 0 ? 0 : h + 1));
                     return;
                 case "k":
                     setHighlight((h) => Math.max(0, h - 1));
@@ -365,20 +377,20 @@ export function SkillsRoute() {
                     setHighlight(0);
                     return;
                 case "G":
-                    setHighlight(Math.max(0, visible.length - 1));
+                    setHighlight(Math.max(0, rendered.length - 1));
                     return;
                 case "r":
                     void load("refresh");
                     return;
                 case "x": {
-                    const row = visible[highlight];
+                    const row = rendered[highlight];
                     if (row) toggleSelected(row.name);
                     return;
                 }
                 case "1":
                 case "2":
                 case "3": {
-                    const row = visible[highlight];
+                    const row = rendered[highlight];
                     if (!row) return;
                     const decision: TriageDecision =
                         e.key === "1" ? "keep" : e.key === "2" ? "review" : "archive";
@@ -386,7 +398,7 @@ export function SkillsRoute() {
                     return;
                 }
                 case "Enter": {
-                    const row = visible[highlight];
+                    const row = rendered[highlight];
                     if (row) void toggleExpanded(row);
                     return;
                 }
@@ -396,13 +408,13 @@ export function SkillsRoute() {
         };
         document.addEventListener("keydown", handler);
         return () => document.removeEventListener("keydown", handler);
-        // load/decide/toggleExpanded/toggleSelected are stable enough; visible
+        // load/decide/toggleExpanded/toggleSelected are stable enough; rendered
         // and highlight are the meaningful deps.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [visible, highlight]);
+    }, [rendered, highlight]);
 
     const allVisibleSelected =
-        visible.length > 0 && visible.every((r) => selected.has(r.name));
+        rendered.length > 0 && rendered.every((r) => selected.has(r.name));
 
     const computeStats = (rows: ReadonlyArray<SkillTriageEntry>) => {
         let decided = 0;
@@ -452,6 +464,9 @@ export function SkillsRoute() {
                     <span>
                         <strong>{visible.length}</strong> visible
                     </span>
+                    {hasMoreRows ? (
+                        <span>· showing {rendered.length}</span>
+                    ) : null}
                     <span>· keep {viewStats.keep}</span>
                     <span>· review {viewStats.review}</span>
                     <span>· archive {viewStats.archive}</span>
@@ -576,7 +591,7 @@ export function SkillsRoute() {
                             <th style={{ width: 32 }}>
                                 <input
                                     type="checkbox"
-                                    aria-label="select all visible"
+                                    aria-label="select loaded rows"
                                     checked={allVisibleSelected}
                                     onChange={() =>
                                         allVisibleSelected
@@ -608,7 +623,7 @@ export function SkillsRoute() {
                         </tr>
                     </thead>
                     <tbody ref={tbodyRef}>
-                        {visible.map((row, idx) => (
+                        {rendered.map((row, idx) => (
                             <SkillRowView
                                 key={row.name}
                                 row={row}
@@ -628,6 +643,20 @@ export function SkillsRoute() {
                         ))}
                     </tbody>
                 </table>
+            ) : null}
+            {data && hasMoreRows ? (
+                <div className="load-more">
+                    <button
+                        type="button"
+                        onClick={() =>
+                            setRenderLimit((limit) =>
+                                Math.min(limit + SKILL_RENDER_PAGE_SIZE, visible.length),
+                            )
+                        }
+                    >
+                        load {Math.min(SKILL_RENDER_PAGE_SIZE, visible.length - rendered.length)} more
+                    </button>
+                </div>
             ) : null}
         </section>
     );
