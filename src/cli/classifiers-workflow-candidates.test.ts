@@ -1522,6 +1522,7 @@ describe("classifiers workflow-candidates", () => {
             smoke_marker_count: 2,
             apply_guard: "blocked_smoke_review",
             can_apply: false,
+            apply_blockers: ["blocked_smoke_review"],
             next_action: "Replace smoke or example review markers with real review decisions before applying.",
         });
         expect(summary.projection_totals.fact_count).toBe(1);
@@ -1589,9 +1590,11 @@ describe("classifiers workflow-candidates", () => {
             smoke_marker_count: 0,
             apply_guard: "no_reviewed_fixtures",
             can_apply: false,
+            apply_blockers: ["no_reviewed_fixtures"],
             next_action: "Set at least one fixture to accept, revise, reject, or defer and add a rationale.",
         });
         expect(text).toContain("coverage review can apply: no");
+        expect(text).toContain("coverage review blockers: no_reviewed_fixtures");
         expect(text).toContain("coverage review next action: Set at least one fixture to accept, revise, reject, or defer and add a rationale.");
         expect(summary.projection_totals.fact_count).toBe(0);
         expect(summary.write_plan_totals.statement_count).toBe(1);
@@ -1635,6 +1638,7 @@ describe("classifiers workflow-candidates", () => {
             missing_rationale_count: 1,
             apply_guard: "missing_review_rationale",
             can_apply: false,
+            apply_blockers: ["missing_review_rationale"],
             next_action: "Add rationale text for every reviewed fixture.",
         });
     });
@@ -1776,6 +1780,7 @@ describe("classifiers workflow-candidates", () => {
             projected_unreviewed_candidate_count: 1,
             apply_guard: "invalid_review_pack",
             can_apply: false,
+            apply_blockers: ["invalid_review_pack", "no_reviewed_fixtures"],
             next_action: "Fix invalid review statuses before syncing or applying.",
         });
     });
@@ -1885,6 +1890,7 @@ describe("classifiers workflow-candidates", () => {
             projected_unreviewed_candidate_count: 0,
             apply_guard: "ready_to_apply",
             can_apply: true,
+            apply_blockers: [],
             next_action: "Run the apply command after confirming the review pack is intentional.",
         });
     });
