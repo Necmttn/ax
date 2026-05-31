@@ -15,6 +15,7 @@ import type {
     SessionTopSkill,
 } from "../lib/shared/dashboard-types.ts";
 import { runQuery, runSingleQuery } from "../lib/shared/graph-query.ts";
+import { resolveTurnContent } from "../queries/session-turn-content.ts";
 import {
     sessionOverviewQuery,
     sessionShareFilesQuery,
@@ -157,6 +158,15 @@ export function normalizeSessionRecordRef(sessionId: string): string | null {
 
 const isPresent = <T>(value: T | null): value is T => value !== null;
 
+const attachTurnContent = (
+    turns: ReadonlyArray<ShareTurn>,
+    turnContent: Map<number, ShareTurn["content"]>,
+): ReadonlyArray<ShareTurn> =>
+    turns.map((turn) => {
+        const content = turnContent.get(turn.seq);
+        return content ? { ...turn, content } : turn;
+    });
+
 export const exportSessionShare = (
     sessionId: string,
     axVersion: string,
@@ -166,7 +176,7 @@ export const exportSessionShare = (
         if (recordRef === null) return null;
 
         const params = { recordRef };
-        const [overview, topSkillsRaw, toolCallsRaw, turnsRaw, timelineRaw, filesRaw] =
+        const [overview, topSkillsRaw, toolCallsRaw, turnsRaw, timelineRaw, filesRaw, turnContent] =
             yield* Effect.all([
                 runSingleQuery(sessionOverviewQuery, params),
                 runQuery(sessionTopSkillsQuery, params),
@@ -174,6 +184,7 @@ export const exportSessionShare = (
                 runQuery(sessionShareTurnsQuery, params),
                 runQuery(sessionShareTimelineQuery, params),
                 runQuery(sessionShareFilesQuery, params),
+                resolveTurnContent(sessionId),
             ]);
 
         if (overview === null) return null;
@@ -184,7 +195,7 @@ export const exportSessionShare = (
             overview,
             topSkills: topSkillsRaw.filter(isPresent),
             toolCalls: toolCallsRaw.filter(isPresent),
-            turns: turnsRaw.filter(isPresent),
+            turns: attachTurnContent(turnsRaw.filter(isPresent), turnContent),
             timeline: timelineRaw.filter(isPresent),
             files: filesRaw.filter(isPresent),
         });

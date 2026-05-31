@@ -27,6 +27,25 @@ describe("buildShareArtifactFromParts", () => {
                     role: "user",
                     message_kind: "task",
                     text: "Build the readable share view.",
+                    content: {
+                        document_id: "content_document:abc",
+                        parser_id: "claude-jsonl",
+                        parser_version: "1",
+                        blockset_hash: "hash-1",
+                        blocks: [{
+                            seq: 0,
+                            parent_seq: null,
+                            kind: "text",
+                            role: "user",
+                            heading: null,
+                            text: "Build the readable share view.",
+                            text_excerpt: "Build the readable share view.",
+                            start_offset: 0,
+                            end_offset: 30,
+                            confidence: 1,
+                            atoms: [],
+                        }],
+                    },
                 },
             ],
             timeline: [{ id: "tool_call:abc", kind: "tool_call", title: "exec_command", actor: "agent" }],
@@ -36,6 +55,7 @@ describe("buildShareArtifactFromParts", () => {
         expect(artifact.session.id).toBe("abc123");
         expect(artifact.stats.turns).toBe(1);
         expect(artifact.turns[0]?.text).toBe("Build the readable share view.");
+        expect(artifact.turns[0]?.content?.blocks[0]?.text).toBe("Build the readable share view.");
         expect(artifact.stats.tool_calls).toBe(2);
         expect(artifact.stats.skills_used).toBe(1);
         expect(artifact.stats.failures).toBe(1);

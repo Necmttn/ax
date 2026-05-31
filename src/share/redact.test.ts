@@ -70,4 +70,47 @@ describe("share redaction", () => {
         expect(redacted.artifact.redactions.applied).toBe(true);
         expect(redacted.artifact.redactions.rules).toContain("authorization-bearer");
     });
+
+    it("redacts nested turn content blocks in share artifacts", () => {
+        const artifact = minimalShareArtifact({ id: "abc123", source: "codex" });
+        const redacted = redactShareArtifact({
+            ...artifact,
+            turns: [{
+                id: "turn:abc-1",
+                seq: 1,
+                role: "assistant",
+                text: "ok",
+                content: {
+                    document_id: "content_document:abc",
+                    parser_id: "codex-jsonl",
+                    parser_version: "1",
+                    blockset_hash: null,
+                    blocks: [{
+                        seq: 0,
+                        parent_seq: null,
+                        kind: "tool_call",
+                        role: "assistant",
+                        heading: null,
+                        text: "Authorization: Bearer secret-token",
+                        text_excerpt: "Authorization: Bearer secret-token",
+                        start_offset: 0,
+                        end_offset: 34,
+                        confidence: 1,
+                        atoms: [{
+                            kind: "command",
+                            value: "OPENAI_API_KEY=sk-test123",
+                            normalized: null,
+                            confidence: 1,
+                            raw: null,
+                        }],
+                    }],
+                },
+            }],
+        });
+
+        expect(redacted.artifact.turns[0]?.content?.blocks[0]?.text).toBe("Authorization: Bearer [REDACTED_SECRET]");
+        expect(redacted.artifact.turns[0]?.content?.blocks[0]?.atoms[0]?.value).toBe("OPENAI_API_KEY=[REDACTED_SECRET]");
+        expect(redacted.artifact.redactions.rules).toContain("authorization-bearer");
+        expect(redacted.artifact.redactions.rules).toContain("openai-api-key");
+    });
 });

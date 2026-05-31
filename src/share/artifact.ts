@@ -1,3 +1,5 @@
+import type { InspectTurnContentDto } from "../lib/shared/dashboard-types.ts";
+
 export const AX_SESSION_SHARE_SCHEMA_VERSION = 1 as const;
 
 export type KnownShareSource = "claude" | "codex" | "pi" | "opencode" | "cursor";
@@ -51,6 +53,7 @@ export interface ShareTurn {
     readonly text_excerpt?: string;
     readonly has_tool_use?: boolean;
     readonly has_error?: boolean;
+    readonly content?: InspectTurnContentDto | null;
 }
 
 export interface ShareEvent {

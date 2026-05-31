@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
 import type {
+    InspectTurnContentDto,
     InspectSpanKind,
     InspectTurnDto,
     SessionInspectPayload,
@@ -39,6 +40,7 @@ interface ShareArtifact {
         readonly message_kind?: string;
         readonly intent_kind?: string;
         readonly text: string;
+        readonly content?: InspectTurnContentDto | null;
         readonly has_tool_use?: boolean;
         readonly has_error?: boolean;
     }>;
@@ -92,7 +94,7 @@ export function spanKindForShareTurn(turn: NonNullable<ShareArtifact["turns"]>[n
     return "user_input";
 }
 
-function inspectPayloadFromShare(artifact: ShareArtifact, sourcePath: string): SessionInspectPayload {
+export function inspectPayloadFromShare(artifact: ShareArtifact, sourcePath: string): SessionInspectPayload {
     const totals: Partial<Record<InspectSpanKind, number>> = {};
     let totalChars = 0;
     const turns = (artifact.turns ?? []).map((turn): InspectTurnDto => {
@@ -105,7 +107,9 @@ function inspectPayloadFromShare(artifact: ShareArtifact, sourcePath: string): S
             semantic_role: kind,
             ts: turn.ts ?? null,
             char_count: turn.text.length,
+            raw_text: turn.text,
             spans: [{ kind, text: turn.text, label: turn.intent_kind ?? turn.message_kind }],
+            content: turn.content ?? null,
         };
     });
 
