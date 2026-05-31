@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { spanKindForShareTurn } from "./share-inspect.tsx";
+import {
+    fetchShareArtifact,
+    rawSessionFileUrl,
+    spanKindForShareTurn,
+} from "./share-inspect.tsx";
 
 type ShareTurn = Parameters<typeof spanKindForShareTurn>[0];
 
@@ -36,5 +40,45 @@ describe("spanKindForShareTurn", () => {
             intent_kind: "organic_task",
             text: "lets run review all command",
         }))).toBe("user_input");
+    });
+});
+
+describe("fetchShareArtifact", () => {
+    test("loads ax-session.json directly from gist raw content", async () => {
+        const calls: string[] = [];
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = (async (input: RequestInfo | URL) => {
+            calls.push(String(input));
+            return new Response(JSON.stringify({
+                schema_version: 1,
+                exported_at: "2026-05-31T00:00:00.000Z",
+                session: { id: "session-1", source: "codex" },
+                stats: {
+                    turns: 1,
+                    tool_calls: 0,
+                    files_changed: 0,
+                    skills_used: 0,
+                    failures: 0,
+                },
+                turns: [{
+                    id: "turn-1",
+                    seq: 1,
+                    role: "user",
+                    text: "hello",
+                }],
+            }), {
+                headers: { "content-type": "application/json" },
+            });
+        }) as typeof fetch;
+
+        try {
+            const artifact = await fetchShareArtifact("Necmttn", "abc123");
+
+            expect(artifact.session.id).toBe("session-1");
+            expect(calls).toEqual([rawSessionFileUrl("Necmttn", "abc123")]);
+            expect(calls[0]).not.toContain("api.github.com");
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
     });
 });

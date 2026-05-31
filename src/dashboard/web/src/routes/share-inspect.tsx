@@ -48,28 +48,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null;
 }
 
-function gistApiUrl(gistId: string): string {
-    return `https://api.github.com/gists/${encodeURIComponent(gistId)}`;
-}
-
-function rawSessionFileUrlFromGist(value: unknown): string {
-    if (!isRecord(value) || !isRecord(value.files)) {
-        throw new Error("Gist response has no files");
-    }
-    const sessionFile = value.files["ax-session.json"];
-    if (!isRecord(sessionFile) || typeof sessionFile.raw_url !== "string") {
-        throw new Error("Gist does not contain ax-session.json");
-    }
-    return sessionFile.raw_url;
-}
-
-function gistOwnerMatches(value: unknown, owner: string): boolean {
-    return (
-        isRecord(value) &&
-        isRecord(value.owner) &&
-        typeof value.owner.login === "string" &&
-        value.owner.login.localeCompare(owner, undefined, { sensitivity: "accent" }) === 0
-    );
+export function rawSessionFileUrl(owner: string, gistId: string): string {
+    return `https://gist.githubusercontent.com/${encodeURIComponent(owner)}/${encodeURIComponent(gistId)}/raw/ax-session.json`;
 }
 
 function validateArtifact(value: unknown): ShareArtifact {
@@ -86,16 +66,8 @@ function validateArtifact(value: unknown): ShareArtifact {
     return value as ShareArtifact;
 }
 
-async function fetchShareArtifact(owner: string, gistId: string): Promise<ShareArtifact> {
-    const gistResponse = await fetch(gistApiUrl(gistId), {
-        headers: { Accept: "application/vnd.github+json" },
-    });
-    if (!gistResponse.ok) throw new Error(`Could not fetch Gist ${owner}/${gistId}`);
-
-    const gist = await gistResponse.json();
-    if (!gistOwnerMatches(gist, owner)) throw new Error(`Gist owner is not ${owner}`);
-
-    const artifactResponse = await fetch(rawSessionFileUrlFromGist(gist));
+export async function fetchShareArtifact(owner: string, gistId: string): Promise<ShareArtifact> {
+    const artifactResponse = await fetch(rawSessionFileUrl(owner, gistId));
     if (!artifactResponse.ok) throw new Error("Could not fetch ax-session.json");
 
     return validateArtifact(await artifactResponse.json());
