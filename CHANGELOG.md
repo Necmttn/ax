@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.4.0](https://github.com/Necmttn/ax/compare/v0.3.0...v0.4.0) (2026-05-31)
+
+
+### Features
+
+* add gist-backed session sharing ([c7a36a4](https://github.com/Necmttn/ax/commit/c7a36a4d436f6ad80c5961d4da2eacb1badee947))
+* add typed JSON boundary helpers ([#101](https://github.com/Necmttn/ax/issues/101)) ([ed95a0e](https://github.com/Necmttn/ax/commit/ed95a0ea7a65ff036ecbd2e26cc5e85a03550a09))
+* **classifiers:** add embedding helper export ([4c602d9](https://github.com/Necmttn/ax/commit/4c602d943137ba34e9c87ef81382145bf5cecce6))
+* **classifiers:** add embedding helper graph mode ([74c39c7](https://github.com/Necmttn/ax/commit/74c39c7dee35524f8a6592eedccfff3449a2ad57))
+* **classifiers:** add embedding helper review ([7dcd25b](https://github.com/Necmttn/ax/commit/7dcd25b4ede2f01ce32918ab3b14f22095f7a1f0))
+* **classifiers:** add embedding svm helper eval ([e008bbb](https://github.com/Necmttn/ax/commit/e008bbb176e2997fc88633ee98dff62fae45c27f))
+* **classifiers:** add graph classifier harness ([7be279b](https://github.com/Necmttn/ax/commit/7be279b1b54bad9205619cd6c3aab35a3375311d))
+* **classifiers:** add lifecycle graph view ([a4d06c3](https://github.com/Necmttn/ax/commit/a4d06c356ba4c783875d5d342a301c85373aab98))
+* **classifiers:** add proposal review checklist ([037e6c8](https://github.com/Necmttn/ax/commit/037e6c88f032ebd7ad5956b3e1194391c71c1e5e))
+* **classifiers:** add workflow proposal gates ([adef453](https://github.com/Necmttn/ax/commit/adef4537e0da43060c1a64a8b50b9dc2724f8297))
+* **classifiers:** gate embedding helper review ([bffba8f](https://github.com/Necmttn/ax/commit/bffba8f74a75cc22adb566e6cc1926764f25f0d5))
+* **classifiers:** gate proposal draft promotion ([13146b3](https://github.com/Necmttn/ax/commit/13146b3d6e253755aa1e6ffe29a6a5a1e30c73cf))
+* **classifiers:** project embedding helper graph ([08a0648](https://github.com/Necmttn/ax/commit/08a06483562ff2fa38e8f2bb52114a6f0ce77e51))
+* **classifiers:** project proposal lifecycle facts ([dc8724f](https://github.com/Necmttn/ax/commit/dc8724f0a5df5e5744b0c100584b0358b1872b6c))
+* **classifiers:** surface proposal lifecycle ([75c006c](https://github.com/Necmttn/ax/commit/75c006cc8bea83a0ab66a6ea2ba2a622f5fee567))
+* **cli:** expand insights and session surfaces ([5fb4a81](https://github.com/Necmttn/ax/commit/5fb4a8162eb615dd7b0ea073558819ffb22fbf61))
+* **ingest:** normalize provider sessions and costs ([0f3f31d](https://github.com/Necmttn/ax/commit/0f3f31d7e079dc2d4e0f59a78737c31bb65f1083))
+* **ingest:** parse transcript content blocks ([797991d](https://github.com/Necmttn/ax/commit/797991d30473b9de89a2c5610bea6aeb5f7aaaef))
+* **schema:** add storage for content and classifiers ([478273e](https://github.com/Necmttn/ax/commit/478273ed7abd12705d694157c11c73fcf2bb0737))
+* **site:** add release changelog page ([#104](https://github.com/Necmttn/ax/issues/104)) ([5919ce0](https://github.com/Necmttn/ax/commit/5919ce0d01f387b1b5d416c5732cca6b01112a7c))
+* **site:** add release detail pages ([#105](https://github.com/Necmttn/ax/issues/105)) ([da245e7](https://github.com/Necmttn/ax/commit/da245e74b6dcfea144686e6f89ec85bf075283e9))
+* **site:** densify release pages ([#106](https://github.com/Necmttn/ax/issues/106)) ([6e76970](https://github.com/Necmttn/ax/commit/6e7697063e1f79d607058a8ae16c68ab900caefa))
+
+
+### Bug Fixes
+
+* **ingest:** clean up exact optional handling ([5b7863f](https://github.com/Necmttn/ax/commit/5b7863f543f3c1d97965901541aa8d072527b3cd))
+* surface subagent lifecycle in inspector ([9fdadf8](https://github.com/Necmttn/ax/commit/9fdadf84ee6d51ed3393924b8c5e3181d1c8b973))
+
 ## [0.3.0](https://github.com/Necmttn/ax/compare/v0.2.0...v0.3.0) (2026-05-30)
 
 
