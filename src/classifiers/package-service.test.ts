@@ -464,7 +464,8 @@ describe("ClassifierPackageService", () => {
     });
 
     test("builds lifecycle insights through the service layer", async () => {
-        const statusPath = join(mkdtempSync(join(tmpdir(), "ax-lifecycle-status-")), "status.json");
+        const statusDir = mkdtempSync(join(tmpdir(), "ax-lifecycle-status-"));
+        const statusPath = join(statusDir, "status.json");
         writeFileSync(statusPath, `${JSON.stringify({
             schema: "ax.blind_workflow_status.v1",
             decision: "needs_human_review",
@@ -509,6 +510,35 @@ describe("ClassifierPackageService", () => {
                     },
                 },
             },
+        })}\n`);
+        writeFileSync(join(statusDir, "workflow-candidate-proposal-review-current.json"), `${JSON.stringify({
+            schema: "ax.workflow_candidate_proposal_review.v1",
+            decision: "needs_workflow_candidate_proposal_review",
+            totals: {
+                proposal_count: 4,
+                ready_count: 0,
+                pending_count: 4,
+                invalid_count: 0,
+                missing_field_count: 16,
+            },
+            failures: ["proposal briefs are not promotion-ready"],
+        })}\n`);
+        writeFileSync(join(statusDir, "workflow-candidate-proposal-review-current.md"), "# review checklist\n");
+        writeFileSync(join(statusDir, "workflow-candidate-proposal-promotion-current.json"), `${JSON.stringify({
+            schema: "ax.workflow_candidate_proposal_promotion.v1",
+            decision: "needs_workflow_candidate_proposal_review",
+            proposal_count: 4,
+            emitted_draft_count: 0,
+            skipped_proposal_count: 4,
+            failures: ["proposal review report is not ready"],
+        })}\n`);
+        writeFileSync(join(statusDir, "workflow-candidate-proposal-ready-smoke-promotion-current.json"), `${JSON.stringify({
+            schema: "ax.workflow_candidate_proposal_promotion.v1",
+            decision: "workflow_candidate_proposal_promotion_ready",
+            proposal_count: 3,
+            emitted_draft_count: 2,
+            skipped_proposal_count: 1,
+            failures: [],
         })}\n`);
         const db = {
             query: () => Effect.sync(() => [
@@ -559,6 +589,13 @@ describe("ClassifierPackageService", () => {
         expect(report.workflow_status.focused_batch?.incomplete_refs[0]?.id).toBe("blind-row-1");
         expect(report.workflow_status.focused_batch?.incomplete_refs[0]?.invalid).toEqual(["review_notes"]);
         expect(report.workflow_status.focused_batch?.invalid_refs[0]?.invalid).toEqual(["review_notes"]);
+        expect(report.workflow_status.proposal_review?.decision).toBe("needs_workflow_candidate_proposal_review");
+        expect(report.workflow_status.proposal_review?.summary_path).toBe(join(statusDir, "workflow-candidate-proposal-review-current.md"));
+        expect(report.workflow_status.proposal_review?.missing_field_count).toBe(16);
+        expect(report.workflow_status.proposal_promotion?.skipped_proposal_count).toBe(4);
+        expect(report.workflow_status.proposal_ready_smoke?.promotion_decision).toBe("workflow_candidate_proposal_promotion_ready");
+        expect(report.workflow_status.next_actions[0]).toContain("workflow-candidate-proposal-review-current.md");
+        expect(report.blocking_items).toContain("workflow candidate proposal review pending 4 proposal(s)");
         expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.graph_operation_count).toBe(1);
     });
 });

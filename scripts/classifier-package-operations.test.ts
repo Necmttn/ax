@@ -805,6 +805,35 @@ describe("classifier package operations report", () => {
                 pending_blind_labels: 2,
                 pending_hard_negatives: 1,
                 accepted_hard_negatives: 0,
+                proposal_review: {
+                    report_path: ".ax/experiments/workflow-candidate-proposal-review-current.json",
+                    summary_path: ".ax/experiments/workflow-candidate-proposal-review-current.md",
+                    decision: "needs_workflow_candidate_proposal_review",
+                    proposal_count: 4,
+                    ready_count: 0,
+                    pending_count: 4,
+                    invalid_count: 0,
+                    missing_field_count: 16,
+                    failures: ["proposal briefs are not promotion-ready"],
+                },
+                proposal_promotion: {
+                    report_path: ".ax/experiments/workflow-candidate-proposal-promotion-current.json",
+                    decision: "needs_workflow_candidate_proposal_review",
+                    proposal_count: 4,
+                    emitted_draft_count: 0,
+                    skipped_proposal_count: 4,
+                    failures: ["proposal review report is not ready"],
+                },
+                proposal_ready_smoke: {
+                    promotion_report_path: ".ax/experiments/workflow-candidate-proposal-ready-smoke-promotion-current.json",
+                    draft_dir: ".ax/experiments/workflow-candidate-proposal-ready-smoke-drafts",
+                    review_decision: "workflow_candidate_proposal_reviews_ready",
+                    promotion_decision: "workflow_candidate_proposal_promotion_ready",
+                    proposal_count: 3,
+                    emitted_draft_count: 2,
+                    skipped_proposal_count: 1,
+                    failures: [],
+                },
                 next_actions: ["review batch"],
             },
         });
@@ -815,6 +844,11 @@ describe("classifier package operations report", () => {
         expect(report.totals.guarded_operation_count).toBe(1);
         expect(report.totals.failed_operation_count).toBe(1);
         expect(report.blocking_items).toContain("2 blind labels pending");
+        expect(report.blocking_items).toContain("workflow candidate proposal review pending 4 proposal(s)");
+        expect(report.blocking_items).toContain("workflow candidate proposal promotion blocked by review");
+        expect(report.workflow_status.proposal_review?.missing_field_count).toBe(16);
+        expect(report.workflow_status.proposal_promotion?.emitted_draft_count).toBe(0);
+        expect(report.workflow_status.proposal_ready_smoke?.emitted_draft_count).toBe(2);
         expect(report.blocking_items).toContain("demo/train failed 1 time(s)");
         expect(report.packages[0]?.guarded_operation_count).toBe(1);
         expect(report.packages[0]?.failed_operation_count).toBe(1);

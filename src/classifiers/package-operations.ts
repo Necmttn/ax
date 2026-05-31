@@ -390,6 +390,35 @@ export interface ClassifierLifecycleReviewStatus {
     readonly accepted_hard_negatives?: number;
     readonly invalid_blind_label_note_count?: number;
     readonly invalid_hard_negative_note_count?: number;
+    readonly proposal_review?: {
+        readonly report_path: string;
+        readonly summary_path?: string;
+        readonly decision?: string;
+        readonly proposal_count?: number;
+        readonly ready_count?: number;
+        readonly pending_count?: number;
+        readonly invalid_count?: number;
+        readonly missing_field_count?: number;
+        readonly failures: readonly string[];
+    };
+    readonly proposal_promotion?: {
+        readonly report_path: string;
+        readonly decision?: string;
+        readonly proposal_count?: number;
+        readonly emitted_draft_count?: number;
+        readonly skipped_proposal_count?: number;
+        readonly failures: readonly string[];
+    };
+    readonly proposal_ready_smoke?: {
+        readonly promotion_report_path: string;
+        readonly draft_dir?: string;
+        readonly review_decision?: string;
+        readonly promotion_decision?: string;
+        readonly proposal_count?: number;
+        readonly emitted_draft_count?: number;
+        readonly skipped_proposal_count?: number;
+        readonly failures: readonly string[];
+    };
     readonly focused_batch?: {
         readonly batch_path?: string;
         readonly batch_report_path?: string;
@@ -644,6 +673,65 @@ function numberRecordAt(record: Record<string, unknown>, key: string): Record<st
     const entries = Object.entries(value)
         .filter((entry): entry is [string, number] => typeof entry[1] === "number" && Number.isFinite(entry[1]));
     return entries.length > 0 ? Object.fromEntries(entries) : {};
+}
+
+function loadJsonRecord(path: string): Record<string, unknown> {
+    if (!existsSync(path)) {
+        return {};
+    }
+    const parsed = safeJsonParse<unknown>(readFileSync(path, "utf8"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown>
+        : {};
+}
+
+function loadProposalLifecycleStatus(baseDir: string): Pick<ClassifierLifecycleReviewStatus, "proposal_review" | "proposal_promotion" | "proposal_ready_smoke"> {
+    const reviewPath = join(baseDir, "workflow-candidate-proposal-review-current.json");
+    const reviewSummaryPath = join(baseDir, "workflow-candidate-proposal-review-current.md");
+    const promotionPath = join(baseDir, "workflow-candidate-proposal-promotion-current.json");
+    const smokePromotionPath = join(baseDir, "workflow-candidate-proposal-ready-smoke-promotion-current.json");
+    const smokeDraftDir = join(baseDir, "workflow-candidate-proposal-ready-smoke-drafts");
+    const review = loadJsonRecord(reviewPath);
+    const reviewTotals = jsonRecordAt(review, "totals");
+    const promotion = loadJsonRecord(promotionPath);
+    const smokePromotion = loadJsonRecord(smokePromotionPath);
+    return {
+        ...(Object.keys(review).length === 0 ? {} : {
+            proposal_review: {
+                report_path: reviewPath,
+                ...(existsSync(reviewSummaryPath) ? { summary_path: reviewSummaryPath } : {}),
+                ...(stringAt(review, "decision") === undefined ? {} : { decision: stringAt(review, "decision") as string }),
+                ...(numberAt(reviewTotals, "proposal_count") === undefined ? {} : { proposal_count: numberAt(reviewTotals, "proposal_count") as number }),
+                ...(numberAt(reviewTotals, "ready_count") === undefined ? {} : { ready_count: numberAt(reviewTotals, "ready_count") as number }),
+                ...(numberAt(reviewTotals, "pending_count") === undefined ? {} : { pending_count: numberAt(reviewTotals, "pending_count") as number }),
+                ...(numberAt(reviewTotals, "invalid_count") === undefined ? {} : { invalid_count: numberAt(reviewTotals, "invalid_count") as number }),
+                ...(numberAt(reviewTotals, "missing_field_count") === undefined ? {} : { missing_field_count: numberAt(reviewTotals, "missing_field_count") as number }),
+                failures: jsonArrayOfStrings(review.failures),
+            },
+        }),
+        ...(Object.keys(promotion).length === 0 ? {} : {
+            proposal_promotion: {
+                report_path: promotionPath,
+                ...(stringAt(promotion, "decision") === undefined ? {} : { decision: stringAt(promotion, "decision") as string }),
+                ...(numberAt(promotion, "proposal_count") === undefined ? {} : { proposal_count: numberAt(promotion, "proposal_count") as number }),
+                ...(numberAt(promotion, "emitted_draft_count") === undefined ? {} : { emitted_draft_count: numberAt(promotion, "emitted_draft_count") as number }),
+                ...(numberAt(promotion, "skipped_proposal_count") === undefined ? {} : { skipped_proposal_count: numberAt(promotion, "skipped_proposal_count") as number }),
+                failures: jsonArrayOfStrings(promotion.failures),
+            },
+        }),
+        ...(Object.keys(smokePromotion).length === 0 ? {} : {
+            proposal_ready_smoke: {
+                promotion_report_path: smokePromotionPath,
+                ...(existsSync(smokeDraftDir) ? { draft_dir: smokeDraftDir } : {}),
+                review_decision: "workflow_candidate_proposal_reviews_ready",
+                ...(stringAt(smokePromotion, "decision") === undefined ? {} : { promotion_decision: stringAt(smokePromotion, "decision") as string }),
+                ...(numberAt(smokePromotion, "proposal_count") === undefined ? {} : { proposal_count: numberAt(smokePromotion, "proposal_count") as number }),
+                ...(numberAt(smokePromotion, "emitted_draft_count") === undefined ? {} : { emitted_draft_count: numberAt(smokePromotion, "emitted_draft_count") as number }),
+                ...(numberAt(smokePromotion, "skipped_proposal_count") === undefined ? {} : { skipped_proposal_count: numberAt(smokePromotion, "skipped_proposal_count") as number }),
+                failures: jsonArrayOfStrings(smokePromotion.failures),
+            },
+        }),
+    };
 }
 
 export function buildOperationsReport(
@@ -1460,17 +1548,16 @@ export function buildExecutionGraphHealthReport(input: {
 }
 
 export function loadClassifierLifecycleReviewStatus(path: string): ClassifierLifecycleReviewStatus {
+    const proposalLifecycle = loadProposalLifecycleStatus(dirname(path));
     if (!existsSync(path)) {
         return {
             path,
             exists: false,
+            ...proposalLifecycle,
             next_actions: [],
         };
     }
-    const parsed = safeJsonParse<unknown>(readFileSync(path, "utf8"));
-    const record = parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? parsed as Record<string, unknown>
-        : {};
+    const record = loadJsonRecord(path);
     const stages = jsonRecordAt(record, "stages");
     const blindLabels = jsonRecordAt(stages, "blind_labels");
     const hardNegativeReview = jsonRecordAt(stages, "hard_negative_review");
@@ -1635,12 +1722,16 @@ export function loadClassifierLifecycleReviewStatus(path: string): ClassifierLif
         }
         : undefined;
     const baseNextActions = jsonArrayOfStrings(record.next_actions);
+    const proposalReviewAction = proposalLifecycle.proposal_review?.decision === "needs_workflow_candidate_proposal_review"
+        ? [`edit proposal briefs listed in ${proposalLifecycle.proposal_review.summary_path ?? proposalLifecycle.proposal_review.report_path} then run workflow-candidate-proposal-review`]
+        : [];
     const nextActions = focusedBatch?.suggestion_draft?.eval_decision === "needs_batch_review" && focusedBatch?.draft_promotion?.decision === "needs_human_notes"
         ? [
             `edit suggestion draft notes in ${focusedBatch.suggestion_draft.path} then run bun run classifiers:blind-review-batch -- --mode=promote-draft --batch=${focusedBatch.suggestion_draft.path} --out=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-promotion-report.json --json`,
+            ...proposalReviewAction,
             ...baseNextActions.filter((action) => action !== "complete focused batch review fields"),
         ]
-        : baseNextActions;
+        : [...proposalReviewAction, ...baseNextActions];
     return {
         path,
         exists: true,
@@ -1651,6 +1742,7 @@ export function loadClassifierLifecycleReviewStatus(path: string): ClassifierLif
         ...(acceptedHardNegatives === undefined ? {} : { accepted_hard_negatives: acceptedHardNegatives }),
         ...(invalidBlindLabelNoteCount === 0 ? {} : { invalid_blind_label_note_count: invalidBlindLabelNoteCount }),
         ...(invalidHardNegativeNoteCount === 0 ? {} : { invalid_hard_negative_note_count: invalidHardNegativeNoteCount }),
+        ...proposalLifecycle,
         ...(focusedBatch === undefined ? {} : { focused_batch: focusedBatch }),
         next_actions: nextActions,
     };
@@ -1702,6 +1794,12 @@ export function buildClassifierLifecycleInsightReport(input: {
         ...(input.workflowStatus.exists && input.workflowStatus.decision && input.workflowStatus.decision !== "ready_for_next_model_run" && input.workflowStatus.decision !== "healthy"
             ? [`workflow status ${input.workflowStatus.decision}`]
             : []),
+        ...(input.workflowStatus.proposal_review?.decision === "needs_workflow_candidate_proposal_review"
+            ? [`workflow candidate proposal review pending ${input.workflowStatus.proposal_review.pending_count ?? 0} proposal(s)`]
+            : []),
+        ...(input.workflowStatus.proposal_promotion?.decision === "needs_workflow_candidate_proposal_review"
+            ? ["workflow candidate proposal promotion blocked by review"]
+            : []),
         ...((input.workflowStatus.pending_blind_labels ?? 0) > 0
             ? [`${input.workflowStatus.pending_blind_labels} blind labels pending`]
             : []),
@@ -1711,9 +1809,11 @@ export function buildClassifierLifecycleInsightReport(input: {
     ];
     const pendingBlindLabels = input.workflowStatus.pending_blind_labels ?? 0;
     const pendingHardNegatives = input.workflowStatus.pending_hard_negatives ?? 0;
+    const proposalReviewPending = input.workflowStatus.proposal_review?.decision === "needs_workflow_candidate_proposal_review";
+    const proposalPromotionBlocked = input.workflowStatus.proposal_promotion?.decision === "needs_workflow_candidate_proposal_review";
     const decision: ClassifierLifecycleInsightReport["decision"] = input.graph.decision === "empty_graph"
         ? "needs_graph_apply"
-        : pendingBlindLabels > 0 || pendingHardNegatives > 0 || input.workflowStatus.decision === "needs_human_review"
+        : pendingBlindLabels > 0 || pendingHardNegatives > 0 || input.workflowStatus.decision === "needs_human_review" || proposalReviewPending || proposalPromotionBlocked
             ? "needs_human_review"
             : input.graph.guarded_operations.length > 0
                 ? "has_guarded_operations"

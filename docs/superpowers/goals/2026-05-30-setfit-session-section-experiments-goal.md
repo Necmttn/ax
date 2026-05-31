@@ -11420,6 +11420,85 @@ Decision:
   promotion-draft operation results, so `classifiers lifecycle` can report
   proposal review pending vs ready vs smoke-passed without opening raw JSON.
 
+## E206 - Proposal Lifecycle Visibility
+
+Question:
+
+- Can `classifiers lifecycle` show workflow-candidate proposal review,
+  promotion, and ready-smoke state without opening raw JSON artifacts?
+
+Implementation:
+
+- Extended `loadClassifierLifecycleReviewStatus` in
+  `src/classifiers/package-operations.ts` to read adjacent proposal artifacts:
+  - `.ax/experiments/workflow-candidate-proposal-review-current.json`
+  - `.ax/experiments/workflow-candidate-proposal-review-current.md`
+  - `.ax/experiments/workflow-candidate-proposal-promotion-current.json`
+  - `.ax/experiments/workflow-candidate-proposal-ready-smoke-promotion-current.json`
+  - `.ax/experiments/workflow-candidate-proposal-ready-smoke-drafts/`
+- Added proposal review, promotion, and ready-smoke fields to the lifecycle
+  report.
+- Added lifecycle blocking items and next action text for pending proposal
+  review.
+- Extended lifecycle text rendering in
+  `src/cli/classifiers-package-operations.ts`.
+- Adjusted lifecycle CLI exit behavior so `--out` status-artifact writes exit
+  `0` even when the lifecycle decision is non-healthy. Interactive lifecycle
+  output still exits nonzero when not healthy.
+- Added lifecycle tests for proposal state in:
+  - `scripts/classifier-package-operations.test.ts`
+  - `src/classifiers/package-service.test.ts`
+
+Commands:
+
+```sh
+bun test scripts/classifier-package-operations.test.ts src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts
+bun src/cli/index.ts classifiers package-operations --operation=classifier-lifecycle-status --execute --out=.ax/experiments/classifier-package-execution-classifier-lifecycle-status-e206.json
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e206-direct.json
+bun src/cli/index.ts classifiers lifecycle | tee .ax/experiments/classifiers-lifecycle-e206.txt
+```
+
+Artifacts:
+
+- `.ax/experiments/classifiers-lifecycle-current.json`
+- `.ax/experiments/classifiers-lifecycle-e206.json`
+- `.ax/experiments/classifiers-lifecycle-e206-direct.json`
+- `.ax/experiments/classifiers-lifecycle-e206.txt`
+- `.ax/experiments/classifier-package-execution-classifier-lifecycle-status-e206.json`
+
+Results:
+
+- Package operation decision: `executed`
+- Package operation exit code: `0`
+- Lifecycle decision: `needs_human_review`
+- Proposal review decision: `needs_workflow_candidate_proposal_review`
+- Proposal review ready/pending/invalid: `0/4/0`
+- Proposal review missing fields: `16`
+- Proposal promotion decision: `needs_workflow_candidate_proposal_review`
+- Proposal promotion drafts/skipped: `0/4`
+- Proposal ready-smoke promotion decision:
+  `workflow_candidate_proposal_promotion_ready`
+- Proposal ready-smoke drafts/skipped: `2/1`
+- Lifecycle text now includes:
+  - `proposal review: needs_workflow_candidate_proposal_review`
+  - `proposal promotion: needs_workflow_candidate_proposal_review`
+  - `proposal ready smoke: workflow_candidate_proposal_promotion_ready`
+  - next action pointing to
+    `.ax/experiments/workflow-candidate-proposal-review-current.md`
+
+Decision:
+
+- E206 makes the proposal gate visible in the classifier lifecycle report.
+  Agents can now see that the production proposal pack is pending human review,
+  promotion is blocked by that review, and the ready-review smoke proves the
+  post-review path works.
+- The current end-to-end state remains intentionally blocked on actual proposal
+  brief review, not missing infrastructure.
+- Next useful slice: turn one reviewed proposal fixture into the existing
+  improvement/proposal graph lifecycle or add a `workflow-candidate-proposal`
+  graph projection so proposal review state is queryable from SurrealDB, not
+  only filesystem lifecycle artifacts.
+
 ## E196 - First-Class Hybrid Robustness Gate
 
 Question:

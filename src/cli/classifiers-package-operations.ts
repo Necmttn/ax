@@ -327,6 +327,30 @@ export function renderClassifierLifecycleInsightText(report: ClassifierLifecycle
     } else {
         lines.push(`workflow status: missing (${report.workflow_status.path})`);
     }
+    if (report.workflow_status.proposal_review) {
+        const review = report.workflow_status.proposal_review;
+        lines.push(`proposal review: ${review.decision ?? "unknown"} (${review.report_path})`);
+        lines.push(`  ready/pending/invalid: ${review.ready_count ?? 0}/${review.pending_count ?? 0}/${review.invalid_count ?? 0}`);
+        if (review.missing_field_count !== undefined) {
+            lines.push(`  missing fields: ${review.missing_field_count}`);
+        }
+        if (review.summary_path) {
+            lines.push(`  checklist: ${review.summary_path}`);
+        }
+    }
+    if (report.workflow_status.proposal_promotion) {
+        const promotion = report.workflow_status.proposal_promotion;
+        lines.push(`proposal promotion: ${promotion.decision ?? "unknown"} (${promotion.report_path})`);
+        lines.push(`  drafts/skipped: ${promotion.emitted_draft_count ?? 0}/${promotion.skipped_proposal_count ?? 0}`);
+        if (promotion.failures.length > 0) {
+            lines.push(`  failures: ${promotion.failures.join("; ")}`);
+        }
+    }
+    if (report.workflow_status.proposal_ready_smoke) {
+        const smoke = report.workflow_status.proposal_ready_smoke;
+        lines.push(`proposal ready smoke: ${smoke.promotion_decision ?? "unknown"} (${smoke.promotion_report_path})`);
+        lines.push(`  drafts/skipped: ${smoke.emitted_draft_count ?? 0}/${smoke.skipped_proposal_count ?? 0}`);
+    }
     if (report.workflow_status.focused_batch) {
         const batch = report.workflow_status.focused_batch;
         lines.push(`focused batch: ${batch.batch_path ?? "unknown"}`);
@@ -661,7 +685,7 @@ export const runClassifiersLifecycle = (
         } else if (!input.out) {
             console.log(renderClassifierLifecycleInsightText(report));
         }
-        if (report.decision !== "healthy") {
+        if (!input.out && report.decision !== "healthy") {
             process.exitCode = 1;
         }
     }).pipe(
