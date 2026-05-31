@@ -48,6 +48,7 @@ export interface ClassifierPackageOperationsCommandInput extends ClassifierPacka
     readonly predicate?: string;
     readonly subject?: string;
     readonly valueContains?: string;
+    readonly valueEquals?: string;
     readonly root?: string;
     readonly workflowStatusPath?: string;
 }
@@ -305,6 +306,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `filter predicate: ${report.query.predicate ?? "all"}`,
         `filter subject: ${report.query.subject ?? "all"}`,
         `filter value contains: ${report.query.value_contains ?? "all"}`,
+        `filter value equals: ${report.query.value_equals ?? "all"}`,
         `nodes/edges/facts: ${report.totals.node_count}/${report.totals.edge_count}/${report.totals.fact_count}`,
         `packages/operations/executions/artifacts: ${report.totals.package_count}/${report.totals.operation_count}/${report.totals.execution_count}/${report.totals.artifact_count}`,
         `execution/guard/artifact/lifecycle/helper facts: ${report.totals.execution_fact_count}/${report.totals.guard_fact_count}/${report.totals.artifact_fact_count}/${report.totals.lifecycle_fact_count}/${report.totals.embedding_helper_fact_count}`,
@@ -693,6 +695,7 @@ export const runClassifiersPackageOperations = (
                 ...(input.predicate ? { predicate: input.predicate } : {}),
                 ...(input.subject ? { subject: input.subject } : {}),
                 ...(input.valueContains ? { value_contains: input.valueContains } : {}),
+                ...(input.valueEquals !== undefined ? { value_equals: input.valueEquals } : {}),
             } as const;
             const report = input.out
                 ? yield* packages.writeExecutionGraphHealthReport({ out: input.out, query })

@@ -540,6 +540,7 @@ describe("classifiers package-operations format", () => {
                 subject: "classifier_lifecycle:workflow_candidate_proposal",
                 source_kind: "classifier_package_execution",
                 value_contains: "src/cli/index.ts",
+                value_equals: "bind_inputs",
             },
             operations: [],
             guarded_operations: [],
@@ -591,6 +592,7 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("filter predicate: review_pipeline_prepared_argv");
         expect(output).toContain("filter source kind: classifier_package_execution");
         expect(output).toContain("filter value contains: src/cli/index.ts");
+        expect(output).toContain("filter value equals: bind_inputs");
         expect(output).toContain("execution/guard/artifact/lifecycle/helper facts: 0/0/0/1/0");
         expect(output).toContain("lifecycle facts:");
         expect(output).toContain("- review_pipeline_prepared_argv: [\"bun\",\"src/cli/index.ts\"]");

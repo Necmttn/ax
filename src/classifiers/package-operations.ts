@@ -398,6 +398,7 @@ export interface ClassifierGraphRoutingPolicyRecommendedQuery {
     readonly predicate?: string;
     readonly subject?: string;
     readonly value_contains?: string;
+    readonly value_equals?: string;
 }
 
 export interface ClassifierGraphRoutingPolicySummary {
@@ -455,6 +456,7 @@ export interface ClassifierGraphHealthQuery {
     readonly predicate?: string;
     readonly subject?: string;
     readonly value_contains?: string;
+    readonly value_equals?: string;
 }
 
 export interface ClassifierPackageExecutionGraphHealthReport {
@@ -1079,6 +1081,13 @@ function graphFactValueContains(value: unknown, needle: string | undefined): boo
         return JSON.stringify(value).includes(needle);
     }
     return false;
+}
+
+function graphFactValueEquals(value: unknown, expected: string | undefined): boolean {
+    if (expected === undefined) return true;
+    if (typeof value === "string") return value === expected;
+    if (typeof value === "number" || typeof value === "boolean" || value === null) return String(value) === expected;
+    return JSON.stringify(value) === expected;
 }
 
 function numberRecordAt(record: Record<string, unknown>, key: string): Record<string, number> | undefined {
@@ -2123,6 +2132,7 @@ export function buildExecutionGraphHealthReport(input: {
         ...(input.query?.predicate ? { predicate: input.query.predicate } : {}),
         ...(input.query?.subject ? { subject: input.query.subject } : {}),
         ...(input.query?.value_contains ? { value_contains: input.query.value_contains } : {}),
+        ...(input.query?.value_equals !== undefined ? { value_equals: input.query.value_equals } : {}),
     };
     const nodesById = new Map(input.nodes.map((node) => [node.graph_id, node]));
     const operationByExecution = new Map<string, string>();
@@ -2331,7 +2341,8 @@ export function buildExecutionGraphHealthReport(input: {
             !query.nearest_fixture_id &&
             (!query.predicate || fact.predicate === query.predicate) &&
             (!query.subject || fact.subject === query.subject) &&
-            graphFactValueContains(fact.value, query.value_contains)
+            graphFactValueContains(fact.value, query.value_contains) &&
+            graphFactValueEquals(fact.value, query.value_equals)
         )
         : [];
     const resultEmbeddingHelperFacts = query.mode === "embedding-helper" || query.mode === "evidence"
@@ -2354,7 +2365,8 @@ export function buildExecutionGraphHealthReport(input: {
             (!query.nearest_fixture_id || (fact.nearest_neighbors ?? []).some((neighbor) => neighbor.fixture_id === query.nearest_fixture_id)) &&
             (!query.predicate || fact.predicate === query.predicate) &&
             (!query.subject || fact.subject === query.subject) &&
-            graphFactValueContains(fact.value, query.value_contains)
+            graphFactValueContains(fact.value, query.value_contains) &&
+            graphFactValueEquals(fact.value, query.value_equals)
         )
         : [];
     const routingPolicyAvailableFacts = query.mode === "embedding-helper" || query.mode === "evidence"
@@ -2375,7 +2387,8 @@ export function buildExecutionGraphHealthReport(input: {
             (!query.nearest_fixture_id || (fact.nearest_neighbors ?? []).some((neighbor) => neighbor.fixture_id === query.nearest_fixture_id)) &&
             (!query.predicate || fact.predicate === query.predicate) &&
             (!query.subject || fact.subject === query.subject) &&
-            graphFactValueContains(fact.value, query.value_contains)
+            graphFactValueContains(fact.value, query.value_contains) &&
+            graphFactValueEquals(fact.value, query.value_equals)
         )
         : [];
     const resultEvidencePaths = Array.from(new Set([
@@ -2469,6 +2482,7 @@ export function buildExecutionGraphHealthReport(input: {
             ...(query.predicate === undefined ? {} : { predicate: query.predicate }),
             ...(query.subject === undefined ? {} : { subject: query.subject }),
             ...(query.value_contains === undefined ? {} : { value_contains: query.value_contains }),
+            ...(query.value_equals === undefined ? {} : { value_equals: query.value_equals }),
         };
     const pushRecommendedFloorArg = (argv: string[], flag: string, value: string | number | undefined): void => {
         if (value !== undefined) {
@@ -2495,6 +2509,7 @@ export function buildExecutionGraphHealthReport(input: {
             pushRecommendedFloorArg(argv, "--predicate", recommendedFloorQuery.predicate);
             pushRecommendedFloorArg(argv, "--subject", recommendedFloorQuery.subject);
             pushRecommendedFloorArg(argv, "--value-contains", recommendedFloorQuery.value_contains);
+            pushRecommendedFloorArg(argv, "--value", recommendedFloorQuery.value_equals);
             return argv;
         })();
     const recommendedFloorCandidates = recommendedFloorQuery === undefined

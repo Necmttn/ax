@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E371 adds
-  `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-execution-e371.json`
+- Index continuation: E372 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-value-e372.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-e371.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-value-e372-graph.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,52 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E372 - Query Recommended Action Phase by Exact Value
+
+Question:
+- E371 exposes the recommended action execution phase, but can services query
+  exactly the phase they can execute, such as `bind_inputs`, without relying on
+  substring matching?
+
+Implementation:
+- Added `value_equals` to classifier graph health queries.
+- Added `--value=<value>` to `classifiers package-operations --graph-health`
+  and the `classifiers graph` alias.
+- Applied the exact-value filter to lifecycle facts, embedding-helper facts,
+  and routing-policy candidate facts.
+- Text graph-health output now renders `filter value equals`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-value-e372.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-value-e372-graph.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-value-e372.txt`
+
+Results:
+- `classifiers package-operations --graph-health --graph-mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=bind_inputs`
+  returns exactly one lifecycle fact with value `bind_inputs`.
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=bind_inputs`
+  returns the same exact fact through the graph alias.
+- Text output shows `filter value equals: bind_inputs` and renders
+  `review_pipeline_recommended_action_execution_phase: bind_inputs`.
+
+Decision:
+- Review executors can now discover phase-specific lifecycle facts with exact
+  equality, which is a better service contract than `--value-contains` for enum
+  routing fields.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E372 package-operations and graph-alias reports both preserve
+  `query.value_equals=bind_inputs`.
+- Both reports return exactly one lifecycle fact whose predicate is
+  `review_pipeline_recommended_action_execution_phase` and whose value is
+  `bind_inputs`.
+- Text output renders the exact-value filter and the matching phase fact.
 
 ## E371 - Summarize Recommended Action Execution Route
 
