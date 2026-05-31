@@ -1024,6 +1024,21 @@ export interface ClassifierLifecycleRoutingSummaryReport {
     };
 }
 
+export interface ClassifierLifecycleRouteBindingPreviewReport {
+    readonly schema: "ax.classifier_lifecycle_route_binding_preview.v1";
+    readonly source_schema: ClassifierLifecycleRoutingSummaryReport["schema"];
+    readonly decision: "ready_to_execute" | "missing_values" | "no_active_route";
+    readonly active_route_kind?: ClassifierLifecycleRoutingItem["kind"];
+    readonly active_route_command_kind?: string;
+    readonly provided_inputs: readonly string[];
+    readonly missing_values: readonly string[];
+    readonly input_bindings: readonly string[];
+    readonly original_argv: readonly string[];
+    readonly bound_argv: readonly string[];
+    readonly next_action: "execute_bound_active_route" | "provide_missing_values" | "inspect_lifecycle";
+    readonly remediation: string;
+}
+
 function reviewPipelineLifecycleNextAction(
     lifecycle: NonNullable<ClassifierLifecycleReviewStatus["review_pipeline_lifecycle"]>,
 ): ClassifierReviewPipelineLifecycleInsight["next_action"] {
@@ -3609,6 +3624,69 @@ export function summarizeClassifierLifecycleRouting(
     };
 }
 
+function bindingInputName(binding: string): string {
+    return binding.split(" ", 1)[0] ?? "";
+}
+
+function bindingPlaceholder(binding: string): string | undefined {
+    return binding.split(" ").find((part) => part.startsWith("placeholder="))?.slice("placeholder=".length);
+}
+
+export function buildClassifierLifecycleRouteBindingPreview(
+    summary: ClassifierLifecycleRoutingSummaryReport,
+    values: Readonly<Record<string, string>>,
+): ClassifierLifecycleRouteBindingPreviewReport {
+    const activeRoute = summary.active_route;
+    const inputNames = summary.active_route_input_bindings
+        .map(bindingInputName)
+        .filter((input) => input.length > 0);
+    const providedInputs = Object.keys(values).filter((key) => values[key] !== undefined && values[key] !== "");
+    const missingValues = inputNames.filter((input) => values[input] === undefined || values[input] === "");
+    const boundArgv = activeRoute === undefined || missingValues.length > 0
+        ? activeRoute?.argv ?? []
+        : activeRoute.argv.map((arg) => {
+            let next = arg;
+            for (const binding of summary.active_route_input_bindings) {
+                const input = bindingInputName(binding);
+                const placeholder = bindingPlaceholder(binding);
+                const value = values[input];
+                if (placeholder && value !== undefined) {
+                    next = next.replace(placeholder, value);
+                }
+            }
+            return next;
+        });
+    const decision: ClassifierLifecycleRouteBindingPreviewReport["decision"] = activeRoute === undefined
+        ? "no_active_route"
+        : missingValues.length > 0
+        ? "missing_values"
+        : "ready_to_execute";
+    return {
+        schema: "ax.classifier_lifecycle_route_binding_preview.v1",
+        source_schema: summary.schema,
+        decision,
+        ...(activeRoute === undefined ? {} : {
+            active_route_kind: activeRoute.kind,
+            active_route_command_kind: activeRoute.command_kind,
+        }),
+        provided_inputs: providedInputs,
+        missing_values: missingValues,
+        input_bindings: summary.active_route_input_bindings,
+        original_argv: activeRoute?.argv ?? [],
+        bound_argv: boundArgv,
+        next_action: decision === "ready_to_execute"
+            ? "execute_bound_active_route"
+            : decision === "missing_values"
+            ? "provide_missing_values"
+            : "inspect_lifecycle",
+        remediation: decision === "ready_to_execute"
+            ? "Execute the bound active route command."
+            : decision === "missing_values"
+            ? "Provide the missing active route input values before executing."
+            : "No active lifecycle route is available. Inspect lifecycle blockers before binding inputs.",
+    };
+}
+
 export function writeOperationsReport(path: string, report: ClassifierPackageOperationsReport): void {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
@@ -3678,6 +3756,11 @@ export function writeClassifierLifecycleInsightReport(path: string, report: Clas
 }
 
 export function writeClassifierLifecycleRoutingSummaryReport(path: string, report: ClassifierLifecycleRoutingSummaryReport): void {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+}
+
+export function writeClassifierLifecycleRouteBindingPreviewReport(path: string, report: ClassifierLifecycleRouteBindingPreviewReport): void {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
 }

@@ -18,6 +18,7 @@ import {
     discoverClassifierPackageExecutionReportPaths,
     discoverClassifierPackageManifestPaths,
     executeOperationPlanReport,
+    buildClassifierLifecycleRouteBindingPreview,
     loadClassifierLifecycleReviewStatus,
     summarizeClassifierLifecycleRouting,
     summarizeClassifierPackageOperations,
@@ -2370,6 +2371,19 @@ describe("classifier package operations report", () => {
         });
         expect(summary.executable_routes).toEqual([]);
         expect(summary.active_route_argv).toEqual(["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"]);
+
+        const preview = buildClassifierLifecycleRouteBindingPreview(summary, { reviewer: "necmett" });
+
+        expect(preview).toMatchObject({
+            schema: "ax.classifier_lifecycle_route_binding_preview.v1",
+            source_schema: "ax.classifier_lifecycle_routing_summary.v1",
+            decision: "ready_to_execute",
+            active_route_kind: "review_pipeline_action",
+            missing_values: [],
+            provided_inputs: ["reviewer"],
+            bound_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=necmett"],
+            next_action: "execute_bound_active_route",
+        });
     });
 
     test("routes lifecycle insight reports to graph query repair when the filtered graph has a suggestion", () => {

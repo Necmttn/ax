@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
 import { ClassifierPackageService } from "../classifiers/package-service.ts";
 import {
+    renderClassifierLifecycleRouteBindingPreviewText,
     renderClassifierLifecycleInsightText,
     renderClassifierLifecycleRoutingSummaryText,
     renderClassifierPackageExecutionFactsText,
@@ -20,6 +21,7 @@ import {
     runClassifiersPackageOperations,
 } from "./classifiers-package-operations.ts";
 import type {
+    ClassifierLifecycleRouteBindingPreviewReport,
     ClassifierLifecycleInsightReport,
     ClassifierLifecycleRoutingSummaryReport,
     ClassifierPackageExecutionFactProjectionReport,
@@ -1626,6 +1628,33 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("input bindings: reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string");
         expect(output).toContain("argv: bun src/cli/index.ts --review-provenance-reviewer=<reviewer>");
         expect(output).toContain("routes executable/missing-input/blocked/secondary: 0/1/0/0");
+    });
+
+    test("renders classifier lifecycle route binding previews", () => {
+        const report: ClassifierLifecycleRouteBindingPreviewReport = {
+            schema: "ax.classifier_lifecycle_route_binding_preview.v1",
+            source_schema: "ax.classifier_lifecycle_routing_summary.v1",
+            decision: "ready_to_execute",
+            active_route_kind: "review_pipeline_action",
+            active_route_command_kind: "stamp_review_provenance",
+            provided_inputs: ["reviewer"],
+            missing_values: [],
+            input_bindings: ["reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string"],
+            original_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+            bound_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=necmett"],
+            next_action: "execute_bound_active_route",
+            remediation: "Execute the bound active route command.",
+        };
+
+        const output = renderClassifierLifecycleRouteBindingPreviewText(report);
+
+        expect(output).toContain("classifier lifecycle route binding preview");
+        expect(output).toContain("decision: ready_to_execute");
+        expect(output).toContain("active: review_pipeline_action stamp_review_provenance");
+        expect(output).toContain("provided inputs: reviewer");
+        expect(output).toContain("missing values: none");
+        expect(output).toContain("bound argv: bun src/cli/index.ts --review-provenance-reviewer=necmett");
+        expect(output).toContain("next action: execute_bound_active_route");
     });
 
     test("renders multi-package summaries", () => {

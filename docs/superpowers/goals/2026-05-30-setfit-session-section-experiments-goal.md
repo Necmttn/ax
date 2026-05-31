@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E433 adds
-  `.ax/experiments/classifier-lifecycle-routing-input-bindings-e433.json`
+- Index continuation: E434 adds
+  `.ax/experiments/classifier-lifecycle-route-binding-preview-e434.json`
   and
-  `.ax/experiments/classifier-lifecycle-routing-input-bindings-e433.txt`
+  `.ax/experiments/classifier-lifecycle-route-binding-preview-e434.txt`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,49 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E434 - Preview Bound Active Route Commands
+
+Question:
+- Can services/debugging bind active route inputs into argv and verify the
+  resulting command before executing anything?
+
+Implementation:
+- Added `buildClassifierLifecycleRouteBindingPreview` and the
+  `ax.classifier_lifecycle_route_binding_preview.v1` report shape.
+- Added compact binding-preview text rendering.
+- Added `ax classifiers lifecycle --route-inputs key=value,...` so route
+  binding can be previewed from the CLI.
+
+Artifacts:
+- `.ax/experiments/classifier-lifecycle-route-binding-preview-e434.json`
+- `.ax/experiments/classifier-lifecycle-route-binding-preview-e434.txt`
+
+Results:
+- With `reviewer=necmett` and
+  `reviewed_at=2026-05-31T12:34:56.000Z`, the real preview reports
+  `decision=ready_to_execute`.
+- `missing_values=[]`.
+- Bound argv includes
+  `--review-provenance-reviewer=necmett` and
+  `--review-provenance-reviewed-at=2026-05-31T12:34:56.000Z`.
+- The preview reports `next_action=execute_bound_active_route`.
+
+Decision:
+- E434 closes the loop from route discovery to safe execution preview: services
+  can now request missing values, produce bound argv, and show or execute that
+  command deliberately rather than assembling command strings by hand.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts
+bun src/cli/index.ts classifiers lifecycle --route-inputs reviewer=necmett,reviewed_at=2026-05-31T12:34:56.000Z --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --out .ax/experiments/classifier-lifecycle-route-binding-preview-e434.json --json
+bun src/cli/index.ts classifiers lifecycle --route-inputs reviewer=necmett,reviewed_at=2026-05-31T12:34:56.000Z --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute > .ax/experiments/classifier-lifecycle-route-binding-preview-e434.txt || true
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-lifecycle-route-binding-preview-e434.json").json(); if (saved.decision !== "ready_to_execute") throw new Error(`bad decision ${saved.decision}`); if (!saved.bound_argv.includes("--review-provenance-reviewer=necmett")) throw new Error("missing reviewer binding"); if (!saved.bound_argv.includes("--review-provenance-reviewed-at=2026-05-31T12:34:56.000Z")) throw new Error("missing reviewed-at binding"); if (saved.missing_values.length !== 0) throw new Error(`missing values ${JSON.stringify(saved.missing_values)}`);'
+rg -n -- "decision: ready_to_execute|bound argv: .*--review-provenance-reviewer=necmett .*--review-provenance-reviewed-at=2026-05-31T12:34:56.000Z|next action: execute_bound_active_route" .ax/experiments/classifier-lifecycle-route-binding-preview-e434.txt
+```
+
+Focused tests and artifact assertions passed.
 
 ## E433 - Surface Active Route Input Bindings
 
