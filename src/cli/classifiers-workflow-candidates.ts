@@ -455,6 +455,7 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly review_pipeline_next_action: string;
     readonly review_pipeline_command_status: WorkflowCandidateReviewCoveragePipelineCommandStatus;
     readonly review_pipeline_command_can_execute: boolean;
+    readonly review_pipeline_command_next_action: string;
     readonly review_pipeline_command_blockers: readonly WorkflowCandidateReviewCoveragePipelineCommandBlocker[];
     readonly review_pipeline_command_blocker_details: readonly WorkflowCandidateReviewCoveragePipelineCommandBlockerDetail[];
     readonly review_pipeline_command_kind?: WorkflowCandidateReviewCoveragePipelineCommandKind;
@@ -2083,6 +2084,7 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             `coverage review pipeline next action: ${report.coverage_review.review_pipeline_next_action}`,
             `coverage review pipeline command status: ${report.coverage_review.review_pipeline_command_status}`,
             `coverage review pipeline command can execute: ${report.coverage_review.review_pipeline_command_can_execute ? "yes" : "no"}`,
+            `coverage review pipeline command next action: ${report.coverage_review.review_pipeline_command_next_action}`,
             `coverage review pipeline command blockers: ${report.coverage_review.review_pipeline_command_blockers.length === 0 ? "none" : report.coverage_review.review_pipeline_command_blockers.join(", ")}`,
             `coverage review pipeline command blocker details: ${report.coverage_review.review_pipeline_command_blocker_details.length === 0 ? "none" : report.coverage_review.review_pipeline_command_blocker_details.map((detail) => `${detail.blocker}=${detail.count}`).join(", ")}`,
             `coverage review pipeline command blocker remediations: ${report.coverage_review.review_pipeline_command_blocker_details.length === 0 ? "none" : report.coverage_review.review_pipeline_command_blocker_details.map((detail) => `${detail.blocker}: ${detail.remediation}`).join(" | ")}`,
@@ -3406,6 +3408,9 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
     const reviewPipelineCommandCanExecute = workflowCandidateReviewCoveragePipelineCommandCanExecute(
         reviewPipelineCommandStatus,
     );
+    const reviewPipelineCommandNextAction = workflowCandidateReviewCoveragePipelineCommandNextAction(
+        reviewPipelineCommandStatus,
+    );
     const reviewPipelineCommandBlockers = workflowCandidateReviewCoveragePipelineCommandBlockers(reviewPipelineCommandStatus);
     const reviewPipelineCommandBlockerDetails = workflowCandidateReviewCoveragePipelineCommandBlockerDetails({
         blockers: reviewPipelineCommandBlockers,
@@ -3468,6 +3473,7 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
         `- Pipeline next action: ${reviewPipelineNextAction}`,
         `- Pipeline command status: \`${reviewPipelineCommandStatus}\``,
         `- Pipeline command can execute: \`${reviewPipelineCommandCanExecute ? "yes" : "no"}\``,
+        `- Pipeline command next action: ${reviewPipelineCommandNextAction}`,
         `- Pipeline command blockers: ${reviewPipelineCommandBlockers.length === 0 ? "`none`" : reviewPipelineCommandBlockers.map((blocker) => `\`${blocker}\``).join(", ")}`,
         `- Pipeline command blocker details: ${reviewPipelineCommandBlockerDetails.length === 0 ? "`none`" : reviewPipelineCommandBlockerDetails.map((detail) => `\`${detail.blocker}=${detail.count}\``).join(", ")}`,
         ...(reviewPipelineCommand === undefined ? [] : [
@@ -4125,6 +4131,19 @@ const workflowCandidateReviewCoveragePipelineCommandCanExecute = (
     status: WorkflowCandidateReviewCoveragePipelineCommandStatus,
 ): boolean => status === "ready_to_execute";
 
+const workflowCandidateReviewCoveragePipelineCommandNextAction = (
+    status: WorkflowCandidateReviewCoveragePipelineCommandStatus,
+): string => {
+    switch (status) {
+        case "unavailable":
+            return "No pipeline command is available for the current stage.";
+        case "requires_inputs":
+            return "Bind required pipeline inputs before executing the command.";
+        case "ready_to_execute":
+            return "Execute the pipeline command and capture its output artifacts.";
+    }
+};
+
 const workflowCandidateReviewCoveragePipelineCommandBlockers = (
     status: WorkflowCandidateReviewCoveragePipelineCommandStatus,
 ): WorkflowCandidateReviewCoveragePipelineCommandBlocker[] => {
@@ -4615,6 +4634,9 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     const reviewPipelineCommandCanExecute = workflowCandidateReviewCoveragePipelineCommandCanExecute(
         reviewPipelineCommandStatus,
     );
+    const reviewPipelineCommandNextAction = workflowCandidateReviewCoveragePipelineCommandNextAction(
+        reviewPipelineCommandStatus,
+    );
     const reviewPipelineCommandBlockers = workflowCandidateReviewCoveragePipelineCommandBlockers(reviewPipelineCommandStatus);
     const reviewPipelineCommandBlockerDetails = workflowCandidateReviewCoveragePipelineCommandBlockerDetails({
         blockers: reviewPipelineCommandBlockers,
@@ -4710,6 +4732,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         review_pipeline_next_action: reviewPipelineNextAction,
         review_pipeline_command_status: reviewPipelineCommandStatus,
         review_pipeline_command_can_execute: reviewPipelineCommandCanExecute,
+        review_pipeline_command_next_action: reviewPipelineCommandNextAction,
         review_pipeline_command_blockers: reviewPipelineCommandBlockers,
         review_pipeline_command_blocker_details: reviewPipelineCommandBlockerDetails,
         ...(reviewPipelineCommandKind === undefined ? {} : { review_pipeline_command_kind: reviewPipelineCommandKind }),
