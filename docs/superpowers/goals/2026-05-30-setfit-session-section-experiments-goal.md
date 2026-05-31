@@ -16,6 +16,30 @@ The expected output is not only higher label accuracy. The output must improve
 the graph: better evidence-backed facts, clearer session sections, and stronger
 harness candidates.
 
+## Current Checkpoint Index
+
+This table is the audit shortcut for the long experiment log. Treat the
+artifact path as the evidence to inspect before trusting any summary row.
+
+| Area | Experiments | Evidence | Current decision | Gate status | Commit anchor | Next action |
+|---|---|---|---|---|---|---|
+| Deterministic control | E0-E1 | `.ax/experiments/model-windows-e1.jsonl` | Baseline and model-ready window export are healthy. | Passed: 1000 windows, 100% under 384 approximate tokens, 74.2% prior context. | Earlier experiment log | Keep deterministic classifiers as high-precision seeds/fallbacks. |
+| Raw embedding classifier | E2-E2b | `.ax/experiments/embedding-baseline-e2-expanded.json` | Raw nearest-neighbor embeddings are not adoption quality. | Failed: macro F1 `0.1239`, `none` FP `0.7273`. | Earlier experiment log | Use embeddings for helper/search/review tasks, not direct promotion. |
+| SetFit model quality | E3-E44 | `.ax/experiments/setfit-gate-stack-robustness-e45-pair-group-repeated.json` | Plain SetFit is fragile; hybrid gate-stack is the viable path. | Mixed: several model-quality failures before candidate gate stack. | Earlier experiment log | Keep improving through gates, fixtures, and failure analysis rather than raw model claims. |
+| Blind/review workflow | E46-E65+ | `.ax/experiments/blind-workflow-status-e57.json` and related review artifacts | Human review is mandatory before fixtures or graph facts are promoted. | Pending where review rows are incomplete. | Earlier experiment log | Prefer review queues/workspaces over automatic label edits. |
+| Transcript graph projection | E155-E157 | `.ax/experiments/transcript-candidate-graph-projection-e155.json`, `.ax/experiments/workflow-candidate-report-e156.json`, `.ax/experiments/workflow-candidate-cli-e157.json` | Real persisted classifier facts can become graph-backed workflow candidates. | Passed for projection/query; still needs product review filters and proposal gates. | E155/E156/E157 commits in log | Use graph facts for evidence-backed workflow/harness discovery. |
+| Proposal lifecycle | E168-E208 | `.ax/experiments/workflow-candidate-proposal-list-e168.json`, `.ax/experiments/classifier-package-execution-write-plan-e208.json` | Classifier-derived workflow proposals are discoverable and lifecycle-tracked. | Passed for visibility/lifecycle plumbing; promotion remains review-gated. | Recent proposal lifecycle commits | Continue using review and ready-smoke gates before guidance/harness changes. |
+| Embedding/SVM helper layer | E209-E215 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. | Blocked correctly by pending review: 15 hard negatives and 1 dedupe cluster remain unreviewed. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `4c602d9`, `98312c1` | Build/reuse a reviewer workflow for E210, then export accepted hard negatives/dedupe hints and rerun usefulness checks. |
+
+Current recommendation:
+
+- Do not adopt SetFit/SVM model output as promotion-quality facts yet.
+- Continue the hybrid path: deterministic guards, helper mining, human review,
+  append-only fixtures, graph projection, and workflow/harness usefulness
+  checks.
+- The immediate bottleneck is review throughput, not another expensive model
+  run.
+
 ## Hypothesis
 
 SetFit should classify small event windows better than keyword rules when the
