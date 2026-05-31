@@ -484,6 +484,12 @@ export function renderClassifierLifecycleInsightText(report: ClassifierLifecycle
         if (pipeline.recommended_action_can_execute !== undefined) {
             lines.push(`  recommended action can execute: ${pipeline.recommended_action_can_execute ? "yes" : "no"}`);
         }
+        if (pipeline.recommended_action_execution_phase) {
+            lines.push(`  recommended action phase: ${pipeline.recommended_action_execution_phase}`);
+        }
+        if (pipeline.recommended_action_execution_summary) {
+            lines.push(`  recommended action summary: ${pipeline.recommended_action_execution_summary}`);
+        }
         if (pipeline.recommended_action_next_action) {
             lines.push(`  recommended action next: ${pipeline.recommended_action_next_action}`);
         }

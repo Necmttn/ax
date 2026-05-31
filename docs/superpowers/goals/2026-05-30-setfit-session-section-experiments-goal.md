@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E370 adds
-  `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-output-checks-e370.json`
+- Index continuation: E371 adds
+  `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-execution-e371.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-output-checks-e370.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-e371.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,65 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E371 - Summarize Recommended Action Execution Route
+
+Question:
+- E370 exposes command inputs, output artifacts, and output checks, but can a
+  service route the recommended action directly without piecing together
+  several lifecycle fields?
+
+Implementation:
+- Added `recommended_action_execution_phase` and
+  `recommended_action_execution_summary` to review-pipeline lifecycle status
+  and lifecycle insight.
+- Derived phases:
+  - `bind_inputs`
+  - `execute`
+  - `execute_then_verify_outputs`
+  - `repair_outputs`
+  - `inspect_lifecycle`
+- Projected the phase and compact summary into lifecycle graph facts:
+  `review_pipeline_recommended_action_execution_phase` and
+  `review_pipeline_recommended_action_execution_summary`.
+- Lifecycle text now renders `recommended action phase` and
+  `recommended action summary`.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371.json`
+- `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-execution-e371.json`
+- `.ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-execution-e371.json`
+- `.ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-execution-e371.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-e371.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-summary-e371.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-execution-e371.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-execution-e371.txt`
+
+Results:
+- Fact projection exposes:
+  - `review_pipeline_recommended_action_execution_phase=bind_inputs`
+  - `review_pipeline_recommended_action_execution_summary="kind=stamp_review_provenance phase=bind_inputs status=missing_inputs can_execute=false missing_inputs=2 output_artifacts=2 output_checks=2"`
+- Lifecycle graph queries by phase and summary each return exactly one
+  lifecycle fact.
+- Lifecycle insight JSON/text render the same phase and summary.
+
+Decision:
+- Services no longer need to reconstruct the direct executor route from
+  separate status, missing-input, and output-check fields. The graph/lifecycle
+  surface now says whether to bind inputs, execute, execute then verify,
+  repair outputs, or inspect the lifecycle.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E371 fact projection includes exactly one execution phase and one execution
+  summary fact.
+- E371 lifecycle graph queries return exactly one phase fact and one summary
+  fact.
+- E371 lifecycle insight JSON/text render both execution routing fields.
 
 ## E370 - Expose Recommended Action Output Checks
 

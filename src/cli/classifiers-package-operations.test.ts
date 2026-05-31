@@ -959,6 +959,8 @@ describe("classifiers package-operations format", () => {
                 recommended_action_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
                 recommended_action_status: "requires_inputs",
                 recommended_action_can_execute: false,
+                recommended_action_execution_phase: "bind_inputs",
+                recommended_action_execution_summary: "kind=stamp_review_provenance phase=bind_inputs status=requires_inputs can_execute=false missing_inputs=2 output_artifacts=1 output_checks=1",
                 recommended_action_next_action: "Bind required pipeline inputs before executing the command.",
                 recommended_action_missing_inputs: ["reviewer", "reviewed_at"],
                 recommended_action_input_bindings: [
@@ -1041,6 +1043,8 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("recommended action argv: bun src/cli/index.ts --review-provenance-reviewer=<reviewer>");
         expect(output).toContain("recommended action status: requires_inputs");
         expect(output).toContain("recommended action can execute: no");
+        expect(output).toContain("recommended action phase: bind_inputs");
+        expect(output).toContain("recommended action summary: kind=stamp_review_provenance phase=bind_inputs status=requires_inputs can_execute=false missing_inputs=2 output_artifacts=1 output_checks=1");
         expect(output).toContain("recommended action next: Bind required pipeline inputs before executing the command.");
         expect(output).toContain("recommended action missing inputs: reviewer, reviewed_at");
         expect(output).toContain("recommended action input bindings: reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string; reviewed_at flag=--review-provenance-reviewed-at index=9 prefix=--review-provenance-reviewed-at= placeholder=<reviewed-at-iso> value_kind=iso_datetime");

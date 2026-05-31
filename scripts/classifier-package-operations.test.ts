@@ -520,6 +520,8 @@ describe("classifier package operations report", () => {
                 recommended_action_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
                 recommended_action_status: "requires_inputs",
                 recommended_action_can_execute: false,
+                recommended_action_execution_phase: "bind_inputs",
+                recommended_action_execution_summary: "kind=stamp_review_provenance phase=bind_inputs status=requires_inputs can_execute=false missing_inputs=1 output_artifacts=1 output_checks=1",
                 recommended_action_next_action: "Bind required pipeline inputs before executing the command.",
                 recommended_action_missing_inputs: ["reviewer"],
                 recommended_action_input_bindings: ["reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string"],
@@ -538,7 +540,7 @@ describe("classifier package operations report", () => {
             next_actions: [],
         });
 
-        expect(report.totals.lifecycle_fact_count).toBe(24);
+        expect(report.totals.lifecycle_fact_count).toBe(26);
         expect(report.nodes).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 id: "classifier_lifecycle:workflow_candidate_review_pipeline",
@@ -605,6 +607,14 @@ describe("classifier package operations report", () => {
             expect.objectContaining({
                 predicate: "review_pipeline_recommended_action_can_execute",
                 value: false,
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_recommended_action_execution_phase",
+                value: "bind_inputs",
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_recommended_action_execution_summary",
+                value: "kind=stamp_review_provenance phase=bind_inputs status=requires_inputs can_execute=false missing_inputs=1 output_artifacts=1 output_checks=1",
             }),
             expect.objectContaining({
                 predicate: "review_pipeline_recommended_action_next_action",
@@ -1892,6 +1902,8 @@ describe("classifier package operations report", () => {
                     recommended_action_argv: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
                     recommended_action_status: "missing_outputs",
                     recommended_action_can_execute: false,
+                    recommended_action_execution_phase: "repair_outputs",
+                    recommended_action_execution_summary: "kind=repair_review_issues phase=repair_outputs status=missing_outputs can_execute=false missing_inputs=0 output_artifacts=1 output_checks=1",
                     recommended_action_next_action: "Repair review pipeline outputs before continuing.",
                     recommended_action_missing_inputs: [],
                     recommended_action_input_bindings: ["reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string"],
@@ -1930,6 +1942,8 @@ describe("classifier package operations report", () => {
             recommended_action_argv: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
             recommended_action_status: "missing_outputs",
             recommended_action_can_execute: false,
+            recommended_action_execution_phase: "repair_outputs",
+            recommended_action_execution_summary: "kind=repair_review_issues phase=repair_outputs status=missing_outputs can_execute=false missing_inputs=0 output_artifacts=1 output_checks=1",
             recommended_action_next_action: "Repair review pipeline outputs before continuing.",
             recommended_action_missing_inputs: [],
             recommended_action_input_bindings: ["reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string"],

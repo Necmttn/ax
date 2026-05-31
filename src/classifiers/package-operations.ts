@@ -552,6 +552,8 @@ export interface ClassifierLifecycleReviewStatus {
         readonly recommended_action_argv?: readonly string[];
         readonly recommended_action_status?: string;
         readonly recommended_action_can_execute?: boolean;
+        readonly recommended_action_execution_phase?: ClassifierReviewPipelineRecommendedActionExecutionPhase;
+        readonly recommended_action_execution_summary?: string;
         readonly recommended_action_next_action?: string;
         readonly recommended_action_missing_inputs?: readonly string[];
         readonly recommended_action_input_bindings?: readonly string[];
@@ -656,6 +658,13 @@ export interface ClassifierReviewPipelineArtifactSummary {
     readonly exists?: boolean;
 }
 
+export type ClassifierReviewPipelineRecommendedActionExecutionPhase =
+    | "bind_inputs"
+    | "execute"
+    | "execute_then_verify_outputs"
+    | "repair_outputs"
+    | "inspect_lifecycle";
+
 export interface ClassifierLifecyclePackageInsight {
     readonly package_key: string;
     readonly package_name: string;
@@ -688,6 +697,8 @@ export interface ClassifierReviewPipelineLifecycleInsight {
     readonly recommended_action_argv?: readonly string[];
     readonly recommended_action_status?: string;
     readonly recommended_action_can_execute?: boolean;
+    readonly recommended_action_execution_phase?: ClassifierReviewPipelineRecommendedActionExecutionPhase;
+    readonly recommended_action_execution_summary?: string;
     readonly recommended_action_next_action?: string;
     readonly recommended_action_missing_inputs?: readonly string[];
     readonly recommended_action_input_bindings?: readonly string[];
@@ -759,17 +770,63 @@ function reviewPipelineRecommendedAction(
     | "recommended_action_argv"
     | "recommended_action_status"
     | "recommended_action_can_execute"
+    | "recommended_action_execution_phase"
+    | "recommended_action_execution_summary"
     | "recommended_action_next_action"
     | "recommended_action_missing_inputs"
     | "recommended_action_input_bindings"
     | "recommended_action_output_artifacts"
     | "recommended_action_output_checks"
 > {
+    type RecommendedAction = Pick<NonNullable<ClassifierLifecycleReviewStatus["review_pipeline_lifecycle"]>,
+        | "recommended_action_kind"
+        | "recommended_action_argv"
+        | "recommended_action_status"
+        | "recommended_action_can_execute"
+        | "recommended_action_execution_phase"
+        | "recommended_action_execution_summary"
+        | "recommended_action_next_action"
+        | "recommended_action_missing_inputs"
+        | "recommended_action_input_bindings"
+        | "recommended_action_output_artifacts"
+        | "recommended_action_output_checks"
+    >;
+    const withExecutionRoute = (action: RecommendedAction): RecommendedAction => {
+        if (action.recommended_action_kind === undefined) {
+            return action;
+        }
+        const missingInputCount = action.recommended_action_missing_inputs?.length ?? 0;
+        const outputArtifactCount = action.recommended_action_output_artifacts?.length ?? 0;
+        const outputCheckCount = action.recommended_action_output_checks?.length ?? 0;
+        const phase: ClassifierReviewPipelineRecommendedActionExecutionPhase = action.recommended_action_status === "missing_outputs"
+            ? "repair_outputs"
+            : missingInputCount > 0 || action.recommended_action_status === "requires_inputs" || action.recommended_action_status === "missing_inputs"
+            ? "bind_inputs"
+            : action.recommended_action_can_execute === true && outputCheckCount > 0
+            ? "execute_then_verify_outputs"
+            : action.recommended_action_can_execute === true
+            ? "execute"
+            : "inspect_lifecycle";
+        const summary = [
+            `kind=${action.recommended_action_kind}`,
+            `phase=${phase}`,
+            `status=${action.recommended_action_status ?? "unknown"}`,
+            `can_execute=${action.recommended_action_can_execute === undefined ? "unknown" : action.recommended_action_can_execute}`,
+            `missing_inputs=${missingInputCount}`,
+            `output_artifacts=${outputArtifactCount}`,
+            `output_checks=${outputCheckCount}`,
+        ].join(" ");
+        return {
+            ...action,
+            recommended_action_execution_phase: phase,
+            recommended_action_execution_summary: summary,
+        };
+    };
     const missingOutputs = (lifecycle.missing_required_artifact_count ?? 0) > 0 ||
         lifecycle.output_verification_status === "missing_required_outputs" ||
         (lifecycle.failures ?? []).length > 0;
     if (missingOutputs && lifecycle.review_issue_repair_argv && lifecycle.review_issue_repair_argv.length > 0) {
-        return {
+        return withExecutionRoute({
             recommended_action_kind: "repair_review_issues",
             recommended_action_argv: lifecycle.review_issue_repair_argv,
             recommended_action_status: "missing_outputs",
@@ -779,7 +836,7 @@ function reviewPipelineRecommendedAction(
             ...(prepared?.input_bindings === undefined || prepared.input_bindings.length === 0 ? {} : { recommended_action_input_bindings: prepared.input_bindings }),
             ...(prepared?.output_artifacts === undefined || prepared.output_artifacts.length === 0 ? {} : { recommended_action_output_artifacts: prepared.output_artifacts }),
             ...(prepared?.output_checks === undefined || prepared.output_checks.length === 0 ? {} : { recommended_action_output_checks: prepared.output_checks }),
-        };
+        });
     }
     const canExecute = prepared?.can_execute ?? lifecycle.can_execute;
     const executionState = {
@@ -792,25 +849,25 @@ function reviewPipelineRecommendedAction(
         ...(prepared?.output_checks === undefined || prepared.output_checks.length === 0 ? {} : { recommended_action_output_checks: prepared.output_checks }),
     };
     if (lifecycle.command_kind === "repair_review_issues" && lifecycle.review_issue_repair_argv && lifecycle.review_issue_repair_argv.length > 0) {
-        return {
+        return withExecutionRoute({
             recommended_action_kind: "repair_review_issues",
             recommended_action_argv: lifecycle.review_issue_repair_argv,
             ...executionState,
-        };
+        });
     }
     if (lifecycle.command_kind === "stamp_review_provenance" && lifecycle.review_provenance_stamp_argv && lifecycle.review_provenance_stamp_argv.length > 0) {
-        return {
+        return withExecutionRoute({
             recommended_action_kind: "stamp_review_provenance",
             recommended_action_argv: lifecycle.review_provenance_stamp_argv,
             ...executionState,
-        };
+        });
     }
     if (lifecycle.command_kind === "apply_review_facts" && lifecycle.production_apply_argv && lifecycle.production_apply_argv.length > 0) {
-        return {
+        return withExecutionRoute({
             recommended_action_kind: "apply_review_facts",
             recommended_action_argv: lifecycle.production_apply_argv,
             ...executionState,
-        };
+        });
     }
     return {};
 }
@@ -1892,6 +1949,8 @@ export function buildExecutionFactProjectionReport(
                     review_pipeline_output_verification_status: workflowStatus.review_pipeline_lifecycle.output_verification_status,
                     review_pipeline_recommended_action_kind: workflowStatus.review_pipeline_lifecycle.recommended_action_kind,
                     review_pipeline_recommended_action_status: workflowStatus.review_pipeline_lifecycle.recommended_action_status,
+                    review_pipeline_recommended_action_execution_phase: workflowStatus.review_pipeline_lifecycle.recommended_action_execution_phase,
+                    review_pipeline_recommended_action_execution_summary: workflowStatus.review_pipeline_lifecycle.recommended_action_execution_summary,
                     review_pipeline_recommended_action_next_action: workflowStatus.review_pipeline_lifecycle.recommended_action_next_action,
                 },
                 arrayFacts: {
@@ -2824,6 +2883,12 @@ export function buildClassifierLifecycleInsightReport(input: {
                 }),
                 ...((input.workflowStatus.review_pipeline_lifecycle.recommended_action_can_execute ?? recommendation.recommended_action_can_execute) === undefined ? {} : {
                     recommended_action_can_execute: input.workflowStatus.review_pipeline_lifecycle.recommended_action_can_execute ?? recommendation.recommended_action_can_execute,
+                }),
+                ...((input.workflowStatus.review_pipeline_lifecycle.recommended_action_execution_phase ?? recommendation.recommended_action_execution_phase) === undefined ? {} : {
+                    recommended_action_execution_phase: input.workflowStatus.review_pipeline_lifecycle.recommended_action_execution_phase ?? recommendation.recommended_action_execution_phase,
+                }),
+                ...((input.workflowStatus.review_pipeline_lifecycle.recommended_action_execution_summary ?? recommendation.recommended_action_execution_summary) === undefined ? {} : {
+                    recommended_action_execution_summary: input.workflowStatus.review_pipeline_lifecycle.recommended_action_execution_summary ?? recommendation.recommended_action_execution_summary,
                 }),
                 ...((input.workflowStatus.review_pipeline_lifecycle.recommended_action_next_action ?? recommendation.recommended_action_next_action) === undefined ? {} : {
                     recommended_action_next_action: input.workflowStatus.review_pipeline_lifecycle.recommended_action_next_action ?? recommendation.recommended_action_next_action,
