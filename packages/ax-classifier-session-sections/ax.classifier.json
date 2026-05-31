@@ -216,6 +216,34 @@
       ]
     },
     {
+      "id": "embedding-helper-boundary-miss-review",
+      "kind": "review",
+      "description": "Generate a human-review brief for repeated canonical boundary misses before embedding-helper fixture promotion.",
+      "command": "bun run classifiers:boundary-miss-review -- --analysis=.ax/experiments/setfit-failure-analysis-embedding-helper-fixtures-current.json --review=.ax/experiments/boundary-miss-review-current.json --brief=.ax/experiments/boundary-miss-review-current.md --out=.ax/experiments/boundary-miss-review-current-report.json --mode=generate --json",
+      "inputs": [
+        ".ax/experiments/setfit-failure-analysis-embedding-helper-fixtures-current.json"
+      ],
+      "outputs": [
+        ".ax/experiments/boundary-miss-review-current.json",
+        ".ax/experiments/boundary-miss-review-current.md",
+        ".ax/experiments/boundary-miss-review-current-report.json"
+      ]
+    },
+    {
+      "id": "embedding-helper-boundary-miss-review-sync",
+      "kind": "review",
+      "description": "Sync reviewed boundary-miss statuses and notes from Markdown, then report whether fixture promotion remains blocked.",
+      "command": "bun run classifiers:boundary-miss-review -- --review=.ax/experiments/boundary-miss-review-current.json --brief=.ax/experiments/boundary-miss-review-current.md --out=.ax/experiments/boundary-miss-review-current-report.json --mode=sync --json",
+      "inputs": [
+        ".ax/experiments/boundary-miss-review-current.json",
+        ".ax/experiments/boundary-miss-review-current.md"
+      ],
+      "outputs": [
+        ".ax/experiments/boundary-miss-review-current.json",
+        ".ax/experiments/boundary-miss-review-current-report.json"
+      ]
+    },
+    {
       "id": "embedding-helper-export-preview",
       "kind": "review",
       "description": "Preview accepted embedding-helper hard negatives and dedupe hints while keeping pending reviews non-appendable.",

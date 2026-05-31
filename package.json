@@ -59,6 +59,7 @@
     "classifiers:embedding-helper-review-status": "python3 packages/ax-classifier-session-sections/embedding_helper_review_status.py",
     "classifiers:embedding-helper-export": "python3 packages/ax-classifier-session-sections/embedding_helper_export.py",
     "classifiers:embedding-helper-graph-projection": "python3 packages/ax-classifier-session-sections/embedding_helper_graph_projection.py",
+    "classifiers:boundary-miss-review": "python3 packages/ax-classifier-session-sections/boundary_miss_review.py",
     "classifiers:project-fixtures": "python3 packages/ax-classifier-session-sections/projection.py",
     "classifiers:assemble-sections": "python3 packages/ax-classifier-session-sections/section_assembler.py",
     "classifiers:graph-usefulness": "python3 packages/ax-classifier-session-sections/graph_usefulness.py",

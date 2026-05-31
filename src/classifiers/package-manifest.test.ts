@@ -53,6 +53,8 @@ describe("classifier package manifest", () => {
         expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-fixture-split-audit")?.kind).toBe("eval");
         expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-fixture-setfit-robustness")?.command).toContain("classifiers:setfit-robustness");
         expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-fixture-failure-analysis")?.command).toContain("classifiers:failure-analysis");
+        expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-boundary-miss-review")?.command).toContain("classifiers:boundary-miss-review");
+        expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-boundary-miss-review-sync")?.command).toContain("--mode=sync");
         expect(manifest.operations?.find((operation) => operation.id === "graph-health-summary")?.kind).toBe("status");
         expect(manifest.operations?.find((operation) => operation.id === "graph-health-guarded")?.command).toContain("--graph-mode=guarded");
         expect(manifest.operations?.find((operation) => operation.id === "classifier-lifecycle-status")?.outputs).toContain(".ax/experiments/classifiers-lifecycle-current.json");
@@ -92,6 +94,8 @@ describe("classifier package manifest", () => {
         const embeddingHelperSplitAudit = requireClassifierPackageOperation(manifest, "embedding-helper-fixture-split-audit");
         const embeddingHelperSetFitRobustness = requireClassifierPackageOperation(manifest, "embedding-helper-fixture-setfit-robustness");
         const embeddingHelperFailureAnalysis = requireClassifierPackageOperation(manifest, "embedding-helper-fixture-failure-analysis");
+        const embeddingHelperBoundaryReview = requireClassifierPackageOperation(manifest, "embedding-helper-boundary-miss-review");
+        const embeddingHelperBoundaryReviewSync = requireClassifierPackageOperation(manifest, "embedding-helper-boundary-miss-review-sync");
         const graphHealth = requireClassifierPackageOperation(manifest, "graph-health-changed-artifacts");
         const lifecycle = requireClassifierPackageOperation(manifest, "classifier-lifecycle-status");
         const batchEval = requireClassifierPackageOperation(manifest, "focused-batch-eval");
@@ -131,6 +135,8 @@ describe("classifier package manifest", () => {
         expect(embeddingHelperSplitAudit.command).toContain("--group-field=pair_group");
         expect(embeddingHelperSetFitRobustness.outputs).toContain(".ax/experiments/setfit-robustness-embedding-helper-fixtures-current.json");
         expect(embeddingHelperFailureAnalysis.outputs).toContain(".ax/experiments/setfit-failure-analysis-embedding-helper-fixtures-current.json");
+        expect(embeddingHelperBoundaryReview.outputs).toContain(".ax/experiments/boundary-miss-review-current.md");
+        expect(embeddingHelperBoundaryReviewSync.inputs).toContain(".ax/experiments/boundary-miss-review-current.md");
         expect(graphHealth.outputs).toContain(".ax/experiments/classifier-package-execution-graph-health-changed-current.json");
         expect(lifecycle.command).toContain("classifiers lifecycle");
         expect(batchEval.outputs).toContain(".ax/experiments/blind-review-batch-current-eval-report.json");

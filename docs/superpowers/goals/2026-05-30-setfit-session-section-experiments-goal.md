@@ -29,7 +29,7 @@ artifact path as the evidence to inspect before trusting any summary row.
 | Blind/review workflow | E46-E65+ | `.ax/experiments/blind-workflow-status-e57.json` and related review artifacts | Human review is mandatory before fixtures or graph facts are promoted. | Pending where review rows are incomplete. | Earlier experiment log | Prefer review queues/workspaces over automatic label edits. |
 | Transcript graph projection | E155-E157 | `.ax/experiments/transcript-candidate-graph-projection-e155.json`, `.ax/experiments/workflow-candidate-report-e156.json`, `.ax/experiments/workflow-candidate-cli-e157.json` | Real persisted classifier facts can become graph-backed workflow candidates. | Passed for projection/query; still needs product review filters and proposal gates. | E155/E156/E157 commits in log | Use graph facts for evidence-backed workflow/harness discovery. |
 | Proposal lifecycle | E168-E208 | `.ax/experiments/workflow-candidate-proposal-list-e168.json`, `.ax/experiments/classifier-package-execution-write-plan-e208.json` | Classifier-derived workflow proposals are discoverable and lifecycle-tracked. | Passed for visibility/lifecycle plumbing; promotion remains review-gated. | Recent proposal lifecycle commits | Continue using review and ready-smoke gates before guidance/harness changes. |
-| Embedding/SVM helper layer | E209-E229 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/embedding-helper-review-batch-e216-report.json`, `.ax/experiments/embedding-helper-review-progress-e218.json`, `.ax/experiments/classifier-package-execution-embedding-helper-export-preview-e221.json`, `.ax/experiments/classifier-package-execution-embedding-helper-review-progress-e223.json`, `.ax/experiments/embedding-helper-export-e227-report.json`, `.ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e227.json`, `.ax/experiments/embedding-helper-fixture-split-audit-e228.json`, `.ax/experiments/setfit-robustness-embedding-helper-fixtures-e228.json`, `.ax/experiments/setfit-failure-analysis-embedding-helper-fixtures-e229.json`, `.ax/experiments/classifier-package-execution-embedding-helper-fixture-failure-analysis-e229.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. Reviewed helper hard negatives improve fixture coverage without breaking the SetFit gate, and the helper rows themselves are not the residual miss source. | Passed experiment gate with residual review: canonical review export-ready with `12` accepted hard negatives and `1` accepted dedupe cluster; append gate combines `124` base + `12` helper rows into `136`; split audit has zero group leakage; SetFit robustness is `robust_enough`; failure analysis decision is `robust_with_residual_none_false_positive_review`, gate passed, all residual misses come from `session-section-chunks`, and the only repeated none FP is `none-model-size-question` on seeds `13`/`42`. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `65b0b3c`, `4c602d9`, `eeb517c`, `9a6811e`, `31a1b16`, `e41562c`, `0587b67`, `0e0a960`, `3f01787`, `7bea922`, `21f7163`, `24e4a4e`, `f97c8e3`, `722e3e8` | Do not run another broad hard-negative mining pass yet. Review the residual repeated canonical misses, especially correction-vs-verification workflow-state boundaries and the model-size none false-positive, before canonical fixture promotion. |
+| Embedding/SVM helper layer | E209-E230 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/embedding-helper-review-batch-e216-report.json`, `.ax/experiments/embedding-helper-review-progress-e218.json`, `.ax/experiments/classifier-package-execution-embedding-helper-export-preview-e221.json`, `.ax/experiments/classifier-package-execution-embedding-helper-review-progress-e223.json`, `.ax/experiments/embedding-helper-export-e227-report.json`, `.ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e227.json`, `.ax/experiments/embedding-helper-fixture-split-audit-e228.json`, `.ax/experiments/setfit-robustness-embedding-helper-fixtures-e228.json`, `.ax/experiments/setfit-failure-analysis-embedding-helper-fixtures-e229.json`, `.ax/experiments/classifier-package-execution-embedding-helper-fixture-failure-analysis-e229.json`, `.ax/experiments/boundary-miss-review-current.md`, `.ax/experiments/boundary-miss-review-current-report.json`, `.ax/experiments/classifier-package-execution-embedding-helper-boundary-miss-review-e230.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. Reviewed helper hard negatives improve fixture coverage without breaking the SetFit gate, and the helper rows themselves are not the residual miss source. | Passed experiment gate but promotion is blocked by boundary review: E230 generated `8` pending repeated canonical miss rows covering workflow-state correction vs verification, benchmark verification, recovery vs approval, approval continuation, and model-size `none` boundaries. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `65b0b3c`, `4c602d9`, `eeb517c`, `9a6811e`, `31a1b16`, `e41562c`, `0587b67`, `0e0a960`, `3f01787`, `7bea922`, `21f7163`, `24e4a4e`, `f97c8e3`, `722e3e8`, `8b27657` | Review `.ax/experiments/boundary-miss-review-current.md`, sync it, and only then decide whether canonical helper-fixture promotion is allowed or fixture/label-contract changes are required. |
 
 Current recommendation:
 
@@ -12008,6 +12008,120 @@ python3 -m json.tool packages/ax-classifier-session-sections/ax.classifier.json 
 bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts
 python3 -m json.tool .ax/experiments/setfit-failure-analysis-embedding-helper-fixtures-e229.json >/dev/null
 python3 -m json.tool .ax/experiments/classifier-package-execution-embedding-helper-fixture-failure-analysis-e229.json >/dev/null
+```
+
+## E230 - Boundary Miss Review Gate For Helper Fixture Promotion
+
+Question:
+
+- Can the repeated canonical misses found in E229 become an explicit review
+  gate, so helper-fixture promotion is blocked by concrete rows rather than a
+  vague "inspect confusions" instruction?
+
+Implementation:
+
+- Added `packages/ax-classifier-session-sections/boundary_miss_review.py`.
+- Added `packages/ax-classifier-session-sections/boundary_miss_review_test.py`.
+- Added `bun run classifiers:boundary-miss-review`.
+- Added package operations:
+  - `embedding-helper-boundary-miss-review`
+  - `embedding-helper-boundary-miss-review-sync`
+- The helper reads a robustness failure-analysis report and selects repeated
+  canonical misses from `all_seed_repeated_misses`. By default it filters to
+  `source_group = "session-section-chunks"` so clean helper-appended rows do
+  not block promotion.
+- The review output is a Markdown checklist plus JSON state. Accepted rows
+  mean the current canonical label should remain unchanged. Rejected rows mean
+  fixture text, label, target, or label-contract changes are required before
+  promotion.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers package-operations --operation=embedding-helper-boundary-miss-review --execute --out=.ax/experiments/classifier-package-execution-embedding-helper-boundary-miss-review-e230.json
+```
+
+Artifacts:
+
+- `.ax/experiments/boundary-miss-review-current.json`
+- `.ax/experiments/boundary-miss-review-current.md`
+- `.ax/experiments/boundary-miss-review-current-report.json`
+- `.ax/experiments/classifier-package-execution-embedding-helper-boundary-miss-review-e230.json`
+
+Results:
+
+- Review items: `8`
+- Accepted/rejected/pending: `0 / 0 / 8`
+- Review report decision: `needs_boundary_miss_review`
+- Review report failures:
+  - `boundary miss review still has pending items`
+- Package execution decision: `failed`
+- Package execution exit code: `1`
+- This package failure is expected for a review-generation gate with pending
+  rows, matching the existing review-operation convention.
+
+Generated review rows:
+
+- `verification-benchmark`
+  - actual: `verification_or_recovery_signal`
+  - predicted: `none`
+  - family: `missed_signal`
+  - hit count: `3`
+- `correction-dirty-files-question`
+  - actual: `correction_or_rejection_signal`
+  - predicted: `verification_or_recovery_signal`
+  - family: `label_boundary`
+  - hit count: `3`
+- `correction-not-committed`
+  - actual: `correction_or_rejection_signal`
+  - predicted: `verification_or_recovery_signal`
+  - family: `label_boundary`
+  - hit count: `3`
+- `correction-failed-command-was-ignored`
+  - actual: `correction_or_rejection_signal`
+  - predicted: `verification_or_recovery_signal`
+  - family: `label_boundary`
+  - hit count: `3`
+- `recovery-updated-goal-doc`
+  - actual: `verification_or_recovery_signal`
+  - predicted: `approval`
+  - family: `approval_boundary`
+  - hit count: `3`
+- `correction-you-skipped-status-check`
+  - actual: `correction_or_rejection_signal`
+  - predicted: `verification_or_recovery_signal`
+  - family: `label_boundary`
+  - hit count: `3`
+- `approval-keep-moving`
+  - actual: `approval`
+  - predicted: `none` or `verification_or_recovery_signal`
+  - families: `approval_boundary`, `missed_signal`
+  - hit count: `3`
+- `none-model-size-question`
+  - actual: `none`
+  - predicted: `environment_or_preference_signal`
+  - family: `none_false_positive`
+  - hit count: `2`
+
+Decision:
+
+- E230 turns the E229 residual confusion analysis into a concrete human-review
+  gate. Helper fixture promotion remains blocked until these `8` boundary rows
+  are reviewed and synced.
+- The next useful slice is to review the generated Markdown:
+  `.ax/experiments/boundary-miss-review-current.md`.
+  If all rows are accepted, promotion can move to a canonical fixture-change
+  proposal. If any row is rejected, the next work should adjust fixture labels,
+  targets, text, or the README label contract before another model run.
+
+Verification:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/boundary_miss_review_test.py
+python3 -m json.tool packages/ax-classifier-session-sections/ax.classifier.json >/dev/null
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts
+python3 -m json.tool .ax/experiments/boundary-miss-review-current-report.json >/dev/null
+python3 -m json.tool .ax/experiments/classifier-package-execution-embedding-helper-boundary-miss-review-e230.json >/dev/null
 ```
 
 ## E197 - Hybrid Graph Usefulness Gate

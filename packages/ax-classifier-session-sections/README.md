@@ -94,6 +94,8 @@ Section outputs:
 - `embedding_helper_graph_projection.py` projects reviewed embedding helper
   routing, hard-negative, nearest-neighbor, and dedupe evidence into graph-ready
   facts plus a Surreal write plan.
+- `boundary_miss_review.py` turns repeated residual robustness misses into a
+  Markdown review gate before canonical fixture promotion.
 
 Optional model assets are expected under `.ax/experiments/`. They are not required to install the package and should not be committed by default.
 
@@ -148,6 +150,8 @@ bun run classifiers:fixture-metadata -- --fixtures=.ax/experiments/chunks-with-e
 bun run classifiers:split-audit -- --fixtures=.ax/experiments/chunks-with-embedding-helper-fixture-metadata-current.jsonl --group-field=pair_group --pair-field=pair_group --label-mode=coarse --seeds=7,13,42 --out=.ax/experiments/embedding-helper-fixture-split-audit-current.json --json
 bun run classifiers:setfit-robustness -- --fixtures=.ax/experiments/chunks-with-embedding-helper-fixture-metadata-current.jsonl --group-field=pair_group --label-mode=coarse --seeds=7,13,42 --epochs=1 --batch-size=8 --calibration-threshold=0.4 --out=.ax/experiments/setfit-robustness-embedding-helper-fixtures-current.json --json
 bun run classifiers:failure-analysis -- --robustness=.ax/experiments/setfit-robustness-embedding-helper-fixtures-current.json --fixtures=.ax/experiments/chunks-with-embedding-helper-fixture-metadata-current.jsonl --out=.ax/experiments/setfit-failure-analysis-embedding-helper-fixtures-current.json --json
+bun run classifiers:boundary-miss-review -- --analysis=.ax/experiments/setfit-failure-analysis-embedding-helper-fixtures-current.json --review=.ax/experiments/boundary-miss-review-current.json --brief=.ax/experiments/boundary-miss-review-current.md --out=.ax/experiments/boundary-miss-review-current-report.json --mode=generate --json
+bun run classifiers:boundary-miss-review -- --review=.ax/experiments/boundary-miss-review-current.json --brief=.ax/experiments/boundary-miss-review-current.md --out=.ax/experiments/boundary-miss-review-current-report.json --mode=sync --json
 bun run classifiers:embedding-helper-export -- --allow-partial-preview --preview-exit-zero --review=.ax/experiments/embedding-helper-review-current.json --status=.ax/experiments/embedding-helper-review-status-current.json --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --out=.ax/experiments/embedding-helper-fixture-preview-current.jsonl --hints=.ax/experiments/embedding-helper-dedupe-preview-current.json --report=.ax/experiments/embedding-helper-export-preview-current-report.json
 bun run classifiers:embedding-helper-graph-projection -- --review=.ax/experiments/embedding-helper-review-current.json --out=.ax/experiments/embedding-helper-graph-projection-current.json --write-plan=.ax/experiments/embedding-helper-graph-write-plan-current.json
 bun run classifiers:relabel-audit -- --robustness=.ax/experiments/setfit-robustness-fixed-fold.json --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --out=.ax/experiments/setfit-relabel-audit.json
@@ -294,12 +298,16 @@ bun src/cli/index.ts classifiers package-operations --operation=embedding-helper
 bun src/cli/index.ts classifiers package-operations --operation=embedding-helper-fixture-split-audit --json
 bun src/cli/index.ts classifiers package-operations --operation=embedding-helper-fixture-setfit-robustness --json
 bun src/cli/index.ts classifiers package-operations --operation=embedding-helper-fixture-failure-analysis --json
+bun src/cli/index.ts classifiers package-operations --operation=embedding-helper-boundary-miss-review --json
+bun src/cli/index.ts classifiers package-operations --operation=embedding-helper-boundary-miss-review-sync --json
 ```
 
 Use this path after `embedding-helper-export` is appendable. It keeps canonical
 fixtures untouched while checking whether reviewed helper hard negatives remain
 split-safe and whether residual SetFit confusions require another targeted
-review batch before fixture promotion.
+review batch before fixture promotion. The boundary-miss review only selects
+repeated canonical fixture misses by default; helper-appended rows that already
+classify cleanly do not block promotion.
 
 The intended sequence is:
 
