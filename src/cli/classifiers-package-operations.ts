@@ -318,6 +318,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `query result kinds: ${(report.query_result_kinds ?? []).join(", ") || "none"}`,
         `query result kind counts: ${(report.query_result_kind_counts ?? []).map((entry) => `${entry.kind}=${entry.count}`).join(", ") || "none"}`,
         `query suggested value equals: ${report.query_suggested_value_equals ?? "none"}`,
+        `query suggested result count: ${report.query_suggested_result_count ?? "none"}`,
         `query suggested argv: ${report.query_suggested_argv?.join(" ") ?? "none"}`,
         `query suggested query: ${querySuggestedQuery}`,
         `nodes/edges/facts: ${report.totals.node_count}/${report.totals.edge_count}/${report.totals.fact_count}`,

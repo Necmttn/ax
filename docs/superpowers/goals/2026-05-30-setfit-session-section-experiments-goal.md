@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E381 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-query-no-match-e381.json`
+- Index continuation: E382 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-result-count-no-match-e382.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-query-match-e381.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-result-count-match-e382.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,50 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E382 - Expose Suggested Query Result Count
+
+Question:
+- E381 gives services a repaired structured query, but can they know the
+  expected result size without re-reading and ranking available value counts?
+
+Implementation:
+- Added `query_suggested_result_count` to classifier graph health reports.
+- The count comes from the same ranked lifecycle available-value row that
+  produces `query_suggested_value_equals`.
+- Text graph-health output now renders `query suggested result count`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-result-count-no-match-e382.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-result-count-match-e382.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-result-count-no-match-e382.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match`,
+  `query_suggested_value_equals=bind_inputs`, and
+  `query_suggested_result_count=1`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and `query_suggested_result_count=1`.
+- Text output renders `query suggested result count: 1`.
+
+Decision:
+- Services can now treat suggested lifecycle graph-query repairs as
+  service-readable reroute candidates with an expected match count, instead of
+  parsing availability buckets client-side.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E382 no-match report has `query_match_status=no_match`,
+  `query_suggested_value_equals=bind_inputs`, and
+  `query_suggested_result_count=1`.
+- E382 match report has `query_match_status=matched` and
+  `query_suggested_result_count=1`.
+- E382 text output includes the suggested result-count line.
 
 ## E381 - Suggest Structured Graph Query Repair
 

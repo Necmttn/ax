@@ -577,6 +577,7 @@ describe("classifiers package-operations format", () => {
                 count: 1,
             }],
             query_suggested_value_equals: "bind_inputs",
+            query_suggested_result_count: 1,
             query_suggested_argv: [
                 "bun",
                 "src/cli/index.ts",
@@ -644,6 +645,7 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("query result kinds: lifecycle_facts");
         expect(output).toContain("query result kind counts: lifecycle_facts=1");
         expect(output).toContain("query suggested value equals: bind_inputs");
+        expect(output).toContain("query suggested result count: 1");
         expect(output).toContain("query suggested argv: bun src/cli/index.ts classifiers graph --mode lifecycle --predicate review_pipeline_prepared_argv --subject classifier_lifecycle:workflow_candidate_proposal --source-kind classifier_package_execution --value-contains src/cli/index.ts --value bind_inputs");
         expect(output).toContain("query suggested query: mode=lifecycle predicate=review_pipeline_prepared_argv subject=classifier_lifecycle:workflow_candidate_proposal source_kind=classifier_package_execution value_contains=src/cli/index.ts value_equals=bind_inputs");
         expect(output).toContain("execution/guard/artifact/lifecycle/helper facts: 0/0/0/1/0");

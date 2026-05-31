@@ -1271,6 +1271,7 @@ describe("classifier package operations report", () => {
             predicate: "review_pipeline_recommended_action_execution_phase",
             value_equals: "bind_inputs",
         });
+        expect(report.query_suggested_result_count).toBe(1);
     });
 
     test("summarizes lifecycle graph fact values", () => {
