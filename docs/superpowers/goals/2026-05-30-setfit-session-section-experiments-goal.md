@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E390 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-changes-no-match-e390.json`
+- Index continuation: E391 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-change-status-no-match-e391.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-changes-match-e390.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-change-status-match-e391.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,54 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E391 - Expose Suggested Query Filter Change Status
+
+Question:
+- E390 lists suggested filter changes, but can services distinguish a real
+  query repair from an already-matching suggestion without comparing `from`
+  and `to` values?
+
+Implementation:
+- Added `status: changed | unchanged` to each `query_suggestion.filter_changes`
+  row.
+- Suggested lifecycle graph-query repairs now mark `value_equals` as `changed`
+  when the suggested value differs from the original query, and `unchanged`
+  when the suggested query already matches.
+- Text graph-health output now renders the filter-change status beside each
+  before/after pair.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-change-status-no-match-e391.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-change-status-match-e391.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-change-status-no-match-e391.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.filter_changes[0].status=changed`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.filter_changes[0].status=unchanged`.
+- Text output renders `query suggestion filter changes:
+  value_equals:execute->bind_inputs (changed)`.
+
+Decision:
+- Services can now route query suggestions by explicit change status, avoiding
+  repeated client-side comparisons and making no-op suggestions easy to
+  identify in logs or debug UIs.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E391 no-match report includes `status=changed` for the suggested
+  `value_equals` repair.
+- E391 match report includes `status=unchanged` for the already-matching
+  `value_equals` suggestion.
+- E391 text output includes the filter-change status.
 
 ## E390 - Expose Suggested Query Filter Changes
 

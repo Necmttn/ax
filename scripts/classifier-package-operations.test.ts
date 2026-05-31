@@ -1298,6 +1298,7 @@ describe("classifier package operations report", () => {
                 filter: "value_equals",
                 from: "execute",
                 to: "bind_inputs",
+                status: "changed",
             }],
             argv: [
                 "bun",

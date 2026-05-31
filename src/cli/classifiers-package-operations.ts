@@ -299,7 +299,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
     const querySuggestionFilterChanges = report.query_suggestion === undefined
         ? "none"
         : report.query_suggestion.filter_changes
-            .map((change) => `${change.filter}:${change.from ?? "none"}->${change.to}`)
+            .map((change) => `${change.filter}:${change.from ?? "none"}->${change.to} (${change.status})`)
             .join(", ") || "none";
     const querySuggestion = report.query_suggestion === undefined
         ? "none"

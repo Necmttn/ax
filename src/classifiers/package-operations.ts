@@ -486,6 +486,7 @@ export interface ClassifierGraphQuerySuggestion {
         readonly filter: "value_equals";
         readonly from?: string;
         readonly to: string;
+        readonly status: "changed" | "unchanged";
     }[];
     readonly argv: readonly string[];
 }
@@ -2535,6 +2536,7 @@ export function buildExecutionGraphHealthReport(input: {
                     filter: "value_equals",
                     ...(query.value_equals === undefined ? {} : { from: query.value_equals }),
                     to: querySuggestedValueEquals,
+                    status: query.value_equals === querySuggestedValueEquals ? "unchanged" : "changed",
                 }],
                 argv: querySuggestedArgv,
             };
