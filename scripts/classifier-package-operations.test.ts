@@ -1270,6 +1270,69 @@ describe("classifier package operations report", () => {
         });
     });
 
+    test("filters embedding helper graph facts by minimum positive recall", () => {
+        const report = buildExecutionGraphHealthReport({
+            nodes: [],
+            edges: [{
+                graph_id: "edge:routing-none",
+                kind: "emitted_routing_candidate",
+                from_id: "artifact:.ax/experiments/embedding-helper-review-e210.json",
+                to_id: "embedding_helper_routing:session-section-chunks",
+                evidence_path: ".ax/experiments/embedding-helper-review-e210.json",
+                properties_json: "{}",
+                source_kind: "embedding_helper_review_projection",
+            }, {
+                graph_id: "edge:routing-04",
+                kind: "emitted_routing_candidate",
+                from_id: "artifact:.ax/experiments/embedding-helper-review-e210.json",
+                to_id: "embedding_helper_routing:session-section-chunks",
+                evidence_path: ".ax/experiments/embedding-helper-review-e210.json",
+                properties_json: "{}",
+                source_kind: "embedding_helper_review_projection",
+            }],
+            facts: [{
+                graph_id: "fact:routing-none",
+                kind: "embedding_helper_routing_candidate",
+                subject: "embedding_helper_routing:session-section-chunks",
+                predicate: "recommended_threshold",
+                value_json: JSON.stringify({ threshold: "none", positive_recall_after_routing_mean: 0.9028 }),
+                evidence_edges_json: JSON.stringify(["edge:routing-none"]),
+                properties_json: JSON.stringify({
+                    threshold: "none",
+                    setfit_call_reduction_rate_mean: 0.1778,
+                    positive_recall_after_routing_mean: 0.9028,
+                }),
+                source_kind: "embedding_helper_review_projection",
+            }, {
+                graph_id: "fact:routing-04",
+                kind: "embedding_helper_routing_candidate",
+                subject: "embedding_helper_routing:session-section-chunks",
+                predicate: "recommended_threshold",
+                value_json: JSON.stringify({ threshold: "0.4", positive_recall_after_routing_mean: 0.8123 }),
+                evidence_edges_json: JSON.stringify(["edge:routing-04"]),
+                properties_json: JSON.stringify({
+                    threshold: "0.4",
+                    setfit_call_reduction_rate_mean: 0.2912,
+                    positive_recall_after_routing_mean: 0.8123,
+                }),
+                source_kind: "embedding_helper_review_projection",
+            }],
+            query: {
+                mode: "embedding-helper",
+                fact_kind: "embedding_helper_routing_candidate",
+                min_positive_recall: 0.9,
+            },
+        });
+
+        expect(report.query.min_positive_recall).toBe(0.9);
+        expect(report.totals.embedding_helper_fact_count).toBe(2);
+        expect(report.result_totals.embedding_helper_fact_count).toBe(1);
+        expect(report.embedding_helper_facts[0]).toMatchObject({
+            threshold: "none",
+            positive_recall_after_routing_mean: 0.9028,
+        });
+    });
+
     test("filters embedding helper graph facts by minimum seed count", () => {
         const report = buildExecutionGraphHealthReport({
             nodes: [],

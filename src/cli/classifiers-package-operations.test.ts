@@ -609,6 +609,7 @@ describe("classifiers package-operations format", () => {
                 proposed_label: "none",
                 threshold: "none",
                 min_seed_count: 2,
+                min_positive_recall: 0.9,
                 min_nearest_similarity: 0.85,
                 nearest_fixture_id: "session-section-chunks/approval-alright-go",
             },
@@ -680,6 +681,7 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("filter proposed label: none");
         expect(output).toContain("filter threshold: none");
         expect(output).toContain("filter min seed count: 2");
+        expect(output).toContain("filter min positive recall: 0.9");
         expect(output).toContain("filter min nearest similarity: 0.85");
         expect(output).toContain("filter nearest fixture: session-section-chunks/approval-alright-go");
         expect(output).toContain("embedding helper facts:");
