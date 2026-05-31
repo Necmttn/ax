@@ -30,6 +30,7 @@ import {
     recommendWorkflowCandidatePromotionArtifact,
     renderWorkflowCandidateBriefMarkdown,
     renderWorkflowCandidateReviewCoverageBriefMarkdown,
+    stampWorkflowCandidateReviewProvenance,
     syncWorkflowCandidateFixtureRowsFromBrief,
     syncWorkflowCandidateFixtureRowsFromBriefWithSummary,
     renderWorkflowCandidateTopicEvidencePackMarkdown,
@@ -2207,6 +2208,92 @@ describe("classifiers workflow-candidates", () => {
         });
         expect(brief).toContain("## Provenance Issues");
         expect(brief).toContain("- `invalid_reviewed_at` fixture=`workflow-candidate-review-coverage/verification_or_recovery_signal/a` candidate=`classifier_candidate_group:hybrid-window/verification_or_recovery_signal` reviewed_at=`not-a-date`");
+    });
+
+    test("stamps explicit review provenance on reviewed coverage rows", () => {
+        const rows = parseWorkflowCandidateFixtureRowsJsonl(JSON.stringify({
+            id: "workflow-candidate-review-coverage/verification_or_recovery_signal/a",
+            suite: "workflow-candidate-review-coverage",
+            name: "coverage-gap-verification_or_recovery_signal-01",
+            label: "verification_or_recovery_signal",
+            target: "unknown",
+            text: "USER:\ncontinue and verify the fix\n\nPREVIOUS_ASSISTANT:\n",
+            source_group: "workflow-candidate",
+            review_status: "accept",
+            review_rationale: "Useful verification behavior worth preserving.",
+            topic: "review-coverage",
+            candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+            candidate_label: "verification_or_recovery_signal",
+            proposed_action: "add_verification_gate",
+            result_id: "classifier_result:verification",
+            turn: "turn:verification",
+            confidence: 0.83,
+        }));
+        const stamped = stampWorkflowCandidateReviewProvenance(rows, {
+            reviewer: "reviewer@example.test",
+            reviewedAt: "2026-05-31T10:00:00Z",
+        });
+        const projection = buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures({
+            rows: stamped.rows,
+            syncedFrom: ".ax/experiments/reviewed-coverage-gaps.jsonl",
+        });
+        const writePlan = buildWorkflowCandidateTopicReviewGraphWritePlan(projection);
+        const summary = buildWorkflowCandidateReviewCoverageApplySummary({
+            rows: stamped.rows,
+            sourcePath: ".ax/experiments/reviewed-coverage-gaps.jsonl",
+            projection,
+            writePlan,
+            applyRequested: false,
+            applied: false,
+            stampedReviewerCount: stamped.stamped_reviewer_count,
+            stampedReviewedAtCount: stamped.stamped_reviewed_at_count,
+            requireReviewProvenance: true,
+        });
+        const text = renderWorkflowCandidateReviewCoverageText({
+            schema: "ax.workflow_candidate_review_coverage.v1",
+            source_kind: "hybrid_window_classifier_projection",
+            query: { limit: 10 },
+            candidates: [],
+            totals: {
+                candidate_group_count: 0,
+                returned_candidate_count: 0,
+                reviewed_candidate_count: 0,
+                unreviewed_candidate_count: 0,
+                review_fact_count: 0,
+                rejected_fact_count: 0,
+                accepted_fact_count: 0,
+                deferred_fact_count: 0,
+                revised_fact_count: 0,
+                helper_source_fixture_count: 0,
+            },
+            coverage_review: summary,
+            decision: "needs_workflow_candidate_reviews",
+        });
+
+        expect(stamped).toMatchObject({
+            stamped_reviewer_count: 1,
+            stamped_reviewed_at_count: 1,
+            rows: [{
+                review_reviewer: "reviewer@example.test",
+                review_reviewed_at: "2026-05-31T10:00:00Z",
+            }],
+        });
+        expect(summary).toMatchObject({
+            stamped_reviewer_count: 1,
+            stamped_reviewed_at_count: 1,
+            missing_reviewer_count: 0,
+            missing_reviewed_at_count: 0,
+            invalid_reviewed_at_count: 0,
+            provenance_status: "complete_review_provenance",
+            apply_guard: "ready_to_apply",
+            can_apply: true,
+            strict_apply_guard: "ready_to_apply",
+            strict_can_apply: true,
+            strict_apply_blockers: [],
+            provenance_issue_rows: [],
+        });
+        expect(text).toContain("coverage review provenance stamp: reviewer=1 reviewed_at=1");
+        expect(text).toContain("coverage review strict can apply: yes");
     });
 
     test("reports applied coverage review statement counts", () => {

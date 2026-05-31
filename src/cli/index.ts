@@ -1939,6 +1939,8 @@ const classifiersWorkflowCandidatesCommand = Command.make(
         reviewWritePlan: Flag.string("review-write-plan").pipe(Flag.optional),
         applyReviewFacts: Flag.boolean("apply-review-facts").pipe(Flag.withDefault(false)),
         requireReviewProvenance: Flag.boolean("require-review-provenance").pipe(Flag.withDefault(false)),
+        reviewProvenanceReviewer: Flag.string("review-provenance-reviewer").pipe(Flag.optional),
+        reviewProvenanceReviewedAt: Flag.string("review-provenance-reviewed-at").pipe(Flag.optional),
         limit: positiveLimit(10),
         examples: Flag.integer("examples").pipe(Flag.withDefault(3)),
         out: Flag.string("out").pipe(Flag.optional),
@@ -1956,7 +1958,7 @@ const classifiersWorkflowCandidatesCommand = Command.make(
         proposalSection: Flag.string("proposal-section").pipe(Flag.optional),
         json: jsonFlag,
     },
-    ({ sourceKind, action, classifier, search, taskLike, topicReport, listProposals, listHarnessFacts, reviewCoverage, includeHarnessFacts, includeHelperFacts, includeReviewFacts, proposalStatus, expandEvidence, evidencePack, classifierFixturePack, coverageFixturePack, coverageReviewPack, coverageReviewBrief, syncCoverageReviewBrief, harnessFacts, harnessWritePlan, applyHarnessFacts, reviewFacts, reviewWritePlan, applyReviewFacts, requireReviewProvenance, limit, examples, out, brief, syncBrief, promoteTasks, emitAdjacentTasks, promoteHarnessProposals, requireHarnessChecks, promoteProposals, proposalDryRun, promotionMode, taskDir, proposalTarget, proposalSection, json }) => {
+    ({ sourceKind, action, classifier, search, taskLike, topicReport, listProposals, listHarnessFacts, reviewCoverage, includeHarnessFacts, includeHelperFacts, includeReviewFacts, proposalStatus, expandEvidence, evidencePack, classifierFixturePack, coverageFixturePack, coverageReviewPack, coverageReviewBrief, syncCoverageReviewBrief, harnessFacts, harnessWritePlan, applyHarnessFacts, reviewFacts, reviewWritePlan, applyReviewFacts, requireReviewProvenance, reviewProvenanceReviewer, reviewProvenanceReviewedAt, limit, examples, out, brief, syncBrief, promoteTasks, emitAdjacentTasks, promoteHarnessProposals, requireHarnessChecks, promoteProposals, proposalDryRun, promotionMode, taskDir, proposalTarget, proposalSection, json }) => {
         const actionValue = optionValue(action);
         const classifierValue = optionValue(classifier);
         const searchValue = optionValue(search);
@@ -1973,6 +1975,8 @@ const classifiersWorkflowCandidatesCommand = Command.make(
         const harnessWritePlanPath = optionValue(harnessWritePlan);
         const reviewFactsPath = optionValue(reviewFacts);
         const reviewWritePlanPath = optionValue(reviewWritePlan);
+        const reviewProvenanceReviewerValue = optionValue(reviewProvenanceReviewer);
+        const reviewProvenanceReviewedAtValue = optionValue(reviewProvenanceReviewedAt);
         const taskDirPath = optionValue(taskDir);
         const proposalTargetPath = optionValue(proposalTarget);
         const proposalSectionValue = optionValue(proposalSection);
@@ -2006,6 +2010,8 @@ const classifiersWorkflowCandidatesCommand = Command.make(
             ...(reviewWritePlanPath === undefined ? {} : { reviewWritePlan: reviewWritePlanPath }),
             applyReviewFacts,
             requireReviewProvenance,
+            ...(reviewProvenanceReviewerValue === undefined ? {} : { reviewProvenanceReviewer: reviewProvenanceReviewerValue }),
+            ...(reviewProvenanceReviewedAtValue === undefined ? {} : { reviewProvenanceReviewedAt: reviewProvenanceReviewedAtValue }),
             ...(outPath === undefined ? {} : { out: outPath }),
             ...(briefPath === undefined ? {} : { brief: briefPath }),
             ...(syncBriefPath === undefined ? {} : { syncBrief: syncBriefPath }),

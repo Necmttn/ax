@@ -51,6 +51,8 @@ export interface WorkflowCandidateCommandInput {
     readonly reviewWritePlan?: string;
     readonly applyReviewFacts?: boolean;
     readonly requireReviewProvenance?: boolean;
+    readonly reviewProvenanceReviewer?: string;
+    readonly reviewProvenanceReviewedAt?: string;
     readonly out?: string;
     readonly brief?: string;
     readonly syncBrief?: string;
@@ -243,6 +245,8 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly provenance_next_action: string;
     readonly synced_fixture_count: number;
     readonly unknown_fixture_count: number;
+    readonly stamped_reviewer_count: number;
+    readonly stamped_reviewed_at_count: number;
     readonly pack_candidate_count: number;
     readonly new_candidate_count: number;
     readonly existing_candidate_count: number;
@@ -272,6 +276,12 @@ export interface WorkflowCandidateFixtureBriefSyncResult {
     readonly rows: readonly WorkflowCandidateTopicClassifierFixtureRow[];
     readonly synced_fixture_count: number;
     readonly unknown_fixture_count: number;
+}
+
+export interface WorkflowCandidateReviewProvenanceStampResult {
+    readonly rows: readonly WorkflowCandidateTopicClassifierFixtureRow[];
+    readonly stamped_reviewer_count: number;
+    readonly stamped_reviewed_at_count: number;
 }
 
 export interface WorkflowCandidateReviewCoverageBriefContext {
@@ -1819,6 +1829,7 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             `coverage review source: ${report.coverage_review.source_path}`,
             `coverage review fixtures: ${report.coverage_review.reviewed_fixture_count} reviewed, ${report.coverage_review.pending_fixture_count} pending`,
             `coverage review sync: synced=${report.coverage_review.synced_fixture_count} unknown=${report.coverage_review.unknown_fixture_count}`,
+            `coverage review provenance stamp: reviewer=${report.coverage_review.stamped_reviewer_count} reviewed_at=${report.coverage_review.stamped_reviewed_at_count}`,
             `coverage review impact: pack_candidates=${report.coverage_review.pack_candidate_count} new=${report.coverage_review.new_candidate_count} existing=${report.coverage_review.existing_candidate_count} unknown=${report.coverage_review.unknown_candidate_count}`,
             `coverage review projected coverage: reviewed=${report.coverage_review.projected_reviewed_candidate_count} unreviewed=${report.coverage_review.projected_unreviewed_candidate_count}`,
             `coverage review issues: invalid=${report.coverage_review.invalid_fixture_count} missing_rationale=${report.coverage_review.missing_rationale_count} smoke=${report.coverage_review.smoke_marker_count}`,
@@ -3148,6 +3159,38 @@ export function syncWorkflowCandidateFixtureRowsFromBriefWithSummary(
     };
 }
 
+export function stampWorkflowCandidateReviewProvenance(
+    rows: readonly WorkflowCandidateTopicClassifierFixtureRow[],
+    input: { readonly reviewer?: string; readonly reviewedAt?: string },
+): WorkflowCandidateReviewProvenanceStampResult {
+    const reviewer = input.reviewer?.trim();
+    const reviewedAt = input.reviewedAt?.trim();
+    let stampedReviewerCount = 0;
+    let stampedReviewedAtCount = 0;
+    const stampedRows = rows.map((row) => {
+        if (fixtureReviewVerdict(row) === undefined) return row;
+        let next: WorkflowCandidateTopicClassifierFixtureRow = row;
+        if (reviewer !== undefined && reviewer.length > 0 && (row.review_reviewer ?? "").trim().length === 0) {
+            next = { ...next, review_reviewer: reviewer };
+            stampedReviewerCount += 1;
+        }
+        if (
+            reviewedAt !== undefined &&
+            reviewedAt.length > 0 &&
+            ((row.review_reviewed_at ?? "").trim().length === 0 || hasInvalidReviewedAt(row))
+        ) {
+            next = { ...next, review_reviewed_at: reviewedAt };
+            stampedReviewedAtCount += 1;
+        }
+        return next;
+    });
+    return {
+        rows: stampedRows,
+        stamped_reviewer_count: stampedReviewerCount,
+        stamped_reviewed_at_count: stampedReviewedAtCount,
+    };
+}
+
 export function buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures(input: {
     readonly rows: readonly WorkflowCandidateTopicClassifierFixtureRow[];
     readonly syncedFrom: string;
@@ -3312,6 +3355,8 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     readonly applied: boolean;
     readonly syncedFixtureCount?: number;
     readonly unknownFixtureCount?: number;
+    readonly stampedReviewerCount?: number;
+    readonly stampedReviewedAtCount?: number;
     readonly coverageRows?: readonly WorkflowCandidateReviewCoverageRow[];
     readonly requireReviewProvenance?: boolean;
     readonly sourceKind?: string;
@@ -3453,6 +3498,8 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         provenance_next_action: provenanceNextAction,
         synced_fixture_count: input.syncedFixtureCount ?? 0,
         unknown_fixture_count: input.unknownFixtureCount ?? 0,
+        stamped_reviewer_count: input.stampedReviewerCount ?? 0,
+        stamped_reviewed_at_count: input.stampedReviewedAtCount ?? 0,
         pack_candidate_count: packCandidateIds.size,
         new_candidate_count: newCandidateCount,
         existing_candidate_count: existingCandidateCount,
@@ -4328,6 +4375,8 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 );
                 let syncedFixtureCount = 0;
                 let unknownFixtureCount = 0;
+                let stampedReviewerCount = 0;
+                let stampedReviewedAtCount = 0;
                 if (input.syncCoverageReviewBrief) {
                     const syncResult = syncWorkflowCandidateFixtureRowsFromBriefWithSummary(
                         reviewedRows,
@@ -4336,6 +4385,16 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     reviewedRows = syncResult.rows;
                     syncedFixtureCount = syncResult.synced_fixture_count;
                     unknownFixtureCount = syncResult.unknown_fixture_count;
+                    writeFileSync(input.coverageReviewPack, renderClassifierFixtureRowsJsonl(reviewedRows), "utf8");
+                }
+                if (input.reviewProvenanceReviewer !== undefined || input.reviewProvenanceReviewedAt !== undefined) {
+                    const stampResult = stampWorkflowCandidateReviewProvenance(reviewedRows, {
+                        ...(input.reviewProvenanceReviewer === undefined ? {} : { reviewer: input.reviewProvenanceReviewer }),
+                        ...(input.reviewProvenanceReviewedAt === undefined ? {} : { reviewedAt: input.reviewProvenanceReviewedAt }),
+                    });
+                    reviewedRows = stampResult.rows;
+                    stampedReviewerCount = stampResult.stamped_reviewer_count;
+                    stampedReviewedAtCount = stampResult.stamped_reviewed_at_count;
                     writeFileSync(input.coverageReviewPack, renderClassifierFixtureRowsJsonl(reviewedRows), "utf8");
                 }
                 if (input.coverageReviewBrief) {
@@ -4370,6 +4429,8 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     applied: false,
                     syncedFixtureCount,
                     unknownFixtureCount,
+                    stampedReviewerCount,
+                    stampedReviewedAtCount,
                     coverageRows: report.candidates,
                     ...(input.requireReviewProvenance === undefined ? {} : { requireReviewProvenance: input.requireReviewProvenance }),
                     sourceKind: input.sourceKind,
@@ -4392,6 +4453,8 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                         applied: true,
                         syncedFixtureCount,
                         unknownFixtureCount,
+                        stampedReviewerCount,
+                        stampedReviewedAtCount,
                         coverageRows: report.candidates,
                         ...(input.requireReviewProvenance === undefined ? {} : { requireReviewProvenance: input.requireReviewProvenance }),
                         sourceKind: input.sourceKind,
