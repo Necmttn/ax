@@ -1748,6 +1748,9 @@ describe("classifiers workflow-candidates", () => {
         expect(brief).toContain("--sync-coverage-review-brief=.ax/experiments/review-coverage.md");
         expect(brief).toContain("--apply-review-facts");
         expect(brief).toContain("--require-review-provenance");
+        expect(brief).toContain("To inspect the review graph write before applying, run:");
+        expect(brief).toContain("--review-facts=.ax/experiments/review-coverage-review-facts.json");
+        expect(brief).toContain("--review-write-plan=.ax/experiments/review-coverage-review-write-plan.json");
         expect(brief).toContain("To stamp provenance from a review service, run:");
         expect(brief).toContain("--review-provenance-reviewer=<reviewer>");
         expect(brief).toContain("--review-provenance-reviewed-at=<reviewed-at-iso>");

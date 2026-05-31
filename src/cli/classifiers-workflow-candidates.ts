@@ -2846,6 +2846,11 @@ const postApplyOutputPath = (outputPath: string): string => {
     return `${outputPath}-post-apply.json`;
 };
 
+const siblingOutputPath = (outputPath: string, suffix: string): string => {
+    if (outputPath.endsWith(".json")) return outputPath.replace(/\.json$/, `${suffix}.json`);
+    return `${outputPath}${suffix}.json`;
+};
+
 const workflowCandidateReviewCoverageRecheckCommand = (input: {
     readonly sourceKind?: string;
     readonly limit?: number;
@@ -2990,6 +2995,8 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
     const sourceKind = context.sourceKind ?? "hybrid_window_classifier_projection";
     const readinessOutputPath = context.outputPath ?? ".ax/experiments/workflow-candidate-review-coverage-reviewed.json";
     const syncedBriefPath = context.coverageReviewBrief ?? ".ax/experiments/workflow-candidate-review-coverage-reviewed.md";
+    const reviewFactsPath = siblingOutputPath(readinessOutputPath, "-review-facts");
+    const reviewWritePlanPath = siblingOutputPath(readinessOutputPath, "-review-write-plan");
     const postApplyRecheckCommand = workflowCandidateReviewCoverageRecheckCommand({
         sourceKind,
         ...(context.limit === undefined ? {} : { limit: context.limit }),
@@ -3016,6 +3023,19 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
             `--coverage-review-pack=${reviewPackPath}`,
             context.coverageReviewBrief === undefined ? undefined : `--sync-coverage-review-brief=${context.coverageReviewBrief}`,
             "--apply-review-facts",
+            `--out=${readinessOutputPath}`,
+            "--json",
+        ].filter((part): part is string => part !== undefined).join(" ");
+    const inspectWriteCommand = reviewPackPath === undefined
+        ? undefined
+        : [
+            "bun src/cli/index.ts classifiers workflow-candidates",
+            "--review-coverage",
+            `--source-kind=${sourceKind}`,
+            `--coverage-review-pack=${reviewPackPath}`,
+            context.coverageReviewBrief === undefined ? undefined : `--sync-coverage-review-brief=${context.coverageReviewBrief}`,
+            `--review-facts=${reviewFactsPath}`,
+            `--review-write-plan=${reviewWritePlanPath}`,
             `--out=${readinessOutputPath}`,
             "--json",
         ].filter((part): part is string => part !== undefined).join(" ");
@@ -3100,6 +3120,12 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
             "",
             "```sh",
             applyCommand ?? "",
+            "```",
+            "",
+            "To inspect the review graph write before applying, run:",
+            "",
+            "```sh",
+            inspectWriteCommand ?? "",
             "```",
             "",
             "For production or shared graph updates, require review provenance:",
