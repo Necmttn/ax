@@ -513,6 +513,17 @@ describe("classifier package operations report", () => {
                 command_kind: "stamp_review_provenance",
                 prepared_status: "ready_to_execute",
                 output_verification_status: "verified",
+                apply_result: "applied",
+                applied: true,
+                applied_statement_count: 5,
+                review_handoff_status: "complete_review_handoff",
+                production_apply_guard: "ready_to_apply",
+                production_can_apply: true,
+                post_apply_recheck_status: "gap_closed",
+                post_apply_reviewed_candidate_delta: 1,
+                post_apply_unreviewed_candidate_delta: -1,
+                post_apply_projected_reviewed_delta: 0,
+                post_apply_projected_unreviewed_delta: 0,
                 can_execute: true,
                 can_continue: true,
                 missing_required_artifact_count: 0,
@@ -545,7 +556,7 @@ describe("classifier package operations report", () => {
             next_actions: [],
         });
 
-        expect(report.totals.lifecycle_fact_count).toBe(26);
+        expect(report.totals.lifecycle_fact_count).toBe(37);
         expect(report.nodes).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 id: "classifier_lifecycle:workflow_candidate_review_pipeline",
@@ -572,6 +583,42 @@ describe("classifier package operations report", () => {
             expect.objectContaining({
                 predicate: "review_pipeline_output_verification_status",
                 value: "verified",
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_apply_result",
+                value: "applied",
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_applied",
+                value: true,
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_applied_statement_count",
+                value: 5,
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_review_handoff_status",
+                value: "complete_review_handoff",
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_production_apply_guard",
+                value: "ready_to_apply",
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_production_can_apply",
+                value: true,
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_post_apply_recheck_status",
+                value: "gap_closed",
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_post_apply_reviewed_candidate_delta",
+                value: 1,
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_post_apply_unreviewed_candidate_delta",
+                value: -1,
             }),
             expect.objectContaining({
                 predicate: "review_pipeline_can_continue",
@@ -672,6 +719,12 @@ describe("classifier package operations report", () => {
                 production_apply_command_argv: ["bun", "src/cli/index.ts", "--apply-review-facts"],
                 review_provenance_stamp_command_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
                 review_issue_repair_command_argv: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
+                apply_result: "applied",
+                applied: true,
+                applied_statement_count: 5,
+                review_handoff_status: "complete_review_handoff",
+                production_apply_guard: "ready_to_apply",
+                production_can_apply: true,
                 review_pipeline_lifecycle: {
                     schema: "ax.classifier_review_pipeline_lifecycle.v1",
                     status: "verified_after_execution",
@@ -713,6 +766,13 @@ describe("classifier package operations report", () => {
                         ],
                     },
                 },
+                post_apply_recheck: {
+                    status: "gap_closed",
+                    reviewed_candidate_delta: 1,
+                    unreviewed_candidate_delta: -1,
+                    projected_reviewed_delta: 0,
+                    projected_unreviewed_delta: 0,
+                },
             },
         }), "utf8");
 
@@ -724,6 +784,15 @@ describe("classifier package operations report", () => {
             command_kind: "stamp_review_provenance",
             prepared_status: "ready_to_execute",
             output_verification_status: "verified",
+            apply_result: "applied",
+            applied: true,
+            applied_statement_count: 5,
+            review_handoff_status: "complete_review_handoff",
+            production_apply_guard: "ready_to_apply",
+            production_can_apply: true,
+            post_apply_recheck_status: "gap_closed",
+            post_apply_reviewed_candidate_delta: 1,
+            post_apply_unreviewed_candidate_delta: -1,
             can_execute: true,
             can_continue: true,
             missing_required_artifact_count: 0,

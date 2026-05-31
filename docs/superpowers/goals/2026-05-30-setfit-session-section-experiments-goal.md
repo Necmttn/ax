@@ -33,10 +33,12 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E439 adds
-  `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e439-apply.json`
+- Index continuation: E440 adds
+  `.ax/experiments/classifier-package-execution-facts-review-pipeline-apply-e440.json`,
+  `.ax/experiments/classifier-package-execution-write-plan-review-pipeline-apply-e440.json`,
+  `.ax/experiments/classifier-package-execution-apply-review-pipeline-apply-e440.json`,
   and
-  `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e439-apply-post-apply.json`
+  `.ax/experiments/classifier-graph-lifecycle-review-pipeline-apply-e440.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,11 +46,78 @@ Current recommendation:
   checks.
 - Direct review execution/routing is now possible behind an explicit
   `--execute-route` gate, route outputs can be inspected after execution, the
-  current handoff artifacts are complete, and the guarded production apply has
-  closed the reviewed-coverage gap. The immediate bottleneck is now projecting
-  this successful route/apply/recheck loop into durable lifecycle graph facts
-  and deciding which reviewed classifier candidates should become harness or
-  guidance proposals.
+  current handoff artifacts are complete, the guarded production apply has
+  closed the reviewed-coverage gap, and the successful loop is now persisted as
+  lifecycle graph facts. The immediate bottleneck is deciding which reviewed
+  classifier candidates should become harness or guidance proposals.
+
+## E440 - Persist Route Apply Recheck Lifecycle Facts
+
+Question:
+- Can the successful route/apply/recheck loop from E439 become durable
+  lifecycle graph facts that services can query without reading experiment
+  artifacts directly?
+
+Implementation:
+- Extended review-pipeline lifecycle loading with apply and post-apply recheck
+  fields from the workflow candidate review coverage report.
+- Projected those fields into `classifier_lifecycle_status` facts, including
+  `review_pipeline_apply_result`, `review_pipeline_applied`,
+  `review_pipeline_applied_statement_count`,
+  `review_pipeline_review_handoff_status`,
+  `review_pipeline_production_apply_guard`,
+  `review_pipeline_production_can_apply`, and
+  `review_pipeline_post_apply_recheck_status`.
+- Regenerated `.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json`
+  from the guarded apply path.
+- Generated classifier graph facts, a Surreal write plan, applied the write
+  plan, and queried the persisted graph.
+
+Artifacts:
+- `.ax/experiments/classifier-package-execution-facts-review-pipeline-apply-e440.json`
+- `.ax/experiments/classifier-package-execution-write-plan-review-pipeline-apply-e440.json`
+- `.ax/experiments/classifier-package-execution-apply-review-pipeline-apply-e440.json`
+- `.ax/experiments/classifier-graph-lifecycle-review-pipeline-apply-e440.json`
+- `.ax/experiments/classifier-graph-lifecycle-review-pipeline-apply-e440.txt`
+
+Results:
+- Fact projection contains:
+  `review_pipeline_apply_result=applied`,
+  `review_pipeline_applied=true`,
+  `review_pipeline_applied_statement_count=5`,
+  `review_pipeline_review_handoff_status=complete_review_handoff`,
+  `review_pipeline_production_apply_guard=ready_to_apply`,
+  `review_pipeline_production_can_apply=true`, and
+  `review_pipeline_post_apply_recheck_status=gap_closed`.
+- The Surreal write-plan apply reported `decision=applied`,
+  `applied_statement_count=596`, and `failed_statement_count=0`.
+- Persisted lifecycle graph query for
+  `review_pipeline_post_apply_recheck_status=gap_closed` returned
+  `query_match_status=matched`, `decision=healthy`, and one lifecycle fact.
+- Persisted lifecycle graph text query for
+  `review_pipeline_apply_result=applied` returned `query match: matched`.
+
+Decision:
+- E440 makes the successful hybrid classifier review route available through
+  graph queries. Services can now ask the graph whether review-route apply
+  closed the gap, instead of replaying route execution artifacts.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371.md --review-facts=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371-review-facts.json --review-write-plan=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371-review-write-plan.json --apply-review-facts --require-review-provenance --require-review-handoff --out=.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json --json
+bun src/cli/index.ts classifiers package-operations --facts --out .ax/experiments/classifier-package-execution-facts-review-pipeline-apply-e440.json --json
+bun src/cli/index.ts classifiers package-operations --write-plan --out .ax/experiments/classifier-package-execution-write-plan-review-pipeline-apply-e440.json --json
+bun src/cli/index.ts classifiers package-operations --apply-write-plan --out .ax/experiments/classifier-package-execution-apply-review-pipeline-apply-e440.json --json
+bun src/cli/index.ts classifiers package-operations --graph-health --graph-mode lifecycle --predicate review_pipeline_post_apply_recheck_status --value gap_closed --out .ax/experiments/classifier-graph-lifecycle-review-pipeline-apply-e440.json --json
+bun src/cli/index.ts classifiers package-operations --graph-health --graph-mode lifecycle --predicate review_pipeline_apply_result --value applied > .ax/experiments/classifier-graph-lifecycle-review-pipeline-apply-e440.txt
+bun -e 'const f=await Bun.file(".ax/experiments/classifier-package-execution-facts-review-pipeline-apply-e440.json").json(); const facts=Object.fromEntries(f.facts.filter(x=>x.subject==="classifier_lifecycle:workflow_candidate_review_pipeline").map(x=>[x.predicate,x.value])); const required={review_pipeline_apply_result:"applied",review_pipeline_applied:true,review_pipeline_applied_statement_count:5,review_pipeline_review_handoff_status:"complete_review_handoff",review_pipeline_production_apply_guard:"ready_to_apply",review_pipeline_production_can_apply:true,review_pipeline_post_apply_recheck_status:"gap_closed"}; for (const [k,v] of Object.entries(required)) { if (facts[k] !== v) throw new Error(`${k} expected ${v} got ${facts[k]}`); }'
+bun -e 'const apply=await Bun.file(".ax/experiments/classifier-package-execution-apply-review-pipeline-apply-e440.json").json(); const graph=await Bun.file(".ax/experiments/classifier-graph-lifecycle-review-pipeline-apply-e440.json").json(); if (apply.decision !== "applied" || apply.applied_statement_count !== 596 || apply.failed_statement_count !== 0) throw new Error(`bad apply ${JSON.stringify(apply)}`); if (graph.decision !== "healthy" || graph.query_match_status !== "matched" || graph.lifecycle_facts?.[0]?.value !== "gap_closed") throw new Error(`bad graph ${JSON.stringify({decision:graph.decision,status:graph.query_match_status,facts:graph.lifecycle_facts})}`);'
+rg -n "review_pipeline_apply_result|value: applied|query match: matched|decision: healthy" .ax/experiments/classifier-graph-lifecycle-review-pipeline-apply-e440.txt
+```
+
+Focused tests, projection assertions, Surreal apply, and persisted graph queries
+passed.
 
 ## E439 - Apply Reviewed Route Facts and Recheck Coverage
 

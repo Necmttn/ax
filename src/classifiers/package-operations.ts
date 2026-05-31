@@ -768,6 +768,17 @@ export interface ClassifierLifecycleReviewStatus {
         readonly command_kind?: string;
         readonly prepared_status?: string;
         readonly output_verification_status?: string;
+        readonly apply_result?: string;
+        readonly applied?: boolean;
+        readonly applied_statement_count?: number;
+        readonly review_handoff_status?: string;
+        readonly production_apply_guard?: string;
+        readonly production_can_apply?: boolean;
+        readonly post_apply_recheck_status?: string;
+        readonly post_apply_reviewed_candidate_delta?: number;
+        readonly post_apply_unreviewed_candidate_delta?: number;
+        readonly post_apply_projected_reviewed_delta?: number;
+        readonly post_apply_projected_unreviewed_delta?: number;
         readonly can_execute?: boolean;
         readonly can_continue?: boolean;
         readonly missing_required_artifact_count?: number;
@@ -1557,7 +1568,12 @@ function loadReviewPipelineLifecycleStatus(baseDir: string): Pick<ClassifierLife
     const report = loadJsonRecord(reportPath);
     const coverageReview = jsonRecordAt(report, "coverage_review");
     const lifecycle = jsonRecordAt(coverageReview, "review_pipeline_lifecycle");
-    if (Object.keys(lifecycle).length === 0) return {};
+    const postApplyRecheck = jsonRecordAt(coverageReview, "post_apply_recheck");
+    const hasLifecycle = Object.keys(lifecycle).length > 0;
+    const hasApplyState = stringAt(coverageReview, "apply_result") !== undefined ||
+        numberAt(coverageReview, "applied_statement_count") !== undefined ||
+        stringAt(postApplyRecheck, "status") !== undefined;
+    if (!hasLifecycle && !hasApplyState) return {};
     const prepared = jsonRecordAt(lifecycle, "prepared");
     const summary = jsonRecordAt(lifecycle, "summary");
     const outputVerification = jsonRecordAt(lifecycle, "output_verification");
@@ -1588,6 +1604,17 @@ function loadReviewPipelineLifecycleStatus(baseDir: string): Pick<ClassifierLife
         ...(stringAt(coverageReview, "review_pipeline_command_kind") === undefined ? {} : { command_kind: stringAt(coverageReview, "review_pipeline_command_kind") as string }),
         ...(stringAt(prepared, "status") === undefined ? {} : { prepared_status: stringAt(prepared, "status") as string }),
         ...(stringAt(outputVerification, "status") === undefined ? {} : { output_verification_status: stringAt(outputVerification, "status") as string }),
+        ...(stringAt(coverageReview, "apply_result") === undefined ? {} : { apply_result: stringAt(coverageReview, "apply_result") as string }),
+        ...(jsonBoolean(coverageReview.applied) === null ? {} : { applied: jsonBoolean(coverageReview.applied) as boolean }),
+        ...(numberAt(coverageReview, "applied_statement_count") === undefined ? {} : { applied_statement_count: numberAt(coverageReview, "applied_statement_count") as number }),
+        ...(stringAt(coverageReview, "review_handoff_status") === undefined ? {} : { review_handoff_status: stringAt(coverageReview, "review_handoff_status") as string }),
+        ...(stringAt(coverageReview, "production_apply_guard") === undefined ? {} : { production_apply_guard: stringAt(coverageReview, "production_apply_guard") as string }),
+        ...(jsonBoolean(coverageReview.production_can_apply) === null ? {} : { production_can_apply: jsonBoolean(coverageReview.production_can_apply) as boolean }),
+        ...(stringAt(postApplyRecheck, "status") === undefined ? {} : { post_apply_recheck_status: stringAt(postApplyRecheck, "status") as string }),
+        ...(numberAt(postApplyRecheck, "reviewed_candidate_delta") === undefined ? {} : { post_apply_reviewed_candidate_delta: numberAt(postApplyRecheck, "reviewed_candidate_delta") as number }),
+        ...(numberAt(postApplyRecheck, "unreviewed_candidate_delta") === undefined ? {} : { post_apply_unreviewed_candidate_delta: numberAt(postApplyRecheck, "unreviewed_candidate_delta") as number }),
+        ...(numberAt(postApplyRecheck, "projected_reviewed_delta") === undefined ? {} : { post_apply_projected_reviewed_delta: numberAt(postApplyRecheck, "projected_reviewed_delta") as number }),
+        ...(numberAt(postApplyRecheck, "projected_unreviewed_delta") === undefined ? {} : { post_apply_projected_unreviewed_delta: numberAt(postApplyRecheck, "projected_unreviewed_delta") as number }),
         ...(jsonBoolean(lifecycle.can_execute) === null ? {} : { can_execute: jsonBoolean(lifecycle.can_execute) as boolean }),
         ...(jsonBoolean(lifecycle.can_continue) === null ? {} : { can_continue: jsonBoolean(lifecycle.can_continue) as boolean }),
         missing_required_artifact_count: missingRequiredArtifacts.length,
@@ -2338,16 +2365,27 @@ export function buildExecutionFactProjectionReport(
                 numericFacts: {
                     review_pipeline_missing_required_artifact_count: workflowStatus.review_pipeline_lifecycle.missing_required_artifact_count,
                     review_pipeline_checked_artifact_count: workflowStatus.review_pipeline_lifecycle.checked_artifact_count,
+                    review_pipeline_applied_statement_count: workflowStatus.review_pipeline_lifecycle.applied_statement_count,
+                    review_pipeline_post_apply_reviewed_candidate_delta: workflowStatus.review_pipeline_lifecycle.post_apply_reviewed_candidate_delta,
+                    review_pipeline_post_apply_unreviewed_candidate_delta: workflowStatus.review_pipeline_lifecycle.post_apply_unreviewed_candidate_delta,
+                    review_pipeline_post_apply_projected_reviewed_delta: workflowStatus.review_pipeline_lifecycle.post_apply_projected_reviewed_delta,
+                    review_pipeline_post_apply_projected_unreviewed_delta: workflowStatus.review_pipeline_lifecycle.post_apply_projected_unreviewed_delta,
                 },
                 booleanFacts: {
                     review_pipeline_can_execute: workflowStatus.review_pipeline_lifecycle.can_execute,
                     review_pipeline_can_continue: workflowStatus.review_pipeline_lifecycle.can_continue,
                     review_pipeline_recommended_action_can_execute: workflowStatus.review_pipeline_lifecycle.recommended_action_can_execute,
+                    review_pipeline_applied: workflowStatus.review_pipeline_lifecycle.applied,
+                    review_pipeline_production_can_apply: workflowStatus.review_pipeline_lifecycle.production_can_apply,
                 },
                 stringFacts: {
                     review_pipeline_command_kind: workflowStatus.review_pipeline_lifecycle.command_kind,
                     review_pipeline_prepared_status: workflowStatus.review_pipeline_lifecycle.prepared_status,
                     review_pipeline_output_verification_status: workflowStatus.review_pipeline_lifecycle.output_verification_status,
+                    review_pipeline_apply_result: workflowStatus.review_pipeline_lifecycle.apply_result,
+                    review_pipeline_review_handoff_status: workflowStatus.review_pipeline_lifecycle.review_handoff_status,
+                    review_pipeline_production_apply_guard: workflowStatus.review_pipeline_lifecycle.production_apply_guard,
+                    review_pipeline_post_apply_recheck_status: workflowStatus.review_pipeline_lifecycle.post_apply_recheck_status,
                     review_pipeline_recommended_action_kind: workflowStatus.review_pipeline_lifecycle.recommended_action_kind,
                     review_pipeline_recommended_action_status: workflowStatus.review_pipeline_lifecycle.recommended_action_status,
                     review_pipeline_recommended_action_execution_phase: workflowStatus.review_pipeline_lifecycle.recommended_action_execution_phase,
