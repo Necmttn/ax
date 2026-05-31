@@ -1736,12 +1736,14 @@ describe("classifiers workflow-candidates", () => {
             review_issue_candidate_count: 1,
             review_issue_status: "needs_review_repair",
             review_issue_next_action: "Fix review issue rows before applying reviewed coverage facts.",
+            review_issue_repair_command: "bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/reviewed-coverage-gaps.jsonl --sync-coverage-review-brief=.ax/experiments/reviewed-coverage-gaps.md --coverage-review-brief=.ax/experiments/reviewed-coverage-gaps.md --out=.ax/experiments/reviewed-coverage-gaps.json --json",
         });
         expect(text).toContain("coverage review issue rows: 3");
         expect(text).toContain("coverage review issue fixtures: 1");
         expect(text).toContain("coverage review issue candidates: 1");
         expect(text).toContain("coverage review issue status: needs_review_repair");
         expect(text).toContain("coverage review issue next action: Fix review issue rows before applying reviewed coverage facts.");
+        expect(text).toContain("coverage review issue repair command: bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/reviewed-coverage-gaps.jsonl --sync-coverage-review-brief=.ax/experiments/reviewed-coverage-gaps.md --coverage-review-brief=.ax/experiments/reviewed-coverage-gaps.md --out=.ax/experiments/reviewed-coverage-gaps.json --json");
         expect(text).toContain("coverage review issue counts: missing_review_rationale=1, missing_reviewer=1, missing_reviewed_at=1");
         expect(text).toContain("coverage review issue: missing_review_rationale fixture=workflow-candidate-review-coverage/verification_or_recovery_signal/a candidate=classifier_candidate_group:hybrid-window/verification_or_recovery_signal status=accept");
         expect(text).toContain("coverage review issue: missing_reviewer fixture=workflow-candidate-review-coverage/verification_or_recovery_signal/a candidate=classifier_candidate_group:hybrid-window/verification_or_recovery_signal status=accept");
@@ -1751,6 +1753,7 @@ describe("classifiers workflow-candidates", () => {
         expect(brief).toContain("- Issue candidates: `1`");
         expect(brief).toContain("- Issue status: `needs_review_repair`");
         expect(brief).toContain("- Issue next action: Fix review issue rows before applying reviewed coverage facts.");
+        expect(brief).toContain("- Issue repair command: `bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/reviewed-coverage-gaps.jsonl --sync-coverage-review-brief=.ax/experiments/reviewed-coverage-gaps.md --coverage-review-brief=.ax/experiments/reviewed-coverage-gaps.md --out=.ax/experiments/reviewed-coverage-gaps.json --json`");
         expect(brief).toContain("- Issue counts: `missing_review_rationale=1`, `missing_reviewer=1`, `missing_reviewed_at=1`");
         expect(brief).toContain("- `missing_review_rationale` fixture=`workflow-candidate-review-coverage/verification_or_recovery_signal/a` candidate=`classifier_candidate_group:hybrid-window/verification_or_recovery_signal` status=`accept` remediation=`Add rationale text to this reviewed fixture.`");
         expect(brief).toContain("- `missing_reviewer` fixture=`workflow-candidate-review-coverage/verification_or_recovery_signal/a` candidate=`classifier_candidate_group:hybrid-window/verification_or_recovery_signal` status=`accept` remediation=`Add reviewer metadata to this reviewed fixture.`");

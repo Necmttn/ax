@@ -351,6 +351,7 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly review_issue_candidate_count: number;
     readonly review_issue_status: WorkflowCandidateReviewCoverageReviewIssueStatus;
     readonly review_issue_next_action: string;
+    readonly review_issue_repair_command?: string;
     readonly provenance_issue_rows: readonly WorkflowCandidateReviewCoverageProvenanceIssueRow[];
     readonly projection_totals: WorkflowCandidateTopicReviewGraphProjection["totals"];
     readonly write_plan_totals: WorkflowCandidateTopicReviewGraphWritePlan["totals"];
@@ -1964,6 +1965,9 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             `coverage review issue candidates: ${report.coverage_review.review_issue_candidate_count}`,
             `coverage review issue status: ${report.coverage_review.review_issue_status}`,
             `coverage review issue next action: ${report.coverage_review.review_issue_next_action}`,
+            ...(report.coverage_review.review_issue_repair_command === undefined ? [] : [
+                `coverage review issue repair command: ${report.coverage_review.review_issue_repair_command}`,
+            ]),
             `coverage review issue counts: ${report.coverage_review.review_issue_counts.length === 0 ? "none" : report.coverage_review.review_issue_counts.map((item) => `${item.issue}=${item.count}`).join(", ")}`,
             ...report.coverage_review.review_issue_rows.map((row) =>
                 `coverage review issue: ${row.issue} fixture=${row.fixture_id} candidate=${row.candidate_id} status=${row.review_status}`
@@ -3209,6 +3213,7 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
             `--out=${readinessOutputPath}`,
             "--json",
         ].filter((part): part is string => part !== undefined).join(" ");
+    const reviewIssueRepairCommand = reviewIssueRows.length === 0 ? undefined : nextCommand;
     const lines = [
         "# Workflow Candidate Coverage Review",
         "",
@@ -3260,6 +3265,9 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
                 `- Issue candidates: \`${reviewIssueCandidateCount}\``,
                 `- Issue status: \`${reviewIssueStatus}\``,
                 `- Issue next action: ${reviewIssueNextAction}`,
+                ...(reviewIssueRepairCommand === undefined ? [] : [
+                    `- Issue repair command: \`${reviewIssueRepairCommand}\``,
+                ]),
                 `- Issue counts: ${reviewIssueCounts.map((item) => `\`${item.issue}=${item.count}\``).join(", ")}`,
                 ...reviewIssueRows.map((row) =>
                     `- \`${row.issue}\` fixture=\`${row.fixture_id}\` candidate=\`${row.candidate_id}\` status=\`${row.review_status}\` remediation=\`${row.remediation}\``
@@ -3766,6 +3774,39 @@ const workflowCandidateReviewCoverageProvenanceStampCommand = (input: {
     ].join(" ");
 };
 
+const defaultReviewBriefPathForReviewPack = (sourcePath: string): string => {
+    if (sourcePath.endsWith(".jsonl")) return sourcePath.replace(/\.jsonl$/, ".md");
+    return `${sourcePath}.md`;
+};
+
+const defaultReadinessOutputPathForReviewPack = (sourcePath: string): string => {
+    if (sourcePath.endsWith(".jsonl")) return sourcePath.replace(/\.jsonl$/, ".json");
+    return `${sourcePath}.json`;
+};
+
+const workflowCandidateReviewCoverageReviewIssueRepairCommand = (input: {
+    readonly sourcePath: string;
+    readonly sourceKind?: string;
+    readonly reviewBriefPath?: string;
+    readonly syncedReviewBriefPath?: string;
+    readonly outputPath?: string;
+}): string => {
+    const reviewBriefPath = input.reviewBriefPath
+        ?? input.syncedReviewBriefPath
+        ?? defaultReviewBriefPathForReviewPack(input.sourcePath);
+    const syncedReviewBriefPath = input.syncedReviewBriefPath ?? reviewBriefPath;
+    return [
+        "bun src/cli/index.ts classifiers workflow-candidates",
+        "--review-coverage",
+        `--source-kind=${input.sourceKind ?? "hybrid_window_classifier_projection"}`,
+        `--coverage-review-pack=${input.sourcePath}`,
+        `--sync-coverage-review-brief=${syncedReviewBriefPath}`,
+        `--coverage-review-brief=${reviewBriefPath}`,
+        `--out=${input.outputPath ?? defaultReadinessOutputPathForReviewPack(input.sourcePath)}`,
+        "--json",
+    ].join(" ");
+};
+
 export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     readonly rows: readonly WorkflowCandidateTopicClassifierFixtureRow[];
     readonly sourcePath: string;
@@ -3965,6 +4006,15 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     const reviewIssueCandidateCount = workflowCandidateReviewCoverageReviewIssueCandidateCount(reviewIssueRows);
     const reviewIssueStatus = workflowCandidateReviewCoverageReviewIssueStatus(reviewIssueRows);
     const reviewIssueNextAction = workflowCandidateReviewCoverageReviewIssueNextAction(reviewIssueStatus);
+    const reviewIssueRepairCommand = reviewIssueRows.length === 0
+        ? undefined
+        : workflowCandidateReviewCoverageReviewIssueRepairCommand({
+            sourcePath: input.sourcePath,
+            ...(input.sourceKind === undefined ? {} : { sourceKind: input.sourceKind }),
+            ...(input.reviewBriefPath === undefined ? {} : { reviewBriefPath: input.reviewBriefPath }),
+            ...(input.syncedReviewBriefPath === undefined ? {} : { syncedReviewBriefPath: input.syncedReviewBriefPath }),
+            ...(input.outputPath === undefined ? {} : { outputPath: input.outputPath }),
+        });
     return {
         schema: "ax.workflow_candidate_review_readiness.v1",
         source_path: input.sourcePath,
@@ -4034,6 +4084,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         review_issue_candidate_count: reviewIssueCandidateCount,
         review_issue_status: reviewIssueStatus,
         review_issue_next_action: reviewIssueNextAction,
+        ...(reviewIssueRepairCommand === undefined ? {} : { review_issue_repair_command: reviewIssueRepairCommand }),
         provenance_issue_rows: provenanceIssueRows,
         projection_totals: input.projection.totals,
         write_plan_totals: input.writePlan.totals,
