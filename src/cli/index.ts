@@ -2064,6 +2064,7 @@ const classifiersWorkflowCandidatesCommand = Command.make(
         includeHelperFacts: Flag.boolean("include-helper-facts").pipe(Flag.withDefault(false)),
         includeReviewFacts: Flag.boolean("include-review-facts").pipe(Flag.withDefault(false)),
         guidanceDecision: Flag.boolean("guidance-decision").pipe(Flag.withDefault(false)),
+        guidanceDecisionBatch: Flag.boolean("guidance-decision-batch").pipe(Flag.withDefault(false)),
         proposalStatus: Flag.choice("proposal-status", ["all", "open", "accepted", "rejected"] as const).pipe(Flag.withDefault("all")),
         expandEvidence: Flag.boolean("expand-evidence").pipe(Flag.withDefault(false)),
         evidencePack: Flag.string("evidence-pack").pipe(Flag.optional),
@@ -2103,7 +2104,7 @@ const classifiersWorkflowCandidatesCommand = Command.make(
         proposalSection: Flag.string("proposal-section").pipe(Flag.optional),
         json: jsonFlag,
     },
-    ({ sourceKind, action, classifier, search, taskLike, topicReport, listProposals, listHarnessFacts, reviewCoverage, includeHarnessFacts, includeHelperFacts, includeReviewFacts, guidanceDecision, proposalStatus, expandEvidence, evidencePack, classifierFixturePack, coverageFixturePack, coverageReviewPack, coverageReviewBrief, syncCoverageReviewBrief, harnessFacts, harnessWritePlan, applyHarnessFacts, reviewFacts, reviewWritePlan, applyReviewFacts, requireReviewProvenance, requireReviewHandoff, reviewProvenanceReviewer, reviewProvenanceReviewedAt, reviewPipelineLifecycle, reviewPipelineVerifyOutputs, reviewPipelineReviewer, reviewPipelineReviewedAt, limit, examples, out, brief, syncBrief, promoteTasks, emitAdjacentTasks, promoteHarnessProposals, requireHarnessChecks, promoteProposals, proposalDryRun, promotionMode, taskDir, proposalTarget, proposalSection, json }) => {
+    ({ sourceKind, action, classifier, search, taskLike, topicReport, listProposals, listHarnessFacts, reviewCoverage, includeHarnessFacts, includeHelperFacts, includeReviewFacts, guidanceDecision, guidanceDecisionBatch, proposalStatus, expandEvidence, evidencePack, classifierFixturePack, coverageFixturePack, coverageReviewPack, coverageReviewBrief, syncCoverageReviewBrief, harnessFacts, harnessWritePlan, applyHarnessFacts, reviewFacts, reviewWritePlan, applyReviewFacts, requireReviewProvenance, requireReviewHandoff, reviewProvenanceReviewer, reviewProvenanceReviewedAt, reviewPipelineLifecycle, reviewPipelineVerifyOutputs, reviewPipelineReviewer, reviewPipelineReviewedAt, limit, examples, out, brief, syncBrief, promoteTasks, emitAdjacentTasks, promoteHarnessProposals, requireHarnessChecks, promoteProposals, proposalDryRun, promotionMode, taskDir, proposalTarget, proposalSection, json }) => {
         const actionValue = optionValue(action);
         const classifierValue = optionValue(classifier);
         const searchValue = optionValue(search);
@@ -2143,6 +2144,7 @@ const classifiersWorkflowCandidatesCommand = Command.make(
             includeHelperFacts,
             includeReviewFacts,
             guidanceDecision,
+            guidanceDecisionBatch,
             proposalStatus: proposalStatus as WorkflowCandidateProposalStatusFilter,
             expandEvidence,
             ...(evidencePackPath === undefined ? {} : { evidencePack: evidencePackPath }),

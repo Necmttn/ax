@@ -13,6 +13,7 @@ import {
     buildWorkflowCandidateTopicHarnessGraphWritePlan,
     buildWorkflowCandidateTopicHarnessChecks,
     buildWorkflowCandidateTopicHarnessEvidenceSummary,
+    buildWorkflowCandidateTopicGuidanceDecisionBatchReport,
     buildWorkflowCandidateTopicGuidanceDecisionReport,
     buildWorkflowCandidateTopicHelperExplanations,
     buildWorkflowCandidateTopicReviewGraphProjection,
@@ -43,6 +44,7 @@ import {
     renderWorkflowCandidateTaskMarkdown,
     renderWorkflowCandidateTopicReportText,
     renderWorkflowCandidateTopicHarnessGraphListText,
+    renderWorkflowCandidateTopicGuidanceDecisionBatchText,
     renderWorkflowCandidateReportText,
     renderWorkflowCandidateReviewCoverageText,
     syncWorkflowCandidateReportFromBrief,
@@ -3644,6 +3646,146 @@ describe("classifiers workflow-candidates", () => {
         expect(renderWorkflowCandidateTopicReportText({ ...report, guidance_decision: decision })).toContain(
             "guidance decision: guidance_promotion_not_warranted",
         );
+    });
+
+    test("guidance decision treats rejected reviewed candidates as not warranted", () => {
+        const proposals = buildWorkflowCandidateProposalListReport({
+            rows: [],
+            limit: 10,
+            status: "all",
+            expandEvidence: true,
+            search: "surrealml",
+        });
+        const candidates = buildWorkflowCandidateReport({
+            groupRows: [],
+            evidenceRows: [],
+            sourceKind: "hybrid_window_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            search: "surrealml",
+            taskLike: "include",
+        });
+        const report = {
+            ...buildWorkflowCandidateTopicReport({
+                sourceKind: "hybrid_window_classifier_projection",
+                topic: "surrealml",
+                proposals,
+                candidates: {
+                    ...candidates,
+                    candidates: [{
+                        group_id: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+                        label: "environment_or_preference_signal",
+                        proposed_action: "record_guidance_or_environment_preference",
+                        raw_support_count: 1,
+                        support_count: 1,
+                        evidence_count: 1,
+                        turn_ref_count: 1,
+                        average_confidence: 1,
+                        wrapper_like_count: 0,
+                        task_like_count: 0,
+                        task_like_ratio: 0,
+                        score: 1,
+                        examples: [{
+                            result_id: "fact:workflow_topic_candidate_review__surrealml",
+                            turn: "turn:surrealml",
+                            confidence: 1,
+                            task_like: false,
+                            text_excerpt: "Persisted review fact rejected environment_or_preference_signal.",
+                        }],
+                        review: {
+                            verdict: "reject",
+                            rationale: "Information request, not durable guidance.",
+                        },
+                    }],
+                },
+            }),
+            persisted_review_facts: buildWorkflowCandidateTopicReviewGraphListReport({
+                topic: "surrealml",
+                facts: [{
+                    graph_id: "fact:workflow_topic_candidate_review__surrealml",
+                    subject: "workflow_topic_candidate_review:surrealml:environment",
+                    predicate: "reject",
+                    object: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+                    value_json: properties({ reviewed: true, verdict: "reject" }),
+                    properties_json: properties({
+                        topic: "surrealml",
+                        candidate_id: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+                    }),
+                }],
+                edges: [],
+            }),
+        };
+
+        const decision = buildWorkflowCandidateTopicGuidanceDecisionReport(report);
+
+        expect(decision.decision).toBe("guidance_promotion_not_warranted");
+        expect(decision.totals).toMatchObject({
+            guidance_not_warranted_count: 1,
+            needs_human_review_count: 0,
+        });
+        expect(decision.candidates[0]).toMatchObject({
+            has_review_acceptance: false,
+            decision: "guidance_promotion_not_warranted",
+            rationale: "Human review rejected or deferred this candidate, so guidance promotion is not warranted.",
+        });
+    });
+
+    test("guidance decision batch summarizes multiple reviewed topics", () => {
+        const batch = buildWorkflowCandidateTopicGuidanceDecisionBatchReport({
+            sourceKind: "hybrid_window_classifier_projection",
+            limit: 10,
+            decisions: [{
+                schema: "ax.workflow_topic_guidance_decision.v1",
+                topic: "review-coverage",
+                decision: "guidance_promotion_not_warranted",
+                next_action: "Do not promote guidance for this topic yet; use the persisted harness fact as graph evidence.",
+                candidates: [],
+                totals: {
+                    candidate_count: 1,
+                    guidance_ready_count: 0,
+                    guidance_not_warranted_count: 1,
+                    needs_passing_harness_evidence_count: 0,
+                    needs_human_review_count: 0,
+                    accepted_harness_proposal_count: 1,
+                    scaffolded_harness_experiment_count: 1,
+                    passing_harness_evidence_count: 1,
+                    guidance_proposal_count: 0,
+                },
+            }, {
+                schema: "ax.workflow_topic_guidance_decision.v1",
+                topic: "surrealml",
+                decision: "guidance_promotion_not_warranted",
+                next_action: "Do not promote guidance for this topic yet; use the persisted harness fact as graph evidence.",
+                candidates: [],
+                totals: {
+                    candidate_count: 1,
+                    guidance_ready_count: 0,
+                    guidance_not_warranted_count: 1,
+                    needs_passing_harness_evidence_count: 0,
+                    needs_human_review_count: 0,
+                    accepted_harness_proposal_count: 1,
+                    scaffolded_harness_experiment_count: 1,
+                    passing_harness_evidence_count: 1,
+                    guidance_proposal_count: 1,
+                },
+            }],
+        });
+
+        expect(batch).toMatchObject({
+            schema: "ax.workflow_topic_guidance_decision_batch.v1",
+            totals: {
+                topic_count: 2,
+                candidate_count: 2,
+                guidance_ready_count: 0,
+                guidance_not_warranted_count: 2,
+                passing_harness_evidence_count: 2,
+            },
+            next_action: "No guidance promotion is currently warranted by reviewed topic evidence.",
+        });
+        const text = renderWorkflowCandidateTopicGuidanceDecisionBatchText(batch);
+        expect(text).toContain("workflow topic guidance decision batch");
+        expect(text).toContain("decisions: ready=0 not_warranted=2 needs_harness=0 needs_review=0");
+        expect(text).toContain("guidance_promotion_not_warranted review-coverage");
     });
 
     test("topic harness gates fail with only persisted failed harness facts", () => {

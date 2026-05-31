@@ -45,6 +45,7 @@ export interface WorkflowCandidateCommandInput {
     readonly includeHelperFacts?: boolean;
     readonly includeReviewFacts?: boolean;
     readonly guidanceDecision?: boolean;
+    readonly guidanceDecisionBatch?: boolean;
     readonly proposalStatus?: WorkflowCandidateProposalStatusFilter;
     readonly expandEvidence?: boolean;
     readonly evidencePack?: string;
@@ -205,6 +206,29 @@ export interface WorkflowCandidateTopicGuidanceDecisionReport {
         readonly passing_harness_evidence_count: number;
         readonly guidance_proposal_count: number;
     };
+}
+
+export interface WorkflowCandidateTopicGuidanceDecisionBatchReport {
+    readonly schema: "ax.workflow_topic_guidance_decision_batch.v1";
+    readonly source_kind: string;
+    readonly query: {
+        readonly limit: number;
+        readonly search?: string;
+    };
+    readonly decisions: readonly WorkflowCandidateTopicGuidanceDecisionReport[];
+    readonly totals: {
+        readonly topic_count: number;
+        readonly candidate_count: number;
+        readonly guidance_ready_count: number;
+        readonly guidance_not_warranted_count: number;
+        readonly needs_passing_harness_evidence_count: number;
+        readonly needs_human_review_count: number;
+        readonly accepted_harness_proposal_count: number;
+        readonly scaffolded_harness_experiment_count: number;
+        readonly passing_harness_evidence_count: number;
+        readonly guidance_proposal_count: number;
+    };
+    readonly next_action: string;
 }
 
 export interface WorkflowCandidateTopicTaskSummary {
@@ -1062,6 +1086,13 @@ const parseProperties = (value: string | undefined): Record<string, unknown> => 
     if (!value) return {};
     const parsed = safeJsonParse<unknown>(value);
     return isObject(parsed) ? parsed : {};
+};
+
+const topicFromPropertiesJson = (value: string | undefined): string | undefined => {
+    const props = parseProperties(value);
+    return typeof props.topic === "string" && props.topic.trim().length > 0
+        ? props.topic.trim()
+        : undefined;
 };
 
 const asNumber = (value: unknown): number | undefined =>
@@ -2711,6 +2742,23 @@ const acceptedReviewCandidateIds = (report: WorkflowCandidateTopicReport): Reado
     return ids;
 };
 
+const rejectedReviewCandidateIds = (report: WorkflowCandidateTopicReport): ReadonlySet<string> => {
+    const ids = new Set<string>();
+    for (const candidate of report.candidates.candidates) {
+        if (candidate.review?.verdict === "reject" || candidate.review?.verdict === "defer") ids.add(candidate.group_id);
+        if ((candidate.persisted_review_facts ?? []).some((fact) => fact.predicate === "reject" || fact.predicate === "defer")) {
+            ids.add(candidate.group_id);
+        }
+    }
+    for (const fact of report.persisted_review_facts?.facts ?? []) {
+        if (fact.predicate !== "reject" && fact.predicate !== "defer") continue;
+        if (typeof fact.object === "string" && fact.object.length > 0) ids.add(fact.object);
+        const props = parseProperties(fact.properties_json);
+        if (typeof props.candidate_id === "string" && props.candidate_id.length > 0) ids.add(props.candidate_id);
+    }
+    return ids;
+};
+
 export function buildWorkflowCandidateTopicGuidanceDecisionReport(
     report: WorkflowCandidateTopicReport,
 ): WorkflowCandidateTopicGuidanceDecisionReport {
@@ -2722,6 +2770,7 @@ export function buildWorkflowCandidateTopicGuidanceDecisionReport(
     );
     const guidanceCandidateIds = proposalEvidenceCandidateIds(report, (proposal) => proposal.form === "guidance");
     const acceptedReviewIds = acceptedReviewCandidateIds(report);
+    const rejectedReviewIds = rejectedReviewCandidateIds(report);
     const passingHarnessIds = passingHarnessCandidateIds(report);
 
     const candidates = report.candidates.candidates.map((candidate): WorkflowCandidateTopicGuidanceCandidateDecision => {
@@ -2731,6 +2780,19 @@ export function buildWorkflowCandidateTopicGuidanceDecisionReport(
         const hasPassingHarnessEvidence = passingHarnessIds.has(candidate.group_id);
         const hasGuidanceProposal = guidanceCandidateIds.has(candidate.group_id);
 
+        if (rejectedReviewIds.has(candidate.group_id)) {
+            return {
+                candidate_id: candidate.group_id,
+                label: candidate.label,
+                recommended_artifact: recommendation.primary,
+                has_review_acceptance: false,
+                has_accepted_harness_proposal: hasAcceptedHarnessProposal,
+                has_passing_harness_evidence: hasPassingHarnessEvidence,
+                has_guidance_proposal: hasGuidanceProposal,
+                decision: "guidance_promotion_not_warranted",
+                rationale: "Human review rejected or deferred this candidate, so guidance promotion is not warranted.",
+            };
+        }
         if (!hasReviewAcceptance) {
             return {
                 candidate_id: candidate.group_id,
@@ -2833,6 +2895,86 @@ export function buildWorkflowCandidateTopicGuidanceDecisionReport(
             guidance_proposal_count: guidanceCandidateIds.size,
         },
     };
+}
+
+export function buildWorkflowCandidateTopicGuidanceDecisionBatchReport(input: {
+    readonly sourceKind: string;
+    readonly limit: number;
+    readonly search?: string;
+    readonly decisions: readonly WorkflowCandidateTopicGuidanceDecisionReport[];
+}): WorkflowCandidateTopicGuidanceDecisionBatchReport {
+    const totals = input.decisions.reduce(
+        (sum, decision) => ({
+            topic_count: sum.topic_count + 1,
+            candidate_count: sum.candidate_count + decision.totals.candidate_count,
+            guidance_ready_count: sum.guidance_ready_count + decision.totals.guidance_ready_count,
+            guidance_not_warranted_count: sum.guidance_not_warranted_count + decision.totals.guidance_not_warranted_count,
+            needs_passing_harness_evidence_count: sum.needs_passing_harness_evidence_count + decision.totals.needs_passing_harness_evidence_count,
+            needs_human_review_count: sum.needs_human_review_count + decision.totals.needs_human_review_count,
+            accepted_harness_proposal_count: sum.accepted_harness_proposal_count + decision.totals.accepted_harness_proposal_count,
+            scaffolded_harness_experiment_count: sum.scaffolded_harness_experiment_count + decision.totals.scaffolded_harness_experiment_count,
+            passing_harness_evidence_count: sum.passing_harness_evidence_count + decision.totals.passing_harness_evidence_count,
+            guidance_proposal_count: sum.guidance_proposal_count + decision.totals.guidance_proposal_count,
+        }),
+        {
+            topic_count: 0,
+            candidate_count: 0,
+            guidance_ready_count: 0,
+            guidance_not_warranted_count: 0,
+            needs_passing_harness_evidence_count: 0,
+            needs_human_review_count: 0,
+            accepted_harness_proposal_count: 0,
+            scaffolded_harness_experiment_count: 0,
+            passing_harness_evidence_count: 0,
+            guidance_proposal_count: 0,
+        },
+    );
+    const nextAction = totals.guidance_ready_count > 0
+        ? "Inspect guidance-ready topic decisions and create or refresh guidance proposals."
+        : totals.needs_passing_harness_evidence_count > 0
+            ? "Accept or run missing harness checks before promoting guidance."
+            : totals.needs_human_review_count > 0
+                ? "Review pending topic candidates before promoting guidance."
+                : "No guidance promotion is currently warranted by reviewed topic evidence.";
+    return {
+        schema: "ax.workflow_topic_guidance_decision_batch.v1",
+        source_kind: input.sourceKind,
+        query: {
+            limit: input.limit,
+            ...(input.search === undefined ? {} : { search: input.search }),
+        },
+        decisions: input.decisions,
+        totals,
+        next_action: nextAction,
+    };
+}
+
+export function renderWorkflowCandidateTopicGuidanceDecisionBatchText(
+    report: WorkflowCandidateTopicGuidanceDecisionBatchReport,
+): string {
+    const lines = [
+        "workflow topic guidance decision batch",
+        `source: ${report.source_kind}`,
+        ...(report.query.search ? [`search: ${report.query.search}`] : []),
+        `topics: ${report.totals.topic_count}`,
+        `candidates: ${report.totals.candidate_count}`,
+        `decisions: ready=${report.totals.guidance_ready_count} not_warranted=${report.totals.guidance_not_warranted_count} needs_harness=${report.totals.needs_passing_harness_evidence_count} needs_review=${report.totals.needs_human_review_count}`,
+        `evidence: accepted_harness=${report.totals.accepted_harness_proposal_count} scaffolded_harness=${report.totals.scaffolded_harness_experiment_count} passing_harness=${report.totals.passing_harness_evidence_count} guidance_proposals=${report.totals.guidance_proposal_count}`,
+        `next action: ${report.next_action}`,
+        "",
+        "topics:",
+    ];
+    if (report.decisions.length === 0) lines.push("  (none)");
+    for (const decision of report.decisions) {
+        lines.push(
+            `  - ${decision.decision} ${decision.topic}`,
+            `    candidates: ${decision.totals.candidate_count}`,
+            `    counts: ready=${decision.totals.guidance_ready_count} not_warranted=${decision.totals.guidance_not_warranted_count} needs_harness=${decision.totals.needs_passing_harness_evidence_count} needs_review=${decision.totals.needs_human_review_count}`,
+            `    evidence: accepted_harness=${decision.totals.accepted_harness_proposal_count} scaffolded_harness=${decision.totals.scaffolded_harness_experiment_count} passing_harness=${decision.totals.passing_harness_evidence_count} guidance_proposals=${decision.totals.guidance_proposal_count}`,
+            `    next: ${decision.next_action}`,
+        );
+    }
+    return lines.join("\n");
 }
 
 const withWorkflowCandidateTopicGuidanceDecision = (
@@ -5981,6 +6123,188 @@ export function renderWorkflowCandidateBriefMarkdown(report: WorkflowCandidateRe
 export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommandInput) =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
+        const loadTopicReport = (topic: string) =>
+            Effect.gen(function* () {
+                const status = input.proposalStatus ?? "all";
+                const proposalRows = yield* db.query<[WorkflowCandidateProposalListRow[]]>(`
+                    SELECT
+                        type::string(id) AS proposal_id,
+                        dedupe_sig,
+                        title,
+                        form,
+                        status,
+                        confidence,
+                        frequency,
+                        (SELECT file_target FROM guidance_proposal WHERE proposal = $parent.id LIMIT 1)[0].file_target AS target,
+                        (SELECT section FROM guidance_proposal WHERE proposal = $parent.id LIMIT 1)[0].section AS section,
+                        type::string((SELECT id FROM experiment WHERE proposal = $parent.id LIMIT 1)[0].id) AS experiment_id,
+                        (SELECT status FROM experiment WHERE proposal = $parent.id LIMIT 1)[0].status AS experiment_status,
+                        (SELECT artifact_path FROM experiment WHERE proposal = $parent.id LIMIT 1)[0].artifact_path AS artifact_path,
+                        (SELECT task_path FROM experiment WHERE proposal = $parent.id LIMIT 1)[0].task_path AS task_path,
+                        type::string(updated_at) AS updated_at
+                    FROM proposal
+                    WHERE (${WORKFLOW_CANDIDATE_PROPOSAL_PREFIXES.map((prefix) => `string::starts_with(dedupe_sig, ${surrealString(prefix)})`).join(" OR ")})
+                        ${status === "all" ? "" : `AND status = ${surrealString(status)}`}
+                        AND (string::lowercase(title) CONTAINS ${surrealString(topic.toLowerCase())} OR string::lowercase(hypothesis) CONTAINS ${surrealString(topic.toLowerCase())})
+                    ORDER BY updated_at DESC, frequency DESC
+                    LIMIT ${Math.max(1, input.limit)};
+                `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+                let proposalListRows: readonly WorkflowCandidateProposalListRow[] = proposalRows?.[0] ?? [];
+                if (proposalListRows.length > 0) {
+                    const proposalRefs = proposalListRows
+                        .map((row) => recordKeyPart(row.proposal_id, "proposal"))
+                        .filter((key): key is string => key !== null)
+                        .map((key) => recordRef("proposal", key));
+                    if (proposalRefs.length > 0) {
+                        const edgeRows = yield* db.query<[WorkflowCandidateProposalEvidenceEdgeRow[]]>(`
+                            SELECT type::string(in) AS proposal_id, type::string(out) AS candidate_ref
+                            FROM cites_evidence
+                            WHERE kind = "workflow_candidate" AND in IN [${proposalRefs.join(", ")}];
+                        `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+                        const edges = edgeRows?.[0] ?? [];
+                        const candidateIds = [...new Set(edges
+                            .map((edge) => recordKeyPart(edge.candidate_ref, "classifier_graph_node"))
+                            .filter((id): id is string => id !== null))].sort();
+                        if (candidateIds.length > 0) {
+                            const evidenceRows = yield* db.query<[WorkflowCandidateGroupRow[], WorkflowCandidateEvidenceRow[]]>(`
+                                SELECT graph_id, label, properties_json
+                                FROM classifier_graph_node
+                                WHERE kind = "classifier_candidate_group" AND graph_id IN [${candidateIds.map(surrealString).join(", ")}];
+                                SELECT graph_id, subject, object, properties_json
+                                FROM classifier_graph_fact
+                                WHERE kind = "classifier_candidate_evidence" AND subject IN [${candidateIds.map(surrealString).join(", ")}]
+                                ORDER BY graph_id;
+                            `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+                            proposalListRows = attachWorkflowCandidateProposalEvidence({
+                                rows: proposalListRows,
+                                edges,
+                                candidateRows: evidenceRows?.[0] ?? [],
+                                factRows: evidenceRows?.[1] ?? [],
+                                examplesPerCandidate: input.examples,
+                            });
+                        }
+                    }
+                }
+                const proposalReport = buildWorkflowCandidateProposalListReport({
+                    rows: proposalListRows,
+                    limit: input.limit,
+                    status,
+                    expandEvidence: true,
+                    search: topic,
+                });
+                const candidateRows = yield* db.query<[WorkflowCandidateGroupRow[], WorkflowCandidateEvidenceRow[]]>(
+                    workflowCandidateSql,
+                    { sourceKind: input.sourceKind },
+                ).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+                const candidateReport = buildWorkflowCandidateReport({
+                    groupRows: candidateRows[0] ?? [],
+                    evidenceRows: candidateRows[1] ?? [],
+                    sourceKind: input.sourceKind,
+                    limit: input.limit,
+                    examplesPerGroup: input.examples,
+                    ...(input.action === undefined ? {} : { action: input.action }),
+                    ...(input.classifier === undefined ? {} : { classifier: input.classifier }),
+                    search: topic,
+                    taskLike: input.taskLike,
+                });
+                let topicReport = buildWorkflowCandidateTopicReport({
+                    sourceKind: input.sourceKind,
+                    topic,
+                    proposals: proposalReport,
+                    candidates: candidateReport,
+                });
+                const topicWhere = `AND string::lowercase(properties_json) CONTAINS ${surrealString(topic.toLowerCase())}`;
+                const persistedHarnessRows = yield* db.query<[
+                    WorkflowCandidateTopicHarnessGraphFactRow[],
+                    WorkflowCandidateTopicHarnessGraphEdgeRow[],
+                ]>(`
+                    SELECT graph_id, subject, predicate, object, value_json, properties_json, type::string(updated_at) AS updated_at
+                    FROM classifier_graph_fact
+                    WHERE kind = "workflow_topic_harness_check"
+                      AND source_kind = "workflow_topic_harness_check"
+                      ${topicWhere}
+                    ORDER BY updated_at DESC
+                    LIMIT ${Math.max(1, input.limit)};
+                    SELECT graph_id, kind, from_id, to_id, evidence_path, properties_json, type::string(updated_at) AS updated_at
+                    FROM classifier_graph_edge
+                    WHERE source_kind = "workflow_topic_harness_check"
+                      ${topicWhere}
+                    ORDER BY updated_at DESC
+                    LIMIT ${Math.max(1, input.limit * 3)};
+                `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+                topicReport = withWorkflowCandidateTopicHarnessEvidence({
+                    ...topicReport,
+                    persisted_harness_facts: buildWorkflowCandidateTopicHarnessGraphListReport({
+                        topic,
+                        facts: persistedHarnessRows?.[0] ?? [],
+                        edges: persistedHarnessRows?.[1] ?? [],
+                    }),
+                });
+                const persistedReviewRows = yield* db.query<[
+                    WorkflowCandidateTopicHarnessGraphFactRow[],
+                    WorkflowCandidateTopicHarnessGraphEdgeRow[],
+                ]>(`
+                    SELECT graph_id, subject, predicate, object, value_json, properties_json, type::string(updated_at) AS updated_at
+                    FROM classifier_graph_fact
+                    WHERE kind = "workflow_topic_candidate_review"
+                      AND source_kind = "workflow_topic_candidate_review"
+                      ${topicWhere}
+                    ORDER BY updated_at DESC
+                    LIMIT ${Math.max(1, input.limit)};
+                    SELECT graph_id, kind, from_id, to_id, evidence_path, properties_json, type::string(updated_at) AS updated_at
+                    FROM classifier_graph_edge
+                    WHERE source_kind = "workflow_topic_candidate_review"
+                      ${topicWhere}
+                    ORDER BY updated_at DESC
+                    LIMIT ${Math.max(1, input.limit * 3)};
+                `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+                topicReport = {
+                    ...topicReport,
+                    persisted_review_facts: buildWorkflowCandidateTopicReviewGraphListReport({
+                        topic,
+                        facts: persistedReviewRows?.[0] ?? [],
+                        edges: persistedReviewRows?.[1] ?? [],
+                    }),
+                };
+                topicReport = withWorkflowCandidateTopicPersistedReviewCandidates(topicReport);
+                topicReport = withWorkflowCandidateTopicGuidanceDecision(topicReport);
+                return topicReport;
+            });
+
+        if (input.guidanceDecisionBatch) {
+            const topicRows = yield* db.query<[WorkflowCandidateTopicHarnessGraphFactRow[]]>(`
+                SELECT properties_json, type::string(updated_at) AS updated_at
+                FROM classifier_graph_fact
+                WHERE (kind = "workflow_topic_candidate_review" AND source_kind = "workflow_topic_candidate_review")
+                   OR (kind = "workflow_topic_harness_check" AND source_kind = "workflow_topic_harness_check")
+                ORDER BY updated_at DESC
+                LIMIT ${Math.max(1, input.limit * 50)};
+            `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+            const search = input.search?.trim().toLowerCase();
+            const topics = [...new Set((topicRows?.[0] ?? [])
+                .map((row) => topicFromPropertiesJson(row.properties_json))
+                .filter((topic): topic is string => topic !== undefined)
+                .filter((topic) => search === undefined || topic.toLowerCase().includes(search))
+                .map((topic) => topic.toLowerCase()))]
+                .sort()
+                .slice(0, Math.max(1, input.limit));
+            const reports: WorkflowCandidateTopicReport[] = [];
+            for (const topic of topics) reports.push(yield* loadTopicReport(topic));
+            const batch = buildWorkflowCandidateTopicGuidanceDecisionBatchReport({
+                sourceKind: input.sourceKind,
+                limit: input.limit,
+                ...(input.search === undefined ? {} : { search: input.search }),
+                decisions: reports
+                    .map((report) => report.guidance_decision)
+                    .filter((decision): decision is WorkflowCandidateTopicGuidanceDecisionReport => decision !== undefined),
+            });
+            if (input.out) {
+                mkdirSync(dirname(input.out), { recursive: true });
+                writeFileSync(input.out, `${prettyPrint(batch)}\n`, "utf8");
+            }
+            console.log(input.json ? prettyPrint(batch) : renderWorkflowCandidateTopicGuidanceDecisionBatchText(batch));
+            return;
+        }
         if (input.listHarnessFacts) {
             const topic = input.search?.trim();
             const topicWhere = topic && topic.length > 0

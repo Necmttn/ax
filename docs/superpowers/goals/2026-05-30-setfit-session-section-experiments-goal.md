@@ -33,11 +33,11 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E445 adds
-  `.ax/experiments/workflow-topic-review-coverage-guidance-decision-e445.json`,
-  `.ax/experiments/workflow-topic-review-coverage-guidance-decision-e445.txt`,
+- Index continuation: E446 adds
+  `.ax/experiments/workflow-topic-guidance-decision-batch-e446.json`,
+  `.ax/experiments/workflow-topic-guidance-decision-batch-e446.txt`,
   and
-  the `ax.workflow_topic_guidance_decision.v1` report surface
+  the `ax.workflow_topic_guidance_decision_batch.v1` report surface
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -48,10 +48,71 @@ Current recommendation:
   current handoff artifacts are complete, the guarded production apply has
   closed the reviewed-coverage gap, the successful loop is now persisted as
   lifecycle graph facts, and the accepted `review-coverage` harness proposal
-  now has a passing persisted harness fact. The guidance decision report says
-  `guidance_promotion_not_warranted` for `review-coverage`, so the immediate
-  bottleneck is using this decision surface on other reviewed topics or broader
-  session-section candidates.
+  now has a passing persisted harness fact. The batch guidance decision says
+  reviewed `review-coverage` and `surrealml` candidates are both
+  `guidance_promotion_not_warranted`, so the immediate bottleneck is finding
+  or reviewing true guidance-ready candidates rather than promoting rejected or
+  harness-only evidence.
+
+## E446 - Batch Guidance Decisions Across Reviewed Topics
+
+Question:
+- Can the guidance-decision surface run across all reviewed workflow topics so
+  services can see whether any reviewed classifier evidence is ready for
+  guidance promotion?
+
+Implementation:
+- Added `ax.workflow_topic_guidance_decision_batch.v1`.
+- Added `--guidance-decision-batch` to `classifiers workflow-candidates`.
+- Batch discovery reads persisted topic review and harness facts, extracts
+  topics, loads each topic with proposals, persisted review facts, persisted
+  harness facts, and emits one guidance decision per reviewed topic.
+- Updated single-topic guidance decisions so rejected or deferred human review
+  facts become `guidance_promotion_not_warranted` instead of falling through to
+  `needs_human_review`.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e446.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e446.txt`
+
+Results:
+- Live batch reviewed topics: `2`
+  - `review-coverage`: `guidance_promotion_not_warranted`
+  - `surrealml`: `guidance_promotion_not_warranted`
+- Totals:
+  - `candidate_count=2`
+  - `guidance_ready_count=0`
+  - `guidance_not_warranted_count=2`
+  - `needs_passing_harness_evidence_count=0`
+  - `needs_human_review_count=0`
+  - `accepted_harness_proposal_count=2`
+  - `scaffolded_harness_experiment_count=2`
+  - `passing_harness_evidence_count=2`
+  - `guidance_proposal_count=2`
+- Next action:
+  `No guidance promotion is currently warranted by reviewed topic evidence.`
+
+Decision:
+- E446 makes the promotion gate inspectable at the service level. We can now
+  ask "are any reviewed topics guidance-ready?" without manually running one
+  topic at a time.
+- The current graph does not justify a guidance change from reviewed topic
+  evidence. `review-coverage` is useful as harness/graph evidence, while the
+  reviewed `surrealml` candidate was rejected and should not be promoted.
+- The next aligned slice is to broaden the batch surface beyond already
+  reviewed topics so it can also show pending candidates that need human review
+  before they could become guidance, harness, or classifier-fixture work.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 --out .ax/experiments/workflow-topic-guidance-decision-batch-e446.json --json
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 > .ax/experiments/workflow-topic-guidance-decision-batch-e446.txt
+rg -n "workflow topic guidance decision batch|topics: 2|decisions: ready=0 not_warranted=2 needs_harness=0 needs_review=0|No guidance promotion is currently warranted|guidance_promotion_not_warranted review-coverage|guidance_promotion_not_warranted surrealml" .ax/experiments/workflow-topic-guidance-decision-batch-e446.txt
+bun -e 'const r=await Bun.file(".ax/experiments/workflow-topic-guidance-decision-batch-e446.json").json(); if (r.schema !== "ax.workflow_topic_guidance_decision_batch.v1") throw new Error(r.schema); if (r.totals.topic_count !== 2 || r.totals.guidance_not_warranted_count !== 2 || r.totals.guidance_ready_count !== 0 || r.totals.needs_human_review_count !== 0) throw new Error(JSON.stringify(r.totals)); const byTopic=Object.fromEntries(r.decisions.map(d=>[d.topic,d.decision])); if (byTopic["review-coverage"] !== "guidance_promotion_not_warranted" || byTopic.surrealml !== "guidance_promotion_not_warranted") throw new Error(JSON.stringify(byTopic));'
+```
+
+DB-backed batch guidance decision checks passed.
 
 ## E445 - Guidance Decision From Harness-Backed Topic Evidence
 
