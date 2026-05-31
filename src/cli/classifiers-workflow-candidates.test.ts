@@ -1729,6 +1729,12 @@ describe("classifiers workflow-candidates", () => {
         expect(brief).toContain("- Invalid fixtures: `0`");
         expect(brief).toContain("- Complete rationales: `0`");
         expect(brief).toContain("- Missing rationales: `0`");
+        expect(brief).toContain("- Missing reviewers: `0`");
+        expect(brief).toContain("- Missing reviewed-at timestamps: `0`");
+        expect(brief).toContain("- Provenance status: `complete_review_provenance`");
+        expect(brief).toContain("- Strict provenance apply guard: `no_reviewed_fixtures`");
+        expect(brief).toContain("- Strict provenance blockers: `no_reviewed_fixtures`");
+        expect(brief).toContain("- Strict provenance blocker remediations: no_reviewed_fixtures: Review at least one fixture and add a rationale before applying.");
         expect(brief).toContain("- Smoke markers: `0`");
         expect(brief).toContain("- Apply guard: `no_reviewed_fixtures`");
         expect(brief).toContain("- Apply blockers: `no_reviewed_fixtures`");
@@ -1738,6 +1744,7 @@ describe("classifiers workflow-candidates", () => {
         expect(brief).toContain("--coverage-review-pack=.ax/experiments/review-coverage.jsonl");
         expect(brief).toContain("--sync-coverage-review-brief=.ax/experiments/review-coverage.md");
         expect(brief).toContain("--apply-review-facts");
+        expect(brief).toContain("--require-review-provenance");
         expect(brief).toContain("## Candidate Queue");
         expect(brief).toContain("verification_or_recovery_signal");
         expect(brief).toContain("- Fixture id: `workflow-candidate-review-coverage/verification_or_recovery_signal/a`");

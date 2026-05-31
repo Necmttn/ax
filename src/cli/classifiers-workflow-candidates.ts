@@ -2821,6 +2821,12 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
     const reviewedRows = rows.filter((row) => fixtureReviewVerdict(row) !== undefined);
     const missingRationaleCount = reviewedRows.filter((row) => (row.review_rationale ?? "").trim().length === 0).length;
     const completeRationaleCount = reviewedRows.length - missingRationaleCount;
+    const missingReviewerCount = reviewedRows.filter((row) => (row.review_reviewer ?? "").trim().length === 0).length;
+    const missingReviewedAtCount = reviewedRows.filter((row) => (row.review_reviewed_at ?? "").trim().length === 0).length;
+    const provenanceStatus: WorkflowCandidateReviewCoverageProvenanceStatus =
+        missingReviewerCount === 0 && missingReviewedAtCount === 0
+            ? "complete_review_provenance"
+            : "missing_review_provenance";
     const reviewPackPath = context.coverageReviewPack ?? context.coverageFixturePack;
     const smokeMarkerCount = reviewedRows.filter(fixtureRowHasSmokeMarker).length +
         (reviewPackPath?.toLowerCase().includes("smoke") ? 1 : 0);
@@ -2838,6 +2844,17 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
     if (reviewedRows.length === 0) applyBlockers.push("no_reviewed_fixtures");
     if (missingRationaleCount > 0) applyBlockers.push("missing_review_rationale");
     if (smokeMarkerCount > 0) applyBlockers.push("blocked_smoke_review");
+    const strictApplyGuard: WorkflowCandidateReviewCoverageApplyGuard = applyGuard !== "ready_to_apply"
+        ? applyGuard
+        : provenanceStatus === "missing_review_provenance"
+            ? "missing_review_provenance"
+            : "ready_to_apply";
+    const strictApplyBlockers: WorkflowCandidateReviewCoverageApplyBlocker[] = [
+        ...applyBlockers,
+        ...(applyGuard === "ready_to_apply" && provenanceStatus === "missing_review_provenance"
+            ? ["missing_review_provenance" as const]
+            : []),
+    ];
     const sourceKind = context.sourceKind ?? "hybrid_window_classifier_projection";
     const readinessOutputPath = context.outputPath ?? ".ax/experiments/workflow-candidate-review-coverage-reviewed.json";
     const syncedBriefPath = context.coverageReviewBrief ?? ".ax/experiments/workflow-candidate-review-coverage-reviewed.md";
@@ -2865,6 +2882,19 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
             `--out=${readinessOutputPath}`,
             "--json",
         ].filter((part): part is string => part !== undefined).join(" ");
+    const strictApplyCommand = reviewPackPath === undefined
+        ? undefined
+        : [
+            "bun src/cli/index.ts classifiers workflow-candidates",
+            "--review-coverage",
+            `--source-kind=${sourceKind}`,
+            `--coverage-review-pack=${reviewPackPath}`,
+            context.coverageReviewBrief === undefined ? undefined : `--sync-coverage-review-brief=${context.coverageReviewBrief}`,
+            "--apply-review-facts",
+            "--require-review-provenance",
+            `--out=${readinessOutputPath}`,
+            "--json",
+        ].filter((part): part is string => part !== undefined).join(" ");
     const lines = [
         "# Workflow Candidate Coverage Review",
         "",
@@ -2885,10 +2915,16 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
         `- Invalid fixtures: \`${invalidCount}\``,
         `- Complete rationales: \`${completeRationaleCount}\``,
         `- Missing rationales: \`${missingRationaleCount}\``,
+        `- Missing reviewers: \`${missingReviewerCount}\``,
+        `- Missing reviewed-at timestamps: \`${missingReviewedAtCount}\``,
+        `- Provenance status: \`${provenanceStatus}\``,
         `- Smoke markers: \`${smokeMarkerCount}\``,
         `- Apply guard: \`${applyGuard}\``,
         `- Apply blockers: ${applyBlockers.length === 0 ? "`none`" : applyBlockers.map((blocker) => `\`${blocker}\``).join(", ")}`,
+        `- Strict provenance apply guard: \`${strictApplyGuard}\``,
+        `- Strict provenance blockers: ${strictApplyBlockers.length === 0 ? "`none`" : strictApplyBlockers.map((blocker) => `\`${blocker}\``).join(", ")}`,
         `- Blocker remediations: ${applyBlockers.length === 0 ? "none" : applyBlockers.map((blocker) => `${blocker}: ${workflowCandidateReviewCoverageBlockerRemediation(blocker)}`).join(" | ")}`,
+        `- Strict provenance blocker remediations: ${strictApplyBlockers.length === 0 ? "none" : strictApplyBlockers.map((blocker) => `${blocker}: ${workflowCandidateReviewCoverageBlockerRemediation(blocker)}`).join(" | ")}`,
         `- Next action: ${workflowCandidateReviewCoverageGuardNextAction(applyGuard)}`,
         "",
         ...(nextCommand === undefined ? [] : [
@@ -2904,6 +2940,12 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
             "",
             "```sh",
             applyCommand ?? "",
+            "```",
+            "",
+            "For production or shared graph updates, require review provenance:",
+            "",
+            "```sh",
+            strictApplyCommand ?? "",
             "```",
             "",
         ]),
