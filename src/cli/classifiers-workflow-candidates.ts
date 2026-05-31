@@ -199,6 +199,8 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly source_path: string;
     readonly apply_requested: boolean;
     readonly applied: boolean;
+    readonly apply_result: "not_requested" | "blocked" | "applied";
+    readonly applied_statement_count: number;
     readonly reviewed_fixture_count: number;
     readonly pending_fixture_count: number;
     readonly invalid_fixture_count: number;
@@ -1776,6 +1778,7 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             `coverage review issues: invalid=${report.coverage_review.invalid_fixture_count} missing_rationale=${report.coverage_review.missing_rationale_count} smoke=${report.coverage_review.smoke_marker_count}`,
             `coverage review apply guard: ${report.coverage_review.apply_guard}`,
             `coverage review can apply: ${report.coverage_review.can_apply ? "yes" : "no"}`,
+            `coverage review apply result: ${report.coverage_review.apply_result} statements=${report.coverage_review.applied_statement_count}`,
             `coverage review blockers: ${report.coverage_review.apply_blockers.length === 0 ? "none" : report.coverage_review.apply_blockers.join(", ")}`,
             `coverage review blocker details: ${report.coverage_review.apply_blocker_details.length === 0 ? "none" : report.coverage_review.apply_blocker_details.map((detail) => `${detail.blocker}=${detail.count}`).join(", ")}`,
             `coverage review blocker remediations: ${report.coverage_review.apply_blocker_details.length === 0 ? "none" : report.coverage_review.apply_blocker_details.map((detail) => `${detail.blocker}: ${detail.remediation}`).join(" | ")}`,
@@ -3142,6 +3145,11 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
             ? "blocked_smoke_review"
             : "ready_to_apply";
     const canApply = applyGuard === "ready_to_apply" && input.writePlan.statements.length > 0;
+    const applyResult = input.applied
+        ? "applied"
+        : input.applyRequested
+            ? "blocked"
+            : "not_requested";
     const applyBlockers: WorkflowCandidateReviewCoverageApplyBlocker[] = [];
     if (invalidRows.length > 0) applyBlockers.push("invalid_review_pack");
     if (reviewedRows.length === 0) applyBlockers.push("no_reviewed_fixtures");
@@ -3169,6 +3177,8 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         source_path: input.sourcePath,
         apply_requested: input.applyRequested,
         applied: input.applied,
+        apply_result: applyResult,
+        applied_statement_count: input.applied ? input.writePlan.totals.statement_count : 0,
         reviewed_fixture_count: reviewedRows.length,
         pending_fixture_count: input.rows.length - reviewedRows.length,
         invalid_fixture_count: invalidRows.length,
@@ -4087,12 +4097,22 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     );
                 }
                 const applied = Boolean(input.applyReviewFacts && pendingApplySummary.can_apply);
+                const applySummary = applied
+                    ? buildWorkflowCandidateReviewCoverageApplySummary({
+                        rows: reviewedRows,
+                        sourcePath: input.coverageReviewPack,
+                        projection: reviewProjection,
+                        writePlan: reviewWritePlan,
+                        applyRequested: true,
+                        applied: true,
+                        syncedFixtureCount,
+                        unknownFixtureCount,
+                        coverageRows: report.candidates,
+                    })
+                    : pendingApplySummary;
                 report = {
                     ...report,
-                    coverage_review: {
-                        ...pendingApplySummary,
-                        applied,
-                    },
+                    coverage_review: applySummary,
                 };
                 if (input.applyReviewFacts && !pendingApplySummary.can_apply) process.exitCode = 1;
             }

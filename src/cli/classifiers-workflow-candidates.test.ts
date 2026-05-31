@@ -1516,6 +1516,8 @@ describe("classifiers workflow-candidates", () => {
             schema: "ax.workflow_candidate_review_readiness.v1",
             apply_requested: true,
             applied: false,
+            apply_result: "blocked",
+            applied_statement_count: 0,
             reviewed_fixture_count: 1,
             pending_fixture_count: 0,
             invalid_fixture_count: 0,
@@ -1593,6 +1595,8 @@ describe("classifiers workflow-candidates", () => {
             schema: "ax.workflow_candidate_review_readiness.v1",
             apply_requested: false,
             applied: false,
+            apply_result: "not_requested",
+            applied_statement_count: 0,
             reviewed_fixture_count: 0,
             pending_fixture_count: 1,
             invalid_fixture_count: 0,
@@ -1654,6 +1658,8 @@ describe("classifiers workflow-candidates", () => {
 
         expect(summary).toMatchObject({
             schema: "ax.workflow_candidate_review_readiness.v1",
+            apply_result: "blocked",
+            applied_statement_count: 0,
             reviewed_fixture_count: 1,
             pending_fixture_count: 0,
             invalid_fixture_count: 0,
@@ -1797,6 +1803,8 @@ describe("classifiers workflow-candidates", () => {
         });
         expect(summary).toMatchObject({
             schema: "ax.workflow_candidate_review_readiness.v1",
+            apply_result: "blocked",
+            applied_statement_count: 0,
             reviewed_fixture_count: 0,
             pending_fixture_count: 1,
             invalid_fixture_count: 1,
@@ -1926,6 +1934,8 @@ describe("classifiers workflow-candidates", () => {
 
         expect(summary).toMatchObject({
             schema: "ax.workflow_candidate_review_readiness.v1",
+            apply_result: "not_requested",
+            applied_statement_count: 0,
             reviewed_fixture_count: 3,
             pack_candidate_count: 3,
             new_candidate_count: 1,
@@ -1945,6 +1955,71 @@ describe("classifiers workflow-candidates", () => {
             ],
         });
         expect(summary.projected_fact_ids).toHaveLength(3);
+    });
+
+    test("reports applied coverage review statement counts", () => {
+        const rows = parseWorkflowCandidateFixtureRowsJsonl(JSON.stringify({
+            id: "workflow-candidate-review-coverage/verification_or_recovery_signal/a",
+            suite: "workflow-candidate-review-coverage",
+            name: "coverage-gap-verification_or_recovery_signal-01",
+            label: "verification_or_recovery_signal",
+            target: "unknown",
+            text: "USER:\ncontinue and verify the fix\n\nPREVIOUS_ASSISTANT:\n",
+            source_group: "workflow-candidate",
+            review_status: "accept",
+            review_rationale: "Useful verification behavior worth preserving.",
+            topic: "review-coverage",
+            candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+            candidate_label: "verification_or_recovery_signal",
+            proposed_action: "add_verification_gate",
+            result_id: "classifier_result:verification",
+            turn: "turn:verification",
+            confidence: 0.83,
+        }));
+        const projection = buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures({
+            rows,
+            syncedFrom: ".ax/experiments/reviewed-coverage-gaps.jsonl",
+        });
+        const writePlan = buildWorkflowCandidateTopicReviewGraphWritePlan(projection);
+
+        const summary = buildWorkflowCandidateReviewCoverageApplySummary({
+            rows,
+            sourcePath: ".ax/experiments/reviewed-coverage-gaps.jsonl",
+            projection,
+            writePlan,
+            applyRequested: true,
+            applied: true,
+        });
+        const text = renderWorkflowCandidateReviewCoverageText({
+            schema: "ax.workflow_candidate_review_coverage.v1",
+            source_kind: "hybrid_window_classifier_projection",
+            query: { limit: 10 },
+            candidates: [],
+            totals: {
+                candidate_group_count: 0,
+                returned_candidate_count: 0,
+                reviewed_candidate_count: 0,
+                unreviewed_candidate_count: 0,
+                review_fact_count: 0,
+                rejected_fact_count: 0,
+                accepted_fact_count: 0,
+                deferred_fact_count: 0,
+                revised_fact_count: 0,
+                helper_source_fixture_count: 0,
+            },
+            coverage_review: summary,
+            decision: "needs_workflow_candidate_reviews",
+        });
+
+        expect(summary).toMatchObject({
+            apply_requested: true,
+            applied: true,
+            apply_result: "applied",
+            applied_statement_count: writePlan.totals.statement_count,
+            apply_guard: "ready_to_apply",
+            can_apply: true,
+        });
+        expect(text).toContain(`coverage review apply result: applied statements=${writePlan.totals.statement_count}`);
     });
 
     test("renders persisted harness facts inside topic evidence packs", () => {
