@@ -581,6 +581,57 @@ describe("ClassifierPackageService", () => {
         expect(summary.suggestion?.verification.expected_result_count).toBe(1);
     });
 
+    test("writes graph query suggestion routing summaries through the service layer", async () => {
+        const out = join(mkdtempSync(join(tmpdir(), "ax-query-routing-summary-")), "nested", "summary.json");
+        const db = {
+            query: (sql: string) => Effect.sync(() => {
+                expect(sql).toContain("FROM classifier_graph_node");
+                return [
+                    [],
+                    [
+                        {
+                            graph_id: "edge:review",
+                            kind: "has_lifecycle_fact",
+                            from_id: "classifier_lifecycle:workflow_candidate_proposal",
+                            to_id: "classifier_lifecycle_fact:workflow_candidate_proposal/review_pipeline_recommended_action_execution_phase",
+                            evidence_path: ".ax/experiments/workflow-candidate-proposal-review-current.json",
+                            properties_json: "{}",
+                        },
+                    ],
+                    [
+                        {
+                            graph_id: "classifier_lifecycle_fact:workflow_candidate_proposal/review_pipeline_recommended_action_execution_phase",
+                            kind: "classifier_lifecycle_status",
+                            subject: "classifier_lifecycle:workflow_candidate_proposal",
+                            predicate: "review_pipeline_recommended_action_execution_phase",
+                            value_json: "\"bind_inputs\"",
+                            evidence_edges_json: "[\"edge:review\"]",
+                            properties_json: "{\"source_kind\":\"review_pipeline_lifecycle\"}",
+                        },
+                    ],
+                ];
+            }),
+        } as unknown as SurrealClientShape;
+
+        const summary = await runWithServiceAndDb(Effect.gen(function* () {
+            const packages = yield* ClassifierPackageService;
+            return yield* packages.writeExecutionGraphQuerySuggestionRoutingSummaryReport({
+                out,
+                query: {
+                    mode: "lifecycle",
+                    predicate: "review_pipeline_recommended_action_execution_phase",
+                    value_equals: "execute",
+                },
+            });
+        }), db);
+        const saved = await Bun.file(out).json();
+
+        expect(summary.suggestion?.repair.execution_status).toBe("ready_to_execute");
+        expect(saved.has_suggestion).toBe(true);
+        expect(saved.suggestion.repair.command_kind).toBe("classifier_graph_query_repair");
+        expect(saved.suggestion.verification.command_kind).toBe("classifier_graph_query_repair_verification");
+    });
+
     test("builds lifecycle insights through the service layer", async () => {
         const statusDir = mkdtempSync(join(tmpdir(), "ax-lifecycle-status-"));
         const statusPath = join(statusDir, "status.json");

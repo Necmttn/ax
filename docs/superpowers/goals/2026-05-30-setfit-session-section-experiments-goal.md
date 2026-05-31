@@ -33,10 +33,8 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E418 adds
-  `.ax/experiments/classifier-graph-query-suggestion-routing-summary-no-match-e418.json`
-  and
-  `.ax/experiments/classifier-graph-query-suggestion-routing-summary-match-e418.json`
+- Index continuation: E419 adds
+  `.ax/experiments/classifier-graph-query-suggestion-routing-summary-written-e419.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +42,50 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E419 - Persist Query Suggestion Routing Summaries
+
+Question:
+- Can services save the compact graph-query repair/verification routing summary
+  as a first-class debug artifact after computing it?
+
+Implementation:
+- Added `writeClassifierGraphQuerySuggestionRoutingSummary` for JSON artifact
+  persistence.
+- Added `writeExecutionGraphQuerySuggestionRoutingSummaryReport` to
+  `ClassifierPackageService`.
+- The write method reuses the E418 summary builder and returns the same summary
+  it writes.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-query-suggestion-routing-summary-written-e419.json`
+
+Results:
+- The written E419 artifact records
+  `suggestion.repair.command_kind=classifier_graph_query_repair`.
+- The same artifact records
+  `suggestion.verification.command_kind=classifier_graph_query_repair_verification`.
+- Service tests verify the writer creates nested output directories and saves
+  the repair/verification command routing summary.
+
+Decision:
+- E419 makes the query-suggestion routing summary recordable. FX services can
+  now produce durable debug evidence for the routing decision they consumed,
+  which keeps classifier repair execution auditable without saving the full
+  graph-health report.
+
+Verification:
+```sh
+bun test src/classifiers/package-service.test.ts
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun test src/cli/classifiers-workflow-candidates.test.ts
+git diff --check
+bun run typecheck
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-graph-query-suggestion-routing-summary-written-e419.json").json(); if (!saved.has_suggestion) throw new Error("missing suggestion"); if (saved.suggestion?.repair?.command_kind !== "classifier_graph_query_repair") throw new Error("wrong repair command kind"); if (saved.suggestion?.verification?.command_kind !== "classifier_graph_query_repair_verification") throw new Error("wrong verification command kind");'
+```
+
+All passed. `bun run typecheck` still emits existing Effect advisories but exits
+`0`.
 
 ## E418 - Add Query Suggestion Routing Service Helper
 

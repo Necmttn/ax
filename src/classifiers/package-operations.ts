@@ -3448,6 +3448,14 @@ export function writeExecutionGraphHealthReport(path: string, report: Classifier
     writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
 }
 
+export function writeClassifierGraphQuerySuggestionRoutingSummary(
+    path: string,
+    report: ClassifierGraphQuerySuggestionRoutingSummary,
+): void {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+}
+
 export function writeClassifierLifecycleInsightReport(path: string, report: ClassifierLifecycleInsightReport): void {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);

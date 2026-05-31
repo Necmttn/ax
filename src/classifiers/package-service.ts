@@ -25,6 +25,7 @@ import {
     writeExecutionSurrealWritePlanReport,
     writeExecutionSurrealApplyReport,
     writeExecutionGraphHealthReport,
+    writeClassifierGraphQuerySuggestionRoutingSummary,
     writeClassifierLifecycleInsightReport,
     writePackagesOperationsReport,
     writeOperationPreflightReport,
@@ -178,6 +179,10 @@ export interface ClassifierPackageExecutionGraphHealthWriteInput extends Classif
     readonly out: string;
 }
 
+export interface ClassifierGraphQuerySuggestionRoutingSummaryWriteInput extends ClassifierPackageExecutionGraphHealthInput {
+    readonly out: string;
+}
+
 export interface ClassifierLifecycleInsightInput {
     readonly root?: string;
     readonly workflowStatusPath?: string;
@@ -261,6 +266,9 @@ export interface ClassifierPackageServiceShape {
     ) => Effect.Effect<ClassifierPackageExecutionGraphHealthReport, ClassifierPackageReportWriteError, SurrealClient>;
     readonly executionGraphQuerySuggestionRoutingSummary: (
         input?: ClassifierPackageExecutionGraphHealthInput,
+    ) => Effect.Effect<ClassifierGraphQuerySuggestionRoutingSummary, ClassifierPackageReportWriteError, SurrealClient>;
+    readonly writeExecutionGraphQuerySuggestionRoutingSummaryReport: (
+        input: ClassifierGraphQuerySuggestionRoutingSummaryWriteInput,
     ) => Effect.Effect<ClassifierGraphQuerySuggestionRoutingSummary, ClassifierPackageReportWriteError, SurrealClient>;
     readonly writeExecutionGraphHealthReport: (
         input: ClassifierPackageExecutionGraphHealthWriteInput,
@@ -581,6 +589,17 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService>
             return summarizeClassifierGraphQuerySuggestionRouting(report);
         });
 
+        const writeExecutionGraphQuerySuggestionRoutingSummary = Effect.fn("ClassifierPackageService.writeExecutionGraphQuerySuggestionRoutingSummaryReport")(function* (
+            input: ClassifierGraphQuerySuggestionRoutingSummaryWriteInput,
+        ) {
+            const report = yield* executionGraphQuerySuggestionRoutingSummary(input);
+            yield* Effect.try({
+                try: () => writeClassifierGraphQuerySuggestionRoutingSummary(input.out, report),
+                catch: (error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) }),
+            });
+            return report;
+        });
+
         const lifecycleInsight = Effect.fn("ClassifierPackageService.lifecycleInsightReport")(function* (
             input?: ClassifierLifecycleInsightInput,
         ) {
@@ -636,6 +655,7 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService>
             writeExecutionSurrealApplyReport: writeExecutionSurrealApply,
             executionGraphHealthReport: executionGraphHealth,
             executionGraphQuerySuggestionRoutingSummary,
+            writeExecutionGraphQuerySuggestionRoutingSummaryReport: writeExecutionGraphQuerySuggestionRoutingSummary,
             writeExecutionGraphHealthReport: writeExecutionGraphHealth,
             lifecycleInsightReport: lifecycleInsight,
             writeLifecycleInsightReport: writeLifecycleInsight,
