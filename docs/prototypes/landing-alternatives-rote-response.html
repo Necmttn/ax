@@ -1,0 +1,633 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ax landing alternatives</title>
+  <style>
+    :root {
+      --ink: #151515;
+      --muted: #74716b;
+      --line: #d8d3ca;
+      --page: #f5f1e9;
+      --panel: #ebe5da;
+      --green: #277a4d;
+      --blue: #2d5c88;
+      --red: #9b3b32;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      --serif: Georgia, "Times New Roman", serif;
+      --sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background:
+        linear-gradient(rgba(21, 21, 21, 0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(21, 21, 21, 0.025) 1px, transparent 1px),
+        var(--page);
+      background-size: 44px 44px;
+      color: var(--ink);
+      font-family: var(--sans);
+    }
+
+    .shell {
+      width: min(1180px, calc(100vw - 40px));
+      margin: 0 auto;
+    }
+
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      border-bottom: 1px solid var(--line);
+      background: rgba(245, 241, 233, 0.92);
+      backdrop-filter: blur(16px);
+    }
+
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      min-height: 64px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+    }
+
+    .wordmark {
+      font-family: var(--serif);
+      font-size: 34px;
+      line-height: 1;
+    }
+
+    .tag {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .nav-links {
+      display: flex;
+      gap: 18px;
+      font-family: var(--mono);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+
+    a { color: inherit; }
+    .nav-links a {
+      color: var(--muted);
+      text-decoration: none;
+    }
+    .nav-links a:hover { color: var(--ink); }
+
+    .intro {
+      padding: 42px 0 24px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .intro h1 {
+      font-family: var(--serif);
+      font-size: clamp(42px, 7vw, 90px);
+      font-weight: 400;
+      letter-spacing: -0.03em;
+      line-height: 0.96;
+      max-width: 980px;
+      margin: 0 0 18px;
+      text-wrap: balance;
+    }
+
+    .intro p {
+      max-width: 760px;
+      margin: 0;
+      font-size: 19px;
+      line-height: 1.5;
+      color: var(--muted);
+    }
+
+    .alt {
+      min-height: 720px;
+      padding: 74px 0 86px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .alt-head {
+      display: grid;
+      grid-template-columns: 110px minmax(0, 1fr);
+      gap: 30px;
+      margin-bottom: 42px;
+    }
+
+    .alt-num {
+      font-family: var(--mono);
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      padding-top: 13px;
+    }
+
+    .alt h2 {
+      font-family: var(--serif);
+      font-size: clamp(42px, 6vw, 78px);
+      font-weight: 400;
+      letter-spacing: -0.03em;
+      line-height: 0.98;
+      margin: 0 0 18px;
+      max-width: 940px;
+      text-wrap: balance;
+    }
+
+    .alt .lede {
+      max-width: 720px;
+      font-size: 20px;
+      line-height: 1.48;
+      color: var(--muted);
+      margin: 0;
+    }
+
+    .grid-a {
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(340px, 0.85fr);
+      gap: 28px;
+      align-items: stretch;
+    }
+
+    .terminal {
+      background: var(--ink);
+      color: var(--page);
+      border: 1px solid var(--ink);
+      min-height: 430px;
+      padding: 18px;
+      font-family: var(--mono);
+      font-size: 14px;
+      line-height: 1.55;
+      overflow: hidden;
+    }
+
+    .chrome {
+      display: flex;
+      gap: 7px;
+      align-items: center;
+      padding-bottom: 16px;
+      border-bottom: 1px solid rgba(245, 241, 233, 0.18);
+      margin-bottom: 18px;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      border: 1px solid rgba(245, 241, 233, 0.35);
+    }
+
+    .title {
+      margin-left: 10px;
+      color: rgba(245, 241, 233, 0.55);
+      font-size: 12px;
+    }
+
+    .line { display: block; white-space: pre-wrap; }
+    .prompt { color: #8fce9d; }
+    .dim { color: rgba(245, 241, 233, 0.58); }
+    .ok { color: #8fce9d; }
+    .warn { color: #e5c17a; }
+    .bad { color: #df8f84; }
+
+    .proof-list {
+      border-top: 1px solid var(--ink);
+      background: rgba(235, 229, 218, 0.58);
+    }
+
+    .proof-row {
+      display: grid;
+      grid-template-columns: 72px minmax(0, 1fr);
+      gap: 18px;
+      padding: 20px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .proof-row span {
+      font-family: var(--mono);
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .proof-row strong {
+      display: block;
+      font-family: var(--serif);
+      font-weight: 400;
+      font-size: 28px;
+      margin-bottom: 7px;
+    }
+
+    .proof-row p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.42;
+    }
+
+    .grid-b {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+
+    .before-after {
+      min-height: 430px;
+      border-top: 1px solid var(--ink);
+      background: rgba(235, 229, 218, 0.62);
+      padding: 24px;
+    }
+
+    .before-after h3 {
+      font-family: var(--mono);
+      font-size: 12px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 0 0 30px;
+    }
+
+    .big-stat {
+      font-family: var(--serif);
+      font-size: clamp(54px, 8vw, 112px);
+      line-height: 0.9;
+      letter-spacing: -0.05em;
+      margin: 0 0 26px;
+    }
+
+    .stack {
+      display: grid;
+      gap: 12px;
+      margin-top: 28px;
+    }
+
+    .event {
+      border-left: 2px solid var(--line);
+      padding: 10px 0 10px 16px;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+
+    .event strong {
+      color: var(--ink);
+      font-weight: 600;
+    }
+
+    .after .event { border-left-color: var(--green); }
+    .before .event { border-left-color: var(--red); }
+
+    .ledger {
+      border-top: 1px solid var(--ink);
+      display: grid;
+      grid-template-columns: 1.05fr 0.95fr;
+      gap: 0;
+      background: rgba(235, 229, 218, 0.5);
+    }
+
+    .ledger-main,
+    .ledger-side {
+      min-height: 470px;
+      padding: 24px;
+    }
+
+    .ledger-side {
+      border-left: 1px solid var(--line);
+      background: rgba(245, 241, 233, 0.7);
+    }
+
+    .ledger-title {
+      font-family: var(--mono);
+      font-size: 12px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 26px;
+    }
+
+    .session {
+      display: grid;
+      grid-template-columns: 92px minmax(0, 1fr) 86px;
+      gap: 18px;
+      padding: 16px 0;
+      border-bottom: 1px solid var(--line);
+      align-items: start;
+    }
+
+    .session time,
+    .session em {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--muted);
+      font-style: normal;
+    }
+
+    .session strong {
+      display: block;
+      font-weight: 650;
+      margin-bottom: 4px;
+    }
+
+    .session p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.38;
+      font-size: 14px;
+    }
+
+    .verdict-card {
+      border: 1px solid var(--ink);
+      padding: 22px;
+      margin-bottom: 18px;
+      background: var(--page);
+    }
+
+    .verdict-card small {
+      display: block;
+      font-family: var(--mono);
+      color: var(--muted);
+      margin-bottom: 22px;
+    }
+
+    .verdict-card strong {
+      display: block;
+      font-family: var(--serif);
+      font-size: 40px;
+      font-weight: 400;
+      margin-bottom: 10px;
+    }
+
+    .cta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 32px;
+    }
+
+    .btn,
+    .link-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 42px;
+      padding: 0 18px;
+      font-family: var(--mono);
+      font-size: 13px;
+      text-decoration: none;
+      border: 1px solid var(--ink);
+    }
+
+    .btn {
+      background: var(--ink);
+      color: var(--page);
+    }
+
+    .link-btn {
+      background: transparent;
+      color: var(--ink);
+    }
+
+    .note {
+      margin-top: 24px;
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.55;
+      max-width: 740px;
+    }
+
+    @media (max-width: 860px) {
+      .shell { width: min(100vw - 28px, 1180px); }
+      .nav-links { display: none; }
+      .alt { padding: 54px 0 64px; }
+      .alt-head,
+      .grid-a,
+      .grid-b,
+      .ledger {
+        grid-template-columns: 1fr;
+      }
+      .ledger-side { border-left: none; border-top: 1px solid var(--line); }
+      .session { grid-template-columns: 1fr; gap: 8px; }
+      .terminal { font-size: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <nav class="shell">
+      <div class="brand">
+        <span class="wordmark">ax</span>
+        <span class="tag">landing alternatives</span>
+      </div>
+      <div class="nav-links">
+        <a href="#a">A proof</a>
+        <a href="#b">B before/after</a>
+        <a href="#c">C ledger</a>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <section class="intro">
+      <div class="shell">
+        <h1>The current hero is still too abstract.</h1>
+        <p>
+          These are three first-screen alternatives. Each keeps the ax voice:
+          evidence-first, local, terse. The difference is where the proof lands.
+        </p>
+      </div>
+    </section>
+
+    <section class="alt" id="a">
+      <div class="shell">
+        <div class="alt-head">
+          <div class="alt-num">alt a</div>
+          <div>
+            <h2>Make the first run visible.</h2>
+            <p class="lede">
+              Lead with a terminal and the four commands/results that make
+              the product legible. This is the closest answer to Rote's page:
+              the mechanism shows up before the category language.
+            </p>
+          </div>
+        </div>
+
+        <div class="grid-a">
+          <div class="terminal" aria-label="ax first-run terminal">
+            <div class="chrome">
+              <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+              <span class="title">~/Projects/app - ax first run</span>
+            </div>
+            <span class="line"><span class="prompt">$</span> axctl ingest --since=7</span>
+            <span class="line dim">indexed 91 sessions · 18,424 turns · 3,802 tool calls</span>
+            <span class="line dim">skills 288 · commits 142 · local graph 127.0.0.1</span>
+            <span class="line">&nbsp;</span>
+            <span class="line"><span class="prompt">$</span> axctl recall "auth middleware failed"</span>
+            <span class="line ok">4 matching sessions · same file pair · same verify miss</span>
+            <span class="line dim">2026-05-23 src/auth/apple.ts -> test/auth/apple.test.ts</span>
+            <span class="line">&nbsp;</span>
+            <span class="line"><span class="prompt">$</span> axctl retro pending</span>
+            <span class="line warn">3 sessions need review · 1 repeats a known failure</span>
+            <span class="line dim">proposal: post-feature-verify skill</span>
+            <span class="line">&nbsp;</span>
+            <span class="line"><span class="prompt">$</span> axctl improve verdict post-feature-verify</span>
+            <span class="line ok">adopted · +30 sessions · 0 repeat incidents</span>
+          </div>
+
+          <div class="proof-list">
+            <div class="proof-row">
+              <span>01</span>
+              <div><strong>ingest</strong><p>Read the logs already on your laptop.</p></div>
+            </div>
+            <div class="proof-row">
+              <span>02</span>
+              <div><strong>recall</strong><p>Find the prior failure before the agent repeats it.</p></div>
+            </div>
+            <div class="proof-row">
+              <span>03</span>
+              <div><strong>retro</strong><p>Turn what happened into a structured next bet.</p></div>
+            </div>
+            <div class="proof-row">
+              <span>04</span>
+              <div><strong>verdict</strong><p>Keep the change only if future sessions prove it.</p></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="cta-row">
+          <a class="btn" href="#install">Install and ingest</a>
+          <a class="link-btn" href="#how">See the loop</a>
+        </div>
+        <p class="note">
+          Use this if the current page is losing people before they understand
+          what ax does. It is less poetic, more credible.
+        </p>
+      </div>
+    </section>
+
+    <section class="alt" id="b">
+      <div class="shell">
+        <div class="alt-head">
+          <div class="alt-num">alt b</div>
+          <div>
+            <h2>Show the cost of not closing the loop.</h2>
+            <p class="lede">
+              Lead with before/after evidence. This makes the pain concrete:
+              the same coding-agent failure repeats until ax turns it into an
+              experiment with a verdict.
+            </p>
+          </div>
+        </div>
+
+        <div class="grid-b">
+          <article class="before-after before">
+            <h3>without ax</h3>
+            <div class="big-stat">3x</div>
+            <p class="lede">The same auth test failed in three separate sessions.</p>
+            <div class="stack">
+              <div class="event"><strong>session 4018</strong> skipped the local auth fixture.</div>
+              <div class="event"><strong>session 4061</strong> patched the same file after "done".</div>
+              <div class="event"><strong>session 4129</strong> repeated the verify miss.</div>
+            </div>
+          </article>
+
+          <article class="before-after after">
+            <h3>with ax</h3>
+            <div class="big-stat">0</div>
+            <p class="lede">Repeat incidents after the proposal became a skill.</p>
+            <div class="stack">
+              <div class="event"><strong>retro</strong> captured tried, worked, failed, next.</div>
+              <div class="event"><strong>proposal</strong> created post-feature-verify.</div>
+              <div class="event"><strong>verdict</strong> adopted at +30 sessions.</div>
+            </div>
+          </article>
+        </div>
+
+        <div class="cta-row">
+          <a class="btn" href="#install">Find repeated failures</a>
+          <a class="link-btn" href="#demo">View skill triage</a>
+        </div>
+        <p class="note">
+          Use this if we can back the numbers with real local examples. It is
+          the strongest positioning once the data is honest.
+        </p>
+      </div>
+    </section>
+
+    <section class="alt" id="c">
+      <div class="shell">
+        <div class="alt-head">
+          <div class="alt-num">alt c</div>
+          <div>
+            <h2>Your agent needs an engineering logbook.</h2>
+            <p class="lede">
+              Lead with the operator view: sessions, proposals, and verdicts
+              in one ledger. This makes ax feel less like "memory" and more
+              like the local control plane for coding-agent improvement.
+            </p>
+          </div>
+        </div>
+
+        <div class="ledger">
+          <div class="ledger-main">
+            <div class="ledger-title">recent agent evidence</div>
+            <div class="session">
+              <time>09:14</time>
+              <div><strong>Codex session ended</strong><p>2 tool failures, 1 correction, same verify command missed.</p></div>
+              <em>retro due</em>
+            </div>
+            <div class="session">
+              <time>10:02</time>
+              <div><strong>Claude subagent shipped fix</strong><p>Used post-feature-verify before final response.</p></div>
+              <em>clean</em>
+            </div>
+            <div class="session">
+              <time>10:47</time>
+              <div><strong>Proposal repeated</strong><p>main-branch edits still appear in 7 sessions.</p></div>
+              <em>triage</em>
+            </div>
+            <div class="session">
+              <time>11:21</time>
+              <div><strong>Skill fired</strong><p>worktree-first triggered before large refactor.</p></div>
+              <em>kept</em>
+            </div>
+          </div>
+
+          <aside class="ledger-side">
+            <div class="ledger-title">open verdict</div>
+            <div class="verdict-card">
+              <small>experiment · post-feature-verify</small>
+              <strong>adopted</strong>
+              <p>Fired in 11 of the last 30 sessions. No repeated auth verify miss after acceptance.</p>
+            </div>
+            <div class="verdict-card">
+              <small>proposal · main-branch-guardrail</small>
+              <strong>pending</strong>
+              <p>7 incidents. High annoyance risk, low implementation cost.</p>
+            </div>
+          </aside>
+        </div>
+
+        <div class="cta-row">
+          <a class="btn" href="#install">Open ax studio</a>
+          <a class="link-btn" href="#what">Read the model</a>
+        </div>
+        <p class="note">
+          Use this if the landing page should sell the operational surface
+          more than the CLI. It is broader, but less instantly installable.
+        </p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

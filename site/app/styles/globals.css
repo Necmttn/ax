@@ -517,6 +517,119 @@ p.lede {
   color: var(--ink);
 }
 
+.hero-proof {
+  display: grid;
+  grid-template-columns: minmax(0, 1.16fr) minmax(320px, 0.84fr);
+  gap: 28px;
+  margin: 36px 0 28px;
+  align-items: stretch;
+}
+
+.hero-terminal {
+  background: var(--ink);
+  color: var(--page);
+  border: 1px solid var(--ink);
+  min-height: 360px;
+  padding: 18px;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.52;
+  overflow: hidden;
+}
+
+.hero-terminal-chrome {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-bottom: 15px;
+  margin-bottom: 17px;
+  border-bottom: 1px solid rgba(245, 241, 233, 0.18);
+}
+
+.hero-terminal-chrome span {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1px solid rgba(245, 241, 233, 0.35);
+}
+
+.hero-terminal-chrome em {
+  margin-left: 9px;
+  color: rgba(245, 241, 233, 0.55);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.hero-terminal code {
+  display: grid;
+  gap: 1px;
+  color: var(--page);
+}
+
+.hero-terminal code span {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.hero-terminal b {
+  color: var(--green);
+  font-weight: 700;
+}
+
+.term-muted {
+  color: rgba(245, 241, 233, 0.58);
+}
+
+.term-ok {
+  color: #8fce9d;
+}
+
+.term-warn {
+  color: #e5c17a;
+}
+
+.proof-run {
+  display: grid;
+  border-top: 1px solid var(--ink);
+  background: color-mix(in srgb, var(--panel) 58%, transparent);
+}
+
+.proof-step {
+  min-width: 0;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 18px;
+}
+
+.proof-step:last-child {
+  border-bottom: none;
+}
+
+.proof-num {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.proof-step strong {
+  display: block;
+  font-family: var(--serif);
+  font-size: 26px;
+  font-weight: 400;
+  line-height: 1;
+  margin-bottom: 7px;
+}
+
+.proof-step p {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.42;
+  color: var(--muted);
+}
+
 .muted {
   color: var(--muted);
 }
@@ -915,6 +1028,16 @@ footer .right {
   h1 { font-size: 42px; }
   h2 { font-size: 26px; }
   p, p.lede { font-size: 17px; }
+  .hero-proof {
+    grid-template-columns: 1fr;
+  }
+  .hero-terminal {
+    min-height: 0;
+    font-size: 12px;
+  }
+  .proof-step {
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
   .wordmark { font-size: 28px; }
   main, header, footer { padding: 0 20px; }
   footer { padding: 24px 20px 40px; }
