@@ -194,6 +194,15 @@ export interface WorkflowCandidateReviewCoverageApplyBlockerDetail {
     readonly remediation: string;
 }
 
+export type WorkflowCandidateReviewVerdict = "accept" | "revise" | "reject" | "defer";
+
+export interface WorkflowCandidateReviewCoverageApplyAuditRow {
+    readonly fixture_id: string;
+    readonly candidate_id: string;
+    readonly verdict: WorkflowCandidateReviewVerdict;
+    readonly projected_fact_id: string | null;
+}
+
 export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly schema: "ax.workflow_candidate_review_readiness.v1";
     readonly source_path: string;
@@ -221,6 +230,7 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly next_action: string;
     readonly reviewed_fixture_ids: readonly string[];
     readonly projected_fact_ids: readonly string[];
+    readonly apply_audit_rows: readonly WorkflowCandidateReviewCoverageApplyAuditRow[];
     readonly projection_totals: WorkflowCandidateTopicReviewGraphProjection["totals"];
     readonly write_plan_totals: WorkflowCandidateTopicReviewGraphWritePlan["totals"];
 }
@@ -1783,6 +1793,7 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             `coverage review blocker details: ${report.coverage_review.apply_blocker_details.length === 0 ? "none" : report.coverage_review.apply_blocker_details.map((detail) => `${detail.blocker}=${detail.count}`).join(", ")}`,
             `coverage review blocker remediations: ${report.coverage_review.apply_blocker_details.length === 0 ? "none" : report.coverage_review.apply_blocker_details.map((detail) => `${detail.blocker}: ${detail.remediation}`).join(" | ")}`,
             `coverage review audit ids: fixtures=${report.coverage_review.reviewed_fixture_ids.length} facts=${report.coverage_review.projected_fact_ids.length}`,
+            `coverage review audit rows: ${report.coverage_review.apply_audit_rows.length}`,
             `coverage review next action: ${report.coverage_review.next_action}`,
             `coverage review applied: ${report.coverage_review.applied ? "yes" : "no"}`,
         ] : []),
@@ -2698,8 +2709,8 @@ export function buildWorkflowCandidateTopicReviewGraphProjection(
     };
 }
 
-const fixtureReviewVerdict = (row: WorkflowCandidateTopicClassifierFixtureRow): string | undefined =>
-    REVIEWED_VERDICTS.has(row.review_status) ? row.review_status : undefined;
+const fixtureReviewVerdict = (row: WorkflowCandidateTopicClassifierFixtureRow): WorkflowCandidateReviewVerdict | undefined =>
+    REVIEWED_VERDICTS.has(row.review_status) ? row.review_status as WorkflowCandidateReviewVerdict : undefined;
 
 const workflowCandidateReviewCoverageGuardNextAction = (
     guard: WorkflowCandidateReviewCoverageApplyGuard,
@@ -3172,6 +3183,23 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
                 return { blocker, count: 1, remediation: workflowCandidateReviewCoverageBlockerRemediation(blocker) };
         }
     });
+    const factIdByFixtureId = new Map<string, string>();
+    for (const fact of input.projection.facts) {
+        const fixtureId = fact.properties.fixture_id;
+        if (typeof fixtureId === "string" && fixtureId.length > 0) {
+            factIdByFixtureId.set(fixtureId, fact.id);
+        }
+    }
+    const applyAuditRows: WorkflowCandidateReviewCoverageApplyAuditRow[] = reviewedRows.flatMap((row) => {
+        const verdict = fixtureReviewVerdict(row);
+        if (verdict === undefined) return [];
+        return [{
+            fixture_id: row.id,
+            candidate_id: row.candidate_id,
+            verdict,
+            projected_fact_id: factIdByFixtureId.get(row.id) ?? null,
+        }];
+    });
     return {
         schema: "ax.workflow_candidate_review_readiness.v1",
         source_path: input.sourcePath,
@@ -3199,6 +3227,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         next_action: workflowCandidateReviewCoverageGuardNextAction(applyGuard),
         reviewed_fixture_ids: reviewedRows.map((row) => row.id),
         projected_fact_ids: input.projection.facts.map((fact) => fact.id),
+        apply_audit_rows: applyAuditRows,
         projection_totals: input.projection.totals,
         write_plan_totals: input.writePlan.totals,
     };

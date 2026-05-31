@@ -1955,6 +1955,26 @@ describe("classifiers workflow-candidates", () => {
             ],
         });
         expect(summary.projected_fact_ids).toHaveLength(3);
+        expect(summary.apply_audit_rows).toEqual([
+            {
+                fixture_id: "workflow-candidate-review-coverage/new/a",
+                candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+                verdict: "accept",
+                projected_fact_id: summary.projected_fact_ids[0],
+            },
+            {
+                fixture_id: "workflow-candidate-review-coverage/existing/a",
+                candidate_id: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+                verdict: "reject",
+                projected_fact_id: summary.projected_fact_ids[1],
+            },
+            {
+                fixture_id: "workflow-candidate-review-coverage/unknown/a",
+                candidate_id: "classifier_candidate_group:hybrid-window/unknown_signal",
+                verdict: "defer",
+                projected_fact_id: summary.projected_fact_ids[2],
+            },
+        ]);
     });
 
     test("reports applied coverage review statement counts", () => {
@@ -2019,7 +2039,14 @@ describe("classifiers workflow-candidates", () => {
             apply_guard: "ready_to_apply",
             can_apply: true,
         });
+        expect(summary.apply_audit_rows).toEqual([{
+            fixture_id: "workflow-candidate-review-coverage/verification_or_recovery_signal/a",
+            candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+            verdict: "accept",
+            projected_fact_id: summary.projected_fact_ids[0],
+        }]);
         expect(text).toContain(`coverage review apply result: applied statements=${writePlan.totals.statement_count}`);
+        expect(text).toContain("coverage review audit rows: 1");
     });
 
     test("renders persisted harness facts inside topic evidence packs", () => {
