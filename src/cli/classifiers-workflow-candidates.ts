@@ -3070,6 +3070,16 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
             ? ["missing_review_handoff" as const]
             : []),
     ];
+    const productionApplyGuard: WorkflowCandidateReviewCoverageApplyGuard =
+        strictApplyGuard === "ready_to_apply" && handoffMissingPaths.length > 0
+            ? "missing_review_handoff"
+            : strictApplyGuard;
+    const productionApplyBlockers: WorkflowCandidateReviewCoverageApplyBlocker[] = [
+        ...strictApplyBlockers,
+        ...(applyGuard === "ready_to_apply" && handoffMissingPaths.length > 0
+            ? ["missing_review_handoff" as const]
+            : []),
+    ];
     const postApplyRecheckCommand = workflowCandidateReviewCoverageRecheckCommand({
         sourceKind,
         ...(context.limit === undefined ? {} : { limit: context.limit }),
@@ -3176,9 +3186,12 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
         `- Apply blockers: ${applyBlockers.length === 0 ? "`none`" : applyBlockers.map((blocker) => `\`${blocker}\``).join(", ")}`,
         `- Strict provenance apply guard: \`${strictApplyGuard}\``,
         `- Strict provenance blockers: ${strictApplyBlockers.length === 0 ? "`none`" : strictApplyBlockers.map((blocker) => `\`${blocker}\``).join(", ")}`,
+        `- Production apply guard: \`${productionApplyGuard}\``,
+        `- Production blockers: ${productionApplyBlockers.length === 0 ? "`none`" : productionApplyBlockers.map((blocker) => `\`${blocker}\``).join(", ")}`,
         `- Blocker remediations: ${applyBlockers.length === 0 ? "none" : applyBlockers.map((blocker) => `${blocker}: ${workflowCandidateReviewCoverageBlockerRemediation(blocker)}`).join(" | ")}`,
         `- Handoff blocker remediations: ${handoffApplyBlockers.length === 0 ? "none" : handoffApplyBlockers.map((blocker) => `${blocker}: ${workflowCandidateReviewCoverageBlockerRemediation(blocker)}`).join(" | ")}`,
         `- Strict provenance blocker remediations: ${strictApplyBlockers.length === 0 ? "none" : strictApplyBlockers.map((blocker) => `${blocker}: ${workflowCandidateReviewCoverageBlockerRemediation(blocker)}`).join(" | ")}`,
+        `- Production blocker remediations: ${productionApplyBlockers.length === 0 ? "none" : productionApplyBlockers.map((blocker) => `${blocker}: ${workflowCandidateReviewCoverageBlockerRemediation(blocker)}`).join(" | ")}`,
         `- Next action: ${workflowCandidateReviewCoverageGuardNextAction(applyGuard)}`,
         "",
         "## Provenance Issues",

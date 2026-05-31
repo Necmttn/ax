@@ -1743,6 +1743,9 @@ describe("classifiers workflow-candidates", () => {
         expect(brief).toContain("- Strict provenance apply guard: `no_reviewed_fixtures`");
         expect(brief).toContain("- Strict provenance blockers: `no_reviewed_fixtures`");
         expect(brief).toContain("- Strict provenance blocker remediations: no_reviewed_fixtures: Review at least one fixture and add a rationale before applying.");
+        expect(brief).toContain("- Production apply guard: `no_reviewed_fixtures`");
+        expect(brief).toContain("- Production blockers: `no_reviewed_fixtures`");
+        expect(brief).toContain("- Production blocker remediations: no_reviewed_fixtures: Review at least one fixture and add a rationale before applying.");
         expect(brief).toContain("- Smoke markers: `0`");
         expect(brief).toContain("- Apply guard: `no_reviewed_fixtures`");
         expect(brief).toContain("- Apply blockers: `no_reviewed_fixtures`");
