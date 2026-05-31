@@ -2142,6 +2142,7 @@ describe("classifiers workflow-candidates", () => {
                     argv_index: 8,
                     argv_value_prefix: "--review-provenance-reviewer=",
                     placeholder: "<reviewer>",
+                    value_kind: "nonempty_string",
                 },
                 {
                     input: "reviewed_at",
@@ -2149,6 +2150,7 @@ describe("classifiers workflow-candidates", () => {
                     argv_index: 9,
                     argv_value_prefix: "--review-provenance-reviewed-at=",
                     placeholder: "<reviewed-at-iso>",
+                    value_kind: "iso_datetime",
                 },
             ],
             review_pipeline_command_argv: [
@@ -2223,7 +2225,7 @@ describe("classifiers workflow-candidates", () => {
         expect(text).toContain("coverage review pipeline command status: requires_inputs");
         expect(text).toContain("coverage review pipeline command kind: stamp_review_provenance");
         expect(text).toContain("coverage review pipeline required inputs: reviewer, reviewed_at");
-        expect(text).toContain("coverage review pipeline input bindings: reviewer@8=--review-provenance-reviewer:<reviewer>, reviewed_at@9=--review-provenance-reviewed-at:<reviewed-at-iso>");
+        expect(text).toContain("coverage review pipeline input bindings: reviewer@8=--review-provenance-reviewer:<reviewer>:nonempty_string, reviewed_at@9=--review-provenance-reviewed-at:<reviewed-at-iso>:iso_datetime");
         expect(text).toContain("coverage review pipeline command argv: bun | src/cli/index.ts | classifiers | workflow-candidates | --review-coverage | --source-kind=hybrid_window_classifier_projection | --coverage-review-pack=.ax/experiments/reviewed-coverage-gaps.jsonl | --sync-coverage-review-brief=.ax/experiments/reviewed-coverage-edited.md | --review-provenance-reviewer=<reviewer> | --review-provenance-reviewed-at=<reviewed-at-iso> | --coverage-review-brief=.ax/experiments/reviewed-coverage.md | --out=.ax/experiments/workflow-candidate-review-coverage-post-apply.json | --json");
         expect(text).toContain("coverage review pipeline command: bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/reviewed-coverage-gaps.jsonl --sync-coverage-review-brief=.ax/experiments/reviewed-coverage-edited.md --review-provenance-reviewer=<reviewer> --review-provenance-reviewed-at=<reviewed-at-iso> --coverage-review-brief=.ax/experiments/reviewed-coverage.md --out=.ax/experiments/workflow-candidate-review-coverage-post-apply.json --json");
         const incompleteHandoff = buildWorkflowCandidateReviewCoverageApplySummary({

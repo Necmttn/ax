@@ -288,6 +288,10 @@ export type WorkflowCandidateReviewCoveragePipelineRequiredInput =
     | "reviewer"
     | "reviewed_at";
 
+export type WorkflowCandidateReviewCoveragePipelineInputValueKind =
+    | "nonempty_string"
+    | "iso_datetime";
+
 export type WorkflowCandidateReviewCoveragePipelineCommandStatus =
     | "unavailable"
     | "requires_inputs"
@@ -299,6 +303,7 @@ export interface WorkflowCandidateReviewCoveragePipelineInputBinding {
     readonly argv_index: number;
     readonly argv_value_prefix: string;
     readonly placeholder: string;
+    readonly value_kind: WorkflowCandidateReviewCoveragePipelineInputValueKind;
 }
 
 export type WorkflowCandidateReviewCoverageRecheckStatus =
@@ -2030,7 +2035,7 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
                 `coverage review pipeline command kind: ${report.coverage_review.review_pipeline_command_kind}`,
             ]),
             `coverage review pipeline required inputs: ${report.coverage_review.review_pipeline_required_inputs.length === 0 ? "none" : report.coverage_review.review_pipeline_required_inputs.join(", ")}`,
-            `coverage review pipeline input bindings: ${report.coverage_review.review_pipeline_input_bindings.length === 0 ? "none" : report.coverage_review.review_pipeline_input_bindings.map((binding) => `${binding.input}@${binding.argv_index}=${binding.argv_flag}:${binding.placeholder}`).join(", ")}`,
+            `coverage review pipeline input bindings: ${report.coverage_review.review_pipeline_input_bindings.length === 0 ? "none" : report.coverage_review.review_pipeline_input_bindings.map((binding) => `${binding.input}@${binding.argv_index}=${binding.argv_flag}:${binding.placeholder}:${binding.value_kind}`).join(", ")}`,
             ...(report.coverage_review.review_pipeline_command_argv === undefined ? [] : [
                 `coverage review pipeline command argv: ${report.coverage_review.review_pipeline_command_argv.join(" | ")}`,
             ]),
@@ -3386,7 +3391,7 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
         ...(reviewPipelineCommand === undefined ? [] : [
             `- Pipeline command kind: \`${reviewPipelineCommandKind}\``,
             `- Pipeline required inputs: ${reviewPipelineRequiredInputs.length === 0 ? "`none`" : reviewPipelineRequiredInputs.map((input) => `\`${input}\``).join(", ")}`,
-            `- Pipeline input bindings: ${reviewPipelineInputBindings.length === 0 ? "`none`" : reviewPipelineInputBindings.map((binding) => `\`${binding.input}@${binding.argv_index}=${binding.argv_flag}:${binding.placeholder}\``).join(", ")}`,
+            `- Pipeline input bindings: ${reviewPipelineInputBindings.length === 0 ? "`none`" : reviewPipelineInputBindings.map((binding) => `\`${binding.input}@${binding.argv_index}=${binding.argv_flag}:${binding.placeholder}:${binding.value_kind}\``).join(", ")}`,
             `- Pipeline command argv: ${reviewPipelineCommandArgv === undefined ? "`none`" : reviewPipelineCommandArgv.map((part) => `\`${part}\``).join(" ")}`,
             `- Pipeline command: \`${reviewPipelineCommand}\``,
         ]),
@@ -4034,7 +4039,12 @@ const workflowCandidateReviewCoveragePipelineInputBindings = (
     commandKind: WorkflowCandidateReviewCoveragePipelineCommandKind | undefined,
     argv: readonly string[] | undefined,
 ): WorkflowCandidateReviewCoveragePipelineInputBinding[] => {
-    const bindingFor = (input: WorkflowCandidateReviewCoveragePipelineRequiredInput, argvFlag: string, placeholder: string): WorkflowCandidateReviewCoveragePipelineInputBinding => {
+    const bindingFor = (
+        input: WorkflowCandidateReviewCoveragePipelineRequiredInput,
+        argvFlag: string,
+        placeholder: string,
+        valueKind: WorkflowCandidateReviewCoveragePipelineInputValueKind,
+    ): WorkflowCandidateReviewCoveragePipelineInputBinding => {
         const argvValuePrefix = `${argvFlag}=`;
         const argvIndex = argv?.findIndex((part) => part.startsWith(argvValuePrefix)) ?? -1;
         return {
@@ -4043,13 +4053,14 @@ const workflowCandidateReviewCoveragePipelineInputBindings = (
             argv_index: argvIndex,
             argv_value_prefix: argvValuePrefix,
             placeholder,
+            value_kind: valueKind,
         };
     };
     switch (commandKind) {
         case "stamp_review_provenance":
             return [
-                bindingFor("reviewer", "--review-provenance-reviewer", "<reviewer>"),
-                bindingFor("reviewed_at", "--review-provenance-reviewed-at", "<reviewed-at-iso>"),
+                bindingFor("reviewer", "--review-provenance-reviewer", "<reviewer>", "nonempty_string"),
+                bindingFor("reviewed_at", "--review-provenance-reviewed-at", "<reviewed-at-iso>", "iso_datetime"),
             ];
         case "repair_review_issues":
         case "apply_review_facts":
