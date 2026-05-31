@@ -1663,6 +1663,12 @@ describe("classifiers workflow-candidates", () => {
             applyRequested: true,
             applied: false,
         });
+        const brief = renderWorkflowCandidateReviewCoverageBriefMarkdown(rows, {
+            sourceKind: "hybrid_window_classifier_projection",
+            coverageReviewPack: ".ax/experiments/reviewed-coverage-gaps.jsonl",
+            coverageReviewBrief: ".ax/experiments/reviewed-coverage-gaps.md",
+            outputPath: ".ax/experiments/reviewed-coverage-gaps.json",
+        });
         const text = renderWorkflowCandidateReviewCoverageText({
             schema: "ax.workflow_candidate_review_coverage.v1",
             source_kind: "hybrid_window_classifier_projection",
@@ -1732,6 +1738,11 @@ describe("classifiers workflow-candidates", () => {
         expect(text).toContain("coverage review issue: missing_review_rationale fixture=workflow-candidate-review-coverage/verification_or_recovery_signal/a candidate=classifier_candidate_group:hybrid-window/verification_or_recovery_signal status=accept");
         expect(text).toContain("coverage review issue: missing_reviewer fixture=workflow-candidate-review-coverage/verification_or_recovery_signal/a candidate=classifier_candidate_group:hybrid-window/verification_or_recovery_signal status=accept");
         expect(text).toContain("coverage review issue: missing_reviewed_at fixture=workflow-candidate-review-coverage/verification_or_recovery_signal/a candidate=classifier_candidate_group:hybrid-window/verification_or_recovery_signal status=accept");
+        expect(brief).toContain("## Review Issues");
+        expect(brief).toContain("- Issue counts: `missing_review_rationale=1`, `missing_reviewer=1`, `missing_reviewed_at=1`");
+        expect(brief).toContain("- `missing_review_rationale` fixture=`workflow-candidate-review-coverage/verification_or_recovery_signal/a` candidate=`classifier_candidate_group:hybrid-window/verification_or_recovery_signal` status=`accept` remediation=`Add rationale text to this reviewed fixture.`");
+        expect(brief).toContain("- `missing_reviewer` fixture=`workflow-candidate-review-coverage/verification_or_recovery_signal/a` candidate=`classifier_candidate_group:hybrid-window/verification_or_recovery_signal` status=`accept` remediation=`Add reviewer metadata to this reviewed fixture.`");
+        expect(brief).toContain("- `missing_reviewed_at` fixture=`workflow-candidate-review-coverage/verification_or_recovery_signal/a` candidate=`classifier_candidate_group:hybrid-window/verification_or_recovery_signal` status=`accept` remediation=`Add reviewed-at metadata to this reviewed fixture.`");
         expect(summary.projected_fact_ids).toHaveLength(1);
     });
 

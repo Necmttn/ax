@@ -3082,6 +3082,8 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
             : []),
     ];
     const provenanceIssueRows = workflowCandidateReviewCoverageProvenanceIssueRows(reviewedRows);
+    const reviewIssueRows = workflowCandidateReviewCoverageReviewIssueRows(rows);
+    const reviewIssueCounts = workflowCandidateReviewCoverageReviewIssueCounts(reviewIssueRows);
     const sourceKind = context.sourceKind ?? "hybrid_window_classifier_projection";
     const readinessOutputPath = context.outputPath ?? ".ax/experiments/workflow-candidate-review-coverage-reviewed.json";
     const syncedBriefPath = context.coverageReviewBrief ?? ".ax/experiments/workflow-candidate-review-coverage-reviewed.md";
@@ -3232,6 +3234,17 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
         `- Production blocker remediations: ${productionApplyBlockers.length === 0 ? "none" : productionApplyBlockers.map((blocker) => `${blocker}: ${workflowCandidateReviewCoverageBlockerRemediation(blocker)}`).join(" | ")}`,
         `- Production next action: ${workflowCandidateReviewCoverageGuardNextAction(productionApplyGuard)}`,
         `- Next action: ${workflowCandidateReviewCoverageGuardNextAction(applyGuard)}`,
+        "",
+        "## Review Issues",
+        "",
+        ...(reviewIssueRows.length === 0
+            ? ["- _none_"]
+            : [
+                `- Issue counts: ${reviewIssueCounts.map((item) => `\`${item.issue}=${item.count}\``).join(", ")}`,
+                ...reviewIssueRows.map((row) =>
+                    `- \`${row.issue}\` fixture=\`${row.fixture_id}\` candidate=\`${row.candidate_id}\` status=\`${row.review_status}\` remediation=\`${row.remediation}\``
+                ),
+            ]),
         "",
         "## Provenance Issues",
         "",
