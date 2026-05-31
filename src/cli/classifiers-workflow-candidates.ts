@@ -41,6 +41,7 @@ export interface WorkflowCandidateCommandInput {
     readonly evidencePack?: string;
     readonly classifierFixturePack?: string;
     readonly coverageFixturePack?: string;
+    readonly coverageReviewPack?: string;
     readonly harnessFacts?: string;
     readonly harnessWritePlan?: string;
     readonly applyHarnessFacts?: boolean;
@@ -179,7 +180,8 @@ export interface WorkflowCandidateTopicClassifierFixtureRow {
     readonly target: string;
     readonly text: string;
     readonly source_group: "workflow-candidate";
-    readonly review_status: "pending";
+    readonly review_status: "pending" | "accept" | "revise" | "reject" | "defer";
+    readonly review_rationale?: string;
     readonly topic: string;
     readonly candidate_id: string;
     readonly candidate_label: string;
@@ -302,7 +304,7 @@ export interface WorkflowCandidateTopicHarnessGraphWritePlan {
 
 export interface WorkflowCandidateTopicReviewGraphProjection {
     readonly schema: "ax.workflow_topic_review_graph_projection.v1";
-    readonly source_report_schema: WorkflowCandidateTopicReport["schema"];
+    readonly source_report_schema: WorkflowCandidateTopicReport["schema"] | "ax.workflow_candidate_review_coverage_fixture_pack.v1";
     readonly topic: string;
     readonly nodes: readonly WorkflowCandidateTopicHarnessGraphNode[];
     readonly edges: readonly WorkflowCandidateTopicHarnessGraphEdge[];
@@ -2607,6 +2609,136 @@ export function buildWorkflowCandidateTopicReviewGraphProjection(
     };
 }
 
+const fixtureReviewVerdict = (row: WorkflowCandidateTopicClassifierFixtureRow): string | undefined =>
+    REVIEWED_VERDICTS.has(row.review_status) ? row.review_status : undefined;
+
+export function parseWorkflowCandidateFixtureRowsJsonl(
+    content: string,
+): readonly WorkflowCandidateTopicClassifierFixtureRow[] {
+    return content
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .map((line) => safeJsonParse<WorkflowCandidateTopicClassifierFixtureRow>(line))
+        .filter((row): row is WorkflowCandidateTopicClassifierFixtureRow => row !== null);
+}
+
+export function buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures(input: {
+    readonly rows: readonly WorkflowCandidateTopicClassifierFixtureRow[];
+    readonly syncedFrom: string;
+}): WorkflowCandidateTopicReviewGraphProjection {
+    const reviewedRows = input.rows.filter((row) => fixtureReviewVerdict(row) !== undefined);
+    const topic = "review-coverage";
+    const topicNode = topicHarnessGraphId(topic);
+    const nodes = new Map<string, WorkflowCandidateTopicHarnessGraphNode>();
+    const edges: WorkflowCandidateTopicHarnessGraphEdge[] = [];
+    const facts: WorkflowCandidateTopicHarnessGraphFact[] = [];
+    nodes.set(topicNode, {
+        id: topicNode,
+        kind: "workflow_topic",
+        label: topic,
+        properties: {
+            topic,
+            source_kind: "workflow_candidate_review_coverage",
+            synced_from: input.syncedFrom,
+        },
+    });
+
+    for (const row of reviewedRows) {
+        const verdict = fixtureReviewVerdict(row);
+        if (verdict === undefined) continue;
+        const reviewNode = topicReviewGraphId(topic, `${row.candidate_id}:${row.id}`);
+        const evidenceRefs = [row.result_id, row.turn]
+            .filter((ref): ref is string => typeof ref === "string" && ref.length > 0)
+            .sort();
+        nodes.set(reviewNode, {
+            id: reviewNode,
+            kind: "workflow_topic_candidate_review",
+            label: row.candidate_label,
+            properties: {
+                topic,
+                candidate_id: row.candidate_id,
+                candidate_label: row.candidate_label,
+                proposed_action: row.proposed_action,
+                verdict,
+                rationale: row.review_rationale ?? "",
+                synced_from: input.syncedFrom,
+                fixture_id: row.id,
+                evidence_refs: evidenceRefs,
+            },
+        });
+        const topicEdge = `edge:${graphKeyWithHash(`${topicNode}:has_candidate_review:${reviewNode}`)}`;
+        edges.push({
+            id: topicEdge,
+            kind: "topic_has_candidate_review",
+            from: topicNode,
+            to: reviewNode,
+            evidence_path: input.syncedFrom,
+            properties: {
+                topic,
+                verdict,
+                fixture_id: row.id,
+            },
+        });
+        const candidateEdge = `edge:${graphKeyWithHash(`${reviewNode}:reviews_candidate:${row.candidate_id}`)}`;
+        edges.push({
+            id: candidateEdge,
+            kind: "candidate_review_reviews_candidate",
+            from: reviewNode,
+            to: row.candidate_id,
+            evidence_path: evidenceRefs.join(" "),
+            properties: {
+                topic,
+                candidate_id: row.candidate_id,
+                fixture_id: row.id,
+                evidence_refs: evidenceRefs,
+            },
+        });
+        facts.push({
+            id: `fact:${graphKeyWithHash(`${reviewNode}:fixture:${row.id}:verdict:${verdict}`)}`,
+            kind: "workflow_topic_candidate_review",
+            subject: reviewNode,
+            predicate: verdict,
+            object: row.candidate_id,
+            value: {
+                reviewed: true,
+                verdict,
+            },
+            evidence_edges: [topicEdge, candidateEdge],
+            properties: {
+                topic,
+                candidate_id: row.candidate_id,
+                candidate_label: row.candidate_label,
+                proposed_action: row.proposed_action,
+                verdict,
+                rationale: row.review_rationale ?? "",
+                synced_from: input.syncedFrom,
+                fixture_id: row.id,
+                evidence_refs: evidenceRefs,
+            },
+        });
+    }
+
+    return {
+        schema: "ax.workflow_topic_review_graph_projection.v1",
+        source_report_schema: "ax.workflow_candidate_review_coverage_fixture_pack.v1",
+        topic,
+        nodes: [...nodes.values()],
+        edges,
+        facts,
+        totals: {
+            reviewed_candidate_count: reviewedRows.length,
+            rejected_count: reviewedRows.filter((row) => fixtureReviewVerdict(row) === "reject").length,
+            accepted_count: reviewedRows.filter((row) => fixtureReviewVerdict(row) === "accept").length,
+            deferred_count: reviewedRows.filter((row) => fixtureReviewVerdict(row) === "defer").length,
+            revised_count: reviewedRows.filter((row) => fixtureReviewVerdict(row) === "revise").length,
+            node_count: nodes.size,
+            edge_count: edges.length,
+            fact_count: facts.length,
+        },
+    };
+}
+
 export function buildWorkflowCandidateTopicReviewGraphWritePlan(
     projection: WorkflowCandidateTopicReviewGraphProjection,
 ): WorkflowCandidateTopicReviewGraphWritePlan {
@@ -3429,6 +3561,29 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 mkdirSync(dirname(input.coverageFixturePack), { recursive: true });
                 writeFileSync(input.coverageFixturePack, renderClassifierFixtureRowsJsonl(fixtureSummary.fixtures), "utf8");
                 report = { ...report, fixture_pack: fixtureSummary };
+            }
+            if (input.coverageReviewPack && (input.reviewFacts || input.reviewWritePlan || input.applyReviewFacts)) {
+                const reviewedRows = parseWorkflowCandidateFixtureRowsJsonl(
+                    readFileSync(input.coverageReviewPack, "utf8"),
+                );
+                const reviewProjection = buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures({
+                    rows: reviewedRows,
+                    syncedFrom: input.coverageReviewPack,
+                });
+                const reviewWritePlan = buildWorkflowCandidateTopicReviewGraphWritePlan(reviewProjection);
+                if (input.reviewFacts) {
+                    mkdirSync(dirname(input.reviewFacts), { recursive: true });
+                    writeFileSync(input.reviewFacts, `${prettyPrint(reviewProjection)}\n`, "utf8");
+                }
+                if (input.reviewWritePlan) {
+                    mkdirSync(dirname(input.reviewWritePlan), { recursive: true });
+                    writeFileSync(input.reviewWritePlan, `${prettyPrint(reviewWritePlan)}\n`, "utf8");
+                }
+                if (input.applyReviewFacts && reviewWritePlan.statements.length > 0) {
+                    yield* db.query(reviewWritePlan.statements.join("\n")).pipe(
+                        catchDbErrorAndExit("axctl classifiers workflow-candidates"),
+                    );
+                }
             }
             if (input.out) {
                 mkdirSync(dirname(input.out), { recursive: true });

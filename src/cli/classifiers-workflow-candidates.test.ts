@@ -14,6 +14,7 @@ import {
     buildWorkflowCandidateTopicHarnessEvidenceSummary,
     buildWorkflowCandidateTopicHelperExplanations,
     buildWorkflowCandidateTopicReviewGraphProjection,
+    buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures,
     buildWorkflowCandidateTopicReviewGraphListReport,
     buildWorkflowCandidateTopicReviewGraphWritePlan,
     buildWorkflowCandidateTopicTaskDrafts,
@@ -24,6 +25,7 @@ import {
     buildWorkflowCandidateTaskDrafts,
     isTaskLikeWorkflowText,
     parseWorkflowCandidateBriefReview,
+    parseWorkflowCandidateFixtureRowsJsonl,
     recommendWorkflowCandidatePromotionArtifact,
     renderWorkflowCandidateBriefMarkdown,
     renderWorkflowCandidateTopicEvidencePackMarkdown,
@@ -1400,6 +1402,75 @@ describe("classifiers workflow-candidates", () => {
         });
         expect(summary.fixtures[0]?.id).toContain("workflow-candidate-review-coverage/verification_or_recovery_signal/");
         expect(summary.fixtures[0]?.text).toBe("USER:\ncontinue and make sure the tests prove this does not regress\n\nPREVIOUS_ASSISTANT:\n");
+    });
+
+    test("projects reviewed coverage-gap fixtures into review graph facts", () => {
+        const rows = parseWorkflowCandidateFixtureRowsJsonl([
+            JSON.stringify({
+                id: "workflow-candidate-review-coverage/verification_or_recovery_signal/a",
+                suite: "workflow-candidate-review-coverage",
+                name: "coverage-gap-verification_or_recovery_signal-01",
+                label: "verification_or_recovery_signal",
+                target: "unknown",
+                text: "USER:\ncontinue and make sure the tests prove this does not regress\n\nPREVIOUS_ASSISTANT:\n",
+                source_group: "workflow-candidate",
+                review_status: "accept",
+                review_rationale: "This is useful verification/recovery behavior to preserve as review context.",
+                topic: "review-coverage",
+                candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+                candidate_label: "verification_or_recovery_signal",
+                proposed_action: "add_verification_gate",
+                result_id: "classifier_result:verification",
+                turn: "turn:verification",
+                confidence: 0.83,
+            }),
+            JSON.stringify({
+                id: "workflow-candidate-review-coverage/correction_or_rejection_signal/b",
+                suite: "workflow-candidate-review-coverage",
+                name: "coverage-gap-correction_or_rejection_signal-01",
+                label: "correction_or_rejection_signal",
+                target: "unknown",
+                text: "USER:\nthis is not bad but I need another scenario\n\nPREVIOUS_ASSISTANT:\n",
+                source_group: "workflow-candidate",
+                review_status: "pending",
+                topic: "review-coverage",
+                candidate_id: "classifier_candidate_group:hybrid-window/correction_or_rejection_signal",
+                candidate_label: "correction_or_rejection_signal",
+                proposed_action: "add_context_guardrail",
+                turn: "turn:correction",
+                confidence: 0.61,
+            }),
+        ].join("\n"));
+
+        const projection = buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures({
+            rows,
+            syncedFrom: ".ax/experiments/reviewed-coverage-gaps.jsonl",
+        });
+        const writePlan = buildWorkflowCandidateTopicReviewGraphWritePlan(projection);
+
+        expect(projection).toMatchObject({
+            schema: "ax.workflow_topic_review_graph_projection.v1",
+            source_report_schema: "ax.workflow_candidate_review_coverage_fixture_pack.v1",
+            topic: "review-coverage",
+            totals: {
+                reviewed_candidate_count: 1,
+                accepted_count: 1,
+                rejected_count: 0,
+                fact_count: 1,
+            },
+        });
+        expect(projection.facts[0]).toMatchObject({
+            kind: "workflow_topic_candidate_review",
+            predicate: "accept",
+            object: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+            properties: {
+                fixture_id: "workflow-candidate-review-coverage/verification_or_recovery_signal/a",
+                rationale: "This is useful verification/recovery behavior to preserve as review context.",
+                synced_from: ".ax/experiments/reviewed-coverage-gaps.jsonl",
+            },
+        });
+        expect(writePlan.totals.fact_statement_count).toBe(1);
+        expect(writePlan.statements.join("\n")).toContain("workflow_topic_candidate_review");
     });
 
     test("renders persisted harness facts inside topic evidence packs", () => {
