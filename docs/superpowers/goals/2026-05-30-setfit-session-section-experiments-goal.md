@@ -29,7 +29,7 @@ artifact path as the evidence to inspect before trusting any summary row.
 | Blind/review workflow | E46-E65+ | `.ax/experiments/blind-workflow-status-e57.json` and related review artifacts | Human review is mandatory before fixtures or graph facts are promoted. | Pending where review rows are incomplete. | Earlier experiment log | Prefer review queues/workspaces over automatic label edits. |
 | Transcript graph projection | E155-E157 | `.ax/experiments/transcript-candidate-graph-projection-e155.json`, `.ax/experiments/workflow-candidate-report-e156.json`, `.ax/experiments/workflow-candidate-cli-e157.json` | Real persisted classifier facts can become graph-backed workflow candidates. | Passed for projection/query; still needs product review filters and proposal gates. | E155/E156/E157 commits in log | Use graph facts for evidence-backed workflow/harness discovery. |
 | Proposal lifecycle | E168-E208 | `.ax/experiments/workflow-candidate-proposal-list-e168.json`, `.ax/experiments/classifier-package-execution-write-plan-e208.json` | Classifier-derived workflow proposals are discoverable and lifecycle-tracked. | Passed for visibility/lifecycle plumbing; promotion remains review-gated. | Recent proposal lifecycle commits | Continue using review and ready-smoke gates before guidance/harness changes. |
-| Embedding/SVM helper layer | E209-E227 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/embedding-helper-review-batch-e216-report.json`, `.ax/experiments/embedding-helper-review-progress-e218.json`, `.ax/experiments/classifier-package-execution-embedding-helper-export-preview-e221.json`, `.ax/experiments/classifier-package-execution-embedding-helper-review-progress-e223.json`, `.ax/experiments/embedding-helper-export-e227-report.json`, `.ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e227.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. | Canonical review is now export-ready: `12` accepted hard negatives, `3` rejected hard negatives, `1` accepted dedupe cluster; fixture append gate combines `124` base rows + `12` accepted helper rows into `136` checked rows. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `65b0b3c`, `4c602d9`, `eeb517c`, `9a6811e`, `31a1b16`, `e41562c`, `0587b67`, `0e0a960`, `3f01787`, `7bea922`, `21f7163`, `24e4a4e` | Run split audit/metadata and then a scoped model-quality rerun on the combined fixture file before considering any canonical fixture-file mutation. |
+| Embedding/SVM helper layer | E209-E228 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/embedding-helper-review-batch-e216-report.json`, `.ax/experiments/embedding-helper-review-progress-e218.json`, `.ax/experiments/classifier-package-execution-embedding-helper-export-preview-e221.json`, `.ax/experiments/classifier-package-execution-embedding-helper-review-progress-e223.json`, `.ax/experiments/embedding-helper-export-e227-report.json`, `.ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e227.json`, `.ax/experiments/embedding-helper-fixture-split-audit-e228.json`, `.ax/experiments/setfit-robustness-embedding-helper-fixtures-e228.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. Reviewed helper hard negatives improve fixture coverage without breaking the SetFit gate. | Passed experiment gate: canonical review export-ready with `12` accepted hard negatives and `1` accepted dedupe cluster; append gate combines `124` base + `12` helper rows into `136`; grouped split audit has zero group leakage; SetFit robustness is `robust_enough` with macro F1 mean/min `0.7858` / `0.7672` and none FP mean/max `0.0513` / `0.0769`. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `65b0b3c`, `4c602d9`, `eeb517c`, `9a6811e`, `31a1b16`, `e41562c`, `0587b67`, `0e0a960`, `3f01787`, `7bea922`, `21f7163`, `24e4a4e`, `f97c8e3` | Keep canonical fixture mutation review-gated; next compare confusion rows and decide whether to promote the appended helper rows or add another mined hard-negative batch. |
 
 Current recommendation:
 
@@ -11755,6 +11755,156 @@ Decision:
   back to canonical E210 only if the reviewed-copy decisions are accepted, then
   run the canonical status/export path and append the accepted rows through the
   existing fixture append gate.
+
+## E227 - Append Reviewed Embedding Helper Fixtures
+
+Question:
+
+- Can the completed embedding-helper review queue become an append-only
+  experiment fixture set without mutating the canonical package fixtures?
+
+Implementation:
+
+- Applied the E226 reviewed copy back to local canonical review artifact
+  `.ax/experiments/embedding-helper-review-e210.json`.
+- Kept a local backup:
+  `.ax/experiments/embedding-helper-review-e210-before-e227.json`.
+- Extended `fixture_append.py` with an explicit
+  `embedding-helper-hard-negative` source-group path:
+  - accepted rows must keep label `none`
+  - accepted rows must have review notes
+  - accepted rows must preserve `source_candidate_id` and `source_fixture_id`
+- Added package operation `embedding-helper-fixture-append`.
+
+Commands:
+
+```sh
+bun run classifiers:embedding-helper-export -- --review=.ax/experiments/embedding-helper-review-e210.json --status=.ax/experiments/embedding-helper-review-status-e227-canonical.json --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --out=.ax/experiments/embedding-helper-fixture-append-current.jsonl --hints=.ax/experiments/embedding-helper-dedupe-hints-current.json --report=.ax/experiments/embedding-helper-export-e227-report.json --json
+bun src/cli/index.ts classifiers package-operations --operation=embedding-helper-fixture-append --execute --allow-expensive --out=.ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e227.json
+```
+
+Artifacts:
+
+- `.ax/experiments/embedding-helper-review-status-e227-canonical.json`
+- `.ax/experiments/embedding-helper-export-e227-report.json`
+- `.ax/experiments/embedding-helper-fixture-append-current.jsonl`
+- `.ax/experiments/embedding-helper-dedupe-hints-current.json`
+- `.ax/experiments/chunks-with-embedding-helper-fixtures-current.jsonl`
+- `.ax/experiments/fixture-append-embedding-helper-current-report.json`
+- `.ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e227.json`
+
+Results:
+
+- Canonical review checksum before apply:
+  `5997295b73027794bae2c598a5207733eb75c8a9da95ae6f6fa2787c8423a541`
+- Canonical review checksum after apply:
+  `d610b0547abc437b330918743f7f178841edb7a10646b7924b499615270f0a4a`
+- Review status decision: `ready_for_embedding_helper_export`
+- Hard negatives: `12` accepted, `3` rejected, `0` pending
+- Dedupe clusters: `1` accepted, `0` pending
+- Export decision: `ready_to_append_embedding_helper_fixtures`
+- Export appendable: `true`
+- Fixture append decision: `ready_to_write_combined_fixtures`
+- Base rows: `124`
+- Append rows: `12`
+- Combined rows: `136`
+- Append label counts: `{ "none": 12 }`
+
+Decision:
+
+- E227 closes the reviewed helper-to-fixture append path. The embedding/SVM
+  helper is now valuable as a miner and reviewer assistant: it found reviewed
+  hard negatives that can be appended without changing labels or weakening
+  provenance.
+- This still does not promote model output as facts. It only creates an
+  experiment fixture set for downstream split and robustness gates.
+
+Verification:
+
+```sh
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+Passed: `308` Python tests and `69` Bun tests. `bun run typecheck` exited `0`
+with existing Effect advisories.
+
+## E228 - Validate Embedding Helper Fixture Split And SetFit Robustness
+
+Question:
+
+- After appending the reviewed embedding-helper hard negatives, does the
+  combined experiment fixture set remain split-safe and model-quality viable,
+  or did we only add review volume?
+
+Commands:
+
+```sh
+bun run classifiers:fixture-metadata -- --fixtures=.ax/experiments/chunks-with-embedding-helper-fixtures-current.jsonl --out=.ax/experiments/chunks-with-embedding-helper-fixture-metadata-current.jsonl
+bun run classifiers:split-audit -- --fixtures=.ax/experiments/chunks-with-embedding-helper-fixture-metadata-current.jsonl --group-field=pair_group --pair-field=pair_group --label-mode=coarse --seeds=7,13,42 --out=.ax/experiments/embedding-helper-fixture-split-audit-e228.json --json
+bun run classifiers:setfit-robustness -- --fixtures=.ax/experiments/chunks-with-embedding-helper-fixture-metadata-current.jsonl --group-field=pair_group --label-mode=coarse --seeds=7,13,42 --epochs=1 --batch-size=8 --calibration-threshold=0.4 --out=.ax/experiments/setfit-robustness-embedding-helper-fixtures-e228.json --json
+```
+
+Artifacts:
+
+- `.ax/experiments/chunks-with-embedding-helper-fixture-metadata-current.jsonl`
+- `.ax/experiments/embedding-helper-fixture-split-audit-e228.json`
+- `.ax/experiments/setfit-robustness-embedding-helper-fixtures-e228.json`
+
+Split audit:
+
+- Fixtures: `136`
+- Group count: `72`
+- Pair group count: `72`
+- Seeds `7`, `13`, and `42`: all `viable_split`
+- Train/test rows per seed: `95` / `41`
+- Overlap groups: `0`
+- Overlap pair groups: `0`
+- Coarse label counts:
+  - `approval`: `20`
+  - `correction_or_rejection_signal`: `26`
+  - `environment_or_preference_signal`: `24`
+  - `none`: `37`
+  - `verification_or_recovery_signal`: `29`
+
+SetFit robustness:
+
+- Decision: `robust_enough`
+- Runs: `3`
+- Fixtures: `136`
+- Train seconds total: `308.81`
+- Macro F1 mean/min/max: `0.7858` / `0.7672` / `0.8189`
+- Accuracy mean: `0.7968`
+- None false-positive mean/max: `0.0513` / `0.0769`
+- Calibrated summary at threshold `0.4` is effectively unchanged:
+  - macro F1 mean/min/max: `0.7856` / `0.7672` / `0.8189`
+  - none false-positive mean/max: `0.0513` / `0.0769`
+- Per-seed highlights:
+  - seed `7`: macro F1 `0.8189`, accuracy `0.8293`, none FP `0.0`
+  - seed `13`: macro F1 `0.7713`, accuracy `0.7805`, none FP `0.0769`
+  - seed `42`: macro F1 `0.7672`, accuracy `0.7805`, none FP `0.0769`
+
+Decision:
+
+- E228 is a real progress gate, not just fixture churn. The reviewed helper
+  hard negatives increased the `none` fixture family and the grouped split
+  remains leakage-free across all tested seeds.
+- The SetFit gate now clears the working thresholds that earlier failed in
+  E189: macro F1 is above `0.75` and `none` false-positive stays below `10%`
+  on every tested seed.
+- This supports the current hybrid architecture: embedding/SVM mines and
+  explains review candidates; reviewed rows become append-only fixtures; SetFit
+  is evaluated after the review and split gates.
+- Canonical package fixture mutation should still be a separate reviewed
+  promotion decision, because E228 only validates the experiment fixture file.
+
+Verification:
+
+```sh
+python3 -m json.tool .ax/experiments/embedding-helper-fixture-split-audit-e228.json >/dev/null
+python3 -m json.tool .ax/experiments/setfit-robustness-embedding-helper-fixtures-e228.json >/dev/null
+```
 
 ## E197 - Hybrid Graph Usefulness Gate
 
