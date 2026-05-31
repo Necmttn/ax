@@ -3,6 +3,7 @@ import {
   gistOwnerMatches,
   gistApiUrl,
   rawSessionFileUrlFromGist,
+  studioShareUrl,
   validateShareArtifact,
 } from "./session-share.ts";
 
@@ -53,6 +54,12 @@ function validArtifact() {
 describe("site session share helpers", () => {
   it("builds GitHub API URLs", () => {
     expect(gistApiUrl("abc123")).toBe("https://api.github.com/gists/abc123");
+  });
+
+  it("builds Studio embed URLs without changing the public share path", () => {
+    expect(studioShareUrl("Necmttn", "abc 123")).toBe(
+      "/studio/?shareOwner=Necmttn&gistId=abc%20123",
+    );
   });
 
   it("selects ax-session.json raw URL from a Gist response", () => {

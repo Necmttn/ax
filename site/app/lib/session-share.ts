@@ -77,6 +77,10 @@ export function gistApiUrl(gistId: string): string {
   return `https://api.github.com/gists/${encodeURIComponent(gistId)}`;
 }
 
+export function studioShareUrl(owner: string, gistId: string): string {
+  return `/studio/?shareOwner=${encodeURIComponent(owner)}&gistId=${encodeURIComponent(gistId)}`;
+}
+
 export function gistOwnerMatches(value: unknown, owner: string): boolean {
   if (!isRecord(value) || !isRecord(value.owner)) {
     return false;
