@@ -2335,6 +2335,28 @@ describe("classifier package operations report", () => {
 
         expect(report.decision).toBe("needs_graph_query_repair");
         expect(report.blocking_items).toContain("graph query repair available: review_pipeline_recommended_action_execution_phase value execute -> bind_inputs");
+        expect(report.routing_items).toContainEqual({
+            kind: "graph_query_repair",
+            status: "ready_to_execute",
+            command_kind: "classifier_graph_query_repair",
+            predicate: "review_pipeline_recommended_action_execution_phase",
+            from_value: "execute",
+            to_value: "bind_inputs",
+            next_action: "run_repaired_query",
+            remediation: "Run the repaired graph query to inspect matching classifier lifecycle facts.",
+            argv: [
+                "bun",
+                "src/cli/index.ts",
+                "classifiers",
+                "graph",
+                "--mode",
+                "lifecycle",
+                "--predicate",
+                "review_pipeline_recommended_action_execution_phase",
+                "--value",
+                "bind_inputs",
+            ],
+        });
         expect(report.graph_query_suggestion?.suggestion?.repair.command_kind).toBe("classifier_graph_query_repair");
     });
 

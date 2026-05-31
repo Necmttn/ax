@@ -938,6 +938,18 @@ export interface ClassifierReviewPipelineLifecycleInsight {
     readonly next_action: "execute_review_pipeline_command" | "repair_review_pipeline_outputs" | "continue_review_pipeline" | "inspect_review_pipeline_lifecycle";
 }
 
+export interface ClassifierLifecycleRoutingItem {
+    readonly kind: "graph_query_repair";
+    readonly status: ClassifierGraphQuerySuggestionRepairRoutingSummary["execution_status"];
+    readonly command_kind: ClassifierGraphQuerySuggestionRepairRoutingSummary["command_kind"];
+    readonly predicate?: string;
+    readonly from_value?: string;
+    readonly to_value: string;
+    readonly next_action: ClassifierGraphQuerySuggestionRepairRoutingSummary["next_action"];
+    readonly remediation: string;
+    readonly argv: readonly string[];
+}
+
 export interface ClassifierLifecycleInsightReport {
     readonly schema: "ax.classifier_lifecycle_insight_report.v1";
     readonly packages_root: string;
@@ -948,6 +960,7 @@ export interface ClassifierLifecycleInsightReport {
     readonly failed_operations: readonly ClassifierGraphOperationHealth[];
     readonly changed_artifacts: readonly ClassifierGraphChangedArtifact[];
     readonly blocking_items: readonly string[];
+    readonly routing_items: readonly ClassifierLifecycleRoutingItem[];
     readonly graph_query_suggestion?: ClassifierGraphQuerySuggestionRoutingSummary;
     readonly review_pipeline?: ClassifierReviewPipelineLifecycleInsight;
     readonly totals: {
@@ -3354,6 +3367,19 @@ export function buildClassifierLifecycleInsightReport(input: {
     const queryRepairSuggestion = queryGraphSuggestion.suggestion?.repair.status === "repair_available"
         ? queryGraphSuggestion.suggestion
         : undefined;
+    const routingItems: readonly ClassifierLifecycleRoutingItem[] = queryRepairSuggestion === undefined
+        ? []
+        : [{
+            kind: "graph_query_repair",
+            status: queryRepairSuggestion.repair.execution_status,
+            command_kind: queryRepairSuggestion.repair.command_kind,
+            ...(queryRepairSuggestion.original_query.predicate === undefined ? {} : { predicate: queryRepairSuggestion.original_query.predicate }),
+            ...(queryRepairSuggestion.original_query.value_equals === undefined ? {} : { from_value: queryRepairSuggestion.original_query.value_equals }),
+            to_value: queryRepairSuggestion.value_equals,
+            next_action: queryRepairSuggestion.repair.next_action,
+            remediation: queryRepairSuggestion.repair.remediation,
+            argv: queryRepairSuggestion.repair.argv,
+        }];
     const blockingItems = [
         ...packages
             .filter((entry) => entry.lifecycle_readiness.status === "incomplete")
@@ -3418,6 +3444,7 @@ export function buildClassifierLifecycleInsightReport(input: {
         failed_operations: failedOperations,
         changed_artifacts: input.graph.changed_artifacts,
         blocking_items: blockingItems,
+        routing_items: routingItems,
         ...(queryGraphSuggestion.suggestion === undefined ? {} : { graph_query_suggestion: queryGraphSuggestion }),
         ...(reviewPipeline ? { review_pipeline: reviewPipeline } : {}),
         totals: {

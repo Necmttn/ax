@@ -704,6 +704,19 @@ export function renderClassifierLifecycleInsightText(report: ClassifierLifecycle
             lines.push(`graph query verification argv: ${suggestion.verification.argv.join(" ")}`);
         }
     }
+    if (report.routing_items.length > 0) {
+        lines.push("routing items:");
+        for (const item of report.routing_items) {
+            lines.push(`- ${item.kind}: ${item.status} ${item.command_kind} next=${item.next_action}`);
+            if (item.kind === "graph_query_repair") {
+                lines.push(`  value repair: ${item.predicate ?? "any_predicate"} ${item.from_value ?? "any"} -> ${item.to_value}`);
+            }
+            if (item.argv.length > 0) {
+                lines.push(`  argv: ${item.argv.join(" ")}`);
+            }
+            lines.push(`  remediation: ${item.remediation}`);
+        }
+    }
     if (report.review_pipeline) {
         const pipeline = report.review_pipeline;
         lines.push(`review pipeline: ${pipeline.status ?? "unknown"} (${pipeline.report_path})`);

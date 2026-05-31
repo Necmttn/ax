@@ -1336,6 +1336,17 @@ describe("classifiers package-operations format", () => {
                 "graph query repair available: review_pipeline_recommended_action_execution_phase value execute -> bind_inputs",
                 "40 blind labels pending",
             ],
+            routing_items: [{
+                kind: "graph_query_repair",
+                status: "ready_to_execute",
+                command_kind: "classifier_graph_query_repair",
+                predicate: "review_pipeline_recommended_action_execution_phase",
+                from_value: "execute",
+                to_value: "bind_inputs",
+                next_action: "run_repaired_query",
+                remediation: "Run the repaired graph query to inspect matching classifier lifecycle facts.",
+                argv: ["bun", "src/cli/index.ts", "classifiers", "graph", "--value", "bind_inputs"],
+            }],
             graph_query_suggestion: {
                 has_suggestion: true,
                 query_match_status: "no_match",
@@ -1501,6 +1512,10 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("graph query repair: expected_matches ready_to_execute classifier_graph_query_repair");
         expect(output).toContain("graph query repair argv: bun src/cli/index.ts classifiers graph --value bind_inputs");
         expect(output).toContain("graph query verification: expected_matches ready_to_execute classifier_graph_query_repair_verification");
+        expect(output).toContain("routing items:");
+        expect(output).toContain("- graph_query_repair: ready_to_execute classifier_graph_query_repair next=run_repaired_query");
+        expect(output).toContain("value repair: review_pipeline_recommended_action_execution_phase execute -> bind_inputs");
+        expect(output).toContain("remediation: Run the repaired graph query to inspect matching classifier lifecycle facts.");
         expect(output).toContain("review pipeline: verified_after_execution (.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json)");
         expect(output).toContain("command: stamp_review_provenance prepared=ready_to_execute");
         expect(output).toContain("argv: bun src/cli/index.ts classifiers workflow-candidates");

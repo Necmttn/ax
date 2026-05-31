@@ -802,6 +802,15 @@ describe("ClassifierPackageService", () => {
         expect(report.workflow_status.next_actions[0]).toContain("workflow-candidate-proposal-review-current.md");
         expect(report.blocking_items).toContain("workflow candidate proposal review pending 4 proposal(s)");
         expect(report.blocking_items).toContain("graph query repair available: review_pipeline_recommended_action_execution_phase value execute -> bind_inputs");
+        expect(report.routing_items[0]).toMatchObject({
+            kind: "graph_query_repair",
+            status: "ready_to_execute",
+            command_kind: "classifier_graph_query_repair",
+            predicate: "review_pipeline_recommended_action_execution_phase",
+            from_value: "execute",
+            to_value: "bind_inputs",
+            next_action: "run_repaired_query",
+        });
         expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.graph_operation_count).toBe(1);
         expect(report.graph_query_suggestion?.suggestion?.repair.outcome_status).toBe("expected_matches");
     });

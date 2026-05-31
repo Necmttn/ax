@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E427 adds
-  `.ax/experiments/classifier-lifecycle-query-repair-decision-e427.json`
+- Index continuation: E428 adds
+  `.ax/experiments/classifier-lifecycle-routing-items-e428.json`
   and
-  `.ax/experiments/classifier-lifecycle-query-repair-decision-e427.txt`
+  `.ax/experiments/classifier-lifecycle-routing-items-e428.txt`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,54 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E428 - Add Structured Lifecycle Routing Items
+
+Question:
+- Can lifecycle insight expose graph-query repair as structured routing data,
+  so FX services can enqueue or execute the repair without parsing
+  `blocking_items` strings?
+
+Implementation:
+- Added `routing_items` to `ClassifierLifecycleInsightReport`.
+- Added a `graph_query_repair` routing item with status, command kind,
+  predicate, original value, repaired value, next action, remediation, and argv.
+- Rendered routing items in lifecycle text while keeping existing blocking
+  items for human-facing summaries.
+
+Artifacts:
+- `.ax/experiments/classifier-lifecycle-routing-items-e428.json`
+- `.ax/experiments/classifier-lifecycle-routing-items-e428.txt`
+
+Results:
+- JSON output reports one routing item with
+  `kind=graph_query_repair`.
+- The routing item reports
+  `status=ready_to_execute`,
+  `command_kind=classifier_graph_query_repair`, and
+  `execute -> bind_inputs`.
+- Text output renders a `routing items:` section with the same repair and
+  executable command routing.
+
+Decision:
+- E428 makes lifecycle insight a structured service-routing surface. Services
+  can now route graph-query repair from `routing_items` and keep
+  `blocking_items` for display/audit only.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+git diff --check
+bun src/cli/index.ts classifiers lifecycle --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --out .ax/experiments/classifier-lifecycle-routing-items-e428.json --json
+bun src/cli/index.ts classifiers lifecycle --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute > .ax/experiments/classifier-lifecycle-routing-items-e428.txt
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-lifecycle-routing-items-e428.json").json(); const item=saved.routing_items?.[0]; if (item?.kind !== "graph_query_repair") throw new Error("missing routing item"); if (item.command_kind !== "classifier_graph_query_repair") throw new Error("wrong command kind"); if (item.from_value !== "execute" || item.to_value !== "bind_inputs") throw new Error("wrong repair values");'
+rg -n "routing items:|- graph_query_repair: ready_to_execute classifier_graph_query_repair next=run_repaired_query|value repair: review_pipeline_recommended_action_execution_phase execute -> bind_inputs" .ax/experiments/classifier-lifecycle-routing-items-e428.txt
+bun test src/cli/classifiers-workflow-candidates.test.ts
+```
+
+All passed. `bun run typecheck` still emits the existing Effect advisory
+messages, but exits `0`.
 
 ## E427 - Promote Graph Query Repair To Lifecycle Decision Routing
 
