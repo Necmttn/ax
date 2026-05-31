@@ -586,6 +586,7 @@ export interface ClassifierPackageExecutionGraphHealthReport {
 
 export interface ClassifierGraphQuerySuggestionRepairRoutingSummary {
     readonly status: ClassifierGraphQuerySuggestion["repair_status"];
+    readonly outcome_status: "expected_matches" | "not_applicable";
     readonly execution_status: ClassifierGraphQuerySuggestion["repair_execution_status"];
     readonly next_action: ClassifierGraphQuerySuggestion["repair_next_action"];
     readonly command_kind: ClassifierGraphQuerySuggestion["repair_command_kind"];
@@ -657,6 +658,11 @@ export function summarizeClassifierGraphQuerySuggestionRouting(
 
     const repair = {
         status: suggestion.repair_status,
+        outcome_status: suggestion.repair_expected_query_match_status === "matched" &&
+                suggestion.repair_expected_result_count !== undefined &&
+                suggestion.repair_expected_result_count > 0
+            ? "expected_matches" as const
+            : "not_applicable" as const,
         execution_status: suggestion.repair_execution_status,
         next_action: suggestion.repair_next_action,
         command_kind: suggestion.repair_command_kind,

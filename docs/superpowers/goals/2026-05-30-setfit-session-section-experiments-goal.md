@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E422 adds
-  `.ax/experiments/classifier-graph-query-suggestion-routing-verification-outcome-e422.json`
+- Index continuation: E423 adds
+  `.ax/experiments/classifier-graph-query-suggestion-routing-repair-outcome-e423.json`
   and
-  `.ax/experiments/classifier-graph-query-suggestion-routing-verification-outcome-e422.txt`
+  `.ax/experiments/classifier-graph-query-suggestion-routing-repair-outcome-e423.txt`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,53 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E423 - Expose Query Suggestion Repair Outcome
+
+Question:
+- Can services distinguish a repair route that is expected to produce matching
+  graph rows from a no-op repair route without comparing expected match/count
+  fields themselves?
+
+Implementation:
+- Added `repair.outcome_status` to
+  `ClassifierGraphQuerySuggestionRoutingSummary`.
+- The outcome is `expected_matches` when the repaired query has an expected
+  matched result with a positive expected result count.
+- The outcome is `not_applicable` for no-op repair.
+- Text rendering now prints `repair outcome status`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-query-suggestion-routing-repair-outcome-e423.json`
+- `.ax/experiments/classifier-graph-query-suggestion-routing-repair-outcome-e423.txt`
+
+Results:
+- JSON output reports `suggestion.repair.outcome_status=expected_matches`.
+- JSON output reports `suggestion.repair.expected_result_count=1`.
+- Text output reports `repair outcome status: expected_matches`.
+- Text output reports `repair expected result count: 1`.
+
+Decision:
+- E423 makes repair and verification routing symmetrical. FX services can route
+  both phases from explicit outcome status fields instead of reconstructing
+  semantics from expected match/count pairs.
+
+Verification:
+```sh
+bun test src/classifiers/package-service.test.ts
+bun test src/cli/classifiers-package-operations.test.ts
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers graph --mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --query-suggestion-routing --out .ax/experiments/classifier-graph-query-suggestion-routing-repair-outcome-e423.json --json
+bun src/cli/index.ts classifiers graph --mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --query-suggestion-routing > .ax/experiments/classifier-graph-query-suggestion-routing-repair-outcome-e423.txt
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-graph-query-suggestion-routing-repair-outcome-e423.json").json(); if (saved.suggestion?.repair?.outcome_status !== "expected_matches") throw new Error("wrong repair outcome");'
+rg -n "repair outcome status: expected_matches|repair expected result count: 1" .ax/experiments/classifier-graph-query-suggestion-routing-repair-outcome-e423.txt
+git diff --check
+bun run typecheck
+```
+
+All passed. `bun run typecheck` still emits the existing Effect advisory
+messages, but exits `0`.
 
 ## E422 - Expose Query Suggestion Verification Outcome
 

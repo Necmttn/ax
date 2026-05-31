@@ -574,6 +574,7 @@ describe("ClassifierPackageService", () => {
         expect(summary.suggestion?.repair.execution_status).toBe("ready_to_execute");
         expect(summary.suggestion?.repair.command_kind).toBe("classifier_graph_query_repair");
         expect(summary.suggestion?.repair.query?.value_equals).toBe("bind_inputs");
+        expect(summary.suggestion?.repair.outcome_status).toBe("expected_matches");
         expect(summary.suggestion?.verification.can_execute).toBe(true);
         expect(summary.suggestion?.verification.execution_status).toBe("ready_to_execute");
         expect(summary.suggestion?.verification.command_kind).toBe("classifier_graph_query_repair_verification");

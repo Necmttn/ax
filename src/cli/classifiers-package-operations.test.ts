@@ -63,6 +63,7 @@ describe("classifiers package-operations format", () => {
                 },
                 repair: {
                     status: "repair_available",
+                    outcome_status: "expected_matches",
                     execution_status: "ready_to_execute",
                     next_action: "run_repaired_query",
                     command_kind: "classifier_graph_query_repair",
@@ -112,6 +113,7 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("query match: no_match");
         expect(output).toContain("suggested value equals: bind_inputs");
         expect(output).toContain("repair execution status: ready_to_execute");
+        expect(output).toContain("repair outcome status: expected_matches");
         expect(output).toContain("repair command kind: classifier_graph_query_repair");
         expect(output).toContain("repair argv: bun src/cli/index.ts classifiers graph --value bind_inputs");
         expect(output).toContain("verification execution status: ready_to_execute");
@@ -148,6 +150,7 @@ describe("classifiers package-operations format", () => {
                 },
                 repair: {
                     status: "repair_available",
+                    outcome_status: "expected_matches",
                     execution_status: "ready_to_execute",
                     next_action: "run_repaired_query",
                     command_kind: "classifier_graph_query_repair",

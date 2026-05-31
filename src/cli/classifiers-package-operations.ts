@@ -295,6 +295,7 @@ export function renderClassifierGraphQuerySuggestionRoutingSummaryText(
     lines.push(`suggestion original query: ${renderGraphQuery(suggestion.original_query)}`);
     lines.push(`suggestion query: ${renderGraphQuery(suggestion.query)}`);
     lines.push(`repair status: ${suggestion.repair.status}`);
+    lines.push(`repair outcome status: ${suggestion.repair.outcome_status}`);
     lines.push(`repair execution status: ${suggestion.repair.execution_status}`);
     lines.push(`repair next action: ${suggestion.repair.next_action}`);
     lines.push(`repair command kind: ${suggestion.repair.command_kind}`);
