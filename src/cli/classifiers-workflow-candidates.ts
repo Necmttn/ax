@@ -225,6 +225,7 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly missing_rationale_count: number;
     readonly missing_reviewer_count: number;
     readonly missing_reviewed_at_count: number;
+    readonly invalid_reviewed_at_count: number;
     readonly provenance_status: WorkflowCandidateReviewCoverageProvenanceStatus;
     readonly provenance_next_action: string;
     readonly synced_fixture_count: number;
@@ -1803,7 +1804,7 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             `coverage review impact: pack_candidates=${report.coverage_review.pack_candidate_count} new=${report.coverage_review.new_candidate_count} existing=${report.coverage_review.existing_candidate_count} unknown=${report.coverage_review.unknown_candidate_count}`,
             `coverage review projected coverage: reviewed=${report.coverage_review.projected_reviewed_candidate_count} unreviewed=${report.coverage_review.projected_unreviewed_candidate_count}`,
             `coverage review issues: invalid=${report.coverage_review.invalid_fixture_count} missing_rationale=${report.coverage_review.missing_rationale_count} smoke=${report.coverage_review.smoke_marker_count}`,
-            `coverage review provenance: missing_reviewer=${report.coverage_review.missing_reviewer_count} missing_reviewed_at=${report.coverage_review.missing_reviewed_at_count}`,
+            `coverage review provenance: missing_reviewer=${report.coverage_review.missing_reviewer_count} missing_reviewed_at=${report.coverage_review.missing_reviewed_at_count} invalid_reviewed_at=${report.coverage_review.invalid_reviewed_at_count}`,
             `coverage review provenance status: ${report.coverage_review.provenance_status}`,
             `coverage review provenance next action: ${report.coverage_review.provenance_next_action}`,
             `coverage review apply guard: ${report.coverage_review.apply_guard}`,
@@ -2766,7 +2767,7 @@ const workflowCandidateReviewCoverageBlockerRemediation = (
         case "missing_review_rationale":
             return "Add rationale text to each reviewed fixture.";
         case "missing_review_provenance":
-            return "Add reviewer and reviewed-at metadata or rerun without strict provenance.";
+            return "Add reviewer and valid reviewed-at metadata or rerun without strict provenance.";
         case "blocked_smoke_review":
             return "Replace smoke or example review markers with real review decisions.";
         case "empty_write_plan":
@@ -2844,8 +2845,9 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
     const completeRationaleCount = reviewedRows.length - missingRationaleCount;
     const missingReviewerCount = reviewedRows.filter((row) => (row.review_reviewer ?? "").trim().length === 0).length;
     const missingReviewedAtCount = reviewedRows.filter((row) => (row.review_reviewed_at ?? "").trim().length === 0).length;
+    const invalidReviewedAtCount = reviewedRows.filter(hasInvalidReviewedAt).length;
     const provenanceStatus: WorkflowCandidateReviewCoverageProvenanceStatus =
-        missingReviewerCount === 0 && missingReviewedAtCount === 0
+        missingReviewerCount === 0 && missingReviewedAtCount === 0 && invalidReviewedAtCount === 0
             ? "complete_review_provenance"
             : "missing_review_provenance";
     const reviewPackPath = context.coverageReviewPack ?? context.coverageFixturePack;
@@ -2943,6 +2945,7 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
         `- Missing rationales: \`${missingRationaleCount}\``,
         `- Missing reviewers: \`${missingReviewerCount}\``,
         `- Missing reviewed-at timestamps: \`${missingReviewedAtCount}\``,
+        `- Invalid reviewed-at timestamps: \`${invalidReviewedAtCount}\``,
         `- Provenance status: \`${provenanceStatus}\``,
         `- Smoke markers: \`${smokeMarkerCount}\``,
         `- Apply guard: \`${applyGuard}\``,
@@ -3241,6 +3244,11 @@ const fixtureRowHasSmokeMarker = (row: WorkflowCandidateTopicClassifierFixtureRo
         text.includes("smoke_");
 };
 
+const hasInvalidReviewedAt = (row: WorkflowCandidateTopicClassifierFixtureRow): boolean => {
+    const reviewedAt = (row.review_reviewed_at ?? "").trim();
+    return reviewedAt.length > 0 && Number.isNaN(Date.parse(reviewedAt));
+};
+
 export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     readonly rows: readonly WorkflowCandidateTopicClassifierFixtureRow[];
     readonly sourcePath: string;
@@ -3261,8 +3269,9 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     const missingRationaleRows = reviewedRows.filter((row) => (row.review_rationale ?? "").trim().length === 0);
     const missingReviewerRows = reviewedRows.filter((row) => (row.review_reviewer ?? "").trim().length === 0);
     const missingReviewedAtRows = reviewedRows.filter((row) => (row.review_reviewed_at ?? "").trim().length === 0);
+    const invalidReviewedAtRows = reviewedRows.filter(hasInvalidReviewedAt);
     const provenanceStatus: WorkflowCandidateReviewCoverageProvenanceStatus =
-        missingReviewerRows.length === 0 && missingReviewedAtRows.length === 0
+        missingReviewerRows.length === 0 && missingReviewedAtRows.length === 0 && invalidReviewedAtRows.length === 0
             ? "complete_review_provenance"
             : "missing_review_provenance";
     const provenanceNextAction = provenanceStatus === "complete_review_provenance"
@@ -3327,8 +3336,8 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
                 return { blocker, count: input.rows.length, remediation: workflowCandidateReviewCoverageBlockerRemediation(blocker) };
             case "missing_review_rationale":
                 return { blocker, count: missingRationaleRows.length, remediation: workflowCandidateReviewCoverageBlockerRemediation(blocker) };
-            case "missing_review_provenance":
-                return { blocker, count: missingReviewerRows.length + missingReviewedAtRows.length, remediation: workflowCandidateReviewCoverageBlockerRemediation(blocker) };
+        case "missing_review_provenance":
+                return { blocker, count: missingReviewerRows.length + missingReviewedAtRows.length + invalidReviewedAtRows.length, remediation: workflowCandidateReviewCoverageBlockerRemediation(blocker) };
             case "blocked_smoke_review":
                 return { blocker, count: smokeMarkerCount, remediation: workflowCandidateReviewCoverageBlockerRemediation(blocker) };
             case "empty_write_plan":
@@ -3367,6 +3376,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         missing_rationale_count: missingRationaleRows.length,
         missing_reviewer_count: missingReviewerRows.length,
         missing_reviewed_at_count: missingReviewedAtRows.length,
+        invalid_reviewed_at_count: invalidReviewedAtRows.length,
         provenance_status: provenanceStatus,
         provenance_next_action: provenanceNextAction,
         synced_fixture_count: input.syncedFixtureCount ?? 0,

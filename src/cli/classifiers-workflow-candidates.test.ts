@@ -1731,6 +1731,7 @@ describe("classifiers workflow-candidates", () => {
         expect(brief).toContain("- Missing rationales: `0`");
         expect(brief).toContain("- Missing reviewers: `0`");
         expect(brief).toContain("- Missing reviewed-at timestamps: `0`");
+        expect(brief).toContain("- Invalid reviewed-at timestamps: `0`");
         expect(brief).toContain("- Provenance status: `complete_review_provenance`");
         expect(brief).toContain("- Strict provenance apply guard: `no_reviewed_fixtures`");
         expect(brief).toContain("- Strict provenance blockers: `no_reviewed_fixtures`");
@@ -2075,20 +2076,75 @@ describe("classifiers workflow-candidates", () => {
             can_apply: false,
             missing_reviewer_count: 1,
             missing_reviewed_at_count: 1,
+            invalid_reviewed_at_count: 0,
             provenance_status: "missing_review_provenance",
             apply_blockers: ["missing_review_provenance"],
             apply_blocker_details: [{
                 blocker: "missing_review_provenance",
                 count: 2,
-                remediation: "Add reviewer and reviewed-at metadata or rerun without strict provenance.",
+                remediation: "Add reviewer and valid reviewed-at metadata or rerun without strict provenance.",
             }],
             next_action: "Add reviewer and reviewed-at metadata, or rerun without strict provenance if legacy review packs are acceptable.",
         });
         expect(text).toContain("coverage review apply guard: missing_review_provenance");
         expect(text).toContain("coverage review can apply: no");
         expect(text).toContain("coverage review blockers: missing_review_provenance");
-        expect(text).toContain("coverage review blocker remediations: missing_review_provenance: Add reviewer and reviewed-at metadata or rerun without strict provenance.");
+        expect(text).toContain("coverage review blocker remediations: missing_review_provenance: Add reviewer and valid reviewed-at metadata or rerun without strict provenance.");
         expect(text).toContain("coverage review post-apply recheck: bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=10 --out=.ax/experiments/workflow-candidate-review-coverage-post-apply.json --json");
+    });
+
+    test("blocks strict provenance apply when reviewed-at is invalid", () => {
+        const rows = parseWorkflowCandidateFixtureRowsJsonl(JSON.stringify({
+            id: "workflow-candidate-review-coverage/verification_or_recovery_signal/a",
+            suite: "workflow-candidate-review-coverage",
+            name: "coverage-gap-verification_or_recovery_signal-01",
+            label: "verification_or_recovery_signal",
+            target: "unknown",
+            text: "USER:\ncontinue and verify the fix\n\nPREVIOUS_ASSISTANT:\n",
+            source_group: "workflow-candidate",
+            review_status: "accept",
+            review_rationale: "Useful verification behavior worth preserving.",
+            review_reviewer: "reviewer@example.test",
+            review_reviewed_at: "not-a-date",
+            topic: "review-coverage",
+            candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+            candidate_label: "verification_or_recovery_signal",
+            proposed_action: "add_verification_gate",
+            result_id: "classifier_result:verification",
+            turn: "turn:verification",
+            confidence: 0.83,
+        }));
+        const projection = buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures({
+            rows,
+            syncedFrom: ".ax/experiments/reviewed-coverage-gaps.jsonl",
+        });
+        const writePlan = buildWorkflowCandidateTopicReviewGraphWritePlan(projection);
+
+        const summary = buildWorkflowCandidateReviewCoverageApplySummary({
+            rows,
+            sourcePath: ".ax/experiments/reviewed-coverage-gaps.jsonl",
+            projection,
+            writePlan,
+            applyRequested: true,
+            applied: false,
+            requireReviewProvenance: true,
+        });
+
+        expect(summary).toMatchObject({
+            apply_result: "blocked",
+            apply_guard: "missing_review_provenance",
+            can_apply: false,
+            missing_reviewer_count: 0,
+            missing_reviewed_at_count: 0,
+            invalid_reviewed_at_count: 1,
+            provenance_status: "missing_review_provenance",
+            apply_blockers: ["missing_review_provenance"],
+            apply_blocker_details: [{
+                blocker: "missing_review_provenance",
+                count: 1,
+                remediation: "Add reviewer and valid reviewed-at metadata or rerun without strict provenance.",
+            }],
+        });
     });
 
     test("reports applied coverage review statement counts", () => {
