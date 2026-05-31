@@ -587,6 +587,8 @@ describe("classifiers package-operations format", () => {
                 changed_filter_count: 0,
                 unchanged_filter_count: 1,
                 has_changed_filters: false,
+                changed_filters: [],
+                unchanged_filters: ["value_equals"],
                 status: "expected_matches",
                 next_action: "run_suggested_query",
                 remediation: "Run the suggested graph query to inspect the available classifier lifecycle facts.",
@@ -708,6 +710,8 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("query suggestion: status=expected_matches next_action=run_suggested_query result_count=1 value_equals=bind_inputs");
         expect(output).toContain("query suggestion filter counts: changed=0 unchanged=1");
         expect(output).toContain("query suggestion has changed filters: false");
+        expect(output).toContain("query suggestion changed filters: none");
+        expect(output).toContain("query suggestion unchanged filters: value_equals");
         expect(output).toContain("query suggestion provenance: source=lifecycle_available_value_counts reason=available_value_after_relaxing_value_equals");
         expect(output).toContain("query suggestion relaxed filters: value_equals");
         expect(output).toContain("query suggestion original query: mode=lifecycle predicate=review_pipeline_prepared_argv subject=classifier_lifecycle:workflow_candidate_proposal source_kind=classifier_package_execution value_contains=src/cli/index.ts value_equals=bind_inputs");

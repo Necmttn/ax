@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E393 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-has-changed-filters-no-match-e393.json`
+- Index continuation: E394 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-name-lists-no-match-e394.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-has-changed-filters-match-e393.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-name-lists-match-e394.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,53 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E394 - Expose Suggested Query Filter Name Lists
+
+Question:
+- E393 exposes whether suggested graph-query filters changed, but can services
+  name the changed and unchanged filter groups without scanning detailed
+  `filter_changes` rows?
+
+Implementation:
+- Added `changed_filters` and `unchanged_filters` to `query_suggestion`.
+- Lifecycle graph-query suggestions now summarize filter names by repair status
+  alongside the existing counts, boolean, and detailed before/after rows.
+- Text graph-health output now renders `query suggestion changed filters` and
+  `query suggestion unchanged filters`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-name-lists-no-match-e394.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-name-lists-match-e394.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-name-lists-no-match-e394.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match`,
+  `query_suggestion.changed_filters=["value_equals"]`, and
+  `query_suggestion.unchanged_filters=[]`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched`,
+  `query_suggestion.changed_filters=[]`, and
+  `query_suggestion.unchanged_filters=["value_equals"]`.
+- Text output renders `query suggestion changed filters: value_equals` and
+  `query suggestion unchanged filters: none`.
+
+Decision:
+- Services can now display or route changed filter names directly while keeping
+  detailed before/after rows available for debugging.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E394 no-match report has changed filters `["value_equals"]` and no unchanged
+  filters.
+- E394 match report has unchanged filters `["value_equals"]` and no changed
+  filters.
+- E394 text output includes both filter-name list lines.
 
 ## E393 - Expose Suggested Query Actionable Filter Boolean
 

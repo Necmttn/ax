@@ -477,6 +477,8 @@ export interface ClassifierGraphQuerySuggestion {
     readonly changed_filter_count: number;
     readonly unchanged_filter_count: number;
     readonly has_changed_filters: boolean;
+    readonly changed_filters: readonly ["value_equals"] | readonly [];
+    readonly unchanged_filters: readonly ["value_equals"] | readonly [];
     readonly status: "expected_matches";
     readonly next_action: "run_suggested_query";
     readonly remediation: string;
@@ -2530,6 +2532,8 @@ export function buildExecutionGraphHealthReport(input: {
                 changed_filter_count: query.value_equals === querySuggestedValueEquals ? 0 : 1,
                 unchanged_filter_count: query.value_equals === querySuggestedValueEquals ? 1 : 0,
                 has_changed_filters: query.value_equals !== querySuggestedValueEquals,
+                changed_filters: query.value_equals === querySuggestedValueEquals ? [] : ["value_equals"],
+                unchanged_filters: query.value_equals === querySuggestedValueEquals ? ["value_equals"] : [],
                 status: querySuggestedStatus,
                 next_action: querySuggestedNextAction,
                 remediation: querySuggestedRemediation,
