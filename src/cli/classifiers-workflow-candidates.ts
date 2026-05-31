@@ -2711,6 +2711,11 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
     );
     const pendingCount = rows.filter((row) => row.review_status === "pending").length;
     const reviewedCount = rows.length - pendingCount;
+    const acceptedCount = rows.filter((row) => row.review_status === "accept").length;
+    const revisedCount = rows.filter((row) => row.review_status === "revise").length;
+    const rejectedCount = rows.filter((row) => row.review_status === "reject").length;
+    const deferredCount = rows.filter((row) => row.review_status === "defer").length;
+    const invalidCount = rows.filter((row) => !VALID_VERDICTS.has(row.review_status)).length;
     const reviewPackPath = context.coverageReviewPack ?? context.coverageFixturePack;
     const sourceKind = context.sourceKind ?? "hybrid_window_classifier_projection";
     const readinessOutputPath = context.outputPath ?? ".ax/experiments/workflow-candidate-review-coverage-reviewed.json";
@@ -2752,6 +2757,11 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
         `- Candidate groups: \`${candidateSummaries.size}\``,
         `- Pending fixtures: \`${pendingCount}\``,
         `- Reviewed fixtures: \`${reviewedCount}\``,
+        `- Accepted fixtures: \`${acceptedCount}\``,
+        `- Revised fixtures: \`${revisedCount}\``,
+        `- Rejected fixtures: \`${rejectedCount}\``,
+        `- Deferred fixtures: \`${deferredCount}\``,
+        `- Invalid fixtures: \`${invalidCount}\``,
         "",
         ...(nextCommand === undefined ? [] : [
             "## Review Commands",

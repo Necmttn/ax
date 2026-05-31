@@ -1646,6 +1646,12 @@ describe("classifiers workflow-candidates", () => {
         expect(brief).toContain("- Fixtures: `1`");
         expect(brief).toContain("- Candidate groups: `1`");
         expect(brief).toContain("- Pending fixtures: `1`");
+        expect(brief).toContain("- Reviewed fixtures: `0`");
+        expect(brief).toContain("- Accepted fixtures: `0`");
+        expect(brief).toContain("- Revised fixtures: `0`");
+        expect(brief).toContain("- Rejected fixtures: `0`");
+        expect(brief).toContain("- Deferred fixtures: `0`");
+        expect(brief).toContain("- Invalid fixtures: `0`");
         expect(brief).toContain("## Review Commands");
         expect(brief).toContain("--coverage-review-pack=.ax/experiments/review-coverage.jsonl");
         expect(brief).toContain("--sync-coverage-review-brief=.ax/experiments/review-coverage.md");
