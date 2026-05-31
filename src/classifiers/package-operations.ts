@@ -485,6 +485,8 @@ export interface ClassifierGraphQuerySuggestion {
     readonly repair_can_execute: boolean;
     readonly repair_execution_status: "ready_to_execute" | "not_needed";
     readonly repair_command_kind: "classifier_graph_query_repair" | "none";
+    readonly repair_requires_inputs: boolean;
+    readonly repair_required_inputs: readonly [];
     readonly repair_blockers: readonly ["no_repair_needed"] | readonly [];
     readonly repair_blocker_details: readonly {
         readonly blocker: "no_repair_needed";
@@ -2555,6 +2557,8 @@ export function buildExecutionGraphHealthReport(input: {
                 repair_can_execute: query.value_equals !== querySuggestedValueEquals,
                 repair_execution_status: query.value_equals === querySuggestedValueEquals ? "not_needed" : "ready_to_execute",
                 repair_command_kind: query.value_equals === querySuggestedValueEquals ? "none" : "classifier_graph_query_repair",
+                repair_requires_inputs: false,
+                repair_required_inputs: [],
                 repair_blockers: query.value_equals === querySuggestedValueEquals ? ["no_repair_needed"] : [],
                 repair_blocker_details: query.value_equals === querySuggestedValueEquals
                     ? [{

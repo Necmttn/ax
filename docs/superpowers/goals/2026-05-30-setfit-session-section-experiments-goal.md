@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E403 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-command-kind-no-match-e403.json`
+- Index continuation: E404 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-inputs-no-match-e404.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-command-kind-match-e403.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-inputs-match-e404.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,53 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E404 - Expose Suggested Query Repair Input Requirements
+
+Question:
+- E403 exposes repair command kind, but can services know whether a repair
+  command needs operator-supplied inputs without inspecting argv or blockers?
+
+Implementation:
+- Added `repair_requires_inputs` and `repair_required_inputs` to
+  `query_suggestion`.
+- Lifecycle graph-query suggestions now report `repair_requires_inputs=false`
+  and empty required inputs because suggested graph-query repairs are fully
+  bound.
+- Text graph-health output now renders repair input requirements.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-inputs-no-match-e404.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-inputs-match-e404.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-inputs-no-match-e404.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match`,
+  `query_suggestion.repair_requires_inputs=false`, and empty
+  `repair_required_inputs`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched`,
+  `query_suggestion.repair_requires_inputs=false`, and empty
+  `repair_required_inputs`.
+- Text output renders `query suggestion repair requires inputs: false` and
+  `query suggestion repair required inputs: none`.
+
+Decision:
+- Services can now distinguish fully-bound repair commands from future
+  input-requiring commands without parsing argv.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E404 no-match report has `repair_requires_inputs=false` and empty
+  `repair_required_inputs`.
+- E404 match report has `repair_requires_inputs=false` and empty
+  `repair_required_inputs`.
+- E404 text output includes repair input requirement lines.
 
 ## E403 - Expose Suggested Query Repair Command Kind
 
