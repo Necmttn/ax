@@ -330,6 +330,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `routing policy recommended floor best threshold: ${routingPolicySummary.recommended_floor_best_threshold_by_call_reduction ?? "none"}`,
         `routing policy recommended floor best positive recall: ${routingPolicySummary.recommended_floor_best_positive_recall ?? "none"}`,
         `routing policy recommended floor best call reduction: ${routingPolicySummary.recommended_floor_best_call_reduction ?? "none"}`,
+        `routing policy recommended floor next action: ${routingPolicySummary.recommended_floor_next_action ?? "none"}`,
         `routing policy next action: ${routingPolicySummary.next_action}`,
         `routing policy remediation: ${routingPolicySummary.remediation}`,
     ];

@@ -432,6 +432,7 @@ export interface ClassifierGraphRoutingPolicySummary {
     readonly recommended_floor_best_threshold_by_call_reduction?: string;
     readonly recommended_floor_best_positive_recall?: number;
     readonly recommended_floor_best_call_reduction?: number;
+    readonly recommended_floor_next_action?: "choose_recommended_routing_threshold" | "review_more_routing_candidates";
 }
 
 export type ClassifierGraphHealthMode = "summary" | "guarded" | "changed-artifacts" | "evidence" | "lifecycle" | "embedding-helper";
@@ -2308,6 +2309,7 @@ export function buildExecutionGraphHealthReport(input: {
         ...(recommendedFloorQuery === undefined ? {} : {
             recommended_floor_status: recommendedFloorCandidates.length > 0 ? "expected_matches" : "no_expected_match",
             recommended_floor_candidate_count: recommendedFloorCandidates.length,
+            recommended_floor_next_action: recommendedFloorCandidates.length > 0 ? "choose_recommended_routing_threshold" : "review_more_routing_candidates",
         }),
         ...(recommendedFloorBestPolicy?.threshold === undefined ? {} : { recommended_floor_best_threshold_by_call_reduction: recommendedFloorBestPolicy.threshold }),
         ...(recommendedFloorBestPolicy?.positive_recall_after_routing_mean === undefined ? {} : { recommended_floor_best_positive_recall: recommendedFloorBestPolicy.positive_recall_after_routing_mean }),

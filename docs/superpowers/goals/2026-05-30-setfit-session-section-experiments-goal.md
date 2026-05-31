@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E359 adds
-  `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-best-e359.json`
+- Index continuation: E360 adds
+  `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-next-action-e360.json`
   and
-  `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-best-e359.txt`
+  `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-next-action-e360.txt`
   as the latest Embedding/SVM helper evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -14503,6 +14503,52 @@ bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=emb
 bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 > .ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.txt || true
 python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.json >/dev/null
 rg -n 'routing policy blocking floors: positive_recall, call_reduction|routing policy largest gap: positive_recall|"blocking_floor_fields"|"largest_gap_floor"|"positive_recall_gap_to_request"|"call_reduction_gap_to_request"' .ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.txt .ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.json
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 84 passed.
+
+## E360 - Route Recommended Floor Follow-Up
+
+Question:
+
+- After a no-match routing policy report finds a reviewed policy under
+  recommended relaxed floors, can automation branch on one field instead of
+  inferring the next step from candidate counts and best-threshold metrics?
+
+Change:
+
+- Added `recommended_floor_next_action` to `routing_policy_summary`.
+- The field is `choose_recommended_routing_threshold` when the recommended
+  relaxed-floor query is expected to match reviewed policies.
+- The field is `review_more_routing_candidates` when the recommended relaxed
+  floor query still has no expected reviewed match.
+- Text graph output now renders the recommended-floor next action.
+
+Evidence:
+
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-next-action-e360.json`
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-next-action-e360.txt`
+
+Result:
+
+- The impossible `min-positive-recall=0.95`, `min-call-reduction=0.2`
+  report still returns 0 matching routing facts.
+- The recommended relaxed-floor candidate set has one expected match and
+  selects threshold `none`.
+- The report has
+  `routing_policy_summary.recommended_floor_next_action=choose_recommended_routing_threshold`.
+- Text output renders
+  `routing policy recommended floor next action: choose_recommended_routing_threshold`.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 --out=.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-next-action-e360.json --json > .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-next-action-e360.stdout
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 > .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-next-action-e360.txt || true
+python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-next-action-e360.json >/dev/null
+rg -n 'routing policy recommended floor next action|"recommended_floor_next_action"|choose_recommended_routing_threshold' .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-next-action-e360.txt .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-next-action-e360.json
 ```
 
 Verification:

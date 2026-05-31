@@ -1555,6 +1555,7 @@ describe("classifier package operations report", () => {
             recommended_floor_best_threshold_by_call_reduction: "none",
             recommended_floor_best_positive_recall: 0.9028,
             recommended_floor_best_call_reduction: 0.1778,
+            recommended_floor_next_action: "choose_recommended_routing_threshold",
         });
     });
 

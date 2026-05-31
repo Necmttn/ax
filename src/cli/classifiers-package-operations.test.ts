@@ -716,6 +716,7 @@ describe("classifiers package-operations format", () => {
                 recommended_floor_best_threshold_by_call_reduction: "none",
                 recommended_floor_best_positive_recall: 0.9028,
                 recommended_floor_best_call_reduction: 0.1778,
+                recommended_floor_next_action: "choose_recommended_routing_threshold",
             },
             evidence_paths: [".ax/experiments/embedding-helper-review-e210.json"],
             totals: {
@@ -779,6 +780,7 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("routing policy recommended floor best threshold: none");
         expect(output).toContain("routing policy recommended floor best positive recall: 0.9028");
         expect(output).toContain("routing policy recommended floor best call reduction: 0.1778");
+        expect(output).toContain("routing policy recommended floor next action: choose_recommended_routing_threshold");
         expect(output).toContain("routing policy next action: choose_reviewed_routing_threshold");
         expect(output).toContain("routing policy remediation: Use the selected reviewed threshold as an advisory routing policy.");
         expect(output).toContain("embedding helper facts:");
