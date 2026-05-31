@@ -2047,6 +2047,9 @@ describe("classifiers workflow-candidates", () => {
         }]);
         expect(text).toContain(`coverage review apply result: applied statements=${writePlan.totals.statement_count}`);
         expect(text).toContain("coverage review audit rows: 1");
+        expect(text).toContain(
+            `coverage review audit row: accept fixture=workflow-candidate-review-coverage/verification_or_recovery_signal/a candidate=classifier_candidate_group:hybrid-window/verification_or_recovery_signal fact=${summary.projected_fact_ids[0]}`,
+        );
     });
 
     test("renders persisted harness facts inside topic evidence packs", () => {

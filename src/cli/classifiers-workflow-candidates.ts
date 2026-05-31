@@ -1794,6 +1794,9 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             `coverage review blocker remediations: ${report.coverage_review.apply_blocker_details.length === 0 ? "none" : report.coverage_review.apply_blocker_details.map((detail) => `${detail.blocker}: ${detail.remediation}`).join(" | ")}`,
             `coverage review audit ids: fixtures=${report.coverage_review.reviewed_fixture_ids.length} facts=${report.coverage_review.projected_fact_ids.length}`,
             `coverage review audit rows: ${report.coverage_review.apply_audit_rows.length}`,
+            ...report.coverage_review.apply_audit_rows.map((row) =>
+                `coverage review audit row: ${row.verdict} fixture=${row.fixture_id} candidate=${row.candidate_id} fact=${row.projected_fact_id ?? "none"}`
+            ),
             `coverage review next action: ${report.coverage_review.next_action}`,
             `coverage review applied: ${report.coverage_review.applied ? "yes" : "no"}`,
         ] : []),
