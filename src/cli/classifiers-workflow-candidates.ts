@@ -251,6 +251,10 @@ export interface WorkflowCandidateReviewCoverageReviewIssueCount {
     readonly count: number;
 }
 
+export type WorkflowCandidateReviewCoverageReviewIssueStatus =
+    | "needs_review_repair"
+    | "review_repair_complete";
+
 export type WorkflowCandidateReviewCoverageRecheckStatus =
     | "gap_closed"
     | "gap_reduced"
@@ -344,6 +348,8 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly review_issue_rows: readonly WorkflowCandidateReviewCoverageReviewIssueRow[];
     readonly review_issue_counts: readonly WorkflowCandidateReviewCoverageReviewIssueCount[];
     readonly review_issue_fixture_count: number;
+    readonly review_issue_status: WorkflowCandidateReviewCoverageReviewIssueStatus;
+    readonly review_issue_next_action: string;
     readonly provenance_issue_rows: readonly WorkflowCandidateReviewCoverageProvenanceIssueRow[];
     readonly projection_totals: WorkflowCandidateTopicReviewGraphProjection["totals"];
     readonly write_plan_totals: WorkflowCandidateTopicReviewGraphWritePlan["totals"];
@@ -1954,6 +1960,8 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             `coverage review production blocker remediations: ${report.coverage_review.production_apply_blocker_details.length === 0 ? "none" : report.coverage_review.production_apply_blocker_details.map((detail) => `${detail.blocker}: ${detail.remediation}`).join(" | ")}`,
             `coverage review issue rows: ${report.coverage_review.review_issue_rows.length}`,
             `coverage review issue fixtures: ${report.coverage_review.review_issue_fixture_count}`,
+            `coverage review issue status: ${report.coverage_review.review_issue_status}`,
+            `coverage review issue next action: ${report.coverage_review.review_issue_next_action}`,
             `coverage review issue counts: ${report.coverage_review.review_issue_counts.length === 0 ? "none" : report.coverage_review.review_issue_counts.map((item) => `${item.issue}=${item.count}`).join(", ")}`,
             ...report.coverage_review.review_issue_rows.map((row) =>
                 `coverage review issue: ${row.issue} fixture=${row.fixture_id} candidate=${row.candidate_id} status=${row.review_status}`
@@ -3087,6 +3095,8 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
     const reviewIssueRows = workflowCandidateReviewCoverageReviewIssueRows(rows);
     const reviewIssueCounts = workflowCandidateReviewCoverageReviewIssueCounts(reviewIssueRows);
     const reviewIssueFixtureCount = workflowCandidateReviewCoverageReviewIssueFixtureCount(reviewIssueRows);
+    const reviewIssueStatus = workflowCandidateReviewCoverageReviewIssueStatus(reviewIssueRows);
+    const reviewIssueNextAction = workflowCandidateReviewCoverageReviewIssueNextAction(reviewIssueStatus);
     const sourceKind = context.sourceKind ?? "hybrid_window_classifier_projection";
     const readinessOutputPath = context.outputPath ?? ".ax/experiments/workflow-candidate-review-coverage-reviewed.json";
     const syncedBriefPath = context.coverageReviewBrief ?? ".ax/experiments/workflow-candidate-review-coverage-reviewed.md";
@@ -3244,6 +3254,8 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
             ? ["- _none_"]
             : [
                 `- Issue fixtures: \`${reviewIssueFixtureCount}\``,
+                `- Issue status: \`${reviewIssueStatus}\``,
+                `- Issue next action: ${reviewIssueNextAction}`,
                 `- Issue counts: ${reviewIssueCounts.map((item) => `\`${item.issue}=${item.count}\``).join(", ")}`,
                 ...reviewIssueRows.map((row) =>
                     `- \`${row.issue}\` fixture=\`${row.fixture_id}\` candidate=\`${row.candidate_id}\` status=\`${row.review_status}\` remediation=\`${row.remediation}\``
@@ -3666,6 +3678,18 @@ const workflowCandidateReviewCoverageReviewIssueFixtureCount = (
     rows: readonly WorkflowCandidateReviewCoverageReviewIssueRow[],
 ): number => new Set(rows.map((row) => row.fixture_id)).size;
 
+const workflowCandidateReviewCoverageReviewIssueStatus = (
+    rows: readonly WorkflowCandidateReviewCoverageReviewIssueRow[],
+): WorkflowCandidateReviewCoverageReviewIssueStatus =>
+    rows.length === 0 ? "review_repair_complete" : "needs_review_repair";
+
+const workflowCandidateReviewCoverageReviewIssueNextAction = (
+    status: WorkflowCandidateReviewCoverageReviewIssueStatus,
+): string =>
+    status === "review_repair_complete"
+        ? "Review issue repairs are complete."
+        : "Fix review issue rows before applying reviewed coverage facts.";
+
 const workflowCandidateReviewCoverageHandoffMissingPaths = (input: {
     readonly reviewFactsPath?: string;
     readonly reviewWritePlanPath?: string;
@@ -3930,6 +3954,8 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     const reviewIssueRows = workflowCandidateReviewCoverageReviewIssueRows(input.rows);
     const reviewIssueCounts = workflowCandidateReviewCoverageReviewIssueCounts(reviewIssueRows);
     const reviewIssueFixtureCount = workflowCandidateReviewCoverageReviewIssueFixtureCount(reviewIssueRows);
+    const reviewIssueStatus = workflowCandidateReviewCoverageReviewIssueStatus(reviewIssueRows);
+    const reviewIssueNextAction = workflowCandidateReviewCoverageReviewIssueNextAction(reviewIssueStatus);
     return {
         schema: "ax.workflow_candidate_review_readiness.v1",
         source_path: input.sourcePath,
@@ -3996,6 +4022,8 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         review_issue_rows: reviewIssueRows,
         review_issue_counts: reviewIssueCounts,
         review_issue_fixture_count: reviewIssueFixtureCount,
+        review_issue_status: reviewIssueStatus,
+        review_issue_next_action: reviewIssueNextAction,
         provenance_issue_rows: provenanceIssueRows,
         projection_totals: input.projection.totals,
         write_plan_totals: input.writePlan.totals,
