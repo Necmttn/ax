@@ -241,6 +241,7 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly apply_blockers: readonly WorkflowCandidateReviewCoverageApplyBlocker[];
     readonly apply_blocker_details: readonly WorkflowCandidateReviewCoverageApplyBlockerDetail[];
     readonly next_action: string;
+    readonly post_apply_recheck_command: string;
     readonly reviewed_fixture_ids: readonly string[];
     readonly projected_fact_ids: readonly string[];
     readonly apply_audit_rows: readonly WorkflowCandidateReviewCoverageApplyAuditRow[];
@@ -256,6 +257,7 @@ export interface WorkflowCandidateFixtureBriefSyncResult {
 
 export interface WorkflowCandidateReviewCoverageBriefContext {
     readonly sourceKind?: string;
+    readonly limit?: number;
     readonly coverageFixturePack?: string;
     readonly coverageReviewPack?: string;
     readonly coverageReviewBrief?: string;
@@ -1810,6 +1812,7 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             `coverage review blockers: ${report.coverage_review.apply_blockers.length === 0 ? "none" : report.coverage_review.apply_blockers.join(", ")}`,
             `coverage review blocker details: ${report.coverage_review.apply_blocker_details.length === 0 ? "none" : report.coverage_review.apply_blocker_details.map((detail) => `${detail.blocker}=${detail.count}`).join(", ")}`,
             `coverage review blocker remediations: ${report.coverage_review.apply_blocker_details.length === 0 ? "none" : report.coverage_review.apply_blocker_details.map((detail) => `${detail.blocker}: ${detail.remediation}`).join(" | ")}`,
+            `coverage review post-apply recheck: ${report.coverage_review.post_apply_recheck_command}`,
             `coverage review audit ids: fixtures=${report.coverage_review.reviewed_fixture_ids.length} facts=${report.coverage_review.projected_fact_ids.length}`,
             `coverage review audit rows: ${report.coverage_review.apply_audit_rows.length}`,
             ...report.coverage_review.apply_audit_rows.map((row) =>
@@ -2771,6 +2774,24 @@ const workflowCandidateReviewCoverageBlockerRemediation = (
     }
 };
 
+const postApplyOutputPath = (outputPath: string): string => {
+    if (outputPath.endsWith(".json")) return outputPath.replace(/\.json$/, "-post-apply.json");
+    return `${outputPath}-post-apply.json`;
+};
+
+const workflowCandidateReviewCoverageRecheckCommand = (input: {
+    readonly sourceKind?: string;
+    readonly limit?: number;
+    readonly outputPath?: string;
+}): string => [
+    "bun src/cli/index.ts classifiers workflow-candidates",
+    "--review-coverage",
+    `--source-kind=${input.sourceKind ?? "hybrid_window_classifier_projection"}`,
+    `--limit=${input.limit ?? 10}`,
+    `--out=${postApplyOutputPath(input.outputPath ?? ".ax/experiments/workflow-candidate-review-coverage.json")}`,
+    "--json",
+].join(" ");
+
 export function parseWorkflowCandidateFixtureRowsJsonl(
     content: string,
 ): readonly WorkflowCandidateTopicClassifierFixtureRow[] {
@@ -2858,6 +2879,11 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
     const sourceKind = context.sourceKind ?? "hybrid_window_classifier_projection";
     const readinessOutputPath = context.outputPath ?? ".ax/experiments/workflow-candidate-review-coverage-reviewed.json";
     const syncedBriefPath = context.coverageReviewBrief ?? ".ax/experiments/workflow-candidate-review-coverage-reviewed.md";
+    const postApplyRecheckCommand = workflowCandidateReviewCoverageRecheckCommand({
+        sourceKind,
+        ...(context.limit === undefined ? {} : { limit: context.limit }),
+        outputPath: readinessOutputPath,
+    });
     const nextCommand = reviewPackPath === undefined
         ? undefined
         : [
@@ -2946,6 +2972,12 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
             "",
             "```sh",
             strictApplyCommand ?? "",
+            "```",
+            "",
+            "After applying, re-run coverage to verify the gap closed:",
+            "",
+            "```sh",
+            postApplyRecheckCommand,
             "```",
             "",
         ]),
@@ -3220,6 +3252,9 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     readonly unknownFixtureCount?: number;
     readonly coverageRows?: readonly WorkflowCandidateReviewCoverageRow[];
     readonly requireReviewProvenance?: boolean;
+    readonly sourceKind?: string;
+    readonly limit?: number;
+    readonly outputPath?: string;
 }): WorkflowCandidateReviewCoverageApplySummary {
     const reviewedRows = input.rows.filter((row) => fixtureReviewVerdict(row) !== undefined);
     const invalidRows = input.rows.filter((row) => !VALID_VERDICTS.has(row.review_status));
@@ -3348,6 +3383,11 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         apply_blockers: applyBlockers,
         apply_blocker_details: applyBlockerDetails,
         next_action: workflowCandidateReviewCoverageGuardNextAction(applyGuard),
+        post_apply_recheck_command: workflowCandidateReviewCoverageRecheckCommand({
+            ...(input.sourceKind === undefined ? {} : { sourceKind: input.sourceKind }),
+            ...(input.limit === undefined ? {} : { limit: input.limit }),
+            ...(input.outputPath === undefined ? {} : { outputPath: input.outputPath }),
+        }),
         reviewed_fixture_ids: reviewedRows.map((row) => row.id),
         projected_fact_ids: input.projection.facts.map((fact) => fact.id),
         apply_audit_rows: applyAuditRows,
@@ -4187,6 +4227,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     mkdirSync(dirname(input.coverageReviewBrief), { recursive: true });
                     writeFileSync(input.coverageReviewBrief, renderWorkflowCandidateReviewCoverageBriefMarkdown(fixtureSummary.fixtures, {
                         sourceKind: input.sourceKind,
+                        limit: input.limit,
                         coverageFixturePack: input.coverageFixturePack,
                         coverageReviewBrief: input.coverageReviewBrief,
                         ...(input.out === undefined ? {} : { outputPath: input.out }),
@@ -4214,6 +4255,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     mkdirSync(dirname(input.coverageReviewBrief), { recursive: true });
                     writeFileSync(input.coverageReviewBrief, renderWorkflowCandidateReviewCoverageBriefMarkdown(reviewedRows, {
                         sourceKind: input.sourceKind,
+                        limit: input.limit,
                         coverageReviewPack: input.coverageReviewPack,
                         coverageReviewBrief: input.coverageReviewBrief,
                         ...(input.out === undefined ? {} : { outputPath: input.out }),
@@ -4243,6 +4285,9 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     unknownFixtureCount,
                     coverageRows: report.candidates,
                     ...(input.requireReviewProvenance === undefined ? {} : { requireReviewProvenance: input.requireReviewProvenance }),
+                    sourceKind: input.sourceKind,
+                    limit: input.limit,
+                    ...(input.out === undefined ? {} : { outputPath: input.out }),
                 });
                 if (input.applyReviewFacts && pendingApplySummary.can_apply) {
                     yield* db.query(reviewWritePlan.statements.join("\n")).pipe(
@@ -4262,6 +4307,9 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                         unknownFixtureCount,
                         coverageRows: report.candidates,
                         ...(input.requireReviewProvenance === undefined ? {} : { requireReviewProvenance: input.requireReviewProvenance }),
+                        sourceKind: input.sourceKind,
+                        limit: input.limit,
+                        ...(input.out === undefined ? {} : { outputPath: input.out }),
                     })
                     : pendingApplySummary;
                 report = {

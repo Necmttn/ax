@@ -1745,6 +1745,8 @@ describe("classifiers workflow-candidates", () => {
         expect(brief).toContain("--sync-coverage-review-brief=.ax/experiments/review-coverage.md");
         expect(brief).toContain("--apply-review-facts");
         expect(brief).toContain("--require-review-provenance");
+        expect(brief).toContain("After applying, re-run coverage to verify the gap closed:");
+        expect(brief).toContain("bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=10 --out=.ax/experiments/review-coverage-post-apply.json --json");
         expect(brief).toContain("## Candidate Queue");
         expect(brief).toContain("verification_or_recovery_signal");
         expect(brief).toContain("- Fixture id: `workflow-candidate-review-coverage/verification_or_recovery_signal/a`");
@@ -1980,6 +1982,7 @@ describe("classifiers workflow-candidates", () => {
                 "workflow-candidate-review-coverage/existing/a",
                 "workflow-candidate-review-coverage/unknown/a",
             ],
+            post_apply_recheck_command: "bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=10 --out=.ax/experiments/workflow-candidate-review-coverage-post-apply.json --json",
         });
         expect(summary.projected_fact_ids).toHaveLength(3);
         expect(summary.apply_audit_rows).toEqual([
@@ -2085,6 +2088,7 @@ describe("classifiers workflow-candidates", () => {
         expect(text).toContain("coverage review can apply: no");
         expect(text).toContain("coverage review blockers: missing_review_provenance");
         expect(text).toContain("coverage review blocker remediations: missing_review_provenance: Add reviewer and reviewed-at metadata or rerun without strict provenance.");
+        expect(text).toContain("coverage review post-apply recheck: bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=10 --out=.ax/experiments/workflow-candidate-review-coverage-post-apply.json --json");
     });
 
     test("reports applied coverage review statement counts", () => {
