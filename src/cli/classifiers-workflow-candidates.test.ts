@@ -1798,6 +1798,7 @@ describe("classifiers workflow-candidates", () => {
                 },
             ],
             review_pipeline_command_output_check_status: "pending_execution",
+            review_pipeline_command_output_check_next_action: "Execute the pipeline command, then verify every required output artifact path exists.",
         });
         expect(text).toContain("coverage review issue rows: 3");
         expect(text).toContain("coverage review issue fixtures: 1");
@@ -1811,6 +1812,7 @@ describe("classifiers workflow-candidates", () => {
         expect(text).toContain("coverage review pipeline command blocker details: none");
         expect(text).toContain("coverage review pipeline command output artifacts: review_brief@8=.ax/experiments/reviewed-coverage-gaps.md, readiness_report@9=.ax/experiments/reviewed-coverage-gaps.json");
         expect(text).toContain("coverage review pipeline command output check status: pending_execution");
+        expect(text).toContain("coverage review pipeline command output check next action: Execute the pipeline command, then verify every required output artifact path exists.");
         expect(text).toContain("coverage review pipeline command output checks: review_brief@8=pending_execution, readiness_report@9=pending_execution");
         expect(text).toContain("coverage review issue repair command: bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/reviewed-coverage-gaps.jsonl --sync-coverage-review-brief=.ax/experiments/reviewed-coverage-gaps.md --coverage-review-brief=.ax/experiments/reviewed-coverage-gaps.md --out=.ax/experiments/reviewed-coverage-gaps.json --json");
         expect(text).toContain("coverage review issue counts: missing_review_rationale=1, missing_reviewer=1, missing_reviewed_at=1");
@@ -1833,6 +1835,7 @@ describe("classifiers workflow-candidates", () => {
         expect(brief).toContain("- Pipeline command blocker details: `none`");
         expect(brief).toContain("- Pipeline command output artifacts: `review_brief@8=.ax/experiments/reviewed-coverage-gaps.md`, `readiness_report@9=.ax/experiments/reviewed-coverage-gaps.json`");
         expect(brief).toContain("- Pipeline command output check status: `pending_execution`");
+        expect(brief).toContain("- Pipeline command output check next action: Execute the pipeline command, then verify every required output artifact path exists.");
         expect(brief).toContain("- Pipeline command output checks: `review_brief@8=pending_execution`, `readiness_report@9=pending_execution`");
         expect(brief).toContain("- Issue repair command: `bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/reviewed-coverage-gaps.jsonl --sync-coverage-review-brief=.ax/experiments/reviewed-coverage-gaps.md --coverage-review-brief=.ax/experiments/reviewed-coverage-gaps.md --out=.ax/experiments/reviewed-coverage-gaps.json --json`");
         expect(brief).toContain("- Issue counts: `missing_review_rationale=1`, `missing_reviewer=1`, `missing_reviewed_at=1`");
@@ -2226,6 +2229,7 @@ describe("classifiers workflow-candidates", () => {
                 },
             ],
             review_pipeline_command_output_check_status: "pending_execution",
+            review_pipeline_command_output_check_next_action: "Execute the pipeline command, then verify every required output artifact path exists.",
             review_pipeline_required_inputs: ["reviewer", "reviewed_at"],
             review_pipeline_input_bindings: [
                 {
@@ -2321,6 +2325,7 @@ describe("classifiers workflow-candidates", () => {
         expect(text).toContain("coverage review pipeline command kind: stamp_review_provenance");
         expect(text).toContain("coverage review pipeline command output artifacts: review_brief@10=.ax/experiments/reviewed-coverage.md, readiness_report@11=.ax/experiments/workflow-candidate-review-coverage-post-apply.json");
         expect(text).toContain("coverage review pipeline command output check status: pending_execution");
+        expect(text).toContain("coverage review pipeline command output check next action: Execute the pipeline command, then verify every required output artifact path exists.");
         expect(text).toContain("coverage review pipeline command output checks: review_brief@10=pending_execution, readiness_report@11=pending_execution");
         expect(text).toContain("coverage review pipeline required inputs: reviewer, reviewed_at");
         expect(text).toContain("coverage review pipeline input bindings: reviewer@8=--review-provenance-reviewer:<reviewer>:nonempty_string, reviewed_at@9=--review-provenance-reviewed-at:<reviewed-at-iso>:iso_datetime");
