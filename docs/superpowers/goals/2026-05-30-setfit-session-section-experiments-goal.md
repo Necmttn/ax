@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E401 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-execution-status-no-match-e401.json`
+- Index continuation: E402 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-blockers-no-match-e402.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-execution-status-match-e401.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-blockers-match-e402.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,52 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E402 - Expose Suggested Query Repair Blockers
+
+Question:
+- E401 exposes repair execution status, but can services explain why a repair
+  is not executable without inferring it from `repair_can_execute=false`?
+
+Implementation:
+- Added `repair_blockers` and `repair_blocker_details` to
+  `query_suggestion`.
+- Lifecycle graph-query suggestions now expose no blockers for executable
+  repair suggestions and `no_repair_needed` for no-op suggestions.
+- Text graph-health output now renders repair blockers and blocker details.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-blockers-no-match-e402.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-blockers-match-e402.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-blockers-no-match-e402.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match`,
+  `query_suggestion.repair_execution_status=ready_to_execute`, and empty
+  repair blockers.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched`,
+  `query_suggestion.repair_execution_status=not_needed`, and
+  `repair_blockers=[no_repair_needed]`.
+- Text output renders `query suggestion repair blockers: none` and
+  `query suggestion repair blocker details: none` for executable repairs.
+
+Decision:
+- Services can now route skipped repair execution with an explicit blocker
+  reason instead of relying on boolean interpretation.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E402 no-match report has empty `repair_blockers` and
+  `repair_blocker_details`.
+- E402 match report has `repair_blockers=[no_repair_needed]`.
+- E402 match report has a `no_repair_needed` blocker detail with remediation.
+- E402 text output includes repair blocker and detail lines.
 
 ## E401 - Expose Suggested Query Repair Execution Status
 

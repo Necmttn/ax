@@ -484,6 +484,11 @@ export interface ClassifierGraphQuerySuggestion {
     readonly repair_remediation: string;
     readonly repair_can_execute: boolean;
     readonly repair_execution_status: "ready_to_execute" | "not_needed";
+    readonly repair_blockers: readonly ["no_repair_needed"] | readonly [];
+    readonly repair_blocker_details: readonly {
+        readonly blocker: "no_repair_needed";
+        readonly remediation: string;
+    }[];
     readonly repair_argv: readonly string[];
     readonly repair_query?: ClassifierGraphHealthQuery;
     readonly status: "expected_matches";
@@ -2548,6 +2553,13 @@ export function buildExecutionGraphHealthReport(input: {
                     : "Run the repaired graph query to inspect matching classifier lifecycle facts.",
                 repair_can_execute: query.value_equals !== querySuggestedValueEquals,
                 repair_execution_status: query.value_equals === querySuggestedValueEquals ? "not_needed" : "ready_to_execute",
+                repair_blockers: query.value_equals === querySuggestedValueEquals ? ["no_repair_needed"] : [],
+                repair_blocker_details: query.value_equals === querySuggestedValueEquals
+                    ? [{
+                        blocker: "no_repair_needed",
+                        remediation: "Use the current graph query; no repair execution is required.",
+                    }]
+                    : [],
                 repair_argv: query.value_equals === querySuggestedValueEquals ? [] : querySuggestedArgv,
                 ...(query.value_equals === querySuggestedValueEquals ? {} : { repair_query: querySuggestedQuery }),
                 status: querySuggestedStatus,

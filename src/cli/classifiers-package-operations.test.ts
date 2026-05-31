@@ -594,6 +594,11 @@ describe("classifiers package-operations format", () => {
                 repair_remediation: "Use the current graph query; no filter repair is needed.",
                 repair_can_execute: false,
                 repair_execution_status: "not_needed",
+                repair_blockers: ["no_repair_needed"],
+                repair_blocker_details: [{
+                    blocker: "no_repair_needed",
+                    remediation: "Use the current graph query; no repair execution is required.",
+                }],
                 repair_argv: [],
                 status: "expected_matches",
                 next_action: "run_suggested_query",
@@ -723,6 +728,8 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("query suggestion repair remediation: Use the current graph query; no filter repair is needed.");
         expect(output).toContain("query suggestion repair can execute: false");
         expect(output).toContain("query suggestion repair execution status: not_needed");
+        expect(output).toContain("query suggestion repair blockers: no_repair_needed");
+        expect(output).toContain("query suggestion repair blocker details: no_repair_needed: Use the current graph query; no repair execution is required.");
         expect(output).toContain("query suggestion repair argv: none");
         expect(output).toContain("query suggestion repair query: none");
         expect(output).toContain("query suggestion provenance: source=lifecycle_available_value_counts reason=available_value_after_relaxing_value_equals");
