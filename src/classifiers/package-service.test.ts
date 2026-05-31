@@ -9,6 +9,11 @@ import {
     ClassifierPackageService,
     ClassifierPackageServiceLive,
 } from "./package-service.ts";
+import {
+    buildOperationExecutionPlanReport,
+    executeOperationPlanReport,
+    writeOperationExecutionReport,
+} from "./package-operations.ts";
 
 const sessionSectionManifest = "packages/ax-classifier-session-sections/ax.classifier.json";
 
@@ -45,6 +50,20 @@ function writeTempManifest(command: string): string {
         }],
     }, null, 2)}\n`);
     return path;
+}
+
+async function writeTempExecutionReportRoot(): Promise<string> {
+    const root = mkdtempSync(join(tmpdir(), "ax-package-service-executions-"));
+    const artifactPath = join(root, "artifact.txt");
+    const manifestPath = writeTempManifest(`node -e "require('fs').writeFileSync('${artifactPath}', 'artifact')"`);
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    const plan = buildOperationExecutionPlanReport(manifest, manifestPath, "print-demo", {
+        allowExecute: true,
+        allowExpensive: false,
+    });
+    const execution = await executeOperationPlanReport(plan);
+    writeOperationExecutionReport(join(root, "classifier-package-execution-demo.json"), execution);
+    return root;
 }
 
 describe("ClassifierPackageService", () => {
@@ -373,30 +392,33 @@ describe("ClassifierPackageService", () => {
     });
 
     test("builds execution history through the service layer", async () => {
+        const root = await writeTempExecutionReportRoot();
         const report = await runWithService(Effect.gen(function* () {
             const packages = yield* ClassifierPackageService;
-            return yield* packages.executionHistoryReport({ root: ".ax/experiments" });
+            return yield* packages.executionHistoryReport({ root });
         }));
 
         expect(report.schema).toBe("ax.classifier_package_execution_history_report.v1");
-        expect(report.totals.report_count).toBeGreaterThanOrEqual(1);
+        expect(report.totals.report_count).toBe(1);
     });
 
     test("builds execution fact projections through the service layer", async () => {
+        const root = await writeTempExecutionReportRoot();
         const report = await runWithService(Effect.gen(function* () {
             const packages = yield* ClassifierPackageService;
-            return yield* packages.executionFactProjectionReport({ root: ".ax/experiments" });
+            return yield* packages.executionFactProjectionReport({ root });
         }));
 
         expect(report.schema).toBe("ax.classifier_package_execution_fact_projection.v1");
-        expect(report.totals.source_report_count).toBeGreaterThanOrEqual(1);
+        expect(report.totals.source_report_count).toBe(1);
         expect(report.totals.fact_count).toBeGreaterThanOrEqual(report.totals.source_report_count);
     });
 
     test("builds Surreal write plans through the service layer", async () => {
+        const root = await writeTempExecutionReportRoot();
         const report = await runWithService(Effect.gen(function* () {
             const packages = yield* ClassifierPackageService;
-            return yield* packages.executionSurrealWritePlanReport({ root: ".ax/experiments" });
+            return yield* packages.executionSurrealWritePlanReport({ root });
         }));
 
         expect(report.schema).toBe("ax.classifier_package_execution_surreal_write_plan.v1");
