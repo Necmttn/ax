@@ -1823,6 +1823,7 @@ const classifiersPackageOperationsCommand = Command.make(
         artifact: Flag.string("artifact").pipe(Flag.optional),
         predicate: Flag.string("predicate").pipe(Flag.optional),
         subject: Flag.string("subject").pipe(Flag.optional),
+        valueContains: Flag.string("value-contains").pipe(Flag.optional),
         out: Flag.string("out").pipe(Flag.optional),
         preflight: Flag.boolean("preflight").pipe(Flag.withDefault(false)),
         root: Flag.string("root").pipe(Flag.optional),
@@ -1830,11 +1831,12 @@ const classifiersPackageOperationsCommand = Command.make(
         writePlan: Flag.boolean("write-plan").pipe(Flag.withDefault(false)),
         json: jsonFlag,
     },
-    ({ allowExpensive, applyWritePlan, all, dryRun, execute, facts, graphHealth, graphMode, history, manifest, operation, artifact, predicate, subject, out, preflight, root, workflowStatus, writePlan, json }) => {
+    ({ allowExpensive, applyWritePlan, all, dryRun, execute, facts, graphHealth, graphMode, history, manifest, operation, artifact, predicate, subject, valueContains, out, preflight, root, workflowStatus, writePlan, json }) => {
         const operationId = optionValue(operation);
         const artifactPath = optionValue(artifact);
         const predicateName = optionValue(predicate);
         const subjectName = optionValue(subject);
+        const valueContainsText = optionValue(valueContains);
         const outPath = optionValue(out);
         const rootPath = optionValue(root);
         const workflowStatusPath = optionValue(workflowStatus);
@@ -1860,6 +1862,7 @@ const classifiersPackageOperationsCommand = Command.make(
             ...(artifactPath === undefined ? {} : { artifact: artifactPath }),
             ...(predicateName === undefined ? {} : { predicate: predicateName }),
             ...(subjectName === undefined ? {} : { subject: subjectName }),
+            ...(valueContainsText === undefined ? {} : { valueContains: valueContainsText }),
             preflight,
             ...(rootPath === undefined ? {} : { root: rootPath }),
             ...(workflowStatusPath === undefined ? {} : { workflowStatusPath }),
@@ -1877,14 +1880,16 @@ const classifiersGraphCommand = Command.make(
         artifact: Flag.string("artifact").pipe(Flag.optional),
         predicate: Flag.string("predicate").pipe(Flag.optional),
         subject: Flag.string("subject").pipe(Flag.optional),
+        valueContains: Flag.string("value-contains").pipe(Flag.optional),
         out: Flag.string("out").pipe(Flag.optional),
         json: jsonFlag,
     },
-    ({ mode, operation, artifact, predicate, subject, out, json }) => {
+    ({ mode, operation, artifact, predicate, subject, valueContains, out, json }) => {
         const operationId = optionValue(operation);
         const artifactPath = optionValue(artifact);
         const predicateName = optionValue(predicate);
         const subjectName = optionValue(subject);
+        const valueContainsText = optionValue(valueContains);
         const outPath = optionValue(out);
         return runClassifiersPackageOperations({
             manifestPath: "packages/ax-classifier-session-sections/ax.classifier.json",
@@ -1894,6 +1899,7 @@ const classifiersGraphCommand = Command.make(
             ...(artifactPath === undefined ? {} : { artifact: artifactPath }),
             ...(predicateName === undefined ? {} : { predicate: predicateName }),
             ...(subjectName === undefined ? {} : { subject: subjectName }),
+            ...(valueContainsText === undefined ? {} : { valueContains: valueContainsText }),
             ...(outPath === undefined ? {} : { out: outPath }),
             json,
         }).pipe(Effect.provide(ClassifierPackageServiceLive));

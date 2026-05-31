@@ -385,6 +385,7 @@ export interface ClassifierGraphHealthQuery {
     readonly artifact_path?: string;
     readonly predicate?: string;
     readonly subject?: string;
+    readonly value_contains?: string;
 }
 
 export interface ClassifierPackageExecutionGraphHealthReport {
@@ -789,6 +790,19 @@ function stringAt(record: Record<string, unknown>, key: string): string | undefi
 function numberArrayAt(record: Record<string, unknown>, key: string): readonly number[] {
     const value = record[key];
     return Array.isArray(value) ? value.filter((entry): entry is number => typeof entry === "number" && Number.isFinite(entry)) : [];
+}
+
+function graphFactValueContains(value: unknown, needle: string | undefined): boolean {
+    if (!needle) return true;
+    if (typeof value === "string") return value.includes(needle);
+    if (typeof value === "number" || typeof value === "boolean") return String(value).includes(needle);
+    if (Array.isArray(value)) {
+        return value.some((entry) => graphFactValueContains(entry, needle));
+    }
+    if (value && typeof value === "object") {
+        return JSON.stringify(value).includes(needle);
+    }
+    return false;
 }
 
 function numberRecordAt(record: Record<string, unknown>, key: string): Record<string, number> | undefined {
@@ -1783,6 +1797,7 @@ export function buildExecutionGraphHealthReport(input: {
         ...(input.query?.artifact_path ? { artifact_path: input.query.artifact_path } : {}),
         ...(input.query?.predicate ? { predicate: input.query.predicate } : {}),
         ...(input.query?.subject ? { subject: input.query.subject } : {}),
+        ...(input.query?.value_contains ? { value_contains: input.query.value_contains } : {}),
     };
     const nodesById = new Map(input.nodes.map((node) => [node.graph_id, node]));
     const operationByExecution = new Map<string, string>();
@@ -1976,7 +1991,8 @@ export function buildExecutionGraphHealthReport(input: {
                 fact.artifact_path === query.artifact_path ||
                 fact.evidence_paths.includes(query.artifact_path)) &&
             (!query.predicate || fact.predicate === query.predicate) &&
-            (!query.subject || fact.subject === query.subject)
+            (!query.subject || fact.subject === query.subject) &&
+            graphFactValueContains(fact.value, query.value_contains)
         )
         : [];
     const resultEmbeddingHelperFacts = query.mode === "embedding-helper" || query.mode === "evidence"
@@ -1987,7 +2003,8 @@ export function buildExecutionGraphHealthReport(input: {
                 fact.subject === query.artifact_path ||
                 fact.object === query.artifact_path) &&
             (!query.predicate || fact.predicate === query.predicate) &&
-            (!query.subject || fact.subject === query.subject)
+            (!query.subject || fact.subject === query.subject) &&
+            graphFactValueContains(fact.value, query.value_contains)
         )
         : [];
     const resultEvidencePaths = Array.from(new Set([
