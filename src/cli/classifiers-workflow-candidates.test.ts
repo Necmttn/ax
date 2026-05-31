@@ -1746,6 +1746,7 @@ describe("classifiers workflow-candidates", () => {
         expect(brief).toContain("- Production apply guard: `no_reviewed_fixtures`");
         expect(brief).toContain("- Production blockers: `no_reviewed_fixtures`");
         expect(brief).toContain("- Production blocker remediations: no_reviewed_fixtures: Review at least one fixture and add a rationale before applying.");
+        expect(brief).toContain("- Production next action: Set at least one fixture to accept, revise, reject, or defer and add a rationale.");
         expect(brief).toContain("- Smoke markers: `0`");
         expect(brief).toContain("- Apply guard: `no_reviewed_fixtures`");
         expect(brief).toContain("- Apply blockers: `no_reviewed_fixtures`");
@@ -2015,6 +2016,7 @@ describe("classifiers workflow-candidates", () => {
                 count: 6,
                 remediation: "Add reviewer and valid reviewed-at metadata or rerun without strict provenance.",
             }],
+            production_next_action: "Add reviewer and reviewed-at metadata, or rerun without strict provenance if legacy review packs are acceptable.",
             next_action: "Run the apply command after confirming the review pack is intentional.",
             reviewed_fixture_ids: [
                 "workflow-candidate-review-coverage/new/a",
@@ -2063,6 +2065,7 @@ describe("classifiers workflow-candidates", () => {
         expect(text).toContain("coverage review handoff can apply: yes");
         expect(text).toContain("coverage review production apply guard: missing_review_provenance");
         expect(text).toContain("coverage review production can apply: no");
+        expect(text).toContain("coverage review production next action: Add reviewer and reviewed-at metadata, or rerun without strict provenance if legacy review packs are acceptable.");
         const incompleteHandoff = buildWorkflowCandidateReviewCoverageApplySummary({
             rows,
             sourcePath: ".ax/experiments/reviewed-coverage-gaps.jsonl",

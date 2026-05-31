@@ -311,6 +311,7 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly production_can_apply: boolean;
     readonly production_apply_blockers: readonly WorkflowCandidateReviewCoverageApplyBlocker[];
     readonly production_apply_blocker_details: readonly WorkflowCandidateReviewCoverageApplyBlockerDetail[];
+    readonly production_next_action: string;
     readonly next_action: string;
     readonly post_apply_recheck_command: string;
     readonly post_apply_recheck?: WorkflowCandidateReviewCoveragePostApplyRecheckSummary;
@@ -1908,6 +1909,7 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             `coverage review strict can apply: ${report.coverage_review.strict_can_apply ? "yes" : "no"}`,
             `coverage review production apply guard: ${report.coverage_review.production_apply_guard}`,
             `coverage review production can apply: ${report.coverage_review.production_can_apply ? "yes" : "no"}`,
+            `coverage review production next action: ${report.coverage_review.production_next_action}`,
             `coverage review apply result: ${report.coverage_review.apply_result} statements=${report.coverage_review.applied_statement_count}`,
             `coverage review blockers: ${report.coverage_review.apply_blockers.length === 0 ? "none" : report.coverage_review.apply_blockers.join(", ")}`,
             `coverage review blocker details: ${report.coverage_review.apply_blocker_details.length === 0 ? "none" : report.coverage_review.apply_blocker_details.map((detail) => `${detail.blocker}=${detail.count}`).join(", ")}`,
@@ -3192,6 +3194,7 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
         `- Handoff blocker remediations: ${handoffApplyBlockers.length === 0 ? "none" : handoffApplyBlockers.map((blocker) => `${blocker}: ${workflowCandidateReviewCoverageBlockerRemediation(blocker)}`).join(" | ")}`,
         `- Strict provenance blocker remediations: ${strictApplyBlockers.length === 0 ? "none" : strictApplyBlockers.map((blocker) => `${blocker}: ${workflowCandidateReviewCoverageBlockerRemediation(blocker)}`).join(" | ")}`,
         `- Production blocker remediations: ${productionApplyBlockers.length === 0 ? "none" : productionApplyBlockers.map((blocker) => `${blocker}: ${workflowCandidateReviewCoverageBlockerRemediation(blocker)}`).join(" | ")}`,
+        `- Production next action: ${workflowCandidateReviewCoverageGuardNextAction(productionApplyGuard)}`,
         `- Next action: ${workflowCandidateReviewCoverageGuardNextAction(applyGuard)}`,
         "",
         "## Provenance Issues",
@@ -3799,6 +3802,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         production_can_apply: productionCanApply,
         production_apply_blockers: productionApplyBlockers,
         production_apply_blocker_details: productionApplyBlockerDetails,
+        production_next_action: workflowCandidateReviewCoverageGuardNextAction(productionApplyGuard),
         next_action: workflowCandidateReviewCoverageGuardNextAction(applyGuard),
         post_apply_recheck_command: workflowCandidateReviewCoverageRecheckCommand({
             ...(input.sourceKind === undefined ? {} : { sourceKind: input.sourceKind }),
