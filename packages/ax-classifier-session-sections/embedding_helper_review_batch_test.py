@@ -122,6 +122,23 @@ class EmbeddingHelperReviewBatchTest(unittest.TestCase):
         self.assertEqual(report["dry_run"], True)
         self.assertEqual(report["would_write_review"], False)
 
+    def test_evaluate_batch_reports_progress_and_selected_batch_ids(self) -> None:
+        report = module.evaluate_batch(
+            review(),
+            """
+- Candidate id: `embedding-hard-negative/session-section-chunks/none-a`
+- Status: `pending_human_acceptance`
+- Review notes: _pending_
+""",
+        )
+
+        self.assertEqual(report["decision"], "needs_embedding_helper_review")
+        self.assertEqual(report["hard_negative_pending"], 1)
+        self.assertEqual(report["dedupe_pending"], 1)
+        self.assertEqual(report["selected_batch_items"], 1)
+        self.assertEqual(report["selected_batch_ids"], ["embedding-hard-negative/session-section-chunks/none-a"])
+        self.assertEqual(report["next_action"], "review pending embedding-helper hard negatives")
+
 
 if __name__ == "__main__":
     unittest.main()

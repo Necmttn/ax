@@ -11,7 +11,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from blind_label_review import load_json, write_json  # noqa: E402
-from embedding_helper_review_status import evaluate_review, sync_review_from_markdown  # noqa: E402
+from embedding_helper_review_status import evaluate_review, parse_markdown_review, sync_review_from_markdown  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -201,14 +201,37 @@ def sync_batch(review: dict[str, Any], batch: str, dry_run: bool = False) -> tup
     return synced, report
 
 
-def evaluate_batch(review: dict[str, Any]) -> dict[str, Any]:
+def selected_batch_ids(batch: str) -> list[str]:
+    updates = parse_markdown_review(batch)
+    return list(updates.keys())
+
+
+def next_action(status: dict[str, Any]) -> str:
+    if status["decision"] == "ready_for_embedding_helper_export":
+        return "run embedding-helper-export"
+    if status.get("hard_negative_pending"):
+        return "review pending embedding-helper hard negatives"
+    if status.get("dedupe_pending"):
+        return "review pending embedding-helper dedupe clusters"
+    return "fix embedding-helper review failures"
+
+
+def evaluate_batch(review: dict[str, Any], batch: str | None = None) -> dict[str, Any]:
     status = evaluate_review(review)
+    selected_ids = selected_batch_ids(batch) if batch is not None else []
     return {
         "schema": "ax.embedding_helper_review_batch_report.v1",
         "mode": "evaluate",
         "decision": status["decision"],
+        "hard_negative_accepted": status["hard_negative_accepted"],
+        "hard_negative_rejected": status["hard_negative_rejected"],
         "hard_negative_pending": status["hard_negative_pending"],
+        "dedupe_accepted": status["dedupe_accepted"],
+        "dedupe_rejected": status["dedupe_rejected"],
         "dedupe_pending": status["dedupe_pending"],
+        "selected_batch_items": len(selected_ids),
+        "selected_batch_ids": selected_ids,
+        "next_action": next_action(status),
         "failures": list(status.get("failures", [])),
     }
 
@@ -238,7 +261,8 @@ def main() -> int:
         if not args.dry_run:
             write_json(args.review, review)
     else:
-        report = evaluate_batch(review)
+        batch = Path(args.batch).read_text() if Path(args.batch).exists() else None
+        report = evaluate_batch(review, batch)
     write_json(args.out, report)
     if args.json:
         print(json.dumps(report, indent=2))
