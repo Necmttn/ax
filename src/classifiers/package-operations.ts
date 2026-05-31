@@ -940,6 +940,7 @@ export interface ClassifierReviewPipelineLifecycleInsight {
 
 export type ClassifierLifecycleRoutingItem = {
     readonly kind: "graph_query_repair";
+    readonly blocks_decision: boolean;
     readonly status: ClassifierGraphQuerySuggestionRepairRoutingSummary["execution_status"];
     readonly command_kind: ClassifierGraphQuerySuggestionRepairRoutingSummary["command_kind"];
     readonly predicate?: string;
@@ -950,6 +951,7 @@ export type ClassifierLifecycleRoutingItem = {
     readonly argv: readonly string[];
 } | {
     readonly kind: "review_pipeline_action";
+    readonly blocks_decision: boolean;
     readonly status?: string;
     readonly command_kind: string;
     readonly next_action: ClassifierReviewPipelineLifecycleInsight["next_action"];
@@ -3378,10 +3380,26 @@ export function buildClassifierLifecycleInsightReport(input: {
     const queryRepairSuggestion = queryGraphSuggestion.suggestion?.repair.status === "repair_available"
         ? queryGraphSuggestion.suggestion
         : undefined;
+    const pendingBlindLabels = input.workflowStatus.pending_blind_labels ?? 0;
+    const pendingHardNegatives = input.workflowStatus.pending_hard_negatives ?? 0;
+    const proposalReviewPending = input.workflowStatus.proposal_review?.decision === "needs_workflow_candidate_proposal_review";
+    const proposalPromotionBlocked = input.workflowStatus.proposal_promotion?.decision === "needs_workflow_candidate_proposal_review";
+    const reviewPipelineBlocked = reviewPipeline?.next_action === "repair_review_pipeline_outputs" || reviewPipeline?.can_continue === false;
+    const queryRepairNeeded = queryRepairSuggestion !== undefined;
+    const queryRepairBlocksDecision = queryRepairNeeded &&
+        input.graph.decision !== "empty_graph" &&
+        pendingBlindLabels === 0 &&
+        pendingHardNegatives === 0 &&
+        input.workflowStatus.decision !== "needs_human_review" &&
+        !proposalReviewPending &&
+        !proposalPromotionBlocked &&
+        !reviewPipelineBlocked &&
+        input.graph.guarded_operations.length === 0;
     const graphQueryRoutingItems: readonly ClassifierLifecycleRoutingItem[] = queryRepairSuggestion === undefined
         ? []
         : [{
             kind: "graph_query_repair",
+            blocks_decision: queryRepairBlocksDecision,
             status: queryRepairSuggestion.repair.execution_status,
             command_kind: queryRepairSuggestion.repair.command_kind,
             ...(queryRepairSuggestion.original_query.predicate === undefined ? {} : { predicate: queryRepairSuggestion.original_query.predicate }),
@@ -3395,6 +3413,7 @@ export function buildClassifierLifecycleInsightReport(input: {
         ? []
         : [{
             kind: "review_pipeline_action",
+            blocks_decision: reviewPipelineBlocked,
             ...(reviewPipeline.recommended_action_status === undefined ? {} : { status: reviewPipeline.recommended_action_status }),
             command_kind: reviewPipeline.recommended_action_kind,
             next_action: reviewPipeline.next_action,
@@ -3408,7 +3427,7 @@ export function buildClassifierLifecycleInsightReport(input: {
     const routingItems = [
         ...graphQueryRoutingItems,
         ...reviewPipelineRoutingItems,
-    ];
+    ].sort((a, b) => Number(b.blocks_decision) - Number(a.blocks_decision));
     const blockingItems = [
         ...packages
             .filter((entry) => entry.lifecycle_readiness.status === "incomplete")
@@ -3448,12 +3467,6 @@ export function buildClassifierLifecycleInsightReport(input: {
             ? [`${input.workflowStatus.pending_hard_negatives} hard-negative decisions pending`]
             : []),
     ];
-    const pendingBlindLabels = input.workflowStatus.pending_blind_labels ?? 0;
-    const pendingHardNegatives = input.workflowStatus.pending_hard_negatives ?? 0;
-    const proposalReviewPending = input.workflowStatus.proposal_review?.decision === "needs_workflow_candidate_proposal_review";
-    const proposalPromotionBlocked = input.workflowStatus.proposal_promotion?.decision === "needs_workflow_candidate_proposal_review";
-    const reviewPipelineBlocked = reviewPipeline?.next_action === "repair_review_pipeline_outputs" || reviewPipeline?.can_continue === false;
-    const queryRepairNeeded = queryRepairSuggestion !== undefined;
     const decision: ClassifierLifecycleInsightReport["decision"] = input.graph.decision === "empty_graph"
         ? "needs_graph_apply"
         : pendingBlindLabels > 0 || pendingHardNegatives > 0 || input.workflowStatus.decision === "needs_human_review" || proposalReviewPending || proposalPromotionBlocked || reviewPipelineBlocked

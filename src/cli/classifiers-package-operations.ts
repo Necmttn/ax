@@ -707,7 +707,7 @@ export function renderClassifierLifecycleInsightText(report: ClassifierLifecycle
     if (report.routing_items.length > 0) {
         lines.push("routing items:");
         for (const item of report.routing_items) {
-            lines.push(`- ${item.kind}: ${item.status} ${item.command_kind} next=${item.next_action}`);
+            lines.push(`- ${item.kind}: ${item.status} ${item.command_kind} next=${item.next_action} blocks_decision=${item.blocks_decision ? "yes" : "no"}`);
             if (item.kind === "graph_query_repair") {
                 lines.push(`  value repair: ${item.predicate ?? "any_predicate"} ${item.from_value ?? "any"} -> ${item.to_value}`);
             } else {

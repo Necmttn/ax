@@ -804,6 +804,7 @@ describe("ClassifierPackageService", () => {
         expect(report.blocking_items).toContain("graph query repair available: review_pipeline_recommended_action_execution_phase value execute -> bind_inputs");
         expect(report.routing_items[0]).toMatchObject({
             kind: "graph_query_repair",
+            blocks_decision: false,
             status: "ready_to_execute",
             command_kind: "classifier_graph_query_repair",
             predicate: "review_pipeline_recommended_action_execution_phase",

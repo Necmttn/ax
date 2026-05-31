@@ -2280,8 +2280,9 @@ describe("classifier package operations report", () => {
         expect(report.decision).toBe("needs_human_review");
         expect(report.blocking_items).toContain("review pipeline missing 2 required output artifact(s)");
         expect(report.blocking_items).toContain("review pipeline lifecycle cannot continue: needs_output_verification");
-        expect(report.routing_items).toContainEqual({
+        expect(report.routing_items[0]).toEqual({
             kind: "review_pipeline_action",
+            blocks_decision: true,
             status: "missing_outputs",
             command_kind: "repair_review_issues",
             next_action: "repair_review_pipeline_outputs",
@@ -2291,6 +2292,9 @@ describe("classifier package operations report", () => {
             missing_inputs: [],
             argv: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
             remediation: "Repair review pipeline outputs before continuing.",
+        });
+        expect(report.routing_items.find((item) => item.kind === "graph_query_repair")).toMatchObject({
+            blocks_decision: false,
         });
         expect(report.graph_query_suggestion?.suggestion?.repair.outcome_status).toBe("expected_matches");
         expect(report.graph_query_suggestion?.suggestion?.verification.outcome_status).toBe("expected_matches");
@@ -2349,6 +2353,7 @@ describe("classifier package operations report", () => {
         expect(report.blocking_items).toContain("graph query repair available: review_pipeline_recommended_action_execution_phase value execute -> bind_inputs");
         expect(report.routing_items).toContainEqual({
             kind: "graph_query_repair",
+            blocks_decision: true,
             status: "ready_to_execute",
             command_kind: "classifier_graph_query_repair",
             predicate: "review_pipeline_recommended_action_execution_phase",

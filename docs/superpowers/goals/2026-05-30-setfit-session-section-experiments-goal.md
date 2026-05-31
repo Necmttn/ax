@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E429 adds
-  `.ax/experiments/classifier-lifecycle-review-routing-items-e429.json`
+- Index continuation: E430 adds
+  `.ax/experiments/classifier-lifecycle-routing-priority-e430.json`
   and
-  `.ax/experiments/classifier-lifecycle-review-routing-items-e429.txt`
+  `.ax/experiments/classifier-lifecycle-routing-priority-e430.txt`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,55 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E430 - Mark Decision-Blocking Lifecycle Routes
+
+Question:
+- Can lifecycle `routing_items` distinguish the route that blocks the current
+  top-level decision from other available work, so services do not execute
+  secondary graph repairs before the active review-pipeline blocker?
+
+Implementation:
+- Added `blocks_decision` to both `graph_query_repair` and
+  `review_pipeline_action` routing items.
+- Routing items now sort decision-blocking items before secondary available
+  work.
+- Lifecycle text renders `blocks_decision=yes/no` for each route.
+
+Artifacts:
+- `.ax/experiments/classifier-lifecycle-routing-priority-e430.json`
+- `.ax/experiments/classifier-lifecycle-routing-priority-e430.txt`
+
+Results:
+- Current real JSON reports the first routing item as
+  `review_pipeline_action` with `blocks_decision=true`.
+- Current real JSON reports the second routing item as
+  `graph_query_repair` with `blocks_decision=false`.
+- Text output renders
+  `review_pipeline_action ... blocks_decision=yes` before
+  `graph_query_repair ... blocks_decision=no`.
+- Unit coverage also proves a clean graph-query repair report marks
+  `graph_query_repair.blocks_decision=true`.
+
+Decision:
+- E430 makes lifecycle routing priority explicit. FX services can now consume
+  `routing_items` in order and only execute secondary items after the
+  decision-blocking route is cleared.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+git diff --check
+bun src/cli/index.ts classifiers lifecycle --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --out .ax/experiments/classifier-lifecycle-routing-priority-e430.json --json
+bun src/cli/index.ts classifiers lifecycle --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute > .ax/experiments/classifier-lifecycle-routing-priority-e430.txt
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-lifecycle-routing-priority-e430.json").json(); const [first, second]=saved.routing_items ?? []; if (first?.kind !== "review_pipeline_action" || first.blocks_decision !== true) throw new Error("review pipeline is not first blocking route"); if (second?.kind !== "graph_query_repair" || second.blocks_decision !== false) throw new Error("graph query route is not secondary");'
+rg -n -- "- review_pipeline_action: missing_inputs stamp_review_provenance next=inspect_review_pipeline_lifecycle blocks_decision=yes|- graph_query_repair: ready_to_execute classifier_graph_query_repair next=run_repaired_query blocks_decision=no" .ax/experiments/classifier-lifecycle-routing-priority-e430.txt
+bun test src/cli/classifiers-workflow-candidates.test.ts
+```
+
+All passed. `bun run typecheck` still emits the existing Effect advisory
+messages, but exits `0`.
 
 ## E429 - Add Review Pipeline Actions To Lifecycle Routing Items
 

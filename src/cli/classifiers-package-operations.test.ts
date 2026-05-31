@@ -1338,6 +1338,7 @@ describe("classifiers package-operations format", () => {
             ],
             routing_items: [{
                 kind: "graph_query_repair",
+                blocks_decision: false,
                 status: "ready_to_execute",
                 command_kind: "classifier_graph_query_repair",
                 predicate: "review_pipeline_recommended_action_execution_phase",
@@ -1348,6 +1349,7 @@ describe("classifiers package-operations format", () => {
                 argv: ["bun", "src/cli/index.ts", "classifiers", "graph", "--value", "bind_inputs"],
             }, {
                 kind: "review_pipeline_action",
+                blocks_decision: false,
                 status: "requires_inputs",
                 command_kind: "stamp_review_provenance",
                 next_action: "continue_review_pipeline",
@@ -1524,10 +1526,10 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("graph query repair argv: bun src/cli/index.ts classifiers graph --value bind_inputs");
         expect(output).toContain("graph query verification: expected_matches ready_to_execute classifier_graph_query_repair_verification");
         expect(output).toContain("routing items:");
-        expect(output).toContain("- graph_query_repair: ready_to_execute classifier_graph_query_repair next=run_repaired_query");
+        expect(output).toContain("- graph_query_repair: ready_to_execute classifier_graph_query_repair next=run_repaired_query blocks_decision=no");
         expect(output).toContain("value repair: review_pipeline_recommended_action_execution_phase execute -> bind_inputs");
         expect(output).toContain("remediation: Run the repaired graph query to inspect matching classifier lifecycle facts.");
-        expect(output).toContain("- review_pipeline_action: requires_inputs stamp_review_provenance next=continue_review_pipeline");
+        expect(output).toContain("- review_pipeline_action: requires_inputs stamp_review_provenance next=continue_review_pipeline blocks_decision=no");
         expect(output).toContain("action next: Bind required pipeline inputs before executing the command.");
         expect(output).toContain("can execute: no");
         expect(output).toContain("execution phase: bind_inputs");
