@@ -12,6 +12,7 @@ import { ToolFailuresRoute } from "./routes/tools.tsx";
 import { WorkflowRoute } from "./routes/workflow.tsx";
 import { SessionRoute } from "./routes/session.tsx";
 import { SessionInspectRoute } from "./routes/session-inspect.tsx";
+import { ShareInspectRoute } from "./routes/share-inspect.tsx";
 import { SessionsRoute } from "./routes/sessions.tsx";
 import { EpisodeRoute } from "./routes/episode.tsx";
 import { ProjectRoute } from "./routes/project.tsx";
@@ -21,6 +22,7 @@ import { GraphRoute } from "./routes/graph.tsx";
 import type { GraphExplorerMode } from "@shared/dashboard-types.ts";
 import { WrappedRoute } from "./routes/wrapped.tsx";
 import { ImproveRoute } from "./routes/improve.tsx";
+import { ShareInspectView } from "./routes/share-inspect.tsx";
 
 const rootRoute = createRootRoute({
     component: () => (
@@ -49,8 +51,20 @@ const rootRoute = createRootRoute({
 const indexRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
-    component: SkillsRoute,
+    component: StudioIndexRoute,
+    validateSearch: (search): { shareOwner?: string; gistId?: string } => ({
+        shareOwner: typeof search.shareOwner === "string" ? search.shareOwner : undefined,
+        gistId: typeof search.gistId === "string" ? search.gistId : undefined,
+    }),
 });
+
+function StudioIndexRoute() {
+    const search = indexRoute.useSearch();
+    if (search.shareOwner && search.gistId) {
+        return <ShareInspectView owner={search.shareOwner} gistId={search.gistId} />;
+    }
+    return <SkillsRoute />;
+}
 
 const skillsRoute = createRoute({
     getParentRoute: () => rootRoute,
@@ -98,6 +112,12 @@ const sessionInspectRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/sessions/$sessionId/inspect",
     component: SessionInspectRoute,
+});
+
+const shareInspectRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/share/$owner/$gistId",
+    component: ShareInspectRoute,
 });
 
 const episodeRoute = createRoute({
@@ -192,6 +212,7 @@ const routeTree = rootRoute.addChildren([
     sessionsRoute,
     sessionRoute,
     sessionInspectRoute,
+    shareInspectRoute,
     episodeRoute,
     projectRoute,
     skillGraphRoute,

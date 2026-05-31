@@ -22,6 +22,7 @@ import type {
     SessionToolCall,
     SessionTopSkill,
 } from "../lib/shared/dashboard-types.ts";
+import type { ShareEvent, ShareFile, ShareTurn } from "../share/artifact.ts";
 
 export const SESSION_OVERVIEW_SQL = `
 SELECT
@@ -161,6 +162,48 @@ WHERE in.session = $sessionId
 ORDER BY ts DESC
 LIMIT 100;`;
 
+export const SESSION_SHARE_TIMELINE_SQL = `
+SELECT
+    id,
+    ts,
+    "tool_call" AS kind,
+    (command_norm ?? name) AS title,
+    output_excerpt AS summary
+FROM tool_call
+WHERE session = $sessionId
+ORDER BY ts ASC
+LIMIT 200;`;
+
+export const SESSION_SHARE_TURNS_SQL = `
+SELECT
+    id,
+    seq,
+    ts,
+    role,
+    message_kind,
+    intent_kind,
+    text,
+    text_excerpt,
+    has_tool_use,
+    has_error
+FROM turn
+WHERE session = $sessionId AND text IS NOT NONE
+ORDER BY seq ASC
+LIMIT 250;`;
+
+export const SESSION_SHARE_FILES_SQL = `
+SELECT
+    ts,
+    (path_seen ?? out.path) AS path,
+    out.lang AS lang,
+    "edited" AS role,
+    NONE AS additions,
+    NONE AS deletions
+FROM edited
+WHERE in.session = $sessionId
+ORDER BY ts ASC
+LIMIT 200;`;
+
 // ---------------------------------------------------------------------------
 // Typed Query seam
 // ---------------------------------------------------------------------------
@@ -189,6 +232,16 @@ const nullableNumberField = (row: Record<string, unknown>, key: string): number 
     return Number.isFinite(n) ? n : null;
 };
 
+const optionalNumericField = (
+    row: Record<string, unknown>,
+    key: string,
+): number | undefined => {
+    const value = row[key];
+    if (value === null || value === undefined) return undefined;
+    const numberValue = Number(value);
+    return Number.isFinite(numberValue) ? numberValue : undefined;
+};
+
 function classifyAgentDescription(
     desc: string | null,
 ): SessionAgentDelegation["phase"] {
@@ -199,6 +252,77 @@ function classifyAgentDescription(
     if (/(merge|ship|release|deploy)/.test(lower)) return "merge";
     if (/(implement|build|fix|edit|write|migrate|refactor|integrate|wire|add|execute)/.test(lower)) return "execute";
     return "other";
+}
+
+export function mapSessionShareTurnRow(
+    raw: Record<string, unknown>,
+): ShareTurn | null {
+    if (!isRecord(raw)) return null;
+    const id = recordIdString(raw.id);
+    const role = stringField(raw, "role");
+    const text = stringField(raw, "text");
+    if (!id || !role || !text) return null;
+
+    const seq = numericField(raw, "seq");
+    const ts = dateField(raw, "ts") ?? undefined;
+    const message_kind = stringField(raw, "message_kind") ?? undefined;
+    const intent_kind = stringField(raw, "intent_kind") ?? undefined;
+    const text_excerpt = stringField(raw, "text_excerpt") ?? undefined;
+    const has_tool_use = typeof raw.has_tool_use === "boolean" ? raw.has_tool_use : undefined;
+    const has_error = typeof raw.has_error === "boolean" ? raw.has_error : undefined;
+
+    return {
+        id,
+        seq,
+        role,
+        text,
+        ...(ts ? { ts } : {}),
+        ...(message_kind ? { message_kind } : {}),
+        ...(intent_kind ? { intent_kind } : {}),
+        ...(text_excerpt ? { text_excerpt } : {}),
+        ...(has_tool_use !== undefined ? { has_tool_use } : {}),
+        ...(has_error !== undefined ? { has_error } : {}),
+    };
+}
+
+export function mapSessionShareTimelineRow(
+    raw: Record<string, unknown>,
+): ShareEvent | null {
+    if (!isRecord(raw)) return null;
+    const id = recordIdString(raw.id);
+    const title = stringField(raw, "title");
+    if (!id || !title) return null;
+    const ts = dateField(raw, "ts") ?? undefined;
+    const summary = stringField(raw, "summary") ?? undefined;
+    const event: ShareEvent = {
+        id,
+        kind: "tool_call",
+        actor: "agent",
+        title,
+    };
+    if (ts) return summary ? { ...event, ts, summary } : { ...event, ts };
+    return summary ? { ...event, summary } : event;
+}
+
+export function mapSessionShareFileRow(
+    raw: Record<string, unknown>,
+): ShareFile | null {
+    if (!isRecord(raw)) return null;
+    const path = stringField(raw, "path");
+    if (!path) return null;
+    const file: ShareFile = {
+        path,
+        role: "edited",
+    };
+    const lang = stringField(raw, "lang");
+    const additions = optionalNumericField(raw, "additions");
+    const deletions = optionalNumericField(raw, "deletions");
+    return {
+        ...file,
+        ...(lang ? { lang } : {}),
+        ...(additions !== undefined ? { additions } : {}),
+        ...(deletions !== undefined ? { deletions } : {}),
+    };
 }
 
 export const sessionOverviewQuery = defineSingleQuery<
@@ -261,6 +385,16 @@ export const sessionToolCallsQuery = defineQuery<
             last_used: dateField(raw, "last_used"),
         };
     },
+});
+
+export const sessionShareTurnsQuery = defineQuery<
+    SessionDetailParams,
+    Record<string, unknown>,
+    ShareTurn | null
+>({
+    name: "session-detail.share_turns",
+    sql: (p) => subst(SESSION_SHARE_TURNS_SQL, p.recordRef),
+    mapRow: mapSessionShareTurnRow,
 });
 
 export const sessionChildrenQuery = defineQuery<
@@ -365,4 +499,24 @@ export const sessionTokenUsageQuery = defineSingleQuery<
             pricing_source: stringField(raw, "pricing_source"),
         };
     },
+});
+
+export const sessionShareTimelineQuery = defineQuery<
+    SessionDetailParams,
+    Record<string, unknown>,
+    ShareEvent | null
+>({
+    name: "session-detail.share_timeline",
+    sql: (p) => subst(SESSION_SHARE_TIMELINE_SQL, p.recordRef),
+    mapRow: (raw) => mapSessionShareTimelineRow(raw),
+});
+
+export const sessionShareFilesQuery = defineQuery<
+    SessionDetailParams,
+    Record<string, unknown>,
+    ShareFile | null
+>({
+    name: "session-detail.share_files",
+    sql: (p) => subst(SESSION_SHARE_FILES_SQL, p.recordRef),
+    mapRow: (raw) => mapSessionShareFileRow(raw),
 });

@@ -202,6 +202,7 @@ axctl costs for --terms <a,b,c> [--since=N] # cost for sessions matching any ter
 axctl costs for --commit <sha>              # cost for sessions that produced a commit
 axctl costs for --branch <name>             # cost for sessions linked to a branch
 axctl pricing [--query <model>]             # inspect imported model pricing rows
+axctl share <session-id>                    # publish a sanitized session share via GitHub Gist
 axctl roles                                 # list role labels with skill counts
 axctl project <context|verify|harness>
 axctl evidence <guidance-next|session-summary|weekly>

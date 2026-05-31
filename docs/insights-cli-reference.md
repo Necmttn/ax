@@ -564,6 +564,32 @@ The brief is plain markdown. Hand it to any agent; the agent's diff is what
 lands in your config. `lint` reconciles the brief's existence against the
 marker actually showing up in the target file.
 
+## Session Sharing CLI (`axctl share`)
+
+### Share a Session
+
+`axctl share <session-id>` exports a sanitized session artifact, creates a
+secret GitHub Gist containing `ax-session.json`, and prints an
+`https://ax.necmttn.com/s/<owner>/<gist-id>` renderer URL, which opens the
+Studio-backed session inspector.
+
+Use `--dry-run` to inspect the artifact before publishing:
+
+```bash
+axctl share <session-id> --dry-run > session-share.json
+```
+
+Secret Gists are unlisted links, not private storage. Do not share sessions that
+contain secrets or proprietary data without reviewing the dry-run artifact first.
+
+Flags:
+
+- `--dry-run` - print the sanitized artifact JSON without publishing.
+- `--public` - create a public Gist instead of the default secret Gist.
+- `--yes` - skip the publish confirmation prompt.
+- `--open` - open the printed renderer URL in the default browser after publish
+  on macOS.
+
 ## Retro CLI (`axctl retro`)
 
 The retro surface tracks one structured reflection per session

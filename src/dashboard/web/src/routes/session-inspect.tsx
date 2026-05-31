@@ -10,7 +10,7 @@ import { shortSessionId } from "@shared/session-id.ts";
 import type { InspectContentAtomDto, InspectContentBlockDto, InspectTurnContentDto } from "@shared/dashboard-types.ts";
 
 interface KindStyle { bg: string; fg: string; bar: string; label: string }
-const KIND_STYLE: Record<InspectSpanKind, KindStyle> = {
+export const KIND_STYLE: Record<InspectSpanKind, KindStyle> = {
     user_input:            { bg: "#fef9c3", fg: "#78350f", bar: "#eab308", label: "user input" },
     assistant_text:        { bg: "#f3f4f6", fg: "#111827", bar: "#0f172a", label: "assistant text" },
     tool_use:              { bg: "#ede9fe", fg: "#4c1d95", bar: "#8b5cf6", label: "tool use" },
@@ -24,7 +24,7 @@ const KIND_STYLE: Record<InspectSpanKind, KindStyle> = {
     pasted_reference:      { bg: "#fecaca", fg: "#7f1d1d", bar: "#ef4444", label: "pasted" },
 };
 
-function Span({ span }: { span: InspectSpanDto }) {
+export function Span({ span }: { span: InspectSpanDto }) {
     const s = KIND_STYLE[span.kind];
     const title = span.label ? `${s.label}: ${span.label}` : s.label;
     return (
@@ -619,7 +619,7 @@ function HookFireMarker({ hook }: { hook: HookFireDto }) {
     );
 }
 
-function Turn({ turn, anchored, childrenSpawnedHere }: { turn: InspectTurnDto; anchored: boolean; childrenSpawnedHere?: ReadonlyArray<SpawnChildDto> }) {
+export function Turn({ turn, anchored, childrenSpawnedHere }: { turn: InspectTurnDto; anchored: boolean; childrenSpawnedHere?: ReadonlyArray<SpawnChildDto> }) {
     const [showInspector, setShowInspector] = useState(false);
     const [activeTarget, setActiveTarget] = useState<InspectTarget | null>(null);
     const s = KIND_STYLE[turn.semantic_role];
