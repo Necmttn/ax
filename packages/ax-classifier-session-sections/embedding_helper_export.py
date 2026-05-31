@@ -24,6 +24,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--hints", default=".ax/experiments/embedding-helper-dedupe-hints-current.json")
     parser.add_argument("--report", default=".ax/experiments/embedding-helper-export-current-report.json")
     parser.add_argument("--allow-partial-preview", action="store_true", help="Emit accepted rows for inspection even while the review gate is pending; result remains non-appendable.")
+    parser.add_argument("--preview-exit-zero", action="store_true", help="Exit zero for partial preview reports so package review operations can complete successfully.")
     parser.add_argument("--json", action="store_true")
     return parser.parse_args()
 
@@ -201,7 +202,11 @@ def main() -> int:
         if report["failures"]:
             print(f"failures: {report['failures']}")
         print(f"out: {args.out}")
-    return 0 if report["decision"] == "ready_to_append_embedding_helper_fixtures" else 1
+    if report["decision"] == "ready_to_append_embedding_helper_fixtures":
+        return 0
+    if args.preview_exit_zero and report["decision"] == "partial_embedding_helper_export_preview":
+        return 0
+    return 1
 
 
 if __name__ == "__main__":

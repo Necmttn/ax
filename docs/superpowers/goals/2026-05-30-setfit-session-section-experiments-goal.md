@@ -29,7 +29,7 @@ artifact path as the evidence to inspect before trusting any summary row.
 | Blind/review workflow | E46-E65+ | `.ax/experiments/blind-workflow-status-e57.json` and related review artifacts | Human review is mandatory before fixtures or graph facts are promoted. | Pending where review rows are incomplete. | Earlier experiment log | Prefer review queues/workspaces over automatic label edits. |
 | Transcript graph projection | E155-E157 | `.ax/experiments/transcript-candidate-graph-projection-e155.json`, `.ax/experiments/workflow-candidate-report-e156.json`, `.ax/experiments/workflow-candidate-cli-e157.json` | Real persisted classifier facts can become graph-backed workflow candidates. | Passed for projection/query; still needs product review filters and proposal gates. | E155/E156/E157 commits in log | Use graph facts for evidence-backed workflow/harness discovery. |
 | Proposal lifecycle | E168-E208 | `.ax/experiments/workflow-candidate-proposal-list-e168.json`, `.ax/experiments/classifier-package-execution-write-plan-e208.json` | Classifier-derived workflow proposals are discoverable and lifecycle-tracked. | Passed for visibility/lifecycle plumbing; promotion remains review-gated. | Recent proposal lifecycle commits | Continue using review and ready-smoke gates before guidance/harness changes. |
-| Embedding/SVM helper layer | E209-E220 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/embedding-helper-review-batch-e216-report.json`, `.ax/experiments/embedding-helper-review-batch-dry-run-e217-report.json`, `.ax/experiments/embedding-helper-review-progress-e218.json`, `.ax/experiments/embedding-helper-review-partial-sync-e219-report.json`, `.ax/experiments/embedding-helper-export-preview-e220-report.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. | Blocked correctly by pending review: canonical review still has 15 hard negatives and 1 dedupe cluster pending; synthetic copy/preview proves accepted rows can be inspected while remaining non-appendable. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `4c602d9`, `98312c1`, `0faa935`, `4378a10`, `6ca2b86`, `d6948a1` | Do real review of E216 batch, dry-run copy-sync, inspect preview rows, then sync accepted/rejected statuses and run appendable export only when gate is ready. |
+| Embedding/SVM helper layer | E209-E221 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/embedding-helper-review-batch-e216-report.json`, `.ax/experiments/embedding-helper-review-batch-dry-run-e217-report.json`, `.ax/experiments/embedding-helper-review-progress-e218.json`, `.ax/experiments/embedding-helper-review-partial-sync-e219-report.json`, `.ax/experiments/embedding-helper-export-preview-e220-report.json`, `.ax/experiments/classifier-package-execution-embedding-helper-export-preview-e221.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. | Blocked correctly by pending review: canonical review still has 15 hard negatives and 1 dedupe cluster pending; package tooling can now run non-appendable preview exports cleanly. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `4c602d9`, `98312c1`, `0faa935`, `4378a10`, `6ca2b86`, `d6948a1`, `0587b67` | Do real review of E216 batch, dry-run copy-sync, inspect preview rows, then sync accepted/rejected statuses and run appendable export only when gate is ready. |
 
 Current recommendation:
 
@@ -11248,6 +11248,62 @@ Decision:
   report remains non-appendable until the full review status is ready.
 - This remains synthetic/non-promotion evidence. The canonical E210 review is
   still pending and default E215 export behavior remains blocked.
+
+## E221 - Embedding Helper Export Preview Package Operation
+
+Question:
+
+- Can the non-appendable embedding-helper preview export be discovered and run
+  through classifier package operations without looking like a failed operation?
+
+Changes:
+
+- Added package operation `embedding-helper-export-preview`.
+- Operation kind: `review`, not `publish`, because preview output is for
+  inspection and remains non-appendable.
+- Added `--preview-exit-zero` to `embedding_helper_export.py`.
+- The preview operation uses both:
+  - `--allow-partial-preview`
+  - `--preview-exit-zero`
+- The export report still carries the safety fields:
+  - `decision: partial_embedding_helper_export_preview`
+  - `appendable: false`
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers package-operations --operation=embedding-helper-export-preview --preflight --out=.ax/experiments/classifier-package-operation-embedding-helper-export-preview-preflight-e221.json --json
+bun src/cli/index.ts classifiers package-operations --operation=embedding-helper-export-preview --execute --out=.ax/experiments/classifier-package-execution-embedding-helper-export-preview-e221.json --json
+```
+
+Artifacts:
+
+- `.ax/experiments/classifier-package-operation-embedding-helper-export-preview-preflight-e221.json`
+- `.ax/experiments/classifier-package-execution-embedding-helper-export-preview-e221.json`
+- `.ax/experiments/embedding-helper-fixture-preview-current.jsonl`
+- `.ax/experiments/embedding-helper-dedupe-preview-current.json`
+- `.ax/experiments/embedding-helper-export-preview-current-report.json`
+
+Results:
+
+- Preflight decision: `ready`
+- Execution decision: `executed`
+- Execution exit code: `0`
+- Execution failures: `0`
+- All declared outputs exist: `true`
+- Preview fixture rows: `1`
+- Underlying preview export report:
+  - decision: `partial_embedding_helper_export_preview`
+  - `appendable`: `false`
+  - exported fixture rows: `1`
+
+Decision:
+
+- E221 makes preview exports a first-class package review operation without
+  weakening promotion safety. Package tooling can now run and track the preview
+  path as a successful review artifact, while the export report still prevents
+  append/promotion until full review is complete.
+- The next useful step remains real review of the E216 batch.
 
 ## E197 - Hybrid Graph Usefulness Gate
 

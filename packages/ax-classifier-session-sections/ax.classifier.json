@@ -140,6 +140,22 @@
       ]
     },
     {
+      "id": "embedding-helper-export-preview",
+      "kind": "review",
+      "description": "Preview accepted embedding-helper hard negatives and dedupe hints while keeping pending reviews non-appendable.",
+      "command": "bun run classifiers:embedding-helper-export -- --allow-partial-preview --preview-exit-zero --review=.ax/experiments/embedding-helper-review-current.json --status=.ax/experiments/embedding-helper-review-status-current.json --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --out=.ax/experiments/embedding-helper-fixture-preview-current.jsonl --hints=.ax/experiments/embedding-helper-dedupe-preview-current.json --report=.ax/experiments/embedding-helper-export-preview-current-report.json",
+      "inputs": [
+        ".ax/experiments/embedding-helper-review-current.json",
+        ".ax/experiments/embedding-helper-review-status-current.json",
+        "packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl"
+      ],
+      "outputs": [
+        ".ax/experiments/embedding-helper-fixture-preview-current.jsonl",
+        ".ax/experiments/embedding-helper-dedupe-preview-current.json",
+        ".ax/experiments/embedding-helper-export-preview-current-report.json"
+      ]
+    },
+    {
       "id": "embedding-helper-graph-projection",
       "kind": "status",
       "description": "Project reviewed embedding helper routing, hard-negative, nearest-neighbor, and dedupe evidence into graph-ready facts and a Surreal write plan.",

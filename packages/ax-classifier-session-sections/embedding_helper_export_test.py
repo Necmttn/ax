@@ -96,6 +96,17 @@ class EmbeddingHelperExportTest(unittest.TestCase):
         self.assertEqual(report["appendable"], False)
         self.assertIn("embedding helper review is not ready for export", report["failures"])
 
+    def test_partial_preview_decision_remains_non_appendable_even_when_callers_exit_zero(self) -> None:
+        _rows, _hints, report = module.export_review(
+            review(),
+            {"decision": "needs_embedding_helper_review"},
+            {"session-section-chunks/none-a": {"id": "session-section-chunks/none-a", "label": "none", "text": "USER:\nstatus?"}},
+            allow_partial_preview=True,
+        )
+
+        self.assertEqual(report["decision"], "partial_embedding_helper_export_preview")
+        self.assertEqual(report["appendable"], False)
+
 
 if __name__ == "__main__":
     unittest.main()
