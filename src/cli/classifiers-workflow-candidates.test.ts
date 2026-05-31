@@ -28,6 +28,7 @@ import {
     renderWorkflowCandidateTopicHarnessGraphListText,
     renderWorkflowCandidateReportText,
     syncWorkflowCandidateReportFromBrief,
+    syncWorkflowCandidateTopicReportFromBrief,
     topicAdjacentCandidates,
     workflowCandidateTopicHarnessGateFailures,
     workflowCandidateScore,
@@ -920,6 +921,73 @@ describe("classifiers workflow-candidates", () => {
         expect(markdown).toContain("- Helper matched controls: `1`");
         expect(markdown).toContain("- Helper rationale: promoted `none` control `session-section-chunks/none-maintenance-question` matched this candidate example");
         expect(markdown).toContain("- Suggested reviewer verdict: `reject`");
+    });
+
+    test("syncs reviewed helper-hinted evidence packs into topic reports", () => {
+        const candidates = buildWorkflowCandidateReport({
+            groupRows: [{
+                graph_id: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+                label: "environment_or_preference_signal",
+                properties_json: properties({
+                    classifier_key: "hybrid-window",
+                    label: "environment_or_preference_signal",
+                    proposed_action: "record_guidance_or_environment_preference",
+                    support_count: 50,
+                }),
+            }],
+            evidenceRows: [{
+                graph_id: "fact:maintenance-question",
+                subject: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+                properties_json: properties({
+                    turn: "turn:maintenance-question",
+                    confidence: 0.71,
+                    text_excerpt: "USER: when was the last work around surrealML ? do they actively maintain it or stopped?",
+                }),
+            }],
+            sourceKind: "hybrid_window_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            search: "SurrealML",
+            taskLike: "include",
+        });
+        const report = buildWorkflowCandidateTopicReport({
+            sourceKind: "hybrid_window_classifier_projection",
+            topic: "SurrealML",
+            proposals: buildWorkflowCandidateProposalListReport({
+                rows: [{
+                    proposal_id: "proposal:proposal-a",
+                    dedupe_sig: "guidance__workflow_candidate__abc",
+                    title: "Require applied classifier results for surrealml",
+                    form: "guidance",
+                    status: "accepted",
+                    confidence: "medium",
+                    frequency: 1,
+                    target: "AGENTS.md",
+                }],
+                limit: 10,
+                status: "accepted",
+                expandEvidence: true,
+                search: "SurrealML",
+            }),
+            candidates,
+        });
+        const reviewedPack = renderWorkflowCandidateTopicEvidencePackMarkdown(report)
+            .replace("- Verdict: `pending`", "- Verdict: `reject`")
+            .replace("- Rationale: _pending_", "- Rationale: Promoted helper control marks this as an information request, not a durable preference.");
+
+        const synced = syncWorkflowCandidateTopicReportFromBrief(report, reviewedPack, "topic-pack.md");
+        const reviewed = synced.candidates.candidates[0]?.review;
+
+        expect(reviewed).toEqual({
+            verdict: "reject",
+            rationale: "Promoted helper control marks this as an information request, not a durable preference.",
+        });
+        expect(synced.candidates.review).toMatchObject({
+            synced_from: "topic-pack.md",
+            reviewed_candidate_count: 1,
+            pending_candidate_count: 0,
+        });
+        expect(synced.decision).toBe("workflow_topic_evidence_found");
     });
 
     test("renders persisted harness facts inside topic evidence packs", () => {

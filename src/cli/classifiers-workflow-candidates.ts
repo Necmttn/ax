@@ -693,6 +693,22 @@ export function syncWorkflowCandidateReportFromBrief(
     };
 }
 
+export function syncWorkflowCandidateTopicReportFromBrief(
+    report: WorkflowCandidateTopicReport,
+    brief: string,
+    syncedFrom: string,
+): WorkflowCandidateTopicReport {
+    const syncedCandidates = syncWorkflowCandidateReportFromBrief(report.candidates, brief, syncedFrom);
+    const nonCandidateFailures = report.failures.filter((failure) => !report.candidates.failures.includes(failure));
+    const failures = [...nonCandidateFailures, ...syncedCandidates.failures];
+    return withWorkflowCandidateTopicHarnessEvidence({
+        ...report,
+        candidates: syncedCandidates,
+        failures,
+        decision: failures.length === 0 ? "workflow_topic_evidence_found" : "needs_workflow_topic_evidence",
+    });
+}
+
 const shortHash = (value: string): string => {
     let hash = 0;
     for (const char of value) {
@@ -2892,6 +2908,13 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                         ),
                     }),
                 };
+            }
+            if (input.syncBrief) {
+                topicReport = syncWorkflowCandidateTopicReportFromBrief(
+                    topicReport,
+                    readFileSync(input.syncBrief, "utf8"),
+                    input.syncBrief,
+                );
             }
             if (input.emitAdjacentTasks) {
                 const taskDir = input.taskDir ?? join(process.cwd(), ".ax", "tasks");
