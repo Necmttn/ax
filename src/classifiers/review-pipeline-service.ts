@@ -80,6 +80,32 @@ export interface ClassifierReviewPipelinePreparedCommand {
     readonly output_check_next_action: string;
 }
 
+export type ClassifierReviewPipelineOutputVerificationStatus =
+    | "verified"
+    | "missing_required_outputs"
+    | "no_output_artifacts";
+
+export interface ClassifierReviewPipelineOutputArtifactVerificationRow {
+    readonly kind: WorkflowCandidateReviewCoveragePipelineCommandOutputArtifact["kind"];
+    readonly path: string;
+    readonly argv_index: number;
+    readonly required_for_command_success: boolean;
+    readonly exists: boolean;
+}
+
+export interface ClassifierReviewPipelineOutputVerificationReport {
+    readonly schema: "ax.classifier_review_pipeline_output_verification.v1";
+    readonly status: ClassifierReviewPipelineOutputVerificationStatus;
+    readonly can_continue: boolean;
+    readonly next_action: string;
+    readonly checked_artifacts: readonly ClassifierReviewPipelineOutputArtifactVerificationRow[];
+    readonly missing_required_artifacts: readonly string[];
+}
+
+export interface ClassifierReviewPipelineOutputVerifier {
+    readonly exists: (path: string) => Effect.Effect<boolean>;
+}
+
 export interface ClassifierReviewPipelineServiceShape {
     readonly commandSummary: (
         input: ClassifierReviewPipelineCommandSource,
@@ -88,6 +114,10 @@ export interface ClassifierReviewPipelineServiceShape {
         input: ClassifierReviewPipelineCommandSource,
         values?: ClassifierReviewPipelineInputValues,
     ) => Effect.Effect<ClassifierReviewPipelinePreparedCommand>;
+    readonly verifyOutputArtifacts: (
+        input: ClassifierReviewPipelinePreparedCommand,
+        verifier: ClassifierReviewPipelineOutputVerifier,
+    ) => Effect.Effect<ClassifierReviewPipelineOutputVerificationReport>;
 }
 
 export class ClassifierReviewPipelineService extends Context.Service<
@@ -207,7 +237,56 @@ export const ClassifierReviewPipelineServiceLive: Layer.Layer<ClassifierReviewPi
             });
         });
 
-        return ClassifierReviewPipelineService.of({ commandSummary, prepareCommand });
+        const verifyOutputArtifacts = Effect.fn("ClassifierReviewPipelineService.verifyOutputArtifacts")(function* (
+            input: ClassifierReviewPipelinePreparedCommand,
+            verifier: ClassifierReviewPipelineOutputVerifier,
+        ) {
+            const checkedArtifacts = yield* Effect.forEach(input.output_artifact_checks, (check) =>
+                Effect.gen(function* () {
+                    const exists = yield* verifier.exists(check.path);
+                    return {
+                        kind: check.kind,
+                        path: check.path,
+                        argv_index: check.argv_index,
+                        required_for_command_success: check.required_for_command_success,
+                        exists,
+                    } satisfies ClassifierReviewPipelineOutputArtifactVerificationRow;
+                }));
+
+            const missingRequiredArtifacts = checkedArtifacts
+                .filter((check) => check.required_for_command_success && !check.exists)
+                .map((check) => check.path);
+
+            if (checkedArtifacts.length === 0) {
+                return outputVerificationReport({
+                    status: "no_output_artifacts",
+                    canContinue: true,
+                    nextAction: "No pipeline output artifacts need verification; continue with the next review pipeline step.",
+                    checkedArtifacts,
+                    missingRequiredArtifacts,
+                });
+            }
+
+            if (missingRequiredArtifacts.length > 0) {
+                return outputVerificationReport({
+                    status: "missing_required_outputs",
+                    canContinue: false,
+                    nextAction: "Re-run or debug the pipeline command until every required output artifact exists.",
+                    checkedArtifacts,
+                    missingRequiredArtifacts,
+                });
+            }
+
+            return outputVerificationReport({
+                status: "verified",
+                canContinue: true,
+                nextAction: "All required pipeline output artifacts exist; continue with the next review pipeline step.",
+                checkedArtifacts,
+                missingRequiredArtifacts,
+            });
+        });
+
+        return ClassifierReviewPipelineService.of({ commandSummary, prepareCommand, verifyOutputArtifacts });
     }),
 );
 
@@ -246,4 +325,19 @@ const preparedCommand = (
     output_artifact_checks: summary.output_artifact_checks,
     output_check_status: summary.output_check_status,
     output_check_next_action: summary.output_check_next_action,
+});
+
+const outputVerificationReport = (input: {
+    readonly status: ClassifierReviewPipelineOutputVerificationStatus;
+    readonly canContinue: boolean;
+    readonly nextAction: string;
+    readonly checkedArtifacts: readonly ClassifierReviewPipelineOutputArtifactVerificationRow[];
+    readonly missingRequiredArtifacts: readonly string[];
+}): ClassifierReviewPipelineOutputVerificationReport => ({
+    schema: "ax.classifier_review_pipeline_output_verification.v1",
+    status: input.status,
+    can_continue: input.canContinue,
+    next_action: input.nextAction,
+    checked_artifacts: input.checkedArtifacts,
+    missing_required_artifacts: input.missingRequiredArtifacts,
 });

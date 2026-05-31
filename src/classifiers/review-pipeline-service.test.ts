@@ -217,6 +217,58 @@ describe("ClassifierReviewPipelineService", () => {
         expect(prepared.next_action).toBe("Provide a pipeline command argv before executing the command.");
         expect(prepared.argv).toBeUndefined();
     });
+
+    test("verifies prepared command output artifacts after execution", async () => {
+        const source = provenanceCommandSource();
+
+        const report = await runWithService(Effect.gen(function* () {
+            const pipeline = yield* ClassifierReviewPipelineService;
+            const prepared = yield* pipeline.prepareCommand(source, {
+                reviewer: "codex",
+                reviewed_at: "2026-05-31T10:00:00.000Z",
+            });
+            return yield* pipeline.verifyOutputArtifacts(prepared, {
+                exists: (path) => Effect.succeed(path === ".ax/experiments/workflow-candidate-review-coverage-post-apply.json"),
+            });
+        }));
+
+        expect(report).toEqual({
+            schema: "ax.classifier_review_pipeline_output_verification.v1",
+            status: "verified",
+            can_continue: true,
+            next_action: "All required pipeline output artifacts exist; continue with the next review pipeline step.",
+            checked_artifacts: [{
+                kind: "readiness_report",
+                path: ".ax/experiments/workflow-candidate-review-coverage-post-apply.json",
+                argv_index: 9,
+                required_for_command_success: true,
+                exists: true,
+            }],
+            missing_required_artifacts: [],
+        });
+    });
+
+    test("reports missing required output artifacts after execution", async () => {
+        const source = provenanceCommandSource();
+
+        const report = await runWithService(Effect.gen(function* () {
+            const pipeline = yield* ClassifierReviewPipelineService;
+            const prepared = yield* pipeline.prepareCommand(source, {
+                reviewer: "codex",
+                reviewed_at: "2026-05-31T10:00:00.000Z",
+            });
+            return yield* pipeline.verifyOutputArtifacts(prepared, {
+                exists: () => Effect.succeed(false),
+            });
+        }));
+
+        expect(report.status).toBe("missing_required_outputs");
+        expect(report.can_continue).toBe(false);
+        expect(report.next_action).toBe("Re-run or debug the pipeline command until every required output artifact exists.");
+        expect(report.missing_required_artifacts).toEqual([
+            ".ax/experiments/workflow-candidate-review-coverage-post-apply.json",
+        ]);
+    });
 });
 
 const provenanceCommandSource = (): ClassifierReviewPipelineCommandSource => ({
