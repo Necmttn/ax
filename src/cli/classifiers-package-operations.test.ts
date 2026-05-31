@@ -965,6 +965,9 @@ describe("classifiers package-operations format", () => {
                     "reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string",
                     "reviewed_at flag=--review-provenance-reviewed-at index=9 prefix=--review-provenance-reviewed-at= placeholder=<reviewed-at-iso> value_kind=iso_datetime",
                 ],
+                recommended_action_output_artifacts: [
+                    "review_brief path=.ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md flag=--coverage-review-brief index=10 prefix=--coverage-review-brief= required_for_handoff=true",
+                ],
                 output_artifacts: [{
                     kind: "review_brief",
                     path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md",
@@ -1038,6 +1041,7 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("recommended action next: Bind required pipeline inputs before executing the command.");
         expect(output).toContain("recommended action missing inputs: reviewer, reviewed_at");
         expect(output).toContain("recommended action input bindings: reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string; reviewed_at flag=--review-provenance-reviewed-at index=9 prefix=--review-provenance-reviewed-at= placeholder=<reviewed-at-iso> value_kind=iso_datetime");
+        expect(output).toContain("recommended action output artifacts: review_brief path=.ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md flag=--coverage-review-brief index=10 prefix=--coverage-review-brief= required_for_handoff=true");
         expect(output).toContain("outputs: verified checked=2 missing=0");
         expect(output).toContain("output artifacts: review_brief=.ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md");
         expect(output).toContain("checked artifacts: review_brief=.ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md ok");

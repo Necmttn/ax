@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E368 adds
-  `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-binding-indexes-e368.json`
+- Index continuation: E369 adds
+  `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-outputs-e369.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-binding-indexes-e368.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-output-artifacts-e369.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,69 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E369 - Expose Recommended Action Output Artifacts
+
+Question:
+- E368 makes recommended action input binding executable, but can a service
+  also know which output artifacts to verify after executing the recommended
+  action without reopening the source lifecycle artifact?
+
+Implementation:
+- Added `recommended_action_output_artifacts` to review-pipeline lifecycle
+  status and lifecycle insight.
+- Loaded output artifact descriptors from lifecycle `prepared.output_artifacts`.
+- Rendered each descriptor as:
+  `kind path=<path> flag=<argv_flag> index=<argv_index> prefix=<argv_value_prefix> required_for_handoff=<boolean>`.
+- Projected descriptors into lifecycle graph fact
+  `review_pipeline_recommended_action_output_artifacts`.
+- Lifecycle text now renders `recommended action output artifacts`.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-outputs-e369.md --review-facts=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-outputs-e369-review-facts.json --review-write-plan=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-outputs-e369-review-write-plan.json --review-pipeline-lifecycle --out=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-outputs-e369.json --json > .ax/experiments/workflow-candidate-review-pipeline-recommended-action-outputs-e369.stdout
+cp .ax/experiments/workflow-candidate-review-pipeline-recommended-action-outputs-e369.json .ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json
+bun src/cli/index.ts classifiers package-operations --facts --workflow-status=.ax/experiments/blind-workflow-status-current.json --out=.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-outputs-e369.json --json > .ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-outputs-e369.stdout
+bun src/cli/index.ts classifiers package-operations --write-plan --facts --workflow-status=.ax/experiments/blind-workflow-status-current.json --out=.ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-outputs-e369.json --json > .ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-outputs-e369.stdout
+bun src/cli/index.ts classifiers package-operations --apply-write-plan --facts --workflow-status=.ax/experiments/blind-workflow-status-current.json --out=.ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-outputs-e369.json --json > .ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-outputs-e369.stdout
+bun src/cli/index.ts classifiers package-operations --graph-health --graph-mode=lifecycle --predicate=review_pipeline_recommended_action_output_artifacts --out=.ax/experiments/classifier-graph-lifecycle-recommended-action-output-artifacts-e369.json --json > .ax/experiments/classifier-graph-lifecycle-recommended-action-output-artifacts-e369.stdout
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-outputs-e369.json --json > .ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-outputs-e369.stdout
+bun src/cli/index.ts classifiers lifecycle > .ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-outputs-e369.txt
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-outputs-e369.json`
+- `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-outputs-e369.json`
+- `.ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-outputs-e369.json`
+- `.ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-outputs-e369.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-output-artifacts-e369.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-outputs-e369.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-outputs-e369.txt`
+
+Results:
+- Fact projection and lifecycle graph query expose:
+  - `review_brief path=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-outputs-e369.md flag=--coverage-review-brief index=10 prefix=--coverage-review-brief= required_for_handoff=true`
+  - `readiness_report path=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-outputs-e369.json flag=--out index=11 prefix=--out= required_for_handoff=false`
+- Lifecycle graph query by
+  `review_pipeline_recommended_action_output_artifacts` returns exactly one
+  lifecycle fact.
+- Lifecycle insight JSON/text render the same output artifact descriptors.
+
+Decision:
+- E369 completes the minimal recommended-action execution contract: services
+  can see what to run, why it is blocked, how to bind missing inputs, and what
+  output artifacts to verify after execution.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E369 fact projection and lifecycle graph query include the recommended action
+  output artifact descriptors with `flag=`, `index=`, `prefix=`, and
+  `required_for_handoff=`.
+- E369 lifecycle insight JSON/text render both output artifact descriptors.
 
 ## E368 - Preserve Recommended Action Binding Indexes
 
