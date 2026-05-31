@@ -15,6 +15,7 @@ import {
     buildWorkflowCandidateTopicHelperExplanations,
     buildWorkflowCandidateTopicReviewGraphProjection,
     buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures,
+    buildWorkflowCandidateReviewCoverageApplySummary,
     buildWorkflowCandidateTopicReviewGraphListReport,
     buildWorkflowCandidateTopicReviewGraphWritePlan,
     buildWorkflowCandidateTopicTaskDrafts,
@@ -1471,6 +1472,50 @@ describe("classifiers workflow-candidates", () => {
         });
         expect(writePlan.totals.fact_statement_count).toBe(1);
         expect(writePlan.statements.join("\n")).toContain("workflow_topic_candidate_review");
+    });
+
+    test("blocks smoke-marked coverage review packs from apply", () => {
+        const rows = parseWorkflowCandidateFixtureRowsJsonl(JSON.stringify({
+            id: "workflow-candidate-review-coverage/verification_or_recovery_signal/a",
+            suite: "workflow-candidate-review-coverage",
+            name: "coverage-gap-verification_or_recovery_signal-01",
+            label: "verification_or_recovery_signal",
+            target: "unknown",
+            text: "USER:\ncontinue and make sure the tests prove this does not regress\n\nPREVIOUS_ASSISTANT:\n",
+            source_group: "workflow-candidate",
+            review_status: "accept",
+            review_rationale: "Smoke review: useful verification or recovery behavior worth preserving as review context.",
+            topic: "review-coverage",
+            candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+            candidate_label: "verification_or_recovery_signal",
+            proposed_action: "add_verification_gate",
+            turn: "turn:verification",
+        }));
+        const projection = buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures({
+            rows,
+            syncedFrom: ".ax/experiments/reviewed-smoke.jsonl",
+        });
+        const writePlan = buildWorkflowCandidateTopicReviewGraphWritePlan(projection);
+
+        const summary = buildWorkflowCandidateReviewCoverageApplySummary({
+            rows,
+            sourcePath: ".ax/experiments/reviewed-smoke.jsonl",
+            projection,
+            writePlan,
+            applyRequested: true,
+            applied: false,
+        });
+
+        expect(summary).toMatchObject({
+            apply_requested: true,
+            applied: false,
+            reviewed_fixture_count: 1,
+            pending_fixture_count: 0,
+            smoke_marker_count: 2,
+            apply_guard: "blocked_smoke_review",
+        });
+        expect(summary.projection_totals.fact_count).toBe(1);
+        expect(summary.write_plan_totals.fact_statement_count).toBe(1);
     });
 
     test("renders persisted harness facts inside topic evidence packs", () => {

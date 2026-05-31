@@ -172,6 +172,18 @@ export interface WorkflowCandidateReviewCoverageFixtureSummary {
     readonly fixtures: readonly WorkflowCandidateTopicClassifierFixtureRow[];
 }
 
+export interface WorkflowCandidateReviewCoverageApplySummary {
+    readonly source_path: string;
+    readonly apply_requested: boolean;
+    readonly applied: boolean;
+    readonly reviewed_fixture_count: number;
+    readonly pending_fixture_count: number;
+    readonly smoke_marker_count: number;
+    readonly apply_guard: "ready_to_apply" | "blocked_smoke_review" | "no_reviewed_fixtures";
+    readonly projection_totals: WorkflowCandidateTopicReviewGraphProjection["totals"];
+    readonly write_plan_totals: WorkflowCandidateTopicReviewGraphWritePlan["totals"];
+}
+
 export interface WorkflowCandidateTopicClassifierFixtureRow {
     readonly id: string;
     readonly suite: "workflow-candidate-topic" | "workflow-candidate-review-coverage";
@@ -537,6 +549,7 @@ export interface WorkflowCandidateReviewCoverageReport {
         readonly helper_source_fixture_count: number;
     };
     readonly fixture_pack?: WorkflowCandidateReviewCoverageFixtureSummary;
+    readonly coverage_review?: WorkflowCandidateReviewCoverageApplySummary;
     readonly decision: "workflow_candidate_review_coverage_ready" | "needs_workflow_candidate_reviews";
 }
 
@@ -1697,6 +1710,12 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
         `review facts: ${report.totals.review_fact_count}`,
         `review status: ${report.totals.rejected_fact_count} rejected, ${report.totals.accepted_fact_count} accepted, ${report.totals.deferred_fact_count} deferred, ${report.totals.revised_fact_count} revised`,
         `helper source fixtures: ${report.totals.helper_source_fixture_count}`,
+        ...(report.coverage_review ? [
+            `coverage review source: ${report.coverage_review.source_path}`,
+            `coverage review fixtures: ${report.coverage_review.reviewed_fixture_count} reviewed, ${report.coverage_review.pending_fixture_count} pending`,
+            `coverage review apply guard: ${report.coverage_review.apply_guard}`,
+            `coverage review applied: ${report.coverage_review.applied ? "yes" : "no"}`,
+        ] : []),
         ...(report.fixture_pack ? [
             `coverage fixture pack: ${report.fixture_pack.emitted_fixture_count} fixtures`,
             `coverage fixture candidates: ${report.fixture_pack.candidate_count} emitted, ${report.fixture_pack.skipped_candidate_count} skipped`,
@@ -2739,6 +2758,44 @@ export function buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures(
     };
 }
 
+const fixtureRowHasSmokeMarker = (row: WorkflowCandidateTopicClassifierFixtureRow): boolean => {
+    const text = [
+        row.id,
+        row.name,
+        row.review_rationale ?? "",
+    ].join("\n").toLowerCase();
+    return text.includes("smoke review") || text.includes("-smoke-") || text.includes("smoke_");
+};
+
+export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
+    readonly rows: readonly WorkflowCandidateTopicClassifierFixtureRow[];
+    readonly sourcePath: string;
+    readonly projection: WorkflowCandidateTopicReviewGraphProjection;
+    readonly writePlan: WorkflowCandidateTopicReviewGraphWritePlan;
+    readonly applyRequested: boolean;
+    readonly applied: boolean;
+}): WorkflowCandidateReviewCoverageApplySummary {
+    const reviewedRows = input.rows.filter((row) => fixtureReviewVerdict(row) !== undefined);
+    const smokeMarkerCount = reviewedRows.filter(fixtureRowHasSmokeMarker).length +
+        (input.sourcePath.toLowerCase().includes("smoke") ? 1 : 0);
+    const applyGuard = reviewedRows.length === 0
+        ? "no_reviewed_fixtures"
+        : smokeMarkerCount > 0
+            ? "blocked_smoke_review"
+            : "ready_to_apply";
+    return {
+        source_path: input.sourcePath,
+        apply_requested: input.applyRequested,
+        applied: input.applied,
+        reviewed_fixture_count: reviewedRows.length,
+        pending_fixture_count: input.rows.length - reviewedRows.length,
+        smoke_marker_count: smokeMarkerCount,
+        apply_guard: applyGuard,
+        projection_totals: input.projection.totals,
+        write_plan_totals: input.writePlan.totals,
+    };
+}
+
 export function buildWorkflowCandidateTopicReviewGraphWritePlan(
     projection: WorkflowCandidateTopicReviewGraphProjection,
 ): WorkflowCandidateTopicReviewGraphWritePlan {
@@ -3579,11 +3636,30 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     mkdirSync(dirname(input.reviewWritePlan), { recursive: true });
                     writeFileSync(input.reviewWritePlan, `${prettyPrint(reviewWritePlan)}\n`, "utf8");
                 }
-                if (input.applyReviewFacts && reviewWritePlan.statements.length > 0) {
+                const pendingApplySummary = buildWorkflowCandidateReviewCoverageApplySummary({
+                    rows: reviewedRows,
+                    sourcePath: input.coverageReviewPack,
+                    projection: reviewProjection,
+                    writePlan: reviewWritePlan,
+                    applyRequested: Boolean(input.applyReviewFacts),
+                    applied: false,
+                });
+                const canApply = pendingApplySummary.apply_guard === "ready_to_apply" &&
+                    reviewWritePlan.statements.length > 0;
+                if (input.applyReviewFacts && canApply) {
                     yield* db.query(reviewWritePlan.statements.join("\n")).pipe(
                         catchDbErrorAndExit("axctl classifiers workflow-candidates"),
                     );
                 }
+                const applied = Boolean(input.applyReviewFacts && canApply);
+                report = {
+                    ...report,
+                    coverage_review: {
+                        ...pendingApplySummary,
+                        applied,
+                    },
+                };
+                if (input.applyReviewFacts && !canApply) process.exitCode = 1;
             }
             if (input.out) {
                 mkdirSync(dirname(input.out), { recursive: true });

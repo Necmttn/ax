@@ -29,7 +29,7 @@ artifact path as the evidence to inspect before trusting any summary row.
 | Blind/review workflow | E46-E65+ | `.ax/experiments/blind-workflow-status-e57.json` and related review artifacts | Human review is mandatory before fixtures or graph facts are promoted. | Pending where review rows are incomplete. | Earlier experiment log | Prefer review queues/workspaces over automatic label edits. |
 | Transcript graph projection | E155-E157 | `.ax/experiments/transcript-candidate-graph-projection-e155.json`, `.ax/experiments/workflow-candidate-report-e156.json`, `.ax/experiments/workflow-candidate-cli-e157.json` | Real persisted classifier facts can become graph-backed workflow candidates. | Passed for projection/query; still needs product review filters and proposal gates. | E155/E156/E157 commits in log | Use graph facts for evidence-backed workflow/harness discovery. |
 | Proposal lifecycle | E168-E208 | `.ax/experiments/workflow-candidate-proposal-list-e168.json`, `.ax/experiments/classifier-package-execution-write-plan-e208.json` | Classifier-derived workflow proposals are discoverable and lifecycle-tracked. | Passed for visibility/lifecycle plumbing; promotion remains review-gated. | Recent proposal lifecycle commits | Continue using review and ready-smoke gates before guidance/harness changes. |
-| Embedding/SVM helper layer | E209-E244 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e231-post-promotion.json`, `.ax/experiments/embedding-helper-canonical-promotion-split-audit-e231.json`, `.ax/experiments/embedding-helper-graph-projection-current.json`, `.ax/experiments/embedding-helper-graph-apply-e232.json`, `.ax/experiments/classifier-graph-health-embedding-helper-e232.json`, `.ax/experiments/embedding-helper-graph-usefulness-current.json`, `.ax/experiments/classifier-package-execution-embedding-helper-graph-usefulness-e234.json`, `.ax/experiments/classifier-graph-health-embedding-helper-none-maintenance-e235.json`, `.ax/experiments/workflow-topic-review-graph-query-e239.json`, `.ax/experiments/workflow-topic-evidence-pack-persisted-review-context-e240.md`, `.ax/experiments/workflow-candidate-report-persisted-review-context-e241.json`, `.ax/experiments/workflow-candidate-review-coverage-e242.json`, `.ax/experiments/workflow-candidate-review-coverage-with-gaps-e243.json`, `.ax/experiments/workflow-candidate-review-coverage-gaps-e243.jsonl`, `.ax/experiments/workflow-candidate-review-coverage-review-projection-e244.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. Promoted helper facts now support the full graph loop through coverage-gap fixture review projection, with no automatic ranking suppression. | Passed: reviewed coverage-gap fixture smoke projects 3 reviewed rows into 3 `workflow_topic_candidate_review` facts, 4 nodes, and 6 edges under topic `review-coverage`; not applied to SurrealDB. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `65b0b3c`, `4c602d9`, `eeb517c`, `9a6811e`, `31a1b16`, `e41562c`, `0587b67`, `0e0a960`, `3f01787`, `7bea922`, `21f7163`, `24e4a4e`, `f97c8e3`, `722e3e8`, `8b27657`, `d700090`, `6237d89`, `2490fdf`, `9f4ee34`, `2530699`, `bca5938`, `65bc09a`, `6631d2d`, `85b4df8`, `c9f59e4`, `451b524`, `59adacf`, this commit | Next useful work is to run this path on genuinely reviewed coverage-gap fixtures, then apply those review facts and re-run coverage to confirm the gap closes. |
+| Embedding/SVM helper layer | E209-E245 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e231-post-promotion.json`, `.ax/experiments/embedding-helper-canonical-promotion-split-audit-e231.json`, `.ax/experiments/embedding-helper-graph-projection-current.json`, `.ax/experiments/embedding-helper-graph-apply-e232.json`, `.ax/experiments/classifier-graph-health-embedding-helper-e232.json`, `.ax/experiments/embedding-helper-graph-usefulness-current.json`, `.ax/experiments/classifier-package-execution-embedding-helper-graph-usefulness-e234.json`, `.ax/experiments/classifier-graph-health-embedding-helper-none-maintenance-e235.json`, `.ax/experiments/workflow-topic-review-graph-query-e239.json`, `.ax/experiments/workflow-topic-evidence-pack-persisted-review-context-e240.md`, `.ax/experiments/workflow-candidate-report-persisted-review-context-e241.json`, `.ax/experiments/workflow-candidate-review-coverage-e242.json`, `.ax/experiments/workflow-candidate-review-coverage-with-gaps-e243.json`, `.ax/experiments/workflow-candidate-review-coverage-gaps-e243.jsonl`, `.ax/experiments/workflow-candidate-review-coverage-review-projection-e244.json`, `.ax/experiments/workflow-candidate-review-coverage-apply-guard-e245.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. Promoted helper facts now support the full graph loop through coverage-gap fixture review projection, with an explicit smoke-apply guard and no automatic ranking suppression. | Passed: requesting `--apply-review-facts` on the smoke-reviewed coverage pack is blocked with `apply_guard = blocked_smoke_review`, `applied = false`, and DB query confirms `0` persisted `review-coverage` facts. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `65b0b3c`, `4c602d9`, `9a6811e`, `31a1b16`, `e41562c`, `0587b67`, `0e0a960`, `3f01787`, `7bea922`, `21f7163`, `24e4a4e`, `f97c8e3`, `722e3e8`, `8b27657`, `d700090`, `6237d89`, `2490fdf`, `9f4ee34`, `2530699`, `bca5938`, `65bc09a`, `6631d2d`, `85b4df8`, `c9f59e4`, `451b524`, `59adacf`, `83ebdb0`, this commit | Next useful work is to run this path on genuinely reviewed coverage-gap fixtures, apply those review facts, and re-run coverage to confirm the gap closes. |
 
 Current recommendation:
 
@@ -13126,6 +13126,78 @@ assert plan["totals"]["node_statement_count"] == 4
 assert plan["totals"]["edge_statement_count"] == 6
 assert plan["totals"]["statement_count"] == 13
 PY
+```
+
+## E245 - Block Smoke Coverage Review Applies
+
+Question:
+
+- Can the coverage-review apply path refuse smoke-marked fixture packs while
+  still producing inspectable projection/write-plan artifacts?
+
+Implementation:
+
+- Added `WorkflowCandidateReviewCoverageApplySummary`.
+- Added `buildWorkflowCandidateReviewCoverageApplySummary(...)`.
+- Coverage-review reports now include `coverage_review` when
+  `--coverage-review-pack` is used.
+- `--apply-review-facts` is blocked when:
+  - no reviewed rows exist, or
+  - the review pack/path/rationale carries smoke markers.
+- Blocked applies set `process.exitCode = 1`, keep `applied = false`, and still
+  write the requested projection/write-plan artifacts for inspection.
+
+Command:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-reviewed-smoke-e244.jsonl --review-facts=.ax/experiments/workflow-candidate-review-coverage-apply-guard-projection-e245.json --review-write-plan=.ax/experiments/workflow-candidate-review-coverage-apply-guard-write-plan-e245.json --apply-review-facts --out=.ax/experiments/workflow-candidate-review-coverage-apply-guard-e245.json --json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-coverage-apply-guard-e245.json`
+- `.ax/experiments/workflow-candidate-review-coverage-apply-guard-projection-e245.json`
+- `.ax/experiments/workflow-candidate-review-coverage-apply-guard-write-plan-e245.json`
+
+Results:
+
+- Command exit: `1`
+- Apply requested: `true`
+- Applied: `false`
+- Apply guard: `blocked_smoke_review`
+- Reviewed fixture rows: `3`
+- Projection facts: `3`
+- Write-plan statements: `13`
+- Persisted DB `review-coverage` facts after blocked apply: `0`
+
+Decision:
+
+- E245 makes the review boundary enforceable. Smoke-reviewed fixtures can prove
+  projection shape, but cannot accidentally enter the graph through
+  `--apply-review-facts`.
+- The next real step is to review the coverage-gap fixtures without smoke
+  markers, apply them, and re-run coverage to prove the gap closes.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-apply-guard-e245.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-apply-guard-projection-e245.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-apply-guard-write-plan-e245.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+report = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-apply-guard-e245.json").read_text())
+review = report["coverage_review"]
+assert review["apply_requested"] is True
+assert review["applied"] is False
+assert review["apply_guard"] == "blocked_smoke_review"
+assert review["reviewed_fixture_count"] == 3
+assert review["projection_totals"]["fact_count"] == 3
+assert review["write_plan_totals"]["statement_count"] == 13
+PY
+printf '%s\n' 'SELECT count() AS count FROM classifier_graph_fact WHERE source_kind = "workflow_topic_candidate_review" AND kind = "workflow_topic_candidate_review" AND string::lowercase(properties_json) CONTAINS "review-coverage" GROUP ALL;' | surreal sql --endpoint http://127.0.0.1:8521 --username root --password root --namespace ax --database main --json --hide-welcome
 ```
 
 ## E235 - Explain Promoted Helper Facts From Graph Queries
