@@ -196,6 +196,10 @@ export interface WorkflowCandidateReviewCoverageApplyBlockerDetail {
 
 export type WorkflowCandidateReviewVerdict = "accept" | "revise" | "reject" | "defer";
 
+export type WorkflowCandidateReviewCoverageProvenanceStatus =
+    | "complete_review_provenance"
+    | "missing_review_provenance";
+
 export interface WorkflowCandidateReviewCoverageApplyAuditRow {
     readonly fixture_id: string;
     readonly candidate_id: string;
@@ -218,6 +222,8 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly missing_rationale_count: number;
     readonly missing_reviewer_count: number;
     readonly missing_reviewed_at_count: number;
+    readonly provenance_status: WorkflowCandidateReviewCoverageProvenanceStatus;
+    readonly provenance_next_action: string;
     readonly synced_fixture_count: number;
     readonly unknown_fixture_count: number;
     readonly pack_candidate_count: number;
@@ -1793,6 +1799,8 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             `coverage review projected coverage: reviewed=${report.coverage_review.projected_reviewed_candidate_count} unreviewed=${report.coverage_review.projected_unreviewed_candidate_count}`,
             `coverage review issues: invalid=${report.coverage_review.invalid_fixture_count} missing_rationale=${report.coverage_review.missing_rationale_count} smoke=${report.coverage_review.smoke_marker_count}`,
             `coverage review provenance: missing_reviewer=${report.coverage_review.missing_reviewer_count} missing_reviewed_at=${report.coverage_review.missing_reviewed_at_count}`,
+            `coverage review provenance status: ${report.coverage_review.provenance_status}`,
+            `coverage review provenance next action: ${report.coverage_review.provenance_next_action}`,
             `coverage review apply guard: ${report.coverage_review.apply_guard}`,
             `coverage review can apply: ${report.coverage_review.can_apply ? "yes" : "no"}`,
             `coverage review apply result: ${report.coverage_review.apply_result} statements=${report.coverage_review.applied_statement_count}`,
@@ -3168,6 +3176,13 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     const missingRationaleRows = reviewedRows.filter((row) => (row.review_rationale ?? "").trim().length === 0);
     const missingReviewerRows = reviewedRows.filter((row) => (row.review_reviewer ?? "").trim().length === 0);
     const missingReviewedAtRows = reviewedRows.filter((row) => (row.review_reviewed_at ?? "").trim().length === 0);
+    const provenanceStatus: WorkflowCandidateReviewCoverageProvenanceStatus =
+        missingReviewerRows.length === 0 && missingReviewedAtRows.length === 0
+            ? "complete_review_provenance"
+            : "missing_review_provenance";
+    const provenanceNextAction = provenanceStatus === "complete_review_provenance"
+        ? "Review provenance is complete."
+        : "Add reviewer and reviewed-at metadata before applying if audit provenance is required.";
     const packCandidateIds = new Set(reviewedRows.map((row) => row.candidate_id));
     const knownCandidateIds = new Set((input.coverageRows ?? []).map((row) => row.candidate_id));
     const alreadyReviewedCandidateIds = new Set((input.coverageRows ?? [])
@@ -3260,6 +3275,8 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         missing_rationale_count: missingRationaleRows.length,
         missing_reviewer_count: missingReviewerRows.length,
         missing_reviewed_at_count: missingReviewedAtRows.length,
+        provenance_status: provenanceStatus,
+        provenance_next_action: provenanceNextAction,
         synced_fixture_count: input.syncedFixtureCount ?? 0,
         unknown_fixture_count: input.unknownFixtureCount ?? 0,
         pack_candidate_count: packCandidateIds.size,

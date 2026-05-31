@@ -1955,6 +1955,8 @@ describe("classifiers workflow-candidates", () => {
             reviewed_fixture_count: 3,
             missing_reviewer_count: 3,
             missing_reviewed_at_count: 3,
+            provenance_status: "missing_review_provenance",
+            provenance_next_action: "Add reviewer and reviewed-at metadata before applying if audit provenance is required.",
             pack_candidate_count: 3,
             new_candidate_count: 1,
             existing_candidate_count: 1,
@@ -2066,6 +2068,8 @@ describe("classifiers workflow-candidates", () => {
             can_apply: true,
             missing_reviewer_count: 0,
             missing_reviewed_at_count: 0,
+            provenance_status: "complete_review_provenance",
+            provenance_next_action: "Review provenance is complete.",
         });
         expect(summary.apply_audit_rows).toEqual([{
             fixture_id: "workflow-candidate-review-coverage/verification_or_recovery_signal/a",
@@ -2077,6 +2081,8 @@ describe("classifiers workflow-candidates", () => {
         }]);
         expect(text).toContain(`coverage review apply result: applied statements=${writePlan.totals.statement_count}`);
         expect(text).toContain("coverage review provenance: missing_reviewer=0 missing_reviewed_at=0");
+        expect(text).toContain("coverage review provenance status: complete_review_provenance");
+        expect(text).toContain("coverage review provenance next action: Review provenance is complete.");
         expect(text).toContain("coverage review audit rows: 1");
         expect(text).toContain(
             `coverage review audit row: accept fixture=workflow-candidate-review-coverage/verification_or_recovery_signal/a candidate=classifier_candidate_group:hybrid-window/verification_or_recovery_signal fact=${summary.projected_fact_ids[0]} reviewer=reviewer@example.test reviewed_at=2026-05-31T10:00:00Z`,
