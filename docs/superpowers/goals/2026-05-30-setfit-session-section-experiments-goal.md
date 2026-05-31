@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E357 adds
-  `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-argv-e357.json`
+- Index continuation: E358 adds
+  `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-status-e358.json`
   and
-  `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-argv-e357.txt`
+  `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-status-e358.txt`
   as the latest Embedding/SVM helper evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -14503,6 +14503,48 @@ bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=emb
 bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 > .ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.txt || true
 python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.json >/dev/null
 rg -n 'routing policy blocking floors: positive_recall, call_reduction|routing policy largest gap: positive_recall|"blocking_floor_fields"|"largest_gap_floor"|"positive_recall_gap_to_request"|"call_reduction_gap_to_request"' .ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.txt .ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.json
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 84 passed.
+
+## E358 - Preflight Recommended Routing Query Result
+
+Question:
+
+- Before an FX service executes a recommended relaxed-floor routing query, can
+  it tell whether that query is expected to produce a usable reviewed routing
+  policy?
+
+Change:
+
+- Added `recommended_floor_status` to `routing_policy_summary`.
+- Added `recommended_floor_candidate_count` to `routing_policy_summary`.
+- These fields are inferred from the reviewed routing candidates already loaded
+  by the graph report, after applying the recommended relaxed floors.
+- Text graph output now renders the expected status and candidate count.
+
+Evidence:
+
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-status-e358.json`
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-status-e358.txt`
+
+Result:
+
+- `classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2` returned 0 matching routing facts.
+- The report has `routing_policy_summary.recommended_floor_status=expected_matches`.
+- The report has `routing_policy_summary.recommended_floor_candidate_count=1`.
+- Text output renders `routing policy recommended floor status: expected_matches`
+  and `routing policy recommended floor candidates: 1`.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 --out=.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-status-e358.json --json > .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-status-e358.stdout
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 > .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-status-e358.txt || true
+python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-status-e358.json >/dev/null
+rg -n 'routing policy recommended floor status|routing policy recommended floor candidates|"recommended_floor_status"|"recommended_floor_candidate_count"' .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-status-e358.txt .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-status-e358.json
 ```
 
 Verification:

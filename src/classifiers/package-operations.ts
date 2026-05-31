@@ -427,6 +427,8 @@ export interface ClassifierGraphRoutingPolicySummary {
     }[];
     readonly recommended_floor_query?: ClassifierGraphRoutingPolicyRecommendedQuery;
     readonly recommended_floor_argv?: readonly string[];
+    readonly recommended_floor_status?: "expected_matches" | "no_expected_match";
+    readonly recommended_floor_candidate_count?: number;
 }
 
 export type ClassifierGraphHealthMode = "summary" | "guarded" | "changed-artifacts" | "evidence" | "lifecycle" | "embedding-helper";
@@ -2247,6 +2249,14 @@ export function buildExecutionGraphHealthReport(input: {
             pushRecommendedFloorArg(argv, "--value-contains", recommendedFloorQuery.value_contains);
             return argv;
         })();
+    const recommendedFloorCandidates = recommendedFloorQuery === undefined
+        ? []
+        : routingPolicyAvailableCandidates.filter((fact) =>
+            (recommendedFloorQuery.min_positive_recall === undefined ||
+                fact.positive_recall_after_routing_mean! >= recommendedFloorQuery.min_positive_recall) &&
+            (recommendedFloorQuery.min_call_reduction === undefined ||
+                fact.setfit_call_reduction_rate_mean! >= recommendedFloorQuery.min_call_reduction)
+        );
     const largestGapFloor = positiveRecallGap === undefined && callReductionGap === undefined
         ? undefined
         : (positiveRecallGap ?? 0) >= (callReductionGap ?? 0)
@@ -2285,6 +2295,10 @@ export function buildExecutionGraphHealthReport(input: {
         ...(recommendedFloorAdjustments.length === 0 ? {} : { recommended_floor_adjustments: recommendedFloorAdjustments }),
         ...(recommendedFloorQuery === undefined ? {} : { recommended_floor_query: recommendedFloorQuery }),
         ...(recommendedFloorArgv === undefined ? {} : { recommended_floor_argv: recommendedFloorArgv }),
+        ...(recommendedFloorQuery === undefined ? {} : {
+            recommended_floor_status: recommendedFloorCandidates.length > 0 ? "expected_matches" : "no_expected_match",
+            recommended_floor_candidate_count: recommendedFloorCandidates.length,
+        }),
     };
 
     return {

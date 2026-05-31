@@ -1550,6 +1550,8 @@ describe("classifier package operations report", () => {
                 "--min-call-reduction",
                 "0.1778",
             ],
+            recommended_floor_status: "expected_matches",
+            recommended_floor_candidate_count: 1,
         });
     });
 

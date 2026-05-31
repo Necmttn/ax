@@ -711,6 +711,8 @@ describe("classifiers package-operations format", () => {
                     "--nearest-fixture",
                     "session-section-chunks/approval-alright-go",
                 ],
+                recommended_floor_status: "expected_matches",
+                recommended_floor_candidate_count: 1,
             },
             evidence_paths: [".ax/experiments/embedding-helper-review-e210.json"],
             totals: {
@@ -769,6 +771,8 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("routing policy recommended floor adjustments: call_reduction<=0.1778 (requested 0.25, gap 0.0722, threshold none)");
         expect(output).toContain("routing policy recommended floor query: mode=embedding-helper fact_kind=embedding_helper_hard_negative_candidate status=accepted source_fixture_id=session-section-chunks/none-start-building proposed_label=none threshold=none min_seed_count=2 min_positive_recall=0.9 min_call_reduction=0.1778 min_nearest_similarity=0.85 nearest_fixture_id=session-section-chunks/approval-alright-go");
         expect(output).toContain("routing policy recommended floor argv: bun src/cli/index.ts classifiers graph --mode embedding-helper --fact-kind embedding_helper_hard_negative_candidate --status accepted --source-fixture session-section-chunks/none-start-building --proposed-label none --threshold none --min-seed-count 2 --min-positive-recall 0.9 --min-call-reduction 0.1778 --min-nearest-similarity 0.85 --nearest-fixture session-section-chunks/approval-alright-go");
+        expect(output).toContain("routing policy recommended floor status: expected_matches");
+        expect(output).toContain("routing policy recommended floor candidates: 1");
         expect(output).toContain("routing policy next action: choose_reviewed_routing_threshold");
         expect(output).toContain("routing policy remediation: Use the selected reviewed threshold as an advisory routing policy.");
         expect(output).toContain("embedding helper facts:");

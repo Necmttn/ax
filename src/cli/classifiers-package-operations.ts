@@ -325,6 +325,8 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `routing policy recommended floor adjustments: ${routingPolicyRecommendedFloorAdjustments}`,
         `routing policy recommended floor query: ${routingPolicyRecommendedFloorQuery}`,
         `routing policy recommended floor argv: ${routingPolicyRecommendedFloorArgv}`,
+        `routing policy recommended floor status: ${routingPolicySummary.recommended_floor_status ?? "none"}`,
+        `routing policy recommended floor candidates: ${routingPolicySummary.recommended_floor_candidate_count ?? "none"}`,
         `routing policy next action: ${routingPolicySummary.next_action}`,
         `routing policy remediation: ${routingPolicySummary.remediation}`,
     ];
