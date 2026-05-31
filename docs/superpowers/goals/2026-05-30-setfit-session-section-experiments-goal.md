@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E386 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-no-match-e386.json`
+- Index continuation: E387 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-provenance-no-match-e387.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-match-e386.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-provenance-match-e387.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,53 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E387 - Add Suggested Query Provenance
+
+Question:
+- E386 bundles suggested query repairs, but can services tell where the
+  suggestion came from and why it is valid?
+
+Implementation:
+- Added `source` and `reason` to `query_suggestion`.
+- Suggested lifecycle graph-query repairs now identify
+  `source=lifecycle_available_value_counts` and
+  `reason=available_value_after_relaxing_value_equals`.
+- Text graph-health output now renders `query suggestion provenance`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-provenance-no-match-e387.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-provenance-match-e387.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-provenance-no-match-e387.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and a `query_suggestion` whose
+  `source` is `lifecycle_available_value_counts`, `reason` is
+  `available_value_after_relaxing_value_equals`, and `value_equals` is
+  `bind_inputs`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and the same suggestion provenance.
+- Text output renders `query suggestion provenance:
+  source=lifecycle_available_value_counts
+  reason=available_value_after_relaxing_value_equals`.
+
+Decision:
+- Services can now explain suggested lifecycle query repairs as coming from
+  available value counts after relaxing the exact value filter, rather than
+  treating the repair as an opaque hint.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E387 no-match report has expected `query_suggestion.source`,
+  `query_suggestion.reason`, and `query_suggestion.value_equals`.
+- E387 match report has `query_match_status=matched` and the same suggestion
+  provenance.
+- E387 text output includes the query-suggestion provenance line.
 
 ## E386 - Bundle Suggested Query Repair
 

@@ -477,6 +477,8 @@ export interface ClassifierGraphQuerySuggestion {
     readonly status: "expected_matches";
     readonly next_action: "run_suggested_query";
     readonly remediation: string;
+    readonly source: "lifecycle_available_value_counts";
+    readonly reason: "available_value_after_relaxing_value_equals";
     readonly query: ClassifierGraphHealthQuery;
     readonly argv: readonly string[];
 }
@@ -2517,6 +2519,8 @@ export function buildExecutionGraphHealthReport(input: {
                 status: querySuggestedStatus,
                 next_action: querySuggestedNextAction,
                 remediation: querySuggestedRemediation,
+                source: "lifecycle_available_value_counts",
+                reason: "available_value_after_relaxing_value_equals",
                 query: querySuggestedQuery,
                 argv: querySuggestedArgv,
             };

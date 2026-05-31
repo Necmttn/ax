@@ -294,6 +294,9 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
     const querySuggestion = report.query_suggestion === undefined
         ? "none"
         : `status=${report.query_suggestion.status} next_action=${report.query_suggestion.next_action} result_count=${report.query_suggestion.result_count} value_equals=${report.query_suggestion.value_equals}`;
+    const querySuggestionProvenance = report.query_suggestion === undefined
+        ? "none"
+        : `source=${report.query_suggestion.source} reason=${report.query_suggestion.reason}`;
     const lines = [
         "classifier package execution graph health",
         `decision: ${report.decision}`,
@@ -326,6 +329,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `query suggested next action: ${report.query_suggested_next_action ?? "none"}`,
         `query suggested remediation: ${report.query_suggested_remediation ?? "none"}`,
         `query suggestion: ${querySuggestion}`,
+        `query suggestion provenance: ${querySuggestionProvenance}`,
         `query suggested argv: ${report.query_suggested_argv?.join(" ") ?? "none"}`,
         `query suggested query: ${querySuggestedQuery}`,
         `nodes/edges/facts: ${report.totals.node_count}/${report.totals.edge_count}/${report.totals.fact_count}`,
