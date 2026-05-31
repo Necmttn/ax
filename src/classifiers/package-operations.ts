@@ -346,6 +346,7 @@ export interface ClassifierGraphLifecycleFact {
     readonly graph_id: string;
     readonly subject: string;
     readonly predicate: string;
+    readonly source_kind?: string;
     readonly value: unknown;
     readonly lifecycle_key?: string;
     readonly artifact_path?: string;
@@ -359,6 +360,7 @@ export interface ClassifierGraphEmbeddingHelperFact {
     readonly subject: string;
     readonly predicate: string;
     readonly object?: string;
+    readonly source_kind?: string;
     readonly value: unknown;
     readonly status?: string;
     readonly source_fixture_id?: string;
@@ -383,6 +385,7 @@ export interface ClassifierGraphHealthQuery {
     readonly mode: ClassifierGraphHealthMode;
     readonly operation_id?: string;
     readonly artifact_path?: string;
+    readonly source_kind?: string;
     readonly predicate?: string;
     readonly subject?: string;
     readonly value_contains?: string;
@@ -1795,6 +1798,7 @@ export function buildExecutionGraphHealthReport(input: {
         mode: input.query?.mode ?? "summary",
         ...(input.query?.operation_id ? { operation_id: input.query.operation_id } : {}),
         ...(input.query?.artifact_path ? { artifact_path: input.query.artifact_path } : {}),
+        ...(input.query?.source_kind ? { source_kind: input.query.source_kind } : {}),
         ...(input.query?.predicate ? { predicate: input.query.predicate } : {}),
         ...(input.query?.subject ? { subject: input.query.subject } : {}),
         ...(input.query?.value_contains ? { value_contains: input.query.value_contains } : {}),
@@ -1905,6 +1909,7 @@ export function buildExecutionGraphHealthReport(input: {
                 graph_id: fact.graph_id,
                 subject: fact.subject,
                 predicate: fact.predicate,
+                ...(fact.source_kind === undefined ? {} : { source_kind: fact.source_kind }),
                 value,
                 ...(jsonString(properties.lifecycle_key) === undefined ? {} : { lifecycle_key: jsonString(properties.lifecycle_key) as string }),
                 ...(jsonString(properties.artifact_path) === undefined ? {} : { artifact_path: jsonString(properties.artifact_path) as string }),
@@ -1947,6 +1952,7 @@ export function buildExecutionGraphHealthReport(input: {
                 subject: fact.subject,
                 predicate: fact.predicate,
                 ...(fact.object === undefined ? {} : { object: fact.object }),
+                ...(fact.source_kind === undefined ? {} : { source_kind: fact.source_kind }),
                 value,
                 ...(jsonString(properties.status) === null ? {} : { status: jsonString(properties.status) as string }),
                 ...(jsonString(properties.source_fixture_id) === null ? {} : { source_fixture_id: jsonString(properties.source_fixture_id) as string }),
@@ -1990,6 +1996,7 @@ export function buildExecutionGraphHealthReport(input: {
             (!query.artifact_path ||
                 fact.artifact_path === query.artifact_path ||
                 fact.evidence_paths.includes(query.artifact_path)) &&
+            (!query.source_kind || fact.source_kind === query.source_kind) &&
             (!query.predicate || fact.predicate === query.predicate) &&
             (!query.subject || fact.subject === query.subject) &&
             graphFactValueContains(fact.value, query.value_contains)
@@ -2002,6 +2009,7 @@ export function buildExecutionGraphHealthReport(input: {
                 fact.source_fixture_id === query.artifact_path ||
                 fact.subject === query.artifact_path ||
                 fact.object === query.artifact_path) &&
+            (!query.source_kind || fact.source_kind === query.source_kind) &&
             (!query.predicate || fact.predicate === query.predicate) &&
             (!query.subject || fact.subject === query.subject) &&
             graphFactValueContains(fact.value, query.value_contains)

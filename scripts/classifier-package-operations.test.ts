@@ -976,6 +976,19 @@ describe("classifier package operations report", () => {
                 predicate: "review_pipeline_prepared_argv",
                 value_json: JSON.stringify(["bun", "src/cli/index.ts"]),
                 evidence_edges_json: JSON.stringify(["edge:lifecycle"]),
+                source_kind: "classifier_package_execution",
+                properties_json: JSON.stringify({
+                    lifecycle_key: "review_pipeline_lifecycle",
+                    artifact_path: ".ax/experiments/workflow-candidate-proposal-review-current.json",
+                }),
+            }, {
+                graph_id: "fact:lifecycle:argv-other-source",
+                kind: "classifier_lifecycle_status",
+                subject: "classifier_lifecycle:workflow_candidate_proposal",
+                predicate: "review_pipeline_prepared_argv",
+                value_json: JSON.stringify(["bun", "src/cli/index.ts"]),
+                evidence_edges_json: JSON.stringify(["edge:lifecycle"]),
+                source_kind: "other_projection",
                 properties_json: JSON.stringify({
                     lifecycle_key: "review_pipeline_lifecycle",
                     artifact_path: ".ax/experiments/workflow-candidate-proposal-review-current.json",
@@ -996,6 +1009,7 @@ describe("classifier package operations report", () => {
                 mode: "lifecycle",
                 predicate: "review_pipeline_prepared_argv",
                 subject: "classifier_lifecycle:workflow_candidate_proposal",
+                source_kind: "classifier_package_execution",
                 value_contains: "src/cli/index.ts",
             },
         });
@@ -1003,8 +1017,9 @@ describe("classifier package operations report", () => {
         expect(report.query.mode).toBe("lifecycle");
         expect(report.query.predicate).toBe("review_pipeline_prepared_argv");
         expect(report.query.subject).toBe("classifier_lifecycle:workflow_candidate_proposal");
+        expect(report.query.source_kind).toBe("classifier_package_execution");
         expect(report.query.value_contains).toBe("src/cli/index.ts");
-        expect(report.totals.lifecycle_fact_count).toBe(4);
+        expect(report.totals.lifecycle_fact_count).toBe(5);
         expect(report.result_totals.lifecycle_fact_count).toBe(1);
         expect(report.lifecycle_facts[0]).toMatchObject({
             predicate: "review_pipeline_prepared_argv",

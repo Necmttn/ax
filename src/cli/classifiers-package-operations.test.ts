@@ -538,6 +538,7 @@ describe("classifiers package-operations format", () => {
                 mode: "lifecycle",
                 predicate: "review_pipeline_prepared_argv",
                 subject: "classifier_lifecycle:workflow_candidate_proposal",
+                source_kind: "classifier_package_execution",
                 value_contains: "src/cli/index.ts",
             },
             operations: [],
@@ -587,6 +588,7 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("mode: lifecycle");
         expect(output).toContain("filter subject: classifier_lifecycle:workflow_candidate_proposal");
         expect(output).toContain("filter predicate: review_pipeline_prepared_argv");
+        expect(output).toContain("filter source kind: classifier_package_execution");
         expect(output).toContain("filter value contains: src/cli/index.ts");
         expect(output).toContain("execution/guard/artifact/lifecycle/helper facts: 0/0/0/1/0");
         expect(output).toContain("lifecycle facts:");
