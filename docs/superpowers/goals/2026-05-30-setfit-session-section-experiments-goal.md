@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E391 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-change-status-no-match-e391.json`
+- Index continuation: E392 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-counts-no-match-e392.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-change-status-match-e391.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-counts-match-e392.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,50 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E392 - Expose Suggested Query Filter Change Counts
+
+Question:
+- E391 marks each suggested filter change as `changed` or `unchanged`, but can
+  services decide whether a suggestion contains actionable repairs without
+  scanning every `filter_changes` row?
+
+Implementation:
+- Added `changed_filter_count` and `unchanged_filter_count` to
+  `query_suggestion`.
+- Lifecycle graph-query suggestions now summarize real query repairs separately
+  from already-matching filter suggestions.
+- Text graph-health output now renders `query suggestion filter counts`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-counts-no-match-e392.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-counts-match-e392.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-counts-no-match-e392.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match`,
+  `query_suggestion.changed_filter_count=1`, and
+  `query_suggestion.unchanged_filter_count=0`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched`,
+  `query_suggestion.changed_filter_count=0`, and
+  `query_suggestion.unchanged_filter_count=1`.
+- Text output renders `query suggestion filter counts: changed=1 unchanged=0`.
+
+Decision:
+- Services can now route suggestions by aggregate repair/no-op counts before
+  opening detailed filter rows.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E392 no-match report has changed/unchanged counts `1/0`.
+- E392 match report has changed/unchanged counts `0/1`.
+- E392 text output includes the filter-count summary.
 
 ## E391 - Expose Suggested Query Filter Change Status
 

@@ -474,6 +474,8 @@ export interface ClassifierGraphHealthQuery {
 export interface ClassifierGraphQuerySuggestion {
     readonly value_equals: string;
     readonly result_count: number;
+    readonly changed_filter_count: number;
+    readonly unchanged_filter_count: number;
     readonly status: "expected_matches";
     readonly next_action: "run_suggested_query";
     readonly remediation: string;
@@ -2524,6 +2526,8 @@ export function buildExecutionGraphHealthReport(input: {
             : {
                 value_equals: querySuggestedValueEquals,
                 result_count: querySuggestedResultCount,
+                changed_filter_count: query.value_equals === querySuggestedValueEquals ? 0 : 1,
+                unchanged_filter_count: query.value_equals === querySuggestedValueEquals ? 1 : 0,
                 status: querySuggestedStatus,
                 next_action: querySuggestedNextAction,
                 remediation: querySuggestedRemediation,

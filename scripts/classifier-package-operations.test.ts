@@ -1278,6 +1278,8 @@ describe("classifier package operations report", () => {
         expect(report.query_suggestion).toEqual({
             value_equals: "bind_inputs",
             result_count: 1,
+            changed_filter_count: 1,
+            unchanged_filter_count: 0,
             status: "expected_matches",
             next_action: "run_suggested_query",
             remediation: "Run the suggested graph query to inspect the available classifier lifecycle facts.",
