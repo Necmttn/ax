@@ -118,7 +118,7 @@ export interface WorkflowCandidateProposalEvidence {
 
 export interface WorkflowCandidateProposalListReport {
     readonly schema: "ax.workflow_candidate_proposal_list.v1";
-    readonly prefix: "guidance__workflow_candidate__";
+    readonly prefix: string;
     readonly query: {
         readonly limit: number;
         readonly status: WorkflowCandidateProposalStatusFilter;
@@ -1011,6 +1011,10 @@ WHERE source_kind = $sourceKind AND kind = "classifier_candidate_evidence";
 
 const WORKFLOW_CANDIDATE_PROPOSAL_PREFIX = "guidance__workflow_candidate__" as const;
 const WORKFLOW_CANDIDATE_HARNESS_PROPOSAL_PREFIX = "harness_check__workflow_candidate__" as const;
+const WORKFLOW_CANDIDATE_PROPOSAL_PREFIXES = [
+    WORKFLOW_CANDIDATE_PROPOSAL_PREFIX,
+    WORKFLOW_CANDIDATE_HARNESS_PROPOSAL_PREFIX,
+] as const;
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
     typeof value === "object" && value !== null && !Array.isArray(value);
@@ -2372,7 +2376,7 @@ export function buildWorkflowCandidateProposalListReport(input: {
     );
     return {
         schema: "ax.workflow_candidate_proposal_list.v1",
-        prefix: WORKFLOW_CANDIDATE_PROPOSAL_PREFIX,
+        prefix: WORKFLOW_CANDIDATE_PROPOSAL_PREFIXES.join("|"),
         query: {
             limit: input.limit,
             status: input.status,
@@ -6000,7 +6004,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     (SELECT task_path FROM experiment WHERE proposal = $parent.id LIMIT 1)[0].task_path AS task_path,
                     type::string(updated_at) AS updated_at
                 FROM proposal
-                WHERE string::starts_with(dedupe_sig, ${surrealString(WORKFLOW_CANDIDATE_PROPOSAL_PREFIX)})
+                WHERE (${WORKFLOW_CANDIDATE_PROPOSAL_PREFIXES.map((prefix) => `string::starts_with(dedupe_sig, ${surrealString(prefix)})`).join(" OR ")})
                     ${status === "all" ? "" : `AND status = ${surrealString(status)}`}
                     AND (string::lowercase(title) CONTAINS ${surrealString(topic.toLowerCase())} OR string::lowercase(hypothesis) CONTAINS ${surrealString(topic.toLowerCase())})
                 ORDER BY updated_at DESC, frequency DESC
@@ -6263,7 +6267,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
         if (input.listProposals) {
             const status = input.proposalStatus ?? "all";
             const where = [
-                `string::starts_with(dedupe_sig, ${surrealString(WORKFLOW_CANDIDATE_PROPOSAL_PREFIX)})`,
+                `(${WORKFLOW_CANDIDATE_PROPOSAL_PREFIXES.map((prefix) => `string::starts_with(dedupe_sig, ${surrealString(prefix)})`).join(" OR ")})`,
                 ...(status === "all" ? [] : [`status = ${surrealString(status)}`]),
                 ...(input.search === undefined ? [] : [
                     `(string::lowercase(title) CONTAINS ${surrealString(input.search.toLowerCase())} OR string::lowercase(hypothesis) CONTAINS ${surrealString(input.search.toLowerCase())})`,

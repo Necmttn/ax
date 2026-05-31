@@ -33,11 +33,12 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E442 adds
-  `.ax/experiments/classifier-lifecycle-insight-graph-recommendations-e442.json`,
-  `.ax/experiments/workflow-topic-review-coverage-harness-proposal-e442.json`
+- Index continuation: E443 adds
+  `.ax/experiments/workflow-topic-review-coverage-harness-proposal-apply-e443.json`,
+  `.ax/experiments/workflow-topic-review-coverage-harness-proposal-list-e443.json`,
+  `.ax/experiments/workflow-topic-review-coverage-harness-proposal-list-e443.txt`,
   and
-  `.ax/experiments/workflow-topic-review-coverage-harness-proposal-e442.txt`
+  `.ax/experiments/workflow-topic-review-coverage-harness-proposal-post-apply-e443.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -49,8 +50,59 @@ Current recommendation:
   closed the reviewed-coverage gap, and the successful loop is now persisted as
   lifecycle graph facts. Lifecycle insight now turns the persisted `gap_closed`
   fact into a concrete harness-proposal dry run. The immediate bottleneck is
-  applying or reviewing that harness proposal and then producing a passing
+  reviewing/accepting that harness proposal and then producing a passing
   executable check before guidance promotion.
+
+## E443 - Apply and Rediscover Review Coverage Harness Proposal
+
+Question:
+- Can the dry-run `harness_check` proposal from E442 be written to Surreal and
+  rediscovered through the workflow-candidate proposal list and topic report?
+
+Implementation:
+- Ran the E442 harness proposal command without `--proposal-dry-run`, applying
+  the 3 proposal/evidence statements to Surreal.
+- Extended workflow-candidate proposal discovery to include both
+  `guidance__workflow_candidate__` and
+  `harness_check__workflow_candidate__` dedupe prefixes.
+- Updated proposal-list reporting so the prefix field reflects both workflow
+  proposal families.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-review-coverage-harness-proposal-apply-e443.json`
+- `.ax/experiments/workflow-topic-review-coverage-harness-proposal-list-e443.json`
+- `.ax/experiments/workflow-topic-review-coverage-harness-proposal-list-e443.txt`
+- `.ax/experiments/workflow-topic-review-coverage-harness-proposal-post-apply-e443.json`
+
+Results:
+- The apply report has `harness_proposals.dry_run=false` and
+  `emitted_proposal_count=1`.
+- The proposal list now returns
+  `harness_check__workflow_candidate__df1d675ec48a9208`, form
+  `harness_check`, status `open`.
+- The post-apply topic report now has
+  `decision=workflow_topic_evidence_found`, `proposal_count=1`, and
+  `ranked_candidate_count=1`.
+- The listed proposal cites
+  `classifier_candidate_group:hybrid-window/verification_or_recovery_signal`.
+
+Decision:
+- E443 proves the accepted classifier review fact can become durable proposal
+  state and be rediscovered as topic evidence. The next aligned slice is to
+  review/accept this `harness_check` proposal and create a passing executable
+  harness fact before guidance promotion.
+
+Verification:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --search=review-coverage --source-kind=hybrid_window_classifier_projection --include-review-facts --promote-harness-proposals --limit=10 --out .ax/experiments/workflow-topic-review-coverage-harness-proposal-apply-e443.json --json
+bun src/cli/index.ts classifiers workflow-candidates --list-proposals --search=review-coverage --proposal-status=all --expand-evidence --limit=10 --out .ax/experiments/workflow-topic-review-coverage-harness-proposal-list-e443.json --json
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --search=review-coverage --source-kind=hybrid_window_classifier_projection --include-review-facts --include-harness-facts --limit=10 --out .ax/experiments/workflow-topic-review-coverage-harness-proposal-post-apply-e443.json --json
+bun -e 'const apply=await Bun.file(".ax/experiments/workflow-topic-review-coverage-harness-proposal-apply-e443.json").json(); const list=await Bun.file(".ax/experiments/workflow-topic-review-coverage-harness-proposal-list-e443.json").json(); const post=await Bun.file(".ax/experiments/workflow-topic-review-coverage-harness-proposal-post-apply-e443.json").json(); if (apply.harness_proposals?.dry_run !== false || apply.harness_proposals?.emitted_proposal_count !== 1) throw new Error(JSON.stringify(apply.harness_proposals)); if (list.totals?.proposal_count !== 1 || list.proposals?.[0]?.form !== "harness_check") throw new Error(JSON.stringify(list)); if (post.decision !== "workflow_topic_evidence_found" || post.totals?.proposal_count !== 1) throw new Error(JSON.stringify({decision:post.decision, totals:post.totals, failures:post.failures}));'
+bun src/cli/index.ts classifiers workflow-candidates --list-proposals --search=review-coverage --proposal-status=all --expand-evidence --limit=10 > .ax/experiments/workflow-topic-review-coverage-harness-proposal-list-e443.txt
+rg -n "workflow candidate proposals|prefix: guidance__workflow_candidate__\\|harness_check__workflow_candidate__|harness_check__workflow_candidate__df1d675ec48a9208|status: open|verification_or_recovery_signal" .ax/experiments/workflow-topic-review-coverage-harness-proposal-list-e443.txt
+```
+
+DB-backed apply, proposal-list, and post-apply topic evidence checks passed.
 
 ## E442 - Promote Accepted Review Fact to Harness Proposal Dry Run
 

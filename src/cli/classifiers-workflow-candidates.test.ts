@@ -666,13 +666,21 @@ describe("classifiers workflow-candidates", () => {
                 artifact_path: "CLAUDE.md",
                 task_path: ".ax/tasks/guidance__workflow_candidate__abc.md",
                 updated_at: "2026-05-30T00:00:00Z",
+            }, {
+                dedupe_sig: "harness_check__workflow_candidate__def",
+                title: "Require workflow evidence for review-coverage",
+                form: "harness_check",
+                status: "open",
+                confidence: "medium",
+                frequency: 1,
+                updated_at: "2026-05-31T00:00:00Z",
             }],
         });
 
         expect(report.totals).toMatchObject({
-            proposal_count: 1,
+            proposal_count: 2,
             accepted_count: 1,
-            open_count: 0,
+            open_count: 1,
             rejected_count: 0,
             scaffolded_experiment_count: 1,
         });
@@ -680,7 +688,9 @@ describe("classifiers workflow-candidates", () => {
         expect(output).toContain("workflow candidate proposals");
         expect(output).toContain("status: all");
         expect(output).toContain("search: surrealml");
+        expect(output).toContain("prefix: guidance__workflow_candidate__|harness_check__workflow_candidate__");
         expect(output).toContain("guidance__workflow_candidate__abc");
+        expect(output).toContain("harness_check__workflow_candidate__def");
         expect(output).toContain("target: AGENTS.md#Workflow Candidate Guardrails");
         expect(output).toContain("experiment: scaffolded (experiment:abc)");
     });
