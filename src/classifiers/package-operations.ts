@@ -493,6 +493,7 @@ export interface ClassifierPackageExecutionGraphHealthReport {
     readonly query_suggested_result_count?: number;
     readonly query_suggested_status?: "expected_matches";
     readonly query_suggested_next_action?: "run_suggested_query";
+    readonly query_suggested_remediation?: string;
     readonly query_suggested_query?: ClassifierGraphHealthQuery;
     readonly query_suggested_argv?: readonly string[];
     readonly totals: {
@@ -2456,6 +2457,9 @@ export function buildExecutionGraphHealthReport(input: {
     const querySuggestedResultCount = querySuggestedValue?.count;
     const querySuggestedStatus = querySuggestedValue === undefined ? undefined : "expected_matches" as const;
     const querySuggestedNextAction = querySuggestedValue === undefined ? undefined : "run_suggested_query" as const;
+    const querySuggestedRemediation = querySuggestedValue === undefined
+        ? undefined
+        : "Run the suggested graph query to inspect the available classifier lifecycle facts.";
     const querySuggestedQuery: ClassifierGraphHealthQuery | undefined = querySuggestedValueEquals === undefined
         ? undefined
         : { ...query, value_equals: querySuggestedValueEquals };
@@ -2710,6 +2714,7 @@ export function buildExecutionGraphHealthReport(input: {
         ...(querySuggestedResultCount === undefined ? {} : { query_suggested_result_count: querySuggestedResultCount }),
         ...(querySuggestedStatus === undefined ? {} : { query_suggested_status: querySuggestedStatus }),
         ...(querySuggestedNextAction === undefined ? {} : { query_suggested_next_action: querySuggestedNextAction }),
+        ...(querySuggestedRemediation === undefined ? {} : { query_suggested_remediation: querySuggestedRemediation }),
         ...(querySuggestedQuery === undefined ? {} : { query_suggested_query: querySuggestedQuery }),
         ...(querySuggestedArgv === undefined ? {} : { query_suggested_argv: querySuggestedArgv }),
         totals: {

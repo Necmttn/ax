@@ -1274,6 +1274,7 @@ describe("classifier package operations report", () => {
         expect(report.query_suggested_result_count).toBe(1);
         expect(report.query_suggested_status).toBe("expected_matches");
         expect(report.query_suggested_next_action).toBe("run_suggested_query");
+        expect(report.query_suggested_remediation).toBe("Run the suggested graph query to inspect the available classifier lifecycle facts.");
     });
 
     test("summarizes lifecycle graph fact values", () => {

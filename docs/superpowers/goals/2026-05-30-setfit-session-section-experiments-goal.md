@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E384 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-next-action-no-match-e384.json`
+- Index continuation: E385 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-remediation-no-match-e385.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-next-action-match-e384.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-remediation-match-e385.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,53 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E385 - Expose Suggested Query Remediation
+
+Question:
+- E384 gives services the suggested next action, but can they present operator
+  guidance without hardcoding remediation copy client-side?
+
+Implementation:
+- Added `query_suggested_remediation` to classifier graph health reports.
+- Lifecycle graph queries with a ranked suggested value now explain that the
+  service should run the suggested graph query to inspect available classifier
+  lifecycle facts.
+- Text graph-health output now renders `query suggested remediation`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-remediation-no-match-e385.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-remediation-match-e385.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-remediation-no-match-e385.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match`,
+  `query_suggested_next_action=run_suggested_query`, and
+  `query_suggested_remediation=Run the suggested graph query to inspect the
+  available classifier lifecycle facts.`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and the same suggested remediation.
+- Text output renders `query suggested remediation: Run the suggested graph
+  query to inspect the available classifier lifecycle facts.`.
+
+Decision:
+- Services can now surface the suggested-query repair path as a complete
+  status/action/remediation bundle, instead of mixing report data with
+  hardcoded UI guidance.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E385 no-match report has `query_match_status=no_match`,
+  `query_suggested_next_action=run_suggested_query`, and the expected
+  `query_suggested_remediation`.
+- E385 match report has `query_match_status=matched` and the same suggested
+  remediation.
+- E385 text output includes the suggested-remediation line.
 
 ## E384 - Expose Suggested Query Next Action
 

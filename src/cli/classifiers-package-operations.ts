@@ -321,6 +321,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `query suggested result count: ${report.query_suggested_result_count ?? "none"}`,
         `query suggested status: ${report.query_suggested_status ?? "none"}`,
         `query suggested next action: ${report.query_suggested_next_action ?? "none"}`,
+        `query suggested remediation: ${report.query_suggested_remediation ?? "none"}`,
         `query suggested argv: ${report.query_suggested_argv?.join(" ") ?? "none"}`,
         `query suggested query: ${querySuggestedQuery}`,
         `nodes/edges/facts: ${report.totals.node_count}/${report.totals.edge_count}/${report.totals.fact_count}`,
