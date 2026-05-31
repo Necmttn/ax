@@ -1758,6 +1758,19 @@ describe("classifiers workflow-candidates", () => {
             review_issue_status: "needs_review_repair",
             review_issue_next_action: "Fix review issue rows before applying reviewed coverage facts.",
             review_issue_repair_command: "bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/reviewed-coverage-gaps.jsonl --sync-coverage-review-brief=.ax/experiments/reviewed-coverage-gaps.md --coverage-review-brief=.ax/experiments/reviewed-coverage-gaps.md --out=.ax/experiments/reviewed-coverage-gaps.json --json",
+            review_issue_repair_command_argv: [
+                "bun",
+                "src/cli/index.ts",
+                "classifiers",
+                "workflow-candidates",
+                "--review-coverage",
+                "--source-kind=hybrid_window_classifier_projection",
+                "--coverage-review-pack=.ax/experiments/reviewed-coverage-gaps.jsonl",
+                "--sync-coverage-review-brief=.ax/experiments/reviewed-coverage-gaps.md",
+                "--coverage-review-brief=.ax/experiments/reviewed-coverage-gaps.md",
+                "--out=.ax/experiments/reviewed-coverage-gaps.json",
+                "--json",
+            ],
             review_pipeline_stage: "needs_review_repair",
             review_pipeline_next_action: "Fix review issue rows before applying reviewed coverage facts.",
             review_pipeline_command_status: "ready_to_execute",
@@ -1821,6 +1834,7 @@ describe("classifiers workflow-candidates", () => {
         expect(text).toContain("coverage review pipeline command output check next action: Execute the pipeline command, then verify every required output artifact path exists.");
         expect(text).toContain("coverage review pipeline command output checks: review_brief@8=pending_execution, readiness_report@9=pending_execution");
         expect(text).toContain("coverage review issue repair command: bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/reviewed-coverage-gaps.jsonl --sync-coverage-review-brief=.ax/experiments/reviewed-coverage-gaps.md --coverage-review-brief=.ax/experiments/reviewed-coverage-gaps.md --out=.ax/experiments/reviewed-coverage-gaps.json --json");
+        expect(text).toContain("coverage review issue repair argv: bun | src/cli/index.ts | classifiers | workflow-candidates | --review-coverage | --source-kind=hybrid_window_classifier_projection | --coverage-review-pack=.ax/experiments/reviewed-coverage-gaps.jsonl | --sync-coverage-review-brief=.ax/experiments/reviewed-coverage-gaps.md | --coverage-review-brief=.ax/experiments/reviewed-coverage-gaps.md | --out=.ax/experiments/reviewed-coverage-gaps.json | --json");
         expect(text).toContain("coverage review issue counts: missing_review_rationale=1, missing_reviewer=1, missing_reviewed_at=1");
         expect(text).toContain("coverage review issue scope counts: base_apply=1, production_apply=2");
         expect(text).toContain("coverage review issue scope fixtures: base_apply=1, production_apply=1");
@@ -2841,6 +2855,7 @@ describe("classifiers workflow-candidates", () => {
         expect(summary.review_issue_fixture_count).toBe(0);
         expect(summary.review_issue_candidate_count).toBe(0);
         expect(summary.review_issue_repair_command).toBeUndefined();
+        expect(summary.review_issue_repair_command_argv).toBeUndefined();
         expect(summary.apply_audit_rows).toEqual([{
             fixture_id: "workflow-candidate-review-coverage/verification_or_recovery_signal/a",
             candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
@@ -2857,6 +2872,7 @@ describe("classifiers workflow-candidates", () => {
         expect(text).toContain("coverage review issue status: review_repair_complete");
         expect(text).toContain("coverage review issue next action: Review issue repairs are complete.");
         expect(text).not.toContain("coverage review issue repair command:");
+        expect(text).not.toContain("coverage review issue repair argv:");
         expect(text).toContain("coverage review audit rows: 1");
         expect(text).toContain(
             `coverage review audit row: accept fixture=workflow-candidate-review-coverage/verification_or_recovery_signal/a candidate=classifier_candidate_group:hybrid-window/verification_or_recovery_signal fact=${summary.projected_fact_ids[0]} reviewer=reviewer@example.test reviewed_at=2026-05-31T10:00:00Z`,

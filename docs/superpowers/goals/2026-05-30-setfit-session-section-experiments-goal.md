@@ -33,17 +33,73 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E360 adds
-  `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-next-action-e360.json`
+- Index continuation: E361 adds
+  `.ax/experiments/workflow-candidate-review-coverage-repair-argv-e361.json`
   and
-  `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-next-action-e360.txt`
-  as the latest Embedding/SVM helper evidence.
+  `.ax/experiments/workflow-candidate-review-coverage-repair-argv-e361.txt`
+  as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
   append-only fixtures, graph projection, and workflow/harness usefulness
   checks.
 - The immediate bottleneck is review throughput, not another expensive model
   run.
+
+## E361 - Expose Review Issue Repair Argv
+
+Question:
+- Can services repair coverage review issue queues without parsing the
+  shell-style repair command?
+
+Implementation:
+- Added `review_issue_repair_command_argv` to the coverage review readiness
+  summary when review issue rows require repair.
+- Text coverage review output now renders
+  `coverage review issue repair argv: ...`.
+- Complete repair summaries omit the argv when no review issue rows remain, so
+  service callers can distinguish active repair work from completed repair
+  state.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e268.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e268.md --out=.ax/experiments/workflow-candidate-review-coverage-repair-argv-e361.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e268.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e268.md --out=.ax/experiments/workflow-candidate-review-coverage-repair-argv-e361.json > .ax/experiments/workflow-candidate-review-coverage-repair-argv-e361.txt
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-repair-argv-e361.json`
+- `.ax/experiments/workflow-candidate-review-coverage-repair-argv-e361.txt`
+
+Results:
+- Missing-rationale readiness reports
+  `review_issue_status=needs_review_repair`.
+- JSON exposes `coverage_review.review_issue_repair_command_argv` with the
+  executable argv form of the repair command.
+- Text output renders `coverage review issue repair argv: ...`.
+- The same summary still keeps the shell-style
+  `review_issue_repair_command` for human copy/paste compatibility.
+
+Decision:
+- E361 removes one more shell parsing requirement from the review-throughput
+  path. FX services can now execute review issue repair commands from the argv
+  array while humans still see the readable command.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-repair-argv-e361.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+cr = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-repair-argv-e361.json").read_text())["coverage_review"]
+text = Path(".ax/experiments/workflow-candidate-review-coverage-repair-argv-e361.txt").read_text()
+assert cr["review_issue_status"] == "needs_review_repair"
+assert cr["review_issue_repair_command_argv"][:5] == ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates", "--review-coverage"]
+assert "--coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e268.jsonl" in cr["review_issue_repair_command_argv"]
+assert "--out=.ax/experiments/workflow-candidate-review-coverage-repair-argv-e361.json" in cr["review_issue_repair_command_argv"]
+assert "coverage review issue repair argv: bun | src/cli/index.ts | classifiers | workflow-candidates | --review-coverage" in text
+PY
+```
 
 ## Hypothesis
 

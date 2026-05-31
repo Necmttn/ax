@@ -462,6 +462,7 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly review_issue_candidate_count: number;
     readonly review_issue_status: WorkflowCandidateReviewCoverageReviewIssueStatus;
     readonly review_issue_next_action: string;
+    readonly review_issue_repair_command_argv?: readonly string[];
     readonly review_issue_repair_command?: string;
     readonly review_pipeline_stage: WorkflowCandidateReviewCoveragePipelineStage;
     readonly review_pipeline_next_action: string;
@@ -2137,6 +2138,9 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             ]),
             ...(report.coverage_review.review_issue_repair_command === undefined ? [] : [
                 `coverage review issue repair command: ${report.coverage_review.review_issue_repair_command}`,
+            ]),
+            ...(report.coverage_review.review_issue_repair_command_argv === undefined ? [] : [
+                `coverage review issue repair argv: ${report.coverage_review.review_issue_repair_command_argv.join(" | ")}`,
             ]),
             `coverage review issue counts: ${report.coverage_review.review_issue_counts.length === 0 ? "none" : report.coverage_review.review_issue_counts.map((item) => `${item.issue}=${item.count}`).join(", ")}`,
             `coverage review issue scope counts: ${report.coverage_review.review_issue_scope_counts.length === 0 ? "none" : report.coverage_review.review_issue_scope_counts.map((item) => `${item.blocking_scope}=${item.count}`).join(", ")}`,
@@ -4776,6 +4780,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         review_issue_candidate_count: reviewIssueCandidateCount,
         review_issue_status: reviewIssueStatus,
         review_issue_next_action: reviewIssueNextAction,
+        ...(reviewIssueRepairCommandArgv === undefined ? {} : { review_issue_repair_command_argv: reviewIssueRepairCommandArgv }),
         ...(reviewIssueRepairCommand === undefined ? {} : { review_issue_repair_command: reviewIssueRepairCommand }),
         review_pipeline_stage: reviewPipelineStage,
         review_pipeline_next_action: reviewPipelineNextAction,
