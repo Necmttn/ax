@@ -33,19 +33,65 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E438 adds
-  `.ax/experiments/classifier-lifecycle-route-execution-inspection-e438.json`
+- Index continuation: E439 adds
+  `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e439-apply.json`
   and
-  `.ax/experiments/classifier-lifecycle-route-execution-inspection-e438.txt`
+  `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e439-apply-post-apply.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
   append-only fixtures, graph projection, and workflow/harness usefulness
   checks.
 - Direct review execution/routing is now possible behind an explicit
-  `--execute-route` gate, route outputs can be inspected after execution, and
-  the current handoff artifacts are complete. The immediate bottleneck is now
-  the guarded production apply plus post-apply recheck.
+  `--execute-route` gate, route outputs can be inspected after execution, the
+  current handoff artifacts are complete, and the guarded production apply has
+  closed the reviewed-coverage gap. The immediate bottleneck is now projecting
+  this successful route/apply/recheck loop into durable lifecycle graph facts
+  and deciding which reviewed classifier candidates should become harness or
+  guidance proposals.
+
+## E439 - Apply Reviewed Route Facts and Recheck Coverage
+
+Question:
+- Once lifecycle route inspection reports `ready_for_apply`, can the guarded
+  production apply command update the graph and prove the review-coverage gap
+  closes?
+
+Implementation:
+- Executed the production apply command emitted by the completed review handoff.
+- The command included `--apply-review-facts`,
+  `--require-review-provenance`, and `--require-review-handoff`.
+- Ran the standalone post-apply review coverage recheck.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e439-apply.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e439-apply-post-apply.json`
+
+Results:
+- The guarded apply reported `apply_result=applied`.
+- `applied_statement_count=5`.
+- The embedded post-apply recheck reported `status=gap_closed`.
+- The standalone post-apply coverage report shows
+  `reviewed_candidate_count=2` and `unreviewed_candidate_count=1`.
+- The accepted `verification_or_recovery_signal` candidate now has
+  `review_fact_count=1` and topic `review-coverage`.
+
+Decision:
+- E439 proves the review route can move from classifier-derived candidate
+  evidence through review handoff, guarded graph apply, and post-apply coverage
+  closure. The next aligned slice is to project this route/apply/recheck result
+  into lifecycle graph facts so services can query the successful promotion
+  path without reading experiment artifacts directly.
+
+Verification:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371.md --review-facts=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371-review-facts.json --review-write-plan=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371-review-write-plan.json --apply-review-facts --require-review-provenance --require-review-handoff --out=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e439-apply.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=10 --out=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e439-apply-post-apply.json --json
+bun -e 'const apply=await Bun.file(".ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e439-apply.json").json(); const recheck=await Bun.file(".ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e439-apply-post-apply.json").json(); const cr=apply.coverage_review; if (cr.apply_result !== "applied" || cr.applied !== true || cr.applied_statement_count !== 5) throw new Error(`bad apply ${JSON.stringify({apply_result:cr.apply_result,applied:cr.applied,statements:cr.applied_statement_count})}`); if (cr.post_apply_recheck?.status !== "gap_closed") throw new Error(`bad embedded recheck ${JSON.stringify(cr.post_apply_recheck)}`); if (recheck.totals.reviewed_candidate_count !== 2 || recheck.totals.unreviewed_candidate_count !== 1) throw new Error(`bad recheck totals ${JSON.stringify(recheck.totals)}`);'
+rg -n '"apply_result": "applied"|"applied_statement_count": 5|"status": "gap_closed"|"reviewed_candidate_count": 2|"unreviewed_candidate_count": 1' .ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e439-apply.json .ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e439-apply-post-apply.json
+```
+
+Guarded apply and post-apply artifact assertions passed.
 
 ## E438 - Complete Route Review Handoff
 
