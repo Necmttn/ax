@@ -609,6 +609,7 @@ describe("classifiers package-operations format", () => {
                 repair_verification_next_action: "skip_verification",
                 repair_verification_remediation: "Verification is not needed because no repair execution is required.",
                 repair_verification_command_kind: "none",
+                repair_verification_expected_query_match_status: "not_applicable",
                 repair_verification_argv: [],
                 status: "expected_matches",
                 next_action: "run_suggested_query",
@@ -751,6 +752,8 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("query suggestion repair verification next action: skip_verification");
         expect(output).toContain("query suggestion repair verification remediation: Verification is not needed because no repair execution is required.");
         expect(output).toContain("query suggestion repair verification command kind: none");
+        expect(output).toContain("query suggestion repair verification expected query match: not_applicable");
+        expect(output).toContain("query suggestion repair verification expected result count: none");
         expect(output).toContain("query suggestion repair verification argv: none");
         expect(output).toContain("query suggestion repair query: none");
         expect(output).toContain("query suggestion provenance: source=lifecycle_available_value_counts reason=available_value_after_relaxing_value_equals");

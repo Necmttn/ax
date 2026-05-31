@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E411 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-command-kind-no-match-e411.json`
+- Index continuation: E412 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-expected-outcome-no-match-e412.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-command-kind-match-e411.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-expected-outcome-match-e412.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,58 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E412 - Expose Suggested Query Repair Verification Expected Outcome
+
+Question:
+- E411 exposes the verification command kind, but can services verify the
+  result of that command without reusing repair-level expected fields
+  implicitly?
+
+Implementation:
+- Added `repair_verification_expected_query_match_status` and optional
+  `repair_verification_expected_result_count` to `query_suggestion`.
+- Executable lifecycle graph-query repairs now expect `matched` and the
+  suggested result count.
+- No-op suggestions report `not_applicable` and omit the expected result count.
+- Text graph-health output now renders both verification expected outcome
+  fields.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-expected-outcome-no-match-e412.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-expected-outcome-match-e412.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-expected-outcome-no-match-e412.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match`,
+  `query_suggestion.repair_verification_expected_query_match_status=matched`,
+  and `repair_verification_expected_result_count=1`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched`,
+  `query_suggestion.repair_verification_expected_query_match_status=not_applicable`,
+  and omits `repair_verification_expected_result_count`.
+- Text output renders `query suggestion repair verification expected query
+  match` and `query suggestion repair verification expected result count`.
+
+Decision:
+- Verification execution is now self-contained for services: command kind,
+  argv, expected match status, expected result count, action, and remediation
+  are all under the verification namespace.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E412 no-match report has
+  `repair_verification_expected_query_match_status=matched`.
+- E412 no-match report has `repair_verification_expected_result_count=1`.
+- E412 match report has
+  `repair_verification_expected_query_match_status=not_applicable`.
+- E412 match report omits `repair_verification_expected_result_count`.
+- E412 text output includes both verification expected outcome lines.
 
 ## E411 - Expose Suggested Query Repair Verification Command Kind
 

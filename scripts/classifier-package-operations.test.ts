@@ -1312,6 +1312,8 @@ describe("classifier package operations report", () => {
             repair_verification_next_action: "run_verification_query",
             repair_verification_remediation: "Run the repair verification query and confirm it returns the expected matches.",
             repair_verification_command_kind: "classifier_graph_query_repair_verification",
+            repair_verification_expected_query_match_status: "matched",
+            repair_verification_expected_result_count: 1,
             repair_verification_argv: [
                 "bun",
                 "src/cli/index.ts",
