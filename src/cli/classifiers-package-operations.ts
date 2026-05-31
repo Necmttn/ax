@@ -6,7 +6,9 @@ import {
 } from "../classifiers/package-service.ts";
 import {
     buildClassifierLifecycleRouteBindingPreview,
+    buildClassifierLifecycleRouteExecutionPlan,
     writeClassifierLifecycleRouteBindingPreviewReport,
+    writeClassifierLifecycleRouteExecutionPlanReport,
 } from "../classifiers/package-operations.ts";
 import type {
     ClassifierPackageExecutionFactProjectionReport,
@@ -14,6 +16,7 @@ import type {
     ClassifierPackageExecutionSurrealApplyReport,
     ClassifierPackageExecutionSurrealWritePlanReport,
     ClassifierPackageExecutionGraphHealthReport,
+    ClassifierLifecycleRouteExecutionPlanReport,
     ClassifierLifecycleRouteBindingPreviewReport,
     ClassifierLifecycleInsightReport,
     ClassifierLifecycleRoutingSummaryReport,
@@ -959,6 +962,23 @@ export function renderClassifierLifecycleRouteBindingPreviewText(report: Classif
     ].join("\n");
 }
 
+export function renderClassifierLifecycleRouteExecutionPlanText(report: ClassifierLifecycleRouteExecutionPlanReport): string {
+    const lines = [
+        "classifier lifecycle route execution plan",
+        `decision: ${report.decision}`,
+        `active: ${report.active_route_kind ?? "none"} ${report.active_route_command_kind ?? "none"}`,
+        `requested execute: ${report.requested_execute ? "yes" : "no"}`,
+        `would execute: ${report.would_execute ? "yes" : "no"}`,
+        `command argv: ${report.command_argv.join(" ") || "none"}`,
+        `next action: ${report.next_action}`,
+        `remediation: ${report.remediation}`,
+    ];
+    for (const failure of report.failures) {
+        lines.push(`failure: ${failure}`);
+    }
+    return lines.join("\n");
+}
+
 const serviceErrorText = (error: unknown): string => {
     if (error && typeof error === "object" && "_tag" in error) {
         if ("message" in error && typeof error.message === "string") {
@@ -1200,6 +1220,8 @@ export const runClassifiersLifecycle = (
         readonly workflowStatusPath?: string;
         readonly routingSummary?: boolean;
         readonly routeInputValues?: Readonly<Record<string, string>>;
+        readonly routeExecutionPlan?: boolean;
+        readonly executeRoute?: boolean;
         readonly graphMode?: ClassifierGraphHealthMode;
         readonly predicate?: string;
         readonly subject?: string;
@@ -1213,15 +1235,20 @@ export const runClassifiersLifecycle = (
         const packages = yield* ClassifierPackageService;
         const graphQuery = buildLifecycleGraphQueryInput(input);
         const routeInputValues = input.routeInputValues;
-        const report = routeInputValues !== undefined
-            ? buildClassifierLifecycleRouteBindingPreview(
-                yield* packages.lifecycleRoutingSummaryReport({
-                    ...(input.root === undefined ? {} : { root: input.root }),
-                    ...(input.workflowStatusPath === undefined ? {} : { workflowStatusPath: input.workflowStatusPath }),
-                    ...(graphQuery === undefined ? {} : { graphQuery }),
-                }),
-                routeInputValues,
-            )
+        const routingSummary = routeInputValues === undefined
+            ? undefined
+            : yield* packages.lifecycleRoutingSummaryReport({
+                ...(input.root === undefined ? {} : { root: input.root }),
+                ...(input.workflowStatusPath === undefined ? {} : { workflowStatusPath: input.workflowStatusPath }),
+                ...(graphQuery === undefined ? {} : { graphQuery }),
+            });
+        const routePreview = routeInputValues === undefined || routingSummary === undefined
+            ? undefined
+            : buildClassifierLifecycleRouteBindingPreview(routingSummary, routeInputValues);
+        const report = routePreview !== undefined && input.routeExecutionPlan === true
+            ? buildClassifierLifecycleRouteExecutionPlan(routePreview, { allowExecute: input.executeRoute === true })
+            : routePreview !== undefined
+            ? routePreview
             : input.routingSummary === true
             ? input.out
                 ? yield* packages.writeLifecycleRoutingSummaryReport({
@@ -1251,13 +1278,17 @@ export const runClassifiersLifecycle = (
         if (input.json) {
             console.log(JSON.stringify(report, null, 2));
         } else if (!input.out) {
-            console.log(routeInputValues !== undefined
+            console.log(routePreview !== undefined && input.routeExecutionPlan === true
+                ? renderClassifierLifecycleRouteExecutionPlanText(report as ClassifierLifecycleRouteExecutionPlanReport)
+                : routePreview !== undefined
                 ? renderClassifierLifecycleRouteBindingPreviewText(report as ClassifierLifecycleRouteBindingPreviewReport)
                 : input.routingSummary === true
                 ? renderClassifierLifecycleRoutingSummaryText(report as ClassifierLifecycleRoutingSummaryReport)
                 : renderClassifierLifecycleInsightText(report as ClassifierLifecycleInsightReport));
         }
-        if (routeInputValues !== undefined && input.out !== undefined) {
+        if (routePreview !== undefined && input.routeExecutionPlan === true && input.out !== undefined) {
+            writeClassifierLifecycleRouteExecutionPlanReport(input.out, report as ClassifierLifecycleRouteExecutionPlanReport);
+        } else if (routePreview !== undefined && input.out !== undefined) {
             writeClassifierLifecycleRouteBindingPreviewReport(input.out, report as ClassifierLifecycleRouteBindingPreviewReport);
         }
         if (!input.out && report.decision !== "healthy") {

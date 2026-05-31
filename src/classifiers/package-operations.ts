@@ -1039,6 +1039,21 @@ export interface ClassifierLifecycleRouteBindingPreviewReport {
     readonly remediation: string;
 }
 
+export interface ClassifierLifecycleRouteExecutionPlanReport {
+    readonly schema: "ax.classifier_lifecycle_route_execution_plan.v1";
+    readonly source_schema: ClassifierLifecycleRouteBindingPreviewReport["schema"];
+    readonly decision: "ready_to_execute" | "denied_requires_execute" | "blocked";
+    readonly active_route_kind?: ClassifierLifecycleRoutingItem["kind"];
+    readonly active_route_command_kind?: string;
+    readonly requested_execute: boolean;
+    readonly would_execute: boolean;
+    readonly command_argv: readonly string[];
+    readonly preview: ClassifierLifecycleRouteBindingPreviewReport;
+    readonly failures: readonly string[];
+    readonly next_action: "execute_bound_route" | "request_execute_route" | "repair_binding_preview";
+    readonly remediation: string;
+}
+
 function reviewPipelineLifecycleNextAction(
     lifecycle: NonNullable<ClassifierLifecycleReviewStatus["review_pipeline_lifecycle"]>,
 ): ClassifierReviewPipelineLifecycleInsight["next_action"] {
@@ -3687,6 +3702,45 @@ export function buildClassifierLifecycleRouteBindingPreview(
     };
 }
 
+export function buildClassifierLifecycleRouteExecutionPlan(
+    preview: ClassifierLifecycleRouteBindingPreviewReport,
+    input: { readonly allowExecute: boolean },
+): ClassifierLifecycleRouteExecutionPlanReport {
+    const failures: string[] = [];
+    let decision: ClassifierLifecycleRouteExecutionPlanReport["decision"];
+    if (preview.decision !== "ready_to_execute") {
+        decision = "blocked";
+        failures.push(`route binding preview decision was ${preview.decision}`);
+    } else if (!input.allowExecute) {
+        decision = "denied_requires_execute";
+        failures.push("route execution requires --execute-route");
+    } else {
+        decision = "ready_to_execute";
+    }
+    return {
+        schema: "ax.classifier_lifecycle_route_execution_plan.v1",
+        source_schema: preview.schema,
+        decision,
+        ...(preview.active_route_kind === undefined ? {} : { active_route_kind: preview.active_route_kind }),
+        ...(preview.active_route_command_kind === undefined ? {} : { active_route_command_kind: preview.active_route_command_kind }),
+        requested_execute: input.allowExecute,
+        would_execute: decision === "ready_to_execute",
+        command_argv: preview.bound_argv,
+        preview,
+        failures,
+        next_action: decision === "ready_to_execute"
+            ? "execute_bound_route"
+            : decision === "denied_requires_execute"
+            ? "request_execute_route"
+            : "repair_binding_preview",
+        remediation: decision === "ready_to_execute"
+            ? "Execute the bound active route command."
+            : decision === "denied_requires_execute"
+            ? "Re-run with --execute-route to allow this bound route command."
+            : "Repair the route binding preview before executing.",
+    };
+}
+
 export function writeOperationsReport(path: string, report: ClassifierPackageOperationsReport): void {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
@@ -3761,6 +3815,11 @@ export function writeClassifierLifecycleRoutingSummaryReport(path: string, repor
 }
 
 export function writeClassifierLifecycleRouteBindingPreviewReport(path: string, report: ClassifierLifecycleRouteBindingPreviewReport): void {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+}
+
+export function writeClassifierLifecycleRouteExecutionPlanReport(path: string, report: ClassifierLifecycleRouteExecutionPlanReport): void {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
 }

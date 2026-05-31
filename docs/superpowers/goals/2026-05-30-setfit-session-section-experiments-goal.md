@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E434 adds
-  `.ax/experiments/classifier-lifecycle-route-binding-preview-e434.json`
+- Index continuation: E435 adds
+  `.ax/experiments/classifier-lifecycle-route-execution-plan-denied-e435.json`
   and
-  `.ax/experiments/classifier-lifecycle-route-binding-preview-e434.txt`
+  `.ax/experiments/classifier-lifecycle-route-execution-plan-allowed-e435.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,50 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E435 - Gate Bound Route Execution Plans
+
+Question:
+- Can lifecycle route execution keep preview and execution permission separate,
+  so a ready bound argv does not imply a service should run it automatically?
+
+Implementation:
+- Added `buildClassifierLifecycleRouteExecutionPlan` and the
+  `ax.classifier_lifecycle_route_execution_plan.v1` report shape.
+- Added compact execution-plan text rendering.
+- Added `ax classifiers lifecycle --route-execution-plan` and explicit
+  `--execute-route` gating.
+
+Artifacts:
+- `.ax/experiments/classifier-lifecycle-route-execution-plan-denied-e435.json`
+- `.ax/experiments/classifier-lifecycle-route-execution-plan-allowed-e435.json`
+- `.ax/experiments/classifier-lifecycle-route-execution-plan-denied-e435.txt`
+
+Results:
+- Without `--execute-route`, the real route plan reports
+  `decision=denied_requires_execute`, `would_execute=false`, and
+  `next_action=request_execute_route`.
+- The denied plan includes failure
+  `route execution requires --execute-route`.
+- With `--execute-route`, the same bound route reports
+  `decision=ready_to_execute`, `would_execute=true`, and
+  `next_action=execute_bound_route`.
+
+Decision:
+- E435 makes route execution safe-by-default. Services can preview and plan
+  freely, but actual route execution requires an explicit allow signal.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts
+bun src/cli/index.ts classifiers lifecycle --route-inputs reviewer=necmett,reviewed_at=2026-05-31T12:34:56.000Z --route-execution-plan --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --out .ax/experiments/classifier-lifecycle-route-execution-plan-denied-e435.json --json
+bun src/cli/index.ts classifiers lifecycle --route-inputs reviewer=necmett,reviewed_at=2026-05-31T12:34:56.000Z --route-execution-plan --execute-route --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --out .ax/experiments/classifier-lifecycle-route-execution-plan-allowed-e435.json --json
+bun src/cli/index.ts classifiers lifecycle --route-inputs reviewer=necmett,reviewed_at=2026-05-31T12:34:56.000Z --route-execution-plan --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute > .ax/experiments/classifier-lifecycle-route-execution-plan-denied-e435.txt || true
+bun -e 'const denied=await Bun.file(".ax/experiments/classifier-lifecycle-route-execution-plan-denied-e435.json").json(); const allowed=await Bun.file(".ax/experiments/classifier-lifecycle-route-execution-plan-allowed-e435.json").json(); if (denied.decision !== "denied_requires_execute" || denied.would_execute !== false || denied.requested_execute !== false) throw new Error(`bad denied ${JSON.stringify(denied)}`); if (!denied.failures.includes("route execution requires --execute-route")) throw new Error("missing denied failure"); if (allowed.decision !== "ready_to_execute" || allowed.would_execute !== true || allowed.requested_execute !== true) throw new Error(`bad allowed ${JSON.stringify(allowed)}`); if (!allowed.command_argv.includes("--review-provenance-reviewer=necmett")) throw new Error("allowed missing bound reviewer");'
+rg -n -- "decision: denied_requires_execute|requested execute: no|would execute: no|failure: route execution requires --execute-route|next action: request_execute_route" .ax/experiments/classifier-lifecycle-route-execution-plan-denied-e435.txt
+```
+
+Focused tests and artifact assertions passed.
 
 ## E434 - Preview Bound Active Route Commands
 

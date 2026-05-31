@@ -2007,6 +2007,8 @@ const classifiersLifecycleCommand = Command.make(
         workflowStatus: Flag.string("workflow-status").pipe(Flag.optional),
         routingSummary: Flag.boolean("routing-summary").pipe(Flag.withDefault(false)),
         routeInputs: Flag.string("route-inputs").pipe(Flag.optional),
+        routeExecutionPlan: Flag.boolean("route-execution-plan").pipe(Flag.withDefault(false)),
+        executeRoute: Flag.boolean("execute-route").pipe(Flag.withDefault(false)),
         graphMode: Flag.choice("graph-mode", ["summary", "guarded", "changed-artifacts", "evidence", "lifecycle", "embedding-helper"] as const).pipe(Flag.optional),
         predicate: Flag.string("predicate").pipe(Flag.optional),
         subject: Flag.string("subject").pipe(Flag.optional),
@@ -2015,7 +2017,7 @@ const classifiersLifecycleCommand = Command.make(
         out: Flag.string("out").pipe(Flag.optional),
         json: jsonFlag,
     },
-    ({ root, workflowStatus, routingSummary, routeInputs, graphMode, predicate, subject, valueContains, valueEquals, out, json }) => {
+    ({ root, workflowStatus, routingSummary, routeInputs, routeExecutionPlan, executeRoute, graphMode, predicate, subject, valueContains, valueEquals, out, json }) => {
         const rootPath = optionValue(root);
         const workflowStatusPath = optionValue(workflowStatus);
         const routeInputValues = parseRouteInputValues(routeInputs);
@@ -2030,6 +2032,8 @@ const classifiersLifecycleCommand = Command.make(
             ...(workflowStatusPath === undefined ? {} : { workflowStatusPath }),
             routingSummary,
             ...(routeInputValues === undefined ? {} : { routeInputValues }),
+            routeExecutionPlan,
+            executeRoute,
             ...(graphModeName === undefined ? {} : { graphMode: graphModeName }),
             ...(predicateName === undefined ? {} : { predicate: predicateName }),
             ...(subjectName === undefined ? {} : { subject: subjectName }),

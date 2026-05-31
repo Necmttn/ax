@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
 import { ClassifierPackageService } from "../classifiers/package-service.ts";
 import {
+    renderClassifierLifecycleRouteExecutionPlanText,
     renderClassifierLifecycleRouteBindingPreviewText,
     renderClassifierLifecycleInsightText,
     renderClassifierLifecycleRoutingSummaryText,
@@ -21,6 +22,7 @@ import {
     runClassifiersPackageOperations,
 } from "./classifiers-package-operations.ts";
 import type {
+    ClassifierLifecycleRouteExecutionPlanReport,
     ClassifierLifecycleRouteBindingPreviewReport,
     ClassifierLifecycleInsightReport,
     ClassifierLifecycleRoutingSummaryReport,
@@ -1655,6 +1657,45 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("missing values: none");
         expect(output).toContain("bound argv: bun src/cli/index.ts --review-provenance-reviewer=necmett");
         expect(output).toContain("next action: execute_bound_active_route");
+    });
+
+    test("renders classifier lifecycle route execution plans", () => {
+        const report: ClassifierLifecycleRouteExecutionPlanReport = {
+            schema: "ax.classifier_lifecycle_route_execution_plan.v1",
+            source_schema: "ax.classifier_lifecycle_route_binding_preview.v1",
+            decision: "denied_requires_execute",
+            active_route_kind: "review_pipeline_action",
+            active_route_command_kind: "stamp_review_provenance",
+            requested_execute: false,
+            would_execute: false,
+            command_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=necmett"],
+            preview: {
+                schema: "ax.classifier_lifecycle_route_binding_preview.v1",
+                source_schema: "ax.classifier_lifecycle_routing_summary.v1",
+                decision: "ready_to_execute",
+                active_route_kind: "review_pipeline_action",
+                active_route_command_kind: "stamp_review_provenance",
+                provided_inputs: ["reviewer"],
+                missing_values: [],
+                input_bindings: [],
+                original_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+                bound_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=necmett"],
+                next_action: "execute_bound_active_route",
+                remediation: "Execute the bound active route command.",
+            },
+            failures: ["route execution requires --execute-route"],
+            next_action: "request_execute_route",
+            remediation: "Re-run with --execute-route to allow this bound route command.",
+        };
+
+        const output = renderClassifierLifecycleRouteExecutionPlanText(report);
+
+        expect(output).toContain("classifier lifecycle route execution plan");
+        expect(output).toContain("decision: denied_requires_execute");
+        expect(output).toContain("requested execute: no");
+        expect(output).toContain("would execute: no");
+        expect(output).toContain("command argv: bun src/cli/index.ts --review-provenance-reviewer=necmett");
+        expect(output).toContain("failure: route execution requires --execute-route");
     });
 
     test("renders multi-package summaries", () => {

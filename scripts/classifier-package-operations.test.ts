@@ -19,6 +19,7 @@ import {
     discoverClassifierPackageManifestPaths,
     executeOperationPlanReport,
     buildClassifierLifecycleRouteBindingPreview,
+    buildClassifierLifecycleRouteExecutionPlan,
     loadClassifierLifecycleReviewStatus,
     summarizeClassifierLifecycleRouting,
     summarizeClassifierPackageOperations,
@@ -2383,6 +2384,25 @@ describe("classifier package operations report", () => {
             provided_inputs: ["reviewer"],
             bound_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=necmett"],
             next_action: "execute_bound_active_route",
+        });
+
+        const deniedPlan = buildClassifierLifecycleRouteExecutionPlan(preview, { allowExecute: false });
+        expect(deniedPlan).toMatchObject({
+            schema: "ax.classifier_lifecycle_route_execution_plan.v1",
+            source_schema: "ax.classifier_lifecycle_route_binding_preview.v1",
+            decision: "denied_requires_execute",
+            requested_execute: false,
+            would_execute: false,
+            failures: ["route execution requires --execute-route"],
+        });
+
+        const allowedPlan = buildClassifierLifecycleRouteExecutionPlan(preview, { allowExecute: true });
+        expect(allowedPlan).toMatchObject({
+            decision: "ready_to_execute",
+            requested_execute: true,
+            would_execute: true,
+            command_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=necmett"],
+            failures: [],
         });
     });
 
