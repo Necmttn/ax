@@ -275,6 +275,7 @@ export type WorkflowCandidateReviewCoverageReviewIssueStatus =
 export type WorkflowCandidateReviewCoveragePipelineStage =
     | "needs_review_decisions"
     | "needs_review_repair"
+    | "needs_review_provenance"
     | "needs_review_handoff"
     | "ready_for_production_apply";
 
@@ -3104,6 +3105,9 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
         missingReviewerCount === 0 && missingReviewedAtCount === 0 && invalidReviewedAtCount === 0
             ? "complete_review_provenance"
             : "missing_review_provenance";
+    const provenanceNextAction = provenanceStatus === "complete_review_provenance"
+        ? "Review provenance is complete."
+        : "Add reviewer and reviewed-at metadata before applying if audit provenance is required.";
     const reviewPackPath = context.coverageReviewPack ?? context.coverageFixturePack;
     const smokeMarkerCount = reviewedRows.filter(fixtureRowHasSmokeMarker).length +
         (reviewPackPath?.toLowerCase().includes("smoke") ? 1 : 0);
@@ -3181,11 +3185,16 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
     ];
     const reviewPipelineStage = workflowCandidateReviewCoveragePipelineStage({
         reviewed_fixture_count: reviewedCount,
-        review_issue_status: reviewIssueStatus,
+        apply_guard: applyGuard,
+        provenance_status: provenanceStatus,
         handoff_apply_guard: handoffApplyGuard,
         production_can_apply: productionApplyGuard === "ready_to_apply",
     });
-    const reviewPipelineNextAction = workflowCandidateReviewCoveragePipelineNextAction(reviewPipelineStage, reviewIssueNextAction);
+    const reviewPipelineNextAction = workflowCandidateReviewCoveragePipelineNextAction(
+        reviewPipelineStage,
+        reviewIssueNextAction,
+        provenanceNextAction,
+    );
     const postApplyRecheckCommand = workflowCandidateReviewCoverageRecheckCommand({
         sourceKind,
         ...(context.limit === undefined ? {} : { limit: context.limit }),
@@ -3829,12 +3838,14 @@ const workflowCandidateReviewCoverageReviewIssueNextAction = (
 
 const workflowCandidateReviewCoveragePipelineStage = (input: {
     readonly reviewed_fixture_count: number;
-    readonly review_issue_status: WorkflowCandidateReviewCoverageReviewIssueStatus;
+    readonly apply_guard: WorkflowCandidateReviewCoverageApplyGuard;
+    readonly provenance_status: WorkflowCandidateReviewCoverageProvenanceStatus;
     readonly handoff_apply_guard: WorkflowCandidateReviewCoverageApplyGuard;
     readonly production_can_apply: boolean;
 }): WorkflowCandidateReviewCoveragePipelineStage => {
     if (input.reviewed_fixture_count === 0) return "needs_review_decisions";
-    if (input.review_issue_status === "needs_review_repair") return "needs_review_repair";
+    if (input.apply_guard !== "ready_to_apply") return "needs_review_repair";
+    if (input.provenance_status === "missing_review_provenance") return "needs_review_provenance";
     if (input.production_can_apply) return "ready_for_production_apply";
     if (input.handoff_apply_guard === "missing_review_handoff") return "needs_review_handoff";
     return "needs_review_repair";
@@ -3843,12 +3854,15 @@ const workflowCandidateReviewCoveragePipelineStage = (input: {
 const workflowCandidateReviewCoveragePipelineNextAction = (
     stage: WorkflowCandidateReviewCoveragePipelineStage,
     reviewIssueNextAction: string,
+    provenanceNextAction: string,
 ): string => {
     switch (stage) {
         case "needs_review_decisions":
             return "Set at least one fixture to accept, revise, reject, or defer and add a rationale.";
         case "needs_review_repair":
             return reviewIssueNextAction;
+        case "needs_review_provenance":
+            return provenanceNextAction;
         case "needs_review_handoff":
             return "Complete the review handoff artifacts before applying.";
         case "ready_for_production_apply":
@@ -4162,11 +4176,16 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     const reviewIssueNextAction = workflowCandidateReviewCoverageReviewIssueNextAction(reviewIssueStatus);
     const reviewPipelineStage = workflowCandidateReviewCoveragePipelineStage({
         reviewed_fixture_count: reviewedRows.length,
-        review_issue_status: reviewIssueStatus,
+        apply_guard: applyGuard,
+        provenance_status: provenanceStatus,
         handoff_apply_guard: handoffApplyGuard,
         production_can_apply: productionCanApply,
     });
-    const reviewPipelineNextAction = workflowCandidateReviewCoveragePipelineNextAction(reviewPipelineStage, reviewIssueNextAction);
+    const reviewPipelineNextAction = workflowCandidateReviewCoveragePipelineNextAction(
+        reviewPipelineStage,
+        reviewIssueNextAction,
+        provenanceNextAction,
+    );
     const reviewIssueRepairCommand = reviewIssueRows.length === 0
         ? undefined
         : workflowCandidateReviewCoverageReviewIssueRepairCommand({
