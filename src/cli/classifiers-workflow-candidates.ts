@@ -259,6 +259,8 @@ export interface WorkflowCandidateTopicClassifierFixtureRow {
     readonly source_group: "workflow-candidate";
     readonly review_status: "pending" | "accept" | "revise" | "reject" | "defer";
     readonly review_rationale?: string;
+    readonly review_reviewer?: string;
+    readonly review_reviewed_at?: string;
     readonly topic: string;
     readonly candidate_id: string;
     readonly candidate_label: string;
@@ -2921,6 +2923,8 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
             `- Confidence: \`${row.confidence ?? "n/a"}\``,
             `- Review status: \`${row.review_status}\``,
             `- Review rationale: ${row.review_rationale && row.review_rationale.length > 0 ? row.review_rationale : "_pending_"}`,
+            `- Reviewer: ${row.review_reviewer && row.review_reviewer.length > 0 ? row.review_reviewer : "_pending_"}`,
+            `- Reviewed at: ${row.review_reviewed_at && row.review_reviewed_at.length > 0 ? row.review_reviewed_at : "_pending_"}`,
             "",
             "Fixture text:",
             "",
@@ -2944,7 +2948,7 @@ export function syncWorkflowCandidateFixtureRowsFromBriefWithSummary(
     rows: readonly WorkflowCandidateTopicClassifierFixtureRow[],
     brief: string,
 ): WorkflowCandidateFixtureBriefSyncResult {
-    const updates = new Map<string, { status?: string; rationale?: string }>();
+    const updates = new Map<string, { status?: string; rationale?: string; reviewer?: string; reviewedAt?: string }>();
     let currentFixtureId: string | undefined;
     for (const rawLine of brief.split(/\r?\n/)) {
         const line = rawLine.trim();
@@ -2970,6 +2974,24 @@ export function syncWorkflowCandidateFixtureRowsFromBriefWithSummary(
                 ...(updates.get(currentFixtureId) ?? {}),
                 rationale: rationale === "_pending_" ? "" : rationale,
             });
+            continue;
+        }
+        const reviewerMatch = line.match(/^- Reviewer:\s*(.*)$/);
+        if (reviewerMatch) {
+            const reviewer = reviewerMatch[1].trim();
+            updates.set(currentFixtureId, {
+                ...(updates.get(currentFixtureId) ?? {}),
+                reviewer: reviewer === "_pending_" ? "" : reviewer,
+            });
+            continue;
+        }
+        const reviewedAtMatch = line.match(/^- Reviewed at:\s*(.*)$/);
+        if (reviewedAtMatch) {
+            const reviewedAt = reviewedAtMatch[1].trim();
+            updates.set(currentFixtureId, {
+                ...(updates.get(currentFixtureId) ?? {}),
+                reviewedAt: reviewedAt === "_pending_" ? "" : reviewedAt,
+            });
         }
     }
     const knownIds = new Set(rows.map((row) => row.id));
@@ -2982,6 +3004,8 @@ export function syncWorkflowCandidateFixtureRowsFromBriefWithSummary(
                 review_status: update.status as WorkflowCandidateTopicClassifierFixtureRow["review_status"],
             }),
             ...(update.rationale === undefined ? {} : { review_rationale: update.rationale }),
+            ...(update.reviewer === undefined ? {} : { review_reviewer: update.reviewer }),
+            ...(update.reviewedAt === undefined ? {} : { review_reviewed_at: update.reviewedAt }),
         };
     });
     return {
@@ -3030,6 +3054,8 @@ export function buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures(
                 proposed_action: row.proposed_action,
                 verdict,
                 rationale: row.review_rationale ?? "",
+                reviewer: row.review_reviewer ?? "",
+                reviewed_at: row.review_reviewed_at ?? "",
                 synced_from: input.syncedFrom,
                 fixture_id: row.id,
                 evidence_refs: evidenceRefs,
@@ -3080,6 +3106,8 @@ export function buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures(
                 proposed_action: row.proposed_action,
                 verdict,
                 rationale: row.review_rationale ?? "",
+                reviewer: row.review_reviewer ?? "",
+                reviewed_at: row.review_reviewed_at ?? "",
                 synced_from: input.syncedFrom,
                 fixture_id: row.id,
                 evidence_refs: evidenceRefs,

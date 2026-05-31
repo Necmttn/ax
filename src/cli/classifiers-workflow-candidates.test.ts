@@ -1423,6 +1423,8 @@ describe("classifiers workflow-candidates", () => {
                 source_group: "workflow-candidate",
                 review_status: "accept",
                 review_rationale: "This is useful verification/recovery behavior to preserve as review context.",
+                review_reviewer: "reviewer@example.test",
+                review_reviewed_at: "2026-05-31T10:00:00Z",
                 topic: "review-coverage",
                 candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
                 candidate_label: "verification_or_recovery_signal",
@@ -1473,6 +1475,8 @@ describe("classifiers workflow-candidates", () => {
             properties: {
                 fixture_id: "workflow-candidate-review-coverage/verification_or_recovery_signal/a",
                 rationale: "This is useful verification/recovery behavior to preserve as review context.",
+                reviewer: "reviewer@example.test",
+                reviewed_at: "2026-05-31T10:00:00Z",
                 synced_from: ".ax/experiments/reviewed-coverage-gaps.jsonl",
             },
         });
@@ -1704,7 +1708,9 @@ describe("classifiers workflow-candidates", () => {
         });
         const reviewedBrief = brief
             .replace("- Review status: `pending`", "- Review status: `accept`")
-            .replace("- Review rationale: _pending_", "- Review rationale: Useful recovery behavior worth preserving.");
+            .replace("- Review rationale: _pending_", "- Review rationale: Useful recovery behavior worth preserving.")
+            .replace("- Reviewer: _pending_", "- Reviewer: reviewer@example.test")
+            .replace("- Reviewed at: _pending_", "- Reviewed at: 2026-05-31T10:00:00Z");
 
         const synced = syncWorkflowCandidateFixtureRowsFromBrief(rows, reviewedBrief);
 
@@ -1735,9 +1741,13 @@ describe("classifiers workflow-candidates", () => {
         expect(brief).toContain("- Fixture id: `workflow-candidate-review-coverage/verification_or_recovery_signal/a`");
         expect(brief).toContain("- Review impact: `new_candidate_review`");
         expect(brief).toContain("- Review status: `pending`");
+        expect(brief).toContain("- Reviewer: _pending_");
+        expect(brief).toContain("- Reviewed at: _pending_");
         expect(synced[0]).toMatchObject({
             review_status: "accept",
             review_rationale: "Useful recovery behavior worth preserving.",
+            review_reviewer: "reviewer@example.test",
+            review_reviewed_at: "2026-05-31T10:00:00Z",
         });
     });
 
