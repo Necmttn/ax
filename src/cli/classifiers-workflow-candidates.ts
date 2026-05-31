@@ -252,6 +252,8 @@ export interface WorkflowCandidateReviewCoveragePostApplyRecheckSummary {
 export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly schema: "ax.workflow_candidate_review_readiness.v1";
     readonly source_path: string;
+    readonly review_facts_path?: string;
+    readonly review_write_plan_path?: string;
     readonly apply_requested: boolean;
     readonly applied: boolean;
     readonly apply_result: "not_requested" | "blocked" | "applied";
@@ -1850,6 +1852,12 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
         ...(report.coverage_review ? [
             `coverage review schema: ${report.coverage_review.schema}`,
             `coverage review source: ${report.coverage_review.source_path}`,
+            ...(report.coverage_review.review_facts_path === undefined ? [] : [
+                `coverage review facts path: ${report.coverage_review.review_facts_path}`,
+            ]),
+            ...(report.coverage_review.review_write_plan_path === undefined ? [] : [
+                `coverage review write plan path: ${report.coverage_review.review_write_plan_path}`,
+            ]),
             `coverage review fixtures: ${report.coverage_review.reviewed_fixture_count} reviewed, ${report.coverage_review.pending_fixture_count} pending`,
             `coverage review sync: synced=${report.coverage_review.synced_fixture_count} unknown=${report.coverage_review.unknown_fixture_count}`,
             `coverage review provenance stamp: reviewer=${report.coverage_review.stamped_reviewer_count} reviewed_at=${report.coverage_review.stamped_reviewed_at_count}`,
@@ -3475,6 +3483,8 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     readonly stampedReviewedAtCount?: number;
     readonly coverageRows?: readonly WorkflowCandidateReviewCoverageRow[];
     readonly requireReviewProvenance?: boolean;
+    readonly reviewFactsPath?: string;
+    readonly reviewWritePlanPath?: string;
     readonly sourceKind?: string;
     readonly limit?: number;
     readonly outputPath?: string;
@@ -3599,6 +3609,8 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     return {
         schema: "ax.workflow_candidate_review_readiness.v1",
         source_path: input.sourcePath,
+        ...(input.reviewFactsPath === undefined ? {} : { review_facts_path: input.reviewFactsPath }),
+        ...(input.reviewWritePlanPath === undefined ? {} : { review_write_plan_path: input.reviewWritePlanPath }),
         apply_requested: input.applyRequested,
         applied: input.applied,
         apply_result: applyResult,
@@ -4547,6 +4559,8 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     unknownFixtureCount,
                     stampedReviewerCount,
                     stampedReviewedAtCount,
+                    ...(input.reviewFacts === undefined ? {} : { reviewFactsPath: input.reviewFacts }),
+                    ...(input.reviewWritePlan === undefined ? {} : { reviewWritePlanPath: input.reviewWritePlan }),
                     coverageRows: report.candidates,
                     ...(input.requireReviewProvenance === undefined ? {} : { requireReviewProvenance: input.requireReviewProvenance }),
                     sourceKind: input.sourceKind,
@@ -4572,6 +4586,8 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                         unknownFixtureCount,
                         stampedReviewerCount,
                         stampedReviewedAtCount,
+                        ...(input.reviewFacts === undefined ? {} : { reviewFactsPath: input.reviewFacts }),
+                        ...(input.reviewWritePlan === undefined ? {} : { reviewWritePlanPath: input.reviewWritePlan }),
                         coverageRows: report.candidates,
                         ...(input.requireReviewProvenance === undefined ? {} : { requireReviewProvenance: input.requireReviewProvenance }),
                         sourceKind: input.sourceKind,

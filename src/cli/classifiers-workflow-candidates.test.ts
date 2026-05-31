@@ -1940,6 +1940,8 @@ describe("classifiers workflow-candidates", () => {
             writePlan,
             applyRequested: false,
             applied: false,
+            reviewFactsPath: ".ax/experiments/reviewed-coverage-facts.json",
+            reviewWritePlanPath: ".ax/experiments/reviewed-coverage-write-plan.json",
             coverageRows: [
                 {
                     candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
@@ -2001,6 +2003,30 @@ describe("classifiers workflow-candidates", () => {
             ],
             post_apply_recheck_command: "bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=10 --out=.ax/experiments/workflow-candidate-review-coverage-post-apply.json --json",
         });
+        expect(summary.review_facts_path).toBe(".ax/experiments/reviewed-coverage-facts.json");
+        expect(summary.review_write_plan_path).toBe(".ax/experiments/reviewed-coverage-write-plan.json");
+        const text = renderWorkflowCandidateReviewCoverageText({
+            schema: "ax.workflow_candidate_review_coverage.v1",
+            source_kind: "hybrid_window_classifier_projection",
+            query: { limit: 10 },
+            candidates: [],
+            totals: {
+                candidate_group_count: 0,
+                returned_candidate_count: 0,
+                reviewed_candidate_count: 0,
+                unreviewed_candidate_count: 0,
+                review_fact_count: 0,
+                rejected_fact_count: 0,
+                accepted_fact_count: 0,
+                deferred_fact_count: 0,
+                revised_fact_count: 0,
+                helper_source_fixture_count: 0,
+            },
+            coverage_review: summary,
+            decision: "needs_workflow_candidate_reviews",
+        });
+        expect(text).toContain("coverage review facts path: .ax/experiments/reviewed-coverage-facts.json");
+        expect(text).toContain("coverage review write plan path: .ax/experiments/reviewed-coverage-write-plan.json");
         expect(summary.projected_fact_ids).toHaveLength(3);
         expect(summary.apply_audit_rows).toEqual([
             {
@@ -2084,7 +2110,6 @@ describe("classifiers workflow-candidates", () => {
             coverage_review: summary,
             decision: "needs_workflow_candidate_reviews",
         });
-
         expect(summary).toMatchObject({
             apply_requested: true,
             apply_result: "blocked",
