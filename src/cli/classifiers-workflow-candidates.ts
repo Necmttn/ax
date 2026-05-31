@@ -256,6 +256,11 @@ export interface WorkflowCandidateReviewCoverageReviewIssueCount {
     readonly count: number;
 }
 
+export interface WorkflowCandidateReviewCoverageReviewIssueScopeCount {
+    readonly blocking_scope: WorkflowCandidateReviewCoverageReviewIssueBlockingScope;
+    readonly count: number;
+}
+
 export type WorkflowCandidateReviewCoverageReviewIssueStatus =
     | "needs_review_repair"
     | "review_repair_complete";
@@ -352,6 +357,7 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly apply_audit_rows: readonly WorkflowCandidateReviewCoverageApplyAuditRow[];
     readonly review_issue_rows: readonly WorkflowCandidateReviewCoverageReviewIssueRow[];
     readonly review_issue_counts: readonly WorkflowCandidateReviewCoverageReviewIssueCount[];
+    readonly review_issue_scope_counts: readonly WorkflowCandidateReviewCoverageReviewIssueScopeCount[];
     readonly review_issue_fixture_count: number;
     readonly review_issue_candidate_count: number;
     readonly review_issue_status: WorkflowCandidateReviewCoverageReviewIssueStatus;
@@ -1974,6 +1980,7 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
                 `coverage review issue repair command: ${report.coverage_review.review_issue_repair_command}`,
             ]),
             `coverage review issue counts: ${report.coverage_review.review_issue_counts.length === 0 ? "none" : report.coverage_review.review_issue_counts.map((item) => `${item.issue}=${item.count}`).join(", ")}`,
+            `coverage review issue scope counts: ${report.coverage_review.review_issue_scope_counts.length === 0 ? "none" : report.coverage_review.review_issue_scope_counts.map((item) => `${item.blocking_scope}=${item.count}`).join(", ")}`,
             ...report.coverage_review.review_issue_rows.map((row) =>
                 `coverage review issue: ${row.issue} fixture=${row.fixture_id} candidate=${row.candidate_id} status=${row.review_status} scope=${row.blocking_scope}`
             ),
@@ -3105,6 +3112,7 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
     const provenanceIssueRows = workflowCandidateReviewCoverageProvenanceIssueRows(reviewedRows);
     const reviewIssueRows = workflowCandidateReviewCoverageReviewIssueRows(rows);
     const reviewIssueCounts = workflowCandidateReviewCoverageReviewIssueCounts(reviewIssueRows);
+    const reviewIssueScopeCounts = workflowCandidateReviewCoverageReviewIssueScopeCounts(reviewIssueRows);
     const reviewIssueFixtureCount = workflowCandidateReviewCoverageReviewIssueFixtureCount(reviewIssueRows);
     const reviewIssueCandidateCount = workflowCandidateReviewCoverageReviewIssueCandidateCount(reviewIssueRows);
     const reviewIssueStatus = workflowCandidateReviewCoverageReviewIssueStatus(reviewIssueRows);
@@ -3274,6 +3282,7 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
                     `- Issue repair command: \`${reviewIssueRepairCommand}\``,
                 ]),
                 `- Issue counts: ${reviewIssueCounts.map((item) => `\`${item.issue}=${item.count}\``).join(", ")}`,
+                `- Issue scope counts: ${reviewIssueScopeCounts.map((item) => `\`${item.blocking_scope}=${item.count}\``).join(", ")}`,
                 ...reviewIssueRows.map((row) =>
                     `- \`${row.issue}\` fixture=\`${row.fixture_id}\` candidate=\`${row.candidate_id}\` status=\`${row.review_status}\` scope=\`${row.blocking_scope}\` remediation=\`${row.remediation}\``
                 ),
@@ -3707,6 +3716,16 @@ const workflowCandidateReviewCoverageReviewIssueCounts = (
     return [...counts.entries()].map(([issue, count]) => ({ issue, count }));
 };
 
+const workflowCandidateReviewCoverageReviewIssueScopeCounts = (
+    rows: readonly WorkflowCandidateReviewCoverageReviewIssueRow[],
+): WorkflowCandidateReviewCoverageReviewIssueScopeCount[] => {
+    const counts = new Map<WorkflowCandidateReviewCoverageReviewIssueBlockingScope, number>();
+    for (const row of rows) {
+        counts.set(row.blocking_scope, (counts.get(row.blocking_scope) ?? 0) + 1);
+    }
+    return [...counts.entries()].map(([blocking_scope, count]) => ({ blocking_scope, count }));
+};
+
 const workflowCandidateReviewCoverageReviewIssueFixtureCount = (
     rows: readonly WorkflowCandidateReviewCoverageReviewIssueRow[],
 ): number => new Set(rows.map((row) => row.fixture_id)).size;
@@ -4023,6 +4042,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     const provenanceIssueRows = workflowCandidateReviewCoverageProvenanceIssueRows(reviewedRows);
     const reviewIssueRows = workflowCandidateReviewCoverageReviewIssueRows(input.rows);
     const reviewIssueCounts = workflowCandidateReviewCoverageReviewIssueCounts(reviewIssueRows);
+    const reviewIssueScopeCounts = workflowCandidateReviewCoverageReviewIssueScopeCounts(reviewIssueRows);
     const reviewIssueFixtureCount = workflowCandidateReviewCoverageReviewIssueFixtureCount(reviewIssueRows);
     const reviewIssueCandidateCount = workflowCandidateReviewCoverageReviewIssueCandidateCount(reviewIssueRows);
     const reviewIssueStatus = workflowCandidateReviewCoverageReviewIssueStatus(reviewIssueRows);
@@ -4101,6 +4121,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         apply_audit_rows: applyAuditRows,
         review_issue_rows: reviewIssueRows,
         review_issue_counts: reviewIssueCounts,
+        review_issue_scope_counts: reviewIssueScopeCounts,
         review_issue_fixture_count: reviewIssueFixtureCount,
         review_issue_candidate_count: reviewIssueCandidateCount,
         review_issue_status: reviewIssueStatus,
