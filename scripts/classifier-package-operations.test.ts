@@ -1266,6 +1266,11 @@ describe("classifier package operations report", () => {
             "--value",
             "bind_inputs",
         ]);
+        expect(report.query_suggested_query).toEqual({
+            mode: "lifecycle",
+            predicate: "review_pipeline_recommended_action_execution_phase",
+            value_equals: "bind_inputs",
+        });
     });
 
     test("summarizes lifecycle graph fact values", () => {

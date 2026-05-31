@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E380 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-argv-no-match-e380.json`
+- Index continuation: E381 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-query-no-match-e381.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-argv-match-e380.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-query-match-e381.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,49 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E381 - Suggest Structured Graph Query Repair
+
+Question:
+- E380 provides a rerunnable argv, but can services consume the repaired graph
+  query as structured data without parsing CLI arguments?
+
+Implementation:
+- Added `query_suggested_query` to classifier graph health reports.
+- The suggested query copies the current graph query and replaces
+  `value_equals` with `query_suggested_value_equals`.
+- Text graph-health output now renders the structured suggested query as
+  key/value pairs.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-query-no-match-e381.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-query-match-e381.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-query-no-match-e381.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggested_query={mode: lifecycle, predicate:
+  review_pipeline_recommended_action_execution_phase, value_equals:
+  bind_inputs}`.
+- The matching `--value=bind_inputs` query returns the same structured
+  suggested query.
+- Text output renders `query suggested query: mode=lifecycle ...`.
+
+Decision:
+- Services can now repair lifecycle graph queries through a structured query
+  object or a ready argv, depending on whether they call the service layer or
+  shell out to the CLI.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E381 no-match and match reports both include the expected structured
+  suggested query.
+- E381 text output includes the structured suggested query line.
 
 ## E380 - Suggest Executable Graph Query Argv
 

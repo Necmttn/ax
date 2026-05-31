@@ -286,6 +286,11 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
             .map(([key, value]) => `${key}=${value}`)
             .join(" ");
     const routingPolicyRecommendedFloorArgv = routingPolicySummary.recommended_floor_argv?.join(" ") ?? "none";
+    const querySuggestedQuery = report.query_suggested_query === undefined
+        ? "none"
+        : Object.entries(report.query_suggested_query)
+            .map(([key, value]) => `${key}=${value}`)
+            .join(" ");
     const lines = [
         "classifier package execution graph health",
         `decision: ${report.decision}`,
@@ -314,6 +319,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `query result kind counts: ${(report.query_result_kind_counts ?? []).map((entry) => `${entry.kind}=${entry.count}`).join(", ") || "none"}`,
         `query suggested value equals: ${report.query_suggested_value_equals ?? "none"}`,
         `query suggested argv: ${report.query_suggested_argv?.join(" ") ?? "none"}`,
+        `query suggested query: ${querySuggestedQuery}`,
         `nodes/edges/facts: ${report.totals.node_count}/${report.totals.edge_count}/${report.totals.fact_count}`,
         `packages/operations/executions/artifacts: ${report.totals.package_count}/${report.totals.operation_count}/${report.totals.execution_count}/${report.totals.artifact_count}`,
         `execution/guard/artifact/lifecycle/helper facts: ${report.totals.execution_fact_count}/${report.totals.guard_fact_count}/${report.totals.artifact_fact_count}/${report.totals.lifecycle_fact_count}/${report.totals.embedding_helper_fact_count}`,
