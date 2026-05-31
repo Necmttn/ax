@@ -33,11 +33,13 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E448 adds
-  `.ax/experiments/workflow-topic-guidance-decision-batch-e448.json`,
-  `.ax/experiments/workflow-topic-guidance-decision-batch-e448.txt`,
-  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e448.jsonl`,
-  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e448.md`,
+- Index continuation: E449 adds
+  `.ax/experiments/workflow-topic-guidance-decision-batch-e449.json`,
+  `.ax/experiments/workflow-topic-guidance-decision-batch-e449.txt`,
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e449.jsonl`,
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e449.md`,
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e449.json`,
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e449.json`,
   and
   the `ax.workflow_topic_guidance_decision_batch.v1` report surface
   as the latest hybrid classifier review-throughput evidence.
@@ -54,9 +56,83 @@ Current recommendation:
   reviewed `review-coverage` and `surrealml` candidates are both
   `guidance_promotion_not_warranted`, and it now also exposes one pending
   `correction_or_rejection_signal` candidate blocked on human review with a
-  generated fixture pack and markdown review handoff. The immediate bottleneck
-  is reviewing that pending candidate, not promoting rejected or harness-only
-  evidence.
+  generated fixture pack, markdown review handoff, and machine-readable
+  handoff routing summary. The immediate bottleneck is reviewing that pending
+  candidate, not promoting rejected or harness-only evidence.
+
+## E449 - Add Machine-Readable Pending Review Handoff Routing
+
+Question:
+- Can services route the batch-generated pending-review handoff from JSON,
+  without scraping the markdown review brief?
+
+Implementation:
+- Added `ax.workflow_topic_guidance_pending_review_handoff.v1`.
+- Batch reports now include `pending_review_handoff` when
+  `--coverage-fixture-pack` is used.
+- The handoff summary carries:
+  - fixture, brief, review facts, and write-plan paths,
+  - fixture reviewed/pending counts,
+  - handoff and production apply guards,
+  - review repair status,
+  - review pipeline stage, command status, and next action.
+- `--guidance-decision-batch` now also honors `--review-facts` and
+  `--review-write-plan` for pending-review handoffs, emitting the projected
+  review graph and Surreal write plan before any review facts are applied.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e449.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e449.txt`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e449.jsonl`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e449.md`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e449.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e449.json`
+
+Results:
+- Pending handoff summary:
+  - schema: `ax.workflow_topic_guidance_pending_review_handoff.v1`
+  - fixture pack:
+    `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e449.jsonl`
+  - review brief:
+    `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e449.md`
+  - review facts:
+    `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e449.json`
+  - review write plan:
+    `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e449.json`
+  - `review_pipeline_stage=needs_review_decisions`
+  - `handoff_apply_guard=no_reviewed_fixtures`
+  - `handoff_can_apply=false`
+  - `production_apply_guard=no_reviewed_fixtures`
+  - `production_can_apply=false`
+- Pending projection sanity:
+  - reviewed candidate facts: `0`
+  - projected review facts: `0`
+  - write-plan statements: `1`
+  - write-plan fact statements: `0`
+
+Decision:
+- E449 makes the pending-review handoff service-routable. A caller can now
+  decide from JSON that the next action is review decision entry, not apply,
+  and can find every handoff artifact path without parsing markdown.
+- The pending candidate still intentionally has zero review facts. The next
+  aligned slice is to sync an edited review decision through this handoff,
+  apply the resulting review fact, and re-run the batch to verify the pending
+  queue closes or converts into a warranted artifact path.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 --coverage-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e449.jsonl --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e449.md --review-facts=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e449.json --review-write-plan=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e449.json --out .ax/experiments/workflow-topic-guidance-decision-batch-e449.json --json
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 --coverage-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e449.jsonl --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e449.md --review-facts=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e449.json --review-write-plan=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e449.json > .ax/experiments/workflow-topic-guidance-decision-batch-e449.txt
+rg -n "pending review handoff stage: needs_review_decisions|pending review handoff guard: no_reviewed_fixtures|pending review handoff can apply: no|pending review handoff next: Set at least one fixture|pending review fixture pack|pending review fixtures: 1" .ax/experiments/workflow-topic-guidance-decision-batch-e449.txt
+python3 -m json.tool .ax/experiments/workflow-topic-guidance-decision-batch-e449.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e449.jsonl >/dev/null
+python3 -m json.tool .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e449.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e449.json >/dev/null
+bun -e 'const r=await Bun.file(".ax/experiments/workflow-topic-guidance-decision-batch-e449.json").json(); const h=r.pending_review_handoff; if (h?.schema !== "ax.workflow_topic_guidance_pending_review_handoff.v1") throw new Error(JSON.stringify(h)); if (h.review_pipeline_stage !== "needs_review_decisions" || h.handoff_apply_guard !== "no_reviewed_fixtures" || h.handoff_can_apply !== false) throw new Error(JSON.stringify(h)); if (!h.review_facts_path || !h.review_write_plan_path) throw new Error(JSON.stringify(h)); const facts=await Bun.file(h.review_facts_path).json(); const plan=await Bun.file(h.review_write_plan_path).json(); if (facts.totals.reviewed_candidate_count !== 0 || facts.totals.fact_count !== 0 || plan.totals.fact_statement_count !== 0) throw new Error(JSON.stringify({facts:facts.totals, plan:plan.totals}));'
+```
+
+DB-backed pending-review handoff routing checks passed.
 
 ## E448 - Emit Review Handoff From Batch Pending Queue
 

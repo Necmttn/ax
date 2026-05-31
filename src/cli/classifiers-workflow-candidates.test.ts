@@ -3827,6 +3827,26 @@ describe("classifiers workflow-candidates", () => {
                     proposed_action: "add_context_guardrail",
                 }],
             },
+            pendingReviewHandoff: {
+                schema: "ax.workflow_topic_guidance_pending_review_handoff.v1",
+                fixture_pack_path: ".ax/experiments/pending-review.jsonl",
+                review_brief_path: ".ax/experiments/pending-review.md",
+                emitted_fixture_count: 1,
+                reviewed_fixture_count: 0,
+                pending_fixture_count: 1,
+                review_handoff_status: "complete_review_handoff",
+                handoff_apply_guard: "no_reviewed_fixtures",
+                handoff_can_apply: false,
+                production_apply_guard: "no_reviewed_fixtures",
+                production_can_apply: false,
+                review_issue_status: "review_repair_complete",
+                review_issue_next_action: "No review issue repairs are needed.",
+                review_pipeline_stage: "needs_review_decisions",
+                review_pipeline_next_action: "Set at least one fixture to accept, revise, reject, or defer and add a rationale.",
+                review_pipeline_command_status: "unavailable",
+                review_pipeline_command_can_execute: false,
+                next_action: "Set at least one fixture to accept, revise, reject, or defer and add a rationale.",
+            },
         });
 
         expect(batch).toMatchObject({
@@ -3850,6 +3870,11 @@ describe("classifiers workflow-candidates", () => {
                 path: ".ax/experiments/pending-review.jsonl",
                 emitted_fixture_count: 1,
             },
+            pending_review_handoff: {
+                review_pipeline_stage: "needs_review_decisions",
+                handoff_apply_guard: "no_reviewed_fixtures",
+                handoff_can_apply: false,
+            },
             next_action: "Review pending workflow candidates before promoting them into guidance, harness checks, fixtures, or graph facts.",
         });
         const text = renderWorkflowCandidateTopicGuidanceDecisionBatchText(batch);
@@ -3858,6 +3883,8 @@ describe("classifiers workflow-candidates", () => {
         expect(text).toContain("pending review candidates: 1 guidance=1 harness=0 classifier_fixture=0 review=0");
         expect(text).toContain("pending review fixture pack: .ax/experiments/pending-review.jsonl");
         expect(text).toContain("pending review fixtures: 1");
+        expect(text).toContain("pending review handoff stage: needs_review_decisions");
+        expect(text).toContain("pending review handoff guard: no_reviewed_fixtures");
         expect(text).toContain("guidance_promotion_not_warranted review-coverage");
         expect(text).toContain("needs_human_review correction_or_rejection_signal");
     });
