@@ -3032,6 +3032,20 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
             `--out=${readinessOutputPath}`,
             "--json",
         ].filter((part): part is string => part !== undefined).join(" ");
+    const provenanceStampCommand = reviewPackPath === undefined
+        ? undefined
+        : [
+            "bun src/cli/index.ts classifiers workflow-candidates",
+            "--review-coverage",
+            `--source-kind=${sourceKind}`,
+            `--coverage-review-pack=${reviewPackPath}`,
+            context.coverageReviewBrief === undefined ? undefined : `--sync-coverage-review-brief=${context.coverageReviewBrief}`,
+            "--review-provenance-reviewer=<reviewer>",
+            "--review-provenance-reviewed-at=<reviewed-at-iso>",
+            `--coverage-review-brief=${syncedBriefPath}`,
+            `--out=${readinessOutputPath}`,
+            "--json",
+        ].filter((part): part is string => part !== undefined).join(" ");
     const lines = [
         "# Workflow Candidate Coverage Review",
         "",
@@ -3092,6 +3106,12 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
             "",
             "```sh",
             strictApplyCommand ?? "",
+            "```",
+            "",
+            "To stamp provenance from a review service, run:",
+            "",
+            "```sh",
+            provenanceStampCommand ?? "",
             "```",
             "",
             "After applying, re-run coverage to verify the gap closed:",

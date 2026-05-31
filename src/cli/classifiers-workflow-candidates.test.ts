@@ -1748,6 +1748,9 @@ describe("classifiers workflow-candidates", () => {
         expect(brief).toContain("--sync-coverage-review-brief=.ax/experiments/review-coverage.md");
         expect(brief).toContain("--apply-review-facts");
         expect(brief).toContain("--require-review-provenance");
+        expect(brief).toContain("To stamp provenance from a review service, run:");
+        expect(brief).toContain("--review-provenance-reviewer=<reviewer>");
+        expect(brief).toContain("--review-provenance-reviewed-at=<reviewed-at-iso>");
         expect(brief).toContain("After applying, re-run coverage to verify the gap closed:");
         expect(brief).toContain("bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=10 --out=.ax/experiments/review-coverage-post-apply.json --json");
         expect(brief).toContain("## Candidate Queue");
