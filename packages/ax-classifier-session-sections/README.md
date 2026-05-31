@@ -113,6 +113,7 @@ bun run classifiers:workflow-candidate-compare -- --baseline=.ax/experiments/wor
 bun run classifiers:workflow-candidate-combined -- --baseline=.ax/experiments/workflow-candidate-report-e156.json --hybrid=.ax/experiments/workflow-candidate-report-hybrid-window-current.json --out=.ax/experiments/workflow-candidate-combined-current.json
 bun run classifiers:workflow-candidate-proposal-pack -- --combined=.ax/experiments/workflow-candidate-combined-current.json --out=.ax/experiments/workflow-candidate-proposal-pack-current.json --brief-dir=.ax/tasks/workflow-candidate-proposals --limit=4
 bun run classifiers:workflow-candidate-proposal-review -- --pack=.ax/experiments/workflow-candidate-proposal-pack-current.json --out=.ax/experiments/workflow-candidate-proposal-review-current.json
+bun run classifiers:workflow-candidate-proposal-promote -- --review=.ax/experiments/workflow-candidate-proposal-review-current.json --out=.ax/experiments/workflow-candidate-proposal-promotion-current.json --task-dir=.ax/tasks/workflow-candidate-promotion-drafts
 bun run classifiers:assemble-sections -- --fixtures=packages/ax-classifier-session-sections/eval-fixtures/sections.json --out=.ax/experiments/session-section-assembly-e5.json
 bun run classifiers:graph-usefulness -- --hybrid=.ax/experiments/hybrid-gate-e4.json --sections=.ax/experiments/session-section-assembly-e5.json --out=.ax/experiments/graph-usefulness-e6.json
 bun run classifiers:review-sections -- --mode=generate --graph=.ax/experiments/graph-usefulness-e6.json --sections=.ax/experiments/session-section-assembly-e5.json --review=.ax/experiments/graph-usefulness-review.json --brief=.ax/experiments/graph-usefulness-review.md --out=.ax/experiments/graph-usefulness-review-report.json
@@ -250,6 +251,7 @@ bun src/cli/index.ts classifiers package-operations --operation=workflow-candida
 bun src/cli/index.ts classifiers package-operations --operation=workflow-candidate-combined-report --json
 bun src/cli/index.ts classifiers package-operations --operation=workflow-candidate-proposal-pack --json
 bun src/cli/index.ts classifiers package-operations --operation=workflow-candidate-proposal-review --json
+bun src/cli/index.ts classifiers package-operations --operation=workflow-candidate-proposal-promote-drafts --json
 ```
 
 The intended sequence is:
@@ -296,6 +298,9 @@ The intended sequence is:
 18. Run `workflow-candidate-proposal-review` after editing the proposal briefs
     to verify every proposal has a verdict, rationale, proposed change, and
     target before any promotion path uses it.
+19. Run `workflow-candidate-proposal-promote-drafts` only after the review
+    report is ready. It emits Markdown task drafts for accepted or revised
+    proposals and does not mutate guidance or harness files directly.
 
 These operations deliberately write under `.ax/experiments/`. They do not
 mutate `eval-fixtures/chunks.jsonl`; canonical promotion still requires a

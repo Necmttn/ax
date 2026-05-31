@@ -172,6 +172,19 @@
       ]
     },
     {
+      "id": "workflow-candidate-proposal-promote-drafts",
+      "kind": "review",
+      "description": "Promote accepted or revised workflow-candidate proposal reviews into Markdown task drafts without mutating guidance or harness files.",
+      "command": "bun run classifiers:workflow-candidate-proposal-promote -- --review=.ax/experiments/workflow-candidate-proposal-review-current.json --out=.ax/experiments/workflow-candidate-proposal-promotion-current.json --task-dir=.ax/tasks/workflow-candidate-promotion-drafts --json",
+      "inputs": [
+        ".ax/experiments/workflow-candidate-proposal-review-current.json"
+      ],
+      "outputs": [
+        ".ax/experiments/workflow-candidate-proposal-promotion-current.json",
+        ".ax/tasks/workflow-candidate-promotion-drafts"
+      ]
+    },
+    {
       "id": "predict-windows",
       "kind": "debug",
       "description": "Run the saved SetFit model over exported event windows for local debugging.",

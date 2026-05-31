@@ -850,19 +850,19 @@ describe("classifier package operations report", () => {
 
         expect(report.schema).toBe("ax.classifier_packages_operations_report.v1");
         expect(report.totals.package_count).toBeGreaterThanOrEqual(3);
-        expect(report.totals.operation_count).toBeGreaterThanOrEqual(35);
+        expect(report.totals.operation_count).toBeGreaterThanOrEqual(36);
         expect(report.totals.operation_kinds.train).toBe(1);
         expect(report.totals.operation_kinds.eval).toBe(6);
-        expect(report.totals.operation_kinds.review).toBe(10);
+        expect(report.totals.operation_kinds.review).toBe(11);
         expect(report.totals.operation_kinds.status).toBe(16);
         expect(report.totals.operation_kinds.publish).toBe(1);
         expect(report.totals.operation_kinds.debug).toBe(1);
         expect(report.totals.local_model_ready_count).toBe(1);
         expect(report.totals.local_model_incomplete_count).toBe(0);
-        expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_count).toBe(35);
+        expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_count).toBe(36);
         expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_kinds.train).toBe(1);
         expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_kinds.eval).toBe(6);
-        expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_kinds.review).toBe(10);
+        expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_kinds.review).toBe(11);
         expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_kinds.status).toBe(16);
         expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_kinds.publish).toBe(1);
         expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.lifecycle_readiness.status).toBe("ready");

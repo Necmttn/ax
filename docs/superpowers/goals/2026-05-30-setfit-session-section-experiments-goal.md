@@ -11239,6 +11239,65 @@ Decision:
   `workflow_candidate_proposal_reviews_ready` reports and produces either
   guidance proposals or harness task drafts from accepted/revised briefs.
 
+## E203 - Guarded Proposal Promotion Drafts
+
+Question:
+
+- Can reviewed workflow-candidate proposal briefs become task drafts only after
+  the E202 review gate is ready?
+
+Implementation:
+
+- Added
+  `packages/ax-classifier-session-sections/workflow_candidate_proposal_promote.py`.
+- Added
+  `packages/ax-classifier-session-sections/workflow_candidate_proposal_promote_test.py`.
+- Added `bun run classifiers:workflow-candidate-proposal-promote`.
+- Added package operation `workflow-candidate-proposal-promote-drafts`.
+- The operation:
+  - reads `.ax/experiments/workflow-candidate-proposal-review-current.json`
+  - refuses promotion unless the review decision is
+    `workflow_candidate_proposal_reviews_ready`
+  - emits Markdown task drafts only for `accept` or `revise` verdicts
+  - skips `reject` verdicts
+  - never mutates guidance or harness files directly
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/workflow_candidate_proposal_promote_test.py
+bun src/cli/index.ts classifiers package-operations --operation=workflow-candidate-proposal-promote-drafts --execute --out=.ax/experiments/classifier-package-execution-workflow-candidate-proposal-promote-e203.json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-proposal-promotion-current.json`
+- `.ax/experiments/workflow-candidate-proposal-promotion-e203.json`
+- `.ax/experiments/classifier-package-execution-workflow-candidate-proposal-promote-e203.json`
+- `.ax/tasks/workflow-candidate-promotion-drafts/`
+
+Results:
+
+- Execution decision: `executed`
+- Execution exit code: `0`
+- Promotion decision: `needs_workflow_candidate_proposal_review`
+- Proposal count: `4`
+- Emitted drafts: `0`
+- Skipped proposals: `4`
+- Failure: `proposal review report is not ready`
+
+Decision:
+
+- E203 closes the immediate post-review path without weakening the gate. The
+  operation exists and is package-runnable, but the current proposal pack
+  remains blocked until a reviewer fills the E202 fields.
+- The next useful slice is either:
+  - add a small fixture-driven ready-review smoke that proves accepted/revised
+    proposals create drafts with the expected artifact-specific instructions,
+    or
+  - create a reviewer-friendly summary command that tells a human exactly which
+    proposal briefs need edits before promotion can produce drafts.
+
 ## E196 - First-Class Hybrid Robustness Gate
 
 Question:
