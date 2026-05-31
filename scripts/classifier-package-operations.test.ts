@@ -1536,6 +1536,20 @@ describe("classifier package operations report", () => {
                 min_positive_recall: 0.9028,
                 min_call_reduction: 0.1778,
             },
+            recommended_floor_argv: [
+                "bun",
+                "src/cli/index.ts",
+                "classifiers",
+                "graph",
+                "--mode",
+                "embedding-helper",
+                "--fact-kind",
+                "embedding_helper_routing_candidate",
+                "--min-positive-recall",
+                "0.9028",
+                "--min-call-reduction",
+                "0.1778",
+            ],
         });
     });
 

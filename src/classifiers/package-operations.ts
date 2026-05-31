@@ -426,6 +426,7 @@ export interface ClassifierGraphRoutingPolicySummary {
         readonly source_threshold?: string;
     }[];
     readonly recommended_floor_query?: ClassifierGraphRoutingPolicyRecommendedQuery;
+    readonly recommended_floor_argv?: readonly string[];
 }
 
 export type ClassifierGraphHealthMode = "summary" | "guarded" | "changed-artifacts" | "evidence" | "lifecycle" | "embedding-helper";
@@ -2219,6 +2220,33 @@ export function buildExecutionGraphHealthReport(input: {
             ...(query.subject === undefined ? {} : { subject: query.subject }),
             ...(query.value_contains === undefined ? {} : { value_contains: query.value_contains }),
         };
+    const pushRecommendedFloorArg = (argv: string[], flag: string, value: string | number | undefined): void => {
+        if (value !== undefined) {
+            argv.push(flag, String(value));
+        }
+    };
+    const recommendedFloorArgv = recommendedFloorQuery === undefined
+        ? undefined
+        : (() => {
+            const argv = ["bun", "src/cli/index.ts", "classifiers", "graph", "--mode", recommendedFloorQuery.mode];
+            pushRecommendedFloorArg(argv, "--operation", recommendedFloorQuery.operation_id);
+            pushRecommendedFloorArg(argv, "--artifact", recommendedFloorQuery.artifact_path);
+            pushRecommendedFloorArg(argv, "--source-kind", recommendedFloorQuery.source_kind);
+            pushRecommendedFloorArg(argv, "--fact-kind", recommendedFloorQuery.fact_kind);
+            pushRecommendedFloorArg(argv, "--status", recommendedFloorQuery.status);
+            pushRecommendedFloorArg(argv, "--source-fixture", recommendedFloorQuery.source_fixture_id);
+            pushRecommendedFloorArg(argv, "--proposed-label", recommendedFloorQuery.proposed_label);
+            pushRecommendedFloorArg(argv, "--threshold", recommendedFloorQuery.threshold);
+            pushRecommendedFloorArg(argv, "--min-seed-count", recommendedFloorQuery.min_seed_count);
+            pushRecommendedFloorArg(argv, "--min-positive-recall", recommendedFloorQuery.min_positive_recall);
+            pushRecommendedFloorArg(argv, "--min-call-reduction", recommendedFloorQuery.min_call_reduction);
+            pushRecommendedFloorArg(argv, "--min-nearest-similarity", recommendedFloorQuery.min_nearest_similarity);
+            pushRecommendedFloorArg(argv, "--nearest-fixture", recommendedFloorQuery.nearest_fixture_id);
+            pushRecommendedFloorArg(argv, "--predicate", recommendedFloorQuery.predicate);
+            pushRecommendedFloorArg(argv, "--subject", recommendedFloorQuery.subject);
+            pushRecommendedFloorArg(argv, "--value-contains", recommendedFloorQuery.value_contains);
+            return argv;
+        })();
     const largestGapFloor = positiveRecallGap === undefined && callReductionGap === undefined
         ? undefined
         : (positiveRecallGap ?? 0) >= (callReductionGap ?? 0)
@@ -2256,6 +2284,7 @@ export function buildExecutionGraphHealthReport(input: {
         ...(largestGapFloor === undefined ? {} : { largest_gap_floor: largestGapFloor }),
         ...(recommendedFloorAdjustments.length === 0 ? {} : { recommended_floor_adjustments: recommendedFloorAdjustments }),
         ...(recommendedFloorQuery === undefined ? {} : { recommended_floor_query: recommendedFloorQuery }),
+        ...(recommendedFloorArgv === undefined ? {} : { recommended_floor_argv: recommendedFloorArgv }),
     };
 
     return {

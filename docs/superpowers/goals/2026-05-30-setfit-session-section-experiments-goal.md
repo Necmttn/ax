@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E356 adds
-  `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-query-e356.json`
+- Index continuation: E357 adds
+  `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-argv-e357.json`
   and
-  `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-query-e356.txt`
+  `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-argv-e357.txt`
   as the latest Embedding/SVM helper evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -14503,6 +14503,49 @@ bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=emb
 bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 > .ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.txt || true
 python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.json >/dev/null
 rg -n 'routing policy blocking floors: positive_recall, call_reduction|routing policy largest gap: positive_recall|"blocking_floor_fields"|"largest_gap_floor"|"positive_recall_gap_to_request"|"call_reduction_gap_to_request"' .ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.txt .ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.json
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 84 passed.
+
+## E357 - Expose Executable Recommended Routing Query
+
+Question:
+
+- Can an FX service execute the recommended relaxed-floor routing query without
+  translating structured query fields into CLI arguments itself?
+
+Change:
+
+- Added `recommended_floor_argv` to `routing_policy_summary`.
+- The argv preserves the original graph filters and replaces only impossible
+  routing floors with reviewed recommended floors.
+- Text graph output now renders the argv for quick debugging.
+
+Evidence:
+
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-argv-e357.json`
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-argv-e357.txt`
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-argv-e357-rerun.json`
+
+Result:
+
+- The no-match report includes:
+  `recommended_floor_argv=["bun","src/cli/index.ts","classifiers","graph","--mode","embedding-helper","--source-kind","embedding_helper_review_projection","--fact-kind","embedding_helper_routing_candidate","--min-positive-recall","0.9028","--min-call-reduction","0.1778"]`.
+- Text output renders:
+  `routing policy recommended floor argv: bun src/cli/index.ts classifiers graph --mode embedding-helper --source-kind embedding_helper_review_projection --fact-kind embedding_helper_routing_candidate --min-positive-recall 0.9028 --min-call-reduction 0.1778`.
+- Running that argv returned `routing_policy_summary.status=meets_requested_floors`
+  and one matching embedding-helper routing fact.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 --out=.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-argv-e357.json --json > .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-argv-e357.stdout
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 > .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-argv-e357.txt || true
+python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-argv-e357.json >/dev/null
+rg -n 'routing policy recommended floor argv|"recommended_floor_argv"|--min-positive-recall|--min-call-reduction|--source-kind' .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-argv-e357.txt .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-argv-e357.json
+bun src/cli/index.ts classifiers graph --mode embedding-helper --source-kind embedding_helper_review_projection --fact-kind embedding_helper_routing_candidate --min-positive-recall 0.9028 --min-call-reduction 0.1778 --out=.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-argv-e357-rerun.json --json > .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-argv-e357-rerun.stdout
 ```
 
 Verification:

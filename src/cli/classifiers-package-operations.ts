@@ -284,6 +284,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         : Object.entries(routingPolicySummary.recommended_floor_query)
             .map(([key, value]) => `${key}=${value}`)
             .join(" ");
+    const routingPolicyRecommendedFloorArgv = routingPolicySummary.recommended_floor_argv?.join(" ") ?? "none";
     const lines = [
         "classifier package execution graph health",
         `decision: ${report.decision}`,
@@ -323,6 +324,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `routing policy largest gap: ${routingPolicySummary.largest_gap_floor ?? "none"}`,
         `routing policy recommended floor adjustments: ${routingPolicyRecommendedFloorAdjustments}`,
         `routing policy recommended floor query: ${routingPolicyRecommendedFloorQuery}`,
+        `routing policy recommended floor argv: ${routingPolicyRecommendedFloorArgv}`,
         `routing policy next action: ${routingPolicySummary.next_action}`,
         `routing policy remediation: ${routingPolicySummary.remediation}`,
     ];
