@@ -70,7 +70,10 @@ class EmbeddingHelperGraphUsefulnessTest(unittest.TestCase):
         self.assertEqual(report["summary"]["candidate_group_with_matches_count"], 1)
         candidate = report["workflow_reports"][0]["candidates"][0]
         self.assertEqual(candidate["adjusted_support_count"], 2)
+        self.assertEqual(candidate["scanned_example_count"], 1)
+        self.assertEqual(candidate["unscanned_support_count"], 2)
         self.assertEqual(candidate["helper_matches"][0]["source_fixture_id"], "session-section-chunks/none-next-step")
+        self.assertEqual(report["summary"]["example_coverage_ratio"], 0.3333)
 
     def test_report_blocks_without_promoted_helper_facts(self) -> None:
         report = module.build_report(

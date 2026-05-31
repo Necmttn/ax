@@ -58,7 +58,7 @@ describe("classifier package manifest", () => {
         expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-graph-projection")?.inputs).toContain("packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl");
         expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-graph-apply")?.kind).toBe("publish");
         expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-graph-health")?.command).toContain("--graph-mode=embedding-helper");
-        expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-usefulness-transcript-report")?.command).toContain("--examples=50");
+        expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-usefulness-transcript-report")?.command).toContain("--examples=10000");
         expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-usefulness-hybrid-report")?.command).toContain("hybrid_window_classifier_projection");
         expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-graph-usefulness")?.command).toContain("classifiers:embedding-helper-graph-usefulness");
         expect(manifest.operations?.find((operation) => operation.id === "graph-health-summary")?.kind).toBe("status");

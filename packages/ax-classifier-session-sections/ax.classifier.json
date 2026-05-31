@@ -301,7 +301,7 @@
       "id": "embedding-helper-usefulness-transcript-report",
       "kind": "status",
       "description": "Build an expanded transcript workflow-candidate report for promoted helper fact noise analysis.",
-      "command": "bun run classifiers:workflow-candidates -- --limit=20 --examples=50 --out=.ax/experiments/workflow-candidate-report-helper-usefulness-transcript-current.json --json",
+      "command": "bun run classifiers:workflow-candidates -- --limit=20 --examples=10000 --out=.ax/experiments/workflow-candidate-report-helper-usefulness-transcript-current.json --json",
       "inputs": [],
       "outputs": [
         ".ax/experiments/workflow-candidate-report-helper-usefulness-transcript-current.json"
@@ -311,7 +311,7 @@
       "id": "embedding-helper-usefulness-hybrid-report",
       "kind": "status",
       "description": "Build an expanded hybrid workflow-candidate report for promoted helper fact noise analysis.",
-      "command": "bun run classifiers:workflow-candidates -- --source-kind=hybrid_window_classifier_projection --limit=20 --examples=50 --out=.ax/experiments/workflow-candidate-report-helper-usefulness-hybrid-current.json --json",
+      "command": "bun run classifiers:workflow-candidates -- --source-kind=hybrid_window_classifier_projection --limit=20 --examples=10000 --out=.ax/experiments/workflow-candidate-report-helper-usefulness-hybrid-current.json --json",
       "inputs": [],
       "outputs": [
         ".ax/experiments/workflow-candidate-report-helper-usefulness-hybrid-current.json"

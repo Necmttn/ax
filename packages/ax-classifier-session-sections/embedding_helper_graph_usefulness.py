@@ -117,10 +117,14 @@ def annotate_workflow_report(
     matched_example_count = 0
     total_support = 0
     adjusted_support = 0
+    scanned_example_total = 0
     for candidate in report.get("candidates") or []:
         examples = []
         candidate_match_count = 0
-        for example in candidate.get("examples") or []:
+        source_examples = candidate.get("examples") or []
+        scanned_example_count = len(source_examples)
+        scanned_example_total += scanned_example_count
+        for example in source_examples:
             matches = helper_matches_for_example(example, promoted_fixture_ids, fixture_texts, min_token_overlap)
             if matches:
                 matched_example_count += 1
@@ -141,6 +145,8 @@ def annotate_workflow_report(
                 "label": candidate.get("label"),
                 "proposed_action": candidate.get("proposed_action"),
                 "support_count": support,
+                "scanned_example_count": scanned_example_count,
+                "unscanned_support_count": max(0, support - scanned_example_count),
                 "matched_example_count": candidate_match_count,
                 "adjusted_support_count": candidate_adjusted_support,
                 "helper_matches": [
@@ -157,7 +163,10 @@ def annotate_workflow_report(
         "candidate_group_count": len(report.get("candidates") or []),
         "candidate_group_with_matches_count": len(candidates),
         "matched_candidate_example_count": matched_example_count,
+        "scanned_example_count": scanned_example_total,
         "support_count": total_support,
+        "unscanned_support_count": max(0, total_support - scanned_example_total),
+        "example_coverage_ratio": round(scanned_example_total / total_support, 4) if total_support else 0.0,
         "adjusted_support_count": adjusted_support,
         "estimated_suppressed_support_count": total_support - adjusted_support,
         "candidates": sorted(candidates, key=lambda row: (-int(row["matched_example_count"]), str(row["group_id"]))),
@@ -185,6 +194,8 @@ def build_report(
     missing_text = [fixture_id for fixture_id in promoted_ids if fixture_id not in fixture_texts]
     if missing_text:
         failures.append("promoted helper fixtures missing canonical text")
+    total_support = sum(int(row["support_count"]) for row in workflow_summaries)
+    scanned_examples = sum(int(row["scanned_example_count"]) for row in workflow_summaries)
     return {
         "schema": "ax.embedding_helper_graph_usefulness.v1",
         "query": {
@@ -193,6 +204,10 @@ def build_report(
         "summary": {
             "promoted_helper_fact_count": len(promoted_ids),
             "workflow_report_count": len(workflow_reports),
+            "support_count": total_support,
+            "scanned_example_count": scanned_examples,
+            "unscanned_support_count": max(0, total_support - scanned_examples),
+            "example_coverage_ratio": round(scanned_examples / total_support, 4) if total_support else 0.0,
             "candidate_group_with_matches_count": sum(int(row["candidate_group_with_matches_count"]) for row in workflow_summaries),
             "matched_candidate_example_count": sum(int(row["matched_candidate_example_count"]) for row in workflow_summaries),
             "estimated_suppressed_support_count": sum(int(row["estimated_suppressed_support_count"]) for row in workflow_summaries),
