@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Effect } from "effect";
 import { SurrealClient } from "../lib/db.ts";
@@ -74,6 +74,7 @@ export interface WorkflowCandidateCommandInput {
     readonly promoteTasks?: boolean;
     readonly emitAdjacentTasks?: boolean;
     readonly emitPendingReviewTask?: boolean;
+    readonly listPendingReviewTasks?: boolean;
     readonly promoteHarnessProposals?: boolean;
     readonly requireHarnessChecks?: boolean;
     readonly promoteProposals?: boolean;
@@ -269,6 +270,38 @@ export interface WorkflowCandidateGuidancePendingReviewTaskParsed {
     readonly review_brief_path?: string;
     readonly review_pipeline_stage?: string;
     readonly candidate_ids: readonly string[];
+}
+
+export type WorkflowCandidateGuidancePendingReviewTaskArtifactStatus = "present" | "missing" | "unknown";
+export type WorkflowCandidateGuidancePendingReviewTaskStatus =
+    | "ready_for_review"
+    | "missing_fixture_pack"
+    | "missing_review_brief"
+    | "missing_review_artifacts"
+    | "unknown_schema";
+
+export interface WorkflowCandidateGuidancePendingReviewTaskListItem {
+    readonly path: string;
+    readonly schema?: string;
+    readonly status: WorkflowCandidateGuidancePendingReviewTaskStatus;
+    readonly fixture_pack_path?: string;
+    readonly fixture_pack_status: WorkflowCandidateGuidancePendingReviewTaskArtifactStatus;
+    readonly review_brief_path?: string;
+    readonly review_brief_status: WorkflowCandidateGuidancePendingReviewTaskArtifactStatus;
+    readonly review_pipeline_stage?: string;
+    readonly candidate_ids: readonly string[];
+    readonly candidate_count: number;
+}
+
+export interface WorkflowCandidateGuidancePendingReviewTaskListReport {
+    readonly schema: "ax.workflow_candidate_pending_review_task_list.v1";
+    readonly task_dir: string;
+    readonly task_count: number;
+    readonly ready_for_review_count: number;
+    readonly missing_artifact_count: number;
+    readonly unknown_schema_count: number;
+    readonly tasks: readonly WorkflowCandidateGuidancePendingReviewTaskListItem[];
+    readonly next_action: string;
 }
 
 export interface WorkflowCandidateTopicGuidanceDecisionBatchReport {
@@ -3205,6 +3238,135 @@ export function parseWorkflowCandidateGuidancePendingReviewTaskMarkdown(
         ...(reviewPipelineStage === undefined ? {} : { review_pipeline_stage: reviewPipelineStage }),
         candidate_ids: [...new Set(candidateIds)].sort(),
     };
+}
+
+const pendingReviewTaskStatusFor = (
+    parsed: WorkflowCandidateGuidancePendingReviewTaskParsed,
+    fixturePackStatus: WorkflowCandidateGuidancePendingReviewTaskArtifactStatus,
+    reviewBriefStatus: WorkflowCandidateGuidancePendingReviewTaskArtifactStatus,
+): WorkflowCandidateGuidancePendingReviewTaskStatus => {
+    if (parsed.schema !== workflowCandidateGuidancePendingReviewTaskSchema) return "unknown_schema";
+    const missingFixture = fixturePackStatus === "missing";
+    const missingBrief = reviewBriefStatus === "missing";
+    if (missingFixture && missingBrief) return "missing_review_artifacts";
+    if (missingFixture) return "missing_fixture_pack";
+    if (missingBrief) return "missing_review_brief";
+    return "ready_for_review";
+};
+
+export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input: {
+    readonly taskDir: string;
+    readonly taskFiles: readonly { readonly path: string; readonly content: string }[];
+    readonly pathExists?: (path: string) => boolean;
+}): WorkflowCandidateGuidancePendingReviewTaskListReport {
+    const pathExists = input.pathExists ?? existsSync;
+    const tasks = input.taskFiles
+        .map((file): WorkflowCandidateGuidancePendingReviewTaskListItem | undefined => {
+            const parsed = parseWorkflowCandidateGuidancePendingReviewTaskMarkdown(file.content);
+            if (
+                parsed.schema !== workflowCandidateGuidancePendingReviewTaskSchema &&
+                parsed.fixture_pack_path === undefined &&
+                parsed.review_brief_path === undefined &&
+                parsed.candidate_ids.length === 0
+            ) return undefined;
+            const fixturePackStatus = parsed.fixture_pack_path === undefined
+                ? "unknown"
+                : pathExists(parsed.fixture_pack_path) ? "present" : "missing";
+            const reviewBriefStatus = parsed.review_brief_path === undefined
+                ? "unknown"
+                : pathExists(parsed.review_brief_path) ? "present" : "missing";
+            return {
+                path: file.path,
+                ...(parsed.schema === undefined ? {} : { schema: parsed.schema }),
+                status: pendingReviewTaskStatusFor(parsed, fixturePackStatus, reviewBriefStatus),
+                ...(parsed.fixture_pack_path === undefined ? {} : { fixture_pack_path: parsed.fixture_pack_path }),
+                fixture_pack_status: fixturePackStatus,
+                ...(parsed.review_brief_path === undefined ? {} : { review_brief_path: parsed.review_brief_path }),
+                review_brief_status: reviewBriefStatus,
+                ...(parsed.review_pipeline_stage === undefined ? {} : { review_pipeline_stage: parsed.review_pipeline_stage }),
+                candidate_ids: parsed.candidate_ids,
+                candidate_count: parsed.candidate_ids.length,
+            };
+        })
+        .filter((task): task is WorkflowCandidateGuidancePendingReviewTaskListItem => task !== undefined)
+        .sort((a, b) => a.path.localeCompare(b.path));
+    const missingArtifactCount = tasks.filter((task) =>
+        task.status === "missing_fixture_pack" ||
+        task.status === "missing_review_brief" ||
+        task.status === "missing_review_artifacts"
+    ).length;
+    const readyForReviewCount = tasks.filter((task) => task.status === "ready_for_review").length;
+    const unknownSchemaCount = tasks.filter((task) => task.status === "unknown_schema").length;
+    return {
+        schema: "ax.workflow_candidate_pending_review_task_list.v1",
+        task_dir: input.taskDir,
+        task_count: tasks.length,
+        ready_for_review_count: readyForReviewCount,
+        missing_artifact_count: missingArtifactCount,
+        unknown_schema_count: unknownSchemaCount,
+        tasks,
+        next_action: tasks.length === 0
+            ? "No pending workflow candidate review tasks were found."
+            : missingArtifactCount > 0
+                ? "Regenerate or repair pending review task artifacts before review."
+                : readyForReviewCount > 0
+                    ? "Open the review brief for each ready task and record human review decisions."
+                    : "Regenerate pending review tasks with the current schema before review.",
+    };
+}
+
+const listMarkdownFiles = (dir: string): readonly string[] => {
+    if (!existsSync(dir)) return [];
+    return readdirSync(dir)
+        .map((name) => join(dir, name))
+        .filter((path) => {
+            try {
+                return statSync(path).isFile() && path.endsWith(".md");
+            } catch {
+                return false;
+            }
+        })
+        .sort();
+};
+
+export function loadWorkflowCandidateGuidancePendingReviewTaskListReport(
+    taskDir: string,
+): WorkflowCandidateGuidancePendingReviewTaskListReport {
+    return buildWorkflowCandidateGuidancePendingReviewTaskListReport({
+        taskDir,
+        taskFiles: listMarkdownFiles(taskDir).map((path) => ({
+            path,
+            content: readFileSync(path, "utf8"),
+        })),
+    });
+}
+
+export function renderWorkflowCandidateGuidancePendingReviewTaskListText(
+    report: WorkflowCandidateGuidancePendingReviewTaskListReport,
+): string {
+    const lines = [
+        "workflow candidate pending review tasks",
+        `task dir: ${report.task_dir}`,
+        `tasks: ${report.task_count}`,
+        `ready: ${report.ready_for_review_count}`,
+        `missing artifacts: ${report.missing_artifact_count}`,
+        `unknown schema: ${report.unknown_schema_count}`,
+        `next action: ${report.next_action}`,
+        "",
+        "tasks:",
+    ];
+    if (report.tasks.length === 0) lines.push("  (none)");
+    for (const task of report.tasks) {
+        lines.push(
+            `  - ${task.status} ${task.path}`,
+            `    stage: ${task.review_pipeline_stage ?? "unknown"}`,
+            `    candidates: ${task.candidate_count}`,
+            `    fixture pack: ${task.fixture_pack_status} ${task.fixture_pack_path ?? "unknown"}`,
+            `    review brief: ${task.review_brief_status} ${task.review_brief_path ?? "unknown"}`,
+        );
+        for (const candidateId of task.candidate_ids) lines.push(`    candidate: ${candidateId}`);
+    }
+    return lines.join("\n");
 }
 
 export function buildWorkflowCandidateGuidancePendingReviewHandoffSummary(input: {
@@ -6479,6 +6641,16 @@ export function renderWorkflowCandidateBriefMarkdown(report: WorkflowCandidateRe
 export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommandInput) =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
+        const taskDir = input.taskDir ?? ".ax/tasks";
+        if (input.listPendingReviewTasks) {
+            const report = loadWorkflowCandidateGuidancePendingReviewTaskListReport(taskDir);
+            if (input.out) {
+                mkdirSync(dirname(input.out), { recursive: true });
+                writeFileSync(input.out, `${prettyPrint(report)}\n`, "utf8");
+            }
+            console.log(input.json ? prettyPrint(report) : renderWorkflowCandidateGuidancePendingReviewTaskListText(report));
+            return;
+        }
         const loadTopicReport = (topic: string) =>
             Effect.gen(function* () {
                 const status = input.proposalStatus ?? "all";

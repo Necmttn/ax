@@ -33,13 +33,8 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E454 adds
-  `.ax/experiments/workflow-topic-guidance-decision-batch-e454.json`,
-  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e454.jsonl`,
-  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e454.md`,
-  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e454.json`,
-  and
-  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e454.json`
+- Index continuation: E455 adds
+  `.ax/experiments/workflow-candidate-pending-review-tasks-e455.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -60,10 +55,63 @@ Current recommendation:
   instead of the lower-level coverage command, the batch handoff carries the
   same review-pipeline lifecycle report used by review services, the pending
   review can now be emitted as a `.ax/tasks` handoff with a parseable
-  `ax.workflow_candidate_pending_review_task.v1` marker, and a smoke-marked
-  review is correctly blocked from apply, so the immediate bottleneck remains
-  a real human review decision for that pending candidate, not promoting
-  synthetic or harness-only evidence.
+  `ax.workflow_candidate_pending_review_task.v1` marker, and the CLI can list
+  those tasks and verify their fixture/brief artifacts before review. A
+  smoke-marked review is correctly blocked from apply, so the immediate
+  bottleneck remains a real human review decision for that pending candidate,
+  not promoting synthetic or harness-only evidence.
+
+## E455 - List Pending Review Task Readiness
+
+Question:
+- Can services and humans discover pending workflow-candidate review tasks and
+  see whether their linked fixture packs and review briefs still exist?
+
+Implementation:
+- Added `--list-pending-review-tasks` to `classifiers workflow-candidates`.
+- Added `ax.workflow_candidate_pending_review_task_list.v1` reports with:
+  - task count,
+  - ready-for-review count,
+  - missing-artifact count,
+  - unknown-schema count,
+  - per-task fixture pack status,
+  - per-task review brief status, and
+  - candidate ids.
+- Added a compact text renderer for the list report.
+- Added a regression covering ready and missing-review-brief task states while
+  ignoring unrelated markdown files.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-e455.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live JSON report:
+  - `task_count=1`
+  - `ready_for_review_count=1`
+  - `missing_artifact_count=0`
+  - `unknown_schema_count=0`
+  - `status=ready_for_review`
+  - fixture pack present:
+    `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e454.jsonl`
+  - review brief present:
+    `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e454.md`
+  - candidate:
+    `classifier_candidate_group:hybrid-window/correction_or_rejection_signal`
+- The text output gives the same status without requiring JSON parsing.
+
+Decision:
+- E455 makes the pending review work queue discoverable from the CLI and gives
+  services a read-only readiness surface before any review/apply action.
+- The queue is now operationally visible, but the classifier candidate still
+  needs real human review before graph promotion.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-e455.json --json
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks
+```
 
 ## E454 - Make Pending Review Tasks Machine-Readable
 
