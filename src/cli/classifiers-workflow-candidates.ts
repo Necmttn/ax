@@ -174,6 +174,13 @@ export interface WorkflowCandidateReviewCoverageFixtureSummary {
     readonly fixtures: readonly WorkflowCandidateTopicClassifierFixtureRow[];
 }
 
+export type WorkflowCandidateReviewCoverageApplyGuard =
+    | "ready_to_apply"
+    | "blocked_smoke_review"
+    | "invalid_review_pack"
+    | "missing_review_rationale"
+    | "no_reviewed_fixtures";
+
 export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly source_path: string;
     readonly apply_requested: boolean;
@@ -191,12 +198,7 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly projected_reviewed_candidate_count: number;
     readonly projected_unreviewed_candidate_count: number;
     readonly smoke_marker_count: number;
-    readonly apply_guard:
-        | "ready_to_apply"
-        | "blocked_smoke_review"
-        | "invalid_review_pack"
-        | "missing_review_rationale"
-        | "no_reviewed_fixtures";
+    readonly apply_guard: WorkflowCandidateReviewCoverageApplyGuard;
     readonly projection_totals: WorkflowCandidateTopicReviewGraphProjection["totals"];
     readonly write_plan_totals: WorkflowCandidateTopicReviewGraphWritePlan["totals"];
 }
@@ -2669,6 +2671,23 @@ export function buildWorkflowCandidateTopicReviewGraphProjection(
 const fixtureReviewVerdict = (row: WorkflowCandidateTopicClassifierFixtureRow): string | undefined =>
     REVIEWED_VERDICTS.has(row.review_status) ? row.review_status : undefined;
 
+const workflowCandidateReviewCoverageGuardNextAction = (
+    guard: WorkflowCandidateReviewCoverageApplyGuard,
+): string => {
+    switch (guard) {
+        case "invalid_review_pack":
+            return "Fix invalid review statuses before syncing or applying.";
+        case "no_reviewed_fixtures":
+            return "Set at least one fixture to accept, revise, reject, or defer and add a rationale.";
+        case "missing_review_rationale":
+            return "Add rationale text for every reviewed fixture.";
+        case "blocked_smoke_review":
+            return "Replace smoke or example review markers with real review decisions before applying.";
+        case "ready_to_apply":
+            return "Run the apply command after confirming the review pack is intentional.";
+    }
+};
+
 export function parseWorkflowCandidateFixtureRowsJsonl(
     content: string,
 ): readonly WorkflowCandidateTopicClassifierFixtureRow[] {
@@ -2722,7 +2741,7 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
     const reviewPackPath = context.coverageReviewPack ?? context.coverageFixturePack;
     const smokeMarkerCount = reviewedRows.filter(fixtureRowHasSmokeMarker).length +
         (reviewPackPath?.toLowerCase().includes("smoke") ? 1 : 0);
-    const applyGuard = invalidCount > 0
+    const applyGuard: WorkflowCandidateReviewCoverageApplyGuard = invalidCount > 0
         ? "invalid_review_pack"
         : reviewedRows.length === 0
         ? "no_reviewed_fixtures"
@@ -2780,6 +2799,7 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
         `- Missing rationales: \`${missingRationaleCount}\``,
         `- Smoke markers: \`${smokeMarkerCount}\``,
         `- Apply guard: \`${applyGuard}\``,
+        `- Next action: ${workflowCandidateReviewCoverageGuardNextAction(applyGuard)}`,
         "",
         ...(nextCommand === undefined ? [] : [
             "## Review Commands",
