@@ -33,13 +33,13 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E453 adds
-  `.ax/experiments/workflow-topic-guidance-decision-batch-e453.json`,
-  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e453.jsonl`,
-  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e453.md`,
-  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e453.json`,
+- Index continuation: E454 adds
+  `.ax/experiments/workflow-topic-guidance-decision-batch-e454.json`,
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e454.jsonl`,
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e454.md`,
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e454.json`,
   and
-  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e453.json`
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e454.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -59,10 +59,69 @@ Current recommendation:
   briefs. The generated brief now points reviewers back to the batch command
   instead of the lower-level coverage command, the batch handoff carries the
   same review-pipeline lifecycle report used by review services, the pending
-  review can now be emitted as a `.ax/tasks` handoff, and a smoke-marked
+  review can now be emitted as a `.ax/tasks` handoff with a parseable
+  `ax.workflow_candidate_pending_review_task.v1` marker, and a smoke-marked
   review is correctly blocked from apply, so the immediate bottleneck remains
   a real human review decision for that pending candidate, not promoting
   synthetic or harness-only evidence.
+
+## E454 - Make Pending Review Tasks Machine-Readable
+
+Question:
+- Can emitted pending-review task files be discovered and reconciled by future
+  tooling without scraping human prose?
+
+Implementation:
+- Added the `ax.workflow_candidate_pending_review_task.v1` schema marker to
+  pending review task summaries.
+- Added frontmatter to generated pending review tasks with:
+  - fixture pack path,
+  - review brief path,
+  - review pipeline stage, and
+  - candidate ids as JSON.
+- Added `parseWorkflowCandidateGuidancePendingReviewTaskMarkdown` so services
+  can read the task identity and candidate set directly.
+- Extended the pending-review task regression to assert the summary schema,
+  frontmatter fields, and parser output.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e454.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e454.jsonl`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e454.md`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e454.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e454.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live batch report includes
+  `pending_review_task.schema=ax.workflow_candidate_pending_review_task.v1`.
+- The emitted task frontmatter parses back to:
+  - fixture pack:
+    `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e454.jsonl`
+  - review brief:
+    `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e454.md`
+  - stage: `needs_review_decisions`
+  - candidate:
+    `classifier_candidate_group:hybrid-window/correction_or_rejection_signal`
+- The candidate remains blocked by `no_reviewed_fixtures`; no synthetic review
+  facts were applied.
+
+Decision:
+- E454 makes the `.ax/tasks` review handoff suitable for list/reconcile tooling
+  while keeping the existing human-review gate intact.
+- The next useful automation slice is a task-list or reconciliation command
+  that scans these markers and reports stale/missing fixture packs or review
+  briefs.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 --coverage-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e454.jsonl --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e454.md --review-facts=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e454.json --review-write-plan=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e454.json --review-pipeline-lifecycle --review-pipeline-verify-outputs --emit-pending-review-task --task-dir=.ax/tasks --out .ax/experiments/workflow-topic-guidance-decision-batch-e454.json --json
+python3 -m json.tool .ax/experiments/workflow-topic-guidance-decision-batch-e454.json >/dev/null
+TASK=$(bun -e 'const r=await Bun.file(".ax/experiments/workflow-topic-guidance-decision-batch-e454.json").json(); console.log(r.pending_review_task.path)')
+sed -n '1,28p' "$TASK"
+bun -e 'const { parseWorkflowCandidateGuidancePendingReviewTaskMarkdown } = await import("./src/cli/classifiers-workflow-candidates.ts"); const r=await Bun.file(".ax/experiments/workflow-topic-guidance-decision-batch-e454.json").json(); const parsed=parseWorkflowCandidateGuidancePendingReviewTaskMarkdown(await Bun.file(r.pending_review_task.path).text()); if (parsed.schema !== "ax.workflow_candidate_pending_review_task.v1") throw new Error(JSON.stringify(parsed)); if (parsed.fixture_pack_path !== r.pending_review_task.fixture_pack_path) throw new Error(JSON.stringify(parsed)); if (parsed.candidate_ids[0] !== "classifier_candidate_group:hybrid-window/correction_or_rejection_signal") throw new Error(JSON.stringify(parsed)); console.log(JSON.stringify(parsed, null, 2));'
+```
 
 ## E453 - Emit Pending Review Task From Batch Handoff
 

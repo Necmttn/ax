@@ -34,6 +34,7 @@ import {
     isTaskLikeWorkflowText,
     parseWorkflowCandidateBriefReview,
     parseWorkflowCandidateFixtureRowsJsonl,
+    parseWorkflowCandidateGuidancePendingReviewTaskMarkdown,
     recommendWorkflowCandidatePromotionArtifact,
     renderWorkflowCandidateBriefMarkdown,
     renderWorkflowCandidateReviewCoverageBriefMarkdown,
@@ -4146,6 +4147,7 @@ describe("classifiers workflow-candidates", () => {
         });
 
         expect(task.summary).toMatchObject({
+            schema: "ax.workflow_candidate_pending_review_task.v1",
             task_dir: ".ax/tasks",
             emitted_task_count: 1,
             candidate_count: 1,
@@ -4155,9 +4157,18 @@ describe("classifiers workflow-candidates", () => {
             review_pipeline_stage: "needs_review_decisions",
         });
         expect(task.summary.path).toContain(".ax/tasks/workflow-candidate-pending-review-");
+        expect(task.content).toContain("ax_schema: \"ax.workflow_candidate_pending_review_task.v1\"");
+        expect(task.content).toContain("candidate_ids_json: [\"classifier_candidate_group:hybrid-window/correction_or_rejection_signal\"]");
         expect(task.content).toContain("# ax pending workflow candidate review");
         expect(task.content).toContain("**Review brief:** `.ax/experiments/pending-review.md`");
         expect(task.content).toContain("Set each fixture to `accept`, `revise`, `reject`, or `defer`.");
+        expect(parseWorkflowCandidateGuidancePendingReviewTaskMarkdown(task.content)).toEqual({
+            schema: "ax.workflow_candidate_pending_review_task.v1",
+            fixture_pack_path: ".ax/experiments/pending-review.jsonl",
+            review_brief_path: ".ax/experiments/pending-review.md",
+            review_pipeline_stage: "needs_review_decisions",
+            candidate_ids: ["classifier_candidate_group:hybrid-window/correction_or_rejection_signal"],
+        });
         expect(renderWorkflowCandidateTopicGuidanceDecisionBatchText(batch)).toContain("pending review task emitted: 1");
     });
 

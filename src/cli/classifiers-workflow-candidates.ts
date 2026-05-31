@@ -248,7 +248,10 @@ export interface WorkflowCandidateGuidancePendingReviewHandoffSummary {
     readonly next_action: string;
 }
 
+export const workflowCandidateGuidancePendingReviewTaskSchema = "ax.workflow_candidate_pending_review_task.v1" as const;
+
 export interface WorkflowCandidateGuidancePendingReviewTaskSummary {
+    readonly schema: typeof workflowCandidateGuidancePendingReviewTaskSchema;
     readonly task_dir: string;
     readonly emitted_task_count: number;
     readonly path?: string;
@@ -258,6 +261,14 @@ export interface WorkflowCandidateGuidancePendingReviewTaskSummary {
     readonly fixture_pack_path: string;
     readonly review_pipeline_stage: WorkflowCandidateReviewCoveragePipelineStage;
     readonly next_action: string;
+}
+
+export interface WorkflowCandidateGuidancePendingReviewTaskParsed {
+    readonly schema?: string;
+    readonly fixture_pack_path?: string;
+    readonly review_brief_path?: string;
+    readonly review_pipeline_stage?: string;
+    readonly candidate_ids: readonly string[];
 }
 
 export interface WorkflowCandidateTopicGuidanceDecisionBatchReport {
@@ -3077,6 +3088,14 @@ export function buildWorkflowCandidateGuidancePendingReviewTask(input: {
     const candidateIds = [...new Set(input.fixturePack.fixtures.map((row) => row.candidate_id))].sort();
     const labels = [...new Set(input.fixturePack.fixtures.map((row) => row.candidate_label))].sort();
     const lines = [
+        "---",
+        `ax_schema: ${JSON.stringify(workflowCandidateGuidancePendingReviewTaskSchema)}`,
+        `fixture_pack_path: ${JSON.stringify(input.fixturePack.path)}`,
+        ...(input.handoff.review_brief_path === undefined ? [] : [`review_brief_path: ${JSON.stringify(input.handoff.review_brief_path)}`]),
+        `review_pipeline_stage: ${JSON.stringify(input.handoff.review_pipeline_stage)}`,
+        `candidate_ids_json: ${JSON.stringify(candidateIds)}`,
+        "---",
+        "",
         "# ax pending workflow candidate review",
         "",
         "**Action:** review classifier-derived workflow candidate before graph promotion",
@@ -3122,6 +3141,7 @@ export function buildWorkflowCandidateGuidancePendingReviewTask(input: {
     ];
     return {
         summary: {
+            schema: workflowCandidateGuidancePendingReviewTaskSchema,
             task_dir: input.taskDir,
             emitted_task_count: 1,
             path,
@@ -3133,6 +3153,57 @@ export function buildWorkflowCandidateGuidancePendingReviewTask(input: {
             next_action: input.handoff.next_action,
         },
         content: `${lines.join("\n").trimEnd()}\n`,
+    };
+}
+
+const parsePendingReviewTaskFrontmatterValue = (raw: string): unknown => {
+    const value = raw.trim();
+    if (value.length === 0) return "";
+    if (value.startsWith("\"") || value.startsWith("[") || value.startsWith("{") || value === "true" || value === "false") {
+        try {
+            return JSON.parse(value);
+        } catch {
+            return value;
+        }
+    }
+    return value;
+};
+
+const pendingReviewTaskStringField = (fields: ReadonlyMap<string, unknown>, key: string): string | undefined => {
+    const value = fields.get(key);
+    return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+};
+
+export function parseWorkflowCandidateGuidancePendingReviewTaskMarkdown(
+    markdown: string,
+): WorkflowCandidateGuidancePendingReviewTaskParsed {
+    const lines = markdown.split(/\r?\n/);
+    const fields = new Map<string, unknown>();
+    if (lines[0] === "---") {
+        const end = lines.findIndex((line, index) => index > 0 && line === "---");
+        if (end > 0) {
+            for (const line of lines.slice(1, end)) {
+                const match = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
+                if (match) fields.set(match[1]!, parsePendingReviewTaskFrontmatterValue(match[2]!));
+            }
+        }
+    }
+    const frontmatterCandidateIds = fields.get("candidate_ids_json");
+    const candidateIds = Array.isArray(frontmatterCandidateIds)
+        ? frontmatterCandidateIds.filter((value): value is string => typeof value === "string")
+        : lines
+            .filter((line) => line.startsWith("- `classifier_candidate_group:"))
+            .map((line) => line.replace(/^- `(.+)`$/, "$1"));
+    const schema = pendingReviewTaskStringField(fields, "ax_schema");
+    const fixturePackPath = pendingReviewTaskStringField(fields, "fixture_pack_path");
+    const reviewBriefPath = pendingReviewTaskStringField(fields, "review_brief_path");
+    const reviewPipelineStage = pendingReviewTaskStringField(fields, "review_pipeline_stage");
+    return {
+        ...(schema === undefined ? {} : { schema }),
+        ...(fixturePackPath === undefined ? {} : { fixture_pack_path: fixturePackPath }),
+        ...(reviewBriefPath === undefined ? {} : { review_brief_path: reviewBriefPath }),
+        ...(reviewPipelineStage === undefined ? {} : { review_pipeline_stage: reviewPipelineStage }),
+        candidate_ids: [...new Set(candidateIds)].sort(),
     };
 }
 
