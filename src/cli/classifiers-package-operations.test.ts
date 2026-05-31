@@ -755,6 +755,7 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("query suggestion repair verification expected query match: not_applicable");
         expect(output).toContain("query suggestion repair verification expected result count: none");
         expect(output).toContain("query suggestion repair verification argv: none");
+        expect(output).toContain("query suggestion repair verification query: none");
         expect(output).toContain("query suggestion repair query: none");
         expect(output).toContain("query suggestion provenance: source=lifecycle_available_value_counts reason=available_value_after_relaxing_value_equals");
         expect(output).toContain("query suggestion relaxed filters: value_equals");

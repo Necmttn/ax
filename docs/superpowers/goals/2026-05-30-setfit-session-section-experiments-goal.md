@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E412 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-expected-outcome-no-match-e412.json`
+- Index continuation: E413 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-query-no-match-e413.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-expected-outcome-match-e412.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-query-match-e413.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,53 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E413 - Expose Suggested Query Repair Verification Query
+
+Question:
+- E412 makes verification expected outcomes self-contained, but can services
+  get the structured verification query without reusing `repair_query`?
+
+Implementation:
+- Added optional `repair_verification_query` to `query_suggestion`.
+- Executable lifecycle graph-query repairs now include the structured
+  verification query under the verification namespace.
+- No-op suggestions omit `repair_verification_query`.
+- Text graph-health output now renders `query suggestion repair verification
+  query`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-query-no-match-e413.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-query-match-e413.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-query-no-match-e413.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_verification_query={mode: lifecycle, predicate:
+  review_pipeline_recommended_action_execution_phase, value_equals:
+  bind_inputs}`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and omits
+  `query_suggestion.repair_verification_query`.
+- Text output renders `query suggestion repair verification query:
+  mode=lifecycle predicate=review_pipeline_recommended_action_execution_phase
+  value_equals=bind_inputs`.
+
+Decision:
+- Verification execution now has its own structured query, argv, command kind,
+  expected outcome, action, and remediation, so services no longer need to
+  alias `repair_query` for verification.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E413 no-match report has the expected `repair_verification_query`.
+- E413 match report omits `repair_verification_query`.
+- E413 text output includes the repair verification query line.
 
 ## E412 - Expose Suggested Query Repair Verification Expected Outcome
 

@@ -341,6 +341,11 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
     const querySuggestionRepairVerificationExpectedQueryMatch = report.query_suggestion?.repair_verification_expected_query_match_status ?? "none";
     const querySuggestionRepairVerificationExpectedResultCount = report.query_suggestion?.repair_verification_expected_result_count ?? "none";
     const querySuggestionRepairVerificationArgv = report.query_suggestion?.repair_verification_argv.join(" ") || "none";
+    const querySuggestionRepairVerificationQuery = report.query_suggestion?.repair_verification_query === undefined
+        ? "none"
+        : Object.entries(report.query_suggestion.repair_verification_query)
+            .map(([key, value]) => `${key}=${value}`)
+            .join(" ");
     const querySuggestionRepairQuery = report.query_suggestion?.repair_query === undefined
         ? "none"
         : Object.entries(report.query_suggestion.repair_query)
@@ -407,6 +412,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `query suggestion repair verification expected query match: ${querySuggestionRepairVerificationExpectedQueryMatch}`,
         `query suggestion repair verification expected result count: ${querySuggestionRepairVerificationExpectedResultCount}`,
         `query suggestion repair verification argv: ${querySuggestionRepairVerificationArgv}`,
+        `query suggestion repair verification query: ${querySuggestionRepairVerificationQuery}`,
         `query suggestion repair query: ${querySuggestionRepairQuery}`,
         `query suggestion provenance: ${querySuggestionProvenance}`,
         `query suggestion relaxed filters: ${querySuggestionRelaxedFilters}`,
