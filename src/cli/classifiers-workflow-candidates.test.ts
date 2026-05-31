@@ -1530,7 +1530,10 @@ describe("classifiers workflow-candidates", () => {
                 remediation: "Replace smoke or example review markers with real review decisions.",
             }],
             next_action: "Replace smoke or example review markers with real review decisions before applying.",
+            reviewed_fixture_ids: ["workflow-candidate-review-coverage/verification_or_recovery_signal/a"],
         });
+        expect(summary.projected_fact_ids).toHaveLength(1);
+        expect(summary.projected_fact_ids[0]).toStartWith("fact:workflow_topic_candidate_review__review_coverage__");
         expect(summary.projection_totals.fact_count).toBe(1);
         expect(summary.write_plan_totals.fact_statement_count).toBe(1);
     });
@@ -1604,12 +1607,15 @@ describe("classifiers workflow-candidates", () => {
                 remediation: "Review at least one fixture and add a rationale before applying.",
             }],
             next_action: "Set at least one fixture to accept, revise, reject, or defer and add a rationale.",
+            reviewed_fixture_ids: [],
+            projected_fact_ids: [],
         });
         expect(text).toContain("coverage review schema: ax.workflow_candidate_review_readiness.v1");
         expect(text).toContain("coverage review can apply: no");
         expect(text).toContain("coverage review blockers: no_reviewed_fixtures");
         expect(text).toContain("coverage review blocker details: no_reviewed_fixtures=1");
         expect(text).toContain("coverage review blocker remediations: no_reviewed_fixtures: Review at least one fixture and add a rationale before applying.");
+        expect(text).toContain("coverage review audit ids: fixtures=0 facts=0");
         expect(text).toContain("coverage review next action: Set at least one fixture to accept, revise, reject, or defer and add a rationale.");
         expect(summary.projection_totals.fact_count).toBe(0);
         expect(summary.write_plan_totals.statement_count).toBe(1);
@@ -1661,7 +1667,9 @@ describe("classifiers workflow-candidates", () => {
                 remediation: "Add rationale text to each reviewed fixture.",
             }],
             next_action: "Add rationale text for every reviewed fixture.",
+            reviewed_fixture_ids: ["workflow-candidate-review-coverage/verification_or_recovery_signal/a"],
         });
+        expect(summary.projected_fact_ids).toHaveLength(1);
     });
 
     test("renders and syncs coverage review briefs back into fixture rows", () => {
@@ -1816,6 +1824,8 @@ describe("classifiers workflow-candidates", () => {
                 },
             ],
             next_action: "Fix invalid review statuses before syncing or applying.",
+            reviewed_fixture_ids: [],
+            projected_fact_ids: [],
         });
     });
 
@@ -1928,7 +1938,13 @@ describe("classifiers workflow-candidates", () => {
             apply_blockers: [],
             apply_blocker_details: [],
             next_action: "Run the apply command after confirming the review pack is intentional.",
+            reviewed_fixture_ids: [
+                "workflow-candidate-review-coverage/new/a",
+                "workflow-candidate-review-coverage/existing/a",
+                "workflow-candidate-review-coverage/unknown/a",
+            ],
         });
+        expect(summary.projected_fact_ids).toHaveLength(3);
     });
 
     test("renders persisted harness facts inside topic evidence packs", () => {

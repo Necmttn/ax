@@ -217,6 +217,8 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly apply_blockers: readonly WorkflowCandidateReviewCoverageApplyBlocker[];
     readonly apply_blocker_details: readonly WorkflowCandidateReviewCoverageApplyBlockerDetail[];
     readonly next_action: string;
+    readonly reviewed_fixture_ids: readonly string[];
+    readonly projected_fact_ids: readonly string[];
     readonly projection_totals: WorkflowCandidateTopicReviewGraphProjection["totals"];
     readonly write_plan_totals: WorkflowCandidateTopicReviewGraphWritePlan["totals"];
 }
@@ -1777,6 +1779,7 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             `coverage review blockers: ${report.coverage_review.apply_blockers.length === 0 ? "none" : report.coverage_review.apply_blockers.join(", ")}`,
             `coverage review blocker details: ${report.coverage_review.apply_blocker_details.length === 0 ? "none" : report.coverage_review.apply_blocker_details.map((detail) => `${detail.blocker}=${detail.count}`).join(", ")}`,
             `coverage review blocker remediations: ${report.coverage_review.apply_blocker_details.length === 0 ? "none" : report.coverage_review.apply_blocker_details.map((detail) => `${detail.blocker}: ${detail.remediation}`).join(" | ")}`,
+            `coverage review audit ids: fixtures=${report.coverage_review.reviewed_fixture_ids.length} facts=${report.coverage_review.projected_fact_ids.length}`,
             `coverage review next action: ${report.coverage_review.next_action}`,
             `coverage review applied: ${report.coverage_review.applied ? "yes" : "no"}`,
         ] : []),
@@ -3184,6 +3187,8 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         apply_blockers: applyBlockers,
         apply_blocker_details: applyBlockerDetails,
         next_action: workflowCandidateReviewCoverageGuardNextAction(applyGuard),
+        reviewed_fixture_ids: reviewedRows.map((row) => row.id),
+        projected_fact_ids: input.projection.facts.map((fact) => fact.id),
         projection_totals: input.projection.totals,
         write_plan_totals: input.writePlan.totals,
     };
