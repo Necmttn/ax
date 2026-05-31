@@ -958,17 +958,29 @@ describe("classifier package operations report", () => {
                     lifecycle_key: "proposal_review",
                     artifact_path: ".ax/experiments/workflow-candidate-proposal-review-current.json",
                 }),
+            }, {
+                graph_id: "fact:lifecycle:argv",
+                kind: "classifier_lifecycle_status",
+                subject: "classifier_lifecycle:workflow_candidate_proposal",
+                predicate: "review_pipeline_prepared_argv",
+                value_json: JSON.stringify(["bun", "src/cli/index.ts"]),
+                evidence_edges_json: JSON.stringify(["edge:lifecycle"]),
+                properties_json: JSON.stringify({
+                    lifecycle_key: "review_pipeline_lifecycle",
+                    artifact_path: ".ax/experiments/workflow-candidate-proposal-review-current.json",
+                }),
             }],
-            query: { mode: "lifecycle" },
+            query: { mode: "lifecycle", predicate: "review_pipeline_prepared_argv" },
         });
 
         expect(report.query.mode).toBe("lifecycle");
-        expect(report.totals.lifecycle_fact_count).toBe(1);
+        expect(report.query.predicate).toBe("review_pipeline_prepared_argv");
+        expect(report.totals.lifecycle_fact_count).toBe(2);
         expect(report.result_totals.lifecycle_fact_count).toBe(1);
         expect(report.lifecycle_facts[0]).toMatchObject({
-            predicate: "proposal_review_pending_count",
-            value: 4,
-            lifecycle_key: "proposal_review",
+            predicate: "review_pipeline_prepared_argv",
+            value: ["bun", "src/cli/index.ts"],
+            lifecycle_key: "review_pipeline_lifecycle",
             artifact_path: ".ax/experiments/workflow-candidate-proposal-review-current.json",
             evidence_paths: [".ax/experiments/workflow-candidate-proposal-review-current.json"],
         });

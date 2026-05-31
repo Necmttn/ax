@@ -534,16 +534,16 @@ describe("classifiers package-operations format", () => {
         const report: ClassifierPackageExecutionGraphHealthReport = {
             schema: "ax.classifier_package_execution_graph_health_report.v1",
             tables: ["classifier_graph_node", "classifier_graph_edge", "classifier_graph_fact"],
-            query: { mode: "lifecycle" },
+            query: { mode: "lifecycle", predicate: "review_pipeline_prepared_argv" },
             operations: [],
             guarded_operations: [],
             changed_artifacts: [],
             lifecycle_facts: [{
                 graph_id: "fact:lifecycle",
                 subject: "classifier_lifecycle:workflow_candidate_proposal",
-                predicate: "proposal_review_pending_count",
-                value: 4,
-                lifecycle_key: "proposal_review",
+                predicate: "review_pipeline_prepared_argv",
+                value: ["bun", "src/cli/index.ts"],
+                lifecycle_key: "review_pipeline_lifecycle",
                 artifact_path: ".ax/experiments/workflow-candidate-proposal-review-current.json",
                 evidence_edges: ["edge:lifecycle"],
                 evidence_paths: [".ax/experiments/workflow-candidate-proposal-review-current.json"],
@@ -580,10 +580,11 @@ describe("classifiers package-operations format", () => {
         const output = renderClassifierPackageExecutionGraphHealthText(report);
 
         expect(output).toContain("mode: lifecycle");
+        expect(output).toContain("filter predicate: review_pipeline_prepared_argv");
         expect(output).toContain("execution/guard/artifact/lifecycle/helper facts: 0/0/0/1/0");
         expect(output).toContain("lifecycle facts:");
-        expect(output).toContain("- proposal_review_pending_count: 4");
-        expect(output).toContain("source: proposal_review .ax/experiments/workflow-candidate-proposal-review-current.json");
+        expect(output).toContain("- review_pipeline_prepared_argv: [\"bun\",\"src/cli/index.ts\"]");
+        expect(output).toContain("source: review_pipeline_lifecycle .ax/experiments/workflow-candidate-proposal-review-current.json");
     });
 
     test("renders embedding helper graph facts", () => {

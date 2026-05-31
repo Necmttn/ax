@@ -383,6 +383,7 @@ export interface ClassifierGraphHealthQuery {
     readonly mode: ClassifierGraphHealthMode;
     readonly operation_id?: string;
     readonly artifact_path?: string;
+    readonly predicate?: string;
 }
 
 export interface ClassifierPackageExecutionGraphHealthReport {
@@ -1779,6 +1780,7 @@ export function buildExecutionGraphHealthReport(input: {
         mode: input.query?.mode ?? "summary",
         ...(input.query?.operation_id ? { operation_id: input.query.operation_id } : {}),
         ...(input.query?.artifact_path ? { artifact_path: input.query.artifact_path } : {}),
+        ...(input.query?.predicate ? { predicate: input.query.predicate } : {}),
     };
     const nodesById = new Map(input.nodes.map((node) => [node.graph_id, node]));
     const operationByExecution = new Map<string, string>();
@@ -1968,18 +1970,20 @@ export function buildExecutionGraphHealthReport(input: {
         : filteredChangedArtifacts;
     const resultLifecycleFacts = query.mode === "lifecycle" || query.mode === "evidence"
         ? lifecycleFacts.filter((fact) =>
-            !query.artifact_path ||
-            fact.artifact_path === query.artifact_path ||
-            fact.evidence_paths.includes(query.artifact_path)
+            (!query.artifact_path ||
+                fact.artifact_path === query.artifact_path ||
+                fact.evidence_paths.includes(query.artifact_path)) &&
+            (!query.predicate || fact.predicate === query.predicate)
         )
         : [];
     const resultEmbeddingHelperFacts = query.mode === "embedding-helper" || query.mode === "evidence"
         ? embeddingHelperFacts.filter((fact) =>
-            !query.artifact_path ||
-            fact.evidence_paths.includes(query.artifact_path) ||
-            fact.source_fixture_id === query.artifact_path ||
-            fact.subject === query.artifact_path ||
-            fact.object === query.artifact_path
+            (!query.artifact_path ||
+                fact.evidence_paths.includes(query.artifact_path) ||
+                fact.source_fixture_id === query.artifact_path ||
+                fact.subject === query.artifact_path ||
+                fact.object === query.artifact_path) &&
+            (!query.predicate || fact.predicate === query.predicate)
         )
         : [];
     const resultEvidencePaths = Array.from(new Set([

@@ -34,6 +34,7 @@ export interface ClassifierPackageOperationsCommandInput extends ClassifierPacka
     readonly graphHealth?: boolean;
     readonly graphMode?: ClassifierGraphHealthMode;
     readonly artifact?: string;
+    readonly predicate?: string;
     readonly root?: string;
     readonly workflowStatusPath?: string;
 }
@@ -259,6 +260,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `mode: ${report.query.mode}`,
         `filter operation: ${report.query.operation_id ?? "all"}`,
         `filter artifact: ${report.query.artifact_path ?? "all"}`,
+        `filter predicate: ${report.query.predicate ?? "all"}`,
         `nodes/edges/facts: ${report.totals.node_count}/${report.totals.edge_count}/${report.totals.fact_count}`,
         `packages/operations/executions/artifacts: ${report.totals.package_count}/${report.totals.operation_count}/${report.totals.execution_count}/${report.totals.artifact_count}`,
         `execution/guard/artifact/lifecycle/helper facts: ${report.totals.execution_fact_count}/${report.totals.guard_fact_count}/${report.totals.artifact_fact_count}/${report.totals.lifecycle_fact_count}/${report.totals.embedding_helper_fact_count}`,
@@ -567,6 +569,7 @@ export const runClassifiersPackageOperations = (
                 mode: input.graphMode ?? "summary",
                 ...(input.operationId ? { operation_id: input.operationId } : {}),
                 ...(input.artifact ? { artifact_path: input.artifact } : {}),
+                ...(input.predicate ? { predicate: input.predicate } : {}),
             } as const;
             const report = input.out
                 ? yield* packages.writeExecutionGraphHealthReport({ out: input.out, query })
