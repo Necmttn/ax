@@ -29,7 +29,7 @@ artifact path as the evidence to inspect before trusting any summary row.
 | Blind/review workflow | E46-E65+ | `.ax/experiments/blind-workflow-status-e57.json` and related review artifacts | Human review is mandatory before fixtures or graph facts are promoted. | Pending where review rows are incomplete. | Earlier experiment log | Prefer review queues/workspaces over automatic label edits. |
 | Transcript graph projection | E155-E157 | `.ax/experiments/transcript-candidate-graph-projection-e155.json`, `.ax/experiments/workflow-candidate-report-e156.json`, `.ax/experiments/workflow-candidate-cli-e157.json` | Real persisted classifier facts can become graph-backed workflow candidates. | Passed for projection/query; still needs product review filters and proposal gates. | E155/E156/E157 commits in log | Use graph facts for evidence-backed workflow/harness discovery. |
 | Proposal lifecycle | E168-E208 | `.ax/experiments/workflow-candidate-proposal-list-e168.json`, `.ax/experiments/classifier-package-execution-write-plan-e208.json` | Classifier-derived workflow proposals are discoverable and lifecycle-tracked. | Passed for visibility/lifecycle plumbing; promotion remains review-gated. | Recent proposal lifecycle commits | Continue using review and ready-smoke gates before guidance/harness changes. |
-| Embedding/SVM helper layer | E209-E218 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/embedding-helper-review-batch-e216-report.json`, `.ax/experiments/embedding-helper-review-batch-dry-run-e217-report.json`, `.ax/experiments/embedding-helper-review-progress-e218.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. | Blocked correctly by pending review: 15 hard negatives and 1 dedupe cluster remain unreviewed; the current focused batch covers 5 items. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `4c602d9`, `98312c1`, `0faa935`, `4378a10` | Review E216 batch, dry-run sync, then sync accepted/rejected statuses and export accepted hard negatives/dedupe hints. |
+| Embedding/SVM helper layer | E209-E219 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/embedding-helper-review-batch-e216-report.json`, `.ax/experiments/embedding-helper-review-batch-dry-run-e217-report.json`, `.ax/experiments/embedding-helper-review-progress-e218.json`, `.ax/experiments/embedding-helper-review-partial-sync-e219-report.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. | Blocked correctly by pending review: canonical review still has 15 hard negatives and 1 dedupe cluster pending; synthetic copy-sync proves partial review can reduce pending counts without mutating canonical state. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `4c602d9`, `98312c1`, `0faa935`, `4378a10`, `6ca2b86` | Do real review of E216 batch, dry-run copy-sync, then sync accepted/rejected statuses and export accepted hard negatives/dedupe hints. |
 
 Current recommendation:
 
@@ -11127,6 +11127,65 @@ Decision:
   export gate remains closed.
 - The next useful step remains reviewing E216, but the reviewer can now track
   progress without re-reading the full E210 artifact.
+
+## E219 - Embedding Helper Partial Review Copy-Sync Smoke
+
+Question:
+
+- Can a partially reviewed embedding-helper batch be synced into a review copy
+  and show reduced pending counts without mutating the canonical E210 review?
+
+Changes:
+
+- Added `--review-out` to `embedding_helper_review_batch.py --mode=sync`.
+- When `--review-out` is set, sync writes the synced review JSON to that path.
+- With `--dry-run --review-out`, canonical review JSON is not mutated, while a
+  copy is still emitted for inspection.
+- Sync reports now include:
+  - `would_write_canonical_review`
+  - `wrote_review_out`
+  - `review_out` when a copy is written
+
+Smoke setup:
+
+- Created a synthetic partial-review batch from E216 with two edited hard
+  negatives. This is explicitly not a promotion input and not a real human
+  acceptance decision.
+
+Command:
+
+```sh
+bun run classifiers:embedding-helper-review-batch -- --mode=sync --dry-run --review=.ax/experiments/embedding-helper-review-e210.json --review-out=.ax/experiments/embedding-helper-review-e219-synthetic-synced.json --batch=.ax/experiments/embedding-helper-review-batch-e219-synthetic.md --out=.ax/experiments/embedding-helper-review-partial-sync-e219-report.json --json
+```
+
+Artifacts:
+
+- `.ax/experiments/embedding-helper-review-batch-e219-synthetic.md`
+- `.ax/experiments/embedding-helper-review-e219-synthetic-synced.json`
+- `.ax/experiments/embedding-helper-review-partial-sync-e219-report.json`
+
+Results:
+
+- Command exit status: `1`, expected because only two synthetic items were
+  reviewed and the full review gate still has pending items.
+- Canonical E210 review checksum before/after: unchanged.
+- Report schema: `ax.embedding_helper_review_batch_report.v1`
+- Mode: `sync`
+- `dry_run`: `true`
+- `would_write_canonical_review`: `false`
+- `wrote_review_out`: `true`
+- Decision: `needs_embedding_helper_review`
+- Synthetic copy hard negatives accepted/rejected/pending: `1/1/13`
+- Synthetic copy dedupe accepted/rejected/pending: `0/0/1`
+- Failures still correctly report pending hard negatives and dedupe clusters.
+
+Decision:
+
+- E219 proves the review workflow can safely validate partial progress on a
+  copy. That gives reviewers a safer path: edit batch, dry-run copy-sync,
+  inspect counts, then decide whether to write back to canonical review state.
+- This still intentionally does not satisfy the promotion/export gate because
+  the reviewed statuses are synthetic and incomplete.
 
 ## E197 - Hybrid Graph Usefulness Gate
 

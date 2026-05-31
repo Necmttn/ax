@@ -103,6 +103,8 @@ class EmbeddingHelperReviewBatchTest(unittest.TestCase):
         self.assertEqual(synced["dedupe_clusters"][0]["status"], "rejected")
         self.assertEqual(report["dry_run"], False)
         self.assertEqual(report["would_write_review"], True)
+        self.assertEqual(report["would_write_canonical_review"], True)
+        self.assertEqual(report["wrote_review_out"], False)
         self.assertEqual(report["decision"], "ready_for_embedding_helper_export")
         self.assertEqual(report["hard_negative_pending"], 0)
         self.assertEqual(report["dedupe_pending"], 0)
@@ -121,6 +123,8 @@ class EmbeddingHelperReviewBatchTest(unittest.TestCase):
         self.assertEqual(synced["hard_negative_candidates"][0]["status"], "accepted")
         self.assertEqual(report["dry_run"], True)
         self.assertEqual(report["would_write_review"], False)
+        self.assertEqual(report["would_write_canonical_review"], False)
+        self.assertEqual(report["wrote_review_out"], False)
 
     def test_evaluate_batch_reports_progress_and_selected_batch_ids(self) -> None:
         report = module.evaluate_batch(

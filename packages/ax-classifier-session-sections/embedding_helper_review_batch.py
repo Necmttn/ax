@@ -18,6 +18,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate or sync focused embedding-helper review batches.")
     parser.add_argument("--mode", choices=["generate", "sync", "evaluate"], default="generate")
     parser.add_argument("--review", default=".ax/experiments/embedding-helper-review-current.json")
+    parser.add_argument("--review-out", default=None, help="Optional path for the synced review JSON; useful with --dry-run.")
     parser.add_argument("--fixtures", default="packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl")
     parser.add_argument("--batch", default=".ax/experiments/embedding-helper-review-batch-current.md")
     parser.add_argument("--out", default=".ax/experiments/embedding-helper-review-batch-current-report.json")
@@ -189,6 +190,8 @@ def sync_batch(review: dict[str, Any], batch: str, dry_run: bool = False) -> tup
         "mode": "sync",
         "dry_run": dry_run,
         "would_write_review": not dry_run,
+        "would_write_canonical_review": not dry_run,
+        "wrote_review_out": False,
         "decision": status["decision"],
         "hard_negative_accepted": status["hard_negative_accepted"],
         "hard_negative_rejected": status["hard_negative_rejected"],
@@ -258,7 +261,11 @@ def main() -> int:
         batch_path.write_text(markdown)
     elif args.mode == "sync":
         review, report = sync_batch(review, Path(args.batch).read_text(), dry_run=args.dry_run)
-        if not args.dry_run:
+        if args.review_out:
+            write_json(args.review_out, review)
+            report["review_out"] = args.review_out
+            report["wrote_review_out"] = True
+        elif not args.dry_run:
             write_json(args.review, review)
     else:
         batch = Path(args.batch).read_text() if Path(args.batch).exists() else None
