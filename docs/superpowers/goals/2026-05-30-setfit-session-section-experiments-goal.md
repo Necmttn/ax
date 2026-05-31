@@ -11298,6 +11298,64 @@ Decision:
   - create a reviewer-friendly summary command that tells a human exactly which
     proposal briefs need edits before promotion can produce drafts.
 
+## E204 - Proposal Review Checklist Summary
+
+Question:
+
+- Can the proposal review gate produce a reviewer-friendly checklist that shows
+  exactly which briefs and fields must be edited before promotion can run?
+
+Implementation:
+
+- Extended
+  `packages/ax-classifier-session-sections/workflow_candidate_proposal_review.py`
+  with `--summary`.
+- Added Markdown summary rendering coverage to
+  `workflow_candidate_proposal_review_test.py`.
+- Updated package operation `workflow-candidate-proposal-review` to emit both:
+  - `.ax/experiments/workflow-candidate-proposal-review-current.json`
+  - `.ax/experiments/workflow-candidate-proposal-review-current.md`
+- Updated package docs and manifest tests for the new summary output.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/workflow_candidate_proposal_review_test.py
+bun src/cli/index.ts classifiers package-operations --operation=workflow-candidate-proposal-review --execute --out=.ax/experiments/classifier-package-execution-workflow-candidate-proposal-review-e204.json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-proposal-review-current.json`
+- `.ax/experiments/workflow-candidate-proposal-review-current.md`
+- `.ax/experiments/workflow-candidate-proposal-review-e204.json`
+- `.ax/experiments/workflow-candidate-proposal-review-e204.md`
+- `.ax/experiments/classifier-package-execution-workflow-candidate-proposal-review-e204.json`
+
+Results:
+
+- Execution decision: `executed`
+- Execution exit code: `0`
+- Missing package outputs: `[]`
+- Review decision: `needs_workflow_candidate_proposal_review`
+- Proposal count: `4`
+- Ready proposals: `0`
+- Pending proposals: `4`
+- Invalid proposals: `0`
+- Missing reviewer fields: `16`
+
+Decision:
+
+- E204 keeps the gate strict but makes it actionable for a reviewer. The
+  Markdown checklist points to each proposal brief and lists the missing
+  reviewer fields required before `workflow-candidate-proposal-promote-drafts`
+  can emit task drafts.
+- The current state remains intentionally blocked until a human or trusted
+  reviewer fills the proposal briefs.
+- Next useful slice: add a fixture-driven ready-review smoke for the full
+  review -> promotion-draft path, proving accepted/revised proposals create
+  draft files and rejected proposals stay skipped.
+
 ## E196 - First-Class Hybrid Robustness Gate
 
 Question:

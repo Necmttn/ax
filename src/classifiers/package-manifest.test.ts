@@ -112,6 +112,7 @@ describe("classifier package manifest", () => {
         expect(workflowCandidateProposalPack.outputs).toContain(".ax/tasks/workflow-candidate-proposals");
         expect(workflowCandidateProposalReview.inputs).toContain(".ax/tasks/workflow-candidate-proposals");
         expect(workflowCandidateProposalReview.outputs).toContain(".ax/experiments/workflow-candidate-proposal-review-current.json");
+        expect(workflowCandidateProposalReview.outputs).toContain(".ax/experiments/workflow-candidate-proposal-review-current.md");
         expect(workflowCandidateProposalPromote.inputs).toContain(".ax/experiments/workflow-candidate-proposal-review-current.json");
         expect(workflowCandidateProposalPromote.outputs).toContain(".ax/tasks/workflow-candidate-promotion-drafts");
         expect(graphHealth.outputs).toContain(".ax/experiments/classifier-package-execution-graph-health-changed-current.json");

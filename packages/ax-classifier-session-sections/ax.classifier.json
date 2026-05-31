@@ -162,13 +162,14 @@
       "id": "workflow-candidate-proposal-review",
       "kind": "review",
       "description": "Evaluate proposal briefs and block promotion until reviewer verdict, rationale, proposed change, and target fields are complete.",
-      "command": "bun run classifiers:workflow-candidate-proposal-review -- --pack=.ax/experiments/workflow-candidate-proposal-pack-current.json --out=.ax/experiments/workflow-candidate-proposal-review-current.json --json",
+      "command": "bun run classifiers:workflow-candidate-proposal-review -- --pack=.ax/experiments/workflow-candidate-proposal-pack-current.json --out=.ax/experiments/workflow-candidate-proposal-review-current.json --summary=.ax/experiments/workflow-candidate-proposal-review-current.md --json",
       "inputs": [
         ".ax/experiments/workflow-candidate-proposal-pack-current.json",
         ".ax/tasks/workflow-candidate-proposals"
       ],
       "outputs": [
-        ".ax/experiments/workflow-candidate-proposal-review-current.json"
+        ".ax/experiments/workflow-candidate-proposal-review-current.json",
+        ".ax/experiments/workflow-candidate-proposal-review-current.md"
       ]
     },
     {

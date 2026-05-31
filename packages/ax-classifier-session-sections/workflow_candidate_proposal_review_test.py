@@ -104,6 +104,30 @@ class WorkflowCandidateProposalReviewTest(unittest.TestCase):
             self.assertEqual(report["totals"]["invalid_count"], 1)
             self.assertEqual(report["proposals"][0]["invalid_fields"], ["verdict"])
 
+    def test_render_summary_points_reviewer_at_missing_fields_and_brief(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            brief_path = write_brief(root, "proposal.md", """
+# Add a verification gate for recurring agent work
+
+- Proposal id: `workflow-candidate-proposal:01-add-verification-gate`
+
+## Reviewer Decision
+
+- Verdict: `pending`
+- Rationale:
+- Proposed change:
+- Target file/skill/harness:
+""")
+
+            report = module.build_report({"proposals": [proposal(brief_path)]}, "pack.json")
+            summary = module.render_summary(report)
+
+            self.assertIn("Workflow Candidate Proposal Review", summary)
+            self.assertIn(f"Brief: `{brief_path}`", summary)
+            self.assertIn("Missing fields: `verdict, rationale, proposed_change, target`", summary)
+            self.assertIn("Verdict", summary)
+
 
 if __name__ == "__main__":
     unittest.main()

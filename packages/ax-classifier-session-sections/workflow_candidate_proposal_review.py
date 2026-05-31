@@ -26,6 +26,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate workflow-candidate proposal brief reviewer fields.")
     parser.add_argument("--pack", default=".ax/experiments/workflow-candidate-proposal-pack-current.json")
     parser.add_argument("--out", default=".ax/experiments/workflow-candidate-proposal-review-current.json")
+    parser.add_argument("--summary", default="")
     parser.add_argument("--json", action="store_true")
     return parser.parse_args()
 
@@ -141,12 +142,56 @@ def build_report(pack: dict[str, Any], pack_path: str) -> dict[str, Any]:
     }
 
 
+def render_summary(report: dict[str, Any]) -> str:
+    totals = report["totals"]
+    lines = [
+        "# Workflow Candidate Proposal Review",
+        "",
+        f"- Decision: `{report['decision']}`",
+        f"- Proposals: `{totals['proposal_count']}`",
+        f"- Ready: `{totals['ready_count']}`",
+        f"- Pending: `{totals['pending_count']}`",
+        f"- Invalid: `{totals['invalid_count']}`",
+        f"- Missing fields: `{totals['missing_field_count']}`",
+        "",
+        "## Reviewer Checklist",
+        "",
+    ]
+    if not report["proposals"]:
+        lines.extend(["No proposals found.", ""])
+        return "\n".join(lines)
+    for proposal in report["proposals"]:
+        missing = ", ".join(proposal["missing_fields"]) or "none"
+        invalid = ", ".join(proposal["invalid_fields"]) or "none"
+        lines.extend([
+            f"### {proposal.get('title') or proposal.get('id')}",
+            "",
+            f"- Brief: `{proposal['brief_path']}`",
+            f"- Status: `{proposal['status']}`",
+            f"- Action: `{proposal.get('action')}`",
+            f"- Recommended artifact: `{proposal.get('recommended_artifact')}`",
+            f"- Missing fields: `{missing}`",
+            f"- Invalid fields: `{invalid}`",
+            "- Edit the `## Reviewer Decision` section with:",
+            "  - `Verdict`: `accept`, `revise`, or `reject`",
+            "  - `Rationale`: why this verdict follows from the evidence",
+            "  - `Proposed change`: the concrete guidance, harness, or review change",
+            "  - `Target file/skill/harness`: where the change should land",
+            "",
+        ])
+    return "\n".join(lines)
+
+
 def main() -> int:
     args = parse_args()
     report = build_report(load_json(args.pack), args.pack)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, indent=2) + "\n")
+    if args.summary:
+        summary = Path(args.summary)
+        summary.parent.mkdir(parents=True, exist_ok=True)
+        summary.write_text(render_summary(report))
     if args.json:
         print(json.dumps(report, indent=2))
     else:
