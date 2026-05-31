@@ -648,6 +648,7 @@ describe("classifiers package-operations format", () => {
             routing_policy_summary: {
                 status: "meets_requested_floors",
                 next_action: "choose_reviewed_routing_threshold",
+                remediation: "Use the selected reviewed threshold as an advisory routing policy.",
                 requested_min_positive_recall: 0.9,
                 requested_min_call_reduction: 0.25,
                 candidate_count: 1,
@@ -702,6 +703,7 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("routing policy best positive recall: 0.9028");
         expect(output).toContain("routing policy best call reduction: 0.1778");
         expect(output).toContain("routing policy next action: choose_reviewed_routing_threshold");
+        expect(output).toContain("routing policy remediation: Use the selected reviewed threshold as an advisory routing policy.");
         expect(output).toContain("embedding helper facts:");
         expect(output).toContain("- routing recommended_threshold: threshold=none positive_recall=0.9028 call_reduction=0.1778");
         expect(output).toContain("- hard-negative session-section-chunks/none-start-building: promoted_hard_negative_fixture status=accepted proposed=none seeds=2 nearest=0.8743 promoted=session-section-chunks/embedding-helper-hard-negative-none-start-building");

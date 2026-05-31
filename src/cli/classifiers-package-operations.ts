@@ -270,6 +270,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
     const routingPolicySummary = report.routing_policy_summary ?? {
         status: "not_requested",
         next_action: "set_routing_floors",
+        remediation: "Set positive-recall and call-reduction floors to evaluate reviewed routing policies.",
         candidate_count: 0,
     };
     const lines = [
@@ -302,6 +303,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `routing policy best positive recall: ${routingPolicySummary.best_positive_recall ?? "none"}`,
         `routing policy best call reduction: ${routingPolicySummary.best_call_reduction ?? "none"}`,
         `routing policy next action: ${routingPolicySummary.next_action}`,
+        `routing policy remediation: ${routingPolicySummary.remediation}`,
     ];
     for (const operation of report.operations) {
         lines.push(`- ${operation.package_key}/${operation.operation_id}`);

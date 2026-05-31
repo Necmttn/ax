@@ -383,6 +383,7 @@ export interface ClassifierGraphEmbeddingHelperFact {
 export interface ClassifierGraphRoutingPolicySummary {
     readonly status: "not_requested" | "meets_requested_floors" | "no_matching_policy";
     readonly next_action: "set_routing_floors" | "choose_reviewed_routing_threshold" | "lower_floor_or_review_more_candidates";
+    readonly remediation: string;
     readonly requested_min_positive_recall?: number;
     readonly requested_min_call_reduction?: number;
     readonly candidate_count: number;
@@ -2100,6 +2101,11 @@ export function buildExecutionGraphHealthReport(input: {
             : routingPolicyCandidates.length > 0
                 ? "choose_reviewed_routing_threshold"
                 : "lower_floor_or_review_more_candidates",
+        remediation: !routingPolicyFloorsRequested
+            ? "Set positive-recall and call-reduction floors to evaluate reviewed routing policies."
+            : routingPolicyCandidates.length > 0
+                ? "Use the selected reviewed threshold as an advisory routing policy."
+                : "Lower the requested routing floors or review more routing candidates before enabling this policy.",
         ...(query.min_positive_recall === undefined ? {} : { requested_min_positive_recall: query.min_positive_recall }),
         ...(query.min_call_reduction === undefined ? {} : { requested_min_call_reduction: query.min_call_reduction }),
         candidate_count: routingPolicyCandidates.length,
