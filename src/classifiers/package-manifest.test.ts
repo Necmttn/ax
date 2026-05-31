@@ -55,6 +55,9 @@ describe("classifier package manifest", () => {
         expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-fixture-failure-analysis")?.command).toContain("classifiers:failure-analysis");
         expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-boundary-miss-review")?.command).toContain("classifiers:boundary-miss-review");
         expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-boundary-miss-review-sync")?.command).toContain("--mode=sync");
+        expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-graph-projection")?.inputs).toContain("packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl");
+        expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-graph-apply")?.kind).toBe("publish");
+        expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-graph-health")?.command).toContain("--graph-mode=embedding-helper");
         expect(manifest.operations?.find((operation) => operation.id === "graph-health-summary")?.kind).toBe("status");
         expect(manifest.operations?.find((operation) => operation.id === "graph-health-guarded")?.command).toContain("--graph-mode=guarded");
         expect(manifest.operations?.find((operation) => operation.id === "classifier-lifecycle-status")?.outputs).toContain(".ax/experiments/classifiers-lifecycle-current.json");

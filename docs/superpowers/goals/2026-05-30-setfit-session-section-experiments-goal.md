@@ -29,7 +29,7 @@ artifact path as the evidence to inspect before trusting any summary row.
 | Blind/review workflow | E46-E65+ | `.ax/experiments/blind-workflow-status-e57.json` and related review artifacts | Human review is mandatory before fixtures or graph facts are promoted. | Pending where review rows are incomplete. | Earlier experiment log | Prefer review queues/workspaces over automatic label edits. |
 | Transcript graph projection | E155-E157 | `.ax/experiments/transcript-candidate-graph-projection-e155.json`, `.ax/experiments/workflow-candidate-report-e156.json`, `.ax/experiments/workflow-candidate-cli-e157.json` | Real persisted classifier facts can become graph-backed workflow candidates. | Passed for projection/query; still needs product review filters and proposal gates. | E155/E156/E157 commits in log | Use graph facts for evidence-backed workflow/harness discovery. |
 | Proposal lifecycle | E168-E208 | `.ax/experiments/workflow-candidate-proposal-list-e168.json`, `.ax/experiments/classifier-package-execution-write-plan-e208.json` | Classifier-derived workflow proposals are discoverable and lifecycle-tracked. | Passed for visibility/lifecycle plumbing; promotion remains review-gated. | Recent proposal lifecycle commits | Continue using review and ready-smoke gates before guidance/harness changes. |
-| Embedding/SVM helper layer | E209-E231 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/embedding-helper-review-batch-e216-report.json`, `.ax/experiments/embedding-helper-review-progress-e218.json`, `.ax/experiments/classifier-package-execution-embedding-helper-export-preview-e221.json`, `.ax/experiments/classifier-package-execution-embedding-helper-review-progress-e223.json`, `.ax/experiments/embedding-helper-export-e227-report.json`, `.ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e227.json`, `.ax/experiments/embedding-helper-fixture-split-audit-e228.json`, `.ax/experiments/setfit-robustness-embedding-helper-fixtures-e228.json`, `.ax/experiments/setfit-failure-analysis-embedding-helper-fixtures-e229.json`, `.ax/experiments/classifier-package-execution-embedding-helper-fixture-failure-analysis-e229.json`, `.ax/experiments/boundary-miss-review-current.md`, `.ax/experiments/boundary-miss-review-current-report.json`, `.ax/experiments/classifier-package-execution-embedding-helper-boundary-miss-review-e230.json`, `.ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e231-post-promotion.json`, `.ax/experiments/embedding-helper-canonical-promotion-split-audit-e231.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. Reviewed helper hard negatives now live in canonical fixtures, and the package append operation is idempotent after promotion. | Passed: boundary review is promotion-ready, canonical fixtures contain `136` unique rows including `12` helper hard negatives, split audit is viable for seeds `7/13/42`, and robustness remains `robust_enough` with macro F1 min `0.7542` and max `none` FP `0.0769`. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `65b0b3c`, `4c602d9`, `eeb517c`, `9a6811e`, `31a1b16`, `e41562c`, `0587b67`, `0e0a960`, `3f01787`, `7bea922`, `21f7163`, `24e4a4e`, `f97c8e3`, `722e3e8`, `8b27657`, this commit | Move from fixture promotion to graph/usefulness work: project the promoted helper evidence into queryable classifier facts and test whether workflow/harness discovery improves. |
+| Embedding/SVM helper layer | E209-E232 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/embedding-helper-review-batch-e216-report.json`, `.ax/experiments/embedding-helper-review-progress-e218.json`, `.ax/experiments/classifier-package-execution-embedding-helper-export-preview-e221.json`, `.ax/experiments/classifier-package-execution-embedding-helper-review-progress-e223.json`, `.ax/experiments/embedding-helper-export-e227-report.json`, `.ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e231-post-promotion.json`, `.ax/experiments/embedding-helper-canonical-promotion-split-audit-e231.json`, `.ax/experiments/embedding-helper-graph-projection-current.json`, `.ax/experiments/embedding-helper-graph-apply-e232.json`, `.ax/experiments/classifier-graph-health-embedding-helper-e232.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. Reviewed helper hard negatives now live in canonical fixtures and are projected as persisted graph facts. | Passed: graph projection emits `12` `promoted_hard_negative_fixture` facts, `3` rejected candidate facts, `1` routing fact, and `1` dedupe fact; graph apply wrote `241/241` statements; persisted embedding-helper graph health returns `17` facts with the same predicate counts. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `65b0b3c`, `4c602d9`, `eeb517c`, `9a6811e`, `31a1b16`, `e41562c`, `0587b67`, `0e0a960`, `3f01787`, `7bea922`, `21f7163`, `24e4a4e`, `f97c8e3`, `722e3e8`, `8b27657`, `d700090`, this commit | Use the persisted promoted helper facts to drive graph usefulness checks: compare candidate discovery before/after promoted helper facts and decide whether they should influence workflow/harness evidence ranking. |
 
 Current recommendation:
 
@@ -12230,6 +12230,100 @@ bun run typecheck
 python3 -m json.tool packages/ax-classifier-session-sections/ax.classifier.json >/dev/null
 python3 -m json.tool .ax/experiments/embedding-helper-canonical-promotion-split-audit-e231.json >/dev/null
 python3 -m json.tool .ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e231-post-promotion.json >/dev/null
+```
+
+## E232 - Persist Promoted Helper Evidence As Graph Facts
+
+Question:
+
+- After helper hard negatives are promoted into canonical fixtures, can AX
+  project that promoted state into persisted classifier graph facts that are
+  queryable, instead of leaving the graph at the old pending-review state?
+
+Implementation:
+
+- Extended `embedding_helper_graph_projection.py` with a `--fixtures` input.
+- Promoted canonical fixture rows with
+  `source_group = "embedding-helper-hard-negative"` are now matched back to
+  accepted helper candidates through `source_candidate_id` and
+  `source_fixture_id`.
+- Accepted candidates with a matching canonical fixture emit
+  `promoted_hard_negative_fixture` graph facts and `promoted_as_fixture`
+  evidence edges.
+- Rejected candidates emit `rejected_hard_negative_candidate` graph facts.
+- The write plan now deletes legacy pending hard-negative fact IDs for
+  accepted/rejected candidates, so persisted graph health no longer shows old
+  `pending_human_acceptance` rows beside the new promoted facts.
+- Added package operations:
+  - `embedding-helper-graph-apply`
+  - `embedding-helper-graph-health`
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers package-operations --operation=embedding-helper-graph-projection --execute --out=.ax/experiments/classifier-package-execution-embedding-helper-graph-projection-e232.json
+bun run classifiers:graph-write-plan-apply -- --write-plan=.ax/experiments/embedding-helper-graph-write-plan-current.json --out=.ax/experiments/embedding-helper-graph-apply-e232.json --json
+bun src/cli/index.ts classifiers package-operations --operation=embedding-helper-graph-apply --execute --allow-expensive --out=.ax/experiments/classifier-package-execution-embedding-helper-graph-apply-e232.json
+bun src/cli/index.ts classifiers package-operations --operation=embedding-helper-graph-health --execute --out=.ax/experiments/classifier-package-execution-embedding-helper-graph-health-e232.json
+```
+
+Artifacts:
+
+- `.ax/experiments/embedding-helper-graph-projection-current.json`
+- `.ax/experiments/embedding-helper-graph-write-plan-current.json`
+- `.ax/experiments/embedding-helper-graph-apply-e232.json`
+- `.ax/experiments/classifier-package-execution-embedding-helper-graph-apply-e232.json`
+- `.ax/experiments/classifier-package-execution-embedding-helper-graph-health-e232.json`
+- `.ax/experiments/classifier-graph-health-embedding-helper-current.json`
+- `.ax/experiments/classifier-graph-health-embedding-helper-e232.json`
+
+Results:
+
+- Projection decision: `embedding_helper_graph_projection_ready`
+- Projection totals:
+  - nodes: `87`
+  - edges: `122`
+  - facts: `17`
+  - promoted hard-negative facts: `12`
+  - nearest-neighbor edges: `75`
+- Write plan:
+  - decision: `ready_to_apply`
+  - total statements: `241`
+  - cleanup delete statements: `15`
+  - node/edge/fact statements: `87 / 122 / 17`
+- Apply:
+  - decision: `applied`
+  - statements applied/attempted: `241 / 241`
+  - failures: `[]`
+- Persisted embedding-helper graph health:
+  - facts: `17`
+  - predicates:
+    - `promoted_hard_negative_fixture`: `12`
+    - `rejected_hard_negative_candidate`: `3`
+    - `recommended_threshold`: `1`
+    - `pending_dedupe_review`: `1`
+  - evidence paths: `1`
+
+Decision:
+
+- Promoted helper fixture evidence is now queryable through the persisted
+  classifier graph. The graph no longer has to infer promotion from fixture
+  files or stale pending review facts.
+- The next usefulness slice should connect these persisted helper facts to
+  ranking behavior: do promoted hard negatives reduce noisy workflow/harness
+  candidates, and can the graph expose nearest-neighbor evidence when a
+  reviewer investigates a candidate?
+
+Verification:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/embedding_helper_graph_projection_test.py packages/ax-classifier-session-sections/graph_write_plan_apply_test.py
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+python3 -m json.tool packages/ax-classifier-session-sections/ax.classifier.json >/dev/null
+python3 -m json.tool .ax/experiments/embedding-helper-graph-projection-current.json >/dev/null
+python3 -m json.tool .ax/experiments/embedding-helper-graph-write-plan-current.json >/dev/null
+python3 -m json.tool .ax/experiments/embedding-helper-graph-apply-e232.json >/dev/null
+python3 -m json.tool .ax/experiments/classifier-graph-health-embedding-helper-current.json >/dev/null
 ```
 
 ## E197 - Hybrid Graph Usefulness Gate

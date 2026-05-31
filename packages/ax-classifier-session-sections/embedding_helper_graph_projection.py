@@ -27,6 +27,7 @@ SOURCE_KIND = "embedding_helper_review_projection"
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Project embedding helper review artifacts into graph-ready facts.")
     parser.add_argument("--review", default=".ax/experiments/embedding-helper-review-current.json")
+    parser.add_argument("--fixtures", default="packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl")
     parser.add_argument("--out", default=".ax/experiments/embedding-helper-graph-projection-current.json")
     parser.add_argument("--write-plan", default=".ax/experiments/embedding-helper-graph-write-plan-current.json")
     parser.add_argument("--json", action="store_true")
@@ -35,6 +36,29 @@ def parse_args() -> argparse.Namespace:
 
 def load_json(path: str) -> dict[str, Any]:
     return json.loads(Path(path).read_text())
+
+
+def legacy_pending_hard_negative_fact_id(subject: str) -> str:
+    return f"fact:{fact_id(f'{subject}:pending_hard_negative_review')}"
+
+
+def load_jsonl(path: str) -> list[dict[str, Any]]:
+    source = Path(path)
+    if not source.exists():
+        return []
+    return [json.loads(line) for line in source.read_text().splitlines() if line.strip()]
+
+
+def promoted_fixture_index(promoted_fixtures: list[dict[str, Any]] | None) -> dict[str, dict[str, Any]]:
+    index: dict[str, dict[str, Any]] = {}
+    for fixture in promoted_fixtures or []:
+        if fixture.get("source_group") != "embedding-helper-hard-negative":
+            continue
+        for key in (fixture.get("source_candidate_id"), fixture.get("source_fixture_id")):
+            key_text = str(key or "")
+            if key_text:
+                index[key_text] = fixture
+    return index
 
 
 def routing_projection(
@@ -95,16 +119,21 @@ def hard_negative_projection(
     nodes: dict[str, dict[str, Any]],
     edges: dict[str, dict[str, Any]],
     facts: list[dict[str, Any]],
+    promoted_fixtures: list[dict[str, Any]] | None = None,
 ) -> int:
     count = 0
+    promoted_by_key = promoted_fixture_index(promoted_fixtures)
     for candidate in review.get("hard_negative_candidates") or []:
         source_fixture_id = str(candidate.get("source_fixture_id") or "")
         if not source_fixture_id:
             continue
+        candidate_id = str(candidate.get("id") or "")
+        status = str(candidate.get("status") or "")
+        promoted_fixture = promoted_by_key.get(candidate_id) or promoted_by_key.get(source_fixture_id)
         candidate_node = f"embedding_helper_hard_negative:{fact_id(source_fixture_id)}"
         fixture_node = f"classifier_evidence:{fact_id(source_fixture_id)}"
         nodes[candidate_node] = node(candidate_node, "embedding_helper_hard_negative_candidate", source_fixture_id, {
-            "status": candidate.get("status"),
+            "status": status,
             "proposed_label": candidate.get("proposed_label"),
             "seed_count": candidate.get("seed_count"),
             "seen_in_seeds": candidate.get("seen_in_seeds"),
@@ -113,6 +142,7 @@ def hard_negative_projection(
             "max_margin": candidate.get("max_margin"),
             "max_nearest_positive_similarity": candidate.get("max_nearest_positive_similarity"),
             "review_instruction": candidate.get("review_instruction"),
+            "promoted_fixture_id": promoted_fixture.get("id") if promoted_fixture else None,
         })
         nodes[fixture_node] = node(fixture_node, "classifier_fixture_evidence", source_fixture_id, {
             "fixture_id": source_fixture_id,
@@ -126,6 +156,37 @@ def hard_negative_projection(
             "proposed_label": candidate.get("proposed_label"),
         })
         evidence_edges = [emitted_edge, fixture_edge]
+        object_node = fixture_node
+        predicate = "pending_human_acceptance"
+        value = True
+        review_required = True
+        if status == "accepted" and promoted_fixture:
+            promoted_fixture_id = str(promoted_fixture.get("id") or "")
+            promoted_node = f"classifier_promoted_fixture:{fact_id(promoted_fixture_id)}"
+            nodes[promoted_node] = node(promoted_node, "classifier_promoted_fixture", promoted_fixture_id, {
+                "fixture_id": promoted_fixture_id,
+                "source_fixture_id": source_fixture_id,
+                "source_candidate_id": candidate_id,
+                "label": promoted_fixture.get("label"),
+                "target": promoted_fixture.get("target"),
+                "source_group": promoted_fixture.get("source_group"),
+            })
+            promoted_edge = f"edge:{fact_id(f'{candidate_node}->promoted_as_fixture->{promoted_node}')}"
+            edges[promoted_edge] = edge(promoted_edge, "promoted_as_fixture", candidate_node, promoted_node, source_path, {
+                "fixture_id": promoted_fixture_id,
+                "label": promoted_fixture.get("label"),
+                "target": promoted_fixture.get("target"),
+            })
+            evidence_edges.append(promoted_edge)
+            object_node = promoted_node
+            predicate = "promoted_hard_negative_fixture"
+            review_required = False
+        elif status == "accepted":
+            predicate = "accepted_missing_promoted_fixture"
+        elif status == "rejected":
+            predicate = "rejected_hard_negative_candidate"
+            value = False
+            review_required = False
         for neighbor in candidate.get("nearest_neighbors") or []:
             neighbor_id = str(neighbor.get("id") or "")
             if not neighbor_id:
@@ -142,22 +203,23 @@ def hard_negative_projection(
             })
             evidence_edges.append(neighbor_edge)
         facts.append(fact(
-            f"fact:{fact_id(f'{candidate_node}:pending_hard_negative_review')}",
+            f"fact:{fact_id(f'{candidate_node}:{predicate}')}",
             "embedding_helper_hard_negative_candidate",
             candidate_node,
-            "pending_human_acceptance",
+            predicate,
             evidence_edges,
             {
                 "source_fixture_id": source_fixture_id,
-                "status": candidate.get("status"),
+                "status": status,
                 "proposed_label": candidate.get("proposed_label"),
                 "seed_count": candidate.get("seed_count"),
                 "predicted_label_counts": candidate.get("predicted_label_counts"),
                 "max_nearest_positive_similarity": candidate.get("max_nearest_positive_similarity"),
-                "review_required": True,
+                "promoted_fixture_id": promoted_fixture.get("id") if promoted_fixture else None,
+                "review_required": review_required,
             },
-            object_id=fixture_node,
-            value=True,
+            object_id=object_node,
+            value=value,
         ))
         count += 1
     return count
@@ -215,7 +277,7 @@ def dedupe_projection(
     return count
 
 
-def projection_from_review(review: dict[str, Any], source_path: str) -> dict[str, Any]:
+def projection_from_review(review: dict[str, Any], source_path: str, promoted_fixtures: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     nodes: dict[str, dict[str, Any]] = {}
     edges: dict[str, dict[str, Any]] = {}
     facts: list[dict[str, Any]] = []
@@ -239,7 +301,7 @@ def projection_from_review(review: dict[str, Any], source_path: str) -> dict[str
     })
 
     routing_count = routing_projection(review, source_node, source_path, nodes, edges, facts)
-    hard_negative_count = hard_negative_projection(review, source_node, source_path, nodes, edges, facts)
+    hard_negative_count = hard_negative_projection(review, source_node, source_path, nodes, edges, facts, promoted_fixtures)
     dedupe_count = dedupe_projection(review, source_node, source_path, nodes, edges, facts)
     health = health_from_projection(review, list(nodes.values()), list(edges.values()), facts)
     return {
@@ -258,6 +320,7 @@ def projection_from_review(review: dict[str, Any], source_path: str) -> dict[str
             "routing_candidate_fact_count": routing_count,
             "hard_negative_candidate_fact_count": hard_negative_count,
             "dedupe_cluster_fact_count": dedupe_count,
+            "promoted_hard_negative_fact_count": len([entry for entry in facts if entry["predicate"] == "promoted_hard_negative_fixture"]),
             "nearest_neighbor_edge_count": len([entry for entry in edges.values() if entry["kind"] == "nearest_reviewed_fixture"]),
         },
         "decision": "embedding_helper_graph_projection_ready" if not health["failures"] else "needs_embedding_helper_graph_projection_work",
@@ -272,6 +335,7 @@ def health_from_projection(
 ) -> dict[str, Any]:
     routing_facts = [entry for entry in facts if entry["kind"] == "embedding_helper_routing_candidate"]
     hard_negative_facts = [entry for entry in facts if entry["kind"] == "embedding_helper_hard_negative_candidate"]
+    accepted_missing_promotion_facts = [entry for entry in facts if entry["predicate"] == "accepted_missing_promoted_fixture"]
     dedupe_facts = [entry for entry in facts if entry["kind"] == "embedding_helper_dedupe_cluster"]
     hard_negative_nodes = [entry for entry in nodes if entry["kind"] == "embedding_helper_hard_negative_candidate"]
     nearest_edges = [entry for entry in edges if entry["kind"] == "nearest_reviewed_fixture"]
@@ -287,6 +351,8 @@ def health_from_projection(
         failures.append("no routing candidate fact")
     if not hard_negative_facts:
         failures.append("no hard-negative candidate facts")
+    if accepted_missing_promotion_facts:
+        failures.append("accepted hard-negative candidates missing promoted fixture evidence")
     if hard_negatives_without_neighbors:
         failures.append("hard-negative candidates missing nearest-neighbor evidence")
     if not dedupe_facts:
@@ -294,6 +360,7 @@ def health_from_projection(
     return {
         "routing_candidate_fact_count": len(routing_facts),
         "hard_negative_candidate_fact_count": len(hard_negative_facts),
+        "promoted_hard_negative_fact_count": len([entry for entry in facts if entry["predicate"] == "promoted_hard_negative_fixture"]),
         "dedupe_cluster_fact_count": len(dedupe_facts),
         "nearest_neighbor_edge_count": len(nearest_edges),
         "hard_negatives_without_neighbors": hard_negatives_without_neighbors,
@@ -342,7 +409,12 @@ def write_plan_from_projection(projection: dict[str, Any]) -> dict[str, Any]:
         ]) + ";"
         for entry in projection["facts"]
     ]
-    statements = [*node_statements, *edge_statements, *fact_statements]
+    cleanup_statements = [
+        f"DELETE {record_ref('classifier_graph_fact', legacy_pending_hard_negative_fact_id(str(entry['subject'])))};"
+        for entry in projection["facts"]
+        if entry["kind"] == "embedding_helper_hard_negative_candidate" and entry["predicate"] != "pending_human_acceptance"
+    ]
+    statements = [*cleanup_statements, *node_statements, *edge_statements, *fact_statements]
     return {
         "schema": "ax.embedding_helper_graph_surreal_write_plan.v1",
         "source_projection_schema": projection["schema"],
@@ -351,6 +423,7 @@ def write_plan_from_projection(projection: dict[str, Any]) -> dict[str, Any]:
         "statements": statements,
         "totals": {
             "statement_count": len(statements),
+            "cleanup_statement_count": len(cleanup_statements),
             "node_statement_count": len(node_statements),
             "edge_statement_count": len(edge_statements),
             "fact_statement_count": len(fact_statements),
@@ -362,7 +435,8 @@ def write_plan_from_projection(projection: dict[str, Any]) -> dict[str, Any]:
 def main() -> int:
     args = parse_args()
     review = load_json(args.review)
-    projection = projection_from_review(review, args.review)
+    promoted_fixtures = load_jsonl(args.fixtures)
+    projection = projection_from_review(review, args.review, promoted_fixtures=promoted_fixtures)
     write_plan = write_plan_from_projection(projection)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)

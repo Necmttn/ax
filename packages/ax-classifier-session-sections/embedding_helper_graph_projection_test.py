@@ -62,6 +62,18 @@ def helper_review() -> dict:
     }
 
 
+def promoted_fixture() -> dict:
+    return {
+        "id": "session-section-chunks/embedding-helper-hard-negative-session-section-chunks-none-start-building",
+        "label": "none",
+        "target": "none",
+        "source_group": "embedding-helper-hard-negative",
+        "source_fixture_id": "session-section-chunks/none-start-building",
+        "source_candidate_id": "embedding-hard-negative/session-section-chunks/none-start-building",
+        "review_notes": "Reviewed as a none hard negative.",
+    }
+
+
 class EmbeddingHelperGraphProjectionTest(unittest.TestCase):
     def test_projection_builds_advisory_helper_facts(self) -> None:
         projection = module.projection_from_review(helper_review(), ".ax/experiments/embedding-helper-review.json")
@@ -75,6 +87,37 @@ class EmbeddingHelperGraphProjectionTest(unittest.TestCase):
         self.assertIn("embedding_helper_routing_candidate", {fact["kind"] for fact in projection["facts"]})
         self.assertIn("embedding_helper_hard_negative_candidate", {fact["kind"] for fact in projection["facts"]})
         self.assertIn("embedding_helper_dedupe_cluster", {fact["kind"] for fact in projection["facts"]})
+
+    def test_projection_marks_accepted_hard_negatives_promoted_when_fixture_exists(self) -> None:
+        review = helper_review()
+        review["hard_negative_candidates"][0]["id"] = "embedding-hard-negative/session-section-chunks/none-start-building"
+        review["hard_negative_candidates"][0]["status"] = "accepted"
+
+        projection = module.projection_from_review(
+            review,
+            ".ax/experiments/embedding-helper-review.json",
+            promoted_fixtures=[promoted_fixture()],
+        )
+
+        promoted_facts = [fact for fact in projection["facts"] if fact["predicate"] == "promoted_hard_negative_fixture"]
+        self.assertEqual(projection["decision"], "embedding_helper_graph_projection_ready")
+        self.assertEqual(projection["totals"]["promoted_hard_negative_fact_count"], 1)
+        self.assertEqual(promoted_facts[0]["properties"]["promoted_fixture_id"], promoted_fixture()["id"])
+        self.assertEqual(promoted_facts[0]["object"], f"classifier_promoted_fixture:{module.fact_id(promoted_fixture()['id'])}")
+
+    def test_projection_health_requires_accepted_hard_negatives_to_be_promoted_when_fixtures_are_supplied(self) -> None:
+        review = helper_review()
+        review["hard_negative_candidates"][0]["id"] = "embedding-hard-negative/session-section-chunks/none-start-building"
+        review["hard_negative_candidates"][0]["status"] = "accepted"
+
+        projection = module.projection_from_review(
+            review,
+            ".ax/experiments/embedding-helper-review.json",
+            promoted_fixtures=[],
+        )
+
+        self.assertEqual(projection["decision"], "needs_embedding_helper_graph_projection_work")
+        self.assertIn("accepted hard-negative candidates missing promoted fixture evidence", projection["health"]["failures"])
 
     def test_projection_health_blocks_unready_review(self) -> None:
         review = {**helper_review(), "decision": "needs_helper_review_inputs"}
@@ -102,6 +145,21 @@ class EmbeddingHelperGraphProjectionTest(unittest.TestCase):
             write_plan["totals"]["node_statement_count"] + write_plan["totals"]["edge_statement_count"] + write_plan["totals"]["fact_statement_count"],
         )
         self.assertTrue(any("embedding_helper_review_projection" in statement for statement in write_plan["statements"]))
+
+    def test_write_plan_deletes_legacy_pending_facts_for_promoted_candidates(self) -> None:
+        review = helper_review()
+        review["hard_negative_candidates"][0]["id"] = "embedding-hard-negative/session-section-chunks/none-start-building"
+        review["hard_negative_candidates"][0]["status"] = "accepted"
+        projection = module.projection_from_review(
+            review,
+            ".ax/experiments/embedding-helper-review.json",
+            promoted_fixtures=[promoted_fixture()],
+        )
+
+        write_plan = module.write_plan_from_projection(projection)
+
+        self.assertEqual(write_plan["totals"]["cleanup_statement_count"], 1)
+        self.assertTrue(any(statement.startswith("DELETE classifier_graph_fact:") for statement in write_plan["statements"]))
 
 
 if __name__ == "__main__":
