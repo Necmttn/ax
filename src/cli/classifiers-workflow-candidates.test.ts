@@ -1748,6 +1748,7 @@ describe("classifiers workflow-candidates", () => {
         expect(brief).toContain("--sync-coverage-review-brief=.ax/experiments/review-coverage.md");
         expect(brief).toContain("--apply-review-facts");
         expect(brief).toContain("--require-review-provenance");
+        expect(brief).toContain("--require-review-handoff");
         expect(brief).toContain("To inspect the review graph write before applying, run:");
         expect(brief).toContain("--review-facts=.ax/experiments/review-coverage-review-facts.json");
         expect(brief).toContain("--review-write-plan=.ax/experiments/review-coverage-review-write-plan.json");
@@ -2052,6 +2053,24 @@ describe("classifiers workflow-candidates", () => {
             "review_brief_path",
             "synced_review_brief_path",
         ]);
+        const requiredIncompleteHandoff = buildWorkflowCandidateReviewCoverageApplySummary({
+            rows,
+            sourcePath: ".ax/experiments/reviewed-coverage-gaps.jsonl",
+            projection,
+            writePlan,
+            applyRequested: true,
+            applied: false,
+            requireReviewHandoff: true,
+        });
+        expect(requiredIncompleteHandoff.apply_guard).toBe("missing_review_handoff");
+        expect(requiredIncompleteHandoff.can_apply).toBe(false);
+        expect(requiredIncompleteHandoff.apply_blockers).toEqual(["missing_review_handoff"]);
+        expect(requiredIncompleteHandoff.apply_blocker_details).toEqual([{
+            blocker: "missing_review_handoff",
+            count: 4,
+            remediation: "Run the review handoff command with review facts, write plan, rendered brief, and synced brief paths before applying.",
+        }]);
+        expect(requiredIncompleteHandoff.next_action).toBe("Complete the review handoff artifacts before applying.");
         expect(summary.projected_fact_ids).toHaveLength(3);
         expect(summary.apply_audit_rows).toEqual([
             {

@@ -51,6 +51,7 @@ export interface WorkflowCandidateCommandInput {
     readonly reviewWritePlan?: string;
     readonly applyReviewFacts?: boolean;
     readonly requireReviewProvenance?: boolean;
+    readonly requireReviewHandoff?: boolean;
     readonly reviewProvenanceReviewer?: string;
     readonly reviewProvenanceReviewedAt?: string;
     readonly out?: string;
@@ -181,6 +182,7 @@ export type WorkflowCandidateReviewCoverageApplyGuard =
     | "ready_to_apply"
     | "blocked_smoke_review"
     | "invalid_review_pack"
+    | "missing_review_handoff"
     | "missing_review_provenance"
     | "missing_review_rationale"
     | "no_reviewed_fixtures";
@@ -189,6 +191,7 @@ export type WorkflowCandidateReviewCoverageApplyBlocker =
     | "blocked_smoke_review"
     | "empty_write_plan"
     | "invalid_review_pack"
+    | "missing_review_handoff"
     | "missing_review_provenance"
     | "missing_review_rationale"
     | "no_reviewed_fixtures";
@@ -2845,6 +2848,8 @@ const workflowCandidateReviewCoverageGuardNextAction = (
             return "Add rationale text for every reviewed fixture.";
         case "missing_review_provenance":
             return "Add reviewer and reviewed-at metadata, or rerun without strict provenance if legacy review packs are acceptable.";
+        case "missing_review_handoff":
+            return "Complete the review handoff artifacts before applying.";
         case "blocked_smoke_review":
             return "Replace smoke or example review markers with real review decisions before applying.";
         case "ready_to_apply":
@@ -2864,6 +2869,8 @@ const workflowCandidateReviewCoverageBlockerRemediation = (
             return "Add rationale text to each reviewed fixture.";
         case "missing_review_provenance":
             return "Add reviewer and valid reviewed-at metadata or rerun without strict provenance.";
+        case "missing_review_handoff":
+            return "Run the review handoff command with review facts, write plan, rendered brief, and synced brief paths before applying.";
         case "blocked_smoke_review":
             return "Replace smoke or example review markers with real review decisions.";
         case "empty_write_plan":
@@ -3079,6 +3086,7 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
             context.coverageReviewBrief === undefined ? undefined : `--sync-coverage-review-brief=${context.coverageReviewBrief}`,
             "--apply-review-facts",
             "--require-review-provenance",
+            "--require-review-handoff",
             `--out=${readinessOutputPath}`,
             "--json",
         ].filter((part): part is string => part !== undefined).join(" ");
@@ -3158,7 +3166,7 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
             inspectWriteCommand ?? "",
             "```",
             "",
-            "For production or shared graph updates, require review provenance:",
+            "For production or shared graph updates, require review provenance and a complete handoff:",
             "",
             "```sh",
             strictApplyCommand ?? "",
@@ -3519,6 +3527,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     readonly stampedReviewedAtCount?: number;
     readonly coverageRows?: readonly WorkflowCandidateReviewCoverageRow[];
     readonly requireReviewProvenance?: boolean;
+    readonly requireReviewHandoff?: boolean;
     readonly reviewFactsPath?: string;
     readonly reviewWritePlanPath?: string;
     readonly reviewBriefPath?: string;
@@ -3561,6 +3570,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     const currentReviewedCandidateCount = coverageRows.filter((row) => row.review_fact_count > 0).length;
     const projectedReviewedCandidateCount = currentReviewedCandidateCount + newCandidateCount;
     const projectedUnreviewedCandidateCount = Math.max(0, coverageRows.length - projectedReviewedCandidateCount);
+    const reviewHandoffMissingPaths = workflowCandidateReviewCoverageHandoffMissingPaths(input);
     const smokeMarkerCount = reviewedRows.filter(fixtureRowHasSmokeMarker).length +
         (input.sourcePath.toLowerCase().includes("smoke") ? 1 : 0);
     const baseApplyGuard = invalidRows.length > 0
@@ -3576,7 +3586,13 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         baseApplyGuard === "ready_to_apply" && provenanceStatus === "missing_review_provenance"
             ? "missing_review_provenance"
             : baseApplyGuard;
-    const applyGuard = input.requireReviewProvenance === true ? strictApplyGuard : baseApplyGuard;
+    const provenanceApplyGuard = input.requireReviewProvenance === true ? strictApplyGuard : baseApplyGuard;
+    const applyGuard: WorkflowCandidateReviewCoverageApplyGuard =
+        provenanceApplyGuard === "ready_to_apply" &&
+        input.requireReviewHandoff === true &&
+        reviewHandoffMissingPaths.length > 0
+            ? "missing_review_handoff"
+            : provenanceApplyGuard;
     const canApply = applyGuard === "ready_to_apply" && input.writePlan.statements.length > 0;
     const strictCanApply = strictApplyGuard === "ready_to_apply" && input.writePlan.statements.length > 0;
     const applyResult = input.applied
@@ -3603,7 +3619,16 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     ) {
         strictApplyBlockers.push("empty_write_plan");
     }
-    const applyBlockers = input.requireReviewProvenance === true ? strictApplyBlockers : baseApplyBlockers;
+    const applyBlockers: WorkflowCandidateReviewCoverageApplyBlocker[] = [
+        ...(input.requireReviewProvenance === true ? strictApplyBlockers : baseApplyBlockers),
+    ];
+    if (
+        provenanceApplyGuard === "ready_to_apply" &&
+        input.requireReviewHandoff === true &&
+        reviewHandoffMissingPaths.length > 0
+    ) {
+        applyBlockers.push("missing_review_handoff");
+    }
     const buildApplyBlockerDetails = (
         blockers: readonly WorkflowCandidateReviewCoverageApplyBlocker[],
     ): WorkflowCandidateReviewCoverageApplyBlockerDetail[] => blockers.map((blocker) => {
@@ -3614,8 +3639,10 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
                 return { blocker, count: input.rows.length, remediation: workflowCandidateReviewCoverageBlockerRemediation(blocker) };
             case "missing_review_rationale":
                 return { blocker, count: missingRationaleRows.length, remediation: workflowCandidateReviewCoverageBlockerRemediation(blocker) };
-        case "missing_review_provenance":
+            case "missing_review_provenance":
                 return { blocker, count: missingReviewerRows.length + missingReviewedAtRows.length + invalidReviewedAtRows.length, remediation: workflowCandidateReviewCoverageBlockerRemediation(blocker) };
+            case "missing_review_handoff":
+                return { blocker, count: reviewHandoffMissingPaths.length, remediation: workflowCandidateReviewCoverageBlockerRemediation(blocker) };
             case "blocked_smoke_review":
                 return { blocker, count: smokeMarkerCount, remediation: workflowCandidateReviewCoverageBlockerRemediation(blocker) };
             case "empty_write_plan":
@@ -3644,7 +3671,6 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         }];
     });
     const provenanceIssueRows = workflowCandidateReviewCoverageProvenanceIssueRows(reviewedRows);
-    const reviewHandoffMissingPaths = workflowCandidateReviewCoverageHandoffMissingPaths(input);
     return {
         schema: "ax.workflow_candidate_review_readiness.v1",
         source_path: input.sourcePath,
@@ -4610,6 +4636,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     ...(input.syncCoverageReviewBrief === undefined ? {} : { syncedReviewBriefPath: input.syncCoverageReviewBrief }),
                     coverageRows: report.candidates,
                     ...(input.requireReviewProvenance === undefined ? {} : { requireReviewProvenance: input.requireReviewProvenance }),
+                    ...(input.requireReviewHandoff === undefined ? {} : { requireReviewHandoff: input.requireReviewHandoff }),
                     sourceKind: input.sourceKind,
                     limit: input.limit,
                     ...(input.out === undefined ? {} : { outputPath: input.out }),
@@ -4639,6 +4666,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                         ...(input.syncCoverageReviewBrief === undefined ? {} : { syncedReviewBriefPath: input.syncCoverageReviewBrief }),
                         coverageRows: report.candidates,
                         ...(input.requireReviewProvenance === undefined ? {} : { requireReviewProvenance: input.requireReviewProvenance }),
+                        ...(input.requireReviewHandoff === undefined ? {} : { requireReviewHandoff: input.requireReviewHandoff }),
                         sourceKind: input.sourceKind,
                         limit: input.limit,
                         ...(input.out === undefined ? {} : { outputPath: input.out }),
