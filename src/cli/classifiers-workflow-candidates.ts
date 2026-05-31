@@ -2811,6 +2811,11 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
         : smokeMarkerCount > 0
             ? "blocked_smoke_review"
             : "ready_to_apply";
+    const applyBlockers: WorkflowCandidateReviewCoverageApplyBlocker[] = [];
+    if (invalidCount > 0) applyBlockers.push("invalid_review_pack");
+    if (reviewedRows.length === 0) applyBlockers.push("no_reviewed_fixtures");
+    if (missingRationaleCount > 0) applyBlockers.push("missing_review_rationale");
+    if (smokeMarkerCount > 0) applyBlockers.push("blocked_smoke_review");
     const sourceKind = context.sourceKind ?? "hybrid_window_classifier_projection";
     const readinessOutputPath = context.outputPath ?? ".ax/experiments/workflow-candidate-review-coverage-reviewed.json";
     const syncedBriefPath = context.coverageReviewBrief ?? ".ax/experiments/workflow-candidate-review-coverage-reviewed.md";
@@ -2860,6 +2865,8 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
         `- Missing rationales: \`${missingRationaleCount}\``,
         `- Smoke markers: \`${smokeMarkerCount}\``,
         `- Apply guard: \`${applyGuard}\``,
+        `- Apply blockers: ${applyBlockers.length === 0 ? "`none`" : applyBlockers.map((blocker) => `\`${blocker}\``).join(", ")}`,
+        `- Blocker remediations: ${applyBlockers.length === 0 ? "none" : applyBlockers.map((blocker) => `${blocker}: ${workflowCandidateReviewCoverageBlockerRemediation(blocker)}`).join(" | ")}`,
         `- Next action: ${workflowCandidateReviewCoverageGuardNextAction(applyGuard)}`,
         "",
         ...(nextCommand === undefined ? [] : [

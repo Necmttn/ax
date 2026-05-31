@@ -1723,6 +1723,8 @@ describe("classifiers workflow-candidates", () => {
         expect(brief).toContain("- Missing rationales: `0`");
         expect(brief).toContain("- Smoke markers: `0`");
         expect(brief).toContain("- Apply guard: `no_reviewed_fixtures`");
+        expect(brief).toContain("- Apply blockers: `no_reviewed_fixtures`");
+        expect(brief).toContain("- Blocker remediations: no_reviewed_fixtures: Review at least one fixture and add a rationale before applying.");
         expect(brief).toContain("- Next action: Set at least one fixture to accept, revise, reject, or defer and add a rationale.");
         expect(brief).toContain("## Review Commands");
         expect(brief).toContain("--coverage-review-pack=.ax/experiments/review-coverage.jsonl");
