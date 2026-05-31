@@ -33,14 +33,13 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E452 adds
-  `.ax/experiments/workflow-topic-guidance-decision-batch-e452.json`,
-  `.ax/experiments/workflow-topic-guidance-decision-batch-e452.txt`,
-  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e452.jsonl`,
-  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e452.md`,
-  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e452.json`,
+- Index continuation: E453 adds
+  `.ax/experiments/workflow-topic-guidance-decision-batch-e453.json`,
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e453.jsonl`,
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e453.md`,
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e453.json`,
   and
-  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e452.json`
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e453.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -59,10 +58,67 @@ Current recommendation:
   routing summary, and a batch-level sync/readiness path for edited review
   briefs. The generated brief now points reviewers back to the batch command
   instead of the lower-level coverage command, the batch handoff carries the
-  same review-pipeline lifecycle report used by review services, and a
-  smoke-marked review is correctly blocked from apply, so the immediate
-  bottleneck remains a real human review decision for that pending candidate,
-  not promoting synthetic or harness-only evidence.
+  same review-pipeline lifecycle report used by review services, the pending
+  review can now be emitted as a `.ax/tasks` handoff, and a smoke-marked
+  review is correctly blocked from apply, so the immediate bottleneck remains
+  a real human review decision for that pending candidate, not promoting
+  synthetic or harness-only evidence.
+
+## E453 - Emit Pending Review Task From Batch Handoff
+
+Question:
+- Can the batch pending-review queue produce a trackable human review task
+  without pretending a classifier candidate is ready for graph promotion?
+
+Implementation:
+- Added `--emit-pending-review-task` for `--guidance-decision-batch`.
+- The emitted task summary is included as `pending_review_task` in the batch
+  report.
+- The task file is written under `--task-dir` and records:
+  - fixture pack path,
+  - review brief path,
+  - candidate and fixture counts,
+  - current handoff and production guards,
+  - lifecycle status when available,
+  - exact next action for the reviewer, and
+  - candidate ids that need review.
+- Added a regression covering the task summary, task body, and text report.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e453.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e453.jsonl`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e453.md`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e453.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e453.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live batch report includes:
+  - `pending_review_task.emitted_task_count=1`
+  - `pending_review_task.path=.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+  - `pending_review_task.review_pipeline_stage=needs_review_decisions`
+- The task file points at
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e453.md`
+  and keeps the production guard at `no_reviewed_fixtures`.
+- The task asks the reviewer to set the fixture to `accept`, `revise`,
+  `reject`, or `defer` with rationale/provenance before any graph apply.
+
+Decision:
+- E453 turns the pending classifier review from a transient report row into a
+  trackable human work item while preserving the review/apply guardrails.
+- This still does not close the pending queue. It makes the remaining human
+  decision durable and discoverable.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 --coverage-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e453.jsonl --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e453.md --review-facts=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e453.json --review-write-plan=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e453.json --review-pipeline-lifecycle --review-pipeline-verify-outputs --emit-pending-review-task --task-dir=.ax/tasks --out .ax/experiments/workflow-topic-guidance-decision-batch-e453.json --json
+python3 -m json.tool .ax/experiments/workflow-topic-guidance-decision-batch-e453.json >/dev/null
+TASK=$(bun -e 'const r=await Bun.file(".ax/experiments/workflow-topic-guidance-decision-batch-e453.json").json(); console.log(r.pending_review_task.path)')
+test -f "$TASK"
+rg -n "ax pending workflow candidate review|Review brief|Set each fixture|Production guard|correction_or_rejection_signal" "$TASK"
+bun -e 'const r=await Bun.file(".ax/experiments/workflow-topic-guidance-decision-batch-e453.json").json(); if (r.pending_review_task?.emitted_task_count !== 1) throw new Error(JSON.stringify(r.pending_review_task)); if (r.pending_review_task.review_pipeline_stage !== "needs_review_decisions") throw new Error(JSON.stringify(r.pending_review_task));'
+```
 
 ## E452 - Attach Review Pipeline Lifecycle to Batch Handoffs
 

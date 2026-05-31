@@ -15,6 +15,7 @@ import {
     buildWorkflowCandidateTopicHarnessEvidenceSummary,
     buildWorkflowCandidateTopicGuidanceDecisionBatchReport,
     buildWorkflowCandidateGuidancePendingReviewHandoffSummary,
+    buildWorkflowCandidateGuidancePendingReviewTask,
     buildWorkflowCandidateTopicGuidanceDecisionReport,
     buildWorkflowCandidateTopicHelperExplanations,
     buildWorkflowCandidateTopicReviewGraphProjection,
@@ -4084,6 +4085,80 @@ describe("classifiers workflow-candidates", () => {
         expect(handoff.review_pipeline_lifecycle?.prepared.argv).toContain("--guidance-decision-batch");
         expect(text).toContain("pending review handoff lifecycle: missing_required_outputs");
         expect(text).toContain("pending review handoff lifecycle can execute: yes");
+    });
+
+    test("guidance decision batch can summarize emitted pending review tasks", () => {
+        const rows = parseWorkflowCandidateFixtureRowsJsonl(JSON.stringify({
+            id: "workflow-candidate-review-coverage/correction_or_rejection_signal/example",
+            suite: "workflow-candidate-review-coverage",
+            name: "coverage-gap-correction_or_rejection_signal-01",
+            label: "correction_or_rejection_signal",
+            target: "wrong_output",
+            text: "USER:\nthis is wrong\n\nPREVIOUS_ASSISTANT:\n",
+            source_group: "workflow-candidate",
+            review_status: "pending",
+            topic: "review-coverage",
+            candidate_id: "classifier_candidate_group:hybrid-window/correction_or_rejection_signal",
+            candidate_label: "correction_or_rejection_signal",
+            proposed_action: "add_context_guardrail",
+        }));
+        const fixturePack = {
+            path: ".ax/experiments/pending-review.jsonl",
+            emitted_fixture_count: 1,
+            candidate_count: 1,
+            skipped_candidate_count: 0,
+            fixtures: rows,
+        };
+        const projection = buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures({
+            rows,
+            syncedFrom: fixturePack.path,
+        });
+        const handoff = buildWorkflowCandidateGuidancePendingReviewHandoffSummary({
+            fixturePack,
+            applySummary: buildWorkflowCandidateReviewCoverageApplySummary({
+                rows,
+                sourcePath: fixturePack.path,
+                projection,
+                writePlan: buildWorkflowCandidateTopicReviewGraphWritePlan(projection),
+                applyRequested: false,
+                applied: false,
+                reviewFactsPath: ".ax/experiments/pending-review-facts.json",
+                reviewWritePlanPath: ".ax/experiments/pending-review-write-plan.json",
+                reviewBriefPath: ".ax/experiments/pending-review.md",
+                syncedReviewBriefPath: ".ax/experiments/pending-review.md",
+                sourceKind: "hybrid_window_classifier_projection",
+                limit: 10,
+                commandMode: "guidance_decision_batch",
+            }),
+        });
+        const task = buildWorkflowCandidateGuidancePendingReviewTask({
+            taskDir: ".ax/tasks",
+            fixturePack,
+            handoff,
+        });
+        const batch = buildWorkflowCandidateTopicGuidanceDecisionBatchReport({
+            sourceKind: "hybrid_window_classifier_projection",
+            limit: 10,
+            decisions: [],
+            pendingReviewFixturePack: fixturePack,
+            pendingReviewHandoff: handoff,
+            pendingReviewTask: task.summary,
+        });
+
+        expect(task.summary).toMatchObject({
+            task_dir: ".ax/tasks",
+            emitted_task_count: 1,
+            candidate_count: 1,
+            fixture_count: 1,
+            fixture_pack_path: ".ax/experiments/pending-review.jsonl",
+            review_brief_path: ".ax/experiments/pending-review.md",
+            review_pipeline_stage: "needs_review_decisions",
+        });
+        expect(task.summary.path).toContain(".ax/tasks/workflow-candidate-pending-review-");
+        expect(task.content).toContain("# ax pending workflow candidate review");
+        expect(task.content).toContain("**Review brief:** `.ax/experiments/pending-review.md`");
+        expect(task.content).toContain("Set each fixture to `accept`, `revise`, `reject`, or `defer`.");
+        expect(renderWorkflowCandidateTopicGuidanceDecisionBatchText(batch)).toContain("pending review task emitted: 1");
     });
 
     test("topic harness gates fail with only persisted failed harness facts", () => {

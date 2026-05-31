@@ -73,6 +73,7 @@ export interface WorkflowCandidateCommandInput {
     readonly syncBrief?: string;
     readonly promoteTasks?: boolean;
     readonly emitAdjacentTasks?: boolean;
+    readonly emitPendingReviewTask?: boolean;
     readonly promoteHarnessProposals?: boolean;
     readonly requireHarnessChecks?: boolean;
     readonly promoteProposals?: boolean;
@@ -247,6 +248,18 @@ export interface WorkflowCandidateGuidancePendingReviewHandoffSummary {
     readonly next_action: string;
 }
 
+export interface WorkflowCandidateGuidancePendingReviewTaskSummary {
+    readonly task_dir: string;
+    readonly emitted_task_count: number;
+    readonly path?: string;
+    readonly candidate_count: number;
+    readonly fixture_count: number;
+    readonly review_brief_path?: string;
+    readonly fixture_pack_path: string;
+    readonly review_pipeline_stage: WorkflowCandidateReviewCoveragePipelineStage;
+    readonly next_action: string;
+}
+
 export interface WorkflowCandidateTopicGuidanceDecisionBatchReport {
     readonly schema: "ax.workflow_topic_guidance_decision_batch.v1";
     readonly source_kind: string;
@@ -258,6 +271,7 @@ export interface WorkflowCandidateTopicGuidanceDecisionBatchReport {
     readonly pending_review_candidates: readonly WorkflowCandidateGuidancePendingReviewCandidate[];
     readonly pending_review_fixture_pack?: WorkflowCandidateReviewCoverageFixtureSummary;
     readonly pending_review_handoff?: WorkflowCandidateGuidancePendingReviewHandoffSummary;
+    readonly pending_review_task?: WorkflowCandidateGuidancePendingReviewTaskSummary;
     readonly totals: {
         readonly topic_count: number;
         readonly candidate_count: number;
@@ -2957,6 +2971,7 @@ export function buildWorkflowCandidateTopicGuidanceDecisionBatchReport(input: {
     readonly pendingCandidateReport?: WorkflowCandidateReport;
     readonly pendingReviewFixturePack?: WorkflowCandidateReviewCoverageFixtureSummary;
     readonly pendingReviewHandoff?: WorkflowCandidateGuidancePendingReviewHandoffSummary;
+    readonly pendingReviewTask?: WorkflowCandidateGuidancePendingReviewTaskSummary;
 }): WorkflowCandidateTopicGuidanceDecisionBatchReport {
     const pendingCandidateReport = input.pendingCandidateReport;
     const pendingReviewCandidates: WorkflowCandidateGuidancePendingReviewCandidate[] = (pendingCandidateReport?.candidates ?? [])
@@ -3042,8 +3057,82 @@ export function buildWorkflowCandidateTopicGuidanceDecisionBatchReport(input: {
         pending_review_candidates: pendingReviewCandidates,
         ...(input.pendingReviewFixturePack === undefined ? {} : { pending_review_fixture_pack: input.pendingReviewFixturePack }),
         ...(input.pendingReviewHandoff === undefined ? {} : { pending_review_handoff: input.pendingReviewHandoff }),
+        ...(input.pendingReviewTask === undefined ? {} : { pending_review_task: input.pendingReviewTask }),
         totals: totalsWithPending,
         next_action: nextAction,
+    };
+}
+
+const pendingReviewTaskPath = (
+    taskDir: string,
+    fixturePack: WorkflowCandidateReviewCoverageFixtureSummary,
+): string => join(taskDir, `workflow-candidate-pending-review-${shortHash(fixturePack.fixtures.map((row) => row.candidate_id).sort().join("|"))}.md`);
+
+export function buildWorkflowCandidateGuidancePendingReviewTask(input: {
+    readonly taskDir: string;
+    readonly fixturePack: WorkflowCandidateReviewCoverageFixtureSummary;
+    readonly handoff: WorkflowCandidateGuidancePendingReviewHandoffSummary;
+}): { readonly summary: WorkflowCandidateGuidancePendingReviewTaskSummary; readonly content: string } {
+    const path = pendingReviewTaskPath(input.taskDir, input.fixturePack);
+    const candidateIds = [...new Set(input.fixturePack.fixtures.map((row) => row.candidate_id))].sort();
+    const labels = [...new Set(input.fixturePack.fixtures.map((row) => row.candidate_label))].sort();
+    const lines = [
+        "# ax pending workflow candidate review",
+        "",
+        "**Action:** review classifier-derived workflow candidate before graph promotion",
+        `**Review stage:** \`${input.handoff.review_pipeline_stage}\``,
+        `**Fixture pack:** \`${input.fixturePack.path}\``,
+        ...(input.handoff.review_brief_path === undefined ? [] : [`**Review brief:** \`${input.handoff.review_brief_path}\``]),
+        "",
+        "## Review Scope",
+        "",
+        `- Candidates: \`${candidateIds.length}\``,
+        `- Fixtures: \`${input.fixturePack.emitted_fixture_count}\``,
+        `- Labels: ${labels.map((label) => `\`${label}\``).join(", ") || "`none`"}`,
+        "",
+        "## Required Decision",
+        "",
+        "1. Open the review brief and inspect the fixture evidence.",
+        "2. Set each fixture to `accept`, `revise`, `reject`, or `defer`.",
+        "3. Add rationale and review provenance before applying to the graph.",
+        "4. Re-run the batch command from the review brief and apply only when the production guard is ready.",
+        "",
+        "## Handoff",
+        "",
+        `- Handoff guard: \`${input.handoff.handoff_apply_guard}\``,
+        `- Handoff can apply: \`${input.handoff.handoff_can_apply ? "yes" : "no"}\``,
+        `- Production guard: \`${input.handoff.production_apply_guard}\``,
+        `- Production can apply: \`${input.handoff.production_can_apply ? "yes" : "no"}\``,
+        `- Next action: ${input.handoff.next_action}`,
+        ...(input.handoff.review_pipeline_lifecycle === undefined ? [] : [
+            `- Lifecycle status: \`${input.handoff.review_pipeline_lifecycle.status}\``,
+            `- Lifecycle can execute: \`${input.handoff.review_pipeline_lifecycle.can_execute ? "yes" : "no"}\``,
+        ]),
+        "",
+        "## Candidates",
+        "",
+        ...candidateIds.map((candidateId) => `- \`${candidateId}\``),
+        "",
+        "## References",
+        "",
+        `- fixture-pack: \`${input.fixturePack.path}\``,
+        ...(input.handoff.review_brief_path === undefined ? [] : [`- review-brief: \`${input.handoff.review_brief_path}\``]),
+        ...(input.handoff.review_facts_path === undefined ? [] : [`- review-facts: \`${input.handoff.review_facts_path}\``]),
+        ...(input.handoff.review_write_plan_path === undefined ? [] : [`- review-write-plan: \`${input.handoff.review_write_plan_path}\``]),
+    ];
+    return {
+        summary: {
+            task_dir: input.taskDir,
+            emitted_task_count: 1,
+            path,
+            candidate_count: candidateIds.length,
+            fixture_count: input.fixturePack.emitted_fixture_count,
+            ...(input.handoff.review_brief_path === undefined ? {} : { review_brief_path: input.handoff.review_brief_path }),
+            fixture_pack_path: input.fixturePack.path,
+            review_pipeline_stage: input.handoff.review_pipeline_stage,
+            next_action: input.handoff.next_action,
+        },
+        content: `${lines.join("\n").trimEnd()}\n`,
     };
 }
 
@@ -3108,6 +3197,10 @@ export function renderWorkflowCandidateTopicGuidanceDecisionBatchText(
                 `pending review handoff lifecycle can execute: ${report.pending_review_handoff.review_pipeline_lifecycle.can_execute ? "yes" : "no"}`,
             ]),
             `pending review handoff next: ${report.pending_review_handoff.next_action}`,
+        ]),
+        ...(report.pending_review_task === undefined ? [] : [
+            `pending review task: ${report.pending_review_task.path ?? "none"}`,
+            `pending review task emitted: ${report.pending_review_task.emitted_task_count}`,
         ]),
         `evidence: accepted_harness=${report.totals.accepted_harness_proposal_count} scaffolded_harness=${report.totals.scaffolded_harness_experiment_count} passing_harness=${report.totals.passing_harness_evidence_count} guidance_proposals=${report.totals.guidance_proposal_count}`,
         `next action: ${report.next_action}`,
@@ -6502,6 +6595,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 taskLike: input.taskLike,
             }), reviewFactRows);
             const coverageFixturePack = input.coverageFixturePack;
+            const taskDir = input.taskDir ?? join(process.cwd(), ".ax", "tasks");
             const reviewPipelineValues: ClassifierReviewPipelineInputValues = {
                 ...(input.reviewPipelineReviewer === undefined
                     ? input.reviewProvenanceReviewer === undefined ? {} : { reviewer: input.reviewProvenanceReviewer }
@@ -6512,6 +6606,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
             };
             let pendingReviewFixturePack: WorkflowCandidateReviewCoverageFixtureSummary | undefined;
             let pendingReviewHandoff: WorkflowCandidateGuidancePendingReviewHandoffSummary | undefined;
+            let pendingReviewTask: WorkflowCandidateGuidancePendingReviewTaskSummary | undefined;
             if (coverageFixturePack !== undefined) {
                 pendingReviewFixturePack = buildWorkflowCandidateReviewCoverageFixtureSummary(pendingCandidateReport, coverageFixturePack);
                 mkdirSync(dirname(coverageFixturePack), { recursive: true });
@@ -6713,6 +6808,16 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 });
                 if (input.applyReviewFacts && !pendingApplySummary.can_apply) process.exitCode = 1;
             }
+            if (input.emitPendingReviewTask && pendingReviewFixturePack !== undefined && pendingReviewHandoff !== undefined) {
+                const task = buildWorkflowCandidateGuidancePendingReviewTask({
+                    taskDir,
+                    fixturePack: pendingReviewFixturePack,
+                    handoff: pendingReviewHandoff,
+                });
+                mkdirSync(dirname(task.summary.path!), { recursive: true });
+                writeFileSync(task.summary.path!, task.content, "utf8");
+                pendingReviewTask = task.summary;
+            }
             const batch = buildWorkflowCandidateTopicGuidanceDecisionBatchReport({
                 sourceKind: input.sourceKind,
                 limit: input.limit,
@@ -6723,6 +6828,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 pendingCandidateReport,
                 ...(pendingReviewFixturePack === undefined ? {} : { pendingReviewFixturePack }),
                 ...(pendingReviewHandoff === undefined ? {} : { pendingReviewHandoff }),
+                ...(pendingReviewTask === undefined ? {} : { pendingReviewTask }),
             });
             if (input.out) {
                 mkdirSync(dirname(input.out), { recursive: true });
