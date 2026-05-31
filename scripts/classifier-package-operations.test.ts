@@ -518,6 +518,10 @@ describe("classifier package operations report", () => {
                 review_issue_repair_argv: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
                 recommended_action_kind: "stamp_review_provenance",
                 recommended_action_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+                recommended_action_status: "requires_inputs",
+                recommended_action_can_execute: false,
+                recommended_action_next_action: "Bind required pipeline inputs before executing the command.",
+                recommended_action_missing_inputs: ["reviewer"],
                 output_artifacts: [
                     { kind: "review_brief", path: ".ax/experiments/review.md", required_for_handoff: true },
                     { kind: "readiness_report", path: ".ax/experiments/readiness.json", required_for_handoff: false },
@@ -531,7 +535,7 @@ describe("classifier package operations report", () => {
             next_actions: [],
         });
 
-        expect(report.totals.lifecycle_fact_count).toBe(17);
+        expect(report.totals.lifecycle_fact_count).toBe(21);
         expect(report.nodes).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 id: "classifier_lifecycle:workflow_candidate_review_pipeline",
@@ -592,6 +596,22 @@ describe("classifier package operations report", () => {
                 value: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
             }),
             expect.objectContaining({
+                predicate: "review_pipeline_recommended_action_status",
+                value: "requires_inputs",
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_recommended_action_can_execute",
+                value: false,
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_recommended_action_next_action",
+                value: "Bind required pipeline inputs before executing the command.",
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_recommended_action_missing_inputs",
+                value: ["reviewer"],
+            }),
+            expect.objectContaining({
                 predicate: "review_pipeline_output_artifact_paths",
                 value: [".ax/experiments/review.md", ".ax/experiments/readiness.json"],
             }),
@@ -637,6 +657,9 @@ describe("classifier package operations report", () => {
                     },
                     prepared: {
                         status: "ready_to_execute",
+                        can_execute: true,
+                        next_action: "Execute the pipeline command.",
+                        missing_inputs: [],
                         argv: ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates"],
                         output_artifacts: [
                             { kind: "readiness_report", path: "one.json", required_for_handoff: false },
@@ -665,6 +688,10 @@ describe("classifier package operations report", () => {
             review_issue_repair_argv: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
             recommended_action_kind: "stamp_review_provenance",
             recommended_action_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+            recommended_action_status: "ready_to_execute",
+            recommended_action_can_execute: true,
+            recommended_action_next_action: "Execute the pipeline command.",
+            recommended_action_missing_inputs: [],
             output_artifacts: [
                 { kind: "readiness_report", path: "one.json", required_for_handoff: false },
                 { kind: "review_brief", path: "two.md", required_for_handoff: true },
@@ -1823,6 +1850,10 @@ describe("classifier package operations report", () => {
                     review_provenance_stamp_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
                     recommended_action_kind: "repair_review_issues",
                     recommended_action_argv: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
+                    recommended_action_status: "missing_outputs",
+                    recommended_action_can_execute: false,
+                    recommended_action_next_action: "Repair review pipeline outputs before continuing.",
+                    recommended_action_missing_inputs: [],
                     review_issue_repair_argv: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
                     output_artifacts: [{
                         kind: "review_brief",
@@ -1854,6 +1885,10 @@ describe("classifier package operations report", () => {
             review_provenance_stamp_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
             recommended_action_kind: "repair_review_issues",
             recommended_action_argv: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
+            recommended_action_status: "missing_outputs",
+            recommended_action_can_execute: false,
+            recommended_action_next_action: "Repair review pipeline outputs before continuing.",
+            recommended_action_missing_inputs: [],
             output_artifacts: [{
                 kind: "review_brief",
                 path: ".ax/experiments/review.md",

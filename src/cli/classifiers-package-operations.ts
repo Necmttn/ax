@@ -478,6 +478,18 @@ export function renderClassifierLifecycleInsightText(report: ClassifierLifecycle
         if (pipeline.recommended_action_argv && pipeline.recommended_action_argv.length > 0) {
             lines.push(`  recommended action argv: ${pipeline.recommended_action_argv.join(" ")}`);
         }
+        if (pipeline.recommended_action_status) {
+            lines.push(`  recommended action status: ${pipeline.recommended_action_status}`);
+        }
+        if (pipeline.recommended_action_can_execute !== undefined) {
+            lines.push(`  recommended action can execute: ${pipeline.recommended_action_can_execute ? "yes" : "no"}`);
+        }
+        if (pipeline.recommended_action_next_action) {
+            lines.push(`  recommended action next: ${pipeline.recommended_action_next_action}`);
+        }
+        if (pipeline.recommended_action_missing_inputs && pipeline.recommended_action_missing_inputs.length > 0) {
+            lines.push(`  recommended action missing inputs: ${pipeline.recommended_action_missing_inputs.join(", ")}`);
+        }
         lines.push(`  outputs: ${pipeline.output_verification_status ?? "unknown"} checked=${pipeline.checked_artifact_count} missing=${pipeline.missing_required_artifact_count}`);
         if (pipeline.output_artifacts.length > 0) {
             lines.push(`  output artifacts: ${pipeline.output_artifacts.map((artifact) => `${artifact.kind ?? "artifact"}=${artifact.path}`).join(", ")}`);

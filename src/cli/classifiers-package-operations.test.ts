@@ -957,6 +957,10 @@ describe("classifiers package-operations format", () => {
                 review_issue_repair_argv: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
                 recommended_action_kind: "stamp_review_provenance",
                 recommended_action_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+                recommended_action_status: "requires_inputs",
+                recommended_action_can_execute: false,
+                recommended_action_next_action: "Bind required pipeline inputs before executing the command.",
+                recommended_action_missing_inputs: ["reviewer", "reviewed_at"],
                 output_artifacts: [{
                     kind: "review_brief",
                     path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md",
@@ -1025,6 +1029,10 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("issue repair argv: bun src/cli/index.ts --coverage-review-brief=review.md");
         expect(output).toContain("recommended action: stamp_review_provenance");
         expect(output).toContain("recommended action argv: bun src/cli/index.ts --review-provenance-reviewer=<reviewer>");
+        expect(output).toContain("recommended action status: requires_inputs");
+        expect(output).toContain("recommended action can execute: no");
+        expect(output).toContain("recommended action next: Bind required pipeline inputs before executing the command.");
+        expect(output).toContain("recommended action missing inputs: reviewer, reviewed_at");
         expect(output).toContain("outputs: verified checked=2 missing=0");
         expect(output).toContain("output artifacts: review_brief=.ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md");
         expect(output).toContain("checked artifacts: review_brief=.ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md ok");

@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E365 adds
-  `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-e365.json`
+- Index continuation: E366 adds
+  `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-safety-e366.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-argv-e365.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended_action_status-e366.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,90 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E366 - Add Recommended Action Safety Metadata
+
+Question:
+- E365 tells services which direct review action is recommended, but can they
+  also tell whether that action is executable, blocked on inputs, or needs
+  repair without parsing argv placeholders?
+
+Implementation:
+- Extended review-pipeline lifecycle status and insight with:
+  `recommended_action_status`, `recommended_action_can_execute`,
+  `recommended_action_next_action`, and
+  `recommended_action_missing_inputs`.
+- The recommendation derives safety metadata from prepared command state when
+  available. For missing required output artifacts or lifecycle failures, it
+  routes to `repair_review_issues` with `status=missing_outputs` and
+  `can_execute=false`.
+- Projected the new metadata into lifecycle graph facts:
+  `review_pipeline_recommended_action_status`,
+  `review_pipeline_recommended_action_can_execute`,
+  `review_pipeline_recommended_action_next_action`, and
+  `review_pipeline_recommended_action_missing_inputs`.
+- Lifecycle text now renders the recommended action status, execute boolean,
+  next action, and missing inputs.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-safety-e366.md --review-facts=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-safety-e366-review-facts.json --review-write-plan=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-safety-e366-review-write-plan.json --review-pipeline-lifecycle --out=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-safety-e366.json --json > .ax/experiments/workflow-candidate-review-pipeline-recommended-action-safety-e366.stdout
+cp .ax/experiments/workflow-candidate-review-pipeline-recommended-action-safety-e366.json .ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json
+bun src/cli/index.ts classifiers package-operations --facts --workflow-status=.ax/experiments/blind-workflow-status-current.json --out=.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-safety-e366.json --json > .ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-safety-e366.stdout
+bun src/cli/index.ts classifiers package-operations --write-plan --facts --workflow-status=.ax/experiments/blind-workflow-status-current.json --out=.ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-safety-e366.json --json > .ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-safety-e366.stdout
+bun src/cli/index.ts classifiers package-operations --apply-write-plan --facts --workflow-status=.ax/experiments/blind-workflow-status-current.json --out=.ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-safety-e366.json --json > .ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-safety-e366.stdout
+for pred in review_pipeline_recommended_action_status review_pipeline_recommended_action_can_execute review_pipeline_recommended_action_next_action review_pipeline_recommended_action_missing_inputs; do bun src/cli/index.ts classifiers package-operations --graph-health --graph-mode=lifecycle --predicate=$pred --out=.ax/experiments/classifier-graph-lifecycle-${pred#review_pipeline_}-e366.json --json > .ax/experiments/classifier-graph-lifecycle-${pred#review_pipeline_}-e366.stdout; done
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-safety-e366.json --json > .ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-safety-e366.stdout
+bun src/cli/index.ts classifiers lifecycle > .ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-safety-e366.txt
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-safety-e366.json`
+- `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-safety-e366.json`
+- `.ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-safety-e366.json`
+- `.ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-safety-e366.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended_action_status-e366.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended_action_can_execute-e366.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended_action_next_action-e366.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended_action_missing_inputs-e366.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-safety-e366.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-safety-e366.txt`
+
+Results:
+- Fact projection includes all recommended action facts:
+  kind `stamp_review_provenance`, status `missing_inputs`,
+  `can_execute=false`, next action
+  `Provide required pipeline input values before executing the command.`, argv
+  with reviewer/reviewed-at placeholders, and missing inputs
+  `reviewer`, `reviewed_at`.
+- Lifecycle graph queries by each new predicate return exactly one fact for the
+  review-pipeline lifecycle node.
+- Lifecycle insight JSON exposes the same safety state.
+- Lifecycle text renders:
+  `recommended action status: missing_inputs`,
+  `recommended action can execute: no`,
+  `recommended action next: Provide required pipeline input values before executing the command.`, and
+  `recommended action missing inputs: reviewer, reviewed_at`.
+
+Decision:
+- E366 makes the E365 recommendation safe for services to consume. A service
+  can now distinguish "this is the recommended action" from "this action is
+  executable now" and can prompt for the exact missing inputs instead of
+  accidentally running placeholder argv.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-safety-e366.json`
+  contains all six recommended action predicates.
+- Each E366 lifecycle graph predicate query returns one lifecycle fact.
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-safety-e366.json`
+  reports `recommended_action_status=missing_inputs`,
+  `recommended_action_can_execute=false`, and missing inputs
+  `reviewer`, `reviewed_at`.
 
 ## E365 - Recommend Review Pipeline Direct Action
 
