@@ -11574,6 +11574,82 @@ Decision:
 - The next implementation slice should apply this write plan to SurrealDB and
   add a focused graph-health/list view for `classifier_lifecycle_status` facts.
 
+## E208 - Persisted Proposal Lifecycle Graph View
+
+Question:
+
+- After applying the proposal lifecycle write plan to SurrealDB, can agents
+  query a focused graph view that shows the blocking proposal gate and evidence
+  artifacts without scanning raw JSON or operation history?
+
+Implementation:
+
+- Added graph health mode `lifecycle` to:
+  - `src/classifiers/package-operations.ts`
+  - `src/cli/classifiers-package-operations.ts`
+  - `src/cli/index.ts`
+- Added `lifecycle_facts` to
+  `ClassifierPackageExecutionGraphHealthReport`.
+- `classifiers graph --mode=lifecycle` now returns only
+  `classifier_lifecycle_status` facts and their evidence paths. It suppresses
+  normal operation rows, guarded operations, and changed artifacts in this mode.
+- Fixed `classifier_graph_fact.value_json` writes for string values by using
+  JSON-value encoding instead of JSON-text encoding. This makes decision facts
+  parse back as strings instead of `null`.
+
+Commands:
+
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts
+bun src/cli/index.ts classifiers package-operations --write-plan --out=.ax/experiments/classifier-package-execution-write-plan-e208.json
+bun src/cli/index.ts classifiers package-operations --apply-write-plan --out=.ax/experiments/classifier-package-execution-apply-write-plan-e208.json
+bun src/cli/index.ts classifiers graph --mode=lifecycle --out=.ax/experiments/classifier-graph-lifecycle-e208.json
+bun src/cli/index.ts classifiers graph --mode=lifecycle | tee .ax/experiments/classifier-graph-lifecycle-e208.txt
+```
+
+Artifacts:
+
+- `.ax/experiments/classifier-package-execution-write-plan-e208.json`
+- `.ax/experiments/classifier-package-execution-apply-write-plan-e208.json`
+- `.ax/experiments/classifier-graph-lifecycle-e208.json`
+- `.ax/experiments/classifier-graph-lifecycle-e208.txt`
+
+Results:
+
+- Targeted tests: `73 pass`, then focused graph tests: `52 pass`
+- Surreal apply decision: `applied`
+- Lifecycle graph decision: `healthy`
+- Persisted graph totals:
+  - nodes/edges/facts: `1279/2124/541`
+  - execution/guard/artifact/lifecycle facts: `39/6/73/14`
+- Lifecycle mode result totals:
+  - operation count: `0`
+  - guarded operation count: `0`
+  - changed artifact count: `0`
+  - lifecycle fact count: `14`
+  - evidence path count: `3`
+- Decision facts now parse correctly:
+  - `proposal_review_decision`:
+    `needs_workflow_candidate_proposal_review`
+  - `proposal_promotion_decision`:
+    `needs_workflow_candidate_proposal_review`
+  - `proposal_ready_smoke_promotion_decision`:
+    `workflow_candidate_proposal_promotion_ready`
+
+Decision:
+
+- The proposal gate is now persisted and discoverable through the classifier
+  graph:
+  `ax classifiers graph --mode=lifecycle`.
+- Agents can answer "what proposal gate is blocking the classifier lifecycle?"
+  from graph facts:
+  proposal review is pending `4` proposals with `16` missing fields, promotion
+  is blocked by review, and the ready-smoke path can emit `2` drafts from `3`
+  fixture proposals.
+- Next useful slice: build the embedding/SVM helper-layer experiment already
+  recorded below, using the existing reviewed fixtures and hard-negative
+  machinery.
+
 ## Next Candidate - Embedding/SVM Helper Layer
 
 Hypothesis:

@@ -5,8 +5,8 @@ import { safeJsonParse } from "../lib/shared/safe-json.ts";
 import {
     recordRef,
     surrealJson,
+    surrealJsonOption,
     surrealJsonText,
-    surrealJsonTextOption,
     surrealObject,
     surrealOptionString,
     surrealString,
@@ -342,7 +342,18 @@ export interface ClassifierGraphChangedArtifact {
     readonly evidence_path: string;
 }
 
-export type ClassifierGraphHealthMode = "summary" | "guarded" | "changed-artifacts" | "evidence";
+export interface ClassifierGraphLifecycleFact {
+    readonly graph_id: string;
+    readonly subject: string;
+    readonly predicate: string;
+    readonly value: unknown;
+    readonly lifecycle_key?: string;
+    readonly artifact_path?: string;
+    readonly evidence_edges: readonly string[];
+    readonly evidence_paths: readonly string[];
+}
+
+export type ClassifierGraphHealthMode = "summary" | "guarded" | "changed-artifacts" | "evidence" | "lifecycle";
 
 export interface ClassifierGraphHealthQuery {
     readonly mode: ClassifierGraphHealthMode;
@@ -357,6 +368,7 @@ export interface ClassifierPackageExecutionGraphHealthReport {
     readonly operations: readonly ClassifierGraphOperationHealth[];
     readonly guarded_operations: readonly ClassifierGraphOperationHealth[];
     readonly changed_artifacts: readonly ClassifierGraphChangedArtifact[];
+    readonly lifecycle_facts: readonly ClassifierGraphLifecycleFact[];
     readonly evidence_paths: readonly string[];
     readonly totals: {
         readonly node_count: number;
@@ -369,6 +381,7 @@ export interface ClassifierPackageExecutionGraphHealthReport {
         readonly execution_fact_count: number;
         readonly guard_fact_count: number;
         readonly artifact_fact_count: number;
+        readonly lifecycle_fact_count: number;
         readonly changed_artifact_count: number;
         readonly evidence_path_count: number;
     };
@@ -376,6 +389,7 @@ export interface ClassifierPackageExecutionGraphHealthReport {
         readonly operation_count: number;
         readonly guarded_operation_count: number;
         readonly changed_artifact_count: number;
+        readonly lifecycle_fact_count: number;
         readonly evidence_path_count: number;
     };
     readonly decision: "healthy" | "empty_graph";
@@ -1439,7 +1453,7 @@ export function buildExecutionSurrealWritePlanReport(
             ["subject", surrealString(fact.subject)],
             ["predicate", surrealString(fact.predicate)],
             ["object", surrealOptionString(fact.object)],
-            ["value_json", surrealJsonTextOption(fact.value)],
+            ["value_json", surrealJsonOption(fact.value)],
             ["evidence_edges_json", surrealJsonText(fact.evidence_edges)],
             ["properties_json", surrealJson(fact.properties)],
             ["source_kind", surrealString("classifier_package_execution")],
@@ -1610,6 +1624,31 @@ export function buildExecutionGraphHealthReport(input: {
             evidence_path: evidenceEdge?.evidence_path ?? "",
         };
     });
+    const lifecycleFacts = input.facts
+        .filter((fact) => fact.kind === "classifier_lifecycle_status")
+        .map((fact): ClassifierGraphLifecycleFact => {
+            const properties = jsonRecord(fact.properties_json);
+            const evidenceEdgesValue = safeJsonParse<unknown>(fact.evidence_edges_json);
+            const evidenceEdges = Array.isArray(evidenceEdgesValue)
+                ? evidenceEdgesValue.filter((entry): entry is string => typeof entry === "string")
+                : [];
+            const evidencePaths = Array.from(new Set(evidenceEdges
+                .map((edgeId) => input.edges.find((edge) => edge.graph_id === edgeId)?.evidence_path)
+                .filter((path): path is string => Boolean(path))))
+                .sort();
+            const value = fact.value_json === undefined ? null : safeJsonParse<unknown>(fact.value_json);
+            return {
+                graph_id: fact.graph_id,
+                subject: fact.subject,
+                predicate: fact.predicate,
+                value,
+                ...(jsonString(properties.lifecycle_key) === undefined ? {} : { lifecycle_key: jsonString(properties.lifecycle_key) as string }),
+                ...(jsonString(properties.artifact_path) === undefined ? {} : { artifact_path: jsonString(properties.artifact_path) as string }),
+                evidence_edges: evidenceEdges,
+                evidence_paths: evidencePaths,
+            };
+        })
+        .sort((a, b) => a.predicate.localeCompare(b.predicate));
     const operationMatches = (operation: ClassifierGraphOperationHealth): boolean =>
         !query.operation_id || operation.operation_id === query.operation_id || `${operation.package_key}/${operation.operation_id}` === query.operation_id;
     const artifactMatches = (artifact: ClassifierGraphChangedArtifact): boolean =>
@@ -1620,17 +1659,28 @@ export function buildExecutionGraphHealthReport(input: {
     const filteredOperations = operations.filter(operationMatches);
     const filteredGuardedOperations = operations.filter((operation) => operation.guarded_count > 0).filter(operationMatches);
     const filteredChangedArtifacts = changedArtifacts.filter(changedArtifactMatches);
-    const resultOperations = query.mode === "guarded"
-        ? filteredGuardedOperations
+    const resultGuardedOperations = query.mode === "lifecycle" ? [] : filteredGuardedOperations;
+    const resultOperations = query.mode === "lifecycle"
+        ? []
+        : query.mode === "guarded"
+        ? resultGuardedOperations
         : query.mode === "changed-artifacts"
             ? filteredOperations.filter((operation) => operation.changed_artifact_count > 0)
             : filteredOperations;
-    const resultChangedArtifacts = query.mode === "guarded"
+    const resultChangedArtifacts = query.mode === "guarded" || query.mode === "lifecycle"
         ? []
         : filteredChangedArtifacts;
+    const resultLifecycleFacts = query.mode === "lifecycle" || query.mode === "evidence"
+        ? lifecycleFacts.filter((fact) =>
+            !query.artifact_path ||
+            fact.artifact_path === query.artifact_path ||
+            fact.evidence_paths.includes(query.artifact_path)
+        )
+        : [];
     const resultEvidencePaths = Array.from(new Set([
         ...resultOperations.flatMap((operation) => operation.evidence_paths),
         ...resultChangedArtifacts.map((artifact) => artifact.evidence_path).filter(Boolean),
+        ...resultLifecycleFacts.flatMap((fact) => fact.evidence_paths),
     ])).sort();
 
     return {
@@ -1638,8 +1688,9 @@ export function buildExecutionGraphHealthReport(input: {
         tables: ["classifier_graph_node", "classifier_graph_edge", "classifier_graph_fact"],
         query,
         operations: resultOperations,
-        guarded_operations: filteredGuardedOperations,
+        guarded_operations: resultGuardedOperations,
         changed_artifacts: resultChangedArtifacts,
+        lifecycle_facts: resultLifecycleFacts,
         evidence_paths: resultEvidencePaths,
         totals: {
             node_count: input.nodes.length,
@@ -1652,13 +1703,15 @@ export function buildExecutionGraphHealthReport(input: {
             execution_fact_count: input.facts.filter((fact) => fact.kind === "classifier_operation_execution").length,
             guard_fact_count: input.facts.filter((fact) => fact.kind === "classifier_operation_guard").length,
             artifact_fact_count: input.facts.filter((fact) => fact.kind === "classifier_artifact_observation").length,
+            lifecycle_fact_count: lifecycleFacts.length,
             changed_artifact_count: changedArtifacts.length,
             evidence_path_count: evidencePaths.size,
         },
         result_totals: {
             operation_count: resultOperations.length,
-            guarded_operation_count: filteredGuardedOperations.length,
+            guarded_operation_count: resultGuardedOperations.length,
             changed_artifact_count: resultChangedArtifacts.length,
+            lifecycle_fact_count: resultLifecycleFacts.length,
             evidence_path_count: resultEvidencePaths.length,
         },
         decision: input.nodes.length === 0 && input.edges.length === 0 && input.facts.length === 0 ? "empty_graph" : "healthy",

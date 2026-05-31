@@ -486,6 +486,7 @@ describe("classifiers package-operations format", () => {
                 operation_id: "refresh",
                 evidence_path: ".ax/experiments/run.json",
             }],
+            lifecycle_facts: [],
             evidence_paths: [".ax/experiments/run.json"],
             totals: {
                 node_count: 3,
@@ -498,6 +499,7 @@ describe("classifiers package-operations format", () => {
                 execution_fact_count: 1,
                 guard_fact_count: 1,
                 artifact_fact_count: 1,
+                lifecycle_fact_count: 0,
                 changed_artifact_count: 1,
                 evidence_path_count: 1,
             },
@@ -505,6 +507,7 @@ describe("classifiers package-operations format", () => {
                 operation_count: 1,
                 guarded_operation_count: 1,
                 changed_artifact_count: 1,
+                lifecycle_fact_count: 0,
                 evidence_path_count: 1,
             },
             decision: "healthy",
@@ -517,11 +520,64 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("mode: guarded");
         expect(output).toContain("filter operation: refresh");
         expect(output).toContain("nodes/edges/facts: 3/2/2");
-        expect(output).toContain("results operations/guarded/changed/evidence: 1/1/1/1");
+        expect(output).toContain("results operations/guarded/changed/lifecycle/evidence: 1/1/1/0/1");
         expect(output).toContain("- demo/refresh");
         expect(output).toContain("runs executed/failed/guarded: 1/0/1");
         expect(output).toContain("changed artifacts:");
         expect(output).toContain(".ax/experiments/out.json");
+    });
+
+    test("renders lifecycle graph facts", () => {
+        const report: ClassifierPackageExecutionGraphHealthReport = {
+            schema: "ax.classifier_package_execution_graph_health_report.v1",
+            tables: ["classifier_graph_node", "classifier_graph_edge", "classifier_graph_fact"],
+            query: { mode: "lifecycle" },
+            operations: [],
+            guarded_operations: [],
+            changed_artifacts: [],
+            lifecycle_facts: [{
+                graph_id: "fact:lifecycle",
+                subject: "classifier_lifecycle:workflow_candidate_proposal",
+                predicate: "proposal_review_pending_count",
+                value: 4,
+                lifecycle_key: "proposal_review",
+                artifact_path: ".ax/experiments/workflow-candidate-proposal-review-current.json",
+                evidence_edges: ["edge:lifecycle"],
+                evidence_paths: [".ax/experiments/workflow-candidate-proposal-review-current.json"],
+            }],
+            evidence_paths: [".ax/experiments/workflow-candidate-proposal-review-current.json"],
+            totals: {
+                node_count: 2,
+                edge_count: 1,
+                fact_count: 1,
+                package_count: 0,
+                operation_count: 0,
+                execution_count: 0,
+                artifact_count: 1,
+                execution_fact_count: 0,
+                guard_fact_count: 0,
+                artifact_fact_count: 0,
+                lifecycle_fact_count: 1,
+                changed_artifact_count: 0,
+                evidence_path_count: 1,
+            },
+            result_totals: {
+                operation_count: 0,
+                guarded_operation_count: 0,
+                changed_artifact_count: 0,
+                lifecycle_fact_count: 1,
+                evidence_path_count: 1,
+            },
+            decision: "healthy",
+        };
+
+        const output = renderClassifierPackageExecutionGraphHealthText(report);
+
+        expect(output).toContain("mode: lifecycle");
+        expect(output).toContain("execution/guard/artifact/lifecycle facts: 0/0/0/1");
+        expect(output).toContain("lifecycle facts:");
+        expect(output).toContain("- proposal_review_pending_count: 4");
+        expect(output).toContain("source: proposal_review .ax/experiments/workflow-candidate-proposal-review-current.json");
     });
 
     test("renders classifier lifecycle insight reports", () => {

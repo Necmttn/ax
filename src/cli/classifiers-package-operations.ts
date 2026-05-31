@@ -261,8 +261,8 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `filter artifact: ${report.query.artifact_path ?? "all"}`,
         `nodes/edges/facts: ${report.totals.node_count}/${report.totals.edge_count}/${report.totals.fact_count}`,
         `packages/operations/executions/artifacts: ${report.totals.package_count}/${report.totals.operation_count}/${report.totals.execution_count}/${report.totals.artifact_count}`,
-        `execution/guard/artifact facts: ${report.totals.execution_fact_count}/${report.totals.guard_fact_count}/${report.totals.artifact_fact_count}`,
-        `results operations/guarded/changed/evidence: ${report.result_totals.operation_count}/${report.result_totals.guarded_operation_count}/${report.result_totals.changed_artifact_count}/${report.result_totals.evidence_path_count}`,
+        `execution/guard/artifact/lifecycle facts: ${report.totals.execution_fact_count}/${report.totals.guard_fact_count}/${report.totals.artifact_fact_count}/${report.totals.lifecycle_fact_count}`,
+        `results operations/guarded/changed/lifecycle/evidence: ${report.result_totals.operation_count}/${report.result_totals.guarded_operation_count}/${report.result_totals.changed_artifact_count}/${report.result_totals.lifecycle_fact_count}/${report.result_totals.evidence_path_count}`,
     ];
     for (const operation of report.operations) {
         lines.push(`- ${operation.package_key}/${operation.operation_id}`);
@@ -287,6 +287,21 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
             lines.push(`- ${artifact.package_key ?? "unknown"}/${artifact.operation_id ?? "unknown"} ${artifact.artifact_path}`);
             if (artifact.evidence_path) {
                 lines.push(`  evidence: ${artifact.evidence_path}`);
+            }
+        }
+    }
+    if (report.lifecycle_facts.length > 0) {
+        lines.push("lifecycle facts:");
+        for (const fact of report.lifecycle_facts) {
+            const value = typeof fact.value === "string"
+                ? fact.value
+                : JSON.stringify(fact.value);
+            lines.push(`- ${fact.predicate}: ${value}`);
+            if (fact.lifecycle_key || fact.artifact_path) {
+                lines.push(`  source: ${fact.lifecycle_key ?? "unknown"} ${fact.artifact_path ?? ""}`.trimEnd());
+            }
+            if (fact.evidence_paths.length > 0) {
+                lines.push(`  evidence: ${fact.evidence_paths.join(", ")}`);
             }
         }
     }

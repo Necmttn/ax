@@ -726,6 +726,8 @@ describe("classifier package operations report", () => {
         expect(report.totals.operation_count).toBe(1);
         expect(report.result_totals.operation_count).toBe(1);
         expect(report.totals.changed_artifact_count).toBe(1);
+        expect(report.totals.lifecycle_fact_count).toBe(0);
+        expect(report.result_totals.lifecycle_fact_count).toBe(0);
         expect(report.operations[0]?.changed_artifact_count).toBe(1);
         expect(report.operations[0]?.last_execution?.source_path).toBe(".ax/experiments/run.json");
         expect(report.changed_artifacts[0]?.artifact_path).toBe(".ax/experiments/out.json");
@@ -778,7 +780,52 @@ describe("classifier package operations report", () => {
         expect(report.guarded_operations.map((operation) => operation.operation_id)).toEqual(["train"]);
         expect(report.result_totals.operation_count).toBe(1);
         expect(report.result_totals.guarded_operation_count).toBe(1);
+        expect(report.result_totals.lifecycle_fact_count).toBe(0);
         expect(report.evidence_paths).toEqual(["guarded.json"]);
+    });
+
+    test("lists lifecycle graph facts in lifecycle mode", () => {
+        const report = buildExecutionGraphHealthReport({
+            nodes: [{
+                graph_id: "classifier_lifecycle:workflow_candidate_proposal",
+                kind: "classifier_lifecycle",
+                label: "workflow candidate proposal lifecycle",
+                properties_json: "{}",
+            }],
+            edges: [{
+                graph_id: "edge:lifecycle",
+                kind: "has_evidence",
+                from_id: "classifier_lifecycle:workflow_candidate_proposal",
+                to_id: "artifact:.ax/experiments/workflow-candidate-proposal-review-current.json",
+                evidence_path: ".ax/experiments/workflow-candidate-proposal-review-current.json",
+                properties_json: JSON.stringify({ lifecycle_key: "proposal_review" }),
+            }],
+            facts: [{
+                graph_id: "fact:lifecycle",
+                kind: "classifier_lifecycle_status",
+                subject: "classifier_lifecycle:workflow_candidate_proposal",
+                predicate: "proposal_review_pending_count",
+                value_json: "4",
+                evidence_edges_json: JSON.stringify(["edge:lifecycle"]),
+                properties_json: JSON.stringify({
+                    lifecycle_key: "proposal_review",
+                    artifact_path: ".ax/experiments/workflow-candidate-proposal-review-current.json",
+                }),
+            }],
+            query: { mode: "lifecycle" },
+        });
+
+        expect(report.query.mode).toBe("lifecycle");
+        expect(report.totals.lifecycle_fact_count).toBe(1);
+        expect(report.result_totals.lifecycle_fact_count).toBe(1);
+        expect(report.lifecycle_facts[0]).toMatchObject({
+            predicate: "proposal_review_pending_count",
+            value: 4,
+            lifecycle_key: "proposal_review",
+            artifact_path: ".ax/experiments/workflow-candidate-proposal-review-current.json",
+            evidence_paths: [".ax/experiments/workflow-candidate-proposal-review-current.json"],
+        });
+        expect(report.evidence_paths).toEqual([".ax/experiments/workflow-candidate-proposal-review-current.json"]);
     });
 
     test("writes graph health reports", () => {
