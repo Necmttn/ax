@@ -1119,15 +1119,15 @@ describe("classifier package operations report", () => {
                     source_kind: "embedding_helper_review_projection",
                 },
             ],
-            query: { mode: "embedding-helper" },
+            query: { mode: "embedding-helper", fact_kind: "embedding_helper_hard_negative_candidate" },
         });
 
         expect(report.query.mode).toBe("embedding-helper");
+        expect(report.query.fact_kind).toBe("embedding_helper_hard_negative_candidate");
         expect(report.totals.embedding_helper_fact_count).toBe(2);
-        expect(report.result_totals.embedding_helper_fact_count).toBe(2);
+        expect(report.result_totals.embedding_helper_fact_count).toBe(1);
         expect(report.embedding_helper_facts.map((fact) => fact.predicate)).toEqual([
             "promoted_hard_negative_fixture",
-            "recommended_threshold",
         ]);
         expect(report.embedding_helper_facts[0]).toMatchObject({
             source_fixture_id: "session-section-chunks/none-start-building",

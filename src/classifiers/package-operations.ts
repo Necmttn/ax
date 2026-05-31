@@ -344,6 +344,7 @@ export interface ClassifierGraphChangedArtifact {
 
 export interface ClassifierGraphLifecycleFact {
     readonly graph_id: string;
+    readonly kind: string;
     readonly subject: string;
     readonly predicate: string;
     readonly source_kind?: string;
@@ -386,6 +387,7 @@ export interface ClassifierGraphHealthQuery {
     readonly operation_id?: string;
     readonly artifact_path?: string;
     readonly source_kind?: string;
+    readonly fact_kind?: string;
     readonly predicate?: string;
     readonly subject?: string;
     readonly value_contains?: string;
@@ -1799,6 +1801,7 @@ export function buildExecutionGraphHealthReport(input: {
         ...(input.query?.operation_id ? { operation_id: input.query.operation_id } : {}),
         ...(input.query?.artifact_path ? { artifact_path: input.query.artifact_path } : {}),
         ...(input.query?.source_kind ? { source_kind: input.query.source_kind } : {}),
+        ...(input.query?.fact_kind ? { fact_kind: input.query.fact_kind } : {}),
         ...(input.query?.predicate ? { predicate: input.query.predicate } : {}),
         ...(input.query?.subject ? { subject: input.query.subject } : {}),
         ...(input.query?.value_contains ? { value_contains: input.query.value_contains } : {}),
@@ -1907,6 +1910,7 @@ export function buildExecutionGraphHealthReport(input: {
             const value = fact.value_json === undefined ? null : safeJsonParse<unknown>(fact.value_json);
             return {
                 graph_id: fact.graph_id,
+                kind: fact.kind,
                 subject: fact.subject,
                 predicate: fact.predicate,
                 ...(fact.source_kind === undefined ? {} : { source_kind: fact.source_kind }),
@@ -1997,6 +2001,7 @@ export function buildExecutionGraphHealthReport(input: {
                 fact.artifact_path === query.artifact_path ||
                 fact.evidence_paths.includes(query.artifact_path)) &&
             (!query.source_kind || fact.source_kind === query.source_kind) &&
+            (!query.fact_kind || fact.kind === query.fact_kind) &&
             (!query.predicate || fact.predicate === query.predicate) &&
             (!query.subject || fact.subject === query.subject) &&
             graphFactValueContains(fact.value, query.value_contains)
@@ -2010,6 +2015,7 @@ export function buildExecutionGraphHealthReport(input: {
                 fact.subject === query.artifact_path ||
                 fact.object === query.artifact_path) &&
             (!query.source_kind || fact.source_kind === query.source_kind) &&
+            (!query.fact_kind || fact.kind === query.fact_kind) &&
             (!query.predicate || fact.predicate === query.predicate) &&
             (!query.subject || fact.subject === query.subject) &&
             graphFactValueContains(fact.value, query.value_contains)

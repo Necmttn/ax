@@ -35,6 +35,7 @@ export interface ClassifierPackageOperationsCommandInput extends ClassifierPacka
     readonly graphMode?: ClassifierGraphHealthMode;
     readonly artifact?: string;
     readonly sourceKind?: string;
+    readonly factKind?: string;
     readonly predicate?: string;
     readonly subject?: string;
     readonly valueContains?: string;
@@ -264,6 +265,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `filter operation: ${report.query.operation_id ?? "all"}`,
         `filter artifact: ${report.query.artifact_path ?? "all"}`,
         `filter source kind: ${report.query.source_kind ?? "all"}`,
+        `filter fact kind: ${report.query.fact_kind ?? "all"}`,
         `filter predicate: ${report.query.predicate ?? "all"}`,
         `filter subject: ${report.query.subject ?? "all"}`,
         `filter value contains: ${report.query.value_contains ?? "all"}`,
@@ -576,6 +578,7 @@ export const runClassifiersPackageOperations = (
                 ...(input.operationId ? { operation_id: input.operationId } : {}),
                 ...(input.artifact ? { artifact_path: input.artifact } : {}),
                 ...(input.sourceKind ? { source_kind: input.sourceKind } : {}),
+                ...(input.factKind ? { fact_kind: input.factKind } : {}),
                 ...(input.predicate ? { predicate: input.predicate } : {}),
                 ...(input.subject ? { subject: input.subject } : {}),
                 ...(input.valueContains ? { value_contains: input.valueContains } : {}),
