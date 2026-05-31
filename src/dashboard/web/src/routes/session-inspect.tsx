@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { api } from "../api.ts";
@@ -230,7 +230,6 @@ function AliasMiniMap({
                     <button
                         key={`map-${block.seq}-${alias.value}`}
                         type="button"
-                        onMouseEnter={() => setActiveTarget(target)}
                         onClick={() => setActiveTarget(target)}
                         title={aliasTitle(alias)}
                         style={{
@@ -278,6 +277,32 @@ function visibleTextBlocks(content: InspectTurnContentDto): InspectContentBlockD
     return selected;
 }
 
+export function rawBlockTextStyle({
+    tone,
+    active,
+    hovered,
+    mismatch,
+}: {
+    tone: ContentTone;
+    active: boolean;
+    hovered: boolean;
+    mismatch: boolean;
+}): CSSProperties {
+    const emphasized = active || hovered || mismatch;
+    return {
+        background: hovered ? tone.bg : "transparent",
+        color: emphasized ? tone.fg : "inherit",
+        outline: "none",
+        outlineOffset: 1,
+        borderBottom: mismatch
+            ? "1px dotted #f97316"
+            : emphasized ? `1px solid ${tone.bar}` : "1px solid transparent",
+        boxShadow: active ? `inset 0 -2px 0 ${tone.bar}` : "none",
+        cursor: "pointer",
+        transition: "background 0.12s, color 0.12s, border-color 0.12s, box-shadow 0.12s",
+    };
+}
+
 function AnnotatedRawText({
     content,
     rawText,
@@ -306,7 +331,6 @@ function AnnotatedRawText({
         const mismatch = block.text != null && slice !== block.text;
         const active = activeSeq === block.seq;
         const hovered = hoverSeq === block.seq;
-        const emphasized = active || hovered || mismatch;
         const target: InspectTarget = { kind: "block", blockSeq: block.seq };
         rawParts.push(
             <span
@@ -315,17 +339,7 @@ function AnnotatedRawText({
                 onMouseLeave={() => setHoverSeq((seq) => seq === block.seq ? null : seq)}
                 onClick={() => setActiveTarget(target)}
                 title={blockHoverTitle(block, mismatch)}
-                style={{
-                    background: active ? "#fef08a" : hovered ? family.bg : "transparent",
-                    color: emphasized ? family.fg : "inherit",
-                    outline: active ? `1px solid ${family.bar}` : "none",
-                    outlineOffset: 1,
-                    borderBottom: mismatch
-                        ? "1px dotted #f97316"
-                        : emphasized ? `1px solid ${family.bar}` : "1px solid transparent",
-                    cursor: "pointer",
-                    transition: "background 0.12s, color 0.12s, border-color 0.12s",
-                }}
+                style={rawBlockTextStyle({ tone: family, active, hovered, mismatch })}
             >
                 {slice}
             </span>,
