@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E379 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-value-no-match-e379.json`
+- Index continuation: E380 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-argv-no-match-e380.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-value-match-e379.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-argv-match-e380.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,45 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E380 - Suggest Executable Graph Query Argv
+
+Question:
+- E379 suggests an exact lifecycle value, but can services rerun the repaired
+  graph query without reconstructing CLI flags?
+
+Implementation:
+- Added `query_suggested_argv` to classifier graph health reports.
+- The argv preserves current graph query filters and replaces the exact
+  `--value` with `query_suggested_value_equals`.
+- Text graph-health output now renders `query suggested argv`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-argv-no-match-e380.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-argv-match-e380.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-argv-no-match-e380.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and `query_suggested_argv=["bun",
+  "src/cli/index.ts", "classifiers", "graph", "--mode", "lifecycle",
+  "--predicate", "review_pipeline_recommended_action_execution_phase",
+  "--value", "bind_inputs"]`.
+- The matching `--value=bind_inputs` query returns the same executable argv.
+- Text output renders the suggested argv as a runnable command line.
+
+Decision:
+- Services can now repair and rerun exact lifecycle graph queries directly
+  from the report without duplicating graph CLI flag construction.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E380 no-match and match reports both include the expected suggested argv.
+- E380 text output includes the suggested argv command line.
 
 ## E379 - Suggest Exact Lifecycle Values For Query Repair
 

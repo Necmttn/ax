@@ -490,6 +490,7 @@ export interface ClassifierPackageExecutionGraphHealthReport {
     readonly query_result_kinds?: readonly ClassifierGraphQueryResultKind[];
     readonly query_result_kind_counts?: readonly ClassifierGraphQueryResultKindCount[];
     readonly query_suggested_value_equals?: string;
+    readonly query_suggested_argv?: readonly string[];
     readonly totals: {
         readonly node_count: number;
         readonly edge_count: number;
@@ -2447,6 +2448,34 @@ export function buildExecutionGraphHealthReport(input: {
     const querySuggestedValueEquals = lifecycleAvailableValueCounts
         .slice()
         .sort((a, b) => (b.count - a.count) || `${a.predicate}/${a.value}`.localeCompare(`${b.predicate}/${b.value}`))[0]?.value;
+    const querySuggestedArgv = querySuggestedValueEquals === undefined
+        ? undefined
+        : (() => {
+            const argv = ["bun", "src/cli/index.ts", "classifiers", "graph", "--mode", query.mode];
+            const pushArg = (flag: string, value: string | number | undefined): void => {
+                if (value !== undefined) {
+                    argv.push(flag, String(value));
+                }
+            };
+            pushArg("--operation", query.operation_id);
+            pushArg("--artifact", query.artifact_path);
+            pushArg("--source-kind", query.source_kind);
+            pushArg("--fact-kind", query.fact_kind);
+            pushArg("--status", query.status);
+            pushArg("--source-fixture", query.source_fixture_id);
+            pushArg("--proposed-label", query.proposed_label);
+            pushArg("--threshold", query.threshold);
+            pushArg("--min-seed-count", query.min_seed_count);
+            pushArg("--min-positive-recall", query.min_positive_recall);
+            pushArg("--min-call-reduction", query.min_call_reduction);
+            pushArg("--min-nearest-similarity", query.min_nearest_similarity);
+            pushArg("--nearest-fixture", query.nearest_fixture_id);
+            pushArg("--predicate", query.predicate);
+            pushArg("--subject", query.subject);
+            pushArg("--value-contains", query.value_contains);
+            pushArg("--value", querySuggestedValueEquals);
+            return argv;
+        })();
     const routingPolicyFloorsRequested = query.min_positive_recall !== undefined || query.min_call_reduction !== undefined;
     const routingPolicyCandidates = resultEmbeddingHelperFacts
         .filter((fact) => fact.kind === "embedding_helper_routing_candidate")
@@ -2667,6 +2696,7 @@ export function buildExecutionGraphHealthReport(input: {
         query_result_kinds: queryResultKinds,
         query_result_kind_counts: queryResultKindCounts,
         ...(querySuggestedValueEquals === undefined ? {} : { query_suggested_value_equals: querySuggestedValueEquals }),
+        ...(querySuggestedArgv === undefined ? {} : { query_suggested_argv: querySuggestedArgv }),
         totals: {
             node_count: input.nodes.length,
             edge_count: input.edges.length,

@@ -1254,6 +1254,18 @@ describe("classifier package operations report", () => {
             count: 1,
         }]);
         expect(report.query_suggested_value_equals).toBe("bind_inputs");
+        expect(report.query_suggested_argv).toEqual([
+            "bun",
+            "src/cli/index.ts",
+            "classifiers",
+            "graph",
+            "--mode",
+            "lifecycle",
+            "--predicate",
+            "review_pipeline_recommended_action_execution_phase",
+            "--value",
+            "bind_inputs",
+        ]);
     });
 
     test("summarizes lifecycle graph fact values", () => {

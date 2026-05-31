@@ -313,6 +313,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `query result kinds: ${(report.query_result_kinds ?? []).join(", ") || "none"}`,
         `query result kind counts: ${(report.query_result_kind_counts ?? []).map((entry) => `${entry.kind}=${entry.count}`).join(", ") || "none"}`,
         `query suggested value equals: ${report.query_suggested_value_equals ?? "none"}`,
+        `query suggested argv: ${report.query_suggested_argv?.join(" ") ?? "none"}`,
         `nodes/edges/facts: ${report.totals.node_count}/${report.totals.edge_count}/${report.totals.fact_count}`,
         `packages/operations/executions/artifacts: ${report.totals.package_count}/${report.totals.operation_count}/${report.totals.execution_count}/${report.totals.artifact_count}`,
         `execution/guard/artifact/lifecycle/helper facts: ${report.totals.execution_fact_count}/${report.totals.guard_fact_count}/${report.totals.artifact_fact_count}/${report.totals.lifecycle_fact_count}/${report.totals.embedding_helper_fact_count}`,
