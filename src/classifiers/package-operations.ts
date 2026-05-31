@@ -225,7 +225,7 @@ export interface ClassifierPackageExecutionFact {
     readonly subject: string;
     readonly predicate: string;
     readonly object?: string;
-    readonly value?: string | number | boolean | null;
+    readonly value?: string | number | boolean | readonly string[] | null;
     readonly evidence_edges: readonly string[];
     readonly properties: Readonly<Record<string, string | number | boolean | null>>;
 }
@@ -1455,6 +1455,7 @@ export function buildExecutionFactProjectionReport(
             readonly numericFacts: Readonly<Record<string, number | undefined>>;
             readonly booleanFacts?: Readonly<Record<string, boolean | undefined>>;
             readonly stringFacts?: Readonly<Record<string, string | undefined>>;
+            readonly arrayFacts?: Readonly<Record<string, readonly string[] | undefined>>;
         }): void => {
             const artifactNode = pathArtifactId(input.artifactPath);
             const edgeId = `edge:${factId(`${input.lifecycleNode}->has_evidence->${artifactNode}:${input.key}`)}`;
@@ -1523,6 +1524,21 @@ export function buildExecutionFactProjectionReport(
             }
             for (const [predicate, value] of Object.entries(input.stringFacts ?? {})) {
                 if (value === undefined) continue;
+                facts.push({
+                    id: `fact:${factId(`${input.lifecycleNode}:${predicate}`)}`,
+                    kind: "classifier_lifecycle_status",
+                    subject: input.lifecycleNode,
+                    predicate,
+                    value,
+                    evidence_edges: [edgeId],
+                    properties: {
+                        lifecycle_key: input.key,
+                        artifact_path: input.artifactPath,
+                    },
+                });
+            }
+            for (const [predicate, value] of Object.entries(input.arrayFacts ?? {})) {
+                if (value === undefined || value.length === 0) continue;
                 facts.push({
                     id: `fact:${factId(`${input.lifecycleNode}:${predicate}`)}`,
                     kind: "classifier_lifecycle_status",
@@ -1614,6 +1630,14 @@ export function buildExecutionFactProjectionReport(
                     review_pipeline_command_kind: workflowStatus.review_pipeline_lifecycle.command_kind,
                     review_pipeline_prepared_status: workflowStatus.review_pipeline_lifecycle.prepared_status,
                     review_pipeline_output_verification_status: workflowStatus.review_pipeline_lifecycle.output_verification_status,
+                },
+                arrayFacts: {
+                    review_pipeline_prepared_argv: workflowStatus.review_pipeline_lifecycle.prepared_argv,
+                    review_pipeline_output_artifact_paths: workflowStatus.review_pipeline_lifecycle.output_artifacts?.map((artifact) => artifact.path),
+                    review_pipeline_checked_artifact_paths: workflowStatus.review_pipeline_lifecycle.checked_artifacts?.map((artifact) => artifact.path),
+                    review_pipeline_checked_artifact_states: workflowStatus.review_pipeline_lifecycle.checked_artifacts?.map((artifact) =>
+                        `${artifact.kind ?? "artifact"}:${artifact.exists === true ? "ok" : artifact.exists === false ? "missing" : "unknown"}`,
+                    ),
                 },
             });
         }

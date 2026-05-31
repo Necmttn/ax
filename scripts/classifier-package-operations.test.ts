@@ -512,12 +512,21 @@ describe("classifier package operations report", () => {
                 can_continue: true,
                 missing_required_artifact_count: 0,
                 checked_artifact_count: 2,
+                prepared_argv: ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates"],
+                output_artifacts: [
+                    { kind: "review_brief", path: ".ax/experiments/review.md", required_for_handoff: true },
+                    { kind: "readiness_report", path: ".ax/experiments/readiness.json", required_for_handoff: false },
+                ],
+                checked_artifacts: [
+                    { kind: "review_brief", path: ".ax/experiments/review.md", exists: true },
+                    { kind: "readiness_report", path: ".ax/experiments/readiness.json", exists: true },
+                ],
                 failures: [],
             },
             next_actions: [],
         });
 
-        expect(report.totals.lifecycle_fact_count).toBe(8);
+        expect(report.totals.lifecycle_fact_count).toBe(12);
         expect(report.nodes).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 id: "classifier_lifecycle:workflow_candidate_review_pipeline",
@@ -552,6 +561,22 @@ describe("classifier package operations report", () => {
             expect.objectContaining({
                 predicate: "review_pipeline_checked_artifact_count",
                 value: 2,
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_prepared_argv",
+                value: ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates"],
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_output_artifact_paths",
+                value: [".ax/experiments/review.md", ".ax/experiments/readiness.json"],
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_checked_artifact_paths",
+                value: [".ax/experiments/review.md", ".ax/experiments/readiness.json"],
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_checked_artifact_states",
+                value: ["review_brief:ok", "readiness_report:ok"],
             }),
         ]));
     });
