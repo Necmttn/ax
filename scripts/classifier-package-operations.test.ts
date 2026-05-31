@@ -1307,6 +1307,18 @@ describe("classifier package operations report", () => {
                 "--value",
                 "bind_inputs",
             ],
+            repair_verification_argv: [
+                "bun",
+                "src/cli/index.ts",
+                "classifiers",
+                "graph",
+                "--mode",
+                "lifecycle",
+                "--predicate",
+                "review_pipeline_recommended_action_execution_phase",
+                "--value",
+                "bind_inputs",
+            ],
             repair_query: {
                 mode: "lifecycle",
                 predicate: "review_pipeline_recommended_action_execution_phase",

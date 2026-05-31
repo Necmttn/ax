@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E405 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-no-match-e405.json`
+- Index continuation: E406 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-argv-no-match-e406.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-match-e405.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-argv-match-e406.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,51 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E406 - Expose Suggested Query Repair Verification Argv
+
+Question:
+- E405 exposes repair verification expectations, but can services run the
+  verification command without reusing or reconstructing repair argv?
+
+Implementation:
+- Added `repair_verification_argv` to `query_suggestion`.
+- Executable lifecycle graph-query repairs now expose the repaired graph-query
+  argv as the verification command.
+- No-op suggestions expose an empty verification argv.
+- Text graph-health output now renders repair verification argv.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-argv-no-match-e406.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-argv-match-e406.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-argv-no-match-e406.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_verification_argv=["bun","src/cli/index.ts",
+  "classifiers","graph","--mode","lifecycle","--predicate",
+  "review_pipeline_recommended_action_execution_phase","--value",
+  "bind_inputs"]`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.repair_verification_argv=[]`.
+- Text output renders the repair verification argv command.
+
+Decision:
+- Services can now execute a repair and verify the expected repaired graph
+  query using dedicated structured fields.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E406 no-match report has the repaired graph query in
+  `repair_verification_argv`.
+- E406 match report has an empty `repair_verification_argv`.
+- E406 text output includes the repair verification argv line.
 
 ## E405 - Expose Suggested Query Repair Verification Expectations
 
