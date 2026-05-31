@@ -1,8 +1,12 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import {
     ClassifierReviewPipelineService,
     ClassifierReviewPipelineServiceLive,
+    nodeFileOutputVerifier,
     type ClassifierReviewPipelineCommandSource,
 } from "./review-pipeline-service.ts";
 
@@ -340,9 +344,63 @@ describe("ClassifierReviewPipelineService", () => {
         expect(report.next_action).toBe("All required pipeline output artifacts exist; continue with the next review pipeline step.");
         expect(report.output_verification?.status).toBe("verified");
     });
+
+    test("verifies lifecycle output artifacts against the local filesystem", async () => {
+        const tempDir = mkdtempSync(join(tmpdir(), "ax-review-pipeline-"));
+        try {
+            const artifactPath = join(tempDir, "post-apply.json");
+            writeFileSync(artifactPath, "{}\n");
+            const source = provenanceCommandSource({
+                outputPath: artifactPath,
+            });
+
+            const report = await runWithService(Effect.gen(function* () {
+                const pipeline = yield* ClassifierReviewPipelineService;
+                return yield* pipeline.commandLifecycle(source, {
+                    values: {
+                        reviewer: "codex",
+                        reviewed_at: "2026-05-31T10:00:00.000Z",
+                    },
+                    verifier: nodeFileOutputVerifier,
+                });
+            }));
+
+            expect(report.status).toBe("verified_after_execution");
+            expect(report.output_verification?.checked_artifacts[0]?.exists).toBe(true);
+        } finally {
+            rmSync(tempDir, { force: true, recursive: true });
+        }
+    });
+
+    test("reports filesystem-missing lifecycle output artifacts", async () => {
+        const tempDir = mkdtempSync(join(tmpdir(), "ax-review-pipeline-"));
+        try {
+            const artifactPath = join(tempDir, "missing", "post-apply.json");
+            mkdirSync(join(tempDir, "missing"), { recursive: true });
+            const source = provenanceCommandSource({
+                outputPath: artifactPath,
+            });
+
+            const report = await runWithService(Effect.gen(function* () {
+                const pipeline = yield* ClassifierReviewPipelineService;
+                return yield* pipeline.commandLifecycle(source, {
+                    values: {
+                        reviewer: "codex",
+                        reviewed_at: "2026-05-31T10:00:00.000Z",
+                    },
+                    verifier: nodeFileOutputVerifier,
+                });
+            }));
+
+            expect(report.status).toBe("missing_required_outputs");
+            expect(report.output_verification?.missing_required_artifacts).toEqual([artifactPath]);
+        } finally {
+            rmSync(tempDir, { force: true, recursive: true });
+        }
+    });
 });
 
-const provenanceCommandSource = (): ClassifierReviewPipelineCommandSource => ({
+const provenanceCommandSource = (input: { readonly outputPath?: string } = {}): ClassifierReviewPipelineCommandSource => ({
     review_pipeline_stage: "needs_review_provenance",
     review_pipeline_next_action: "Add reviewer and reviewed-at metadata before applying if audit provenance is required.",
     review_pipeline_command_status: "requires_inputs",
@@ -385,7 +443,7 @@ const provenanceCommandSource = (): ClassifierReviewPipelineCommandSource => ({
     review_pipeline_command: "bun src/cli/index.ts classifiers workflow-candidates --review-provenance-reviewer=<reviewer> --review-provenance-reviewed-at=<reviewed-at-iso>",
     review_pipeline_command_output_artifacts: [{
         kind: "readiness_report",
-        path: ".ax/experiments/workflow-candidate-review-coverage-post-apply.json",
+        path: input.outputPath ?? ".ax/experiments/workflow-candidate-review-coverage-post-apply.json",
         argv_flag: "--out",
         argv_index: 9,
         argv_value_prefix: "--out=",
@@ -393,7 +451,7 @@ const provenanceCommandSource = (): ClassifierReviewPipelineCommandSource => ({
     }],
     review_pipeline_command_output_artifact_checks: [{
         kind: "readiness_report",
-        path: ".ax/experiments/workflow-candidate-review-coverage-post-apply.json",
+        path: input.outputPath ?? ".ax/experiments/workflow-candidate-review-coverage-post-apply.json",
         argv_index: 9,
         check: "file_exists_after_execution",
         status: "pending_execution",

@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { Context, Effect, Layer } from "effect";
 import type {
     WorkflowCandidateReviewCoveragePipelineCommandBlocker,
@@ -105,6 +106,10 @@ export interface ClassifierReviewPipelineOutputVerificationReport {
 export interface ClassifierReviewPipelineOutputVerifier {
     readonly exists: (path: string) => Effect.Effect<boolean>;
 }
+
+export const nodeFileOutputVerifier: ClassifierReviewPipelineOutputVerifier = {
+    exists: (path) => Effect.sync(() => existsSync(path)),
+};
 
 export type ClassifierReviewPipelineLifecycleStatus =
     | "blocked_before_execution"
