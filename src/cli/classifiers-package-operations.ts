@@ -310,6 +310,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `query match: ${report.query_match_status ?? "unknown"}`,
         `query next action: ${report.query_next_action ?? "unknown"}`,
         `query remediation: ${report.query_remediation ?? "unknown"}`,
+        `query result kinds: ${(report.query_result_kinds ?? []).join(", ") || "none"}`,
         `nodes/edges/facts: ${report.totals.node_count}/${report.totals.edge_count}/${report.totals.fact_count}`,
         `packages/operations/executions/artifacts: ${report.totals.package_count}/${report.totals.operation_count}/${report.totals.execution_count}/${report.totals.artifact_count}`,
         `execution/guard/artifact/lifecycle/helper facts: ${report.totals.execution_fact_count}/${report.totals.guard_fact_count}/${report.totals.artifact_fact_count}/${report.totals.lifecycle_fact_count}/${report.totals.embedding_helper_fact_count}`,

@@ -566,6 +566,7 @@ describe("classifiers package-operations format", () => {
             query_match_status: "matched",
             query_next_action: "use_query_results",
             query_remediation: "Use the returned graph rows for the requested classifier workflow.",
+            query_result_kinds: ["lifecycle_facts"],
             totals: {
                 node_count: 2,
                 edge_count: 1,
@@ -604,6 +605,7 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("query match: matched");
         expect(output).toContain("query next action: use_query_results");
         expect(output).toContain("query remediation: Use the returned graph rows for the requested classifier workflow.");
+        expect(output).toContain("query result kinds: lifecycle_facts");
         expect(output).toContain("execution/guard/artifact/lifecycle/helper facts: 0/0/0/1/0");
         expect(output).toContain("lifecycle facts:");
         expect(output).toContain("- review_pipeline_prepared_argv: [\"bun\",\"src/cli/index.ts\"]");

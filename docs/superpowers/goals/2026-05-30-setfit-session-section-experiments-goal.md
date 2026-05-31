@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E375 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-action-e375.json`
+- Index continuation: E376 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-result-kinds-e376.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-action-no-match-e375.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-result-kinds-no-match-e376.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,49 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E376 - Expose Graph Query Result Kinds
+
+Question:
+- E375 tells services what to do after graph query matching, but can they tell
+  which result family matched without scanning several arrays or counters?
+
+Implementation:
+- Added `query_result_kinds` to classifier graph health reports.
+- Result kinds are emitted for non-empty primary result families:
+  `operations`, `guarded_operations`, `changed_artifacts`,
+  `lifecycle_facts`, and `embedding_helper_facts`.
+- No-match queries return an empty result-kind list.
+- Text graph-health output now renders `query result kinds`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-result-kinds-e376.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-result-kinds-no-match-e376.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-result-kinds-e376.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=bind_inputs`
+  returns `query_match_status=matched` and
+  `query_result_kinds=["lifecycle_facts"]`.
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and `query_result_kinds=[]`.
+- Text output renders `query result kinds: lifecycle_facts`.
+
+Decision:
+- Services can now dispatch matched graph queries by result family without
+  coupling to low-level count fields or scanning all result arrays first.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E376 positive report has `query_match_status=matched` and
+  `query_result_kinds=["lifecycle_facts"]`.
+- E376 negative report has `query_match_status=no_match` and
+  `query_result_kinds=[]`.
+- E376 text output includes `query result kinds: lifecycle_facts`.
 
 ## E375 - Expose Graph Query Routing Guidance
 

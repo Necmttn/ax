@@ -443,6 +443,7 @@ export interface ClassifierGraphRoutingPolicySummary {
 }
 
 export type ClassifierGraphHealthMode = "summary" | "guarded" | "changed-artifacts" | "evidence" | "lifecycle" | "embedding-helper";
+export type ClassifierGraphQueryResultKind = "operations" | "guarded_operations" | "changed_artifacts" | "lifecycle_facts" | "embedding_helper_facts";
 
 export interface ClassifierGraphHealthQuery {
     readonly mode: ClassifierGraphHealthMode;
@@ -480,6 +481,7 @@ export interface ClassifierPackageExecutionGraphHealthReport {
     readonly query_match_status?: "matched" | "no_match";
     readonly query_next_action?: "use_query_results" | "relax_filters_or_project_facts";
     readonly query_remediation?: string;
+    readonly query_result_kinds?: readonly ClassifierGraphQueryResultKind[];
     readonly totals: {
         readonly node_count: number;
         readonly edge_count: number;
@@ -2608,6 +2610,13 @@ export function buildExecutionGraphHealthReport(input: {
         resultLifecycleFacts.length +
         resultEmbeddingHelperFacts.length;
     const queryMatchStatus = primaryResultCount > 0 ? "matched" : "no_match";
+    const queryResultKinds: ClassifierGraphQueryResultKind[] = [
+        ...(resultOperations.length > 0 ? ["operations" as const] : []),
+        ...(resultGuardedOperations.length > 0 ? ["guarded_operations" as const] : []),
+        ...(resultChangedArtifacts.length > 0 ? ["changed_artifacts" as const] : []),
+        ...(resultLifecycleFacts.length > 0 ? ["lifecycle_facts" as const] : []),
+        ...(resultEmbeddingHelperFacts.length > 0 ? ["embedding_helper_facts" as const] : []),
+    ];
 
     return {
         schema: "ax.classifier_package_execution_graph_health_report.v1",
@@ -2626,6 +2635,7 @@ export function buildExecutionGraphHealthReport(input: {
         query_remediation: queryMatchStatus === "matched"
             ? "Use the returned graph rows for the requested classifier workflow."
             : "Relax graph filters, inspect available value counts, or project/apply the missing classifier facts before routing from this query.",
+        query_result_kinds: queryResultKinds,
         totals: {
             node_count: input.nodes.length,
             edge_count: input.edges.length,
