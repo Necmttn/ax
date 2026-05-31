@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.5.0](https://github.com/Necmttn/ax/compare/v0.4.0...v0.5.0) (2026-05-31)
+
+
+### Features
+
+* **classifiers:** add embedding helper export preview op ([a622841](https://github.com/Necmttn/ax/commit/a6228410bb53c8148f27fc087071fe207dbc3e62))
+* **classifiers:** add embedding helper progress op ([e1dcfc1](https://github.com/Necmttn/ax/commit/e1dcfc17c7db537d22594cbdb6d2441c1d04c36a))
+* **classifiers:** add embedding helper review batch ([eeb517c](https://github.com/Necmttn/ax/commit/eeb517c759337ede61bd0f845015a5152a440061))
+* **classifiers:** dry-run embedding helper batch sync ([9a6811e](https://github.com/Necmttn/ax/commit/9a6811e9c8ca5c2748716b53524318e566ab047b))
+* **classifiers:** preview embedding helper exports ([16e6c4e](https://github.com/Necmttn/ax/commit/16e6c4ebf64ab60e1069005a2d3bd253ae6ccf42))
+* **classifiers:** report embedding helper review progress ([31a1b16](https://github.com/Necmttn/ax/commit/31a1b16fdf8750099382b23dd3796abc604dbfde))
+* **classifiers:** sync embedding helper review copy ([e41562c](https://github.com/Necmttn/ax/commit/e41562ce93580ae0d6a39ed587e764245694ccd0))
+* **share:** include turn content blocks ([3cb2f17](https://github.com/Necmttn/ax/commit/3cb2f1751a37cc05f6bb94296ec7f9916c027381))
+
+
+### Bug Fixes
+
+* **studio:** load shared sessions from raw gist ([b3ed711](https://github.com/Necmttn/ax/commit/b3ed7118b8afa51ddfb38ea32ab116bbb2dfd293))
+
 ## [0.4.0](https://github.com/Necmttn/ax/compare/v0.3.0...v0.4.0) (2026-05-31)
 
 
