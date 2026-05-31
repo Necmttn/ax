@@ -100,6 +100,12 @@ Run `bun refs:setup` after fresh clone to populate `.references/`.
 loop. `accept` emits a `.ax/tasks/<id>.md` brief; act on it like any other
 task file, then run `axctl improve lint` to reconcile.
 
+## Workflow Candidate Guardrails
+
+<!--ax:guidance__workflow_candidate__b7717e979a1fb149-->
+When a user correction matches `reaction-event:correction:prototype_completeness + correction-event:correction:wrong_artifact`, do not stop at a surface artifact or plan. Use the preceding agent action and the user correction as context, then produce the concrete result the user asked for. For the scoped topic `surrealml`, set up and run the relevant classifier or explain the blocking reason, then show the applied result evidence. Preserve the classifier candidate ids and evidence refs when turning this into a durable guidance or harness change.
+<!--/ax:guidance__workflow_candidate__b7717e979a1fb149-->
+
 ## Open issues
 
 See https://github.com/Necmttn/ax/issues - v0.1 roadmap is 7 issues covering Effect refactor, schema/storage extensions, OpenTUI dashboard, signal derivation, reactivity, and self-improve integration.

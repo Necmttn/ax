@@ -24,6 +24,7 @@ src/dashboard/web/dist-studio/
 
 # local dogfood outputs (HTML reports, profiling scratch)
 dogfood-output/
+checkpoints/
 
 # generated preview HTML from prototype scripts - contains real transcript text
 scripts/prototypes/*-preview.html
