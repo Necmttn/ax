@@ -579,6 +579,7 @@ describe("ClassifierPackageService", () => {
         expect(summary.suggestion?.verification.command_kind).toBe("classifier_graph_query_repair_verification");
         expect(summary.suggestion?.verification.query?.value_equals).toBe("bind_inputs");
         expect(summary.suggestion?.verification.expected_result_count).toBe(1);
+        expect(summary.suggestion?.verification.outcome_status).toBe("expected_matches");
     });
 
     test("writes graph query suggestion routing summaries through the service layer", async () => {

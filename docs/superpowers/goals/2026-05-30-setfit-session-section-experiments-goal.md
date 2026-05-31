@@ -33,8 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E421 adds
-  `.ax/experiments/classifier-graph-query-suggestion-routing-cli-text-e421.txt`
+- Index continuation: E422 adds
+  `.ax/experiments/classifier-graph-query-suggestion-routing-verification-outcome-e422.json`
+  and
+  `.ax/experiments/classifier-graph-query-suggestion-routing-verification-outcome-e422.txt`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -42,6 +44,55 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E422 - Expose Query Suggestion Verification Outcome
+
+Question:
+- Can services distinguish a verification route that is expected to produce
+  matching graph rows from a no-op verification route without comparing
+  expected match/count fields themselves?
+
+Implementation:
+- Added `verification.outcome_status` to
+  `ClassifierGraphQuerySuggestionRoutingSummary`.
+- The outcome is `expected_matches` when the verification query has an expected
+  matched result with a positive expected result count.
+- The outcome is `not_applicable` for no-op verification.
+- Text rendering now prints `verification outcome status`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-query-suggestion-routing-verification-outcome-e422.json`
+- `.ax/experiments/classifier-graph-query-suggestion-routing-verification-outcome-e422.txt`
+
+Results:
+- JSON output reports
+  `suggestion.verification.outcome_status=expected_matches`.
+- JSON output reports
+  `suggestion.verification.expected_result_count=1`.
+- Text output reports `verification outcome status: expected_matches`.
+- Text output reports `verification expected result count: 1`.
+
+Decision:
+- E422 removes one more client-side inference from FX services. A caller can
+  now route verification based on the explicit outcome status instead of
+  recomputing it from expected match and count fields.
+
+Verification:
+```sh
+bun test src/classifiers/package-service.test.ts
+bun test src/cli/classifiers-package-operations.test.ts
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers graph --mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --query-suggestion-routing --out .ax/experiments/classifier-graph-query-suggestion-routing-verification-outcome-e422.json --json
+bun src/cli/index.ts classifiers graph --mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --query-suggestion-routing > .ax/experiments/classifier-graph-query-suggestion-routing-verification-outcome-e422.txt
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-graph-query-suggestion-routing-verification-outcome-e422.json").json(); if (saved.suggestion?.verification?.outcome_status !== "expected_matches") throw new Error("wrong verification outcome");'
+rg -n "verification outcome status: expected_matches|verification expected result count: 1" .ax/experiments/classifier-graph-query-suggestion-routing-verification-outcome-e422.txt
+git diff --check
+bun run typecheck
+```
+
+All passed. `bun run typecheck` still emits existing Effect advisories but exits
+`0`.
 
 ## E421 - Render Query Suggestion Routing Text
 

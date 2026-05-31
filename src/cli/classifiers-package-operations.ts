@@ -307,6 +307,7 @@ export function renderClassifierGraphQuerySuggestionRoutingSummaryText(
     lines.push(`repair expected query match: ${suggestion.repair.expected_query_match_status}`);
     lines.push(`repair expected result count: ${suggestion.repair.expected_result_count ?? "none"}`);
     lines.push(`verification status: ${suggestion.verification.status}`);
+    lines.push(`verification outcome status: ${suggestion.verification.outcome_status}`);
     lines.push(`verification execution status: ${suggestion.verification.execution_status}`);
     lines.push(`verification next action: ${suggestion.verification.next_action}`);
     lines.push(`verification command kind: ${suggestion.verification.command_kind}`);

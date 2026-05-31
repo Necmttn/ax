@@ -603,6 +603,7 @@ export interface ClassifierGraphQuerySuggestionRepairRoutingSummary {
 
 export interface ClassifierGraphQuerySuggestionVerificationRoutingSummary {
     readonly status: ClassifierGraphQuerySuggestion["repair_verification_status"];
+    readonly outcome_status: "expected_matches" | "not_applicable";
     readonly execution_status: ClassifierGraphQuerySuggestion["repair_verification_execution_status"];
     readonly next_action: ClassifierGraphQuerySuggestion["repair_verification_next_action"];
     readonly command_kind: ClassifierGraphQuerySuggestion["repair_verification_command_kind"];
@@ -673,6 +674,11 @@ export function summarizeClassifierGraphQuerySuggestionRouting(
 
     const verification = {
         status: suggestion.repair_verification_status,
+        outcome_status: suggestion.repair_verification_expected_query_match_status === "matched" &&
+                suggestion.repair_verification_expected_result_count !== undefined &&
+                suggestion.repair_verification_expected_result_count > 0
+            ? "expected_matches" as const
+            : "not_applicable" as const,
         execution_status: suggestion.repair_verification_execution_status,
         next_action: suggestion.repair_verification_next_action,
         command_kind: suggestion.repair_verification_command_kind,
