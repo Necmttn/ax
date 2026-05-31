@@ -25,6 +25,18 @@ import { cmdSkillsTag } from "./skills-tag.ts";
 import { cmdSkillsLint } from "./skills-lint.ts";
 import { cmdClassifiersEval } from "./classifiers-eval.ts";
 import { cmdClassifiersList } from "./classifiers-list.ts";
+import {
+    runClassifiersLifecycle,
+    runClassifiersPackageOperations,
+    runClassifiersPackagesOperations,
+} from "./classifiers-package-operations.ts";
+import {
+    runClassifiersWorkflowCandidates,
+    type WorkflowCandidatePromotionMode,
+    type WorkflowCandidateProposalStatusFilter,
+    type WorkflowCandidateTaskLikeMode,
+} from "./classifiers-workflow-candidates.ts";
+import { ClassifierPackageServiceLive } from "../classifiers/package-service.ts";
 import { fetchClassifierExplain } from "../dashboard/classifier-explain.ts";
 import {
     renderClassifierExplainJson,
@@ -1793,9 +1805,204 @@ const classifiersExplainCommand = Command.make(
     ]),
 ).pipe(Command.withDescription("Explain classifier results attached to a turn"));
 
+const classifiersPackageOperationsCommand = Command.make(
+    "package-operations",
+    {
+        allowExpensive: Flag.boolean("allow-expensive").pipe(Flag.withDefault(false)),
+        applyWritePlan: Flag.boolean("apply-write-plan").pipe(Flag.withDefault(false)),
+        all: Flag.boolean("all").pipe(Flag.withDefault(false)),
+        dryRun: Flag.boolean("dry-run").pipe(Flag.withDefault(false)),
+        execute: Flag.boolean("execute").pipe(Flag.withDefault(false)),
+        facts: Flag.boolean("facts").pipe(Flag.withDefault(false)),
+        graphHealth: Flag.boolean("graph-health").pipe(Flag.withDefault(false)),
+        graphMode: Flag.choice("graph-mode", ["summary", "guarded", "changed-artifacts", "evidence"] as const).pipe(Flag.withDefault("summary")),
+        history: Flag.boolean("history").pipe(Flag.withDefault(false)),
+        manifest: Flag.string("manifest").pipe(Flag.withDefault("packages/ax-classifier-session-sections/ax.classifier.json")),
+        operation: Flag.string("operation").pipe(Flag.optional),
+        artifact: Flag.string("artifact").pipe(Flag.optional),
+        out: Flag.string("out").pipe(Flag.optional),
+        preflight: Flag.boolean("preflight").pipe(Flag.withDefault(false)),
+        root: Flag.string("root").pipe(Flag.optional),
+        writePlan: Flag.boolean("write-plan").pipe(Flag.withDefault(false)),
+        json: jsonFlag,
+    },
+    ({ allowExpensive, applyWritePlan, all, dryRun, execute, facts, graphHealth, graphMode, history, manifest, operation, artifact, out, preflight, root, writePlan, json }) => {
+        const operationId = optionValue(operation);
+        const artifactPath = optionValue(artifact);
+        const outPath = optionValue(out);
+        const rootPath = optionValue(root);
+        if (all) {
+            return runClassifiersPackagesOperations({
+                ...(rootPath === undefined ? {} : { root: rootPath }),
+                ...(outPath === undefined ? {} : { out: outPath }),
+                json,
+            }).pipe(Effect.provide(ClassifierPackageServiceLive));
+        }
+        return runClassifiersPackageOperations({
+            manifestPath: manifest,
+            ...(operationId === undefined ? {} : { operationId }),
+            ...(outPath === undefined ? {} : { out: outPath }),
+            allowExpensive,
+            applyWritePlan,
+            dryRun,
+            execute,
+            facts,
+            graphHealth,
+            graphMode,
+            history,
+            ...(artifactPath === undefined ? {} : { artifact: artifactPath }),
+            preflight,
+            ...(rootPath === undefined ? {} : { root: rootPath }),
+            writePlan,
+            json,
+        }).pipe(Effect.provide(ClassifierPackageServiceLive));
+    },
+).pipe(Command.withDescription("Inspect operations declared by a classifier package manifest"));
+
+const classifiersGraphCommand = Command.make(
+    "graph",
+    {
+        mode: Flag.choice("mode", ["summary", "guarded", "changed-artifacts", "evidence"] as const).pipe(Flag.withDefault("summary")),
+        operation: Flag.string("operation").pipe(Flag.optional),
+        artifact: Flag.string("artifact").pipe(Flag.optional),
+        out: Flag.string("out").pipe(Flag.optional),
+        json: jsonFlag,
+    },
+    ({ mode, operation, artifact, out, json }) => {
+        const operationId = optionValue(operation);
+        const artifactPath = optionValue(artifact);
+        const outPath = optionValue(out);
+        return runClassifiersPackageOperations({
+            manifestPath: "packages/ax-classifier-session-sections/ax.classifier.json",
+            graphHealth: true,
+            graphMode: mode,
+            ...(operationId === undefined ? {} : { operationId }),
+            ...(artifactPath === undefined ? {} : { artifact: artifactPath }),
+            ...(outPath === undefined ? {} : { out: outPath }),
+            json,
+        }).pipe(Effect.provide(ClassifierPackageServiceLive));
+    },
+).pipe(Command.withDescription("Query persisted classifier lifecycle graph health"));
+
+const classifiersLifecycleCommand = Command.make(
+    "lifecycle",
+    {
+        root: Flag.string("root").pipe(Flag.optional),
+        workflowStatus: Flag.string("workflow-status").pipe(Flag.optional),
+        out: Flag.string("out").pipe(Flag.optional),
+        json: jsonFlag,
+    },
+    ({ root, workflowStatus, out, json }) => {
+        const rootPath = optionValue(root);
+        const workflowStatusPath = optionValue(workflowStatus);
+        const outPath = optionValue(out);
+        return runClassifiersLifecycle({
+            ...(rootPath === undefined ? {} : { root: rootPath }),
+            ...(workflowStatusPath === undefined ? {} : { workflowStatusPath }),
+            ...(outPath === undefined ? {} : { out: outPath }),
+            json,
+        }).pipe(Effect.provide(ClassifierPackageServiceLive));
+    },
+).pipe(Command.withDescription("Summarize classifier package readiness, graph health, and review blockers"));
+
+const classifiersWorkflowCandidatesCommand = Command.make(
+    "workflow-candidates",
+    {
+        sourceKind: Flag.string("source-kind").pipe(Flag.withDefault("transcript_classifier_projection")),
+        action: Flag.string("action").pipe(Flag.optional),
+        classifier: Flag.string("classifier").pipe(Flag.optional),
+        search: Flag.string("search").pipe(Flag.optional),
+        taskLike: Flag.choice("task-like", ["include", "exclude", "only"] as const).pipe(Flag.withDefault("include")),
+        topicReport: Flag.boolean("topic-report").pipe(Flag.withDefault(false)),
+        listProposals: Flag.boolean("list-proposals").pipe(Flag.withDefault(false)),
+        listHarnessFacts: Flag.boolean("list-harness-facts").pipe(Flag.withDefault(false)),
+        includeHarnessFacts: Flag.boolean("include-harness-facts").pipe(Flag.withDefault(false)),
+        proposalStatus: Flag.choice("proposal-status", ["all", "open", "accepted", "rejected"] as const).pipe(Flag.withDefault("all")),
+        expandEvidence: Flag.boolean("expand-evidence").pipe(Flag.withDefault(false)),
+        evidencePack: Flag.string("evidence-pack").pipe(Flag.optional),
+        classifierFixturePack: Flag.string("classifier-fixture-pack").pipe(Flag.optional),
+        harnessFacts: Flag.string("harness-facts").pipe(Flag.optional),
+        harnessWritePlan: Flag.string("harness-write-plan").pipe(Flag.optional),
+        applyHarnessFacts: Flag.boolean("apply-harness-facts").pipe(Flag.withDefault(false)),
+        limit: positiveLimit(10),
+        examples: Flag.integer("examples").pipe(Flag.withDefault(3)),
+        out: Flag.string("out").pipe(Flag.optional),
+        brief: Flag.string("brief").pipe(Flag.optional),
+        syncBrief: Flag.string("sync-brief").pipe(Flag.optional),
+        promoteTasks: Flag.boolean("promote-tasks").pipe(Flag.withDefault(false)),
+        emitAdjacentTasks: Flag.boolean("emit-adjacent-tasks").pipe(Flag.withDefault(false)),
+        promoteHarnessProposals: Flag.boolean("promote-harness-proposals").pipe(Flag.withDefault(false)),
+        requireHarnessChecks: Flag.boolean("require-harness-checks").pipe(Flag.withDefault(false)),
+        promoteProposals: Flag.boolean("promote-proposals").pipe(Flag.withDefault(false)),
+        proposalDryRun: Flag.boolean("proposal-dry-run").pipe(Flag.withDefault(false)),
+        promotionMode: Flag.choice("promotion-mode", ["per-candidate", "merge-evidence"] as const).pipe(Flag.withDefault("per-candidate")),
+        taskDir: Flag.string("task-dir").pipe(Flag.optional),
+        proposalTarget: Flag.string("proposal-target").pipe(Flag.optional),
+        proposalSection: Flag.string("proposal-section").pipe(Flag.optional),
+        json: jsonFlag,
+    },
+    ({ sourceKind, action, classifier, search, taskLike, topicReport, listProposals, listHarnessFacts, includeHarnessFacts, proposalStatus, expandEvidence, evidencePack, classifierFixturePack, harnessFacts, harnessWritePlan, applyHarnessFacts, limit, examples, out, brief, syncBrief, promoteTasks, emitAdjacentTasks, promoteHarnessProposals, requireHarnessChecks, promoteProposals, proposalDryRun, promotionMode, taskDir, proposalTarget, proposalSection, json }) => {
+        const actionValue = optionValue(action);
+        const classifierValue = optionValue(classifier);
+        const searchValue = optionValue(search);
+        const outPath = optionValue(out);
+        const briefPath = optionValue(brief);
+        const syncBriefPath = optionValue(syncBrief);
+        const evidencePackPath = optionValue(evidencePack);
+        const classifierFixturePackPath = optionValue(classifierFixturePack);
+        const harnessFactsPath = optionValue(harnessFacts);
+        const harnessWritePlanPath = optionValue(harnessWritePlan);
+        const taskDirPath = optionValue(taskDir);
+        const proposalTargetPath = optionValue(proposalTarget);
+        const proposalSectionValue = optionValue(proposalSection);
+        return runClassifiersWorkflowCandidates({
+            sourceKind,
+            limit,
+            examples,
+            ...(actionValue === undefined ? {} : { action: actionValue }),
+            ...(classifierValue === undefined ? {} : { classifier: classifierValue }),
+            ...(searchValue === undefined ? {} : { search: searchValue }),
+            taskLike: taskLike as WorkflowCandidateTaskLikeMode,
+            topicReport,
+            listProposals,
+            listHarnessFacts,
+            includeHarnessFacts,
+            proposalStatus: proposalStatus as WorkflowCandidateProposalStatusFilter,
+            expandEvidence,
+            ...(evidencePackPath === undefined ? {} : { evidencePack: evidencePackPath }),
+            ...(classifierFixturePackPath === undefined ? {} : { classifierFixturePack: classifierFixturePackPath }),
+            ...(harnessFactsPath === undefined ? {} : { harnessFacts: harnessFactsPath }),
+            ...(harnessWritePlanPath === undefined ? {} : { harnessWritePlan: harnessWritePlanPath }),
+            applyHarnessFacts,
+            ...(outPath === undefined ? {} : { out: outPath }),
+            ...(briefPath === undefined ? {} : { brief: briefPath }),
+            ...(syncBriefPath === undefined ? {} : { syncBrief: syncBriefPath }),
+            promoteTasks,
+            emitAdjacentTasks,
+            promoteHarnessProposals,
+            requireHarnessChecks,
+            promoteProposals,
+            proposalDryRun,
+            promotionMode: promotionMode as WorkflowCandidatePromotionMode,
+            ...(taskDirPath === undefined ? {} : { taskDir: taskDirPath }),
+            ...(proposalTargetPath === undefined ? {} : { proposalTarget: proposalTargetPath }),
+            ...(proposalSectionValue === undefined ? {} : { proposalSection: proposalSectionValue }),
+            json,
+        });
+    },
+).pipe(Command.withDescription("Rank transcript-backed workflow candidates from classifier graph facts"));
+
 const classifiersCommand = Command.make("classifiers").pipe(
     Command.withDescription("Develop and evaluate ax classifiers"),
-    Command.withSubcommands([classifiersListCommand, classifiersEvalCommand, classifiersExplainCommand]),
+    Command.withSubcommands([
+        classifiersListCommand,
+        classifiersEvalCommand,
+        classifiersExplainCommand,
+        classifiersGraphCommand,
+        classifiersLifecycleCommand,
+        classifiersPackageOperationsCommand,
+        classifiersWorkflowCandidatesCommand,
+    ]),
 );
 
 /**
@@ -4473,7 +4680,16 @@ async function main() {
         await Effect.runPromise(withIngest(args));
         return;
     }
-    if (args[0] === "classifiers" && (args[1] === "eval" || args[1] === "list")) {
+    if (
+        args[0] === "classifiers" &&
+        ((args[1] === "package-operations" && (args.includes("--apply-write-plan") || args.includes("--graph-health"))) ||
+            args[1] === "graph" ||
+            args[1] === "lifecycle")
+    ) {
+        await Effect.runPromise(withDb(args));
+        return;
+    }
+    if (args[0] === "classifiers" && (args[1] === "eval" || args[1] === "list" || args[1] === "package-operations")) {
         await Effect.runPromise(withoutDb(args));
         return;
     }

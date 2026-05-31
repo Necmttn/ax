@@ -51,4 +51,34 @@ describe("reaction-event classifier", () => {
             durability: "repo_preference",
         });
     });
+
+    test("ignores control and context wrappers", async () => {
+        const program = Effect.gen(function* () {
+            const runner = yield* ClassifierRunner;
+            return yield* runner.runWindow({
+                window: windowFixture({
+                    user: "<subagent_notification>\n{\"status\":{\"completed\":\"tests passed\"}}",
+                    previousAssistant: "I spawned a child agent.",
+                }),
+                classifiers: [reactionEventClassifier],
+            });
+        }).pipe(Effect.provide(ClassifierRunnerLive));
+
+        const subagentResults = await Effect.runPromise(program);
+        expect(subagentResults).toEqual([]);
+
+        const goalProgram = Effect.gen(function* () {
+            const runner = yield* ClassifierRunner;
+            return yield* runner.runWindow({
+                window: windowFixture({
+                    user: "<goal_context>\nContinue working toward the active thread goal.",
+                    previousAssistant: "I was working on the task.",
+                }),
+                classifiers: [reactionEventClassifier],
+            });
+        }).pipe(Effect.provide(ClassifierRunnerLive));
+
+        const goalResults = await Effect.runPromise(goalProgram);
+        expect(goalResults).toEqual([]);
+    });
 });

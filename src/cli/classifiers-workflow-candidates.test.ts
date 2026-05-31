@@ -1,0 +1,1621 @@
+import { describe, expect, test } from "bun:test";
+import {
+    attachWorkflowCandidateProposalEvidence,
+    buildWorkflowCandidateReport,
+    buildWorkflowCandidateGuidanceProposalPlan,
+    buildWorkflowCandidateProposalListReport,
+    buildWorkflowCandidateHarnessProposalPlan,
+    buildWorkflowCandidateTopicClassifierFixtureRows,
+    buildWorkflowCandidateTopicClassifierFixtureSummary,
+    buildWorkflowCandidateTopicHarnessGraphProjection,
+    buildWorkflowCandidateTopicHarnessGraphListReport,
+    buildWorkflowCandidateTopicHarnessGraphWritePlan,
+    buildWorkflowCandidateTopicHarnessChecks,
+    buildWorkflowCandidateTopicHarnessEvidenceSummary,
+    buildWorkflowCandidateTopicTaskDrafts,
+    buildWorkflowCandidateTopicReport,
+    buildWorkflowCandidateTaskDrafts,
+    isTaskLikeWorkflowText,
+    parseWorkflowCandidateBriefReview,
+    recommendWorkflowCandidatePromotionArtifact,
+    renderWorkflowCandidateBriefMarkdown,
+    renderWorkflowCandidateTopicEvidencePackMarkdown,
+    renderMergedWorkflowCandidateTaskMarkdown,
+    renderWorkflowCandidateProposalListText,
+    renderWorkflowCandidateTaskMarkdown,
+    renderWorkflowCandidateTopicReportText,
+    renderWorkflowCandidateTopicHarnessGraphListText,
+    renderWorkflowCandidateReportText,
+    syncWorkflowCandidateReportFromBrief,
+    topicAdjacentCandidates,
+    workflowCandidateTopicHarnessGateFailures,
+    workflowCandidateScore,
+    type WorkflowCandidateEvidenceRow,
+    type WorkflowCandidateProposalEvidenceEdgeRow,
+    type WorkflowCandidateGroupRow,
+} from "./classifiers-workflow-candidates.ts";
+
+const properties = (value: Record<string, unknown>) => JSON.stringify(value);
+
+const groups: WorkflowCandidateGroupRow[] = [
+    {
+        graph_id: "group:verify",
+        label: "verification-event:verification_request:test_required",
+        properties_json: properties({
+            classifier_key: "verification-event",
+            label: "verification_request",
+            target: "test_required",
+            proposed_action: "add_verification_gate",
+            support_count: 3,
+        }),
+    },
+    {
+        graph_id: "group:correction",
+        label: "reaction-event:correction:wrong_output",
+        properties_json: properties({
+            classifier_key: "reaction-event",
+            label: "correction",
+            target: "wrong_output",
+            proposed_action: "add_context_guardrail",
+            support_count: 1,
+        }),
+    },
+];
+
+const evidence: WorkflowCandidateEvidenceRow[] = [
+    {
+        graph_id: "fact:1",
+        subject: "group:verify",
+        properties_json: properties({
+            result_id: "result:1",
+            turn: "turn:1",
+            confidence: 0.9,
+            text_excerpt: "Can you run the tests before calling this done?",
+        }),
+    },
+    {
+        graph_id: "fact:2",
+        subject: "group:verify",
+        properties_json: properties({
+            result_id: "result:2",
+            turn: "turn:2",
+            confidence: 0.8,
+            text_excerpt: "You are implementing task TASK-123. Worktree: /tmp/demo",
+        }),
+    },
+    {
+        graph_id: "fact:3",
+        subject: "group:correction",
+        properties_json: properties({
+            result_id: "result:3",
+            turn: "turn:3",
+            confidence: 0.76,
+            text_excerpt: "That was the wrong file; use the previous agent action as context.",
+        }),
+    },
+    {
+        graph_id: "fact:4",
+        subject: "group:correction",
+        properties_json: properties({
+            result_id: "result:4",
+            turn: "turn:4",
+            confidence: 0.88,
+            text_excerpt: "Did you create the classifier? I want to see results applied to SurrealML.",
+        }),
+    },
+];
+
+describe("classifiers workflow-candidates", () => {
+    test("detects task-like review wrapper text", () => {
+        expect(isTaskLikeWorkflowText("You are implementing task ABC.")).toBe(true);
+        expect(isTaskLikeWorkflowText("Please add a regression test for this fix.")).toBe(false);
+    });
+
+    test("scores verification gates above low-weight approvals with equal support", () => {
+        expect(workflowCandidateScore(5, 5, 0.8, "add_verification_gate", 0))
+            .toBeGreaterThan(workflowCandidateScore(5, 5, 0.8, "record_approval_checkpoint", 0));
+    });
+
+    test("builds ranked report with task-like evidence included by default", () => {
+        const report = buildWorkflowCandidateReport({
+            groupRows: groups,
+            evidenceRows: evidence,
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 2,
+            taskLike: "include",
+        });
+
+        expect(report.decision).toBe("workflow_candidates_ranked");
+        expect(report.totals.candidate_group_count).toBe(2);
+        expect(report.totals.task_like_count).toBe(1);
+        const verify = report.candidates.find((candidate) => candidate.group_id === "group:verify");
+        expect(verify?.support_count).toBe(2);
+        expect(verify?.raw_support_count).toBe(3);
+        expect(verify?.examples).toHaveLength(2);
+    });
+
+    test("filters task-like evidence when requested", () => {
+        const report = buildWorkflowCandidateReport({
+            groupRows: groups,
+            evidenceRows: evidence,
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 5,
+            taskLike: "exclude",
+        });
+
+        const verify = report.candidates.find((candidate) => candidate.group_id === "group:verify");
+        expect(verify?.support_count).toBe(1);
+        expect(verify?.task_like_count).toBe(0);
+        expect(report.totals.considered_evidence_fact_count).toBe(3);
+    });
+
+    test("filters by proposed action and classifier key", () => {
+        const report = buildWorkflowCandidateReport({
+            groupRows: groups,
+            evidenceRows: evidence,
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            action: "add_context_guardrail",
+            classifier: "reaction-event",
+            taskLike: "include",
+        });
+
+        expect(report.candidates).toHaveLength(1);
+        expect(report.candidates[0].label).toBe("reaction-event:correction:wrong_output");
+        expect(report.query.action).toBe("add_context_guardrail");
+        expect(report.query.classifier).toBe("reaction-event");
+    });
+
+    test("filters evidence examples by search text", () => {
+        const report = buildWorkflowCandidateReport({
+            groupRows: groups,
+            evidenceRows: evidence,
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 2,
+            action: "add_context_guardrail",
+            search: "surrealml",
+            taskLike: "exclude",
+        });
+
+        expect(report.candidates).toHaveLength(1);
+        expect(report.candidates[0].label).toBe("reaction-event:correction:wrong_output");
+        expect(report.candidates[0].support_count).toBe(1);
+        expect(report.candidates[0].examples[0].text_excerpt).toContain("SurrealML");
+        expect(report.query.search).toBe("surrealml");
+        expect(report.totals.considered_evidence_fact_count).toBe(1);
+    });
+
+    test("search skips candidate groups with no matching evidence", () => {
+        const report = buildWorkflowCandidateReport({
+            groupRows: groups,
+            evidenceRows: evidence,
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 2,
+            search: "surrealml",
+            taskLike: "include",
+        });
+
+        expect(report.decision).toBe("workflow_candidates_ranked");
+        expect(report.candidates.map((candidate) => candidate.group_id)).toEqual(["group:correction"]);
+        expect(report.failures).toEqual([]);
+    });
+
+    test("renders reviewable text with examples", () => {
+        const report = buildWorkflowCandidateReport({
+            groupRows: groups,
+            evidenceRows: evidence,
+            sourceKind: "transcript_classifier_projection",
+            limit: 2,
+            examplesPerGroup: 1,
+            taskLike: "include",
+        });
+        const output = renderWorkflowCandidateReportText(report);
+
+        expect(output).toContain("workflow candidate report");
+        expect(output).toContain("decision: workflow_candidates_ranked");
+        expect(output).toContain("verification-event:verification_request:test_required -> add_verification_gate");
+        expect(output).toContain("example turn:1 conf=0.90");
+    });
+
+    test("renders markdown brief for candidate review", () => {
+        const report = buildWorkflowCandidateReport({
+            groupRows: groups,
+            evidenceRows: evidence,
+            sourceKind: "transcript_classifier_projection",
+            limit: 1,
+            examplesPerGroup: 1,
+            search: "surrealml",
+            taskLike: "exclude",
+        });
+        const brief = renderWorkflowCandidateBriefMarkdown(report);
+
+        expect(brief).toContain("# Workflow Candidate Review");
+        expect(brief).toContain("Allowed verdicts: `accept`, `revise`, `reject`, `defer`.");
+        expect(brief).toContain("## Candidate 1: reaction-event:correction:wrong_output");
+        expect(brief).toContain("- Candidate id: `group:correction`");
+        expect(brief).toContain("- Proposed action: `add_context_guardrail`");
+        expect(brief).toContain("- Verdict: `pending`");
+        expect(brief).toContain("- Turn: `turn:4`");
+        expect(brief).toContain("SurrealML");
+    });
+
+    test("parses markdown brief verdicts by candidate id", () => {
+        const brief = [
+            "## Candidate 1: reaction-event:correction:wrong_output",
+            "",
+            "- Candidate id: `group:correction`",
+            "- Verdict: `accept`",
+            "- Rationale: Guard against prototype-only responses when the user asks for applied classifier results.",
+            "",
+            "## Candidate 2: verification-event:verification_request:test_required",
+            "",
+            "- Candidate id: `group:verify`",
+            "- Verdict: `defer`",
+            "- Rationale: _pending_",
+            "",
+        ].join("\n");
+
+        expect(parseWorkflowCandidateBriefReview(brief)).toEqual({
+            "group:correction": {
+                verdict: "accept",
+                rationale: "Guard against prototype-only responses when the user asks for applied classifier results.",
+            },
+            "group:verify": {
+                verdict: "defer",
+                rationale: "",
+            },
+        });
+    });
+
+    test("syncs markdown brief review state into report candidates", () => {
+        const report = buildWorkflowCandidateReport({
+            groupRows: groups,
+            evidenceRows: evidence,
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            taskLike: "include",
+        });
+        const brief = renderWorkflowCandidateBriefMarkdown(report)
+            .replace("- Verdict: `pending`", "- Verdict: `accept`")
+            .replace("- Rationale: _pending_", "- Rationale: This candidate should become a guardrail task.");
+
+        const synced = syncWorkflowCandidateReportFromBrief(report, brief, "brief.md");
+        const accepted = synced.candidates.find((candidate) => candidate.review?.verdict === "accept");
+
+        expect(synced.review).toEqual({
+            synced_from: "brief.md",
+            reviewed_candidate_count: 1,
+            pending_candidate_count: 1,
+            invalid_verdict_count: 0,
+            missing_rationale_count: 0,
+            unknown_candidate_count: 0,
+        });
+        expect(synced.decision).toBe("workflow_candidates_ranked");
+        expect(accepted?.review?.rationale).toBe("This candidate should become a guardrail task.");
+    });
+
+    test("sync reports invalid verdict and missing rationale failures", () => {
+        const report = buildWorkflowCandidateReport({
+            groupRows: groups.slice(1),
+            evidenceRows: evidence,
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            taskLike: "include",
+        });
+        const brief = renderWorkflowCandidateBriefMarkdown(report)
+            .replace("- Verdict: `pending`", "- Verdict: `shipit`");
+
+        const synced = syncWorkflowCandidateReportFromBrief(report, brief, "brief.md");
+
+        expect(synced.review?.invalid_verdict_count).toBe(1);
+        expect(synced.failures).toContain("review has invalid verdicts: 1");
+        expect(synced.decision).toBe("needs_workflow_candidate_review");
+    });
+
+    test("builds task drafts only for accepted or revised reviewed candidates", () => {
+        const report = buildWorkflowCandidateReport({
+            groupRows: groups,
+            evidenceRows: evidence,
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            taskLike: "include",
+        });
+        const brief = renderWorkflowCandidateBriefMarkdown(report)
+            .replace("- Candidate id: `group:correction`\n- Proposed action", "- Candidate id: `group:correction`\n- Proposed action")
+            .replace("- Verdict: `pending`", "- Verdict: `accept`")
+            .replace("- Rationale: _pending_", "- Rationale: Promote this correction guardrail.");
+        const synced = syncWorkflowCandidateReportFromBrief(report, brief, "brief.md");
+        const result = buildWorkflowCandidateTaskDrafts(synced, ".ax/tasks-test");
+
+        expect(result.report.promotion?.emitted_task_count).toBe(1);
+        expect(result.report.promotion?.mode).toBe("per-candidate");
+        expect(result.report.promotion?.skipped_candidate_count).toBe(1);
+        expect(result.report.promotion?.blocked_candidate_count).toBe(0);
+        expect(result.drafts).toHaveLength(1);
+        expect(result.drafts[0].path).toContain("workflow-candidate-");
+        expect(result.drafts[0].content).toContain("# ax workflow candidate task:");
+        expect(result.drafts[0].content).toContain("Promote this correction guardrail.");
+        expect(result.drafts[0].content).toContain("candidate-id:");
+    });
+
+    test("merge-evidence promotion emits one task for overlapping evidence", () => {
+        const report = buildWorkflowCandidateReport({
+            groupRows: [
+                groups[1],
+                {
+                    graph_id: "group:artifact",
+                    label: "correction-event:correction:wrong_artifact",
+                    properties_json: properties({
+                        classifier_key: "correction-event",
+                        label: "correction",
+                        target: "wrong_artifact",
+                        proposed_action: "add_context_guardrail",
+                        support_count: 1,
+                    }),
+                },
+            ],
+            evidenceRows: [
+                evidence[3],
+                {
+                    graph_id: "fact:5",
+                    subject: "group:artifact",
+                    properties_json: properties({
+                        result_id: "result:5",
+                        turn: "turn:4",
+                        confidence: 0.86,
+                        text_excerpt: "Did you create the classifier? I want to see results applied to SurrealML.",
+                    }),
+                },
+            ],
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 2,
+            search: "surrealml",
+            taskLike: "exclude",
+        });
+        const brief = renderWorkflowCandidateBriefMarkdown(report)
+            .replace("- Verdict: `pending`", "- Verdict: `accept`")
+            .replace("- Rationale: _pending_", "- Rationale: Promote the prototype completeness guardrail.")
+            .replace("- Verdict: `pending`", "- Verdict: `revise`")
+            .replace("- Rationale: _pending_", "- Rationale: Merge the artifact framing into the accepted task.");
+        const synced = syncWorkflowCandidateReportFromBrief(report, brief, "brief.md");
+        const result = buildWorkflowCandidateTaskDrafts(synced, ".ax/tasks-test", "merge-evidence");
+
+        expect(result.report.promotion?.mode).toBe("merge-evidence");
+        expect(result.report.promotion?.emitted_task_count).toBe(1);
+        expect(result.report.promotion?.tasks[0].candidate_ids).toHaveLength(2);
+        expect(result.report.promotion?.tasks[0].recommended_artifact.primary).toBe("guidance");
+        expect(result.report.promotion?.tasks[0].recommended_artifact.alternatives).toContain("harness_check");
+        expect(result.report.promotion?.tasks[0].recommended_artifact.alternatives).toContain("classifier_fixture");
+        expect(result.drafts).toHaveLength(1);
+        expect(result.drafts[0].content).toContain("merged add_context_guardrail");
+        expect(result.drafts[0].content).toContain("## Promotion Recommendation");
+        expect(result.drafts[0].content).toContain("- Primary: `guidance`");
+        expect(result.drafts[0].content).toContain("correction-event:correction:wrong_artifact");
+        expect(result.drafts[0].content).toContain("result:5");
+    });
+
+    test("builds guidance proposal statements for guidance-recommended promotions", () => {
+        const report = buildWorkflowCandidateReport({
+            groupRows: [
+                groups[1],
+                {
+                    graph_id: "group:artifact",
+                    label: "correction-event:correction:wrong_artifact",
+                    properties_json: properties({
+                        classifier_key: "correction-event",
+                        label: "correction",
+                        target: "wrong_artifact",
+                        proposed_action: "add_context_guardrail",
+                        support_count: 1,
+                    }),
+                },
+            ],
+            evidenceRows: [
+                evidence[3],
+                {
+                    graph_id: "fact:5",
+                    subject: "group:artifact",
+                    properties_json: properties({
+                        result_id: "result:5",
+                        turn: "turn:4",
+                        confidence: 0.86,
+                        text_excerpt: "Did you create the classifier? I want to see results applied to SurrealML.",
+                    }),
+                },
+            ],
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 2,
+            search: "surrealml",
+            taskLike: "exclude",
+        });
+        const synced = syncWorkflowCandidateReportFromBrief(
+            report,
+            renderWorkflowCandidateBriefMarkdown(report)
+                .replace("- Verdict: `pending`", "- Verdict: `accept`")
+                .replace("- Rationale: _pending_", "- Rationale: Promote the prototype completeness guardrail.")
+                .replace("- Verdict: `pending`", "- Verdict: `revise`")
+                .replace("- Rationale: _pending_", "- Rationale: Merge the artifact framing into the accepted task."),
+            "brief.md",
+        );
+        const promoted = buildWorkflowCandidateTaskDrafts(synced, ".ax/tasks-test", "merge-evidence").report;
+        const plan = buildWorkflowCandidateGuidanceProposalPlan(promoted, new Set(), {
+            fileTarget: "AGENTS.md",
+            section: "Workflow Candidate Guardrails",
+        });
+
+        expect(plan.summary.emitted_proposal_count).toBe(1);
+        expect(plan.summary.skipped_proposal_count).toBe(0);
+        expect(plan.summary.dry_run).toBe(false);
+        expect(plan.summary.statement_count).toBe(plan.statements.length);
+        expect(plan.summary.proposals[0].dedupe_sig).toStartWith("guidance__workflow_candidate__");
+        expect(plan.summary.proposals[0].title).toBe("Require applied classifier results for surrealml");
+        expect(plan.statements.join("\n")).toContain("CREATE proposal:");
+        expect(plan.statements.join("\n")).toContain("UPSERT guidance_proposal:");
+        expect(plan.statements.join("\n")).toContain("->cites_evidence:");
+        expect(plan.statements.join("\n")).toContain("classifier_graph_node:");
+    });
+
+    test("guidance proposal dry-run includes planned statements without changing ids", () => {
+        const report = buildWorkflowCandidateReport({
+            groupRows: [groups[1]],
+            evidenceRows: [evidence[3]],
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 2,
+            search: "surrealml",
+            taskLike: "exclude",
+        });
+        const synced = syncWorkflowCandidateReportFromBrief(
+            report,
+            renderWorkflowCandidateBriefMarkdown(report)
+                .replace("- Verdict: `pending`", "- Verdict: `accept`")
+                .replace("- Rationale: _pending_", "- Rationale: Promote the prototype completeness guardrail."),
+            "brief.md",
+        );
+        const promoted = buildWorkflowCandidateTaskDrafts(synced, ".ax/tasks-test", "merge-evidence").report;
+        const dryRun = buildWorkflowCandidateGuidanceProposalPlan(promoted, new Set(), {
+            dryRun: true,
+            includeStatements: true,
+        });
+
+        expect(dryRun.summary.dry_run).toBe(true);
+        expect(dryRun.summary.statement_count).toBe(dryRun.statements.length);
+        expect(dryRun.summary.statements).toEqual(dryRun.statements);
+        expect(dryRun.summary.proposals[0].status).toBe("created_or_refreshed");
+        expect(dryRun.summary.proposals[0].dedupe_sig).toStartWith("guidance__workflow_candidate__");
+    });
+
+    test("renders compact proposal preview in text reports", () => {
+        const report = buildWorkflowCandidateReport({
+            groupRows: [groups[1]],
+            evidenceRows: [evidence[3]],
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 2,
+            search: "surrealml",
+            taskLike: "exclude",
+        });
+        const synced = syncWorkflowCandidateReportFromBrief(
+            report,
+            renderWorkflowCandidateBriefMarkdown(report)
+                .replace("- Verdict: `pending`", "- Verdict: `accept`")
+                .replace("- Rationale: _pending_", "- Rationale: Promote the prototype completeness guardrail."),
+            "brief.md",
+        );
+        const promoted = buildWorkflowCandidateTaskDrafts(synced, ".ax/tasks-test", "merge-evidence").report;
+        const plan = buildWorkflowCandidateGuidanceProposalPlan(promoted, new Set(), {
+            dryRun: true,
+            includeStatements: true,
+            fileTarget: "AGENTS.md",
+            section: "Workflow Candidate Guardrails",
+        });
+        const reportWithPreview = {
+            ...promoted,
+            promotion: {
+                ...promoted.promotion!,
+                proposals: plan.summary,
+            },
+        };
+
+        const output = renderWorkflowCandidateReportText(reportWithPreview);
+
+        expect(output).toContain("promotion proposal writes: dry-run");
+        expect(output).toContain("proposal preview:");
+        expect(output).toContain("would write guidance__workflow_candidate__");
+        expect(output).toContain("proposal: proposal:");
+        expect(output).toContain("target: AGENTS.md#Workflow Candidate Guardrails");
+        expect(output).toContain("artifact: guidance confidence=medium alternatives=harness_check,classifier_fixture");
+    });
+
+    test("renders workflow-candidate proposal list reports", () => {
+        const report = buildWorkflowCandidateProposalListReport({
+            limit: 10,
+            status: "all",
+            search: "surrealml",
+            rows: [{
+                dedupe_sig: "guidance__workflow_candidate__abc",
+                title: "Require applied classifier results for surrealml",
+                form: "guidance",
+                status: "accepted",
+                confidence: "medium",
+                frequency: 2,
+                target: "AGENTS.md",
+                section: "Workflow Candidate Guardrails",
+                experiment_id: "experiment:abc",
+                experiment_status: "scaffolded",
+                artifact_path: "CLAUDE.md",
+                task_path: ".ax/tasks/guidance__workflow_candidate__abc.md",
+                updated_at: "2026-05-30T00:00:00Z",
+            }],
+        });
+
+        expect(report.totals).toMatchObject({
+            proposal_count: 1,
+            accepted_count: 1,
+            open_count: 0,
+            rejected_count: 0,
+            scaffolded_experiment_count: 1,
+        });
+        const output = renderWorkflowCandidateProposalListText(report);
+        expect(output).toContain("workflow candidate proposals");
+        expect(output).toContain("status: all");
+        expect(output).toContain("search: surrealml");
+        expect(output).toContain("guidance__workflow_candidate__abc");
+        expect(output).toContain("target: AGENTS.md#Workflow Candidate Guardrails");
+        expect(output).toContain("experiment: scaffolded (experiment:abc)");
+    });
+
+    test("attaches cited classifier evidence to proposal list reports", () => {
+        const rows = [{
+            proposal_id: "proposal:proposal-a",
+            dedupe_sig: "guidance__workflow_candidate__abc",
+            title: "Require applied classifier results for surrealml",
+            form: "guidance",
+            status: "accepted",
+            confidence: "medium",
+            frequency: 1,
+        }];
+        const edges: WorkflowCandidateProposalEvidenceEdgeRow[] = [{
+            proposal_id: "proposal:proposal-a",
+            candidate_ref: "classifier_graph_node:group:correction",
+        }];
+        const expandedRows = attachWorkflowCandidateProposalEvidence({
+            rows,
+            edges,
+            candidateRows: [groups[1]],
+            factRows: [evidence[3]],
+            examplesPerCandidate: 1,
+        });
+        const report = buildWorkflowCandidateProposalListReport({
+            limit: 10,
+            status: "accepted",
+            expandEvidence: true,
+            rows: expandedRows,
+        });
+
+        expect(report.query.expand_evidence).toBe(true);
+        expect(report.totals.evidence_candidate_count).toBe(1);
+        expect(report.totals.evidence_example_count).toBe(1);
+        expect(report.proposals[0].evidence?.[0]).toMatchObject({
+            candidate_id: "group:correction",
+            candidate_label: "reaction-event:correction:wrong_output",
+            target: "wrong_output",
+            proposed_action: "add_context_guardrail",
+        });
+        const output = renderWorkflowCandidateProposalListText(report);
+        expect(output).toContain("evidence candidates: 1, examples: 1");
+        expect(output).toContain("reaction-event:correction:wrong_output");
+        expect(output).toContain("id: group:correction");
+        expect(output).toContain("Did you create the classifier? I want to see results applied to SurrealML.");
+    });
+
+    test("builds topic reports joining proposals and ranked classifier candidates", () => {
+        const proposalRows = attachWorkflowCandidateProposalEvidence({
+            rows: [{
+                proposal_id: "proposal:proposal-a",
+                dedupe_sig: "guidance__workflow_candidate__abc",
+                title: "Require applied classifier results for surrealml",
+                form: "guidance",
+                status: "accepted",
+                confidence: "medium",
+                frequency: 1,
+                experiment_id: "experiment:abc",
+                experiment_status: "scaffolded",
+            }],
+            edges: [{
+                proposal_id: "proposal:proposal-a",
+                candidate_ref: "classifier_graph_node:group:correction",
+            }],
+            candidateRows: [groups[1]],
+            factRows: [evidence[3]],
+            examplesPerCandidate: 1,
+        });
+        const proposals = buildWorkflowCandidateProposalListReport({
+            rows: proposalRows,
+            limit: 10,
+            status: "accepted",
+            expandEvidence: true,
+            search: "surrealml",
+        });
+        const candidates = buildWorkflowCandidateReport({
+            groupRows: [groups[1]],
+            evidenceRows: [evidence[3]],
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            search: "surrealml",
+            taskLike: "include",
+        });
+        const report = buildWorkflowCandidateTopicReport({
+            sourceKind: "transcript_classifier_projection",
+            topic: "surrealml",
+            proposals,
+            candidates,
+        });
+
+        expect(report.decision).toBe("workflow_topic_evidence_found");
+        expect(report.totals).toMatchObject({
+            proposal_count: 1,
+            experiment_count: 1,
+            proposal_evidence_candidate_count: 1,
+            ranked_candidate_count: 1,
+            candidate_evidence_fact_count: 1,
+            source_turn_count: 1,
+        });
+        const output = renderWorkflowCandidateTopicReportText(report);
+        expect(output).toContain("workflow topic evidence");
+        expect(output).toContain("topic: surrealml");
+        expect(output).toContain("proposals: 1");
+        expect(output).toContain("ranked candidates: 1");
+        expect(output).toContain("Require applied classifier results for surrealml");
+        expect(output).toContain("reaction-event:correction:wrong_output");
+    });
+
+    test("renders topic evidence packs for adjacent unpromoted candidates", () => {
+        const proposalRows = attachWorkflowCandidateProposalEvidence({
+            rows: [{
+                proposal_id: "proposal:proposal-a",
+                dedupe_sig: "guidance__workflow_candidate__abc",
+                title: "Require applied classifier results for surrealml",
+                form: "guidance",
+                status: "accepted",
+                confidence: "medium",
+                frequency: 1,
+                target: "AGENTS.md",
+                section: "Workflow Candidate Guardrails",
+            }],
+            edges: [{
+                proposal_id: "proposal:proposal-a",
+                candidate_ref: "classifier_graph_node:group:correction",
+            }],
+            candidateRows: [groups[1]],
+            factRows: [evidence[3]],
+            examplesPerCandidate: 1,
+        });
+        const proposals = buildWorkflowCandidateProposalListReport({
+            rows: proposalRows,
+            limit: 10,
+            status: "accepted",
+            expandEvidence: true,
+            search: "surrealml",
+        });
+        const candidates = buildWorkflowCandidateReport({
+            groupRows: groups,
+            evidenceRows: [{
+                graph_id: "fact:verify-surrealml",
+                subject: "group:verify",
+                properties_json: properties({
+                    result_id: "result:verify-surrealml",
+                    turn: "turn:verify-surrealml",
+                    confidence: 0.83,
+                    text_excerpt: "Please verify the SurrealML classifier output before calling this done.",
+                }),
+            }, evidence[3]],
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            search: "surrealml",
+            taskLike: "include",
+        });
+        const report = buildWorkflowCandidateTopicReport({
+            sourceKind: "transcript_classifier_projection",
+            topic: "surrealml",
+            proposals,
+            candidates,
+        });
+
+        expect(topicAdjacentCandidates(report).map((candidate) => candidate.group_id)).toEqual(["group:verify"]);
+        const markdown = renderWorkflowCandidateTopicEvidencePackMarkdown(report);
+        expect(markdown).toContain("# Workflow Topic Evidence Pack: surrealml");
+        expect(markdown).toContain("Adjacent unpromoted candidate count: `1`");
+        expect(markdown).toContain("## Harness Gate Evidence");
+        expect(markdown).toContain("- Gate: `unsatisfied`");
+        expect(markdown).toContain("- Evidence source: `none`");
+        expect(markdown).toContain("- Computed checks: `0 passed, 1 failed (1 checks)`");
+        expect(markdown).toContain("- Persisted facts: `0 passed, 0 failed (0 facts)`");
+        expect(markdown).toContain("Covers: `reaction-event:correction:wrong_output`");
+        expect(markdown).toContain("### verification-event:verification_request:test_required");
+        expect(markdown).toContain("- Recommended artifact: `harness_check`");
+        expect(markdown).toContain("- Verdict: `pending`");
+    });
+
+    test("renders persisted harness facts inside topic evidence packs", () => {
+        const proposals = buildWorkflowCandidateProposalListReport({
+            rows: [],
+            limit: 10,
+            status: "accepted",
+            expandEvidence: true,
+            search: "SurrealML",
+        });
+        const candidates = buildWorkflowCandidateReport({
+            groupRows: [groups[1]],
+            evidenceRows: [evidence[3]],
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            search: "SurrealML",
+            taskLike: "include",
+        });
+        const report = {
+            ...buildWorkflowCandidateTopicReport({
+                sourceKind: "transcript_classifier_projection",
+                topic: "SurrealML",
+                proposals,
+                candidates,
+            }),
+            persisted_harness_facts: buildWorkflowCandidateTopicHarnessGraphListReport({
+                topic: "SurrealML",
+                facts: [{
+                    graph_id: "fact:surrealml-harness",
+                    subject: "workflow_topic_harness_check:surrealml:output-required",
+                    predicate: "passed",
+                    object: "classifier_candidate_group:verification",
+                    value_json: properties({ passed: true }),
+                    properties_json: properties({
+                        topic: "SurrealML",
+                        candidate_id: "classifier_candidate_group:verification",
+                    }),
+                }],
+                edges: [],
+            }),
+        };
+
+        const markdown = renderWorkflowCandidateTopicEvidencePackMarkdown(report);
+
+        expect(markdown).toContain("- Persisted harness facts: `1`");
+        expect(markdown).toContain("- Persisted harness status: `1 passed, 0 failed`");
+        expect(markdown).toContain("- Gate: `satisfied`");
+        expect(markdown).toContain("- Evidence source: `persisted`");
+        expect(markdown).toContain("- Persisted facts: `1 passed, 0 failed (1 facts)`");
+        expect(markdown).toContain("## Persisted Harness Facts");
+        expect(markdown).toContain("### fact:surrealml-harness");
+        expect(markdown).toContain("- Candidate id: `classifier_candidate_group:verification`");
+    });
+
+    test("builds classifier fixture review rows from adjacent topic candidates", () => {
+        const proposals = buildWorkflowCandidateProposalListReport({
+            rows: [],
+            limit: 10,
+            status: "accepted",
+            expandEvidence: true,
+            search: "SurrealML",
+        });
+        const candidates = buildWorkflowCandidateReport({
+            groupRows: [{
+                graph_id: "group:direction",
+                label: "direction-event:direction:output_expectation",
+                properties_json: properties({
+                    classifier_key: "direction-event",
+                    label: "direction",
+                    target: "output_expectation",
+                    proposed_action: "record_guidance_or_environment_preference",
+                    support_count: 1,
+                }),
+            }],
+            evidenceRows: [{
+                graph_id: "fact:direction-surrealml",
+                subject: "group:direction",
+                properties_json: properties({
+                    result_id: "classifier_result:direction_event__0_1_0__event_window__surrealml",
+                    turn: "turn:direction-surrealml",
+                    confidence: 0.82,
+                    text_excerpt: "I want to see the classifier results applied to SurrealML.",
+                }),
+            }],
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            search: "SurrealML",
+            taskLike: "include",
+        });
+        const report = buildWorkflowCandidateTopicReport({
+            sourceKind: "transcript_classifier_projection",
+            topic: "SurrealML",
+            proposals,
+            candidates,
+        });
+
+        const rows = buildWorkflowCandidateTopicClassifierFixtureRows(report);
+        const summary = buildWorkflowCandidateTopicClassifierFixtureSummary(report, ".ax/fixtures/surrealml.jsonl");
+        const text = renderWorkflowCandidateTopicReportText({ ...report, classifier_fixtures: summary });
+
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({
+            suite: "workflow-candidate-topic",
+            label: "direction",
+            target: "output_expectation",
+            source_group: "workflow-candidate",
+            review_status: "pending",
+            topic: "SurrealML",
+            candidate_id: "group:direction",
+            proposed_action: "record_guidance_or_environment_preference",
+            result_id: "classifier_result:direction_event__0_1_0__event_window__surrealml",
+            turn: "turn:direction-surrealml",
+            confidence: 0.82,
+        });
+        expect(rows[0].id).toContain("workflow-candidate-topic/surrealml/direction_event__direction__output_expectation/");
+        expect(rows[0].text).toBe("USER:\nI want to see the classifier results applied to SurrealML.\n\nPREVIOUS_ASSISTANT:\n");
+        expect(summary).toMatchObject({
+            path: ".ax/fixtures/surrealml.jsonl",
+            emitted_fixture_count: 1,
+            candidate_count: 1,
+            skipped_candidate_count: 0,
+        });
+        expect(text).toContain("classifier fixture pack: 1 fixtures");
+        expect(text).toContain("classifier fixture path: .ax/fixtures/surrealml.jsonl");
+    });
+
+    test("builds task drafts for adjacent topic candidates only", () => {
+        const proposalRows = attachWorkflowCandidateProposalEvidence({
+            rows: [{
+                proposal_id: "proposal:proposal-a",
+                dedupe_sig: "guidance__workflow_candidate__abc",
+                title: "Require applied classifier results for surrealml",
+                form: "guidance",
+                status: "accepted",
+                confidence: "medium",
+                frequency: 1,
+            }],
+            edges: [{
+                proposal_id: "proposal:proposal-a",
+                candidate_ref: "classifier_graph_node:group:correction",
+            }],
+            candidateRows: [groups[1]],
+            factRows: [evidence[3]],
+            examplesPerCandidate: 1,
+        });
+        const proposals = buildWorkflowCandidateProposalListReport({
+            rows: proposalRows,
+            limit: 10,
+            status: "accepted",
+            expandEvidence: true,
+            search: "surrealml",
+        });
+        const candidates = buildWorkflowCandidateReport({
+            groupRows: groups,
+            evidenceRows: [{
+                graph_id: "fact:verify-surrealml",
+                subject: "group:verify",
+                properties_json: properties({
+                    result_id: "result:verify-surrealml",
+                    turn: "turn:verify-surrealml",
+                    confidence: 0.83,
+                    text_excerpt: "Please verify the SurrealML classifier output before calling this done.",
+                }),
+            }, evidence[3]],
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            search: "surrealml",
+            taskLike: "include",
+        });
+        const report = buildWorkflowCandidateTopicReport({
+            sourceKind: "transcript_classifier_projection",
+            topic: "surrealml",
+            proposals,
+            candidates,
+        });
+
+        const { summary, drafts } = buildWorkflowCandidateTopicTaskDrafts(report, ".ax/tasks-test");
+
+        expect(summary.emitted_task_count).toBe(1);
+        expect(summary.tasks[0]).toMatchObject({
+            candidate_id: "group:verify",
+            label: "verification-event:verification_request:test_required",
+            verdict: "pending",
+            recommended_artifact: { primary: "harness_check" },
+        });
+        expect(drafts).toHaveLength(1);
+        expect(drafts[0].path).toContain("workflow-candidate-verification-event-verification-request-test-required");
+        expect(drafts[0].content).toContain("**Candidate:** `group:verify`");
+        expect(drafts[0].content).toContain("- Primary: `harness_check`");
+        expect(drafts[0].content).toContain("- Result: `result:verify-surrealml`");
+    });
+
+    test("builds harness-check proposal plans for adjacent harness candidates", () => {
+        const proposals = buildWorkflowCandidateProposalListReport({
+            rows: [],
+            limit: 10,
+            status: "accepted",
+            expandEvidence: true,
+            search: "surrealml",
+        });
+        const candidates = buildWorkflowCandidateReport({
+            groupRows: [groups[0]],
+            evidenceRows: [{
+                graph_id: "fact:verify-surrealml",
+                subject: "group:verify",
+                properties_json: properties({
+                    result_id: "result:verify-surrealml",
+                    turn: "turn:verify-surrealml",
+                    confidence: 0.83,
+                    text_excerpt: "Please verify the SurrealML classifier output before calling this done.",
+                }),
+            }],
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            search: "surrealml",
+            taskLike: "include",
+        });
+        const report = buildWorkflowCandidateTopicReport({
+            sourceKind: "transcript_classifier_projection",
+            topic: "surrealml",
+            proposals,
+            candidates,
+        });
+
+        const plan = buildWorkflowCandidateHarnessProposalPlan(report, new Set(), {
+            dryRun: true,
+            includeStatements: true,
+        });
+
+        expect(plan.summary.dry_run).toBe(true);
+        expect(plan.summary.emitted_proposal_count).toBe(1);
+        expect(plan.summary.proposals[0]).toMatchObject({
+            candidate_id: "group:verify",
+            recommended_artifact: { primary: "harness_check" },
+            status: "created_or_refreshed",
+        });
+        expect(plan.summary.proposals[0].dedupe_sig).toStartWith("harness_check__workflow_candidate__");
+        expect(plan.statements.join("\n")).toContain("harness_check");
+        expect(plan.statements.join("\n")).toContain("->cites_evidence:");
+        expect(plan.summary.statements).toEqual(plan.statements);
+    });
+
+    test("passes topic harness checks only with applied classifier result evidence", () => {
+        const proposals = buildWorkflowCandidateProposalListReport({
+            rows: [],
+            limit: 10,
+            status: "accepted",
+            expandEvidence: true,
+            search: "SurrealML",
+        });
+        const candidates = buildWorkflowCandidateReport({
+            groupRows: [{
+                graph_id: "group:output-required",
+                label: "verification-event:verification_request:output_required",
+                properties_json: properties({
+                    classifier_key: "verification-event",
+                    label: "verification_request",
+                    target: "output_required",
+                    proposed_action: "add_verification_gate",
+                    support_count: 2,
+                }),
+            }],
+            evidenceRows: [{
+                graph_id: "fact:surrealml-output-required",
+                subject: "group:output-required",
+                properties_json: properties({
+                    result_id: "classifier_result:verification_event__0_1_0__event_window__38cbc794d9d58e54",
+                    turn: "turn:surrealml-output-required",
+                    confidence: 0.84,
+                    text_excerpt: "Did you create classifier? I do not want just html, I want to see the results applied to SurrealML.",
+                }),
+            }],
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 2,
+            search: "SurrealML",
+            taskLike: "include",
+        });
+        const report = buildWorkflowCandidateTopicReport({
+            sourceKind: "transcript_classifier_projection",
+            topic: "SurrealML",
+            proposals,
+            candidates,
+        });
+
+        const checks = buildWorkflowCandidateTopicHarnessChecks(report);
+
+        expect(checks.failed_count).toBe(0);
+        expect(checks.passed_count).toBe(1);
+        expect(checks.checks[0]).toMatchObject({
+            candidate_id: "group:output-required",
+            status: "passed",
+        });
+        expect(checks.checks[0].evidence_refs).toContain("classifier_result:verification_event__0_1_0__event_window__38cbc794d9d58e54");
+        expect(report.harness_checks?.passed_count).toBe(1);
+        expect(report.harness_evidence).toMatchObject({
+            gate_satisfied: true,
+            gate_evidence_source: "computed",
+            computed_check_count: 1,
+            computed_passed_count: 1,
+            persisted_fact_count: 0,
+        });
+        expect(renderWorkflowCandidateTopicReportText(report)).toContain("harness checks: 1 passed, 0 failed");
+        expect(renderWorkflowCandidateTopicReportText(report)).toContain("harness gate: satisfied (computed)");
+        expect(workflowCandidateTopicHarnessGateFailures(report)).toEqual([]);
+    });
+
+    test("fails topic harness checks when the evidence stops at html without classifier results", () => {
+        const proposals = buildWorkflowCandidateProposalListReport({
+            rows: [],
+            limit: 10,
+            status: "accepted",
+            expandEvidence: true,
+            search: "SurrealML",
+        });
+        const candidates = buildWorkflowCandidateReport({
+            groupRows: [{
+                graph_id: "group:output-required",
+                label: "verification-event:verification_request:output_required",
+                properties_json: properties({
+                    classifier_key: "verification-event",
+                    label: "verification_request",
+                    target: "output_required",
+                    proposed_action: "add_verification_gate",
+                    support_count: 1,
+                }),
+            }],
+            evidenceRows: [{
+                graph_id: "fact:html-only",
+                subject: "group:output-required",
+                properties_json: properties({
+                    result_id: "result:html-only",
+                    turn: "turn:html-only",
+                    confidence: 0.8,
+                    text_excerpt: "Open the html for me.",
+                }),
+            }],
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 2,
+            search: "html",
+            taskLike: "include",
+        });
+        const report = buildWorkflowCandidateTopicReport({
+            sourceKind: "transcript_classifier_projection",
+            topic: "SurrealML",
+            proposals,
+            candidates,
+        });
+
+        const checks = buildWorkflowCandidateTopicHarnessChecks(report);
+
+        expect(checks.passed_count).toBe(0);
+        expect(checks.failed_count).toBe(1);
+        expect(checks.checks[0].failures).toContain("missing applied classifier result evidence for topic");
+        expect(workflowCandidateTopicHarnessGateFailures(report)).toEqual([
+            "harness check group__output_required__applied_classifier_result_evidence failed: missing applied classifier result evidence for topic",
+        ]);
+    });
+
+    test("topic harness gates fail when no executable checks are present", () => {
+        const proposals = buildWorkflowCandidateProposalListReport({
+            rows: [],
+            limit: 10,
+            status: "accepted",
+            expandEvidence: true,
+            search: "SurrealML",
+        });
+        const candidates = buildWorkflowCandidateReport({
+            groupRows: [groups[1]],
+            evidenceRows: [evidence[3]],
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            search: "SurrealML",
+            taskLike: "include",
+        });
+        const report = buildWorkflowCandidateTopicReport({
+            sourceKind: "transcript_classifier_projection",
+            topic: "SurrealML",
+            proposals,
+            candidates,
+        });
+
+        expect(report.harness_checks).toBeUndefined();
+        expect(report.harness_evidence).toMatchObject({
+            gate_satisfied: false,
+            gate_evidence_source: "none",
+        });
+        expect(workflowCandidateTopicHarnessGateFailures(report)).toEqual([
+            "no passing topic harness checks were produced or persisted",
+        ]);
+    });
+
+    test("topic harness gates pass with persisted passing harness facts and no executable checks", () => {
+        const proposals = buildWorkflowCandidateProposalListReport({
+            rows: [],
+            limit: 10,
+            status: "accepted",
+            expandEvidence: true,
+            search: "SurrealML",
+        });
+        const candidates = buildWorkflowCandidateReport({
+            groupRows: [groups[1]],
+            evidenceRows: [evidence[3]],
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            search: "SurrealML",
+            taskLike: "include",
+        });
+        const report = {
+            ...buildWorkflowCandidateTopicReport({
+                sourceKind: "transcript_classifier_projection",
+                topic: "SurrealML",
+                proposals,
+                candidates,
+            }),
+            persisted_harness_facts: buildWorkflowCandidateTopicHarnessGraphListReport({
+                topic: "SurrealML",
+                facts: [{
+                    graph_id: "fact:surrealml-harness",
+                    subject: "workflow_topic_harness_check:surrealml:output-required",
+                    predicate: "passed",
+                    object: "group:verify",
+                    value_json: properties({ passed: true }),
+                    properties_json: properties({
+                        topic: "SurrealML",
+                        candidate_id: "group:verify",
+                    }),
+                }],
+                edges: [],
+            }),
+        };
+
+        expect(report.harness_checks).toBeUndefined();
+        expect(buildWorkflowCandidateTopicHarnessEvidenceSummary(report)).toMatchObject({
+            gate_satisfied: true,
+            gate_evidence_source: "persisted",
+            computed_check_count: 0,
+            persisted_fact_count: 1,
+            persisted_passed_count: 1,
+        });
+        expect(workflowCandidateTopicHarnessGateFailures(report)).toEqual([]);
+    });
+
+    test("topic harness gates fail with only persisted failed harness facts", () => {
+        const proposals = buildWorkflowCandidateProposalListReport({
+            rows: [],
+            limit: 10,
+            status: "accepted",
+            expandEvidence: true,
+            search: "SurrealML",
+        });
+        const candidates = buildWorkflowCandidateReport({
+            groupRows: [groups[1]],
+            evidenceRows: [evidence[3]],
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            search: "SurrealML",
+            taskLike: "include",
+        });
+        const report = {
+            ...buildWorkflowCandidateTopicReport({
+                sourceKind: "transcript_classifier_projection",
+                topic: "SurrealML",
+                proposals,
+                candidates,
+            }),
+            persisted_harness_facts: buildWorkflowCandidateTopicHarnessGraphListReport({
+                topic: "SurrealML",
+                facts: [{
+                    graph_id: "fact:surrealml-harness-failed",
+                    subject: "workflow_topic_harness_check:surrealml:output-required",
+                    predicate: "failed",
+                    object: "group:verify",
+                    value_json: properties({ passed: false }),
+                    properties_json: properties({
+                        topic: "SurrealML",
+                        candidate_id: "group:verify",
+                    }),
+                }],
+                edges: [],
+            }),
+        };
+
+        expect(report.harness_checks).toBeUndefined();
+        expect(buildWorkflowCandidateTopicHarnessEvidenceSummary(report)).toMatchObject({
+            gate_satisfied: false,
+            gate_evidence_source: "none",
+            computed_check_count: 0,
+            persisted_fact_count: 1,
+            persisted_failed_count: 1,
+        });
+        expect(workflowCandidateTopicHarnessGateFailures(report)).toEqual([
+            "no passing topic harness checks were produced or persisted",
+        ]);
+    });
+
+    test("projects topic harness checks into classifier graph facts and write plans", () => {
+        const proposals = buildWorkflowCandidateProposalListReport({
+            rows: [],
+            limit: 10,
+            status: "accepted",
+            expandEvidence: true,
+            search: "SurrealML",
+        });
+        const candidates = buildWorkflowCandidateReport({
+            groupRows: [{
+                graph_id: "group:output-required",
+                label: "verification-event:verification_request:output_required",
+                properties_json: properties({
+                    classifier_key: "verification-event",
+                    label: "verification_request",
+                    target: "output_required",
+                    proposed_action: "add_verification_gate",
+                    support_count: 2,
+                }),
+            }],
+            evidenceRows: [{
+                graph_id: "fact:surrealml-output-required",
+                subject: "group:output-required",
+                properties_json: properties({
+                    result_id: "classifier_result:verification_event__0_1_0__event_window__38cbc794d9d58e54",
+                    turn: "turn:surrealml-output-required",
+                    confidence: 0.84,
+                    text_excerpt: "Did you create classifier? I do not want just html, I want to see the results applied to SurrealML.",
+                }),
+            }],
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 2,
+            search: "SurrealML",
+            taskLike: "include",
+        });
+        const report = buildWorkflowCandidateTopicReport({
+            sourceKind: "transcript_classifier_projection",
+            topic: "SurrealML",
+            proposals,
+            candidates,
+        });
+
+        const projection = buildWorkflowCandidateTopicHarnessGraphProjection(report);
+        const writePlan = buildWorkflowCandidateTopicHarnessGraphWritePlan(projection);
+
+        expect(projection.schema).toBe("ax.workflow_topic_harness_graph_projection.v1");
+        expect(projection.totals).toMatchObject({
+            check_count: 1,
+            passed_count: 1,
+            failed_count: 0,
+            node_count: 2,
+            edge_count: 2,
+            fact_count: 1,
+        });
+        expect(projection.facts[0]).toMatchObject({
+            kind: "workflow_topic_harness_check",
+            predicate: "passed",
+            object: "group:output-required",
+        });
+        expect(projection.facts[0].properties.evidence_refs).toEqual([
+            "classifier_result:verification_event__0_1_0__event_window__38cbc794d9d58e54",
+            "turn:surrealml-output-required",
+        ]);
+        expect(writePlan.schema).toBe("ax.workflow_topic_harness_graph_write_plan.v1");
+        expect(writePlan.totals).toEqual({
+            statement_count: 5,
+            node_statement_count: 2,
+            edge_statement_count: 2,
+            fact_statement_count: 1,
+        });
+        expect(writePlan.statements.join("\n")).toContain("UPSERT classifier_graph_fact");
+        expect(writePlan.statements.join("\n")).toContain("workflow_topic_harness_check");
+    });
+
+    test("renders persisted topic harness graph fact lists", () => {
+        const report = buildWorkflowCandidateTopicHarnessGraphListReport({
+            topic: "SurrealML",
+            facts: [{
+                graph_id: "fact:surrealml-harness",
+                subject: "workflow_topic_harness_check:surrealml:output-required",
+                predicate: "passed",
+                object: "classifier_candidate_group:verification",
+                value_json: properties({ passed: true }),
+                properties_json: properties({ topic: "SurrealML" }),
+            }],
+            edges: [{
+                graph_id: "edge:surrealml-harness",
+                kind: "harness_check_checks_candidate",
+                from_id: "workflow_topic_harness_check:surrealml:output-required",
+                to_id: "classifier_candidate_group:verification",
+                evidence_path: "classifier_result:verification",
+                properties_json: properties({ topic: "SurrealML" }),
+            }],
+        });
+
+        expect(report.totals).toEqual({
+            fact_count: 1,
+            edge_count: 1,
+            passed_count: 1,
+            failed_count: 0,
+        });
+        const output = renderWorkflowCandidateTopicHarnessGraphListText(report);
+        expect(output).toContain("workflow topic harness graph facts");
+        expect(output).toContain("topic: SurrealML");
+        expect(output).toContain("passed: 1");
+        expect(output).toContain("fact:surrealml-harness");
+    });
+
+    test("renders persisted harness facts inside topic reports", () => {
+        const proposals = buildWorkflowCandidateProposalListReport({
+            rows: [],
+            limit: 10,
+            status: "accepted",
+            expandEvidence: true,
+            search: "SurrealML",
+        });
+        const candidates = buildWorkflowCandidateReport({
+            groupRows: [groups[1]],
+            evidenceRows: [evidence[3]],
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            search: "SurrealML",
+            taskLike: "include",
+        });
+        const persisted_harness_facts = buildWorkflowCandidateTopicHarnessGraphListReport({
+            topic: "SurrealML",
+            facts: [{
+                graph_id: "fact:surrealml-harness",
+                subject: "workflow_topic_harness_check:surrealml:output-required",
+                predicate: "passed",
+                object: "classifier_candidate_group:verification",
+                value_json: properties({ passed: true }),
+                properties_json: properties({ topic: "SurrealML" }),
+            }],
+            edges: [{
+                graph_id: "edge:surrealml-harness",
+                kind: "harness_check_checks_candidate",
+                from_id: "workflow_topic_harness_check:surrealml:output-required",
+                to_id: "classifier_candidate_group:verification",
+                evidence_path: "classifier_result:verification",
+                properties_json: properties({ topic: "SurrealML" }),
+            }],
+        });
+        const report = {
+            ...buildWorkflowCandidateTopicReport({
+                sourceKind: "transcript_classifier_projection",
+                topic: "SurrealML",
+                proposals,
+                candidates,
+            }),
+            persisted_harness_facts,
+        };
+
+        const output = renderWorkflowCandidateTopicReportText(report);
+
+        expect(output).toContain("persisted harness facts: 1");
+        expect(output).toContain("persisted harness edges: 1");
+        expect(output).toContain("persisted harness status: 1 passed, 0 failed");
+        expect(output).toContain("harness gate: satisfied (persisted)");
+        expect(output).toContain("harness gate computed: 0 passed, 0 failed (0 checks)");
+        expect(output).toContain("harness gate persisted: 1 passed, 0 failed (1 facts)");
+        expect(output).toContain("fact:surrealml-harness");
+    });
+
+    test("persisted harness facts count as topic candidate coverage", () => {
+        const proposals = buildWorkflowCandidateProposalListReport({
+            rows: [],
+            limit: 10,
+            status: "accepted",
+            expandEvidence: true,
+            search: "SurrealML",
+        });
+        const candidates = buildWorkflowCandidateReport({
+            groupRows: [groups[0]],
+            evidenceRows: [{
+                graph_id: "fact:verify-surrealml",
+                subject: "group:verify",
+                properties_json: properties({
+                    result_id: "classifier_result:verification_event__0_1_0__event_window__38cbc794d9d58e54",
+                    turn: "turn:verify-surrealml",
+                    confidence: 0.83,
+                    text_excerpt: "Did you create classifier? I want to see the results applied to SurrealML.",
+                }),
+            }],
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            search: "SurrealML",
+            taskLike: "include",
+        });
+        const report = {
+            ...buildWorkflowCandidateTopicReport({
+                sourceKind: "transcript_classifier_projection",
+                topic: "SurrealML",
+                proposals,
+                candidates,
+            }),
+            persisted_harness_facts: buildWorkflowCandidateTopicHarnessGraphListReport({
+                topic: "SurrealML",
+                facts: [{
+                    graph_id: "fact:surrealml-harness",
+                    subject: "workflow_topic_harness_check:surrealml:output-required",
+                    predicate: "passed",
+                    object: "group:verify",
+                    value_json: properties({ passed: true }),
+                    properties_json: properties({
+                        topic: "SurrealML",
+                        candidate_id: "group:verify",
+                    }),
+                }],
+                edges: [],
+            }),
+        };
+
+        expect(topicAdjacentCandidates(report)).toEqual([]);
+        const { summary, drafts } = buildWorkflowCandidateTopicTaskDrafts(report, ".ax/tasks-test");
+        expect(summary.emitted_task_count).toBe(0);
+        expect(drafts).toEqual([]);
+        const plan = buildWorkflowCandidateHarnessProposalPlan(report, new Set(), { dryRun: true });
+        expect(plan.summary.emitted_proposal_count).toBe(0);
+    });
+
+    test("failed persisted harness facts do not count as topic candidate coverage", () => {
+        const proposals = buildWorkflowCandidateProposalListReport({
+            rows: [],
+            limit: 10,
+            status: "accepted",
+            expandEvidence: true,
+            search: "SurrealML",
+        });
+        const candidates = buildWorkflowCandidateReport({
+            groupRows: [groups[0]],
+            evidenceRows: [{
+                graph_id: "fact:verify-surrealml",
+                subject: "group:verify",
+                properties_json: properties({
+                    result_id: "classifier_result:verification_event__0_1_0__event_window__38cbc794d9d58e54",
+                    turn: "turn:verify-surrealml",
+                    confidence: 0.83,
+                    text_excerpt: "Did you create classifier? I want to see the results applied to SurrealML.",
+                }),
+            }],
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            search: "SurrealML",
+            taskLike: "include",
+        });
+        const report = {
+            ...buildWorkflowCandidateTopicReport({
+                sourceKind: "transcript_classifier_projection",
+                topic: "SurrealML",
+                proposals,
+                candidates,
+            }),
+            persisted_harness_facts: buildWorkflowCandidateTopicHarnessGraphListReport({
+                topic: "SurrealML",
+                facts: [{
+                    graph_id: "fact:surrealml-harness-failed",
+                    subject: "workflow_topic_harness_check:surrealml:output-required",
+                    predicate: "failed",
+                    object: "group:verify",
+                    value_json: properties({ passed: false }),
+                    properties_json: properties({
+                        topic: "SurrealML",
+                        candidate_id: "group:verify",
+                    }),
+                }],
+                edges: [],
+            }),
+        };
+
+        expect(topicAdjacentCandidates(report).map((candidate) => candidate.group_id)).toEqual(["group:verify"]);
+        const { summary, drafts } = buildWorkflowCandidateTopicTaskDrafts(report, ".ax/tasks-test");
+        expect(summary.emitted_task_count).toBe(1);
+        expect(drafts).toHaveLength(1);
+        const plan = buildWorkflowCandidateHarnessProposalPlan(report, new Set(), { dryRun: true });
+        expect(plan.summary.emitted_proposal_count).toBe(1);
+    });
+
+    test("promotion blocks without synced review", () => {
+        const report = buildWorkflowCandidateReport({
+            groupRows: groups,
+            evidenceRows: evidence,
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            taskLike: "include",
+        });
+        const result = buildWorkflowCandidateTaskDrafts(report, ".ax/tasks-test");
+
+        expect(result.drafts).toHaveLength(0);
+        expect(result.report.promotion?.failures).toContain("review sync required before promotion");
+        expect(result.report.decision).toBe("needs_workflow_candidate_review");
+    });
+
+    test("renders promoted workflow candidate task markdown", () => {
+        const report = buildWorkflowCandidateReport({
+            groupRows: groups.slice(1),
+            evidenceRows: evidence,
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            taskLike: "include",
+        });
+        const synced = syncWorkflowCandidateReportFromBrief(
+            report,
+            renderWorkflowCandidateBriefMarkdown(report)
+                .replace("- Verdict: `pending`", "- Verdict: `revise`")
+                .replace("- Rationale: _pending_", "- Rationale: Merge this with the accepted artifact guardrail."),
+            "brief.md",
+        );
+        const markdown = renderWorkflowCandidateTaskMarkdown(synced.candidates[0], synced);
+
+        expect(markdown).toContain("**Verdict:** `revise`");
+        expect(markdown).toContain("**Proposed graph action:** `add_context_guardrail`");
+        expect(markdown).toContain("Merge this with the accepted artifact guardrail.");
+        expect(markdown).toContain("## Promotion Recommendation");
+        expect(markdown).toContain("- Primary: `guidance`");
+        expect(markdown).toContain("- Turn: `turn:3`");
+        expect(markdown).toContain("- Result: `result:3`");
+    });
+
+    test("renders merged workflow candidate task markdown", () => {
+        const report = buildWorkflowCandidateReport({
+            groupRows: groups,
+            evidenceRows: evidence,
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            taskLike: "include",
+        });
+        const synced = syncWorkflowCandidateReportFromBrief(
+            report,
+            renderWorkflowCandidateBriefMarkdown(report)
+                .replace("- Verdict: `pending`", "- Verdict: `accept`")
+                .replace("- Rationale: _pending_", "- Rationale: Use one merged task."),
+            "brief.md",
+        );
+        const markdown = renderMergedWorkflowCandidateTaskMarkdown([synced.candidates[0], synced.candidates[1]], synced);
+
+        expect(markdown).toContain("**Action:** draft merged candidate-backed improvement");
+        expect(markdown).toContain("## Candidate Signals");
+        expect(markdown).toContain("## Promotion Recommendation");
+        expect(markdown).toContain(synced.candidates[0].group_id);
+        expect(markdown).toContain(synced.candidates[1].group_id);
+    });
+
+    test("recommends harness checks for verification-gate candidates", () => {
+        const report = buildWorkflowCandidateReport({
+            groupRows: groups,
+            evidenceRows: evidence,
+            sourceKind: "transcript_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            taskLike: "include",
+        });
+
+        const verify = report.candidates.find((candidate) => candidate.group_id === "group:verify");
+        expect(verify).toBeDefined();
+        expect(recommendWorkflowCandidatePromotionArtifact([verify!], report)).toMatchObject({
+            primary: "harness_check",
+            confidence: "high",
+        });
+    });
+});

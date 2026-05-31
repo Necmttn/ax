@@ -1,20 +1,12 @@
 import { Effect } from "effect";
 import { defineClassifier, label, type EventWindow, type ClassifierResult } from "../core.ts";
+import { isControlOrContextText } from "../control-text.ts";
 
 const classifierKey = "reaction-event";
 const classifierVersion = "0.1.0";
 
 const recentToolFailureText = (window: EventWindow): string | null =>
     window.recentToolFailures.map((failure) => failure.text ?? "").find((text) => text.trim().length > 0) ?? null;
-
-const isWrapperOrContextText = (text: string): boolean =>
-    text.startsWith("<goal_context>") ||
-    text.startsWith("# AGENTS.md instructions") ||
-    text.startsWith("# CLAUDE.md") ||
-    text.includes("<INSTRUCTIONS>") ||
-    text.includes("<environment_context>") ||
-    text.startsWith("<task>") ||
-    text.startsWith("<task-notification>");
 
 const evidenceFor = (
     window: EventWindow,
@@ -28,7 +20,7 @@ const evidenceFor = (
 
 function classify(window: EventWindow): readonly ClassifierResult[] {
     const text = window.userTurn.text.trim();
-    if (text.length === 0 || isWrapperOrContextText(text)) return [];
+    if (text.length === 0 || isControlOrContextText(text)) return [];
     const lower = text.toLowerCase();
     const toolFailure = recentToolFailureText(window);
     const baseSignals = toolFailure ? ["context:recent_tool_failure"] : [];

@@ -1,0 +1,884 @@
+import { describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { loadClassifierPackageManifest } from "../src/classifiers/package-manifest.ts";
+import {
+    buildOperationExecutionPlanReport,
+    buildOperationDryRunReport,
+    buildOperationPreflightReport,
+    buildExecutionHistoryReport,
+    buildExecutionFactProjectionReport,
+    buildExecutionGraphHealthReport,
+    buildExecutionSurrealWritePlanReport,
+    applyExecutionSurrealWritePlanReport,
+    buildClassifierLifecycleInsightReport,
+    buildPackagesOperationsReport,
+    buildOperationsReport,
+    discoverClassifierPackageExecutionReportPaths,
+    discoverClassifierPackageManifestPaths,
+    executeOperationPlanReport,
+    summarizeClassifierPackageOperations,
+    writeOperationPreflightReport,
+    writeOperationDryRunReport,
+    writeOperationExecutionReport,
+    writeOperationExecutionPlanReport,
+    writeExecutionHistoryReport,
+    writeExecutionFactProjectionReport,
+    writeExecutionSurrealWritePlanReport,
+    writeExecutionSurrealApplyReport,
+    writeExecutionGraphHealthReport,
+    writeClassifierLifecycleInsightReport,
+    writeOperationsReport,
+    writePackagesOperationsReport,
+} from "../src/classifiers/package-operations.ts";
+
+describe("classifier package operations report", () => {
+    test("lists operations from the session-section manifest", () => {
+        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+
+        const report = buildOperationsReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json");
+
+        expect(report.decision).toBe("operations_listed");
+        expect(report.operations.map((operation) => operation.id)).toContain("blind-review-refresh");
+        expect(report.failures).toEqual([]);
+    });
+
+    test("selects one operation by id", () => {
+        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+
+        const report = buildOperationsReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "blind-review-refresh");
+
+        expect(report.decision).toBe("operation_found");
+        expect(report.operations).toHaveLength(1);
+        expect(report.operations[0]?.command).toBe("bun run classifiers:blind-review-refresh");
+    });
+
+    test("reports missing operations without throwing", () => {
+        const manifest = loadClassifierPackageManifest("packages/ax-classifier-verification-event/ax.classifier.json");
+
+        const report = buildOperationsReport(manifest, "packages/ax-classifier-verification-event/ax.classifier.json", "missing");
+
+        expect(report.decision).toBe("operation_missing");
+        expect(report.operations).toEqual([]);
+        expect(report.failures).toEqual(["classifier package verification-event does not declare operation: missing"]);
+    });
+
+    test("preflights selected operation inputs", () => {
+        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+
+        const report = buildOperationPreflightReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval");
+
+        expect(report.decision).toBe("ready");
+        expect(report.operation?.kind).toBe("train");
+        expect(report.inputs).toEqual([{
+            path: "packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl",
+            exists: true,
+        }]);
+        expect(report.missing_inputs).toEqual([]);
+    });
+
+    test("preflight reports missing declared inputs", () => {
+        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+        const testManifest = {
+            ...manifest,
+            operations: [
+                ...(manifest.operations ?? []),
+                {
+                    id: "missing-input-demo",
+                    kind: "debug" as const,
+                    description: "Operation with a deliberately missing input.",
+                    command: "echo missing",
+                    inputs: [".ax/experiments/does-not-exist-for-preflight-test.json"],
+                },
+            ],
+        };
+
+        const report = buildOperationPreflightReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "missing-input-demo");
+
+        expect(report.decision).toBe("missing_inputs");
+        expect(report.missing_inputs).toContain(".ax/experiments/does-not-exist-for-preflight-test.json");
+        expect(report.failures).toContain("missing input: .ax/experiments/does-not-exist-for-preflight-test.json");
+    });
+
+    test("preflight reports missing selected operations", () => {
+        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+
+        const report = buildOperationPreflightReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "missing");
+
+        expect(report.decision).toBe("operation_missing");
+        expect(report.failures).toEqual(["classifier package session-section-chunks does not declare operation: missing"]);
+    });
+
+    test("builds dry-run operation reports without executing", () => {
+        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+
+        const report = buildOperationDryRunReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval");
+
+        expect(report.schema).toBe("ax.classifier_package_operation_dry_run_report.v1");
+        expect(report.decision).toBe("ready_to_run");
+        expect(report.would_execute).toBe(false);
+        expect(report.command).toContain("bun run classifiers:setfit-eval");
+        expect(report.preflight.decision).toBe("ready");
+    });
+
+    test("dry-run reports blocked operations when preflight fails", () => {
+        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+        const testManifest = {
+            ...manifest,
+            operations: [
+                ...(manifest.operations ?? []),
+                {
+                    id: "blocked-demo",
+                    kind: "debug" as const,
+                    description: "Blocked dry-run demo.",
+                    command: "echo blocked",
+                    inputs: [".ax/experiments/does-not-exist-for-dry-run-test.json"],
+                },
+            ],
+        };
+
+        const report = buildOperationDryRunReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "blocked-demo");
+
+        expect(report.decision).toBe("blocked");
+        expect(report.would_execute).toBe(false);
+        expect(report.preflight.missing_inputs).toContain(".ax/experiments/does-not-exist-for-dry-run-test.json");
+    });
+
+    test("execution plan denies execution by default", () => {
+        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+
+        const report = buildOperationExecutionPlanReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval", {
+            allowExecute: false,
+            allowExpensive: false,
+        });
+
+        expect(report.decision).toBe("denied_requires_execute");
+        expect(report.would_execute).toBe(false);
+        expect(report.failures).toContain("execution requires --execute");
+    });
+
+    test("execution plan blocks expensive operations without explicit allowance", () => {
+        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+
+        const report = buildOperationExecutionPlanReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval", {
+            allowExecute: true,
+            allowExpensive: false,
+        });
+
+        expect(report.decision).toBe("denied_expensive");
+        expect(report.would_execute).toBe(false);
+        expect(report.expensive).toBe(true);
+        expect(report.failures).toContain("operation kind train requires --allow-expensive");
+    });
+
+    test("execution plan marks explicitly allowed operation ready", () => {
+        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+
+        const report = buildOperationExecutionPlanReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval", {
+            allowExecute: true,
+            allowExpensive: true,
+        });
+
+        expect(report.decision).toBe("ready_to_execute");
+        expect(report.would_execute).toBe(true);
+        expect(report.dry_run.preflight.decision).toBe("ready");
+    });
+
+    test("executes ready operation plans and captures output", async () => {
+        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+        const outPath = join(mkdtempSync(join(tmpdir(), "ax-exec-output-")), "output.txt");
+        const testManifest = {
+            ...manifest,
+            operations: [{
+                id: "print-demo",
+                kind: "debug" as const,
+                description: "Print a deterministic execution marker.",
+                command: `node -e "require('fs').writeFileSync('${outPath}', 'artifact'); process.stdout.write('ax-exec-ok')"`,
+                outputs: [outPath],
+            }],
+        };
+        const plan = buildOperationExecutionPlanReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "print-demo", {
+            allowExecute: true,
+            allowExpensive: false,
+        });
+
+        const report = await executeOperationPlanReport(plan);
+
+        expect(report.schema).toBe("ax.classifier_package_operation_execution_report.v1");
+        expect(report.decision).toBe("executed");
+        expect(report.executed).toBe(true);
+        expect(report.exit_code).toBe(0);
+        expect(report.stdout).toBe("ax-exec-ok");
+        expect(report.outputs).toEqual([{ path: outPath, exists: true }]);
+        expect(report.missing_outputs).toEqual([]);
+        expect(report.outputs_before).toEqual([{ path: outPath, exists: false }]);
+        expect(report.output_changes).toHaveLength(1);
+        expect(report.output_changes[0]?.changed_during_run).toBe(true);
+        expect(report.output_changes[0]?.after.exists).toBe(true);
+    });
+
+    test("marks execution failed when declared outputs are missing", async () => {
+        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+        const missingOutPath = join(mkdtempSync(join(tmpdir(), "ax-missing-output-")), "missing.txt");
+        const testManifest = {
+            ...manifest,
+            operations: [{
+                id: "missing-output-demo",
+                kind: "debug" as const,
+                description: "Exit zero without writing declared output.",
+                command: "node -e \"process.stdout.write('no-output')\"",
+                outputs: [missingOutPath],
+            }],
+        };
+        const plan = buildOperationExecutionPlanReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "missing-output-demo", {
+            allowExecute: true,
+            allowExpensive: false,
+        });
+
+        const report = await executeOperationPlanReport(plan);
+
+        expect(report.decision).toBe("failed");
+        expect(report.executed).toBe(true);
+        expect(report.exit_code).toBe(0);
+        expect(report.missing_outputs).toEqual([missingOutPath]);
+        expect(report.output_changes[0]?.changed_during_run).toBe(false);
+        expect(report.failures).toContain(`missing output: ${missingOutPath}`);
+    });
+
+    test("does not execute denied operation plans", async () => {
+        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+        const missingOutPath = join(mkdtempSync(join(tmpdir(), "ax-denied-output-")), "missing.txt");
+        const testManifest = {
+            ...manifest,
+            operations: [{
+                id: "denied-train-demo",
+                kind: "train" as const,
+                description: "Expensive operation that must not execute.",
+                command: `node -e "require('fs').writeFileSync('${missingOutPath}', 'should-not-run')"`,
+                outputs: [missingOutPath],
+            }],
+        };
+        const plan = buildOperationExecutionPlanReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "denied-train-demo", {
+            allowExecute: true,
+            allowExpensive: false,
+        });
+
+        const report = await executeOperationPlanReport(plan);
+
+        expect(report.decision).toBe("not_executed");
+        expect(report.executed).toBe(false);
+        expect(report.exit_code).toBe(null);
+        expect(report.missing_outputs).toEqual([missingOutPath]);
+        expect(report.output_changes[0]?.changed_during_run).toBe(false);
+        expect(report.failures).toContain("operation kind train requires --allow-expensive");
+    });
+
+    test("writes operations report JSON to disk", () => {
+        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+        const report = buildOperationsReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "blind-workflow-status");
+        const path = join(mkdtempSync(join(tmpdir(), "ax-ops-")), "nested", "report.json");
+
+        writeOperationsReport(path, report);
+
+        const written = JSON.parse(readFileSync(path, "utf8"));
+        expect(written.decision).toBe("operation_found");
+        expect(written.operations[0].id).toBe("blind-workflow-status");
+    });
+
+    test("writes preflight report JSON to disk", () => {
+        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+        const report = buildOperationPreflightReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval");
+        const path = join(mkdtempSync(join(tmpdir(), "ax-preflight-")), "report.json");
+
+        writeOperationPreflightReport(path, report);
+
+        const written = JSON.parse(readFileSync(path, "utf8"));
+        expect(written.schema).toBe("ax.classifier_package_operation_preflight_report.v1");
+        expect(written.decision).toBe("ready");
+    });
+
+    test("writes dry-run report JSON to disk", () => {
+        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+        const report = buildOperationDryRunReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval");
+        const path = join(mkdtempSync(join(tmpdir(), "ax-dry-run-")), "report.json");
+
+        writeOperationDryRunReport(path, report);
+
+        const written = JSON.parse(readFileSync(path, "utf8"));
+        expect(written.schema).toBe("ax.classifier_package_operation_dry_run_report.v1");
+        expect(written.would_execute).toBe(false);
+    });
+
+    test("writes execution plan report JSON to disk", () => {
+        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+        const report = buildOperationExecutionPlanReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval", {
+            allowExecute: false,
+            allowExpensive: false,
+        });
+        const path = join(mkdtempSync(join(tmpdir(), "ax-execution-plan-")), "report.json");
+
+        writeOperationExecutionPlanReport(path, report);
+
+        const written = JSON.parse(readFileSync(path, "utf8"));
+        expect(written.schema).toBe("ax.classifier_package_operation_execution_plan_report.v1");
+        expect(written.would_execute).toBe(false);
+    });
+
+    test("writes execution report JSON to disk", async () => {
+        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+        const outPath = join(mkdtempSync(join(tmpdir(), "ax-exec-write-output-")), "output.txt");
+        const testManifest = {
+            ...manifest,
+            operations: [{
+                id: "print-demo",
+                kind: "debug" as const,
+                description: "Print a deterministic execution marker.",
+                command: `node -e "require('fs').writeFileSync('${outPath}', 'artifact'); process.stdout.write('ax-exec-write-ok')"`,
+                outputs: [outPath],
+            }],
+        };
+        const plan = buildOperationExecutionPlanReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "print-demo", {
+            allowExecute: true,
+            allowExpensive: false,
+        });
+        const report = await executeOperationPlanReport(plan);
+        const path = join(mkdtempSync(join(tmpdir(), "ax-execution-report-")), "report.json");
+
+        writeOperationExecutionReport(path, report);
+
+        const written = JSON.parse(readFileSync(path, "utf8"));
+        expect(written.schema).toBe("ax.classifier_package_operation_execution_report.v1");
+        expect(written.stdout).toBe("ax-exec-write-ok");
+        expect(written.outputs).toEqual([{ path: outPath, exists: true }]);
+        expect(written.output_changes[0].changed_during_run).toBe(true);
+    });
+
+    test("builds execution history summaries from execution reports", async () => {
+        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+        const outPath = join(mkdtempSync(join(tmpdir(), "ax-history-output-")), "output.txt");
+        const testManifest = {
+            ...manifest,
+            operations: [{
+                id: "print-demo",
+                kind: "debug" as const,
+                description: "Print a deterministic execution marker.",
+                command: `node -e "require('fs').writeFileSync('${outPath}', 'artifact')"`,
+                outputs: [outPath],
+            }],
+        };
+        const plan = buildOperationExecutionPlanReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "print-demo", {
+            allowExecute: true,
+            allowExpensive: false,
+        });
+        const execution = await executeOperationPlanReport(plan);
+
+        const report = buildExecutionHistoryReport(".ax/experiments", [{
+            path: ".ax/experiments/demo-execution.json",
+            report: execution,
+        }]);
+
+        expect(report.schema).toBe("ax.classifier_package_execution_history_report.v1");
+        expect(report.totals.report_count).toBe(1);
+        expect(report.totals.executed_count).toBe(1);
+        expect(report.totals.changed_output_count).toBe(1);
+        expect(report.reports[0]?.operation_id).toBe("print-demo");
+    });
+
+    test("discovers and writes execution history reports", async () => {
+        const root = mkdtempSync(join(tmpdir(), "ax-history-"));
+        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+        const plan = buildOperationExecutionPlanReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "missing", {
+            allowExecute: true,
+            allowExpensive: false,
+        });
+        const execution = await executeOperationPlanReport(plan);
+        const executionPath = join(root, "classifier-package-execution-demo.json");
+        const historyPath = join(root, "history.json");
+        writeOperationExecutionReport(executionPath, execution);
+
+        const paths = discoverClassifierPackageExecutionReportPaths(root);
+        const history = buildExecutionHistoryReport(root, paths.map((path) => ({
+            path,
+            report: JSON.parse(readFileSync(path, "utf8")),
+        })));
+        writeExecutionHistoryReport(historyPath, history);
+
+        const written = JSON.parse(readFileSync(historyPath, "utf8"));
+        expect(paths).toEqual([executionPath]);
+        expect(written.totals.not_executed_count).toBe(1);
+    });
+
+    test("projects execution reports into graph-ready facts and edges", async () => {
+        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+        const outPath = join(mkdtempSync(join(tmpdir(), "ax-fact-output-")), "output.txt");
+        const testManifest = {
+            ...manifest,
+            operations: [{
+                id: "print-demo",
+                kind: "debug" as const,
+                description: "Print a deterministic execution marker.",
+                command: `node -e "require('fs').writeFileSync('${outPath}', 'artifact')"`,
+                outputs: [outPath],
+            }],
+        };
+        const plan = buildOperationExecutionPlanReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "print-demo", {
+            allowExecute: true,
+            allowExpensive: false,
+        });
+        const execution = await executeOperationPlanReport(plan);
+
+        const report = buildExecutionFactProjectionReport(".ax/experiments", [{
+            path: ".ax/experiments/classifier-package-execution-demo.json",
+            report: execution,
+        }]);
+
+        expect(report.schema).toBe("ax.classifier_package_execution_fact_projection.v1");
+        expect(report.totals.source_report_count).toBe(1);
+        expect(report.nodes.map((node) => node.kind)).toEqual(expect.arrayContaining(["classifier_package", "classifier_operation", "classifier_execution", "artifact"]));
+        expect(report.edges.map((edge) => edge.kind)).toEqual(expect.arrayContaining(["declares_operation", "ran_operation", "updated_artifact"]));
+        expect(report.facts.map((fact) => fact.kind)).toEqual(expect.arrayContaining(["classifier_operation_execution", "classifier_artifact_observation"]));
+    });
+
+    test("writes execution fact projection reports", async () => {
+        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+        const plan = buildOperationExecutionPlanReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "missing", {
+            allowExecute: true,
+            allowExpensive: false,
+        });
+        const execution = await executeOperationPlanReport(plan);
+        const report = buildExecutionFactProjectionReport(".ax/experiments", [{
+            path: ".ax/experiments/classifier-package-execution-missing.json",
+            report: execution,
+        }]);
+        const path = join(mkdtempSync(join(tmpdir(), "ax-facts-")), "facts.json");
+
+        writeExecutionFactProjectionReport(path, report);
+
+        const written = JSON.parse(readFileSync(path, "utf8"));
+        expect(written.schema).toBe("ax.classifier_package_execution_fact_projection.v1");
+        expect(written.totals.guard_fact_count).toBe(1);
+    });
+
+    test("builds Surreal write plans from execution fact projections", async () => {
+        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+        const plan = buildOperationExecutionPlanReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "missing", {
+            allowExecute: true,
+            allowExpensive: false,
+        });
+        const execution = await executeOperationPlanReport(plan);
+        const projection = buildExecutionFactProjectionReport(".ax/experiments", [{
+            path: ".ax/experiments/classifier-package-execution-missing.json",
+            report: execution,
+        }]);
+
+        const writePlan = buildExecutionSurrealWritePlanReport(projection);
+
+        expect(writePlan.schema).toBe("ax.classifier_package_execution_surreal_write_plan.v1");
+        expect(writePlan.tables).toEqual(["classifier_graph_node", "classifier_graph_edge", "classifier_graph_fact"]);
+        expect(writePlan.totals.statement_count).toBe(writePlan.totals.node_statement_count + writePlan.totals.edge_statement_count + writePlan.totals.fact_statement_count);
+        expect(writePlan.statements.some((statement) => statement.startsWith("UPSERT classifier_graph_node:"))).toBe(true);
+        expect(writePlan.statements.some((statement) => statement.startsWith("UPSERT classifier_graph_edge:"))).toBe(true);
+        expect(writePlan.statements.some((statement) => statement.startsWith("UPSERT classifier_graph_fact:"))).toBe(true);
+    });
+
+    test("writes Surreal write plan reports", async () => {
+        const projection = buildExecutionFactProjectionReport(".ax/experiments", []);
+        const writePlan = buildExecutionSurrealWritePlanReport(projection);
+        const path = join(mkdtempSync(join(tmpdir(), "ax-write-plan-")), "write-plan.json");
+
+        writeExecutionSurrealWritePlanReport(path, writePlan);
+
+        const written = JSON.parse(readFileSync(path, "utf8"));
+        expect(written.schema).toBe("ax.classifier_package_execution_surreal_write_plan.v1");
+        expect(written.totals.statement_count).toBe(0);
+    });
+
+    test("applies Surreal write plans through a query callback", async () => {
+        const writePlan = buildExecutionSurrealWritePlanReport({
+            schema: "ax.classifier_package_execution_fact_projection.v1",
+            root: ".ax/experiments",
+            source_reports: [],
+            nodes: [],
+            edges: [],
+            facts: [],
+            totals: {
+                source_report_count: 0,
+                node_count: 0,
+                edge_count: 0,
+                fact_count: 0,
+                execution_fact_count: 0,
+                guard_fact_count: 0,
+                artifact_fact_count: 0,
+            },
+        });
+
+        const report = await applyExecutionSurrealWritePlanReport({
+            ...writePlan,
+            statements: ["UPSERT classifier_graph_node:`n` CONTENT {};"],
+            totals: {
+                statement_count: 1,
+                node_statement_count: 1,
+                edge_statement_count: 0,
+                fact_statement_count: 0,
+            },
+        }, async () => undefined);
+
+        expect(report.schema).toBe("ax.classifier_package_execution_surreal_apply_report.v1");
+        expect(report.decision).toBe("applied");
+        expect(report.applied_statement_count).toBe(1);
+    });
+
+    test("apply reports capture first Surreal write failure", async () => {
+        const writePlan = buildExecutionSurrealWritePlanReport({
+            schema: "ax.classifier_package_execution_fact_projection.v1",
+            root: ".ax/experiments",
+            source_reports: [],
+            nodes: [],
+            edges: [],
+            facts: [],
+            totals: {
+                source_report_count: 0,
+                node_count: 0,
+                edge_count: 0,
+                fact_count: 0,
+                execution_fact_count: 0,
+                guard_fact_count: 0,
+                artifact_fact_count: 0,
+            },
+        });
+
+        const report = await applyExecutionSurrealWritePlanReport({
+            ...writePlan,
+            statements: ["UPSERT ok", "UPSERT bad"],
+            totals: {
+                statement_count: 2,
+                node_statement_count: 2,
+                edge_statement_count: 0,
+                fact_statement_count: 0,
+            },
+        }, async (statement) => {
+            if (statement.includes("bad")) throw new Error("db rejected statement");
+        });
+
+        expect(report.decision).toBe("failed");
+        expect(report.applied_statement_count).toBe(1);
+        expect(report.failed_statement_count).toBe(1);
+        expect(report.first_failure?.index).toBe(1);
+        expect(report.first_failure?.message).toBe("db rejected statement");
+    });
+
+    test("writes Surreal apply reports", async () => {
+        const report = await applyExecutionSurrealWritePlanReport({
+            schema: "ax.classifier_package_execution_surreal_write_plan.v1",
+            root: ".ax/experiments",
+            source_projection_schema: "ax.classifier_package_execution_fact_projection.v1",
+            statements: [],
+            tables: ["classifier_graph_node", "classifier_graph_edge", "classifier_graph_fact"],
+            totals: {
+                statement_count: 0,
+                node_statement_count: 0,
+                edge_statement_count: 0,
+                fact_statement_count: 0,
+            },
+        }, async () => undefined);
+        const path = join(mkdtempSync(join(tmpdir(), "ax-apply-")), "apply.json");
+
+        writeExecutionSurrealApplyReport(path, report);
+
+        const written = JSON.parse(readFileSync(path, "utf8"));
+        expect(written.schema).toBe("ax.classifier_package_execution_surreal_apply_report.v1");
+        expect(written.decision).toBe("applied");
+    });
+
+    test("builds graph health reports from persisted classifier graph rows", () => {
+        const report = buildExecutionGraphHealthReport({
+            nodes: [
+                {
+                    graph_id: "classifier_operation:demo/refresh",
+                    kind: "classifier_operation",
+                    label: "refresh",
+                    properties_json: JSON.stringify({ package_key: "demo", operation_kind: "review", expensive: false }),
+                },
+                {
+                    graph_id: "classifier_execution:.ax/experiments/run.json",
+                    kind: "classifier_execution",
+                    label: "refresh",
+                    properties_json: JSON.stringify({
+                        decision: "executed",
+                        plan_decision: "ready_to_execute",
+                        executed: true,
+                        started_at: "2026-05-31T00:00:00.000Z",
+                        finished_at: "2026-05-31T00:00:01.000Z",
+                        duration_ms: 1000,
+                        source_path: ".ax/experiments/run.json",
+                    }),
+                },
+                {
+                    graph_id: "artifact:.ax/experiments/out.json",
+                    kind: "artifact",
+                    label: ".ax/experiments/out.json",
+                    properties_json: JSON.stringify({ path: ".ax/experiments/out.json", exists: true }),
+                },
+            ],
+            edges: [
+                {
+                    graph_id: "edge:run",
+                    kind: "ran_operation",
+                    from_id: "classifier_execution:.ax/experiments/run.json",
+                    to_id: "classifier_operation:demo/refresh",
+                    evidence_path: ".ax/experiments/run.json",
+                    properties_json: JSON.stringify({ decision: "executed" }),
+                },
+                {
+                    graph_id: "edge:artifact",
+                    kind: "updated_artifact",
+                    from_id: "classifier_execution:.ax/experiments/run.json",
+                    to_id: "artifact:.ax/experiments/out.json",
+                    evidence_path: ".ax/experiments/run.json",
+                    properties_json: JSON.stringify({ changed_during_run: true }),
+                },
+            ],
+            facts: [
+                {
+                    graph_id: "fact:run",
+                    kind: "classifier_operation_execution",
+                    subject: "classifier_execution:.ax/experiments/run.json",
+                    predicate: "completed_with_decision",
+                    value_json: "\"executed\"",
+                    evidence_edges_json: JSON.stringify(["edge:run"]),
+                    properties_json: JSON.stringify({ decision: "executed" }),
+                },
+                {
+                    graph_id: "fact:artifact",
+                    kind: "classifier_artifact_observation",
+                    subject: "classifier_execution:.ax/experiments/run.json",
+                    predicate: "updated_artifact",
+                    object: "artifact:.ax/experiments/out.json",
+                    value_json: "true",
+                    evidence_edges_json: JSON.stringify(["edge:artifact"]),
+                    properties_json: JSON.stringify({ path: ".ax/experiments/out.json", changed_during_run: true }),
+                },
+            ],
+        });
+
+        expect(report.schema).toBe("ax.classifier_package_execution_graph_health_report.v1");
+        expect(report.decision).toBe("healthy");
+        expect(report.query.mode).toBe("summary");
+        expect(report.totals.operation_count).toBe(1);
+        expect(report.result_totals.operation_count).toBe(1);
+        expect(report.totals.changed_artifact_count).toBe(1);
+        expect(report.operations[0]?.changed_artifact_count).toBe(1);
+        expect(report.operations[0]?.last_execution?.source_path).toBe(".ax/experiments/run.json");
+        expect(report.changed_artifacts[0]?.artifact_path).toBe(".ax/experiments/out.json");
+    });
+
+    test("filters graph health reports by mode and operation", () => {
+        const report = buildExecutionGraphHealthReport({
+            nodes: [
+                {
+                    graph_id: "classifier_operation:demo/refresh",
+                    kind: "classifier_operation",
+                    label: "refresh",
+                    properties_json: JSON.stringify({ package_key: "demo", operation_kind: "review", expensive: false }),
+                },
+                {
+                    graph_id: "classifier_operation:demo/train",
+                    kind: "classifier_operation",
+                    label: "train",
+                    properties_json: JSON.stringify({ package_key: "demo", operation_kind: "train", expensive: true }),
+                },
+                {
+                    graph_id: "classifier_execution:guarded.json",
+                    kind: "classifier_execution",
+                    label: "train",
+                    properties_json: JSON.stringify({ decision: "not_executed", plan_decision: "denied_expensive", executed: false }),
+                },
+            ],
+            edges: [{
+                graph_id: "edge:guarded",
+                kind: "ran_operation",
+                from_id: "classifier_execution:guarded.json",
+                to_id: "classifier_operation:demo/train",
+                evidence_path: "guarded.json",
+                properties_json: JSON.stringify({ plan_decision: "denied_expensive" }),
+            }],
+            facts: [{
+                graph_id: "fact:guarded",
+                kind: "classifier_operation_guard",
+                subject: "classifier_execution:guarded.json",
+                predicate: "guarded_with_decision",
+                value_json: "\"denied_expensive\"",
+                evidence_edges_json: JSON.stringify(["edge:guarded"]),
+                properties_json: JSON.stringify({ plan_decision: "denied_expensive" }),
+            }],
+            query: { mode: "guarded", operation_id: "train" },
+        });
+
+        expect(report.query).toEqual({ mode: "guarded", operation_id: "train" });
+        expect(report.operations.map((operation) => operation.operation_id)).toEqual(["train"]);
+        expect(report.guarded_operations.map((operation) => operation.operation_id)).toEqual(["train"]);
+        expect(report.result_totals.operation_count).toBe(1);
+        expect(report.result_totals.guarded_operation_count).toBe(1);
+        expect(report.evidence_paths).toEqual(["guarded.json"]);
+    });
+
+    test("writes graph health reports", () => {
+        const report = buildExecutionGraphHealthReport({ nodes: [], edges: [], facts: [] });
+        const path = join(mkdtempSync(join(tmpdir(), "ax-graph-health-")), "health.json");
+
+        writeExecutionGraphHealthReport(path, report);
+
+        const written = JSON.parse(readFileSync(path, "utf8"));
+        expect(written.schema).toBe("ax.classifier_package_execution_graph_health_report.v1");
+        expect(written.decision).toBe("empty_graph");
+    });
+
+    test("builds classifier lifecycle insight reports from packages, graph health, and workflow status", () => {
+        const packages = buildPackagesOperationsReport("packages", [{
+            manifest: "packages/demo/ax.classifier.json",
+            package_key: "demo",
+            package_name: "@ax-classifier/demo",
+            version: "0.1.0",
+            kind: "local_model",
+            input: "event_window",
+            label_count: 1,
+            target_count: 1,
+            fixture_count: 1,
+            asset_count: 0,
+            operation_count: 1,
+            operation_kinds: { train: 1, eval: 0, review: 0, status: 0, publish: 0, debug: 0 },
+            lifecycle_readiness: {
+                status: "incomplete",
+                required_kinds: ["train", "eval", "review", "status"],
+                present_required_kinds: ["train"],
+                missing_required_kinds: ["eval", "review", "status"],
+            },
+            operations: [],
+        }]);
+        const graph = buildExecutionGraphHealthReport({
+            nodes: [{
+                graph_id: "classifier_operation:demo/train",
+                kind: "classifier_operation",
+                label: "train",
+                properties_json: JSON.stringify({ package_key: "demo", operation_kind: "train", expensive: true }),
+            }, {
+                graph_id: "classifier_execution:failed.json",
+                kind: "classifier_execution",
+                label: "failed.json",
+                properties_json: JSON.stringify({ decision: "failed", plan_decision: "ready_to_execute", executed: true, started_at: "2026-05-30T00:00:00.000Z", source_path: "failed.json" }),
+            }],
+            edges: [{
+                graph_id: "edge:guarded",
+                kind: "ran_operation",
+                from_id: "classifier_execution:guarded.json",
+                to_id: "classifier_operation:demo/train",
+                evidence_path: "guarded.json",
+                properties_json: "{}",
+            }, {
+                graph_id: "edge:failed",
+                kind: "ran_operation",
+                from_id: "classifier_execution:failed.json",
+                to_id: "classifier_operation:demo/train",
+                evidence_path: "failed.json",
+                properties_json: "{}",
+            }],
+            facts: [{
+                graph_id: "fact:guarded",
+                kind: "classifier_operation_guard",
+                subject: "classifier_execution:guarded.json",
+                predicate: "guarded_with_decision",
+                value_json: "\"denied_expensive\"",
+                evidence_edges_json: JSON.stringify(["edge:guarded"]),
+                properties_json: "{}",
+            }],
+        });
+
+        const report = buildClassifierLifecycleInsightReport({
+            packages,
+            graph,
+            workflowStatus: {
+                path: ".ax/status.json",
+                exists: true,
+                schema: "ax.blind_workflow_status.v1",
+                decision: "needs_human_review",
+                pending_blind_labels: 2,
+                pending_hard_negatives: 1,
+                accepted_hard_negatives: 0,
+                next_actions: ["review batch"],
+            },
+        });
+
+        expect(report.schema).toBe("ax.classifier_lifecycle_insight_report.v1");
+        expect(report.decision).toBe("needs_human_review");
+        expect(report.totals.local_model_incomplete_count).toBe(1);
+        expect(report.totals.guarded_operation_count).toBe(1);
+        expect(report.totals.failed_operation_count).toBe(1);
+        expect(report.blocking_items).toContain("2 blind labels pending");
+        expect(report.blocking_items).toContain("demo/train failed 1 time(s)");
+        expect(report.packages[0]?.guarded_operation_count).toBe(1);
+        expect(report.packages[0]?.failed_operation_count).toBe(1);
+    });
+
+    test("writes lifecycle insight reports", () => {
+        const report = buildClassifierLifecycleInsightReport({
+            packages: buildPackagesOperationsReport("packages", []),
+            graph: buildExecutionGraphHealthReport({ nodes: [], edges: [], facts: [] }),
+            workflowStatus: { path: ".ax/status.json", exists: false, next_actions: [] },
+        });
+        const path = join(mkdtempSync(join(tmpdir(), "ax-lifecycle-")), "lifecycle.json");
+
+        writeClassifierLifecycleInsightReport(path, report);
+
+        const written = JSON.parse(readFileSync(path, "utf8"));
+        expect(written.schema).toBe("ax.classifier_lifecycle_insight_report.v1");
+        expect(written.decision).toBe("needs_graph_apply");
+    });
+
+    test("discovers classifier package manifests", () => {
+        const paths = discoverClassifierPackageManifestPaths("packages");
+
+        expect(paths).toContain("packages/ax-classifier-session-sections/ax.classifier.json");
+        expect(paths).toContain("packages/ax-classifier-direction-event/ax.classifier.json");
+        expect(paths).toEqual([...paths].sort());
+    });
+
+    test("builds multi-package operation summaries", () => {
+        const paths = discoverClassifierPackageManifestPaths("packages");
+        const packages = paths.map((path) => summarizeClassifierPackageOperations(loadClassifierPackageManifest(path), path));
+        const report = buildPackagesOperationsReport("packages", packages);
+
+        expect(report.schema).toBe("ax.classifier_packages_operations_report.v1");
+        expect(report.totals.package_count).toBeGreaterThanOrEqual(3);
+        expect(report.totals.operation_count).toBeGreaterThanOrEqual(35);
+        expect(report.totals.operation_kinds.train).toBe(1);
+        expect(report.totals.operation_kinds.eval).toBe(6);
+        expect(report.totals.operation_kinds.review).toBe(10);
+        expect(report.totals.operation_kinds.status).toBe(16);
+        expect(report.totals.operation_kinds.publish).toBe(1);
+        expect(report.totals.operation_kinds.debug).toBe(1);
+        expect(report.totals.local_model_ready_count).toBe(1);
+        expect(report.totals.local_model_incomplete_count).toBe(0);
+        expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_count).toBe(35);
+        expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_kinds.train).toBe(1);
+        expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_kinds.eval).toBe(6);
+        expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_kinds.review).toBe(10);
+        expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_kinds.status).toBe(16);
+        expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_kinds.publish).toBe(1);
+        expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.lifecycle_readiness.status).toBe("ready");
+        expect(report.packages.find((entry) => entry.package_key === "direction-event")?.lifecycle_readiness.status).toBe("not_applicable");
+    });
+
+    test("writes multi-package operations report JSON to disk", () => {
+        const paths = discoverClassifierPackageManifestPaths("packages");
+        const packages = paths.map((path) => summarizeClassifierPackageOperations(loadClassifierPackageManifest(path), path));
+        const report = buildPackagesOperationsReport("packages", packages);
+        const path = join(mkdtempSync(join(tmpdir(), "ax-ops-all-")), "report.json");
+
+        writePackagesOperationsReport(path, report);
+
+        const written = JSON.parse(readFileSync(path, "utf8"));
+        expect(written.totals.package_count).toBe(report.totals.package_count);
+        expect(written.packages.some((entry: { package_key: string }) => entry.package_key === "session-section-chunks")).toBe(true);
+    });
+});

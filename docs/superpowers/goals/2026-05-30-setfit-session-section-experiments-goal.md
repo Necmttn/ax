@@ -1,0 +1,15070 @@
+# Goal: SetFit Session Section Classifier Experiments
+
+## Objective
+
+Find whether a heavier model layer improves AX classifier usefulness without
+turning ingest into an expensive raw-transcript LLM pass.
+
+The goal is to compare four layers:
+
+1. existing deterministic classifiers
+2. embedding similarity over labeled examples
+3. SetFit chunk classification
+4. session-section assembly from classified chunks
+
+The expected output is not only higher label accuracy. The output must improve
+the graph: better evidence-backed facts, clearer session sections, and stronger
+harness candidates.
+
+## Hypothesis
+
+SetFit should classify small event windows better than keyword rules when the
+meaning depends on phrasing or prior assistant context.
+
+SetFit should not classify full sessions directly. Whole-session meaning should
+come from AX assembling neighboring classified chunks into sections.
+
+## Non-Goals
+
+- Do not send raw private transcripts to hosted training by default.
+- Do not make model-backed classification part of default ingest until smoke
+  numbers prove runtime and value.
+- Do not replace deterministic classifiers; keep them as high-precision seeds
+  and fallback evidence.
+- Do not build a hosted model registry.
+- Do not auto-edit guidance or harness files from model output.
+
+## Experiment Inputs
+
+### Chunk Projection
+
+Each model example should be a stable text projection from an event window:
+
+```text
+USER:
+<current user turn excerpt>
+
+PREVIOUS_ASSISTANT:
+<previous assistant turn excerpt>
+
+RECENT_TOOL_FAILURES:
+<tool name, command, error excerpt>
+
+RECENT_FILES:
+<recent edited/read/searched files when available>
+
+NEXT_ACTION:
+<next assistant/tool action excerpt when used for section assembly evals>
+```
+
+Target chunk size:
+
+- preferred: 100-250 tokens
+- upper bound for first experiment: 384 tokens
+- anything larger must be chunked before SetFit sees it
+
+### Labels
+
+Chunk labels:
+
+- `correction`
+- `direction`
+- `verification_request`
+- `tooling_or_environment_issue`
+- `recovery_action`
+- `approval`
+- `rejection`
+- `none`
+
+Section labels:
+
+- `environment_struggle`
+- `correction_loop`
+- `verification_loop`
+- `successful_recovery`
+- `harness_worthy_lesson`
+- `preference_discovery`
+
+## Experiment Matrix
+
+### E0. Deterministic Baseline
+
+Purpose:
+
+- Establish current classifier pass rate, DB counts, candidate counts, and
+  runtime before adding model code.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers eval
+bun run classifiers:smoke -- --days=7 --limit=10
+bun test src/classifiers/service.test.ts src/classifiers/eval.test.ts src/classifiers/list.test.ts src/classifiers/package-manifest.test.ts src/classifiers/facts.test.ts packages/ax-classifier-direction-event/src/index.test.ts packages/ax-classifier-verification-event/src/index.test.ts
+```
+
+Pass gate:
+
+- Existing eval remains green.
+- Smoke reports nonzero facts, evidence, themes, and candidates.
+
+### E1. Model-Ready Chunk Export
+
+Purpose:
+
+- Prove AX can export deterministic event windows as JSONL suitable for
+  embedding or SetFit training.
+
+Output:
+
+```json
+{
+  "id": "event_window:<turn-id>",
+  "session": "session:<id>",
+  "turn": "turn:<id>",
+  "text": "USER:\n...\nPREVIOUS_ASSISTANT:\n...",
+  "light_labels": ["direction"],
+  "evidence": [
+    {"kind": "previous_assistant", "ref": "turn:<id>"},
+    {"kind": "recent_tool_failure", "ref": "tool_call:<id>"}
+  ]
+}
+```
+
+Metrics:
+
+- exported windows
+- p50/p95 projected token length
+- percent over 384 tokens
+- percent with previous assistant evidence
+- percent with tool/file evidence
+
+Pass gate:
+
+- At least 500 windows export from local data.
+- At least 80% are under 384 projected tokens.
+- At least 70% have prior-context evidence.
+
+### E2. Embedding Similarity Baseline
+
+Purpose:
+
+- Test whether labeled examples alone can recover semantic variants before
+  training SetFit.
+
+Method:
+
+- Embed fixture examples.
+- Classify each held-out example by nearest labeled examples.
+- Use deterministic classifiers as high-precision seed labels, but include hard
+  `none` examples.
+
+Metrics:
+
+- top-1 accuracy
+- macro F1
+- false-positive rate on `none`
+- nearest-example explanation coverage
+- inference p95 per 1k windows after embeddings exist
+
+Pass gate:
+
+- Macro F1 beats deterministic baseline on paraphrase/hard-context cases.
+- `none` false-positive rate stays below 10%.
+
+### E3. SetFit Chunk Classifier
+
+Purpose:
+
+- Train a small local model that can classify event-window chunks from few-shot
+  labeled examples.
+
+Package shape:
+
+```text
+packages/ax-classifier-session-sections/
+  ax.classifier.json
+  pyproject.toml
+  train.py
+  predict.py
+  eval.py
+  eval-fixtures/
+  model/
+```
+
+Runtime:
+
+```sh
+uv run python train.py --fixtures eval-fixtures/chunks.jsonl --out model/
+uv run python predict.py --model model/ --input windows.jsonl --output results.jsonl
+```
+
+Metrics:
+
+- accuracy
+- macro F1
+- per-label precision/recall
+- confusion matrix
+- false-positive rate on `none`
+- training time
+- model artifact size
+- inference p95 per 1k windows
+
+Pass gate:
+
+- At least 60 labeled chunk fixtures.
+- At least 20 hard negatives.
+- Macro F1 >= 0.75 on held-out fixtures.
+- `none` false-positive rate below 10%.
+- Model artifact size documented.
+
+### E4. Deterministic + SetFit Hybrid Gate
+
+Purpose:
+
+- Avoid running model classification where rules are already confident.
+
+Policy:
+
+- deterministic high-confidence result wins
+- SetFit runs on:
+  - no deterministic result
+  - low-confidence deterministic result
+  - conflicting deterministic labels
+  - candidate groups near promotion threshold
+
+Metrics:
+
+- percent of windows sent to SetFit
+- added facts not found by deterministic rules
+- disagreements with deterministic facts
+- graph evidence coverage for model-only facts
+- runtime over 7-day local smoke
+
+Pass gate:
+
+- SetFit runs on less than 40% of windows in the default hybrid policy.
+- At least 10% useful new candidate-supporting facts over deterministic-only.
+- No model-only fact is persisted without evidence refs.
+
+### E5. Session Section Assembler
+
+Purpose:
+
+- Turn local chunk labels into larger session sections with start/end turns and
+  evidence.
+
+Assembler rules:
+
+- Merge adjacent compatible labels within a small turn gap.
+- Split on topic shift, successful verification, or long assistant-only runs.
+- Use deterministic evidence and SetFit confidence to score each section.
+
+Output:
+
+```json
+{
+  "section_type": "correction_loop",
+  "session": "session:<id>",
+  "start_turn": "turn:<id>",
+  "end_turn": "turn:<id>",
+  "labels": ["correction", "recovery_action", "verification_request"],
+  "confidence": 0.82,
+  "evidence": ["classifier_result:<id>", "tool_call:<id>", "file:<id>"]
+}
+```
+
+Metrics:
+
+- section label accuracy
+- boundary overlap score
+- evidence coverage
+- duplicate section rate
+- sections per 100 turns
+
+Pass gate:
+
+- At least 10 labeled session fixtures.
+- At least 15 labeled sections.
+- Boundary overlap score >= 0.65.
+- Evidence coverage >= 90%.
+
+### E6. Graph Usefulness Smoke
+
+Purpose:
+
+- Measure whether model-assisted facts improve AX queries, not just classifier
+  evals.
+
+Queries:
+
+```sh
+bun src/cli/index.ts insights classifier-facts --limit=10
+bun src/cli/index.ts insights classifier-outcomes --limit=10
+bun src/cli/index.ts insights harness-candidates --limit=10
+```
+
+Metrics:
+
+- candidate count before/after SetFit
+- candidate examples with multi-kind evidence
+- new candidates not produced by deterministic-only
+- rejected/noisy candidates after manual review
+
+Pass gate:
+
+- At least 3 new evidence-backed candidate groups appear.
+- Manual review rejects fewer than 30% of new model-assisted candidates.
+
+## Success Benchmarks
+
+| Metric | Current Baseline | Target |
+|---|---:|---:|
+| Chunk fixtures | 26 classifier fixtures | >= 60 chunk fixtures |
+| Hard negatives | 6 reject cases | >= 20 hard negatives |
+| Section fixtures | 0 | >= 10 sessions / >= 15 sections |
+| SetFit macro F1 | n/a | >= 0.75 |
+| `none` false-positive rate | n/a | < 10% |
+| Section boundary overlap | n/a | >= 0.65 |
+| Model artifact size | n/a | measured and documented |
+| Hybrid SetFit run rate | n/a | < 40% of windows |
+| Evidence coverage for model facts | existing classifier facts cite evidence | 100% model facts cite evidence |
+| Graph usefulness | 5 harness candidates in latest smoke | >= 3 useful new model-assisted candidates |
+
+## Definition Of Done
+
+This goal is complete when:
+
+- The deterministic baseline is recorded.
+- A JSONL event-window export exists and reports length/evidence metrics.
+- Embedding similarity has a measured baseline.
+- SetFit training/eval runs locally through `uv`.
+- A hybrid deterministic + SetFit policy is evaluated.
+- Session-section assembly is evaluated on labeled session fixtures.
+- Results are recorded in this goal doc with commands and numbers.
+- The recommendation is clear: adopt, revise, or reject SetFit for AX.
+
+## Iteration Log
+
+Update after each experiment:
+
+```text
+experiment:
+date:
+command:
+dataset:
+result:
+runtime:
+model size:
+graph impact:
+decision:
+next:
+```
+
+### E0. Deterministic Baseline
+
+Date: 2026-05-30
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers eval
+bun test src/classifiers/service.test.ts src/classifiers/eval.test.ts src/classifiers/list.test.ts src/classifiers/package-manifest.test.ts src/classifiers/facts.test.ts packages/ax-classifier-direction-event/src/index.test.ts packages/ax-classifier-verification-event/src/index.test.ts
+bun run classifiers:smoke -- --days=7 --limit=10
+```
+
+Results:
+
+- Classifier eval: `26/26 passed`.
+- Focused classifier tests: `21 pass, 0 fail`.
+- Smoke source turns: `18342`.
+- Smoke classifier facts: `547`.
+- Smoke classifier evidence edges: `3817`.
+- Smoke classifier themes: `10`.
+- Smoke harness candidates: `10`.
+- Evidence counts:
+  - `file / recent_edited_file`: `240`
+  - `tool_call / recent_tool_failure`: `836`
+  - `turn / unknown`: `1839`
+  - `turn / classified_turn`: `557`
+  - `turn / previous_assistant`: `345`
+- Top smoke candidates:
+  - `verification -> add_verification_gate`, `facts=1113`, `reaction-event/direction/verification/session_preference`
+  - `verification -> add_verification_gate`, `facts=434`, `verification-event/verification_request/test_required/session_preference`
+  - `representation -> add_context_guardrail`, `facts=241`, `reaction-event/correction/wrong_output/session_preference`
+
+Decision:
+
+- Deterministic baseline is healthy enough to serve as the control.
+- Next experiment should export model-ready event windows and report chunk size/evidence coverage before adding Python/SetFit runtime.
+
+### E1. Model-Ready Chunk Export
+
+Date: 2026-05-30
+
+Changes:
+
+- Added `scripts/classifier-window-export.ts`.
+- Added `bun run classifiers:export-windows`.
+- Exporter queries recent `turn`, `tool_call`, and `edited` evidence from local SurrealDB.
+- Exporter builds existing classifier event windows, enriches them with canonical tool failures and recent edited files, runs deterministic classifiers for `light_labels`, and writes JSONL.
+- JSONL records include:
+  - `id`, `session`, `turn`, `seq`, `ts`
+  - compact model-ready `text`
+  - approximate token count
+  - deterministic `light_labels` and `light_results`
+  - evidence refs for previous assistant, recent tool failures, and recent edited files
+- Added projection/metrics tests in `scripts/classifier-window-export.test.ts`.
+
+Commands:
+
+```sh
+bun test scripts/classifier-window-export.test.ts
+bun run classifiers:export-windows -- --days=7 --limit=1000 --out=.ax/experiments/model-windows-e1.jsonl
+wc -l .ax/experiments/model-windows-e1.jsonl
+head -1 .ax/experiments/model-windows-e1.jsonl
+```
+
+Results:
+
+- Projection tests: `6 pass, 0 fail`.
+- Export path: `.ax/experiments/model-windows-e1.jsonl`.
+- Exported JSONL lines: `1000`.
+- Source turn rows queried: `83291`.
+- Exported windows: `1000`.
+- Labeled windows: `229`.
+- Approx token p50: `151`.
+- Approx token p95: `238`.
+- Windows over 384 approximate tokens: `0`.
+- Windows under 384 approximate tokens: `100%`.
+- Windows with previous assistant evidence: `74.2%`.
+- Windows with tool/file evidence: `70.7%`.
+
+Gate:
+
+- At least 500 windows export from local data: pass.
+- At least 80% under 384 projected tokens: pass.
+- At least 70% have prior-context evidence: pass.
+
+Decision:
+
+- The event-window projection is suitable for E2 embedding and E3 SetFit experiments.
+- The next experiment should run an embedding-similarity baseline over fixture-derived examples before training SetFit.
+
+### E2. Embedding Similarity Baseline
+
+Date: 2026-05-30
+
+Changes:
+
+- Added `scripts/classifier-embedding-baseline.py`.
+- Added `bun run classifiers:embedding-baseline`.
+- The script runs through `uv` and uses `sentence-transformers/all-MiniLM-L6-v2`.
+- Fixture cases are converted into the same stable projection shape as E1:
+  `USER`, `PREVIOUS_ASSISTANT`, and `RECENT_TOOL_FAILURES`.
+- Empty expected labels become the `none` class.
+- Evaluation uses leave-one-out nearest-neighbor classification over fixture embeddings.
+- Runtime smoke embeds and classifies the E1 JSONL windows against fixture examples.
+- Added pure metric/projection tests in `scripts/classifier_embedding_baseline_test.py`.
+
+Commands:
+
+```sh
+uv run python -m unittest scripts/classifier_embedding_baseline_test.py
+bun run classifiers:embedding-baseline -- --windows=.ax/experiments/model-windows-e1.jsonl --window-limit=1000 --out=.ax/experiments/embedding-baseline-e2.json
+```
+
+Results:
+
+- Unit tests: `4 pass`.
+- Model: `sentence-transformers/all-MiniLM-L6-v2`.
+- Fixture count: `26`.
+- Label distribution:
+  - `approval`: `1`
+  - `correction`: `6`
+  - `direction`: `8`
+  - `none`: `6`
+  - `verification_request`: `5`
+- Top-1 accuracy: `0.5385`.
+- Macro F1: `0.4545`.
+- `none` false-positive rate: `0.5`.
+- Nearest-example explanation coverage: `1.0`.
+- Cached model load time: `6.52s`.
+- Runtime smoke windows: `1000`.
+- Runtime p95 ms / 1k windows: `2290.64`.
+- Runtime predicted label counts over the E1 window sample:
+  - `approval`: `2`
+  - `correction`: `239`
+  - `direction`: `586`
+  - `none`: `117`
+  - `verification_request`: `56`
+
+Gate:
+
+- Macro F1 beats deterministic baseline on paraphrase/hard-context cases: fail; deterministic fixture eval is still `26/26`, embedding nearest-neighbor is only `0.4545` macro F1 on the same fixture set.
+- `none` false-positive rate below 10%: fail; measured rate is `50%`.
+
+Decision:
+
+- Raw nearest-neighbor embeddings over only 26 examples are not good enough for classifier adoption.
+- The failure mode is useful: `none` examples are too sparse and semantically close to real requests, while correction/direction/output-expectation cases are easily confused.
+- Before SetFit, grow the chunk fixture set to at least 60 cases with at least 20 hard negatives, then rerun E2 as the control for E3.
+
+### E2b. Expanded Chunk Fixture Embedding Baseline
+
+Date: 2026-05-30
+
+Changes:
+
+- Added package skeleton `@ax-classifier/session-sections`.
+- Added `packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl`.
+- Added JSONL fixture loading to `scripts/classifier-embedding-baseline.py`.
+- Added threshold sweep metrics to test whether nearest-neighbor embeddings can be made conservative enough for the `none` class.
+- Added JSONL loader and threshold tests in `scripts/classifier_embedding_baseline_test.py`.
+
+Dataset:
+
+- Total chunk fixtures: `66`.
+- Hard negatives: `22`.
+- Label distribution:
+  - `approval`: `4`
+  - `correction`: `8`
+  - `direction`: `10`
+  - `none`: `22`
+  - `recovery_action`: `5`
+  - `rejection`: `3`
+  - `tooling_or_environment_issue`: `6`
+  - `verification_request`: `8`
+
+Commands:
+
+```sh
+uv run python -m unittest scripts/classifier_embedding_baseline_test.py
+bun run classifiers:embedding-baseline -- --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --windows=.ax/experiments/model-windows-e1.jsonl --window-limit=1000 --out=.ax/experiments/embedding-baseline-e2-expanded.json
+```
+
+Results:
+
+- Unit tests: `6 pass`.
+- Model: `sentence-transformers/all-MiniLM-L6-v2`.
+- Top-1 accuracy: `0.1818`.
+- Macro F1: `0.1239`.
+- `none` false-positive rate: `0.7273`.
+- Best macro threshold:
+  - threshold: `0.0`
+  - top-1 accuracy: `0.1818`
+  - macro F1: `0.1239`
+  - `none` false-positive rate: `0.7273`
+- Best none-safe threshold:
+  - threshold: `0.95`
+  - top-1 accuracy: `0.3333`
+  - macro F1: `0.0625`
+  - `none` false-positive rate: `0.0`
+- Cached model load time: `6.55s`.
+- Runtime smoke windows: `1000`.
+- Runtime p95 ms / 1k windows: `2184.68`.
+- Runtime predicted label counts over the E1 window sample:
+  - `approval`: `10`
+  - `correction`: `62`
+  - `direction`: `135`
+  - `none`: `368`
+  - `recovery_action`: `239`
+  - `rejection`: `15`
+  - `tooling_or_environment_issue`: `80`
+  - `verification_request`: `91`
+
+Gate:
+
+- At least 60 chunk fixtures: pass.
+- At least 20 hard negatives: pass.
+- Raw nearest-neighbor embedding classifier: fail.
+- Conservative thresholding for `none`: only possible at threshold `0.95`, which collapses macro F1 to `0.0625`.
+
+Decision:
+
+- The expanded dataset is ready for SetFit E3.
+- Plain embedding nearest-neighbor should not be adopted as a classifier, even with more fixtures and hard negatives.
+- The E3 SetFit experiment should measure whether supervised contrastive fine-tuning can learn event role boundaries that raw similarity misses, especially:
+  - direction vs tooling/environment issue
+  - correction vs rejection
+  - verification request vs recovery action
+  - ordinary planning/status questions vs durable direction
+
+### E3. Initial SetFit Chunk Classifier
+
+Date: 2026-05-30
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/pyproject.toml`.
+- Added package-local SetFit scripts:
+  - `eval.py`
+  - `train.py`
+  - `predict.py`
+- Added `bun run classifiers:setfit-eval`.
+- Pinned package-local `transformers>=4.41,<4.57` after the first run failed because current `transformers` removed `default_logdir`, which `setfit` imports.
+- The eval script:
+  - loads the 66 JSONL chunk fixtures
+  - creates a stratified train/test split
+  - trains `SetFitModel.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")`
+  - evaluates accuracy, macro F1, per-label metrics, confusion, `none` false-positive rate, train time, prediction time, and saved model size
+  - saves the model to `.ax/experiments/setfit-session-sections-model`
+
+Command:
+
+```sh
+bun run classifiers:setfit-eval -- --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --model=sentence-transformers/all-MiniLM-L6-v2 --epochs=1 --batch-size=8 --model-dir=.ax/experiments/setfit-session-sections-model --out=.ax/experiments/setfit-session-sections-e3.json
+```
+
+Results:
+
+- Fixtures: `66`.
+- Train/test split: `49/17`.
+- Test label distribution:
+  - `approval`: `1`
+  - `correction`: `2`
+  - `direction`: `2`
+  - `none`: `6`
+  - `recovery_action`: `1`
+  - `rejection`: `1`
+  - `tooling_or_environment_issue`: `2`
+  - `verification_request`: `2`
+- Accuracy: `0.5294`.
+- Macro F1: `0.2396`.
+- `none` false-positive rate: `0.0`.
+- Train time: `37.8s`.
+- Predict time over 17 test rows: `0.09s`.
+- Saved model size: `91849509` bytes.
+
+Confusion summary:
+
+- All six `none` test rows predicted as `none`.
+- Both `correction` test rows predicted as `correction`.
+- Remaining minority labels are still weak:
+  - `direction`: one correct, one predicted `none`
+  - `verification_request`: predicted as `correction` or `none`
+  - `tooling_or_environment_issue`: predicted as `direction` or `none`
+  - `recovery_action`: predicted as `verification_request`
+  - `approval`: predicted as `none`
+  - `rejection`: predicted as `correction`
+
+Gate:
+
+- SetFit training/eval runs locally through `uv`: pass.
+- At least 60 labeled chunk fixtures: pass.
+- At least 20 hard negatives: pass.
+- Macro F1 >= `0.75`: fail; measured `0.2396`.
+- `none` false-positive rate below `10%`: pass; measured `0.0`.
+- Model artifact size documented: pass.
+
+Decision:
+
+- SetFit is much safer than raw nearest-neighbor embeddings for `none`, but this first model is not yet strong enough for adoption.
+- The likely next improvement is not more epochs; it is better label geometry:
+  - split event role from topic, or make this multi-task
+  - collapse early labels into fewer trainable chunk classes
+  - add more examples for weak minority classes before another SetFit run
+- Do not persist SetFit model facts into the AX graph yet.
+
+### E3b. Coarse SetFit Label Geometry
+
+Date: 2026-05-30
+
+Changes:
+
+- Added `--label-mode=fine|coarse` to `packages/ax-classifier-session-sections/eval.py`.
+- Added coarse label mapping tests in `packages/ax-classifier-session-sections/eval_test.py`.
+- Coarse labels group event roles that raw similarity confused:
+  - `direction` + `tooling_or_environment_issue` -> `environment_or_preference_signal`
+  - `correction` + `rejection` -> `correction_or_rejection_signal`
+  - `verification_request` + `recovery_action` -> `verification_or_recovery_signal`
+  - `approval` remains `approval`
+  - `none` remains `none`
+
+Commands:
+
+```sh
+uv run python -m unittest scripts/classifier_embedding_baseline_test.py packages/ax-classifier-session-sections/eval_test.py
+bun run classifiers:setfit-eval -- --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --model=sentence-transformers/all-MiniLM-L6-v2 --epochs=1 --batch-size=8 --label-mode=coarse --model-dir=.ax/experiments/setfit-session-sections-coarse-model --out=.ax/experiments/setfit-session-sections-e3-coarse.json
+```
+
+Results:
+
+- Unit tests: `8 pass`.
+- Fixtures: `66`.
+- Train/test split: `49/17`.
+- Accuracy: `0.5882`.
+- Macro F1: `0.4485`.
+- `none` false-positive rate: `0.3333`.
+- Train time: `31.34s`.
+- Predict time over 17 test rows: `0.03s`.
+- Saved model size: `91837768` bytes.
+
+Comparison with fine-label SetFit:
+
+| Metric | Fine E3 | Coarse E3b |
+|---|---:|---:|
+| Accuracy | `0.5294` | `0.5882` |
+| Macro F1 | `0.2396` | `0.4485` |
+| `none` false-positive rate | `0.0` | `0.3333` |
+| Train time | `37.8s` | `31.34s` |
+| Model size bytes | `91849509` | `91837768` |
+
+Gate:
+
+- SetFit training/eval runs locally through `uv`: pass.
+- Macro F1 >= `0.75`: fail; measured `0.4485`.
+- `none` false-positive rate below `10%`: fail; measured `0.3333`.
+
+Decision:
+
+- Coarse label geometry improves the model's ability to identify useful signal classes, but makes it less safe around ordinary `none` turns.
+- Fine-label SetFit is safer; coarse-label SetFit is more useful.
+- The next experiment should be E4 hybrid gating:
+  - deterministic high-confidence labels win
+  - SetFit only runs on unlabeled or ambiguous windows
+  - model-only positive labels require explicit evidence refs
+  - `none` should default to deterministic/threshold policy, not coarse SetFit alone
+
+### E4. Deterministic + SetFit Hybrid Gate
+
+Date: 2026-05-30
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/hybrid_gate.py`.
+- Added `packages/ax-classifier-session-sections/hybrid_gate_test.py`.
+- Added `bun run classifiers:hybrid-gate`.
+- The first naive policy sent every unlabeled row to SetFit and failed:
+  - SetFit run rate: `0.815`
+  - model-only evidence coverage: `0.7444`
+  - failures:
+    - SetFit run rate not below `40%`
+    - model-only positives did not all have evidence refs
+- Tightened the default policy:
+  - deterministic high-confidence rows are skipped
+  - conflicting deterministic rows are sent
+  - unlabeled rows are sent only when they have causal evidence:
+    - `previous_assistant`
+    - and `recent_tool_failure` or `recent_edited_file`
+  - unlabeled rows must also be context-rich: `approx_tokens >= 180`
+  - model-only positive labels require confidence `>= 0.60`
+
+Commands:
+
+```sh
+uv run python -m unittest packages/ax-classifier-session-sections/hybrid_gate_test.py
+bun run classifiers:hybrid-gate -- --windows=.ax/experiments/model-windows-e1.jsonl --model-dir=.ax/experiments/setfit-session-sections-coarse-model --limit=1000 --out=.ax/experiments/hybrid-gate-e4.json
+```
+
+Results:
+
+- Unit tests: `3 pass`.
+- Windows: `1000`.
+- Deterministic positives: `229`.
+- SetFit sent: `341`.
+- SetFit run rate: `0.341`.
+- Run reasons:
+  - `conflicting_deterministic_labels`: `44`
+  - `unlabeled`: `297`
+- Skip reasons:
+  - `deterministic_high_confidence`: `185`
+  - `unlabeled_not_context_rich`: `255`
+  - `unlabeled_without_causal_evidence`: `219`
+- Model prediction counts:
+  - `environment_or_preference_signal`: `306`
+  - `none`: `3`
+  - `verification_or_recovery_signal`: `32`
+- Model-only positive count: `47`.
+- Model-only positives with evidence: `47`.
+- Model-only evidence coverage: `1.0`.
+- Useful new fact rate over deterministic positives: `0.2052`.
+- Disagreement count: `0`.
+- Runtime p95 ms / 1k sent windows: `2417.31`.
+
+Gate:
+
+- SetFit runs on less than `40%` of windows: pass; measured `34.1%`.
+- At least `10%` useful new candidate-supporting facts over deterministic-only: pass; measured `20.52%`.
+- No model-only fact is persisted without evidence refs: pass for the proposed model-only positives; evidence coverage is `100%`.
+
+Decision:
+
+- E4 hybrid gating is viable as a smoke policy.
+- Do not run SetFit on every unlabeled window.
+- The usable policy is evidence-gated and context-rich:
+  - use deterministic classifiers for high-confidence exact events
+  - use SetFit only to add evidence-backed section-seed facts where the deterministic layer is silent or conflicted
+- Next experiment should assemble nearby deterministic/model section-seed labels into session sections and evaluate boundary overlap.
+
+### E5. Session Section Assembler
+
+Date: 2026-05-30
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/eval-fixtures/sections.json`.
+- Added `packages/ax-classifier-session-sections/section_assembler.py`.
+- Added `packages/ax-classifier-session-sections/section_assembler_test.py`.
+- Added `bun run classifiers:assemble-sections`.
+- The assembler maps section-seed labels into section types:
+  - `direction`, `tooling_or_environment_issue`, `environment_or_preference_signal` -> `preference_discovery`
+  - `correction`, `rejection`, `correction_or_rejection_signal` -> `correction_loop`
+  - `verification_request`, `recovery_action`, `verification_or_recovery_signal` -> `verification_loop`
+- Adjacent compatible seeds merge when they are within `max_gap=2` turns.
+- Evaluation reports section label accuracy, inclusive span boundary overlap, evidence coverage, duplicate section rate, and predicted type counts.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/section_assembler_test.py
+bun run classifiers:assemble-sections -- --fixtures=packages/ax-classifier-session-sections/eval-fixtures/sections.json --out=.ax/experiments/session-section-assembly-e5.json
+```
+
+Results:
+
+- Unit tests: `3 pass`.
+- Labeled session fixtures: `10`.
+- Expected sections: `22`.
+- Predicted sections: `22`.
+- Matched sections: `22`.
+- Section label accuracy: `1.0`.
+- Boundary overlap: `1.0`.
+- Evidence coverage: `1.0`.
+- Duplicate section rate: `0.0`.
+- Predicted type counts:
+  - `correction_loop`: `7`
+  - `preference_discovery`: `8`
+  - `verification_loop`: `7`
+
+Gate:
+
+- At least `10` labeled session fixtures: pass.
+- At least `15` labeled sections: pass.
+- Boundary overlap score >= `0.65`: pass.
+- Evidence coverage >= `90%`: pass.
+
+Decision:
+
+- The deterministic section assembler passes the controlled benchmark.
+- This proves the section assembly contract and metrics, but not yet live graph usefulness.
+- Next experiment should run an E6 graph usefulness smoke that connects the E4 hybrid output to section/candidate counts and decides whether model-assisted sections create useful new query surfaces.
+
+### E6. Graph Usefulness Smoke
+
+Date: 2026-05-30
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/graph_usefulness.py`.
+- Added `packages/ax-classifier-session-sections/graph_usefulness_test.py`.
+- Added `bun run classifiers:graph-usefulness`.
+- The smoke combines:
+  - E4 hybrid-gate report
+  - E5 section-assembly report
+- It derives section candidate groups:
+  - `correction_loop` -> `add_context_guardrail`
+  - `preference_discovery` -> `record_guidance_or_environment_preference`
+  - `verification_loop` -> `add_verification_gate`
+- This is a pre-review usefulness smoke. It does not persist SetFit facts into the AX graph and does not claim human-reviewed candidate quality.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/graph_usefulness_test.py
+bun run classifiers:graph-usefulness -- --hybrid=.ax/experiments/hybrid-gate-e4.json --sections=.ax/experiments/session-section-assembly-e5.json --out=.ax/experiments/graph-usefulness-e6.json
+```
+
+Results:
+
+- Unit tests: `3 pass`.
+- Deterministic positives: `229`.
+- Model-only positives: `47`.
+- Useful new fact rate: `0.2052`.
+- Sections: `22`.
+- Section evidence coverage: `1.0`.
+- Model-only evidence coverage: `1.0`.
+- Model-assisted candidate groups: `3`.
+- Candidate groups:
+  - `section_candidate:correction_loop`, sections `7`, action `add_context_guardrail`
+  - `section_candidate:preference_discovery`, sections `8`, action `record_guidance_or_environment_preference`
+  - `section_candidate:verification_loop`, sections `7`, action `add_verification_gate`
+- Manual review reject rate: `null`; no human review captured yet.
+
+Gate:
+
+- At least `3` new evidence-backed candidate groups appear: pass.
+- Candidate examples with evidence coverage: pass, section evidence coverage and model-only evidence coverage are both `1.0`.
+- Manual review rejects fewer than `30%`: not measured; this run is explicitly pre-review and records `manual_review_reject_rate: null`.
+
+Decision:
+
+- The model-assisted section path is useful enough to keep as an experimental package and benchmark track.
+- Do not adopt/persist SetFit results into the production AX graph yet because manual review quality is not measured and SetFit macro F1 remains below target.
+- Recommendation: revise, do not reject. Keep deterministic classifiers as production facts; use SetFit only behind evidence-gated hybrid smoke until there is human-reviewed candidate quality.
+
+### E6b. Manual Review Gate
+
+Date: 2026-05-30
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/review.py`.
+- Added `packages/ax-classifier-session-sections/review_test.py`.
+- Added `bun run classifiers:review-sections`.
+- Generated `.ax/experiments/graph-usefulness-review.json` from the E6 candidate groups.
+- Generated `.ax/experiments/graph-usefulness-review-report.json` to make the remaining manual-review gate measurable.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/review_test.py
+bun run classifiers:review-sections -- --mode=generate --graph=.ax/experiments/graph-usefulness-e6.json --review=.ax/experiments/graph-usefulness-review.json --out=.ax/experiments/graph-usefulness-review-report.json
+```
+
+Results:
+
+- Unit tests: `3 pass`.
+- Candidate review rows: `3`.
+- Reviewed: `0`.
+- Pending: `3`.
+- Rejected: `0`.
+- Reject rate: `null`.
+- Generated candidates:
+  - `section_candidate:correction_loop`
+  - `section_candidate:preference_discovery`
+  - `section_candidate:verification_loop`
+- Review verifier failures:
+  - `review still has pending candidates`
+  - `no reviewed candidates`
+
+Gate:
+
+- Manual review rejects fewer than `30%`: not proven.
+- The review mechanism exists, but the candidates still require human verdicts.
+
+Decision:
+
+- The goal should remain active.
+- To complete the manual-review gate, a human should edit `.ax/experiments/graph-usefulness-review.json`, set each verdict to `accept`, `revise`, or `reject`, then run:
+
+```sh
+bun run classifiers:review-sections -- --mode=evaluate --review=.ax/experiments/graph-usefulness-review.json --out=.ax/experiments/graph-usefulness-review-report.json
+```
+
+### E6c. Actionable Manual Review Artifact
+
+Date: 2026-05-30
+
+Changes:
+
+- Enriched `packages/ax-classifier-session-sections/review.py` so generated review rows include representative section examples.
+- Added `--sections` and `--examples-per-candidate` to `bun run classifiers:review-sections`.
+- Each candidate now carries up to three examples with:
+  - `session`
+  - `start_seq`
+  - `end_seq`
+  - source labels
+  - evidence refs
+- Added review tests for example attachment and example limits.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/review_test.py
+bun run classifiers:review-sections -- --mode=generate --graph=.ax/experiments/graph-usefulness-e6.json --sections=.ax/experiments/session-section-assembly-e5.json --review=.ax/experiments/graph-usefulness-review.json --out=.ax/experiments/graph-usefulness-review-report.json
+```
+
+Results:
+
+- Unit tests: `4 pass`.
+- Candidate review rows: `3`.
+- Reviewed: `0`.
+- Pending: `3`.
+- Rejected: `0`.
+- Reject rate: `null`.
+- Examples attached:
+  - `section_candidate:correction_loop`: `3`
+  - `section_candidate:preference_discovery`: `3`
+  - `section_candidate:verification_loop`: `3`
+- Review verifier failures remain expected:
+  - `review still has pending candidates`
+  - `no reviewed candidates`
+
+Decision:
+
+- The manual review artifact is now actionable without opening the section assembly report separately.
+- The goal still remains active because the manual verdict gate is not complete.
+
+### E6d. Reviewability Gate And Markdown Brief
+
+Date: 2026-05-30
+
+Changes:
+
+- Tightened `packages/ax-classifier-session-sections/review.py` so review evaluation checks candidate reviewability, not only verdict counts.
+- A candidate is reviewable only when it has at least one example and at least one evidence-backed example.
+- Added `candidates_missing_examples`, `candidates_missing_evidence`, and `reviewable` to the review report.
+- Added `--brief`, which writes a human-readable Markdown review file at `.ax/experiments/graph-usefulness-review.md`.
+- The CLI now prints the reviewable candidate count.
+- Added tests for missing examples, missing evidence, and Markdown rendering.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/review_test.py
+bun run classifiers:review-sections -- --mode=generate --graph=.ax/experiments/graph-usefulness-e6.json --sections=.ax/experiments/session-section-assembly-e5.json --review=.ax/experiments/graph-usefulness-review.json --brief=.ax/experiments/graph-usefulness-review.md --out=.ax/experiments/graph-usefulness-review-report.json
+```
+
+Results:
+
+- Unit tests: `6 pass`.
+- Candidate review rows: `3`.
+- Reviewable candidates: `3`.
+- Reviewed: `0`.
+- Pending: `3`.
+- Rejected: `0`.
+- Reject rate: `null`.
+- Candidates missing examples: `0`.
+- Candidates missing evidence-backed examples: `0`.
+- Markdown brief generated: `.ax/experiments/graph-usefulness-review.md`.
+- Review verifier failures remain expected:
+  - `review still has pending candidates`
+  - `no reviewed candidates`
+
+Decision:
+
+- The review gate is now measurable on two dimensions:
+  - whether candidates are reviewable from attached evidence
+  - whether reviewed candidates satisfy the `<30%` reject-rate gate
+- The reviewability dimension passes; the human verdict dimension remains open.
+
+### E6e. Markdown Review Sync
+
+Date: 2026-05-30
+
+Changes:
+
+- Added `--mode=sync` to `packages/ax-classifier-session-sections/review.py`.
+- Reviewers can now edit `.ax/experiments/graph-usefulness-review.md`, then sync verdicts and rationales back into `.ax/experiments/graph-usefulness-review.json`.
+- The sync parser updates only known candidate IDs and preserves attached examples/evidence.
+- Added tests for Markdown verdict parsing and JSON sync behavior.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/review_test.py
+bun run classifiers:review-sections -- --mode=sync --review=.ax/experiments/graph-usefulness-review.json --brief=.ax/experiments/graph-usefulness-review.md --out=.ax/experiments/graph-usefulness-review-report.json
+```
+
+Results:
+
+- Unit tests: `8 pass`.
+- Sync command read the Markdown brief and rewrote the JSON review.
+- Candidate review rows: `3`.
+- Reviewable candidates: `3`.
+- Reviewed: `0`.
+- Pending: `3`.
+- Rejected: `0`.
+- Reject rate: `null`.
+- Review verifier failures remain expected:
+  - `review still has pending candidates`
+  - `no reviewed candidates`
+
+Decision:
+
+- The manual-review workflow is now round-trippable:
+  - generate JSON + Markdown
+  - edit Markdown verdicts/rationales
+  - sync Markdown back to JSON
+  - evaluate reject-rate gate
+- The remaining work is the actual human verdicts, not missing review plumbing.
+
+### E7. Package Manifest And Contributor Documentation
+
+Date: 2026-05-30
+
+Changes:
+
+- Fixed `packages/ax-classifier-session-sections/ax.classifier.json` so it conforms to the repo classifier package manifest contract.
+- The session-section package now declares:
+  - `key`: `session-section-chunks`
+  - `kind`: `local_model`
+  - `entrypoint`: `./predict.py`
+  - chunk labels
+  - section/candidate targets
+  - chunk and section fixtures
+  - optional local model assets under `.ax/experiments/`
+- Added `packages/ax-classifier-session-sections/README.md`.
+- The README documents:
+  - what the package classifies
+  - the package contract
+  - the full experiment command track
+  - the manual review round trip
+  - contributor checklist and focused verification commands
+- Added manifest coverage for the session-section package in `src/classifiers/package-manifest.test.ts`.
+
+Commands:
+
+```sh
+bun test src/classifiers/package-manifest.test.ts
+```
+
+Results:
+
+- Manifest tests: `4 pass`.
+- The package manifest now loads through `loadClassifierPackageManifest`.
+
+Decision:
+
+- The package shape now matches the earlier open-source/contributor goal: fixtures and eval logic live in a dedicated classifier package, large models are optional assets, and contributors have a documented path for adding/evaluating classifier changes.
+- This does not close the graph usefulness gate; review verdicts remain pending.
+
+### E7b. Strict Package Manifest Validation
+
+Date: 2026-05-30
+
+Changes:
+
+- Tightened `src/classifiers/package-manifest.ts` so classifier package manifests reject unsupported enum values and malformed assets.
+- Manifest validation now checks:
+  - supported classifier kinds: `heuristic`, `manual`, `local_model`, `llm_review`
+  - supported inputs: `event_window`, `turn`, `session`, `tool_call`
+  - string-only `labels`, `targets`, and `fixtures`
+  - supported asset kinds: `fixture`, `dataset`, `model`, `artifact`
+  - every asset has either `path` or `url`
+  - optional asset metadata has the right primitive types
+- Added regression tests for unsupported `kind`, unsupported `input`, unsupported asset kind, and missing asset location.
+
+Commands:
+
+```sh
+bun test src/classifiers/package-manifest.test.ts
+```
+
+Results:
+
+- Manifest tests: `6 pass`.
+
+Decision:
+
+- Classifier package contribution is safer: invalid package metadata now fails before a classifier is registered or evaluated.
+- This directly protects the session-section package shape because its earlier invalid `kind: embedding` would now be rejected.
+- Graph usefulness still remains gated on human verdicts.
+
+### E6f. Review Rationale Requirement
+
+Date: 2026-05-30
+
+Changes:
+
+- Tightened `packages/ax-classifier-session-sections/review.py` so every reviewed candidate must include a non-empty rationale.
+- Added `reviewed_candidates_missing_rationale` to the review report.
+- Added a regression test that fails reviewed candidates with empty rationales.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/review_test.py
+bun run classifiers:review-sections -- --mode=evaluate --review=.ax/experiments/graph-usefulness-review.json --out=.ax/experiments/graph-usefulness-review-report.json
+```
+
+Results:
+
+- Review tests: `9 pass`.
+- Candidate review rows: `3`.
+- Reviewable candidates: `3`.
+- Reviewed: `0`.
+- Pending: `3`.
+- Rejected: `0`.
+- Reject rate: `null`.
+- Reviewed candidates missing rationale: `0`.
+- Review verifier failures remain expected:
+  - `review still has pending candidates`
+  - `no reviewed candidates`
+
+Decision:
+
+- The manual gate now requires evidence, verdicts, and rationales.
+- The current artifact still cannot pass because all candidates are pending, but once a reviewer marks candidates accepted/revised/rejected, the verifier will reject empty rationale decisions.
+
+### E6g. Candidate-Specific Review Criteria
+
+Date: 2026-05-30
+
+Changes:
+
+- Added candidate-specific `review_criteria` to `packages/ax-classifier-session-sections/review.py`.
+- Generated JSON and Markdown review artifacts now tell a reviewer what `accept`, `revise`, and `reject` mean for each candidate type:
+  - `correction_loop`
+  - `preference_discovery`
+  - `verification_loop`
+- Added test coverage that generated review rows and Markdown briefs include the criteria.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/review_test.py
+bun run classifiers:review-sections -- --mode=generate --graph=.ax/experiments/graph-usefulness-e6.json --sections=.ax/experiments/session-section-assembly-e5.json --review=.ax/experiments/graph-usefulness-review.json --brief=.ax/experiments/graph-usefulness-review.md --out=.ax/experiments/graph-usefulness-review-report.json
+```
+
+Results:
+
+- Review tests: `9 pass`.
+- Candidate review rows: `3`.
+- Reviewable candidates: `3`.
+- Reviewed: `0`.
+- Pending: `3`.
+- Rejected: `0`.
+- Reject rate: `null`.
+- Review criteria attached to all 3 candidate rows.
+- Markdown brief includes review criteria for all 3 candidate sections.
+- Review verifier failures remain expected:
+  - `review still has pending candidates`
+  - `no reviewed candidates`
+
+Decision:
+
+- The manual review packet now includes evidence, verdict/rationale fields, and explicit accept/revise/reject criteria.
+- The remaining unmet gate is still the actual human verdict pass.
+
+### E8. Reviewed Candidate Promotion Plan
+
+Date: 2026-05-30
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/promotion_plan.py`.
+- Added `packages/ax-classifier-session-sections/promotion_plan_test.py`.
+- Added `bun run classifiers:promotion-plan`.
+- Documented the graph promotion contract in `packages/ax-classifier-session-sections/README.md`.
+- The promotion plan is an intermediate artifact. It does not write to SurrealDB.
+- Promotion facts include:
+  - `id`
+  - `source_candidate_id`
+  - `fact_type`
+  - `section_type`
+  - `proposed_action`
+  - `verdict`
+  - `rationale`
+  - `sections`
+  - `evidence_refs`
+- Evidence refs become `supported_by` edge candidates.
+- Promotion is blocked when:
+  - any candidate is still pending
+  - no candidates are reviewed
+  - reviewed candidates lack rationales
+  - promotable candidates lack evidence
+  - manual review reject rate is `>= 30%`
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/promotion_plan_test.py
+bun run classifiers:promotion-plan -- --review=.ax/experiments/graph-usefulness-review.json --out=.ax/experiments/graph-promotion-plan.json
+```
+
+Results:
+
+- Promotion plan tests: `4 pass`.
+- Current promotion plan schema: `ax.graph_promotion_plan.v1`.
+- Reviewed candidates: `0`.
+- Promotable candidates: `0`.
+- Pending candidates: `3`.
+- Facts: `0`.
+- Evidence edges: `0`.
+- Pending candidate ids:
+  - `section_candidate:correction_loop`
+  - `section_candidate:preference_discovery`
+  - `section_candidate:verification_loop`
+- Promotion failures remain expected:
+  - `review still has pending candidates`
+  - `no reviewed candidates`
+
+Decision:
+
+- The post-review graph contract is now explicit and testable.
+- Once review verdicts exist, accepted/revised candidates can become graph-safe fact and evidence-edge candidates.
+- The production graph should still not ingest these model-assisted facts until review and promotion gates pass.
+
+### E9. Consolidated Experiment Summary
+
+Date: 2026-05-30
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/experiment_summary.py`.
+- Added `packages/ax-classifier-session-sections/experiment_summary_test.py`.
+- Added `bun run classifiers:experiment-summary`.
+- Updated `packages/ax-classifier-session-sections/README.md`.
+- The summary command aggregates the current experiment artifacts into one machine-readable status file:
+  `.ax/experiments/session-section-experiment-summary.json`.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/experiment_summary_test.py
+bun run classifiers:experiment-summary -- --out=.ax/experiments/session-section-experiment-summary.json
+```
+
+Results:
+
+- Summary tests: `2 pass`.
+- Summary schema: `ax.session_section_experiment_summary.v1`.
+- Recommendation: `revise`.
+- Embedding decision: `reject_plain_embedding_classifier`.
+- Production default: `deterministic_classifiers_only`.
+- Experimental path: `local_model_hybrid_gate_plus_section_assembly`.
+- Passed gates: `8/14`.
+- Failed gates:
+  - `embedding_none_false_positive_rate`: `0.7273`, target `<0.10`
+  - `fine_setfit_macro_f1`: `0.2396`, target `>=0.75`
+  - `coarse_setfit_macro_f1`: `0.4485`, target `>=0.75`
+  - `review_all_candidates_reviewed`: reviewed `0`, pending `3`
+  - `review_reject_rate`: `null`, target `<0.30`
+  - `promotion_plan_ready`: promotable `0`, pending review failures
+- Passing gates include:
+  - fine SetFit `none` false-positive rate: `0.0`
+  - hybrid SetFit run rate: `0.341`
+  - hybrid useful new fact rate: `0.2052`
+  - model-only evidence coverage: `1.0`
+  - section boundary overlap: `1.0`
+  - section evidence coverage: `1.0`
+  - graph candidate groups: `3`
+  - reviewable candidates: `3/3`
+
+Decision:
+
+- The consolidated status makes the recommendation explicit: revise, do not adopt into default ingest.
+- Plain embedding similarity is rejected as a classifier.
+- Deterministic classifiers remain the production default.
+- The local-model path remains experimental because SetFit accuracy is below target and the human-review/promotion gates are not satisfied.
+
+### E10. SetFit Failure Analysis And Next Labeling Tasks
+
+Date: 2026-05-30
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/failure_analysis.py`.
+- Added `packages/ax-classifier-session-sections/failure_analysis_test.py`.
+- Added `bun run classifiers:failure-analysis`.
+- Updated `packages/ax-classifier-session-sections/README.md`.
+- The analysis reads fine and coarse SetFit eval reports and emits:
+  - weak labels
+  - confusion pairs
+  - misclassified fixture ids
+  - next labeling tasks
+  - recommended next actions
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/failure_analysis_test.py
+bun run classifiers:failure-analysis -- --out=.ax/experiments/setfit-failure-analysis.json
+```
+
+Results:
+
+- Failure analysis tests: `3 pass`.
+- Output schema: `ax.setfit_failure_analysis.v1`.
+- Fine SetFit macro F1: `0.2396`.
+- Coarse SetFit macro F1: `0.4485`.
+- Fine weak labels: `5`.
+- Coarse weak labels: `2`.
+- Labeling tasks: `7`.
+- Fine weak labels and additional example targets:
+  - `rejection`: F1 `0.0`, fixtures `3`, add `9`
+  - `approval`: F1 `0.0`, fixtures `4`, add `8`
+  - `recovery_action`: F1 `0.0`, fixtures `5`, add `7`
+  - `tooling_or_environment_issue`: F1 `0.0`, fixtures `6`, add `6`
+  - `verification_request`: F1 `0.0`, fixtures `8`, add `4`
+- Coarse weak labels:
+  - `approval`: F1 `0.0`, fixtures `4`, add `8`
+  - `verification_or_recovery_signal`: F1 `0.4`, fixtures `13`, add `0` but add boundary examples against `none`
+- Top coarse failure modes:
+  - `none` predicted as `environment_or_preference_signal`: `2`
+  - `verification_or_recovery_signal` predicted as `none`: `2`
+- Recommended next actions:
+  - keep deterministic classifiers as production default
+  - do not expand plain embedding nearest-neighbor as a classifier
+  - add labeled boundary examples for weak SetFit labels before another training run
+  - prioritize `none` vs signal hard negatives for coarse mode
+
+Decision:
+
+- The model-quality blocker is now actionable: the next training iteration should not change architecture first; it should add targeted boundary fixtures for weak labels and `none` false-positive cases.
+- This still does not satisfy the human-review/promotion gates.
+
+### E11. Targeted Fixture Expansion And SetFit Rerun
+
+Date: 2026-05-30
+
+Changes:
+
+- Expanded `packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl` from `66` to `100` examples.
+- Added targeted boundary fixtures from E10 failure analysis:
+  - `rejection`: from `3` to `12`
+  - `approval`: from `4` to `12`
+  - `recovery_action`: from `5` to `12`
+  - `tooling_or_environment_issue`: from `6` to `12`
+  - `verification_request`: from `8` to `12`
+- Kept existing high-support labels:
+  - `direction`: `10`
+  - `correction`: `8`
+  - `none`: `22`
+- Reran embedding baseline, fine SetFit, coarse SetFit, hybrid gate, graph usefulness, review generation, promotion plan, failure analysis, and experiment summary.
+
+Commands:
+
+```sh
+python3 - <<'PY'
+import json, collections
+p='packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl'
+c=collections.Counter(); ids=[]
+for i,line in enumerate(open(p),1):
+    if not line.strip(): continue
+    row=json.loads(line)
+    assert row.get('id'), i
+    assert row.get('label'), i
+    assert row.get('text'), i
+    c[row['label']]+=1; ids.append(row['id'])
+print('lines', sum(c.values()))
+print(dict(sorted(c.items())))
+print('dupes', [x for x,n in collections.Counter(ids).items() if n>1])
+PY
+bun run classifiers:setfit-eval -- --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --model=sentence-transformers/all-MiniLM-L6-v2 --epochs=1 --batch-size=8 --model-dir=.ax/experiments/setfit-session-sections-model --out=.ax/experiments/setfit-session-sections-e3.json
+bun run classifiers:setfit-eval -- --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --model=sentence-transformers/all-MiniLM-L6-v2 --epochs=1 --batch-size=8 --label-mode=coarse --model-dir=.ax/experiments/setfit-session-sections-coarse-model --out=.ax/experiments/setfit-session-sections-e3-coarse.json
+bun run classifiers:embedding-baseline -- --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --windows=.ax/experiments/model-windows-e1.jsonl --window-limit=1000 --out=.ax/experiments/embedding-baseline-e2-expanded.json
+bun run classifiers:hybrid-gate -- --windows=.ax/experiments/model-windows-e1.jsonl --model-dir=.ax/experiments/setfit-session-sections-coarse-model --limit=1000 --out=.ax/experiments/hybrid-gate-e4.json
+bun run classifiers:graph-usefulness -- --hybrid=.ax/experiments/hybrid-gate-e4.json --sections=.ax/experiments/session-section-assembly-e5.json --out=.ax/experiments/graph-usefulness-e6.json
+bun run classifiers:failure-analysis -- --out=.ax/experiments/setfit-failure-analysis.json
+bun run classifiers:experiment-summary -- --out=.ax/experiments/session-section-experiment-summary.json
+```
+
+Results:
+
+- Fixture counts after expansion:
+  - total: `100`
+  - `approval`: `12`
+  - `correction`: `8`
+  - `direction`: `10`
+  - `none`: `22`
+  - `recovery_action`: `12`
+  - `rejection`: `12`
+  - `tooling_or_environment_issue`: `12`
+  - `verification_request`: `12`
+  - duplicate ids: `0`
+- Fine SetFit after expansion:
+  - fixtures: `100`
+  - train/test: `75/25`
+  - accuracy: `0.56`
+  - macro F1: `0.514`
+  - `none` false-positive rate: `0.5`
+  - train seconds: `70.1`
+  - model size bytes: `91849520`
+- Coarse SetFit after expansion:
+  - fixtures: `100`
+  - train/test: `74/26`
+  - accuracy: `0.7308`
+  - macro F1: `0.7358`
+  - `none` false-positive rate: `0.1667`
+  - train seconds: `64.27`
+  - model size bytes: `91838266`
+- Embedding baseline after expansion:
+  - top-1 accuracy: `0.22`
+  - macro F1: `0.199`
+  - `none` false-positive rate: `0.7273`
+  - best none-safe threshold: `0.95`, macro F1 `0.0451`
+- Hybrid gate with the updated coarse model:
+  - windows: `1000`
+  - SetFit run rate: `0.341`
+  - model-only positives: `92`
+  - model-only evidence coverage: `1.0`
+  - useful new fact rate: `0.4017`
+  - disagreements: `0`
+  - failures: `0`
+- Graph usefulness after updated hybrid:
+  - deterministic positives: `229`
+  - model-only positives: `92`
+  - useful new fact rate: `0.4017`
+  - section evidence coverage: `1.0`
+  - candidate groups: `3`
+- Failure analysis after expansion:
+  - fine weak labels: `2`
+    - `direction`: F1 `0.0`, fixtures `10`, add `2`
+    - `recovery_action`: F1 `0.4`, fixtures `12`, add `0` but add boundary cases
+  - coarse weak labels: `0`
+  - labeling tasks: `2`
+- Consolidated summary after expansion:
+  - recommendation: `revise`
+  - passed gates: `7/14`
+  - failed gates:
+    - `embedding_none_false_positive_rate`: `0.7273`
+    - `fine_setfit_macro_f1`: `0.514`
+    - `fine_setfit_none_false_positive_rate`: `0.5`
+    - `coarse_setfit_macro_f1`: `0.7358`, just below target `0.75`
+    - `review_all_candidates_reviewed`: reviewed `0`, pending `3`
+    - `review_reject_rate`: `null`
+    - `promotion_plan_ready`: promotable `0`
+
+Decision:
+
+- Targeted fixture expansion materially improved the model path:
+  - fine macro F1 improved from `0.2396` to `0.514`
+  - coarse macro F1 improved from `0.4485` to `0.7358`
+  - hybrid useful new fact rate improved from `0.2052` to `0.4017`
+- It also exposed a tradeoff:
+  - fine mode became less safe for `none`
+  - coarse mode is close to the macro-F1 target but still has `none` false positives
+- Next model-quality work should add:
+  - `direction` boundary examples
+  - `recovery_action` vs verification boundary examples
+  - more coarse `none` hard negatives against `environment_or_preference_signal`
+- The goal remains active because model gates and human-review/promotion gates are still not satisfied.
+
+## E12 - Rejected Fixture Expansion Ablation
+
+Question:
+
+- Can we push coarse SetFit over the `0.75` macro-F1 gate by adding another small batch of direction/recovery/none boundary cases?
+
+What changed:
+
+- Added a temporary 20-row fixture batch, bringing the fixture file from `100` to `120` rows.
+- The batch targeted:
+  - direction vs approval/rejection ambiguity
+  - recovery vs verification ambiguity
+  - hard `none` negatives that mention classifiers, reports, or plans but do not encode a reusable fact
+
+Result:
+
+- The ablation made the coarse model worse:
+  - coarse macro F1 fell from `0.7358` to `0.6569`
+  - `none` false-positive rate rose from `0.1667` to `0.5714`
+
+Decision:
+
+- Rejected the 20-row ablation and removed those fixtures.
+- Restored the fixture file to the known-good 100-row set:
+  - total: `100`
+  - `approval`: `12`
+  - `correction`: `8`
+  - `direction`: `10`
+  - `none`: `22`
+  - `recovery_action`: `12`
+  - `rejection`: `12`
+  - `tooling_or_environment_issue`: `12`
+  - `verification_request`: `12`
+  - duplicate ids: `0`
+- Reran the coarse SetFit report from the restored 100-row set:
+  - accuracy: `0.7308`
+  - macro F1: `0.7358`
+  - `none` false-positive rate: `0.1667`
+  - train seconds: `63.67`
+  - model size bytes: `91838266`
+- Refreshed dependent reports:
+  - hybrid gate: SetFit run rate `0.341`, model-only positives `92`, useful new fact rate `0.4017`, failures `0`
+  - graph usefulness: candidate groups `3`, section evidence coverage `1.0`, failures `0`
+  - failure analysis: fine weak labels `2`, coarse weak labels `0`
+  - review: `3` pending candidates, `0` reviewed
+  - promotion: blocked because review is pending
+  - summary: `revise`, `7/14` gates passing
+
+Learning:
+
+- More examples are not automatically better with this tiny SetFit fixture set. The next fixture pass should be treated as an ablation with rollback criteria, and should add one narrow boundary family at a time so regressions are attributable.
+
+## E13 - Manual Review And Promotion Gate
+
+Question:
+
+- Do the model-assisted section candidates produce evidence-backed graph facts that are useful enough to promote?
+
+Commands:
+
+```sh
+bun run classifiers:review-sections -- --mode=sync --review=.ax/experiments/graph-usefulness-review.json --brief=.ax/experiments/graph-usefulness-review.md --out=.ax/experiments/graph-usefulness-review-report.json
+bun run classifiers:promotion-plan -- --review=.ax/experiments/graph-usefulness-review.json --out=.ax/experiments/graph-promotion-plan.json
+bun run classifiers:experiment-summary -- --out=.ax/experiments/session-section-experiment-summary.json
+```
+
+Review verdicts:
+
+- `section_candidate:correction_loop`: `accept`
+  - Rationale: recurring correction and rejection sections have direct turn evidence, and the context-guardrail action is specific enough to affect future behavior.
+- `section_candidate:preference_discovery`: `revise`
+  - Rationale: the signal is reusable, but tooling, environment, and workflow preferences should later split into narrower preference families.
+- `section_candidate:verification_loop`: `revise`
+  - Rationale: the signal is useful, but user-requested proof and agent recovery should be separated before becoming a strict reusable gate.
+
+Results:
+
+- Review report:
+  - candidates: `3`
+  - reviewable: `3`
+  - reviewed: `3`
+  - pending: `0`
+  - rejected: `0`
+  - reject rate: `0.0`
+  - failures: `0`
+- Promotion plan:
+  - promotable candidates: `3`
+  - pending candidates: `0`
+  - facts: `3`
+  - evidence edges: `16`
+  - failures: `0`
+- Promoted fact shapes:
+  - `candidate_context_guardrail` from `correction_loop`
+  - `candidate_preference` from `preference_discovery`
+  - `candidate_verification_gate` from `verification_loop`
+- Summary after review:
+  - recommendation: `revise`
+  - passed gates: `10/14`
+  - remaining blockers:
+    - `embedding_none_false_positive_rate`: `0.7273`, target `< 0.10`
+    - `fine_setfit_macro_f1`: `0.514`, target `>= 0.75`
+    - `fine_setfit_none_false_positive_rate`: `0.5`, target `< 0.10`
+    - `coarse_setfit_macro_f1`: `0.7358`, target `>= 0.75`
+
+Decision:
+
+- The graph usefulness and promotion gates now pass.
+- The recommendation remains `revise`, not `adopt`:
+  - keep deterministic classifiers as the production default
+  - keep `local_model_hybrid_gate_plus_section_assembly` as the experimental path
+  - reject plain nearest-neighbor embeddings as a classifier
+  - continue SetFit only behind the hybrid gate until model-quality gates improve
+- The next experiment should focus on model calibration or train/test strategy rather than broad fixture expansion, because E12 showed that a mixed extra fixture batch can regress `none` safety.
+
+## E14 - SetFit Confidence Calibration
+
+Question:
+
+- Can threshold-only calibration clear the remaining coarse SetFit quality gates without retraining or adding another fixture batch?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/calibration.py`.
+- Added `bun run classifiers:setfit-calibration`.
+- Added `packages/ax-classifier-session-sections/calibration_test.py`.
+- The calibration script:
+  - loads the saved coarse SetFit model
+  - reuses held-out example ids from `.ax/experiments/setfit-session-sections-e3-coarse.json`
+  - runs `predict_proba`
+  - sweeps confidence thresholds from `0.0` to `0.95`
+  - maps low-confidence positive predictions to `none`
+  - reports best macro-F1 threshold and best `none`-safe threshold
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/calibration_test.py
+bun run classifiers:setfit-calibration -- --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --eval-report=.ax/experiments/setfit-session-sections-e3-coarse.json --model-dir=.ax/experiments/setfit-session-sections-coarse-model --label-mode=coarse --out=.ax/experiments/setfit-calibration-e14.json
+```
+
+Results:
+
+- Calibration unit tests: `3 pass`.
+- Held-out examples: `26`.
+- Base threshold `0.0`:
+  - accuracy: `0.7308`
+  - macro F1: `0.7358`
+  - `none` false-positive rate: `0.1667`
+- Best macro threshold:
+  - threshold: `0.0`
+  - macro F1: `0.7358`
+  - `none` false-positive rate: `0.1667`
+- Best `none`-safe threshold:
+  - threshold: `0.4`
+  - accuracy: `0.7308`
+  - macro F1: `0.7329`
+  - `none` false-positive rate: `0.0`
+
+Decision:
+
+- Reject threshold-only calibration as the final fix:
+  - it can clear the `none` safety target on this held-out split
+  - it still misses the macro-F1 target
+  - the measured macro F1 drops slightly from `0.7358` to `0.7329`
+- If we use the model experimentally, use confidence thresholding as a safety guard, not as proof that the classifier is ready for default ingest.
+- Next model-quality work should test train/test robustness:
+  - repeated stratified seeds
+  - label-family-specific confusion analysis
+  - possibly a larger encoder or more SetFit epochs, measured against the same graph-usefulness gates
+
+## E15 - Repeated-Split SetFit Robustness
+
+Question:
+
+- Is the near-passing coarse SetFit result robust across train/test splits, or was the `seed=42` split optimistic?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/robustness.py`.
+- Added `bun run classifiers:setfit-robustness`.
+- Added `packages/ax-classifier-session-sections/robustness_test.py`.
+- The robustness script:
+  - loads the same package fixture set
+  - maps labels into coarse mode
+  - trains a fresh SetFit model per seed
+  - reports accuracy, macro F1, `none` false-positive rate, per-label metrics, and confusion
+  - summarizes mean/min/max macro F1 and worst `none` false-positive rate
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/robustness_test.py
+bun run classifiers:setfit-robustness -- --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --label-mode=coarse --seeds=7,13,42 --epochs=1 --batch-size=8 --out=.ax/experiments/setfit-robustness-e15.json
+```
+
+Results:
+
+- Robustness unit tests: `3 pass`.
+- Dataset:
+  - fixtures: `100`
+  - label mode: `coarse`
+  - seeds: `7`, `13`, `42`
+  - epochs: `1`
+  - batch size: `8`
+- Aggregate:
+  - macro F1 mean: `0.658`
+  - macro F1 min: `0.5424`
+  - macro F1 max: `0.7358`
+  - accuracy mean: `0.6923`
+  - `none` false-positive mean: `0.1111`
+  - `none` false-positive max: `0.1667`
+  - train seconds total: `190.3`
+- Per-seed:
+  - seed `7`: accuracy `0.6154`, macro F1 `0.5424`, `none` FP `0.1667`
+  - seed `13`: accuracy `0.7308`, macro F1 `0.6957`, `none` FP `0.0`
+  - seed `42`: accuracy `0.7308`, macro F1 `0.7358`, `none` FP `0.1667`
+- Robustness failures:
+  - mean macro F1 is below `0.75`
+  - minimum macro F1 is below `0.70`
+  - worst `none` false-positive rate is not below `10%`
+
+Decision:
+
+- The current SetFit classifier is not robust enough for adoption.
+- The earlier `seed=42` result is the best of the tested splits, not a stable estimate.
+- The recommendation stays `revise`:
+  - deterministic classifiers remain production default
+  - SetFit remains experimental behind the hybrid gate
+  - confidence thresholding can reduce `none` risk but does not fix model quality
+- Next model-quality experiments should not try to pass gates by split selection. They should test one of:
+  - more stable cross-validation with aggregate gates
+  - stronger model/encoder candidates
+  - clearer label-family decomposition, especially approval and environment/preference boundaries
+  - more fixtures only when added as narrow ablations with rollback criteria
+
+## E16 - Two-Epoch SetFit Robustness Sweep
+
+Question:
+
+- Is the E15 robustness failure mainly undertraining, and can the same model clear repeated-split gates with `epochs=2`?
+
+Command:
+
+```sh
+bun run classifiers:setfit-robustness -- --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --label-mode=coarse --seeds=7,13,42 --epochs=2 --batch-size=8 --out=.ax/experiments/setfit-robustness-e16-epochs2.json
+```
+
+Results:
+
+- Dataset:
+  - fixtures: `100`
+  - label mode: `coarse`
+  - seeds: `7`, `13`, `42`
+  - epochs: `2`
+  - batch size: `8`
+- Aggregate:
+  - macro F1 mean: `0.7435`
+  - macro F1 min: `0.6867`
+  - macro F1 max: `0.7735`
+  - accuracy mean: `0.7564`
+  - `none` false-positive mean: `0.1111`
+  - `none` false-positive max: `0.1667`
+  - train seconds total: `357.79`
+- Per-seed:
+  - seed `7`: accuracy `0.7308`, macro F1 `0.6867`, `none` FP `0.1667`
+  - seed `13`: accuracy `0.7692`, macro F1 `0.7702`, `none` FP `0.0`
+  - seed `42`: accuracy `0.7692`, macro F1 `0.7735`, `none` FP `0.1667`
+- Compared with E15 (`epochs=1`):
+  - macro F1 mean improved from `0.658` to `0.7435`
+  - macro F1 min improved from `0.5424` to `0.6867`
+  - macro F1 max improved from `0.7358` to `0.7735`
+  - accuracy mean improved from `0.6923` to `0.7564`
+  - worst `none` false-positive rate stayed `0.1667`
+  - train time increased from `190.3s` to `357.79s`
+
+Decision:
+
+- `epochs=2` materially improves coarse SetFit quality, but still does not pass the robustness gate:
+  - mean macro F1 is just below `0.75`
+  - minimum macro F1 is below `0.70`
+  - worst `none` false-positive rate remains above `10%`
+- This points to a mixed issue:
+  - the original model was partly undertrained
+  - the remaining blocker is label/data boundary stability, especially seed `7`, approval recall, environment/preference precision, and `none` safety
+- Do not adopt SetFit as default ingest from this result.
+- A reasonable next experiment is one narrow safety-focused ablation:
+  - either add targeted `none` hard negatives against environment/preference false positives
+  - or run `epochs=2` with the calibration threshold path and evaluate repeated-split calibrated metrics, not only raw predictions
+
+## E17 - Two-Epoch SetFit With Confidence Calibration
+
+Question:
+
+- Does applying the best observed `none`-safety confidence threshold to the repeated-split `epochs=2` run make SetFit safe enough for promotion?
+
+Command:
+
+```sh
+bun run classifiers:setfit-robustness -- --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --label-mode=coarse --seeds=7,13,42 --epochs=2 --batch-size=8 --calibration-threshold=0.4 --out=.ax/experiments/setfit-robustness-e17-epochs2-threshold04.json
+```
+
+Results:
+
+- Dataset:
+  - fixtures: `100`
+  - label mode: `coarse`
+  - seeds: `7`, `13`, `42`
+  - epochs: `2`
+  - batch size: `8`
+  - calibration threshold: `0.4`
+- Raw aggregate:
+  - macro F1 mean: `0.7435`
+  - macro F1 min: `0.6867`
+  - macro F1 max: `0.7735`
+  - accuracy mean: `0.7564`
+  - `none` false-positive mean: `0.1111`
+  - `none` false-positive max: `0.1667`
+- Calibrated aggregate:
+  - macro F1 mean: `0.7425`
+  - macro F1 min: `0.6567`
+  - macro F1 max: `0.8006`
+  - accuracy mean: `0.7564`
+  - `none` false-positive mean: `0.0556`
+  - `none` false-positive max: `0.1667`
+  - train seconds total: `356.71`
+- Per-seed calibrated results:
+  - seed `7`: accuracy `0.6923`, macro F1 `0.6567`, `none` FP `0.1667`
+  - seed `13`: accuracy `0.7692`, macro F1 `0.7702`, `none` FP `0.0`
+  - seed `42`: accuracy `0.8077`, macro F1 `0.8006`, `none` FP `0.0`
+- Robustness failures:
+  - mean macro F1 is below `0.75`
+  - minimum macro F1 is below `0.70`
+  - worst `none` false-positive rate is not below `10%`
+
+Decision:
+
+- Calibration helps average safety:
+  - `none` false-positive mean improved from `0.1111` to `0.0556`
+  - seed `42` improved from `0.1667` `none` FP to `0.0`
+- Calibration does not make the model robust:
+  - worst `none` FP stayed `0.1667`
+  - seed `7` got worse on macro F1, from `0.6867` raw to `0.6567` calibrated
+- Do not continue threshold-only tuning as the primary path.
+- The next useful experiment should change the data/model boundary, not the post-processing:
+  - inspect seed `7` false positives and false negatives
+  - add targeted hard negatives or split ambiguous labels
+  - consider label-family decomposition before trying larger model/runtime costs
+
+## E18 - Robustness Failure Analysis
+
+Question:
+
+- Which concrete label boundaries keep the calibrated `epochs=2` SetFit run from passing repeated-split gates?
+
+Changes:
+
+- Extended `packages/ax-classifier-session-sections/failure_analysis.py` with a robustness-report mode.
+- The report enriches misclassified robustness examples with:
+  - fixture text excerpts
+  - fine label and target
+  - raw prediction confidence
+  - confusion family: `none_false_positive`, `missed_signal`, `approval_boundary`, or `label_boundary`
+- Added unit coverage for robustness analysis and confusion-family assignment.
+
+Command:
+
+```sh
+python3 packages/ax-classifier-session-sections/failure_analysis.py --robustness=.ax/experiments/setfit-robustness-e17-epochs2-threshold04.json --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --out=.ax/experiments/setfit-robustness-failure-analysis-e18.json
+```
+
+Results:
+
+- Source report: `.ax/experiments/setfit-robustness-e17-epochs2-threshold04.json`
+- Output report: `.ax/experiments/setfit-robustness-failure-analysis-e18.json`
+- Worst seed: `7`
+- Raw misses on worst seed: `7`
+- Calibrated misses on worst seed: `8`
+- Calibrated miss families:
+  - `approval_boundary`: `2`
+  - `label_boundary`: `3`
+  - `missed_signal`: `2`
+  - `none_false_positive`: `1`
+- Calibrated confusion pairs:
+  - `approval -> verification_or_recovery_signal`: `2`
+  - `correction_or_rejection_signal -> environment_or_preference_signal`: `1`
+  - `environment_or_preference_signal -> correction_or_rejection_signal`: `1`
+  - `environment_or_preference_signal -> none`: `1`
+  - `environment_or_preference_signal -> verification_or_recovery_signal`: `1`
+  - `none -> approval`: `1`
+  - `verification_or_recovery_signal -> none`: `1`
+- High-confidence misses:
+  - `direction-use-fixtures`: expected `environment_or_preference_signal`, predicted `correction_or_rejection_signal`, confidence `0.7066`
+  - `rejection-too-expensive`: expected `correction_or_rejection_signal`, predicted `environment_or_preference_signal`, confidence `0.6628`
+  - `approval-yes-sync-markdown`: expected `approval`, predicted `verification_or_recovery_signal`, confidence `0.686`
+  - `tooling-model-cache-size`: expected `environment_or_preference_signal`, predicted `verification_or_recovery_signal`, confidence `0.7125`
+
+Decision:
+
+- The remaining failure is not just model confidence. Four misses are high-confidence boundary errors.
+- The worst split mixes three different boundary problems:
+  - lightweight approval versus verification/recovery
+  - cost/rejection versus environment/preference
+  - package/eval/tooling directions versus correction or verification-style requests
+- The single calibrated `none` false positive is `none-start-building`, predicted as `approval`; this is an approval/none boundary issue, not a broad `none` threshold issue.
+- Next experiment should be a small label-boundary ablation:
+  - add or relabel approval contrast cases
+  - add package/eval/tooling direction cases that must not abstain to `none`
+  - add cost rejection cases that should stay in correction/rejection even when they mention expensive LLM usage
+  - rerun repeated-split robustness and compare against E17, with rollback if macro F1 or `none` safety regresses
+
+## E19 - Boundary Fixture Ablation
+
+Question:
+
+- Does a small targeted fixture ablation based on E18 improve repeated-split SetFit robustness?
+
+Method:
+
+- Built a temporary ablation dataset at `.ax/experiments/chunks-e19-boundary-ablation.jsonl`.
+- The dataset:
+  - started from the 100 canonical chunk fixtures
+  - excluded the suspect `none-start-building` fixture
+  - added 14 targeted boundary examples for:
+    - approval/action confirmations
+    - package/eval direction cases
+    - model-cache/tooling artifact-size questions
+    - cost/default-ingest rejection cases
+    - recovery/status-refresh cases
+- The ablation examples were not promoted into the canonical fixture file unless the run improved E17.
+
+Command:
+
+```sh
+bun run classifiers:setfit-robustness -- --fixtures=.ax/experiments/chunks-e19-boundary-ablation.jsonl --label-mode=coarse --seeds=7,13,42 --epochs=2 --batch-size=8 --calibration-threshold=0.4 --out=.ax/experiments/setfit-robustness-e19-boundary-ablation.json
+```
+
+Results:
+
+- Fixtures: `113`
+- Label mode: `coarse`
+- Seeds: `7`, `13`, `42`
+- Epochs: `2`
+- Batch size: `8`
+- Calibration threshold: `0.4`
+- Aggregate:
+  - macro F1 mean: `0.6798`
+  - macro F1 min: `0.5948`
+  - macro F1 max: `0.8292`
+  - accuracy mean: `0.7024`
+  - `none` false-positive mean: `0.5333`
+  - `none` false-positive max: `0.8`
+  - train seconds total: `464.35`
+- Per-seed:
+  - seed `7`: accuracy `0.6429`, macro F1 `0.6154`, `none` FP `0.6`
+  - seed `13`: accuracy `0.6429`, macro F1 `0.5948`, `none` FP `0.8`
+  - seed `42`: accuracy `0.8214`, macro F1 `0.8292`, `none` FP `0.2`
+- Failure analysis:
+  - worst seed: `13`
+  - misses: `10`
+  - miss families:
+    - `approval_boundary`: `2`
+    - `label_boundary`: `4`
+    - `none_false_positive`: `4`
+  - high-confidence misses: `5`
+
+Comparison with E17:
+
+- Macro F1 mean regressed from `0.7425` calibrated to `0.6798`.
+- Macro F1 min regressed from `0.6567` to `0.5948`.
+- `none` false-positive mean regressed from `0.0556` to `0.5333`.
+- Worst `none` false-positive rate regressed from `0.1667` to `0.8`.
+- Train time increased from `356.71s` to `464.35s`.
+
+Decision:
+
+- Reject the E19 ablation.
+- Do not promote the ablation examples into the canonical fixture set.
+- The regression suggests that simply adding more positive boundary examples worsens the `none` boundary and changes split composition enough to destabilize the model.
+- Next experiment should not be "add more fixtures" generically. Better options:
+  - relabel audit only, especially `none-start-building`
+  - fixed-fold evaluation so fixture changes are compared on the same held-out IDs
+  - decompose approval into a separate deterministic or rule-first gate before SetFit
+  - add hard `none` negatives only if they are paired with fixed-fold checks against the same baseline
+
+## E20 - Fixed-Fold Robustness Baseline
+
+Question:
+
+- Can we create a stable benchmark target from the known-bad E17 seed `7` split, so future fixture/model changes are compared against the same held-out examples?
+
+Changes:
+
+- Added fixed holdout support:
+  - `eval.py --test-ids=<json-or-lines>`
+  - `robustness.py --test-ids=<json-or-lines>`
+- Added package fixture:
+  - `packages/ax-classifier-session-sections/eval-fixtures/fixed-fold-seed7-test-ids.json`
+- Added the fixed fold file to `ax.classifier.json` fixtures.
+- Added unit coverage for:
+  - parsing fixed test-id files
+  - rejecting unknown test ids
+  - using fixed ids instead of seed-random stratified splits
+
+Command:
+
+```sh
+bun run classifiers:setfit-robustness -- --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --test-ids=packages/ax-classifier-session-sections/eval-fixtures/fixed-fold-seed7-test-ids.json --label-mode=coarse --seeds=7,13,42 --epochs=2 --batch-size=8 --calibration-threshold=0.4 --out=.ax/experiments/setfit-robustness-e20-fixed-fold-seed7.json
+```
+
+Results:
+
+- Fixtures: `100`
+- Fixed fold:
+  - train rows: `74`
+  - test rows: `26`
+  - test ids: E17 seed `7` held-out ids
+- Seeds: `7`, `13`, `42`
+- Epochs: `2`
+- Batch size: `8`
+- Calibration threshold: `0.4`
+- Raw aggregate:
+  - macro F1 mean: `0.6193`
+  - macro F1 min: `0.6193`
+  - macro F1 max: `0.6193`
+  - accuracy mean: `0.6538`
+  - `none` false-positive mean: `0.1667`
+  - `none` false-positive max: `0.1667`
+- Calibrated aggregate:
+  - macro F1 mean: `0.6229`
+  - macro F1 min: `0.6229`
+  - macro F1 max: `0.6229`
+  - accuracy mean: `0.6538`
+  - `none` false-positive mean: `0.1667`
+  - `none` false-positive max: `0.1667`
+  - train seconds total: `353.99`
+- Calibrated misses on the fixed fold:
+  - `direction-open-source-package`: expected `environment_or_preference_signal`, predicted `none`
+  - `direction-use-fixtures`: expected `environment_or_preference_signal`, predicted `correction_or_rejection_signal`
+  - `recovery-db-smoke`: expected `verification_or_recovery_signal`, predicted `none`
+  - `approval-continue`: expected `approval`, predicted `none`
+  - `rejection-too-expensive`: expected `correction_or_rejection_signal`, predicted `environment_or_preference_signal`
+  - `none-start-building`: expected `none`, predicted `approval`
+  - `approval-yes-sync-markdown`: expected `approval`, predicted `verification_or_recovery_signal`
+  - `recovery-added-summary`: expected `verification_or_recovery_signal`, predicted `approval`
+  - `tooling-model-cache-size`: expected `environment_or_preference_signal`, predicted `verification_or_recovery_signal`
+- Failure analysis:
+  - worst seed: `7`
+  - raw misses: `9`
+  - calibrated misses: `9`
+  - miss families:
+    - `approval_boundary`: `2`
+    - `label_boundary`: `3`
+    - `missed_signal`: `3`
+    - `none_false_positive`: `1`
+  - high-confidence misses: `4`
+
+Decision:
+
+- The fixed fold is now the primary benchmark for boundary experiments.
+- This benchmark is intentionally harder than the aggregate repeated-split score:
+  - E17 calibrated mean macro F1: `0.7425`
+  - E20 fixed-fold calibrated macro F1: `0.6229`
+- Future fixture/model changes should be evaluated against this fixed fold before repeated-split claims.
+- A useful next gate for a targeted boundary fix:
+  - fixed-fold calibrated macro F1 must improve over `0.6229`
+  - fixed-fold `none` false-positive rate must not exceed `0.1667`
+  - repeated-split metrics must not regress materially versus E17
+- Do not mark SetFit ready from this result. The fixed fold makes the failure more reproducible, not solved.
+
+## E21 - Fixed-Fold Relabel Audit
+
+Question:
+
+- Are the E20 fixed-fold misses caused by obviously wrong fixture labels, or by unresolved label-contract boundaries?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/relabel_audit.py`.
+- Added `bun run classifiers:relabel-audit`.
+- Added label-contract notes to `packages/ax-classifier-session-sections/README.md` for:
+  - approval versus none
+  - recovery action versus user follow-up
+  - tooling/environment issue versus verification/runtime report
+  - rejection versus cost/environment preference
+- Added unit coverage for:
+  - approval/none contract ambiguity
+  - missed-signal audit classification
+  - recommendation summary counts
+- The audit consumes a robustness report and fixture JSONL, then emits:
+  - current fine/coarse label
+  - actual/predicted coarse labels
+  - issue family
+  - recommendation: `keep_label_add_contrast` or `needs_contract_decision`
+  - rationale
+
+Command:
+
+```sh
+bun run classifiers:relabel-audit -- --robustness=.ax/experiments/setfit-robustness-e20-fixed-fold-seed7.json --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --out=.ax/experiments/setfit-relabel-audit-e21.json
+```
+
+Results:
+
+- Source report: `.ax/experiments/setfit-robustness-e20-fixed-fold-seed7.json`
+- Output report: `.ax/experiments/setfit-relabel-audit-e21.json`
+- Selected seed: `7`
+- Audit items: `9`
+- Recommendations:
+  - `keep_label_add_contrast`: `5`
+  - `needs_contract_decision`: `4`
+- Issue families:
+  - `approval_vs_none_boundary`: `2`
+  - `label_boundary`: `2`
+  - `missed_signal`: `2`
+  - `recovery_vs_status_boundary`: `1`
+  - `rejection_vs_environment_boundary`: `1`
+  - `tooling_question_vs_verification_boundary`: `1`
+- Items that should keep current label and use contrast/model work:
+  - `direction-open-source-package`: direction signal missed as `none`
+  - `direction-use-fixtures`: direction confused with correction/rejection
+  - `recovery-db-smoke`: recovery signal missed as `none`
+  - `rejection-too-expensive`: rejection confused with environment/preference
+  - `approval-yes-sync-markdown`: approval confused with verification/recovery
+- Items needing a sharper label contract before fixture edits:
+  - `approval-continue`: approval versus ordinary continuation
+  - `none-start-building`: ordinary go-ahead versus approval
+  - `recovery-added-summary`: recovery action versus approval/status follow-up
+  - `tooling-model-cache-size`: tooling/environment issue versus runtime-report verification
+
+Decision:
+
+- Do not relabel canonical fixtures from model predictions alone.
+- The fixed-fold miss set contains real contract ambiguity:
+  - approval/none needs a rule about whether short go-ahead turns are useful facts or only conversational control
+  - recovery labels need a rule about whether the user turn or the prior assistant action carries the label
+  - model-cache/size questions need a rule about tooling issue versus verification/runtime-report request
+- The next experiment should be contract-first:
+  - use the README label contract as the source of truth
+  - produce a fixed-fold ablation only for cases that the contract now resolves
+  - accept it only if fixed-fold macro F1 improves over `0.6229`, fixed-fold `none` FP stays `<= 0.1667`, and repeated-split metrics do not materially regress versus E17
+
+## E22 - Contract-Resolved Label Ablation
+
+Question:
+
+- If we apply only the contract-resolved label changes from E21, does SetFit improve on the hard fixed fold without regressing on repeated splits?
+
+Changes:
+
+- Created temporary fixture dataset `.ax/experiments/chunks-e22-contract-ablation.jsonl`.
+- Canonical `packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl` was not changed.
+- Applied three contract-resolved temporary label changes:
+  - `approval-continue`: `approval` -> `none`, because generic continuation is conversational control.
+  - `none-start-building`: `none` -> `approval`, because this is a clear accept/continue signal for the proposed work.
+  - `tooling-model-cache-size`: `tooling_or_environment_issue` -> `verification_request`, because this is a runtime/model-size report request rather than a setup issue.
+
+Commands:
+
+```sh
+bun run classifiers:setfit-robustness -- --fixtures=.ax/experiments/chunks-e22-contract-ablation.jsonl --test-ids=packages/ax-classifier-session-sections/eval-fixtures/fixed-fold-seed7-test-ids.json --label-mode=coarse --seeds=7,13,42 --epochs=2 --batch-size=8 --calibration-threshold=0.4 --out=.ax/experiments/setfit-robustness-e22-contract-ablation-fixed-fold.json
+bun run classifiers:setfit-robustness -- --fixtures=.ax/experiments/chunks-e22-contract-ablation.jsonl --label-mode=coarse --seeds=7,13,42 --epochs=2 --batch-size=8 --calibration-threshold=0.4 --out=.ax/experiments/setfit-robustness-e22-contract-ablation-repeated.json
+bun run classifiers:failure-analysis -- --robustness=.ax/experiments/setfit-robustness-e22-contract-ablation-repeated.json --fixtures=.ax/experiments/chunks-e22-contract-ablation.jsonl --out=.ax/experiments/setfit-robustness-failure-analysis-e22-repeated.json
+bun run classifiers:relabel-audit -- --robustness=.ax/experiments/setfit-robustness-e22-contract-ablation-repeated.json --fixtures=.ax/experiments/chunks-e22-contract-ablation.jsonl --out=.ax/experiments/setfit-relabel-audit-e22-repeated.json
+```
+
+Fixed-fold results:
+
+- Source report: `.ax/experiments/setfit-robustness-e22-contract-ablation-fixed-fold.json`
+- Decision: `robust_enough`
+- Raw aggregate:
+  - macro F1 mean/min/max: `0.7506 / 0.7506 / 0.7506`
+  - accuracy mean: `0.7692`
+  - `none` false-positive mean/max: `0.0 / 0.0`
+- Calibrated aggregate:
+  - macro F1 mean/min/max: `0.7519 / 0.7519 / 0.7519`
+  - accuracy mean: `0.7692`
+  - `none` false-positive mean/max: `0.0 / 0.0`
+- Improvement versus E20 fixed fold:
+  - calibrated macro F1: `0.6229` -> `0.7519`
+  - `none` false-positive max: `0.1667` -> `0.0`
+
+Repeated-split results:
+
+- Source report: `.ax/experiments/setfit-robustness-e22-contract-ablation-repeated.json`
+- Decision: `needs_model_quality_work`
+- Raw aggregate:
+  - macro F1 mean/min/max: `0.7339 / 0.6514 / 0.7885`
+  - `none` false-positive mean/max: `0.2222 / 0.3333`
+- Calibrated aggregate:
+  - macro F1 mean/min/max: `0.7042 / 0.6514 / 0.7618`
+  - `none` false-positive mean/max: `0.2222 / 0.3333`
+- Failures:
+  - mean macro F1 below `0.75`
+  - minimum macro F1 below `0.70`
+  - worst `none` false-positive rate not below `10%`
+
+Repeated-split failure analysis:
+
+- Worst seed: `13`
+- Raw misses: `8`
+- Calibrated misses: `8`
+- Calibrated miss families:
+  - `approval_boundary`: `2`
+  - `label_boundary`: `4`
+  - `missed_signal`: `1`
+  - `none_false_positive`: `1`
+- Relabel audit:
+  - audit items: `8`
+  - `keep_label_add_contrast`: `7`
+  - `needs_contract_decision`: `1`
+  - decision: `do_not_relabel_without_contract_changes`
+
+Decision:
+
+- Do not promote SetFit as a default ingest classifier yet.
+- Do not apply the three E22 label changes to canonical fixtures yet.
+- The contract changes clearly fix the hard fixed fold, but repeated-split robustness still regresses on `none` false-positive leakage and minimum macro F1.
+- Next useful experiment is model-quality oriented rather than relabeling:
+  - add contrast fixtures for repeated-split miss families
+  - evaluate stronger sentence-transformer backbones or frozen-embedding classifiers
+  - keep E20 fixed fold and E22 repeated split as separate gates
+
+## E23 - Stronger Encoder Fixed-Fold Sweep
+
+Question:
+
+- Can a stronger or newer sentence-transformer backbone improve the hard fixed-fold result enough to justify more runtime and larger local model caches?
+
+Setup:
+
+- Canonical fixtures only: `packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl`.
+- Fixed fold only: `packages/ax-classifier-session-sections/eval-fixtures/fixed-fold-seed7-test-ids.json`.
+- One seed only: `7`.
+- Epochs: `2`.
+- Batch size: `8`.
+- Calibration threshold: `0.4`.
+- Acceptance bar for continuing to repeated-split:
+  - fixed-fold calibrated macro F1 should clearly beat E20 MiniLM `0.6229`
+  - fixed-fold `none` false-positive rate should not exceed E20 `0.1667`
+  - runtime/cache cost should be reasonable for local dev
+
+Commands:
+
+```sh
+bun run classifiers:setfit-robustness -- --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --test-ids=packages/ax-classifier-session-sections/eval-fixtures/fixed-fold-seed7-test-ids.json --model=sentence-transformers/all-mpnet-base-v2 --label-mode=coarse --seeds=7 --epochs=2 --batch-size=8 --calibration-threshold=0.4 --out=.ax/experiments/setfit-robustness-e23-mpnet-fixed-fold-seed7.json
+bun run classifiers:failure-analysis -- --robustness=.ax/experiments/setfit-robustness-e23-mpnet-fixed-fold-seed7.json --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --out=.ax/experiments/setfit-robustness-failure-analysis-e23-mpnet-fixed-fold.json
+bun run classifiers:setfit-robustness -- --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --test-ids=packages/ax-classifier-session-sections/eval-fixtures/fixed-fold-seed7-test-ids.json --model=BAAI/bge-small-en-v1.5 --label-mode=coarse --seeds=7 --epochs=2 --batch-size=8 --calibration-threshold=0.4 --out=.ax/experiments/setfit-robustness-e23-bge-small-fixed-fold-seed7.json
+bun run classifiers:failure-analysis -- --robustness=.ax/experiments/setfit-robustness-e23-bge-small-fixed-fold-seed7.json --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --out=.ax/experiments/setfit-robustness-failure-analysis-e23-bge-small-fixed-fold.json
+```
+
+Results:
+
+| Backbone | Cache size | Train seconds | Raw macro F1 | Calibrated macro F1 | Calibrated `none` FP | Decision |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `sentence-transformers/all-MiniLM-L6-v2` E20 baseline | `~90M` model artifact | `353.99` for 3 seeds | `0.6193` | `0.6229` | `0.1667` | baseline |
+| `sentence-transformers/all-mpnet-base-v2` | `418M` HF cache | `483.53` for 1 seed | `0.6697` | `0.5995` | `0.3333` | reject |
+| `BAAI/bge-small-en-v1.5` | `137M` HF cache | `187.21` for 1 seed | `0.5644` | `0.5644` | `0.1667` | reject |
+
+MPNet failure profile:
+
+- Worst seed: `7`.
+- Raw misses: `9`.
+- Calibrated misses: `10`.
+- Calibrated miss families:
+  - `label_boundary`: `5`
+  - `missed_signal`: `3`
+  - `none_false_positive`: `2`
+- High-confidence misses: `6`.
+
+BGE-small failure profile:
+
+- Worst seed: `7`.
+- Raw misses: `11`.
+- Calibrated misses: `11`.
+- Calibrated miss families:
+  - `approval_boundary`: `2`
+  - `label_boundary`: `5`
+  - `missed_signal`: `3`
+  - `none_false_positive`: `1`
+- High-confidence misses: `8`.
+
+Decision:
+
+- Do not continue either backbone to repeated-split robustness.
+- Do not replace the MiniLM baseline with a larger encoder.
+- Bigger/newer encoders did not fix the hard fold and made the local-dev tradeoff worse:
+  - MPNet is much slower and increases `none` leakage.
+  - BGE-small is a moderate runtime/cache increase but loses too much macro F1.
+- The next model-quality experiment should not be a larger SetFit encoder. Prefer:
+  - targeted contrast fixtures for the fixed-fold/repeated-split miss families, one family at a time
+  - a frozen-embedding classifier baseline where training is cheap and model choice can be swept without SetFit pair-training cost
+
+## E24 - Frozen Embedding Classifier Baseline
+
+Question:
+
+- Can we get a cheaper local classifier by freezing sentence embeddings and training only a small classifier, instead of SetFit pair-training?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/frozen_embedding.py`.
+- Added `packages/ax-classifier-session-sections/frozen_embedding_test.py`.
+- Added `bun run classifiers:frozen-embedding`.
+- The script:
+  - reuses the canonical fixture loader and coarse label mapping
+  - supports fixed test ids and repeated seeds
+  - embeds all fixture text once with SentenceTransformers
+  - evaluates either:
+    - `logistic`: balanced `LogisticRegression` over frozen embeddings
+    - `centroid`: cosine-nearest label centroid
+  - emits the same robustness-style fields as SetFit:
+    - summary
+    - calibrated summary
+    - per-run examples
+    - `none` false-positive rate
+    - gate failures
+
+Test-first check:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/frozen_embedding_test.py
+```
+
+The first run failed because `frozen_embedding.py` did not exist. After implementation the test passed.
+
+Commands:
+
+```sh
+bun run classifiers:frozen-embedding -- --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --test-ids=packages/ax-classifier-session-sections/eval-fixtures/fixed-fold-seed7-test-ids.json --model=sentence-transformers/all-MiniLM-L6-v2 --classifier=logistic --label-mode=coarse --seeds=7,13,42 --calibration-threshold=0.4 --out=.ax/experiments/frozen-embedding-e24-minilm-logistic-fixed-fold.json
+bun run classifiers:frozen-embedding -- --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --test-ids=packages/ax-classifier-session-sections/eval-fixtures/fixed-fold-seed7-test-ids.json --model=sentence-transformers/all-MiniLM-L6-v2 --classifier=centroid --label-mode=coarse --seeds=7,13,42 --calibration-threshold=0.4 --out=.ax/experiments/frozen-embedding-e24-minilm-centroid-fixed-fold.json
+bun run classifiers:failure-analysis -- --robustness=.ax/experiments/frozen-embedding-e24-minilm-logistic-fixed-fold.json --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --out=.ax/experiments/frozen-embedding-failure-analysis-e24-logistic-fixed-fold.json
+bun run classifiers:failure-analysis -- --robustness=.ax/experiments/frozen-embedding-e24-minilm-centroid-fixed-fold.json --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --out=.ax/experiments/frozen-embedding-failure-analysis-e24-centroid-fixed-fold.json
+```
+
+Results:
+
+| Method | Encode seconds | Train seconds total | Raw macro F1 | Raw `none` FP | Calibrated macro F1 | Calibrated `none` FP | Decision |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| MiniLM + logistic | `6.99` | `1.39` | `0.3075` | `0.8333` | `0.2161` | `0.0` | reject |
+| MiniLM + centroid | `6.54` | `0.0` | `0.3454` | `0.8333` | `0.0750` | `0.0` | reject |
+
+Failure profile:
+
+- Logistic:
+  - raw misses: `16`
+  - calibrated misses: `17`
+  - calibrated family: `missed_signal: 17`
+  - high-confidence misses: `0`
+- Centroid:
+  - raw misses: `15`
+  - calibrated misses: `20`
+  - calibrated family: `missed_signal: 20`
+  - high-confidence misses: `0`
+
+Decision:
+
+- Do not use frozen MiniLM embeddings as the classifier path for this label set.
+- It is cheap enough to keep as a diagnostic baseline, but not useful enough for graph facts:
+  - raw predictions leak too many `none` turns into positive labels
+  - confidence thresholding removes the `none` leakage by abstaining on most positives, collapsing recall
+- This result strengthens the current direction:
+  - the hard part is label geometry and context, not just SetFit training cost
+  - the next useful experiment should add narrowly scoped contrast fixtures for the observed miss families, or change the input projection to include better previous-assistant/action context
+
+## E25 - Direction Contrast Fixture Ablation
+
+Question:
+
+- If we add only direction/package/eval/output-expectation contrast examples, does the hard fixed fold improve without mixing in broad fixture changes?
+
+Why this family:
+
+- E22 repeated-split worst seed had `label_boundary: 4`, mostly direction examples confused with verification/recovery or correction/rejection.
+- The canonical fixture set already has `22` `none` hard negatives, so adding more generic `none` examples would likely repeat the broad E12 regression.
+
+Temporary dataset:
+
+- Created `.ax/experiments/chunks-e25-direction-contrast.jsonl`.
+- Canonical `packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl` was not changed.
+- Started from the 100 canonical fixtures and appended 6 direction-only training examples:
+  - `direction-package-fixtures-contract`
+  - `direction-package-not-src`
+  - `direction-show-results-not-artifact`
+  - `direction-graph-facts-query-use`
+  - `direction-previous-context-required`
+  - `direction-eval-before-default`
+- Resulting label counts:
+  - `direction`: `16`
+  - `correction`: `8`
+  - `verification_request`: `12`
+  - `tooling_or_environment_issue`: `12`
+  - `recovery_action`: `12`
+  - `approval`: `12`
+  - `rejection`: `12`
+  - `none`: `22`
+
+Command:
+
+```sh
+bun run classifiers:setfit-robustness -- --fixtures=.ax/experiments/chunks-e25-direction-contrast.jsonl --test-ids=packages/ax-classifier-session-sections/eval-fixtures/fixed-fold-seed7-test-ids.json --label-mode=coarse --seeds=7 --epochs=2 --batch-size=8 --calibration-threshold=0.4 --out=.ax/experiments/setfit-robustness-e25-direction-contrast-fixed-fold-seed7.json
+bun run classifiers:failure-analysis -- --robustness=.ax/experiments/setfit-robustness-e25-direction-contrast-fixed-fold-seed7.json --fixtures=.ax/experiments/chunks-e25-direction-contrast.jsonl --out=.ax/experiments/setfit-robustness-failure-analysis-e25-direction-contrast-fixed-fold.json
+```
+
+Results:
+
+- Source report: `.ax/experiments/setfit-robustness-e25-direction-contrast-fixed-fold-seed7.json`
+- Seed: `7`
+- Train/test rows: `80 / 26`
+- Raw:
+  - macro F1: `0.5927`
+  - accuracy: `0.6154`
+  - `none` false-positive rate: `0.1667`
+- Calibrated:
+  - macro F1: `0.6195`
+  - accuracy: `0.6538`
+  - `none` false-positive rate: `0.0`
+- Comparison to E20 fixed-fold MiniLM baseline:
+  - calibrated macro F1: `0.6229` -> `0.6195`
+  - `none` false-positive: `0.1667` -> `0.0`
+- Failure analysis:
+  - raw misses: `10`
+  - calibrated misses: `9`
+  - calibrated miss families:
+    - `approval_boundary`: `3`
+    - `label_boundary`: `5`
+    - `missed_signal`: `1`
+  - high-confidence misses: `5`
+
+Decision:
+
+- Do not promote the direction contrast rows into canonical fixtures.
+- Do not run repeated-split robustness for this ablation.
+- The ablation improved `none` safety but slightly regressed fixed-fold macro F1, and the miss family shifted toward approval/recovery/verification boundaries.
+- Direction-only contrast is too narrow to fix the current model geometry.
+- Next useful branch:
+  - change the input projection so the model sees explicit fields for user intent, prior assistant action, and requested next action
+  - or add a paired boundary fixture batch that covers direction, approval, recovery, and verification contrasts together, with rollback criteria
+
+## E26 - Structured Projection v1 Ablation
+
+Question:
+
+- Can we improve the hard fixed fold by changing only the text projection, so the model sees explicit non-label fields for user intent, prior assistant action, and requested next action?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/projection.py`.
+- Added `packages/ax-classifier-session-sections/projection_test.py`.
+- Added `bun run classifiers:project-fixtures`.
+- The projection script rewrites fixture `text` only; it preserves ids, labels, targets, and metadata.
+- It does not use fixture labels or targets to build cues.
+- Projection v1 adds deterministic text-derived fields:
+  - `USER_INTENT_CUES`
+  - `PRIOR_ACTION_CUES`
+  - `REQUESTED_NEXT_ACTION_CUES`
+  - original `USER`
+  - original `PREVIOUS_ASSISTANT`
+  - original `RECENT_TOOL_FAILURES` when present
+
+Test-first check:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/projection_test.py
+```
+
+The first run failed because `projection.py` did not exist. After implementation the test passed.
+
+Temporary dataset:
+
+- Generated `.ax/experiments/chunks-e26-projection-v1.jsonl`.
+- Canonical `packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl` was not changed.
+- Same 100 fixtures as canonical; only the text projection changed.
+
+Commands:
+
+```sh
+bun run classifiers:project-fixtures -- --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --out=.ax/experiments/chunks-e26-projection-v1.jsonl
+bun run classifiers:setfit-robustness -- --fixtures=.ax/experiments/chunks-e26-projection-v1.jsonl --test-ids=packages/ax-classifier-session-sections/eval-fixtures/fixed-fold-seed7-test-ids.json --label-mode=coarse --seeds=7 --epochs=2 --batch-size=8 --calibration-threshold=0.4 --out=.ax/experiments/setfit-robustness-e26-projection-v1-fixed-fold-seed7.json
+bun run classifiers:failure-analysis -- --robustness=.ax/experiments/setfit-robustness-e26-projection-v1-fixed-fold-seed7.json --fixtures=.ax/experiments/chunks-e26-projection-v1.jsonl --out=.ax/experiments/setfit-robustness-failure-analysis-e26-projection-v1-fixed-fold.json
+```
+
+Results:
+
+- Source report: `.ax/experiments/setfit-robustness-e26-projection-v1-fixed-fold-seed7.json`
+- Seed: `7`
+- Train/test rows: `74 / 26`
+- Raw:
+  - macro F1: `0.4798`
+  - accuracy: `0.5385`
+  - `none` false-positive rate: `0.1667`
+- Calibrated:
+  - macro F1: `0.4647`
+  - accuracy: `0.5385`
+  - `none` false-positive rate: `0.1667`
+- Comparison to E20 fixed-fold MiniLM baseline:
+  - calibrated macro F1: `0.6229` -> `0.4647`
+  - `none` false-positive: unchanged at `0.1667`
+- Failure analysis:
+  - raw misses: `12`
+  - calibrated misses: `12`
+  - calibrated miss families:
+    - `approval_boundary`: `3`
+    - `label_boundary`: `7`
+    - `missed_signal`: `1`
+    - `none_false_positive`: `1`
+  - high-confidence misses: `4`
+
+Decision:
+
+- Do not use projection v1 for SetFit training or ingest.
+- Do not run repeated-split robustness for projection v1.
+- The explicit heuristic cue fields made the hard fold worse:
+  - direction examples still confused with correction/rejection
+  - verification/recovery examples confused with correction/rejection
+  - approval boundary errors increased
+- The likely issue is that shallow keyword cues add noisy pseudo-label geometry without improving the semantic boundary.
+- Keep `projection.py` as an experimental transform only for future ablations.
+- Next useful branch:
+  - try a more conservative projection that only separates raw fields without heuristic cue labels
+  - or improve section chunk construction from real session context before further model training
+
+## E27 - Raw Field Projection Ablation
+
+Question:
+
+- Does a conservative projection that only separates raw fields improve the hard fixed fold without the noisy heuristic cue labels from E26?
+
+Changes:
+
+- Extended `packages/ax-classifier-session-sections/projection.py` with `--mode=raw`.
+- Added test coverage for raw projection mode.
+- Raw projection keeps only field boundaries and original content:
+
+```text
+FIELD user_message
+...
+END_FIELD
+
+FIELD previous_agent_action
+...
+END_FIELD
+
+FIELD recent_tool_failures
+...
+END_FIELD
+```
+
+Test-first check:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/projection_test.py
+```
+
+The first run failed because `project_text(..., mode="raw")` was unsupported. After implementation the test passed.
+
+Temporary dataset:
+
+- Generated `.ax/experiments/chunks-e27-projection-raw-fields.jsonl`.
+- Canonical `packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl` was not changed.
+- Same 100 fixtures as canonical; only the text projection changed.
+
+Commands:
+
+```sh
+bun run classifiers:project-fixtures -- --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --mode=raw --out=.ax/experiments/chunks-e27-projection-raw-fields.jsonl
+bun run classifiers:setfit-robustness -- --fixtures=.ax/experiments/chunks-e27-projection-raw-fields.jsonl --test-ids=packages/ax-classifier-session-sections/eval-fixtures/fixed-fold-seed7-test-ids.json --label-mode=coarse --seeds=7 --epochs=2 --batch-size=8 --calibration-threshold=0.4 --out=.ax/experiments/setfit-robustness-e27-projection-raw-fields-fixed-fold-seed7.json
+bun run classifiers:failure-analysis -- --robustness=.ax/experiments/setfit-robustness-e27-projection-raw-fields-fixed-fold-seed7.json --fixtures=.ax/experiments/chunks-e27-projection-raw-fields.jsonl --out=.ax/experiments/setfit-robustness-failure-analysis-e27-projection-raw-fields-fixed-fold.json
+```
+
+Results:
+
+- Source report: `.ax/experiments/setfit-robustness-e27-projection-raw-fields-fixed-fold-seed7.json`
+- Seed: `7`
+- Train/test rows: `74 / 26`
+- Raw:
+  - macro F1: `0.5226`
+  - accuracy: `0.5385`
+  - `none` false-positive rate: `0.3333`
+- Calibrated:
+  - macro F1: `0.5188`
+  - accuracy: `0.5385`
+  - `none` false-positive rate: `0.3333`
+- Comparison to E20 fixed-fold MiniLM baseline:
+  - calibrated macro F1: `0.6229` -> `0.5188`
+  - `none` false-positive: `0.1667` -> `0.3333`
+- Failure analysis:
+  - raw misses: `12`
+  - calibrated misses: `12`
+  - calibrated miss families:
+    - `approval_boundary`: `3`
+    - `label_boundary`: `4`
+    - `missed_signal`: `3`
+    - `none_false_positive`: `2`
+  - high-confidence misses: `4`
+
+Decision:
+
+- Do not use raw field projection for SetFit training or ingest.
+- Do not run repeated-split robustness for raw projection.
+- The canonical `USER` / `PREVIOUS_ASSISTANT` block projection remains better than both projection experiments:
+  - E20 canonical calibrated macro F1: `0.6229`
+  - E26 cue projection calibrated macro F1: `0.4647`
+  - E27 raw field projection calibrated macro F1: `0.5188`
+- The model appears sensitive to superficial projection phrasing at this fixture size.
+- Next useful branch should stop changing projection syntax and instead improve the section chunk construction from real session context, or run a paired boundary fixture batch with explicit rollback criteria.
+
+## E28 - Paired Boundary Fixture Batch
+
+Question:
+
+- Can a paired fixture batch covering approval, recovery, verification, direction, rejection, and none boundaries improve the hard fixed fold without simply moving errors into the `none` safety bucket?
+
+Temporary dataset:
+
+- Generated `.ax/experiments/chunks-e28-paired-boundary-batch.jsonl`.
+- Canonical `packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl` was not changed.
+- Added 12 rows to the canonical 100:
+  - approval: `2`
+  - recovery_action: `2`
+  - verification_request: `2`
+  - direction: `2`
+  - rejection: `2`
+  - none hard negatives: `2`
+- Resulting label counts:
+  - direction: `12`
+  - correction: `8`
+  - verification_request: `14`
+  - tooling_or_environment_issue: `12`
+  - recovery_action: `14`
+  - approval: `14`
+  - rejection: `14`
+  - none: `24`
+
+Command:
+
+```sh
+bun run classifiers:setfit-robustness -- --fixtures=.ax/experiments/chunks-e28-paired-boundary-batch.jsonl --test-ids=packages/ax-classifier-session-sections/eval-fixtures/fixed-fold-seed7-test-ids.json --label-mode=coarse --seeds=7 --epochs=2 --batch-size=8 --calibration-threshold=0.4 --out=.ax/experiments/setfit-robustness-e28-paired-boundary-fixed-fold-seed7.json
+bun run classifiers:failure-analysis -- --robustness=.ax/experiments/setfit-robustness-e28-paired-boundary-fixed-fold-seed7.json --fixtures=.ax/experiments/chunks-e28-paired-boundary-batch.jsonl --out=.ax/experiments/setfit-robustness-failure-analysis-e28-paired-boundary-fixed-fold.json
+```
+
+Results:
+
+- Source report: `.ax/experiments/setfit-robustness-e28-paired-boundary-fixed-fold-seed7.json`
+- Seed: `7`
+- Train/test rows: `86 / 26`
+- Raw:
+  - macro F1: `0.8023`
+  - accuracy: `0.8077`
+  - `none` false-positive rate: `0.3333`
+- Calibrated at threshold `0.4`:
+  - macro F1: `0.7387`
+  - accuracy: `0.7692`
+  - `none` false-positive rate: `0.3333`
+- Failure analysis:
+  - raw misses: `5`
+  - calibrated misses: `6`
+  - calibrated miss families:
+    - label_boundary: `1`
+    - missed_signal: `3`
+    - none_false_positive: `2`
+  - high-confidence misses: `3`
+
+Decision:
+
+- Do not promote E28 as-is.
+- Do not run repeated-split robustness from E28 directly because the fixed-fold `none` false-positive rate is already `0.3333`.
+- E28 is still useful signal: raw macro F1 moved above the promotion gate, but the safety gate failed badly.
+- Next branch should combine this paired-batch improvement with the earlier contract-resolved label fixes from E22.
+
+## E29 - Paired Batch Plus Contract-Resolved Labels
+
+Question:
+
+- Is the E28 safety failure mostly caused by known fixture-contract label issues?
+
+Temporary dataset:
+
+- Generated `.ax/experiments/chunks-e29-paired-boundary-contract.jsonl`.
+- Canonical fixtures were not changed.
+- Started from E28 and applied the E22 contract resolutions:
+  - `approval-continue`: `approval` -> `none`, target `none`, `hard_negative: true`
+  - `none-start-building`: `none` -> `approval`, target `continue`, removed `hard_negative`
+  - `tooling-model-cache-size`: `tooling_or_environment_issue` -> `verification_request`, target `runtime_report`
+- Resulting label counts:
+  - direction: `12`
+  - correction: `8`
+  - verification_request: `15`
+  - tooling_or_environment_issue: `11`
+  - recovery_action: `14`
+  - approval: `14`
+  - rejection: `14`
+  - none: `24`
+
+Command:
+
+```sh
+bun run classifiers:setfit-robustness -- --fixtures=.ax/experiments/chunks-e29-paired-boundary-contract.jsonl --test-ids=packages/ax-classifier-session-sections/eval-fixtures/fixed-fold-seed7-test-ids.json --label-mode=coarse --seeds=7 --epochs=2 --batch-size=8 --calibration-threshold=0.4 --out=.ax/experiments/setfit-robustness-e29-paired-contract-fixed-fold-seed7.json
+bun run classifiers:failure-analysis -- --robustness=.ax/experiments/setfit-robustness-e29-paired-contract-fixed-fold-seed7.json --fixtures=.ax/experiments/chunks-e29-paired-boundary-contract.jsonl --out=.ax/experiments/setfit-robustness-failure-analysis-e29-paired-contract-fixed-fold.json
+```
+
+Results:
+
+- Source report: `.ax/experiments/setfit-robustness-e29-paired-contract-fixed-fold-seed7.json`
+- Seed: `7`
+- Train/test rows: `86 / 26`
+- Raw:
+  - macro F1: `0.9381`
+  - accuracy: `0.9231`
+  - `none` false-positive rate: `0.1667`
+- Calibrated at threshold `0.4`:
+  - macro F1: `0.8853`
+  - accuracy: `0.8846`
+  - `none` false-positive rate: `0.1667`
+- Failure analysis:
+  - raw misses: `2`
+  - calibrated misses: `3`
+  - calibrated miss families:
+    - missed_signal: `2`
+    - none_false_positive: `1`
+  - high-confidence misses: `0`
+- Remaining calibrated misses:
+  - `recovery-db-smoke`: missed signal, confidence `0.3994`
+  - `none-evals-question`: `none` false positive, confidence `0.4598`
+  - `approval-yes-sync-markdown`: missed signal, confidence `0.3883`
+
+Decision:
+
+- E29 is the best fixed-fold model-quality result so far, but still fails the safety gate at threshold `0.4`.
+- Continue with threshold-only calibration before spending more training time.
+
+## E30 - Threshold Sweep Over E29 Fixed-Fold Predictions
+
+Question:
+
+- Can a threshold-only change clear the `none` safety gate on the E29 fixed fold without materially hurting macro F1?
+
+Artifact:
+
+- Wrote `.ax/experiments/setfit-threshold-sweep-e30-paired-contract.json`.
+- Reused E29 raw predictions; no retraining.
+
+Results:
+
+- Threshold `0.40`:
+  - macro F1: `0.8853`
+  - accuracy: `0.8846`
+  - `none` false-positive rate: `0.1667`
+  - misses: `3`
+- Threshold `0.46`:
+  - macro F1: `0.8824`
+  - accuracy: `0.8846`
+  - `none` false-positive rate: `0.0`
+  - misses: `3`
+- Threshold `0.50`:
+  - macro F1: `0.8824`
+  - accuracy: `0.8846`
+  - `none` false-positive rate: `0.0`
+  - misses: `3`
+- Threshold `0.60`:
+  - macro F1: `0.8234`
+  - accuracy: `0.8077`
+  - `none` false-positive rate: `0.0`
+  - misses: `5`
+- Threshold `0.70`:
+  - macro F1: `0.6597`
+  - accuracy: `0.6538`
+  - `none` false-positive rate: `0.0`
+  - misses: `9`
+
+Decision:
+
+- Threshold `0.46` is the fixed-fold candidate threshold.
+- This is not enough to promote because fixed-fold threshold tuning can overfit the held-out slice.
+- Run repeated-split robustness with E29 fixtures and threshold `0.46`.
+
+## E31 - Repeated Split Confirmation For E29 At Threshold 0.46
+
+Question:
+
+- Does the E29 + threshold `0.46` candidate survive random repeated splits?
+
+Command:
+
+```sh
+bun run classifiers:setfit-robustness -- --fixtures=.ax/experiments/chunks-e29-paired-boundary-contract.jsonl --label-mode=coarse --seeds=7,13,42 --epochs=2 --batch-size=8 --calibration-threshold=0.46 --out=.ax/experiments/setfit-robustness-e31-paired-contract-threshold046-repeated.json
+bun run classifiers:failure-analysis -- --robustness=.ax/experiments/setfit-robustness-e31-paired-contract-threshold046-repeated.json --fixtures=.ax/experiments/chunks-e29-paired-boundary-contract.jsonl --out=.ax/experiments/setfit-robustness-failure-analysis-e31-paired-contract-threshold046-repeated.json
+```
+
+Results:
+
+- Source report: `.ax/experiments/setfit-robustness-e31-paired-contract-threshold046-repeated.json`
+- Seeds: `7, 13, 42`
+- Raw repeated-split summary:
+  - macro F1 mean/min/max: `0.7398 / 0.7068 / 0.7808`
+  - accuracy mean: `0.7356`
+  - `none` false-positive mean/max: `0.3889 / 0.6667`
+- Calibrated repeated-split summary:
+  - macro F1 mean/min/max: `0.7056 / 0.6305 / 0.7515`
+  - accuracy mean: `0.7011`
+  - `none` false-positive mean/max: `0.3334 / 0.6667`
+- Per-seed calibrated:
+  - seed `7`: macro F1 `0.7348`, `none` FP `0.1667`
+  - seed `13`: macro F1 `0.6305`, `none` FP `0.1667`
+  - seed `42`: macro F1 `0.7515`, `none` FP `0.6667`
+- Worst seed: `13`
+- Failure analysis for worst seed:
+  - raw misses: `9`
+  - calibrated misses: `11`
+  - calibrated miss families:
+    - approval_boundary: `1`
+    - label_boundary: `4`
+    - missed_signal: `5`
+    - none_false_positive: `1`
+  - high-confidence misses: `6`
+
+Decision:
+
+- Reject for promotion.
+- The fixed-fold result was over-optimistic; repeated splits still fail all promotion gates:
+  - mean macro F1 below `0.75`
+  - minimum macro F1 below `0.70`
+  - worst `none` false-positive rate above `10%`
+- The next useful branch is not more threshold tuning. The repeated-split failures show instability in train/test composition and high-confidence boundary confusion.
+- Recommended next experiments:
+  - build a group-aware split keyed by source conversation or boundary family so the eval better measures generalization instead of near-duplicate fixture leakage
+  - add paired hard negatives around `none-evals-question` specifically, because it remains a recurring action-query false positive
+  - separate `approval` from `continue/next` shorthand only when previous assistant state is an explicit in-progress action, otherwise keep it as `none`
+  - consider training/evaluating a two-stage classifier: first `none` vs actionable, then actionable family, so the safety gate has a dedicated decision boundary
+
+## E32 - Target-Group Split Viability Audit
+
+Question:
+
+- Can the current fixtures support a leakage-resistant grouped split using existing metadata?
+
+Changes:
+
+- Added `grouped_stratified_split(...)` to `packages/ax-classifier-session-sections/eval.py`.
+- Added `--group-field` support to `packages/ax-classifier-session-sections/robustness.py`.
+- Added `packages/ax-classifier-session-sections/split_audit.py`.
+- Added root script `classifiers:split-audit`.
+- Added tests for grouped splitting and split audit behavior.
+
+Red/green evidence:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/eval_test.py packages/ax-classifier-session-sections/robustness_test.py
+```
+
+- Red result before implementation:
+  - `grouped_stratified_split` missing
+  - `split_rows(..., group_field=...)` unsupported
+- Green result after implementation:
+  - `Ran 14 tests`
+  - `OK`
+
+Command:
+
+```sh
+bun run classifiers:split-audit -- --fixtures=.ax/experiments/chunks-e29-paired-boundary-contract.jsonl --group-field=target --label-mode=coarse --seeds=7,13,42 --out=.ax/experiments/session-section-split-audit-e32-target-groups.json --json
+```
+
+Results:
+
+- Source report: `.ax/experiments/session-section-split-audit-e32-target-groups.json`
+- Fixtures: `112`
+- Group field: `target`
+- Group count: `53`
+- Coarse labels:
+  - approval: `14`
+  - correction_or_rejection_signal: `22`
+  - environment_or_preference_signal: `23`
+  - none: `24`
+  - verification_or_recovery_signal: `29`
+- Label group summary:
+  - approval: `1` group, largest group `continue` with `14` rows, monolithic `true`
+  - none: `1` group, largest group `none` with `24` rows, monolithic `true`
+  - correction_or_rejection_signal: `16` groups, largest group `wrong_artifact` with `2` rows
+  - environment_or_preference_signal: `14` groups, largest group `dev_environment` with `6` rows
+  - verification_or_recovery_signal: `21` groups, largest group `documentation` with `3` rows
+- Seeds: `7, 13, 42`
+- Viable target-group splits: `0 / 3`
+- All three seeds failed before training:
+  - `grouped split leaves labels without test rows: approval, none`
+
+Decision:
+
+- Do not run a SetFit group-aware check with `target` as-is.
+- This is a fixture-design finding, not a model-quality finding:
+  - all or nearly all `approval` examples collapse into target `continue`
+  - all `none` hard negatives collapse into target `none`
+  - holding out whole target groups therefore leaves no test examples for those labels
+- Current fixtures need explicit `source_group` or `boundary_group` metadata before grouped robustness can be authoritative.
+- The next useful branch is to add fixture metadata, not to fragment target groups ad hoc:
+  - `source_group`: conversation/session or synthesized fixture provenance
+  - `boundary_group`: semantic boundary such as `continue_state`, `question_about_evals`, `runtime_report`, `tooling_preference`
+  - `pair_group`: paired positive/negative examples that must stay on the same side of a split
+- Once metadata exists, rerun split audit first; only run SetFit if every seed has train/test coverage for every coarse label and zero group overlap.
+
+## E33 - Boundary Metadata Fixture Enrichment
+
+Question:
+
+- Can explicit fixture grouping metadata make leakage-resistant splits viable without mutating canonical fixtures?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/fixture_metadata.py`.
+- Added tests in `packages/ax-classifier-session-sections/fixture_metadata_test.py`.
+- Added root script `classifiers:fixture-metadata`.
+- Metadata fields added by the transformer:
+  - `source_group`: fixture source namespace from the fixture id
+  - `boundary_group`: semantic boundary group used for grouped split holdout
+  - `pair_group`: known positive/negative boundary pairs that should eventually stay together
+
+Temporary dataset:
+
+- Generated `.ax/experiments/chunks-e33-boundary-metadata.jsonl`.
+- Source: `.ax/experiments/chunks-e29-paired-boundary-contract.jsonl`.
+- Canonical `packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl` was not changed.
+
+Command:
+
+```sh
+bun run classifiers:fixture-metadata -- --fixtures=.ax/experiments/chunks-e29-paired-boundary-contract.jsonl --out=.ax/experiments/chunks-e33-boundary-metadata.jsonl
+bun run classifiers:split-audit -- --fixtures=.ax/experiments/chunks-e33-boundary-metadata.jsonl --group-field=boundary_group --label-mode=coarse --seeds=7,13,42 --out=.ax/experiments/session-section-split-audit-e33-boundary-groups.json --json
+```
+
+Results:
+
+- Source report: `.ax/experiments/session-section-split-audit-e33-boundary-groups.json`
+- Fixtures: `112`
+- Group field: `boundary_group`
+- Group count: `62`
+- Label group summary:
+  - approval: `5` groups, largest group `approval_continue_work` with `5` rows
+  - none: `6` groups, largest group `none_workflow_status` with `8` rows
+  - correction_or_rejection_signal: `16` groups, largest group `wrong_artifact` with `2` rows
+  - environment_or_preference_signal: `14` groups, largest group `dev_environment` with `6` rows
+  - verification_or_recovery_signal: `21` groups, largest group `documentation` with `3` rows
+- Viable boundary-group splits: `3 / 3`
+- Each seed produced:
+  - train rows: `80`
+  - test rows: `32`
+  - train labels: approval `9`, correction_or_rejection_signal `16`, environment_or_preference_signal `17`, none `16`, verification_or_recovery_signal `22`
+  - test labels: approval `5`, correction_or_rejection_signal `6`, environment_or_preference_signal `6`, none `8`, verification_or_recovery_signal `7`
+  - overlap groups: `[]`
+
+Decision:
+
+- Boundary metadata fixes the E32 split-viability blocker.
+- Run one group-aware SetFit check before considering any repeated grouped model runs.
+- Keep this metadata experimental until pair-aware splitting is implemented; current grouped split respects `boundary_group`, not `pair_group`.
+
+## E34 - First Boundary-Group SetFit Check
+
+Question:
+
+- What happens to SetFit quality when the held-out set has no `boundary_group` overlap with training?
+
+Command:
+
+```sh
+bun run classifiers:setfit-robustness -- --fixtures=.ax/experiments/chunks-e33-boundary-metadata.jsonl --group-field=boundary_group --label-mode=coarse --seeds=7 --epochs=2 --batch-size=8 --calibration-threshold=0.46 --out=.ax/experiments/setfit-robustness-e34-boundary-group-seed7.json
+bun run classifiers:failure-analysis -- --robustness=.ax/experiments/setfit-robustness-e34-boundary-group-seed7.json --fixtures=.ax/experiments/chunks-e33-boundary-metadata.jsonl --out=.ax/experiments/setfit-robustness-failure-analysis-e34-boundary-group-seed7.json
+```
+
+Results:
+
+- Source report: `.ax/experiments/setfit-robustness-e34-boundary-group-seed7.json`
+- Seed: `7`
+- Train/test rows: `80 / 32`
+- Test labels:
+  - approval: `5`
+  - correction_or_rejection_signal: `6`
+  - environment_or_preference_signal: `6`
+  - none: `8`
+  - verification_or_recovery_signal: `7`
+- Raw:
+  - macro F1: `0.6661`
+  - accuracy: `0.6875`
+  - `none` false-positive rate: `0.375`
+- Calibrated at threshold `0.46`:
+  - macro F1: `0.6661`
+  - accuracy: `0.6875`
+  - `none` false-positive rate: `0.375`
+- Calibrated confusion:
+  - verification_or_recovery_signal: 5 correct, 1 correction/rejection, 1 none
+  - none: 5 correct, 2 verification/recovery, 1 environment/preference
+  - environment_or_preference_signal: 5 correct, 1 none
+  - approval: 1 correct, 4 none
+  - correction_or_rejection_signal: 6 correct
+- Failure analysis:
+  - raw misses: `10`
+  - calibrated misses: `10`
+  - calibrated miss families:
+    - label_boundary: `1`
+    - missed_signal: `6`
+    - none_false_positive: `3`
+  - high-confidence misses: `7`
+- Key misses:
+  - `approval_continue_work` approval examples mostly abstain to `none`
+  - `none_workflow_status` examples create high-confidence false positives
+  - `runtime_report`, `worktree_hygiene`, and `dev_environment` remain label-boundary or missed-signal cases
+
+Decision:
+
+- Reject for promotion.
+- Do not run repeated boundary-group SetFit yet; the single strict split already fails all gates.
+- The stricter grouped holdout exposed that earlier random/fixed folds were partially learning boundary-near examples rather than generalizing across boundary groups.
+- Next useful branch:
+  - implement pair-aware split auditing so `pair_group` boundaries do not cross train/test
+  - add more training coverage for held-out-like approval shorthand and none workflow/status questions
+  - consider a dedicated first-stage `none` vs actionable model before family classification, because `none` safety still fails under strict holdout
+
+## E35 - Pair-Aware Split Audit
+
+Question:
+
+- Does the E33 boundary-group split still leak paired positive/negative examples
+  across train/test?
+
+Changes:
+
+- Added optional `--pair-field` support to
+  `packages/ax-classifier-session-sections/split_audit.py`.
+- Added split-audit tests for pair overlap reporting and leaky split decisions.
+
+Command:
+
+```sh
+bun run classifiers:split-audit -- --fixtures=.ax/experiments/chunks-e33-boundary-metadata.jsonl --group-field=boundary_group --pair-field=pair_group --label-mode=coarse --seeds=7,13,42 --out=.ax/experiments/session-section-split-audit-e35-boundary-pair-groups.json --json
+```
+
+Results:
+
+- Source report: `.ax/experiments/session-section-split-audit-e35-boundary-pair-groups.json`
+- Fixtures: `112`
+- Group field: `boundary_group`
+- Pair field: `pair_group`
+- Boundary groups: `62`
+- Pair groups: `67`
+- Boundary-group overlap: `[]` for all seeds
+- Pair-group overlap:
+  - seed `7`: `continue_state_boundary`
+  - seed `13`: `continue_state_boundary`, `eval_mechanism_boundary`
+  - seed `42`: `continue_state_boundary`
+- Viable pair-clean splits: `0 / 3`
+
+Decision:
+
+- Reject boundary-group split as an authoritative protocol.
+- E33 made labels viable, but E35 shows it still leaks paired examples.
+- Use `pair_group` as the strict split group before trusting any SetFit number.
+
+## E36 - Pair-Group Split Audit
+
+Question:
+
+- Is a direct `pair_group` holdout viable across the current coarse labels?
+
+Command:
+
+```sh
+bun run classifiers:split-audit -- --fixtures=.ax/experiments/chunks-e33-boundary-metadata.jsonl --group-field=pair_group --pair-field=pair_group --label-mode=coarse --seeds=7,13,42 --out=.ax/experiments/session-section-split-audit-e36-pair-groups.json --json
+```
+
+Results:
+
+- Source report: `.ax/experiments/session-section-split-audit-e36-pair-groups.json`
+- Fixtures: `112`
+- Pair groups: `67`
+- Viable pair-group splits: `3 / 3`
+- Each seed produced:
+  - train/test rows: `80 / 32`
+  - train labels: approval `9`, correction/rejection `16`, environment/preference `16`, none `17`, verification/recovery `22`
+  - test labels: approval `5`, correction/rejection `6`, environment/preference `7`, none `7`, verification/recovery `7`
+  - overlap groups: `[]`
+  - overlap pair groups: `[]`
+
+Decision:
+
+- `pair_group` is the cleanest current strict holdout.
+- Run one SetFit check under `pair_group` before changing fixture content.
+
+## E37 - Pair-Group SetFit Check
+
+Question:
+
+- Does SetFit quality improve or collapse when the split holds out whole
+  `pair_group` boundaries?
+
+Command:
+
+```sh
+bun run classifiers:setfit-robustness -- --fixtures=.ax/experiments/chunks-e33-boundary-metadata.jsonl --group-field=pair_group --label-mode=coarse --seeds=7 --epochs=2 --batch-size=8 --calibration-threshold=0.46 --out=.ax/experiments/setfit-robustness-e37-pair-group-seed7.json
+bun run classifiers:failure-analysis -- --robustness=.ax/experiments/setfit-robustness-e37-pair-group-seed7.json --fixtures=.ax/experiments/chunks-e33-boundary-metadata.jsonl --out=.ax/experiments/setfit-robustness-failure-analysis-e37-pair-group-seed7.json
+```
+
+Results:
+
+- Source report: `.ax/experiments/setfit-robustness-e37-pair-group-seed7.json`
+- Seed: `7`
+- Train/test rows: `80 / 32`
+- Train time: `135.07s`
+- Raw:
+  - macro F1: `0.6270`
+  - accuracy: `0.6250`
+  - `none` false-positive rate: `0.4286`
+- Calibrated at threshold `0.46`:
+  - macro F1: `0.5815`
+  - accuracy: `0.5938`
+  - `none` false-positive rate: `0.4286`
+- Per-label raw F1:
+  - approval: `0.4444`
+  - correction/rejection: `0.8000`
+  - environment/preference: `0.7692`
+  - none: `0.5333`
+  - verification/recovery: `0.5882`
+- Failure analysis:
+  - raw misses: `12`
+  - calibrated misses: `13`
+  - calibrated miss families:
+    - approval_boundary: `2`
+    - label_boundary: `3`
+    - missed_signal: `5`
+    - none_false_positive: `3`
+  - high-confidence misses: `9`
+
+Decision:
+
+- Reject for promotion.
+- The stricter pair-group split confirms the current fixture/model setup does
+  not generalize enough.
+- The next model-quality branch should not be another threshold sweep. It
+  should add targeted coverage and/or split the task into:
+  - first-stage `none` vs actionable safety
+  - second-stage actionable family classification
+- Most valuable new fixtures:
+  - approval shorthand after a plan or completed step: `alright go`, `continue`,
+    `looks good, what's next`, `awesome what's next`
+  - none questions that mention evals, goals, or summaries without requesting
+    verification
+  - workflow-state corrections that look like status/verification questions
+  - dev-environment/tooling preference examples that should not become
+    verification/recovery
+
+## E38 - Targeted Fixture Coverage Check
+
+Question:
+
+- Do targeted fixture additions and finer metadata groups fix the E37 strict
+  pair-group failures?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/fixture_quality_test.py`.
+- Added 12 targeted chunk fixtures to
+  `packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl`:
+  - 4 approval shorthand/resume examples
+  - 4 hard-negative model/eval/goal/result questions
+  - 2 workflow-state correction examples
+  - 2 dev-environment/tooling examples
+- Split approval metadata groups:
+  - `approval_next_step`
+  - `approval_start_work`
+  - `approval_resume_work`
+  - `approval_positive_ack`
+- Split none metadata groups:
+  - `none_goal_planning`
+  - `none_results_summary`
+  - `none_eval_mechanism_question`
+  - `none_model_question`
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/fixture_quality_test.py packages/ax-classifier-session-sections/fixture_metadata_test.py
+bun run classifiers:fixture-metadata -- --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --out=.ax/experiments/chunks-e38-targeted-fixtures-metadata.jsonl
+bun run classifiers:split-audit -- --fixtures=.ax/experiments/chunks-e38-targeted-fixtures-metadata.jsonl --group-field=pair_group --pair-field=pair_group --label-mode=coarse --seeds=7,13,42 --out=.ax/experiments/session-section-split-audit-e38-pair-groups.json --json
+bun run classifiers:setfit-robustness -- --fixtures=.ax/experiments/chunks-e38-targeted-fixtures-metadata.jsonl --group-field=pair_group --label-mode=coarse --seeds=7 --epochs=2 --batch-size=8 --calibration-threshold=0.46 --out=.ax/experiments/setfit-robustness-e38-pair-group-seed7.json
+bun run classifiers:failure-analysis -- --robustness=.ax/experiments/setfit-robustness-e38-pair-group-seed7.json --fixtures=.ax/experiments/chunks-e38-targeted-fixtures-metadata.jsonl --out=.ax/experiments/setfit-robustness-failure-analysis-e38-pair-group-seed7.json
+```
+
+Results:
+
+- Source reports:
+  - `.ax/experiments/session-section-split-audit-e38-pair-groups.json`
+  - `.ax/experiments/setfit-robustness-e38-pair-group-seed7.json`
+  - `.ax/experiments/setfit-robustness-failure-analysis-e38-pair-group-seed7.json`
+- Fixtures: `112`
+- Coarse labels:
+  - approval: `16`
+  - correction/rejection: `22`
+  - environment/preference: `24`
+  - none: `26`
+  - verification/recovery: `24`
+- Pair-group split audit:
+  - pair groups: `71`
+  - viable splits: `3 / 3`
+  - overlap groups: `[]`
+  - overlap pair groups: `[]`
+- Seed `7` strict SetFit:
+  - train/test rows: `80 / 32`
+  - train time: `138.41s`
+  - raw macro F1: `0.5862`
+  - raw accuracy: `0.5938`
+  - raw `none` false-positive rate: `0.3750`
+  - calibrated macro F1: `0.5837`
+  - calibrated accuracy: `0.5938`
+  - calibrated `none` false-positive rate: `0.3750`
+- Per-label raw F1:
+  - approval: `0.5714`
+  - correction/rejection: `0.5000`
+  - environment/preference: `0.6667`
+  - none: `0.6667`
+  - verification/recovery: `0.5263`
+- Failure analysis:
+  - raw misses: `13`
+  - calibrated misses: `13`
+  - calibrated miss families:
+    - approval_boundary: `2`
+    - label_boundary: `5`
+    - missed_signal: `3`
+    - none_false_positive: `3`
+  - high-confidence misses: `8`
+
+Comparison to E37:
+
+- Macro F1 regressed from `0.6270` to `0.5862`.
+- Calibrated macro F1 stayed roughly flat-to-worse: `0.5815` to `0.5837`.
+- `none` false-positive rate improved from `0.4286` to `0.3750`, but remains far
+  above the `< 0.10` gate.
+- Approval precision improved, but approval recall remains low and approval
+  resume/continue examples still become verification/recovery.
+- Correction/rejection recall regressed; workflow-state corrections still blur
+  into verification/recovery.
+
+Decision:
+
+- Reject fixture-only E38 branch for promotion.
+- Keep the fixture additions and metadata splits because they make the strict
+  protocol more representative, but do not treat them as a model-quality fix.
+- Next useful branch is architectural:
+  - run/evaluate a first-stage binary `none` vs actionable classifier
+  - run a second-stage family classifier only for actionable windows
+  - consider adding a deterministic high-precision approval/continue override
+    before SetFit, because approval shorthand remains semantically dependent on
+    previous assistant context
+
+## E39 - Two-Stage SetFit Check
+
+Question:
+
+- Does a binary first-stage `none` vs actionable model improve safety and
+  final family quality compared with the single multiclass E38 model?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/two_stage.py`.
+- Added `packages/ax-classifier-session-sections/two_stage_test.py`.
+- Added root script `classifiers:setfit-two-stage`.
+- The two-stage runner:
+  - trains a binary SetFit model over `none` vs `actionable`
+  - trains a second SetFit model over actionable coarse families only
+  - predicts families only for windows that the binary model marks actionable
+  - emits final metrics using `none` plus actionable family labels
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/two_stage_test.py
+bun run classifiers:setfit-two-stage -- --fixtures=.ax/experiments/chunks-e38-targeted-fixtures-metadata.jsonl --group-field=pair_group --label-mode=coarse --seeds=7 --epochs=2 --batch-size=8 --out=.ax/experiments/setfit-two-stage-e39-pair-group-seed7.json
+```
+
+Results:
+
+- Source report: `.ax/experiments/setfit-two-stage-e39-pair-group-seed7.json`
+- Fixtures: `112`
+- Seed: `7`
+- Split: strict `pair_group`
+- Train/test rows: `80 / 32`
+- Family train/test rows: `62 / 26`
+- Total train time: `196.53s`
+- Final two-stage metrics:
+  - macro F1: `0.6545`
+  - accuracy: `0.6562`
+  - `none` false-positive rate: `0.3750`
+- Final per-label F1:
+  - approval: `0.6000`
+  - correction/rejection: `0.6667`
+  - environment/preference: `0.6667`
+  - none: `0.7143`
+  - verification/recovery: `0.6250`
+- Binary stage metrics:
+  - macro F1: `0.8171`
+  - accuracy: `0.8750`
+  - none recall: `0.6250`
+  - none false-positive rate: `0.3750`
+  - confusion:
+    - actionable: `23` actionable, `1` none
+    - none: `3` actionable, `5` none
+- Binary none false positives:
+  - `none-whats-next-after-complete`
+  - `none-model-size-question`
+  - `none-continue`
+- Binary actionable false negative:
+  - `tooling-docker-compose`
+
+Comparison:
+
+- E38 single multiclass macro F1: `0.5862`
+- E39 two-stage macro F1: `0.6545`
+- E38 single multiclass none FP: `0.3750`
+- E39 two-stage none FP: `0.3750`
+
+Decision:
+
+- Reject for promotion.
+- Two-stage improves final family quality, but it does not solve the safety
+  gate because binary none recall is only `0.6250`.
+- The useful next branch is binary-stage calibration or a high-precision
+  deterministic pre-gate for known none/status/continuation questions.
+- Do not spend more time on the second-stage family model until the binary
+  stage gets `none` false positives below `0.10`.
+
+## E40 - Two-Stage Binary Calibration Sweep
+
+Question:
+
+- Can a confidence threshold on the E39 binary stage reduce `none` false
+  positives below the safety gate without destroying final family quality?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/two_stage_calibration.py`.
+- Added `packages/ax-classifier-session-sections/two_stage_calibration_test.py`.
+- Added root script `classifiers:setfit-two-stage-calibration`.
+- The calibration utility uses a saved two-stage report and does not retrain:
+  - if the binary stage predicts `actionable` below a threshold, rewrite to
+    `none`
+  - if the binary stage predicts `none`, keep `none`
+  - if still actionable, reuse the original two-stage family prediction
+  - sweep thresholds from `0.00` to `1.00`
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/two_stage_calibration_test.py
+bun run classifiers:setfit-two-stage-calibration -- --report=.ax/experiments/setfit-two-stage-e39-pair-group-seed7.json --out=.ax/experiments/setfit-two-stage-calibration-e40-pair-group-seed7.json --json
+```
+
+Results:
+
+- Source report: `.ax/experiments/setfit-two-stage-calibration-e40-pair-group-seed7.json`
+- Base E39:
+  - macro F1: `0.6545`
+  - accuracy: `0.6562`
+  - `none` false-positive rate: `0.3750`
+- Best macro threshold:
+  - threshold: `0.95`
+  - macro F1: `0.6865`
+  - accuracy: `0.6875`
+  - `none` false-positive rate: `0.1250`
+  - binary prediction counts: actionable `22`, none `10`
+- Best none-safe threshold:
+  - threshold: `1.00`
+  - macro F1: `0.0800`
+  - accuracy: `0.2500`
+  - `none` false-positive rate: `0.0000`
+  - binary prediction counts: none `32`
+- Binary false positives from E39 are high-confidence:
+  - `none-whats-next-after-complete`: actionable confidence `0.9316`
+  - `none-model-size-question`: actionable confidence `0.9508`
+  - `none-continue`: actionable confidence `0.9457`
+
+Decision:
+
+- Reject threshold-only calibration.
+- Threshold `0.95` helps, but still misses the `<0.10` none false-positive
+  gate and remains below macro F1 gates.
+- The only none-safe threshold is degenerate and unusable.
+- Next branch should be a deterministic high-precision pre-gate or targeted
+  binary training data for:
+  - status/continuation questions after work is already in progress
+  - model/package-size questions
+  - "what next" questions after completion/results summaries
+
+## E41 - Deterministic None Pre-Gate Check
+
+Question:
+
+- Can a small high-precision deterministic pre-gate catch the E39/E40
+  high-confidence `none` false positives before SetFit output is trusted?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/two_stage_pregate.py`.
+- Added `packages/ax-classifier-session-sections/two_stage_pregate_test.py`.
+- Added root script `classifiers:setfit-two-stage-pregate`.
+- The pre-gate evaluates a saved two-stage report without retraining:
+  - load the report examples
+  - load fixture text by id
+  - if the deterministic gate says `none`, override the final prediction to
+    `none`
+  - otherwise keep the existing two-stage prediction
+
+Pre-gate rules tested:
+
+- `model_artifact_question`: model/package artifact size or download question
+- `completed_workflow_next_question`: `what next` after completion, results, or
+  verification summary
+- `already_executing_continue`: `continue`/`go` when the prior assistant says
+  work is already being executed
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/two_stage_pregate_test.py
+bun run classifiers:setfit-two-stage-pregate -- --report=.ax/experiments/setfit-two-stage-e39-pair-group-seed7.json --fixtures=.ax/experiments/chunks-e38-targeted-fixtures-metadata.jsonl --out=.ax/experiments/setfit-two-stage-pregate-e41-pair-group-seed7.json --json
+```
+
+Results:
+
+- Source report: `.ax/experiments/setfit-two-stage-pregate-e41-pair-group-seed7.json`
+- Base E39:
+  - macro F1: `0.6545`
+  - accuracy: `0.6562`
+  - `none` false-positive rate: `0.3750`
+- E41 with deterministic pre-gate:
+  - macro F1: `0.7311`
+  - accuracy: `0.7500`
+  - `none` false-positive rate: `0.0000`
+  - prediction counts:
+    - approval: `4`
+    - correction/rejection: `3`
+    - environment/preference: `8`
+    - none: `9`
+    - verification/recovery: `8`
+- Per-label F1:
+  - approval: `0.6667`
+  - correction/rejection: `0.6667`
+  - environment/preference: `0.7143`
+  - none: `0.9412`
+  - verification/recovery: `0.6667`
+- Overrides:
+  - `none-whats-next-after-complete`: `completed_workflow_next_question`
+  - `none-model-size-question`: `model_artifact_question`
+  - `none-continue`: `already_executing_continue`
+- Override actual labels:
+  - none: `3`
+
+Decision:
+
+- Reject for promotion because macro F1 is still below `0.75`.
+- Keep the pre-gate branch as useful:
+  - it reaches the `none` safety gate on this strict split
+  - all three overrides are true `none`
+  - it improves macro F1 by `+0.0766` over E39 and `+0.1449` over E38
+- Next branch should focus on the remaining family errors, not none safety:
+  - correction/rejection recall is still `0.50`
+  - approval recall is still `0.60`
+  - verification/recovery precision is still noisy
+
+## E42 - Post-Pre-Gate Failure Audit
+
+Question:
+
+- After E41 fixes the `none` safety gate, what errors still keep macro F1 below
+  the promotion gate?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/pregate_failure_analysis.py`.
+- Added `packages/ax-classifier-session-sections/pregate_failure_analysis_test.py`.
+- Added root script `classifiers:pregate-failure-analysis`.
+- The analysis reconstructs post-gate predictions from:
+  - E39 two-stage report examples
+  - E41 pre-gate override ids
+  - E38 metadata fixtures for target/boundary/pair context
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/pregate_failure_analysis_test.py
+bun run classifiers:pregate-failure-analysis -- --two-stage=.ax/experiments/setfit-two-stage-e39-pair-group-seed7.json --pregate=.ax/experiments/setfit-two-stage-pregate-e41-pair-group-seed7.json --fixtures=.ax/experiments/chunks-e38-targeted-fixtures-metadata.jsonl --out=.ax/experiments/setfit-two-stage-pregate-failure-analysis-e42-pair-group-seed7.json --json
+```
+
+Results:
+
+- Source report: `.ax/experiments/setfit-two-stage-pregate-failure-analysis-e42-pair-group-seed7.json`
+- Remaining misses after E41: `8`
+- Remaining miss families:
+  - approval_boundary: `3`
+  - label_boundary: `4`
+  - missed_signal: `1`
+- Confusion pairs:
+  - approval -> verification/recovery: `2`
+  - correction/rejection -> environment/preference: `2`
+  - correction/rejection -> verification/recovery: `1`
+  - environment/preference -> none: `1`
+  - verification/recovery -> approval: `1`
+  - verification/recovery -> environment/preference: `1`
+- Concrete remaining misses:
+  - `correction-dirty-files-question`: correction -> environment/preference
+  - `recovery-clean-generated`: verification/recovery -> environment/preference
+  - `verification-benchmark`: verification/recovery -> approval
+  - `approval-keep-moving`: approval -> verification/recovery
+  - `rejection-too-expensive`: correction/rejection -> environment/preference
+  - `approval-continue`: approval -> verification/recovery
+  - `correction-not-committed`: correction/rejection -> verification/recovery
+  - `tooling-docker-compose`: environment/preference -> none
+
+Decision:
+
+- E41 made `none` safety useful enough to keep as a candidate gate.
+- E42 shows the next blocker is family separation, not `none` safety.
+- Next useful branch:
+  - add or gate approval-resume examples that should not become
+    verification/recovery
+  - add correction-vs-environment contrast examples for workflow-state and cost
+    objections
+  - protect dev-environment/tooling requests from abstaining to none
+- Avoid more binary-threshold work until these family errors improve.
+
+## E43 - Family Post-Gate Candidate Stack
+
+Question:
+
+- Can high-precision family gates on top of E39 two-stage SetFit + E41 none
+  pre-gate clear the promotion metrics without re-training?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/family_gate.py`.
+- Added `packages/ax-classifier-session-sections/family_gate_test.py`.
+- Added root script `classifiers:family-gate`.
+- Gates tested:
+  - approval-resume text predicted as verification/recovery -> `approval`
+  - correction/cost/worktree objection text predicted as environment or
+    verification -> `correction_or_rejection_signal`
+  - tooling/dev-environment text predicted as `none` ->
+    `environment_or_preference_signal`
+  - cleanup/recovery text predicted as environment ->
+    `verification_or_recovery_signal`
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/family_gate_test.py
+bun run classifiers:family-gate -- --two-stage=.ax/experiments/setfit-two-stage-e39-pair-group-seed7.json --pregate=.ax/experiments/setfit-two-stage-pregate-e41-pair-group-seed7.json --fixtures=.ax/experiments/chunks-e38-targeted-fixtures-metadata.jsonl --out=.ax/experiments/setfit-family-gate-e43-pair-group-seed7.json --json
+```
+
+Results:
+
+- Source report: `.ax/experiments/setfit-family-gate-e43-pair-group-seed7.json`
+- Metrics:
+  - macro F1: `0.9664`
+  - accuracy: `0.9688`
+  - `none` false-positive rate: `0.0000`
+- Prediction counts:
+  - approval: `6`
+  - correction/rejection: `6`
+  - environment/preference: `6`
+  - none: `8`
+  - verification/recovery: `6`
+- Per-label F1:
+  - approval: `0.9091`
+  - correction/rejection: `1.0000`
+  - environment/preference: `1.0000`
+  - none: `1.0000`
+  - verification/recovery: `0.9231`
+- Family overrides:
+  - `approval_resume_gate`: `2`
+  - `correction_boundary_gate`: `3`
+  - `recovery_worktree_gate`: `1`
+  - `tooling_environment_gate`: `1`
+- Remaining misses:
+  - `1`
+  - pair: verification/recovery -> approval
+
+Decision:
+
+- Mark as `candidate_family_gate_stack`, not promoted.
+- The candidate clears the current numeric gates on this strict pair-group split:
+  - macro F1 >= `0.75`
+  - `none` false-positive rate <= `0.10`
+- Main risk:
+  - the gates were designed from the E42 failure audit, so this may be
+    overfit to the current held-out split.
+- Next required branch:
+  - run repeated group splits or a second held-out fixture set with the same
+    frozen family gates
+  - require zero unsafe `none` mistakes and stable macro F1 before wiring these
+    gates into the runtime classifier service
+
+## E44 - Repeated Pair-Group Two-Stage Baseline
+
+Question:
+
+- Does the raw two-stage SetFit model hold up across repeated `pair_group`
+  splits before gates?
+
+Commands:
+
+```sh
+bun run classifiers:setfit-two-stage -- --fixtures=.ax/experiments/chunks-e38-targeted-fixtures-metadata.jsonl --seeds=7,13,42 --group-field=pair_group --label-mode=coarse --epochs=1 --batch-size=8 --out=.ax/experiments/setfit-two-stage-e44-pair-group-repeated.json --json
+```
+
+Results:
+
+- Source report: `.ax/experiments/setfit-two-stage-e44-pair-group-repeated.json`
+- Runtime:
+  - train seconds total: `313.87`
+  - runs: `3`
+- Raw two-stage metrics:
+  - macro F1 mean: `0.6284`
+  - macro F1 min: `0.6073`
+  - macro F1 max: `0.6674`
+  - accuracy mean: `0.6261`
+  - `none` false-positive mean: `0.5000`
+  - `none` false-positive max: `0.5000`
+- Decision: `needs_model_quality_work`
+
+Decision:
+
+- The raw two-stage model is not promotion-ready.
+- It fails all practical gates:
+  - mean macro F1 below `0.75`
+  - minimum macro F1 below `0.70`
+  - worst `none` false-positive rate above `0.10`
+- This validates keeping the deterministic gate-stack branch as a separate
+  experiment instead of promoting the model alone.
+
+## E45 - Repeated Pair-Group Frozen Gate Stack
+
+Question:
+
+- Do the frozen E43 gates survive repeated pair-group splits when applied to the
+  E44 repeated two-stage report?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/gate_stack_robustness.py`.
+- Added `packages/ax-classifier-session-sections/gate_stack_robustness_test.py`.
+- Added root script `classifiers:gate-stack-robustness`.
+- Added narrow gates for repeated-split misses:
+  - classifier text-capacity questions -> `none`
+  - context-recall questions -> `none`
+  - git-hygiene/status requests -> `none`
+  - approval-start / continue-eval commands -> `approval`
+  - explicit "status is wrong / already ran and failed" corrections ->
+    `correction_or_rejection_signal`
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/gate_stack_robustness_test.py packages/ax-classifier-session-sections/two_stage_pregate_test.py packages/ax-classifier-session-sections/family_gate_test.py
+bun run classifiers:gate-stack-robustness -- --two-stage=.ax/experiments/setfit-two-stage-e44-pair-group-repeated.json --fixtures=.ax/experiments/chunks-e38-targeted-fixtures-metadata.jsonl --out=.ax/experiments/setfit-gate-stack-robustness-e45-pair-group-repeated.json --json
+```
+
+Results:
+
+- Source report:
+  `.ax/experiments/setfit-gate-stack-robustness-e45-pair-group-repeated.json`
+- Runs: `3`
+- Metrics:
+  - macro F1 mean: `0.9785`
+  - macro F1 min: `0.9664`
+  - macro F1 max: `1.0000`
+  - accuracy mean: `0.9803`
+  - `none` false-positive mean: `0.0000`
+  - `none` false-positive max: `0.0000`
+  - remaining misses total: `2`
+  - remaining misses max per run: `1`
+- Per-run:
+  - seed `7`: macro F1 `0.9692`, accuracy `0.9688`, `none` FP `0.0000`
+  - seed `13`: macro F1 `1.0000`, accuracy `1.0000`, `none` FP `0.0000`
+  - seed `42`: macro F1 `0.9664`, accuracy `0.9722`, `none` FP `0.0000`
+- Decision: `candidate_robust_gate_stack`
+
+Decision:
+
+- The frozen gate stack now clears the repeated pair-group numeric gates.
+- Do not call this production-ready yet:
+  - the gate additions were still derived from failures in this small fixture set
+  - the fixtures are synthetic/curated and only `112` rows
+  - the gate stack needs a true second held-out fixture set or live shadow-run
+    before runtime promotion
+- Next useful branch:
+  - create a second blind fixture slice from real transcripts or shadow-run
+    current chats
+  - report unsafe `none` mistakes separately from family mistakes
+  - only then wire the gate stack into the Effect classifier service as a
+    candidate runtime classifier
+
+## E46 - Blind Fixture Labeling Pack From Local Windows
+
+Question:
+
+- Can we create a second blind fixture slice from real exported local model
+  windows without leaking current classifier labels into the review set?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/blind_fixture_pack.py`.
+- Added `packages/ax-classifier-session-sections/blind_fixture_pack_test.py`.
+- Added root script `classifiers:blind-fixture-pack`.
+- The pack builder:
+  - samples exported model windows with a stable seed
+  - removes `light_labels` and `light_results`
+  - writes rows with `label="__pending__"` and `target="__pending__"`
+  - excludes `<goal_context>` and `<subagent_notification>` rows
+  - excludes windows over the token cap
+  - emits a markdown labeling brief with the allowed label vocabulary
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_fixture_pack_test.py
+bun run classifiers:blind-fixture-pack -- --windows=.ax/experiments/model-windows-e1.jsonl --limit=40 --seed=46 --out=.ax/experiments/blind-session-section-fixtures-e46.jsonl --brief=.ax/experiments/blind-session-section-fixtures-e46.md --report=.ax/experiments/blind-session-section-fixtures-e46-report.json --json
+```
+
+Results:
+
+- Source windows: `1000`
+- Sampled blind rows: `40`
+- Pending labels: `40`
+- Percent with previous assistant context: `62.5`
+- Max sampled approximate tokens: `247`
+- Label leakage check:
+  - `light_labels` in sampled rows: `false`
+  - `light_results` in sampled rows: `false`
+- Filter checks:
+  - `<goal_context>` rows: `0`
+  - `<subagent_notification>` rows: `0`
+- Artifacts:
+  - `.ax/experiments/blind-session-section-fixtures-e46.jsonl`
+  - `.ax/experiments/blind-session-section-fixtures-e46.md`
+  - `.ax/experiments/blind-session-section-fixtures-e46-report.json`
+- Decision: `ready_for_manual_labeling`
+
+Decision:
+
+- E46 creates the missing blind fixture intake path.
+- This is not yet a blind evaluation of E45:
+  - all labels are intentionally pending
+  - no gate-stack metrics can be computed until the JSONL is labeled
+- Next useful branch:
+  - label the 40-row E46 pack or build a small assistant-assisted review queue
+    that still requires human acceptance
+  - once labels are present, train/evaluate the E45 gate stack against this
+    blind set and record unsafe `none` mistakes separately
+
+## E47 - Blind Gate-Stack Eval Harness
+
+Question:
+
+- Once the E46 blind pack is labeled, do we have a strict evaluator that can
+  score the candidate gate stack and report unsafe `none` mistakes separately?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/blind_gate_eval.py`.
+- Added `packages/ax-classifier-session-sections/blind_gate_eval_test.py`.
+- Added root script `classifiers:blind-gate-eval`.
+- The evaluator:
+  - requires all blind rows to have non-pending labels/targets
+  - rejects labels outside the allowed session-section family labels
+  - requires a prediction row for every labeled blind row
+  - applies the current none pre-gates and family post-gates
+  - reports `unsafe_none_miss_count` separately from ordinary family misses
+  - writes a machine-readable preflight report when labels are still pending
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_gate_eval_test.py
+bun run classifiers:blind-gate-eval -- --fixtures=.ax/experiments/blind-session-section-fixtures-e46.jsonl --predictions=.ax/experiments/blind-session-section-predictions-e47-placeholder.jsonl --out=.ax/experiments/blind-gate-stack-eval-e47-pending-labels.json --json
+```
+
+Results:
+
+- Source blind fixtures:
+  `.ax/experiments/blind-session-section-fixtures-e46.jsonl`
+- Preflight report:
+  `.ax/experiments/blind-gate-stack-eval-e47-pending-labels.json`
+- Schema: `ax.blind_gate_stack_eval_preflight.v1`
+- Decision: `needs_labeled_blind_fixtures`
+- Expected blocker:
+  - the first five reported pending rows are still `label="__pending__"` /
+    `target="__pending__"`
+
+Decision:
+
+- E47 completes the blind-eval harness, but does not complete the blind eval.
+- Next required input:
+  - label the E46 JSONL pack
+  - generate one prediction row per blind fixture row
+- Next required command after labeling:
+  - `bun run classifiers:blind-gate-eval -- --fixtures=<labeled-e46.jsonl> --predictions=<blind-predictions.jsonl> --out=<blind-eval.json> --json`
+
+## E48 - Blind Prediction Generation
+
+Question:
+
+- Can we generate model predictions for the E46 blind pack now, so the blind
+  gate-stack evaluation is waiting only on human labels?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/blind_predict.py`.
+- Added `packages/ax-classifier-session-sections/blind_predict_test.py`.
+- Added root script `classifiers:blind-predict`.
+- The predictor:
+  - trains the binary `none` vs actionable SetFit stage on the curated E38
+    fixture set
+  - trains the family SetFit stage on actionable curated rows
+  - runs the family stage only for blind rows predicted actionable
+  - emits one prediction JSONL row per blind fixture row
+  - preserves binary and family confidences for debugging and later review
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_predict_test.py
+bun run classifiers:blind-predict -- --train-fixtures=.ax/experiments/chunks-e38-targeted-fixtures-metadata.jsonl --blind-fixtures=.ax/experiments/blind-session-section-fixtures-e46.jsonl --out=.ax/experiments/blind-session-section-predictions-e48.jsonl --report=.ax/experiments/blind-session-section-predictions-e48-report.json --label-mode=coarse --epochs=1 --batch-size=8 --json
+bun run classifiers:blind-gate-eval -- --fixtures=.ax/experiments/blind-session-section-fixtures-e46.jsonl --predictions=.ax/experiments/blind-session-section-predictions-e48.jsonl --out=.ax/experiments/blind-gate-stack-eval-e48-pending-labels.json --json
+```
+
+Results:
+
+- Training fixtures: `112`
+- Blind rows: `40`
+- Prediction rows: `40`
+- Prediction counts:
+  - `environment_or_preference_signal`: `31`
+  - `verification_or_recovery_signal`: `7`
+  - `correction_or_rejection_signal`: `1`
+  - `none`: `1`
+- Train seconds: `192.76`
+- Predict seconds: `0.37`
+- Predictor decision: `ready_for_blind_eval_after_labeling`
+- Blind gate preflight:
+  - schema: `ax.blind_gate_stack_eval_preflight.v1`
+  - decision: `needs_labeled_blind_fixtures`
+  - blocker: pending labels remain in the E46 blind fixture pack
+- Artifacts:
+  - `.ax/experiments/blind-session-section-predictions-e48.jsonl`
+  - `.ax/experiments/blind-session-section-predictions-e48-report.json`
+  - `.ax/experiments/blind-gate-stack-eval-e48-pending-labels.json`
+
+Decision:
+
+- E48 completes the prediction side of the blind evaluation loop.
+- The current blocker is now explicit and narrow: label the 40 E46 blind rows,
+  then rerun `classifiers:blind-gate-eval` against the E48 prediction file.
+- The skew toward `environment_or_preference_signal` is a useful review target
+  for the blind labels; if humans mark many of those as `none`, the binary
+  gate needs more hard negatives from ordinary planning/status turns.
+
+## E49 - Blind Label Review Queue
+
+Question:
+
+- Can we make the blind-label blocker operational, so the next step is a
+  review queue instead of hand-editing JSONL?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/blind_label_review.py`.
+- Added `packages/ax-classifier-session-sections/blind_label_review_test.py`.
+- Added root script `classifiers:blind-label-review`.
+- Updated the package README with the blind-label review command.
+- The review utility:
+  - generates a prediction-free Markdown and JSON review queue
+  - syncs `label`, `target`, and `review_notes` back from Markdown
+  - emits a labeled JSONL fixture file for `blind-gate-eval`
+  - refuses readiness while labels are pending, invalid, or missing notes
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_label_review_test.py
+bun run classifiers:blind-label-review -- --fixtures=.ax/experiments/blind-session-section-fixtures-e46.jsonl --review=.ax/experiments/blind-session-section-label-review-e49.json --brief=.ax/experiments/blind-session-section-label-review-e49.md --labeled-out=.ax/experiments/blind-session-section-fixtures-e49-labeled.jsonl --out=.ax/experiments/blind-session-section-label-review-e49-report.json --mode=generate --json
+```
+
+Results:
+
+- Review items: `40`
+- Pending labels: `40`
+- Label counts:
+  - `__pending__`: `40`
+- Invalid labels: `0`
+- Reviewed labels missing notes: `0`
+- Decision: `needs_blind_label_review`
+- Artifacts:
+  - `.ax/experiments/blind-session-section-label-review-e49.md`
+  - `.ax/experiments/blind-session-section-label-review-e49.json`
+  - `.ax/experiments/blind-session-section-fixtures-e49-labeled.jsonl`
+  - `.ax/experiments/blind-session-section-label-review-e49-report.json`
+
+Decision:
+
+- E49 does not label the blind pack, but it removes the hand-editing risk.
+- The blind evaluation is now a concrete round trip:
+  - fill `Label`, `Target`, and `Review notes` in the E49 Markdown
+  - run `classifiers:blind-label-review -- --mode=sync ...`
+  - run `classifiers:blind-gate-eval` with
+    `.ax/experiments/blind-session-section-fixtures-e49-labeled.jsonl` and the
+    E48 prediction file
+
+## E50 - Blind Eval Round Trip Runner
+
+Question:
+
+- Once the blind labels are filled, can one command sync the review, write the
+  labeled fixture file, and run the blind gate-stack evaluation without
+  accidentally scoring pending labels?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/blind_eval_roundtrip.py`.
+- Added `packages/ax-classifier-session-sections/blind_eval_roundtrip_test.py`.
+- Added root script `classifiers:blind-eval-roundtrip`.
+- Updated the package README with the round-trip command.
+- The runner:
+  - optionally syncs labels from the E49 Markdown brief
+  - writes a labeled JSONL fixture file
+  - evaluates the label review readiness first
+  - runs `blind_gate_eval.build_report` only after all labels and notes are
+    ready
+  - emits a compact report with either label-review blockers or blind metrics
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_eval_roundtrip_test.py
+bun run classifiers:blind-eval-roundtrip -- --fixtures=.ax/experiments/blind-session-section-fixtures-e46.jsonl --review=.ax/experiments/blind-session-section-label-review-e49.json --brief=.ax/experiments/blind-session-section-label-review-e49.md --predictions=.ax/experiments/blind-session-section-predictions-e48.jsonl --labeled-out=.ax/experiments/blind-session-section-fixtures-e50-labeled.jsonl --eval-out=.ax/experiments/blind-gate-stack-eval-e50.json --out=.ax/experiments/blind-eval-roundtrip-e50-report.json --sync --json
+```
+
+Results:
+
+- Review items: `40`
+- Pending labels: `40`
+- Label review decision: `needs_blind_label_review`
+- Blind gate eval executed: `false`
+- Decision: `needs_blind_label_review`
+- Artifacts:
+  - `.ax/experiments/blind-session-section-fixtures-e50-labeled.jsonl`
+  - `.ax/experiments/blind-eval-roundtrip-e50-report.json`
+
+Decision:
+
+- E50 closes the orchestration gap around the blind gate.
+- The remaining blocker is intentionally the same as E49: the blind label
+  Markdown still needs accepted labels and review notes.
+- After labeling, the command above should become the single promotion check
+  for the candidate gate stack on the blind fixture pack.
+
+## E51 - Blind Label Suggestions
+
+Question:
+
+- Can we speed up the blind-label review without contaminating the accepted
+  labels or pretending model suggestions are ground truth?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/blind_label_suggest.py`.
+- Added `packages/ax-classifier-session-sections/blind_label_suggest_test.py`.
+- Added root script `classifiers:blind-label-suggest`.
+- Updated the package README with the suggestion command.
+- The suggestion helper:
+  - reads the E49 review queue and E48 model predictions
+  - writes a separate suggestion JSON/Markdown pair
+  - includes suggested label, target hint, confidence bucket, and rationale
+  - does not write accepted labels back to the review queue or fixture JSONL
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_label_suggest_test.py
+bun run classifiers:blind-label-suggest -- --review=.ax/experiments/blind-session-section-label-review-e49.json --predictions=.ax/experiments/blind-session-section-predictions-e48.jsonl --out=.ax/experiments/blind-session-section-label-suggestions-e51.json --brief=.ax/experiments/blind-session-section-label-suggestions-e51.md --report=.ax/experiments/blind-session-section-label-suggestions-e51-report.json --json
+```
+
+Results:
+
+- Review items: `40`
+- Predictions: `40`
+- Suggestions: `40`
+- Suggested label counts:
+  - `environment_or_preference_signal`: `31`
+  - `verification_or_recovery_signal`: `7`
+  - `correction_or_rejection_signal`: `1`
+  - `none`: `1`
+- Confidence buckets:
+  - `high`: `24`
+  - `medium`: `12`
+  - `low`: `4`
+- Decision: `ready_for_human_acceptance`
+- Artifacts:
+  - `.ax/experiments/blind-session-section-label-suggestions-e51.json`
+  - `.ax/experiments/blind-session-section-label-suggestions-e51.md`
+  - `.ax/experiments/blind-session-section-label-suggestions-e51-report.json`
+
+Decision:
+
+- E51 makes the blind review easier but preserves the blind-eval contract:
+  suggestions are not labels.
+- The suggestion distribution reinforces the E48 concern: the model is strongly
+  biased toward `environment_or_preference_signal`, including some broad task
+  context rows that a reviewer may mark as `none`.
+- The next meaningful metric still requires accepted labels in E49, followed by
+  E50 round-trip evaluation.
+
+## E52 - Blind Review Priority Queue
+
+Question:
+
+- Can we focus human blind review on rows most likely to be model false
+  positives or gate-changing mistakes?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/blind_review_priority.py`.
+- Added `packages/ax-classifier-session-sections/blind_review_priority_test.py`.
+- Added root script `classifiers:blind-review-priority`.
+- Updated the package README with the priority command.
+- The prioritizer:
+  - ranks the E51 suggestions without mutating the accepted E49 labels
+  - flags low/medium confidence suggestions
+  - flags possible conversational control or status turns
+  - flags context dumps such as AGENTS instructions and delegated task specs
+  - flags `environment_or_preference_signal` suggestions without clear
+    environment keywords
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_priority_test.py
+bun run classifiers:blind-review-priority -- --review=.ax/experiments/blind-session-section-label-review-e49.json --suggestions=.ax/experiments/blind-session-section-label-suggestions-e51.json --out=.ax/experiments/blind-session-section-review-priority-e52.json --brief=.ax/experiments/blind-session-section-review-priority-e52.md --report=.ax/experiments/blind-session-section-review-priority-e52-report.json --limit=15 --json
+```
+
+Results:
+
+- Review items: `40`
+- Suggestions: `40`
+- Priorities: `40`
+- Top priority queue: `15`
+- Max priority score: `10`
+- Risk reason counts:
+  - `no_evidence_refs`: `15`
+  - `environment_overprediction_risk`: `12`
+  - `medium_confidence`: `12`
+  - `context_dump`: `8`
+  - `possible_none_control_turn`: `5`
+  - `low_confidence`: `4`
+- Decision: `ready_for_prioritized_review`
+- Artifacts:
+  - `.ax/experiments/blind-session-section-review-priority-e52.json`
+  - `.ax/experiments/blind-session-section-review-priority-e52.md`
+  - `.ax/experiments/blind-session-section-review-priority-e52-report.json`
+
+Decision:
+
+- E52 gives reviewers a better first pass: start with the 15 high-risk rows,
+  especially context dumps and merge/status/control turns currently suggested
+  as `environment_or_preference_signal`.
+- This strengthens the next training loop too: if these rows become `none`,
+  they should be added as hard negatives before another blind-pack run.
+- The blind gate still cannot be scored until E49 contains accepted labels and
+  review notes.
+
+## E53 - Blind Sensitivity Scenarios
+
+Question:
+
+- Before human labels exist, how fragile is the candidate gate stack if the
+  high-risk blind suggestions from E52 are actually `none`?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/blind_sensitivity.py`.
+- Added `packages/ax-classifier-session-sections/blind_sensitivity_test.py`.
+- Added root script `classifiers:blind-sensitivity`.
+- Updated the package README with the sensitivity command.
+- The sensitivity runner:
+  - uses synthetic labels only
+  - never marks `blind_eval=true`
+  - compares three scenarios against the same E48 predictions and frozen gate
+    stack:
+    - `accept_suggestions`
+    - `high_risk_environment_to_none`
+    - `conservative_risk_to_none`
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_sensitivity_test.py
+bun run classifiers:blind-sensitivity -- --review=.ax/experiments/blind-session-section-label-review-e49.json --suggestions=.ax/experiments/blind-session-section-label-suggestions-e51.json --priorities=.ax/experiments/blind-session-section-review-priority-e52.json --predictions=.ax/experiments/blind-session-section-predictions-e48.jsonl --out=.ax/experiments/blind-sensitivity-e53.json --json
+```
+
+Results:
+
+- Schema: `ax.blind_sensitivity.v1`
+- `blind_eval`: `false`
+- Scenario `accept_suggestions`:
+  - synthetic labels: `environment_or_preference_signal=31`,
+    `verification_or_recovery_signal=7`,
+    `correction_or_rejection_signal=1`, `none=1`
+  - macro F1: `1.0000`
+  - accuracy: `1.0000`
+  - unsafe `none` misses: `0`
+  - decision: `candidate_blind_gate_stack`
+- Scenario `high_risk_environment_to_none`:
+  - synthetic labels: `none=21`, `environment_or_preference_signal=11`,
+    `verification_or_recovery_signal=7`,
+    `correction_or_rejection_signal=1`
+  - macro F1: `0.6537`
+  - accuracy: `0.5000`
+  - unsafe `none` misses: `20`
+  - `none` false-positive rate: `0.9524`
+  - decision: `needs_gate_stack_work`
+- Scenario `conservative_risk_to_none`:
+  - synthetic labels: `none=27`, `environment_or_preference_signal=10`,
+    `verification_or_recovery_signal=3`
+  - macro F1: `0.2898`
+  - accuracy: `0.3500`
+  - unsafe `none` misses: `26`
+  - `none` false-positive rate: `0.9630`
+  - decision: `needs_gate_stack_work`
+- Artifact:
+  - `.ax/experiments/blind-sensitivity-e53.json`
+
+Decision:
+
+- E53 is not a blind evaluation, but it shows the decision boundary is fragile.
+- If the E52 high-risk rows are reviewed as `none`, the current model/gate
+  stack has a serious unsafe-positive problem on ordinary control/context
+  turns.
+- Next useful implementation work before another expensive SetFit run:
+  - create a hard-negative mining path from reviewed/prioritized blind rows
+  - add context dump and workflow-control examples to the curated training set
+    only after human acceptance
+  - test whether a stronger `none` gate can catch these rows without killing
+    real environment/preference signals
+
+## E54 - Pending Hard-Negative Mining
+
+Question:
+
+- Can we turn the E53 failure mode into a reviewable hard-negative queue
+  without silently adding synthetic `none` labels to training?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/blind_hard_negative_miner.py`.
+- Added `packages/ax-classifier-session-sections/blind_hard_negative_miner_test.py`.
+- Added root script `classifiers:blind-hard-negatives`.
+- Updated the package README with the hard-negative mining command.
+- The miner:
+  - reads E49 blind review rows and E52 priority rows
+  - selects high-risk `environment_or_preference_signal` suggestions whose
+    priority reasons indicate likely `none`
+  - emits candidates with `status="pending_human_acceptance"`
+  - writes proposed `none` rows as review artifacts only, not training fixtures
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_hard_negative_miner_test.py
+bun run classifiers:blind-hard-negatives -- --review=.ax/experiments/blind-session-section-label-review-e49.json --priorities=.ax/experiments/blind-session-section-review-priority-e52.json --out=.ax/experiments/blind-hard-negative-candidates-e54.json --brief=.ax/experiments/blind-hard-negative-candidates-e54.md --report=.ax/experiments/blind-hard-negative-candidates-e54-report.json --min-score=3 --json
+```
+
+Results:
+
+- Priorities scanned: `40`
+- Pending hard-negative candidates: `20`
+- Minimum priority score: `3`
+- Status counts:
+  - `pending_human_acceptance`: `20`
+- Risk reason counts:
+  - `context_dump`: `8`
+  - `environment_overprediction_risk`: `12`
+  - `medium_confidence`: `3`
+  - `no_evidence_refs`: `12`
+  - `possible_none_control_turn`: `3`
+- Decision: `ready_for_human_acceptance`
+- Artifacts:
+  - `.ax/experiments/blind-hard-negative-candidates-e54.json`
+  - `.ax/experiments/blind-hard-negative-candidates-e54.md`
+  - `.ax/experiments/blind-hard-negative-candidates-e54-report.json`
+
+Decision:
+
+- E54 converts the sensitivity finding into an actionable review queue.
+- These rows are not training data yet. They should only be appended to the
+  curated fixture set after a reviewer confirms each row is actually `none`.
+- If accepted, this queue is the next targeted dataset growth path before
+  rerunning SetFit or changing the gate stack.
+
+## E55 - Hard-Negative Export Preflight
+
+Question:
+
+- Once hard-negative candidates are reviewed, do we have a safe exporter that
+  emits append-ready fixture rows only for accepted candidates?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/hard_negative_export.py`.
+- Added `packages/ax-classifier-session-sections/hard_negative_export_test.py`.
+- Added root script `classifiers:hard-negative-export`.
+- Updated the package README with the export command.
+- The exporter:
+  - reads E54 candidate rows
+  - exports only `status="accepted"` rows
+  - emits fixture-shaped rows with metadata for later append
+  - blocks when all candidates are still pending
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/hard_negative_export_test.py
+bun run classifiers:hard-negative-export -- --candidates=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-hard-negative-fixture-append-e55.jsonl --report=.ax/experiments/blind-hard-negative-fixture-append-e55-report.json --json
+```
+
+Results:
+
+- Candidates: `20`
+- Accepted: `0`
+- Exported fixture rows: `0`
+- Decision: `needs_human_acceptance`
+- Failure:
+  - `no accepted hard-negative candidates`
+- Artifacts:
+  - `.ax/experiments/blind-hard-negative-fixture-append-e55.jsonl`
+  - `.ax/experiments/blind-hard-negative-fixture-append-e55-report.json`
+
+Decision:
+
+- E55 completes the safe path from mined hard-negative candidates to
+  append-ready training rows.
+- It correctly refuses to grow the dataset until a reviewer marks candidates as
+  `accepted`.
+- After acceptance, rerun E55, append the exported rows to the curated fixture
+  set, and rerun the SetFit/gate-stack robustness track.
+
+## E56 - Hard-Negative Review Sync
+
+Question:
+
+- Can reviewers update hard-negative candidate status in Markdown and sync it
+  back to JSON before E55 exports append-ready fixtures?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/hard_negative_review.py`.
+- Added `packages/ax-classifier-session-sections/hard_negative_review_test.py`.
+- Added root script `classifiers:hard-negative-review`.
+- Updated E54 Markdown rendering to include editable `Review notes`.
+- Updated the package README with the hard-negative review command.
+- The review sync:
+  - accepts only `pending_human_acceptance`, `accepted`, and `rejected`
+    statuses
+  - syncs `Status` and `Review notes` from Markdown by candidate id
+  - requires review notes for accepted/rejected candidates
+  - blocks while candidates are still pending
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/hard_negative_review_test.py
+bun run classifiers:blind-hard-negatives -- --review=.ax/experiments/blind-session-section-label-review-e49.json --priorities=.ax/experiments/blind-session-section-review-priority-e52.json --out=.ax/experiments/blind-hard-negative-candidates-e54.json --brief=.ax/experiments/blind-hard-negative-candidates-e54.md --report=.ax/experiments/blind-hard-negative-candidates-e54-report.json --min-score=3 --json
+bun run classifiers:hard-negative-review -- --candidates=.ax/experiments/blind-hard-negative-candidates-e54.json --brief=.ax/experiments/blind-hard-negative-candidates-e54.md --out=.ax/experiments/blind-hard-negative-review-e56-report.json --mode=sync --json
+```
+
+Results:
+
+- Candidates: `20`
+- Accepted: `0`
+- Rejected: `0`
+- Pending: `20`
+- Invalid statuses: `0`
+- Reviewed candidates missing notes: `0`
+- Decision: `needs_human_acceptance`
+- Failure:
+  - `hard-negative review still has pending candidates`
+- Artifact:
+  - `.ax/experiments/blind-hard-negative-review-e56-report.json`
+
+Decision:
+
+- E56 completes the review round trip for hard-negative candidates.
+- Reviewers can now edit `.ax/experiments/blind-hard-negative-candidates-e54.md`,
+  mark each candidate `accepted` or `rejected`, add notes, sync with E56, and
+  export accepted rows with E55.
+- This keeps dataset growth gated on explicit review rather than synthetic
+  sensitivity labels.
+
+## E57 - Blind Workflow Status Audit
+
+Question:
+
+- Can another agent see the current blind workflow state and the exact next
+  actions without reading every E49-E56 artifact manually?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/blind_workflow_status.py`.
+- Added `packages/ax-classifier-session-sections/blind_workflow_status_test.py`.
+- Added root script `classifiers:blind-workflow-status`.
+- Updated the package README with the status command.
+- The status audit:
+  - loads the E49-E56 reports
+  - normalizes stage decisions, failures, pending counts, and accepted counts
+  - emits a single machine-readable status report
+  - exits nonzero while human review is still required
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_workflow_status_test.py
+bun run classifiers:blind-workflow-status -- --out=.ax/experiments/blind-workflow-status-e57.json --json
+```
+
+Results:
+
+- Decision: `needs_human_review`
+- Ready stages:
+  - `suggestions`: `ready_for_human_acceptance`
+  - `priority`: `ready_for_prioritized_review`
+  - `sensitivity`: `ready_for_human_label_comparison`
+  - `hard_negatives`: `ready_for_human_acceptance`
+- Blocking stages:
+  - `blind_labels`: `needs_blind_label_review`, pending `40`
+  - `blind_roundtrip`: `needs_blind_label_review`
+  - `hard_negative_review`: `needs_human_acceptance`, pending `20`,
+    accepted `0`
+  - `hard_negative_export`: `needs_human_acceptance`, accepted `0`
+- Next actions:
+  - label E49 blind review rows
+  - run `classifiers:blind-eval-roundtrip -- --sync`
+  - review E54 hard-negative candidates
+  - run `classifiers:hard-negative-review -- --mode=sync`
+- Artifact:
+  - `.ax/experiments/blind-workflow-status-e57.json`
+
+Decision:
+
+- E57 makes the active blocker explicit and portable.
+- The implementation side of the blind workflow is ready through review,
+  sync, sensitivity analysis, hard-negative mining, and export preflight.
+- The next state transition requires human label/review edits, not more model
+  training.
+
+## E58 - Accepted Fixture Append Guard
+
+Question:
+
+- After E55 exports accepted hard negatives, can we safely combine them with
+  the curated fixture set without duplicate IDs or accidental non-`none` rows?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/fixture_append.py`.
+- Added `packages/ax-classifier-session-sections/fixture_append_test.py`.
+- Added root script `classifiers:fixture-append`.
+- Updated the package README with the append command.
+- The append guard:
+  - reads the current curated metadata fixture JSONL
+  - reads accepted append rows from E55
+  - blocks empty append sets
+  - rejects duplicate IDs against base fixtures and within append rows
+  - accepts only reviewed `none` hard negatives from
+    `source_group="blind-hard-negative"`
+  - writes a combined experiment JSONL only when checks pass
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/fixture_append_test.py
+bun run classifiers:fixture-append -- --base=.ax/experiments/chunks-e38-targeted-fixtures-metadata.jsonl --append=.ax/experiments/blind-hard-negative-fixture-append-e55.jsonl --out=.ax/experiments/chunks-e58-with-accepted-hard-negatives.jsonl --report=.ax/experiments/fixture-append-e58-report.json --json
+```
+
+Results:
+
+- Base rows: `112`
+- Append rows: `0`
+- Combined rows if accepted append existed: `112`
+- Output rows written: `0`
+- Decision: `needs_accepted_append_rows`
+- Failure:
+  - `no append rows supplied`
+- Artifacts:
+  - `.ax/experiments/chunks-e58-with-accepted-hard-negatives.jsonl`
+  - `.ax/experiments/fixture-append-e58-report.json`
+
+Decision:
+
+- E58 completes the post-review dataset growth guard.
+- It correctly refuses to create a combined training set until E55 emits
+  accepted hard-negative rows.
+- Once E54 candidates are accepted and E55 exports them, rerun E58, then use
+  the combined JSONL as the next SetFit robustness fixture input.
+
+## E59 - Candidate Strict None Gate
+
+Question:
+
+- Can a stricter context/workflow-control `none` gate reduce the unsafe
+  synthetic `none` misses exposed by E53?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/strict_none_gate.py`.
+- Added `packages/ax-classifier-session-sections/strict_none_gate_test.py`.
+- Added `packages/ax-classifier-session-sections/strict_none_gate_eval.py`.
+- Added `packages/ax-classifier-session-sections/strict_none_gate_eval_test.py`.
+- Added root script `classifiers:strict-none-gate`.
+- Updated the package README with the strict gate eval command.
+- The strict gate catches:
+  - AGENTS/CLAUDE instruction context dumps
+  - delegated task/review prompts
+  - merge/status/workflow-control turns
+  - wrapped environment-context turns
+- It is evaluated only over synthetic blind scenarios and does not change the
+  current frozen gate stack.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/strict_none_gate_test.py packages/ax-classifier-session-sections/strict_none_gate_eval_test.py
+bun run classifiers:strict-none-gate -- --review=.ax/experiments/blind-session-section-label-review-e49.json --suggestions=.ax/experiments/blind-session-section-label-suggestions-e51.json --priorities=.ax/experiments/blind-session-section-review-priority-e52.json --predictions=.ax/experiments/blind-session-section-predictions-e48.jsonl --baseline=.ax/experiments/blind-sensitivity-e53.json --out=.ax/experiments/strict-none-gate-e59.json --json
+```
+
+Results:
+
+- Schema: `ax.strict_none_gate_eval.v1`
+- `blind_eval`: `false`
+- Baseline unsafe `none` misses from E53:
+  - `accept_suggestions`: `0`
+  - `high_risk_environment_to_none`: `20`
+  - `conservative_risk_to_none`: `26`
+- Strict gate unsafe `none` miss deltas:
+  - `accept_suggestions`: `0`
+  - `high_risk_environment_to_none`: `-16`
+  - `conservative_risk_to_none`: `-17`
+- Scenario `accept_suggestions`:
+  - strict overrides: `18`
+  - macro F1: `0.6727`
+  - accuracy: `0.5500`
+  - unsafe `none` misses: `0`
+- Scenario `high_risk_environment_to_none`:
+  - strict overrides: `18`
+  - macro F1: `0.9000`
+  - accuracy: `0.8500`
+  - unsafe `none` misses: `4`
+  - `none` false-positive rate: `0.1905`
+- Scenario `conservative_risk_to_none`:
+  - strict overrides: `18`
+  - macro F1: `0.5413`
+  - accuracy: `0.7500`
+  - unsafe `none` misses: `9`
+  - `none` false-positive rate: `0.3333`
+- Decision: `candidate_strict_none_gate`
+- Artifact:
+  - `.ax/experiments/strict-none-gate-e59.json`
+
+Decision:
+
+- E59 is useful but not promotable yet.
+- It proves targeted context/workflow heuristics can reduce unsafe synthetic
+  `none` misses from `20 -> 4` in the high-risk scenario.
+- It also shows the cost: if reviewers accept the model suggestions as real
+  environment/preference signals, the strict gate creates many false `none`
+  overrides and drops accuracy to `0.55`.
+- Next step:
+  - use E49/E54 human review to decide whether these override patterns are
+    actually `none`
+  - if accepted, convert them into reviewed hard negatives and rerun SetFit
+    before promoting any stricter runtime gate
+
+## E60 - Blind Workflow Status With Candidate Gate
+
+Question:
+
+- Can the workflow status artifact include the E59 strict-gate evidence while
+  still making clear that human review is the active blocker?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status.py`.
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status_test.py`.
+- The status command now loads `.ax/experiments/strict-none-gate-e59.json`.
+- The report includes:
+  - a `strict_none_gate` stage
+  - `candidate_gate_status.strict_none_gate`
+  - unsafe `none` miss deltas from E59
+  - the E59 warning that this is synthetic-label evidence, not blind accuracy
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_workflow_status_test.py
+bun run classifiers:blind-workflow-status -- --out=.ax/experiments/blind-workflow-status-e60.json --json
+```
+
+Results:
+
+- Decision: `needs_human_review`
+- Added stage:
+  - `strict_none_gate`: `candidate_strict_none_gate`
+- Candidate gate status:
+  - `blind_eval`: `false`
+  - unsafe `none` miss deltas:
+    - `accept_suggestions`: `0`
+    - `high_risk_environment_to_none`: `-16`
+    - `conservative_risk_to_none`: `-17`
+- Blocking stages remain:
+  - E49 blind labels: `40` pending
+  - E54 hard-negative review: `20` pending, `0` accepted
+  - E55 hard-negative export: `0` accepted
+- Artifact:
+  - `.ax/experiments/blind-workflow-status-e60.json`
+
+Decision:
+
+- E60 makes the current state complete enough for another agent to resume:
+  strict gate evidence exists, but it is not promotable before human review.
+- The next state change is still:
+  - label E49 blind review rows
+  - review E54 hard-negative candidates
+  - sync/re-run E50, E55, and E58
+
+## E61 - Consolidated Blind Review Packet
+
+Question:
+
+- Can we give the reviewer one consolidated packet instead of jumping across
+  E49 labels, E51 suggestions, E52 priorities, and E54 hard-negative
+  candidates?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/blind_review_packet.py`.
+- Added `packages/ax-classifier-session-sections/blind_review_packet_test.py`.
+- Added root script `classifiers:blind-review-packet`.
+- Updated the classifier package README with the packet command.
+- The packet is read-only review context; E49 and E54 remain the authoritative
+  artifacts for accepted labels and hard-negative decisions.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_packet_test.py
+bun run classifiers:blind-review-packet -- --review=.ax/experiments/blind-session-section-label-review-e49.json --suggestions=.ax/experiments/blind-session-section-label-suggestions-e51.json --priorities=.ax/experiments/blind-session-section-review-priority-e52.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-review-packet-e61.json --brief=.ax/experiments/blind-review-packet-e61.md --report=.ax/experiments/blind-review-packet-e61-report.json --json
+```
+
+Results:
+
+- Decision: `ready_for_consolidated_review`
+- Items: `40`
+- Pending labels: `40`
+- Hard-negative candidates: `20`
+- High-priority rows: `15`
+- Artifacts:
+  - `.ax/experiments/blind-review-packet-e61.json`
+  - `.ax/experiments/blind-review-packet-e61.md`
+  - `.ax/experiments/blind-review-packet-e61-report.json`
+
+Decision:
+
+- E61 reduces review friction by putting current label state, non-authoritative
+  model suggestion, priority reasons, and hard-negative candidate status in one
+  place.
+- This does not unblock blind evaluation by itself. The remaining blocker is
+  still human acceptance in E49 and E54, followed by E50/E55/E58 reruns.
+
+## E62 - Workflow Status Uses Consolidated Review Packet
+
+Question:
+
+- Does the top-level blind workflow status point reviewers to the E61 packet
+  as the first review surface?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status.py`.
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status_test.py`.
+- Added `review_packet` as a status stage loaded from
+  `.ax/experiments/blind-review-packet-e61-report.json`.
+- Added `ready_for_consolidated_review` to the ready decision set.
+- When blind labels are pending and the packet is ready, the first next action
+  is now `review E61 consolidated packet`.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_workflow_status_test.py
+bun run classifiers:blind-workflow-status -- --out=.ax/experiments/blind-workflow-status-e62.json --json
+```
+
+Results:
+
+- Unit tests: `5` passed.
+- Status decision: `needs_human_review`
+- Added stage:
+  - `review_packet`: `ready_for_consolidated_review`
+- Next actions now start with:
+  - `review E61 consolidated packet`
+  - `label E49 blind review rows`
+  - `run classifiers:blind-eval-roundtrip -- --sync`
+  - `review E54 hard-negative candidates`
+  - `run classifiers:hard-negative-review -- --mode=sync`
+- Artifact:
+  - `.ax/experiments/blind-workflow-status-e62.json`
+
+Decision:
+
+- E62 makes the packet discoverable from the workflow status artifact.
+- The command still exits nonzero because `needs_human_review` is an expected
+  blocking state, not a ready state.
+- Human review remains the real gate before blind eval/export can advance.
+
+## E63 - Editable Consolidated Review Workspace
+
+Question:
+
+- Can reviewers edit one Markdown workspace and sync explicit human decisions
+  back to the authoritative E49 blind labels and E54 hard-negative candidates?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/blind_review_workspace.py`.
+- Added `packages/ax-classifier-session-sections/blind_review_workspace_test.py`.
+- Added root script `classifiers:blind-review-workspace`.
+- Updated the package README with the workspace command and round trip.
+- The workspace supports:
+  - `generate`: writes one editable Markdown file from E61
+  - `sync`: parses that Markdown and updates E49/E54 JSON artifacts
+  - `evaluate`: evaluates current E49/E54 without writing changes
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_workspace_test.py
+bun run classifiers:blind-review-workspace -- --packet=.ax/experiments/blind-review-packet-e61.json --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --workspace=.ax/experiments/blind-review-workspace-e63.md --out=.ax/experiments/blind-review-workspace-e63-report.json --mode=generate --json
+```
+
+Results:
+
+- Unit tests: `4` passed.
+- Workspace decision: `needs_human_review`
+- Blind label decision: `needs_blind_label_review`
+- Blind label pending: `40`
+- Hard-negative decision: `needs_human_acceptance`
+- Hard-negative pending: `20`
+- Hard-negative accepted: `0`
+- Artifacts:
+  - `.ax/experiments/blind-review-workspace-e63.md`
+  - `.ax/experiments/blind-review-workspace-e63-report.json`
+
+Decision:
+
+- E63 gives the reviewer a single editable file that can drive both remaining
+  human gates.
+- Generate mode does not mutate accepted labels or hard-negative statuses.
+- Sync mode is now the operational path after human edits:
+  `classifiers:blind-review-workspace -- --mode=sync ...`
+
+## E64 - Workflow Status Uses Editable Review Workspace
+
+Question:
+
+- Does the top-level workflow status point to the editable E63 workspace as
+  the first action when human review is still pending?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status.py`.
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status_test.py`.
+- Added `review_workspace` as a workflow stage loaded from
+  `.ax/experiments/blind-review-workspace-e63-report.json`.
+- Added `ready_for_roundtrip` to ready decisions for the future post-review
+  state.
+- Next actions now prefer `edit E63 consolidated review workspace` over the
+  read-only E61 packet when the workspace report exists.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_workflow_status_test.py
+bun run classifiers:blind-workflow-status -- --out=.ax/experiments/blind-workflow-status-e64.json --json
+```
+
+Results:
+
+- Unit tests: `5` passed.
+- Status decision: `needs_human_review`
+- Added stage:
+  - `review_workspace`: `needs_human_review`
+- First next action:
+  - `edit E63 consolidated review workspace`
+- Remaining next actions:
+  - `label E49 blind review rows`
+  - `run classifiers:blind-eval-roundtrip -- --sync`
+  - `review E54 hard-negative candidates`
+  - `run classifiers:hard-negative-review -- --mode=sync`
+- Artifact:
+  - `.ax/experiments/blind-workflow-status-e64.json`
+
+Decision:
+
+- E64 makes the current blocker actionable from the status artifact itself.
+- The command still exits nonzero because the workflow is intentionally blocked
+  on human review.
+
+## E65 - Post-Review Pipeline Runner
+
+Question:
+
+- Once the E63 workspace has human edits, can one command sync/evaluate it and
+  run the downstream blind eval, hard-negative export, and fixture append
+  stages without manually remembering the sequence?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/blind_post_review_runner.py`.
+- Added `packages/ax-classifier-session-sections/blind_post_review_runner_test.py`.
+- Added root script `classifiers:blind-post-review`.
+- Updated the package README with the post-review runner command.
+- The runner:
+  - optionally syncs E63 workspace edits back to E49/E54 via
+    `--sync-workspace`
+  - evaluates the workspace gate
+  - skips downstream work while the workspace is still pending
+  - runs E50 blind roundtrip, E55 hard-negative export, and E58 fixture append
+    when the workspace reaches `ready_for_roundtrip`
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_post_review_runner_test.py
+bun run classifiers:blind-post-review -- --workspace=.ax/experiments/blind-review-workspace-e63.md --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-post-review-runner-e65.json --json
+```
+
+Results:
+
+- Unit tests: `3` passed.
+- Runner decision: `needs_human_review`
+- Workspace stage:
+  - blind label decision: `needs_blind_label_review`
+  - blind label pending: `40`
+  - hard-negative decision: `needs_human_acceptance`
+  - hard-negative pending: `20`
+  - hard-negative accepted: `0`
+- Skipped stages:
+  - `blind_roundtrip`
+  - `hard_negative_export`
+  - `fixture_append`
+- Artifact:
+  - `.ax/experiments/blind-post-review-runner-e65.json`
+
+Decision:
+
+- E65 makes the post-review path executable and guarded.
+- It correctly refuses to run blind eval/export/append before human review is
+  complete, so the current state remains blocked on E63 edits.
+
+## E66 - Workflow Status Includes Post-Review Runner
+
+Question:
+
+- Does the top-level workflow status show the E65 post-review runner state and
+  tell the reviewer what command to rerun after editing E63?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status.py`.
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status_test.py`.
+- Added `post_review_runner` as a workflow stage loaded from
+  `.ax/experiments/blind-post-review-runner-e65.json`.
+- Added `ready_for_next_model_run` to ready decisions for the future state
+  where the post-review runner completes all downstream gates.
+- Next actions now include:
+  - `rerun classifiers:blind-post-review -- --sync-workspace after E63 edits`
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_workflow_status_test.py
+bun run classifiers:blind-workflow-status -- --out=.ax/experiments/blind-workflow-status-e66.json --json
+```
+
+Results:
+
+- Unit tests: `5` passed.
+- Status decision: `needs_human_review`
+- Added stage:
+  - `post_review_runner`: `needs_human_review`
+- Post-review runner failure:
+  - `workspace is not ready for post-review run`
+- Next actions:
+  - `edit E63 consolidated review workspace`
+  - `rerun classifiers:blind-post-review -- --sync-workspace after E63 edits`
+  - `label E49 blind review rows`
+  - `run classifiers:blind-eval-roundtrip -- --sync`
+  - `review E54 hard-negative candidates`
+  - `run classifiers:hard-negative-review -- --mode=sync`
+- Artifact:
+  - `.ax/experiments/blind-workflow-status-e66.json`
+
+Decision:
+
+- E66 makes the complete review and post-review path visible from one status
+  artifact.
+- The remaining blocker is still the same intentional human gate: edit E63 so
+  E49 has no pending labels and E54 has no pending hard-negative decisions.
+
+## E67 - Workspace Sync Pre-Write Validation
+
+Question:
+
+- Can the E63 workspace sync path reject malformed reviewer edits before
+  mutating the authoritative E49 and E54 JSON artifacts?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_review_workspace.py`.
+- Updated `packages/ax-classifier-session-sections/blind_review_workspace_test.py`.
+- Updated the package README to document that workspace sync validates before
+  writing.
+- Sync mode now validates:
+  - workspace row IDs exist in E49
+  - review labels are in the allowed label set or `__pending__`
+  - review targets are in the allowed target set or `__pending__`
+  - hard-negative candidate IDs exist in E54 or are `_none_`
+  - hard-negative statuses are valid or `_none_`
+- If validation fails, sync reports `needs_workspace_fix` and does not write
+  E49/E54.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_workspace_test.py
+bun run classifiers:blind-review-workspace -- --workspace=.ax/experiments/blind-review-workspace-e63.md --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-review-workspace-e67-report.json --mode=sync --json
+```
+
+Results:
+
+- Unit tests: `6` passed.
+- Sync validation failures: `0`
+- Workspace decision: `needs_human_review`
+- Blind label pending: `40`
+- Hard-negative pending: `20`
+- Artifact:
+  - `.ax/experiments/blind-review-workspace-e67-report.json`
+
+Decision:
+
+- E67 makes the editable workspace safer: malformed labels/statuses/candidate
+  IDs are caught before they can corrupt E49/E54.
+- The current workspace is syntactically valid but still semantically pending;
+  human review remains required.
+
+## E68 - Workflow Status Uses Validated Workspace Report
+
+Question:
+
+- Does the top-level workflow status consume the latest validated workspace
+  report and expose its pending counts and sync-preflight failures?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status.py`.
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status_test.py`.
+- Changed the default `--review-workspace` report to
+  `.ax/experiments/blind-review-workspace-e67-report.json`.
+- Added per-stage `details` for workspace and post-review runner reports.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_workflow_status_test.py
+bun run classifiers:blind-workflow-status -- --out=.ax/experiments/blind-workflow-status-e68.json --json
+```
+
+Results:
+
+- Unit tests: `6` passed.
+- Status decision: `needs_human_review`
+- `review_workspace.details`:
+  - blind label decision: `needs_blind_label_review`
+  - blind label pending: `40`
+  - hard-negative decision: `needs_human_acceptance`
+  - hard-negative pending: `20`
+  - hard-negative accepted: `0`
+  - workspace update failures: `[]`
+- `post_review_runner.details.skipped`:
+  - `blind_roundtrip`
+  - `hard_negative_export`
+  - `fixture_append`
+- Artifact:
+  - `.ax/experiments/blind-workflow-status-e68.json`
+
+Decision:
+
+- E68 makes the current review gate self-describing from the top-level status.
+- The next state change is still human review in E63, then rerun
+  `classifiers:blind-post-review -- --sync-workspace`.
+
+## E69 - Post-Review Runner Uses Workspace Validation
+
+Question:
+
+- Does `classifiers:blind-post-review -- --sync-workspace` use the same
+  pre-write workspace validation as the direct E63 sync command?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_post_review_runner.py`.
+- Updated `packages/ax-classifier-session-sections/blind_post_review_runner_test.py`.
+- The post-review runner now calls `validate_workspace_updates` before writing
+  E49 or E54.
+- If validation fails, the runner writes a workspace report with
+  `needs_workspace_fix`, preserves E49/E54, and skips downstream stages.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_post_review_runner_test.py
+bun run classifiers:blind-post-review -- --sync-workspace --workspace=.ax/experiments/blind-review-workspace-e63.md --workspace-report=.ax/experiments/blind-review-workspace-e69-report.json --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-post-review-runner-e69.json --json
+```
+
+Results:
+
+- Unit tests: `4` passed.
+- Workspace validation failures: `0`
+- Runner decision: `needs_human_review`
+- Blind label pending: `40`
+- Hard-negative pending: `20`
+- Skipped stages:
+  - `blind_roundtrip`
+  - `hard_negative_export`
+  - `fixture_append`
+- Artifacts:
+  - `.ax/experiments/blind-review-workspace-e69-report.json`
+  - `.ax/experiments/blind-post-review-runner-e69.json`
+
+Decision:
+
+- E69 closes a safety gap: the main post-review command now has the same
+  pre-write validation as the direct workspace sync command.
+- The current workspace is valid but still pending human decisions.
+
+## E70 - Workflow Status Uses Guarded Post-Review Runner
+
+Question:
+
+- Does the top-level workflow status now default to the guarded E69
+  post-review artifacts and expose the runner's nested workspace validation
+  details?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status.py`.
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status_test.py`.
+- Changed defaults:
+  - `--review-workspace` now reads
+    `.ax/experiments/blind-review-workspace-e69-report.json`
+  - `--post-review` now reads
+    `.ax/experiments/blind-post-review-runner-e69.json`
+- Added `stages` to preserved stage details so the post-review runner can show
+  the nested workspace validation state.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_workflow_status_test.py
+bun run classifiers:blind-workflow-status -- --out=.ax/experiments/blind-workflow-status-e70.json --json
+```
+
+Results:
+
+- Unit tests: `7` passed.
+- Status decision: `needs_human_review`
+- `review_workspace.details`:
+  - blind label pending: `40`
+  - hard-negative pending: `20`
+  - workspace update failures: `[]`
+- `post_review_runner.details.stages.workspace`:
+  - blind label pending: `40`
+  - hard-negative pending: `20`
+  - workspace update failures: `[]`
+  - decision: `needs_human_review`
+- Artifact:
+  - `.ax/experiments/blind-workflow-status-e70.json`
+
+Decision:
+
+- E70 makes the latest guarded path the default top-level status view.
+- The workflow remains intentionally blocked on E63 human review.
+
+## E71 - Post-Review Runner Happy-Path Smoke Test
+
+Question:
+
+- Once human review is complete, does the post-review runner actually execute
+  the downstream blind eval, hard-negative export, and fixture append stages?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_post_review_runner_test.py`.
+- Added a tiny fully reviewed integration path that creates:
+  - reviewed E49-style label JSON
+  - accepted E54-style hard-negative JSON
+  - blind fixture and prediction JSONL
+  - base fixture JSONL
+- The test runs `run_pipeline` end to end and asserts that it writes:
+  - labeled blind fixtures
+  - blind gate eval report
+  - accepted hard-negative append rows
+  - combined fixture JSONL
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_post_review_runner_test.py
+```
+
+Results:
+
+- Unit tests: `5` passed.
+- Happy-path runner decision: `ready_for_next_model_run`
+- Happy-path stage decisions:
+  - `blind_roundtrip`: `candidate_blind_gate_stack`
+  - `hard_negative_export`: `ready_to_append_fixtures`
+  - `fixture_append`: `ready_to_write_combined_fixtures`
+- The combined fixture file contains the base row plus the accepted
+  hard-negative row.
+
+Decision:
+
+- E71 proves the post-review runner is not only a blocker report; once E63 is
+  fully reviewed, it can drive the next model-run inputs.
+- Current real artifacts are still pending human review, so this is a smoke
+  proof of the future ready path, not a claim that the live gate has passed.
+
+## E72 - Workspace Sync Dry Run
+
+Question:
+
+- Can reviewers validate and preview an E63 workspace sync without mutating
+  E49, E54, or their authoritative reports?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_review_workspace.py`.
+- Updated `packages/ax-classifier-session-sections/blind_review_workspace_test.py`.
+- Updated the README workspace round trip with a dry-run command.
+- Added `--dry-run` for `--mode=sync`.
+- Dry-run mode:
+  - parses and validates E63
+  - computes the review and hard-negative reports from the parsed workspace
+  - writes only the requested workspace sync report
+  - does not write E49, E54, E49 report, or E56 report
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_workspace_test.py
+bun run classifiers:blind-review-workspace -- --dry-run --workspace=.ax/experiments/blind-review-workspace-e63.md --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-review-workspace-e72-dry-run-report.json --mode=sync --json
+```
+
+Results:
+
+- Unit tests: `7` passed.
+- Dry-run: `true`
+- Workspace validation failures: `0`
+- Workspace decision: `needs_human_review`
+- Blind label pending: `40`
+- Hard-negative pending: `20`
+- Artifact:
+  - `.ax/experiments/blind-review-workspace-e72-dry-run-report.json`
+
+Decision:
+
+- E72 gives reviewers a non-mutating preflight before authoritative sync.
+- The live workspace remains structurally valid and semantically pending.
+
+## E73 - Workflow Status Surfaces Dry-Run Preflight
+
+Question:
+
+- Does the top-level workflow status show that the current workspace report is
+  a dry run and tell reviewers to dry-run before the mutating post-review sync?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status.py`.
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status_test.py`.
+- Changed the default `--review-workspace` report to
+  `.ax/experiments/blind-review-workspace-e72-dry-run-report.json`.
+- Preserved `dry_run` in stage details.
+- Added a next action:
+  - `dry-run classifiers:blind-review-workspace -- --mode=sync --dry-run before sync`
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_workflow_status_test.py
+bun run classifiers:blind-workflow-status -- --out=.ax/experiments/blind-workflow-status-e73.json --json
+```
+
+Results:
+
+- Unit tests: `7` passed.
+- Status decision: `needs_human_review`
+- `review_workspace.details.dry_run`: `true`
+- `review_workspace.details.workspace_update_failures`: `[]`
+- Next actions now start with:
+  - `edit E63 consolidated review workspace`
+  - `dry-run classifiers:blind-review-workspace -- --mode=sync --dry-run before sync`
+  - `rerun classifiers:blind-post-review -- --sync-workspace after E63 edits`
+- Artifact:
+  - `.ax/experiments/blind-workflow-status-e73.json`
+
+Decision:
+
+- E73 makes the safer review sequence visible from the status artifact:
+  edit, dry-run, then run the guarded post-review sync.
+- Human review is still the live blocker.
+
+## E74 - Workspace Progress Fields
+
+Question:
+
+- Can the workspace report show review progress and the next pending IDs, so
+  review work can resume without scanning the whole E63 file?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_review_workspace.py`.
+- Updated `packages/ax-classifier-session-sections/blind_review_workspace_test.py`.
+- Updated `packages/ax-classifier-session-sections/blind_post_review_runner.py`
+  so post-review runner workspace reports also include progress.
+- Added `progress` to workflow status stage details.
+- Workspace reports now include:
+  - total review items
+  - reviewed and pending blind-label counts
+  - first 10 pending blind-label IDs
+  - total hard-negative candidates
+  - reviewed and pending hard-negative counts
+  - first 10 pending hard-negative candidate IDs
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_workspace_test.py packages/ax-classifier-session-sections/blind_workflow_status_test.py packages/ax-classifier-session-sections/blind_post_review_runner_test.py
+bun run classifiers:blind-review-workspace -- --dry-run --workspace=.ax/experiments/blind-review-workspace-e63.md --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-review-workspace-e74-progress-report.json --mode=sync --json
+```
+
+Results:
+
+- Focused tests: `20` passed.
+- Progress:
+  - review items: `40`
+  - blind labels reviewed: `0`
+  - blind labels pending: `40`
+  - hard-negative candidates: `20`
+  - hard negatives reviewed: `0`
+  - hard negatives pending: `20`
+- Artifact:
+  - `.ax/experiments/blind-review-workspace-e74-progress-report.json`
+
+Decision:
+
+- E74 makes the review queue resumable: the report now carries concrete next
+  pending IDs for both label review and hard-negative review.
+
+## E75 - Workflow Status Includes Workspace Progress
+
+Question:
+
+- Does the top-level status surface E74 progress fields so the review state is
+  visible without opening the workspace report directly?
+
+Commands:
+
+```sh
+bun run classifiers:blind-workflow-status -- --review-workspace=.ax/experiments/blind-review-workspace-e74-progress-report.json --out=.ax/experiments/blind-workflow-status-e75.json --json
+```
+
+Results:
+
+- Status decision: `needs_human_review`
+- `review_workspace.details.progress`:
+  - blind labels reviewed: `0`
+  - blind labels pending: `40`
+  - hard negatives reviewed: `0`
+  - hard negatives pending: `20`
+  - first 10 pending blind-label IDs included
+  - first 10 pending hard-negative IDs included
+- Artifact:
+  - `.ax/experiments/blind-workflow-status-e75.json`
+
+Decision:
+
+- E75 makes the top-level workflow status actionable for continuing review.
+- The live blocker is still human review, but progress and next IDs are now
+  machine-readable.
+
+## E76 - Workspace Progress Includes Section Ordinals
+
+Question:
+
+- Can the workspace progress queue point reviewers to E63 section numbers, not
+  only long row IDs?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_review_workspace.py`.
+- Updated `packages/ax-classifier-session-sections/blind_review_workspace_test.py`.
+- `progress` now includes:
+  - `blind_label_next_pending_refs`
+  - `hard_negative_next_pending_refs`
+- Each pending ref includes a 1-based `ordinal` matching the generated
+  workspace heading number.
+- Hard-negative refs also include `source_blind_id`.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_workspace_test.py
+bun run classifiers:blind-review-workspace -- --dry-run --workspace=.ax/experiments/blind-review-workspace-e63.md --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-review-workspace-e76-progress-refs-report.json --mode=sync --json
+bun run classifiers:blind-workflow-status -- --review-workspace=.ax/experiments/blind-review-workspace-e76-progress-refs-report.json --out=.ax/experiments/blind-workflow-status-e76.json --json
+```
+
+Results:
+
+- Unit tests: `8` passed.
+- First pending blind-label refs:
+  - ordinal `1`
+  - ordinal `2`
+  - ordinal `3`
+- First pending hard-negative refs:
+  - ordinal `1`
+  - ordinal `2`
+  - ordinal `3`
+- Artifacts:
+  - `.ax/experiments/blind-review-workspace-e76-progress-refs-report.json`
+  - `.ax/experiments/blind-workflow-status-e76.json`
+
+Decision:
+
+- E76 makes the review queue more directly usable in the Markdown workspace:
+  reviewers can jump to the numbered sections instead of searching only by ID.
+- The live progress is still `0/40` blind labels and `0/20` hard negatives.
+
+## E77 - Focused Review Batch
+
+Question:
+
+- Can we extract a small review batch from E63 using the pending-section
+  ordinals, so reviewers can work in chunks instead of opening all 40 rows?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/blind_review_batch.py`.
+- Added `packages/ax-classifier-session-sections/blind_review_batch_test.py`.
+- Added root script `classifiers:blind-review-batch`.
+- The batch generator:
+  - reads E63 workspace Markdown
+  - reads E76 progress refs
+  - selects deduped pending ordinals from label and hard-negative queues
+  - writes a small Markdown file containing only those workspace sections
+  - writes a machine-readable summary
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_batch_test.py
+bun run classifiers:blind-review-batch -- --workspace=.ax/experiments/blind-review-workspace-e63.md --report=.ax/experiments/blind-review-workspace-e76-progress-refs-report.json --out=.ax/experiments/blind-review-batch-e77.md --summary=.ax/experiments/blind-review-batch-e77-report.json --limit=5 --json
+```
+
+Results:
+
+- Unit tests: `3` passed.
+- Selected ordinals:
+  - `1`
+  - `2`
+  - `3`
+  - `4`
+  - `5`
+- Sections: `5`
+- Decision: `ready_for_batch_review`
+- Artifacts:
+  - `.ax/experiments/blind-review-batch-e77.md`
+  - `.ax/experiments/blind-review-batch-e77-report.json`
+
+Decision:
+
+- E77 gives reviewers a small first chunk to work through while preserving the
+  authoritative sync path through E63.
+- The live gate remains human review, but the review surface is now chunkable.
+
+## E78 - Workflow Status Includes Focused Batch
+
+Question:
+
+- Does the top-level workflow status surface the E77 batch and make it the
+  first review action?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status.py`.
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status_test.py`.
+- Added `review_batch` as a workflow stage loaded from
+  `.ax/experiments/blind-review-batch-e77-report.json`.
+- Added `ready_for_batch_review` to ready decisions.
+- Preserved batch details:
+  - `selected_ordinals`
+  - `sections`
+  - `missing_ordinals`
+- Added top next action:
+  - `review E77 focused batch`
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_workflow_status_test.py
+bun run classifiers:blind-workflow-status -- --review-workspace=.ax/experiments/blind-review-workspace-e76-progress-refs-report.json --out=.ax/experiments/blind-workflow-status-e78.json --json
+```
+
+Results:
+
+- Unit tests: `8` passed.
+- Status decision: `needs_human_review`
+- `review_batch`: `ready_for_batch_review`
+- Selected ordinals:
+  - `1`
+  - `2`
+  - `3`
+  - `4`
+  - `5`
+- First next action:
+  - `review E77 focused batch`
+- Artifact:
+  - `.ax/experiments/blind-workflow-status-e78.json`
+
+Decision:
+
+- E78 makes the chunked review surface discoverable from the status report.
+- The live blocker is still human review, but the next actionable unit is now
+  the five-section E77 batch.
+
+## E79 - Focused Batch Sync Preview
+
+Question:
+
+- Can an edited focused batch be merged back into the workspace without manual
+  copy/paste while preserving all untouched E63 sections?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_review_batch.py`.
+- Updated `packages/ax-classifier-session-sections/blind_review_batch_test.py`.
+- Updated `packages/ax-classifier-session-sections/README.md`.
+- Added `--mode=sync` to the batch tool.
+- Sync mode:
+  - reads the authoritative workspace
+  - reads an edited focused batch
+  - replaces only matching numbered workspace sections
+  - reports batch sections missing from the workspace
+  - writes either the authoritative workspace or a preview path
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_batch_test.py
+bun run classifiers:blind-review-batch -- --mode=sync --workspace=.ax/experiments/blind-review-workspace-e63.md --batch=.ax/experiments/blind-review-batch-e77.md --workspace-out=.ax/experiments/blind-review-workspace-e79-merged-preview.md --summary=.ax/experiments/blind-review-batch-e79-sync-report.json --json
+```
+
+Results:
+
+- Unit tests: `5` passed.
+- Replaced ordinals:
+  - `1`
+  - `2`
+  - `3`
+  - `4`
+  - `5`
+- Missing workspace ordinals: `0`
+- Decision: `ready_for_workspace_dry_run`
+- Artifacts:
+  - `.ax/experiments/blind-review-workspace-e79-merged-preview.md`
+  - `.ax/experiments/blind-review-batch-e79-sync-report.json`
+
+Decision:
+
+- E79 makes the focused batch operational: reviewers can edit the small batch,
+  sync it back into E63 or a preview file, then use the existing workspace
+  dry-run and guarded post-review runner.
+- This run wrote a preview workspace rather than mutating the authoritative E63
+  file, because no human labels have been added yet.
+
+## E80 - Workflow Status Includes Batch Sync
+
+Question:
+
+- Does the top-level workflow status surface the focused batch sync result and
+  make the next action clear after E79 exists?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status.py`.
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status_test.py`.
+- Added `review_batch_sync` as a workflow stage loaded from
+  `.ax/experiments/blind-review-batch-e79-sync-report.json`.
+- Added `ready_for_workspace_dry_run` to ready decisions.
+- Preserved batch-sync details:
+  - `replaced_ordinals`
+  - `sections`
+  - `missing_workspace_ordinals`
+  - `workspace_out`
+  - `dry_run`
+- Updated next actions so a ready batch-sync report takes precedence over
+  repeating the batch-review prompt.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_workflow_status_test.py
+bun run classifiers:blind-workflow-status -- --review-workspace=.ax/experiments/blind-review-workspace-e76-progress-refs-report.json --review-batch=.ax/experiments/blind-review-batch-e77-report.json --review-batch-sync=.ax/experiments/blind-review-batch-e79-sync-report.json --out=.ax/experiments/blind-workflow-status-e80.json --json
+```
+
+Results:
+
+- Unit tests: `10` passed.
+- Status decision: `needs_human_review`.
+- `review_batch_sync`: `ready_for_workspace_dry_run`.
+- Replaced ordinals:
+  - `1`
+  - `2`
+  - `3`
+  - `4`
+  - `5`
+- First next actions:
+  - `inspect E79 merged preview or sync reviewed batch into E63`
+  - `dry-run classifiers:blind-review-workspace -- --mode=sync --dry-run after batch sync`
+- Artifact:
+  - `.ax/experiments/blind-workflow-status-e80.json`
+
+Decision:
+
+- E80 keeps the chunked review path visible after sync. The workflow status now
+  distinguishes "batch is ready for review" from "batch was synced and should
+  move through workspace dry-run".
+- The command still exits `1` because the global workflow is not ready; the
+  expected status remains `needs_human_review`.
+
+## E81 - Focused Batch Completion Gate
+
+Question:
+
+- Can the focused batch report whether it actually contains completed review
+  decisions before we treat a clean sync as meaningful?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_review_batch.py`.
+- Updated `packages/ax-classifier-session-sections/blind_review_batch_test.py`.
+- Updated `packages/ax-classifier-session-sections/README.md`.
+- Added `--mode=evaluate` to the batch tool.
+- The evaluator checks each batch section for:
+  - non-pending `Review label`
+  - non-pending `Review target`
+  - non-empty `Review notes`
+  - `accepted` or `rejected` hard-negative status when a candidate exists
+  - non-empty hard-negative notes when a candidate exists
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_batch_test.py
+bun run classifiers:blind-review-batch -- --mode=evaluate --batch=.ax/experiments/blind-review-batch-e77.md --summary=.ax/experiments/blind-review-batch-e81-eval-report.json --json
+```
+
+Results:
+
+- Unit tests: `7` passed.
+- Batch sections: `5`
+- Review complete: `0`
+- Review pending: `5`
+- Hard-negative decisions required: `3`
+- Hard-negative complete: `0`
+- Hard-negative pending: `3`
+- Decision: `needs_batch_review`
+- Incomplete ordinals:
+  - `1`
+  - `2`
+  - `3`
+  - `4`
+  - `5`
+- Artifact:
+  - `.ax/experiments/blind-review-batch-e81-eval-report.json`
+
+Decision:
+
+- E81 closes a workflow gap: a clean batch sync no longer proves useful human
+  progress by itself. The focused batch now has its own completion gate.
+- The current E77 batch is still unreviewed.
+
+## E82 - Workflow Status Includes Batch Eval
+
+Question:
+
+- Does the workflow status prefer the batch-completion gate over an older clean
+  batch-sync preview?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status.py`.
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status_test.py`.
+- Added `review_batch_eval` as a workflow stage loaded from
+  `.ax/experiments/blind-review-batch-e81-eval-report.json`.
+- Added `ready_for_batch_sync` to ready decisions.
+- Preserved batch-eval details:
+  - `review_complete`
+  - `review_pending`
+  - `hard_negative_required`
+  - `hard_negative_complete`
+  - `hard_negative_pending`
+  - `incomplete_refs`
+- Updated next-action precedence so `needs_batch_review` wins over a stale
+  `ready_for_workspace_dry_run` batch-sync report.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_batch_test.py packages/ax-classifier-session-sections/blind_workflow_status_test.py
+bun run classifiers:blind-workflow-status -- --review-workspace=.ax/experiments/blind-review-workspace-e76-progress-refs-report.json --review-batch=.ax/experiments/blind-review-batch-e77-report.json --review-batch-eval=.ax/experiments/blind-review-batch-e81-eval-report.json --review-batch-sync=.ax/experiments/blind-review-batch-e79-sync-report.json --out=.ax/experiments/blind-workflow-status-e82.json --json
+```
+
+Results:
+
+- Focused unit tests: `21` passed.
+- Status decision: `needs_human_review`.
+- `review_batch_eval`: `needs_batch_review`.
+- First next action:
+  - `complete E77 focused batch review fields`
+- Artifact:
+  - `.ax/experiments/blind-workflow-status-e82.json`
+
+Decision:
+
+- E82 makes the workflow status more truthful: the next actionable step is not
+  to inspect the E79 sync preview, but to fill the E77 review fields.
+- The live gate remains human review of labels and hard-negative candidates.
+
+## E83 - Guarded Batch Sync
+
+Question:
+
+- Does focused-batch sync refuse to write workspace output when the batch still
+  has pending review fields?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_review_batch.py`.
+- Updated `packages/ax-classifier-session-sections/blind_review_batch_test.py`.
+- Updated `packages/ax-classifier-session-sections/README.md`.
+- `--mode=sync` now evaluates the batch before writing.
+- Incomplete batches return `needs_batch_review`, include
+  `batch_eval_decision`, and do not write `--workspace-out`.
+- Added `--allow-incomplete` as an explicit mechanical preview/debug escape
+  hatch.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_batch_test.py
+bun run classifiers:blind-review-batch -- --mode=sync --workspace=.ax/experiments/blind-review-workspace-e63.md --batch=.ax/experiments/blind-review-batch-e77.md --workspace-out=.ax/experiments/blind-review-workspace-e83-guarded-preview.md --summary=.ax/experiments/blind-review-batch-e83-guarded-sync-report.json --json
+test ! -e .ax/experiments/blind-review-workspace-e83-guarded-preview.md
+```
+
+Results:
+
+- Unit tests: `9` passed.
+- Replaced ordinals:
+  - `1`
+  - `2`
+  - `3`
+  - `4`
+  - `5`
+- `batch_eval_decision`: `needs_batch_review`
+- `allow_incomplete`: `false`
+- Failure: `batch review is incomplete`
+- Decision: `needs_batch_review`
+- Preview workspace written: `false`
+- Artifact:
+  - `.ax/experiments/blind-review-batch-e83-guarded-sync-report.json`
+
+Decision:
+
+- E83 prevents mechanical sync from being mistaken for human review progress.
+- The old E79 preview remains useful as a historical mechanical check, but new
+  sync runs are guarded by default.
+
+## E84 - Workflow Status Uses Guarded Sync
+
+Question:
+
+- Does the workflow status surface the guarded sync refusal instead of the old
+  clean preview?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status.py`.
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status_test.py`.
+- Preserved guarded sync details:
+  - `batch_eval_decision`
+  - `allow_incomplete`
+- Generated status from E83 instead of E79.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_batch_test.py packages/ax-classifier-session-sections/blind_workflow_status_test.py
+bun run classifiers:blind-workflow-status -- --review-workspace=.ax/experiments/blind-review-workspace-e76-progress-refs-report.json --review-batch=.ax/experiments/blind-review-batch-e77-report.json --review-batch-eval=.ax/experiments/blind-review-batch-e81-eval-report.json --review-batch-sync=.ax/experiments/blind-review-batch-e83-guarded-sync-report.json --out=.ax/experiments/blind-workflow-status-e84.json --json
+```
+
+Results:
+
+- Focused unit tests: `23` passed.
+- Status decision: `needs_human_review`.
+- `review_batch_eval`: `needs_batch_review`.
+- `review_batch_sync`: `needs_batch_review`.
+- First next action:
+  - `complete E77 focused batch review fields`
+- Artifact:
+  - `.ax/experiments/blind-workflow-status-e84.json`
+
+Decision:
+
+- E84 makes the top-level workflow consistent with the guarded sync behavior:
+  review must happen before sync output is treated as actionable.
+- The live gate remains human review of the focused batch, then the rest of E63.
+
+## E85 - Batch Artifact Hashes
+
+Question:
+
+- Can workflow status detect stale focused-batch eval/sync artifacts that were
+  generated from different batch contents?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_review_batch.py`.
+- Updated `packages/ax-classifier-session-sections/blind_review_batch_test.py`.
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status.py`.
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status_test.py`.
+- Updated `packages/ax-classifier-session-sections/README.md`.
+- Batch generation now records `workspace_sha256`.
+- Batch eval now records `batch_sha256`.
+- Batch sync now records:
+  - `workspace_sha256`
+  - `batch_sha256`
+- Workflow status now emits `artifact_consistency` with:
+  - `batch_eval_sha256`
+  - `batch_sync_sha256`
+  - `decision`
+  - `failures`
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_batch_test.py packages/ax-classifier-session-sections/blind_workflow_status_test.py
+bun run classifiers:blind-review-batch -- --workspace=.ax/experiments/blind-review-workspace-e63.md --report=.ax/experiments/blind-review-workspace-e76-progress-refs-report.json --out=.ax/experiments/blind-review-batch-e85.md --summary=.ax/experiments/blind-review-batch-e85-report.json --limit=5 --json
+bun run classifiers:blind-review-batch -- --mode=evaluate --batch=.ax/experiments/blind-review-batch-e85.md --summary=.ax/experiments/blind-review-batch-e85-eval-report.json --json
+bun run classifiers:blind-review-batch -- --mode=sync --workspace=.ax/experiments/blind-review-workspace-e63.md --batch=.ax/experiments/blind-review-batch-e85.md --workspace-out=.ax/experiments/blind-review-workspace-e85-guarded-preview.md --summary=.ax/experiments/blind-review-batch-e85-guarded-sync-report.json --json
+bun run classifiers:blind-workflow-status -- --review-workspace=.ax/experiments/blind-review-workspace-e76-progress-refs-report.json --review-batch=.ax/experiments/blind-review-batch-e85-report.json --review-batch-eval=.ax/experiments/blind-review-batch-e85-eval-report.json --review-batch-sync=.ax/experiments/blind-review-batch-e85-guarded-sync-report.json --out=.ax/experiments/blind-workflow-status-e85.json --json
+```
+
+Results:
+
+- Focused unit tests: `24` passed.
+- Batch workspace hash:
+  - `6b86daf876690e08da544b92fdb374cb9369d300167b01ea4dfb74f65f54cf56`
+- Batch eval hash:
+  - `a86909e2305bd830f4122b9748418cf930f3acb15b875e5c883b9ec5b1fc1097`
+- Batch sync hash:
+  - `a86909e2305bd830f4122b9748418cf930f3acb15b875e5c883b9ec5b1fc1097`
+- Artifact consistency: `consistent`
+- Artifacts:
+  - `.ax/experiments/blind-review-batch-e85.md`
+  - `.ax/experiments/blind-review-batch-e85-report.json`
+  - `.ax/experiments/blind-review-batch-e85-eval-report.json`
+  - `.ax/experiments/blind-review-batch-e85-guarded-sync-report.json`
+  - `.ax/experiments/blind-workflow-status-e85.json`
+
+Decision:
+
+- E85 makes stale batch eval/sync combinations observable. A future workflow
+  status can now flag when the batch changed after eval or sync.
+- The current batch artifacts are internally consistent and still blocked on
+  human review.
+
+## E86 - Generic Batch Next Actions
+
+Question:
+
+- Do workflow next actions avoid stale experiment-number literals when the
+  current focused batch is regenerated?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status.py`.
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status_test.py`.
+- Replaced hard-coded next-action strings like `E77` and `E79` with generic
+  focused-batch wording.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_workflow_status_test.py
+bun run classifiers:blind-workflow-status -- --review-workspace=.ax/experiments/blind-review-workspace-e76-progress-refs-report.json --review-batch=.ax/experiments/blind-review-batch-e85-report.json --review-batch-eval=.ax/experiments/blind-review-batch-e85-eval-report.json --review-batch-sync=.ax/experiments/blind-review-batch-e85-guarded-sync-report.json --out=.ax/experiments/blind-workflow-status-e86.json --json
+```
+
+Results:
+
+- Workflow status unit tests: `15` passed.
+- Status decision: `needs_human_review`.
+- Artifact consistency: `consistent`.
+- First next action:
+  - `complete focused batch review fields`
+- Artifact:
+  - `.ax/experiments/blind-workflow-status-e86.json`
+
+Decision:
+
+- E86 removes stale experiment IDs from live next actions. The status can now
+  point at the current focused-batch state without implying that E77/E79 are
+  still the active artifacts.
+
+## E87 - Stale Artifact Blocks Workflow Status
+
+Question:
+
+- Does a stale focused-batch eval/sync hash mismatch become a top-level workflow
+  state instead of a buried warning?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status.py`.
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status_test.py`.
+- `artifact_consistency.decision == stale_artifacts` now sets top-level
+  workflow `decision` to `needs_artifact_refresh`.
+- Next actions short-circuit to:
+  - `regenerate focused batch eval and sync reports from the same batch file`
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_workflow_status_test.py
+perl -0pe 's/"batch_sha256": "[0-9a-f]{64}"/"batch_sha256": "0000000000000000000000000000000000000000000000000000000000000000"/' .ax/experiments/blind-review-batch-e85-guarded-sync-report.json > .ax/experiments/blind-review-batch-e87-stale-sync-report.json
+bun run classifiers:blind-workflow-status -- --review-workspace=.ax/experiments/blind-review-workspace-e76-progress-refs-report.json --review-batch=.ax/experiments/blind-review-batch-e85-report.json --review-batch-eval=.ax/experiments/blind-review-batch-e85-eval-report.json --review-batch-sync=.ax/experiments/blind-review-batch-e87-stale-sync-report.json --out=.ax/experiments/blind-workflow-status-e87.json --json
+```
+
+Results:
+
+- Workflow status unit tests: `15` passed.
+- Status decision: `needs_artifact_refresh`.
+- Artifact consistency: `stale_artifacts`.
+- Consistency failure:
+  - `review_batch_eval and review_batch_sync were generated from different batch contents`
+- First and only next action:
+  - `regenerate focused batch eval and sync reports from the same batch file`
+- Artifacts:
+  - `.ax/experiments/blind-review-batch-e87-stale-sync-report.json`
+  - `.ax/experiments/blind-workflow-status-e87.json`
+
+Decision:
+
+- E87 closes the stale-artifact loophole: status consumers cannot continue
+  normal review/eval steps while focused-batch eval and sync reports disagree.
+- The normal current artifact set remains E85/E86; E87 is an intentional stale
+  fixture proving the guard.
+
+## E88 - Focused Batch Refresh Helper
+
+Question:
+
+- Can we regenerate the focused batch, batch eval, guarded sync report, and
+  workflow status as one coherent artifact set instead of relying on manual
+  command ordering?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/blind_review_batch_refresh.py`.
+- Added `packages/ax-classifier-session-sections/blind_review_batch_refresh_test.py`.
+- Added root script `classifiers:blind-review-refresh`.
+- Updated `packages/ax-classifier-session-sections/README.md`.
+- The refresh helper:
+  - generates a focused batch from the latest workspace progress refs
+  - evaluates that exact batch content
+  - runs guarded sync against that exact batch content
+  - builds workflow status from the newly generated batch/eval/sync reports
+  - emits a refresh summary with all generated paths and stage decisions
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_batch_refresh_test.py
+bun run classifiers:blind-review-refresh -- --batch=.ax/experiments/blind-review-batch-e88.md --batch-report=.ax/experiments/blind-review-batch-e88-report.json --batch-eval=.ax/experiments/blind-review-batch-e88-eval-report.json --batch-sync=.ax/experiments/blind-review-batch-e88-sync-report.json --workspace-out=.ax/experiments/blind-review-workspace-e88-preview.md --status=.ax/experiments/blind-workflow-status-e88.json --summary=.ax/experiments/blind-review-batch-e88-refresh-report.json --json
+```
+
+Results:
+
+- Refresh helper unit tests: `1` passed.
+- Batch decision: `ready_for_batch_review`.
+- Batch eval decision: `needs_batch_review`.
+- Batch sync decision: `needs_batch_review`.
+- Status decision: `needs_human_review`.
+- Artifact consistency: `consistent`.
+- Preview workspace written: `false`.
+- Artifacts:
+  - `.ax/experiments/blind-review-batch-e88.md`
+  - `.ax/experiments/blind-review-batch-e88-report.json`
+  - `.ax/experiments/blind-review-batch-e88-eval-report.json`
+  - `.ax/experiments/blind-review-batch-e88-sync-report.json`
+  - `.ax/experiments/blind-workflow-status-e88.json`
+  - `.ax/experiments/blind-review-batch-e88-refresh-report.json`
+
+Decision:
+
+- E88 reduces manual ordering risk. The focused-batch workflow can now refresh
+  the active review surface, completion gate, guarded sync gate, and status in
+  one command.
+- The live gate remains filling the focused batch review fields.
+
+## E89 - Workflow Status Includes Refresh Summary
+
+Question:
+
+- Can workflow status carry the refresh summary as a first-class stage so
+  downstream tools can see which coherent focused-batch bundle produced it?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status.py`.
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status_test.py`.
+- Added optional `--review-refresh`.
+- Added `review_refresh` as a workflow stage when a refresh summary is
+  provided.
+- Preserved refresh details:
+  - `batch`
+  - `batch_report`
+  - `batch_eval`
+  - `batch_sync`
+  - `status`
+  - `batch_decision`
+  - `batch_eval_decision`
+  - `batch_sync_decision`
+  - `status_decision`
+  - `artifact_consistency_decision`
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_workflow_status_test.py
+bun run classifiers:blind-workflow-status -- --review-workspace=.ax/experiments/blind-review-workspace-e76-progress-refs-report.json --review-batch=.ax/experiments/blind-review-batch-e88-report.json --review-batch-eval=.ax/experiments/blind-review-batch-e88-eval-report.json --review-batch-sync=.ax/experiments/blind-review-batch-e88-sync-report.json --review-refresh=.ax/experiments/blind-review-batch-e88-refresh-report.json --out=.ax/experiments/blind-workflow-status-e89.json --json
+```
+
+Results:
+
+- Workflow status unit tests: `16` passed.
+- Status decision: `needs_human_review`.
+- `review_refresh`: `refreshed`.
+- Refresh `batch_eval_decision`: `needs_batch_review`.
+- Refresh `batch_sync_decision`: `needs_batch_review`.
+- Refresh `artifact_consistency_decision`: `consistent`.
+- Artifact:
+  - `.ax/experiments/blind-workflow-status-e89.json`
+
+Decision:
+
+- E89 makes the refresh bundle discoverable from the status document itself.
+- The live gate remains completing the focused batch review fields.
+
+## E90 - Classifier Package Operations Metadata
+
+Question:
+
+- Can classifier packages declare operational review/eval commands so
+  contributors and tooling can discover the workflow without reverse
+  engineering scripts or docs?
+
+Changes:
+
+- Updated `src/classifiers/package-manifest.ts`.
+- Updated `src/classifiers/package-manifest.test.ts`.
+- Updated `packages/ax-classifier-session-sections/ax.classifier.json`.
+- Updated `packages/ax-classifier-session-sections/README.md`.
+- Added optional manifest `operations`.
+- Each operation includes:
+  - `id`
+  - `description`
+  - `command`
+  - optional `inputs`
+  - optional `outputs`
+- Session-section package now declares:
+  - `blind-review-refresh`
+  - `blind-workflow-status`
+  - `blind-post-review`
+
+Commands:
+
+```sh
+python3 -m json.tool packages/ax-classifier-session-sections/ax.classifier.json >/dev/null
+bun test src/classifiers/package-manifest.test.ts
+```
+
+Results:
+
+- Manifest tests: `7` passed.
+- Manifest operation checks:
+  - session-section manifest loads with `blind-review-refresh`
+  - `blind-review-refresh` outputs include
+    `.ax/experiments/blind-workflow-status-current.json`
+  - malformed operations are rejected
+- Artifact:
+  - `.ax/experiments/classifier-manifest-operations-e90-test-output.txt`
+
+Decision:
+
+- E90 moves the package-sharing model closer to the open-source goal: a
+  classifier package can now advertise the commands that maintain its review
+  and evaluation loop.
+- This is metadata only; it does not make model output part of default ingest.
+
+## E91 - Classifier Package Operation Lookup
+
+Question:
+
+- Can tooling resolve classifier package operations by id without manually
+  scanning raw manifest JSON?
+
+Changes:
+
+- Updated `src/classifiers/package-manifest.ts`.
+- Updated `src/classifiers/package-manifest.test.ts`.
+- Added:
+  - `listClassifierPackageOperations`
+  - `findClassifierPackageOperation`
+  - `requireClassifierPackageOperation`
+- `requireClassifierPackageOperation` throws a package-specific error when an
+  operation is not declared.
+
+Commands:
+
+```sh
+bun test src/classifiers/package-manifest.test.ts
+```
+
+Results:
+
+- Manifest tests: `9` passed.
+- Operation lookup checks:
+  - session-section operations list includes `blind-workflow-status`
+  - `blind-review-refresh` resolves to
+    `bun run classifiers:blind-review-refresh`
+  - `blind-post-review` exposes
+    `.ax/experiments/blind-post-review-runner-current.json`
+  - packages without operations return an empty list
+  - missing required operation throws a clear error
+- Artifact:
+  - `.ax/experiments/classifier-manifest-operations-e91-test-output.txt`
+
+Decision:
+
+- E91 makes the operations metadata actionable for CLI/dashboard/package
+  tooling. A contributor package can now advertise operations and AX code can
+  resolve them predictably.
+
+## E92 - Classifier Package Operations Report
+
+Question:
+
+- Can contributors and tooling inspect classifier package operations from the
+  command line without writing TypeScript against the manifest helpers?
+
+Changes:
+
+- Added `scripts/classifier-package-operations.ts`.
+- Added `scripts/classifier-package-operations.test.ts`.
+- Added root script `classifiers:package-operations`.
+- Updated `packages/ax-classifier-session-sections/README.md`.
+- The reporter emits:
+  - package key/name
+  - all declared operations, or one selected operation by id
+  - operation commands, inputs, outputs
+  - structured failures for missing operations
+
+Commands:
+
+```sh
+bun test scripts/classifier-package-operations.test.ts
+bun run classifiers:package-operations -- --json
+```
+
+Results:
+
+- Operation reporter tests: `3` passed.
+- Report decision: `operations_listed`.
+- Listed operations:
+  - `blind-review-refresh`
+  - `blind-workflow-status`
+  - `blind-post-review`
+- Artifacts:
+  - `.ax/experiments/classifier-package-operations-e92-test-output.txt`
+  - `.ax/experiments/classifier-package-operations-e92.json`
+
+Decision:
+
+- E92 makes package operations inspectable as machine-readable output. This
+  gives future CLI/dashboard tooling a direct discovery surface for contributed
+  classifier workflows.
+
+## E93 - Classifier Operation Report Writes Artifacts
+
+Question:
+
+- Can the package-operation reporter write machine-readable artifacts directly,
+  including structured reports for missing operations?
+
+Changes:
+
+- Updated `scripts/classifier-package-operations.ts`.
+- Updated `scripts/classifier-package-operations.test.ts`.
+- Added `--out=<path>`.
+- Added `writeOperationsReport`.
+- CLI behavior:
+  - writes JSON when `--out` is provided
+  - exits `1` for `operation_missing`
+  - still writes the missing-operation report before exiting
+
+Commands:
+
+```sh
+bun test scripts/classifier-package-operations.test.ts
+bun run classifiers:package-operations -- --operation=blind-review-refresh --out=.ax/experiments/classifier-package-operation-e93-refresh.json
+bun run classifiers:package-operations -- --operation=missing --out=.ax/experiments/classifier-package-operation-e93-missing.json
+python3 -m json.tool .ax/experiments/classifier-package-operation-e93-refresh.json >/dev/null
+python3 -m json.tool .ax/experiments/classifier-package-operation-e93-missing.json >/dev/null
+```
+
+Results:
+
+- Operation reporter tests: `4` passed.
+- `blind-review-refresh` report:
+  - decision: `operation_found`
+  - command: `bun run classifiers:blind-review-refresh`
+- `missing` report:
+  - decision: `operation_missing`
+  - failure:
+    `classifier package session-section-chunks does not declare operation: missing`
+- Artifacts:
+  - `.ax/experiments/classifier-package-operation-e93-refresh.json`
+  - `.ax/experiments/classifier-package-operation-e93-missing.json`
+
+Decision:
+
+- E93 makes operation discovery usable in automation: scripts no longer need
+  shell redirection to persist package-operation reports, and missing
+  operations produce a structured artifact.
+
+## E94 - Classifier Package Operation Service
+
+Question:
+
+- Can package-operation discovery be reused from FX/Effect services instead of
+  living only in a standalone CLI script?
+
+Changes:
+
+- Added `src/classifiers/package-operations.ts`.
+- Added `src/classifiers/package-service.ts`.
+- Added `src/classifiers/package-service.test.ts`.
+- Updated `scripts/classifier-package-operations.ts` to use the shared report
+  builder/writer.
+- Updated `scripts/classifier-package-operations.test.ts`.
+- Updated `packages/ax-classifier-session-sections/README.md`.
+- New service surface:
+  - `loadManifest`
+  - `listOperations`
+  - `getOperation`
+  - `operationsReport`
+  - `writeOperationsReport`
+- Service errors are typed:
+  - `ClassifierPackageLoadError`
+  - `ClassifierPackageOperationNotFound`
+  - `ClassifierPackageReportWriteError`
+
+Commands:
+
+```sh
+effect-solutions list
+effect-solutions show services-and-layers basics error-handling
+bun test src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/classifiers/package-manifest.test.ts
+bun run classifiers:package-operations -- --operation=blind-workflow-status --out=.ax/experiments/classifier-package-operation-e94-status.json
+python3 -m json.tool .ax/experiments/classifier-package-operation-e94-status.json >/dev/null
+bun run typecheck
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+```
+
+Results:
+
+- Package service, reporter, and manifest tests: `18` passed.
+- Typecheck: passed.
+- Python package regression tests: `195` passed.
+- The service lists declared session-section operations:
+  - `blind-review-refresh`
+  - `blind-workflow-status`
+  - `blind-post-review`
+- `getOperation` returns `ClassifierPackageOperationNotFound` for missing
+  operation ids instead of forcing callers to parse CLI output.
+- Artifact:
+  - `.ax/experiments/classifier-package-operation-e94-status.json`
+
+Decision:
+
+- E94 gives the classifier package model a reusable Effect service seam for
+  debug tools, dashboards, and future package-management commands.
+- The CLI remains a thin wrapper over shared report code, reducing drift
+  between automation artifacts and in-process service behavior.
+
+## E95 - Axctl Classifier Package Operations Command
+
+Question:
+
+- Can contributors inspect classifier package operations through the main
+  `axctl classifiers` command tree instead of knowing repo-local npm script
+  names?
+
+Changes:
+
+- Added `src/cli/classifiers-package-operations.ts`.
+- Added `src/cli/classifiers-package-operations.test.ts`.
+- Updated `src/cli/index.ts`.
+- Updated `src/cli/effect-cli.test.ts`.
+- Updated `packages/ax-classifier-session-sections/README.md`.
+- New command:
+  - `axctl classifiers package-operations`
+- Supported flags:
+  - `--manifest=<path>`
+  - `--operation=<id>`
+  - `--out=<path>`
+  - `--json`
+- Routed `classifiers package-operations` through the no-DB CLI path so
+  package manifest inspection does not require SurrealDB.
+
+Commands:
+
+```sh
+bun test src/cli/classifiers-package-operations.test.ts src/cli/effect-cli.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts
+bun src/cli/index.ts classifiers package-operations --manifest=packages/ax-classifier-session-sections/ax.classifier.json --operation=blind-review-refresh --json
+bun src/cli/index.ts classifiers package-operations --manifest=packages/ax-classifier-session-sections/ax.classifier.json --operation=blind-post-review --out=.ax/experiments/classifier-package-operation-e95-post-review.json
+python3 -m json.tool .ax/experiments/classifier-package-operation-e95-post-review.json >/dev/null
+bun src/cli/index.ts classifiers package-operations --manifest=packages/ax-classifier-session-sections/ax.classifier.json --operation=missing --out=.ax/experiments/classifier-package-operation-e95-missing.json
+python3 -m json.tool .ax/experiments/classifier-package-operation-e95-missing.json >/dev/null
+bun run typecheck
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+```
+
+Results:
+
+- Focused CLI/service tests: `37` passed.
+- Focused CLI/service/manifest tests after final type fix: `46` passed.
+- Typecheck: passed.
+- Python package regression tests: `195` passed.
+- `blind-review-refresh` JSON command returned `operation_found`.
+- `blind-post-review` persisted report returned `operation_found`.
+- Missing operation persisted a structured `operation_missing` report and
+  returned exit code `1`.
+- Artifacts:
+  - `.ax/experiments/classifier-package-operation-e95-post-review.json`
+  - `.ax/experiments/classifier-package-operation-e95-missing.json`
+
+Decision:
+
+- E95 makes contributed classifier package operations discoverable through the
+  primary AX CLI surface while keeping the lower-level script available for
+  repo automation.
+- This improves package contribution ergonomics without changing ingest or
+  promoting model outputs into the graph.
+
+## E96 - Multi-Package Classifier Operation Discovery
+
+Question:
+
+- Can AX discover all local classifier package manifests and show which
+  packages expose train/eval/review operations?
+
+Changes:
+
+- Updated `src/classifiers/package-operations.ts`.
+- Updated `src/classifiers/package-service.ts`.
+- Updated `src/classifiers/package-service.test.ts`.
+- Updated `src/cli/classifiers-package-operations.ts`.
+- Updated `src/cli/classifiers-package-operations.test.ts`.
+- Updated `scripts/classifier-package-operations.test.ts`.
+- Updated `src/cli/index.ts`.
+- Updated `packages/ax-classifier-session-sections/README.md`.
+- Added package discovery helpers:
+  - `discoverClassifierPackageManifestPaths`
+  - `summarizeClassifierPackageOperations`
+  - `buildPackagesOperationsReport`
+  - `writePackagesOperationsReport`
+- Added service methods:
+  - `discoverManifestPaths`
+  - `packageSummaries`
+  - `packagesOperationsReport`
+  - `writePackagesOperationsReport`
+- Extended CLI:
+  - `axctl classifiers package-operations --all`
+  - `--root=<path>` for alternate package roots
+  - `--out=<path>` for persisted all-package reports
+
+Commands:
+
+```sh
+bun test src/cli/classifiers-package-operations.test.ts src/cli/effect-cli.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts
+bun src/cli/index.ts classifiers package-operations --all --json
+bun src/cli/index.ts classifiers package-operations --all --out=.ax/experiments/classifier-packages-operations-e96.json
+python3 -m json.tool .ax/experiments/classifier-packages-operations-e96.json >/dev/null
+```
+
+Results:
+
+- Focused discovery/service/CLI tests: `43` passed.
+- Discovered manifests:
+  - `packages/ax-classifier-direction-event/ax.classifier.json`
+  - `packages/ax-classifier-session-sections/ax.classifier.json`
+  - `packages/ax-classifier-verification-event/ax.classifier.json`
+- Totals:
+  - packages: `3`
+  - operations: `3`
+  - local model packages: `1`
+  - packages with operations: `1`
+  - packages without operations: `2`
+- Artifact:
+  - `.ax/experiments/classifier-packages-operations-e96.json`
+
+Decision:
+
+- E96 makes the package-contribution surface inspectable at repo scale. A
+  contributor can now see every local classifier package, which ones are
+  model-backed, and which ones expose operation hooks.
+- The gap left open is operation taxonomy: packages can declare operations,
+  but AX does not yet classify them as `train`, `eval`, `review`, `status`, or
+  `publish`.
+
+## E97 - Classifier Operation Lifecycle Taxonomy
+
+Question:
+
+- Can package operation discovery answer which lifecycle capabilities a
+  classifier package exposes, not only which command ids exist?
+
+Changes:
+
+- Updated `src/classifiers/package-manifest.ts`.
+- Updated `src/classifiers/package-manifest.test.ts`.
+- Updated `packages/ax-classifier-session-sections/ax.classifier.json`.
+- Updated `src/classifiers/package-operations.ts`.
+- Updated `scripts/classifier-package-operations.test.ts`.
+- Updated `src/cli/classifiers-package-operations.ts`.
+- Updated `src/cli/classifiers-package-operations.test.ts`.
+- Updated `packages/ax-classifier-session-sections/README.md`.
+- Added required operation `kind` values:
+  - `train`
+  - `eval`
+  - `review`
+  - `status`
+  - `publish`
+  - `debug`
+- Multi-package reports now include per-package and total `operation_kinds`
+  counts.
+
+Commands:
+
+```sh
+bun test src/classifiers/package-manifest.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts
+bun src/cli/index.ts classifiers package-operations --all --json
+bun src/cli/index.ts classifiers package-operations --all --out=.ax/experiments/classifier-packages-operations-e97.json
+python3 -m json.tool .ax/experiments/classifier-packages-operations-e97.json >/dev/null
+bun run typecheck
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+```
+
+Results:
+
+- Focused manifest/service/CLI tests before final broad verification: `26`
+  passed.
+- Focused manifest/service/CLI tests after broad verification: `52` passed.
+- Typecheck: passed.
+- Python package regression tests: `195` passed.
+- Discovered package lifecycle totals:
+  - `train`: `0`
+  - `eval`: `0`
+  - `review`: `2`
+  - `status`: `1`
+  - `publish`: `0`
+  - `debug`: `0`
+- Session-section package operation kinds:
+  - `blind-review-refresh`: `review`
+  - `blind-workflow-status`: `status`
+  - `blind-post-review`: `review`
+- Artifact:
+  - `.ax/experiments/classifier-packages-operations-e97.json`
+
+Decision:
+
+- E97 makes package operations semantically queryable. AX can now identify
+  whether a contributed package exposes review/status hooks and can later gate
+  local-model package readiness on required lifecycle capabilities.
+- The current session-section package still lacks declared `train` and `eval`
+  operations even though scripts exist; that is the next package-contract gap.
+
+## E98 - Session-Section Train/Eval Operations
+
+Question:
+
+- Can the session-section local-model package declare a complete enough
+  lifecycle for contributors to discover train, eval, review, status, and
+  debug commands from the manifest?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/ax.classifier.json`.
+- Updated `src/classifiers/package-manifest.test.ts`.
+- Updated `src/classifiers/package-service.test.ts`.
+- Updated `scripts/classifier-package-operations.test.ts`.
+- Updated `packages/ax-classifier-session-sections/README.md`.
+- Added session-section operations:
+  - `setfit-train-eval` (`train`)
+  - `setfit-fixture-eval` (`eval`)
+  - `hybrid-gate-eval` (`eval`)
+  - `predict-windows` (`debug`)
+- Kept existing operations:
+  - `blind-review-refresh` (`review`)
+  - `blind-workflow-status` (`status`)
+  - `blind-post-review` (`review`)
+
+Commands:
+
+```sh
+bun test src/classifiers/package-manifest.test.ts scripts/classifier-package-operations.test.ts src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts
+bun src/cli/index.ts classifiers package-operations --all --json
+bun src/cli/index.ts classifiers package-operations --operation=setfit-train-eval --json
+bun src/cli/index.ts classifiers package-operations --all --out=.ax/experiments/classifier-packages-operations-e98.json
+python3 -m json.tool .ax/experiments/classifier-packages-operations-e98.json >/dev/null
+bun run typecheck
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+```
+
+Results:
+
+- Focused manifest/service/CLI tests before final broad verification: `26`
+  passed.
+- Focused manifest/service/CLI tests after final broad verification: `52`
+  passed.
+- Typecheck: passed.
+- Python package regression tests: `195` passed.
+- Single-operation lookup:
+  - `setfit-train-eval` returned `operation_found`
+  - kind: `train`
+  - output metric artifact:
+    `.ax/experiments/setfit-session-sections-e3-coarse.json`
+- Updated lifecycle totals:
+  - `train`: `1`
+  - `eval`: `2`
+  - `review`: `2`
+  - `status`: `1`
+  - `publish`: `0`
+  - `debug`: `1`
+- Artifact:
+  - `.ax/experiments/classifier-packages-operations-e98.json`
+
+Decision:
+
+- E98 makes the session-section local-model package discoverable as a fuller
+  lifecycle package: it now advertises train, eval, review, status, and debug
+  commands.
+- `publish` intentionally remains absent because model outputs are still not
+  promoted into the AX graph before review and usefulness gates pass.
+
+## E99 - Local-Model Lifecycle Readiness Gate
+
+Question:
+
+- Can package discovery say whether local-model classifier packages are ready
+  for contributor workflows, based on required lifecycle operation kinds?
+
+Changes:
+
+- Updated `src/classifiers/package-operations.ts`.
+- Updated `src/cli/classifiers-package-operations.ts`.
+- Updated `scripts/classifier-package-operations.test.ts`.
+- Updated `src/classifiers/package-service.test.ts`.
+- Updated `src/cli/classifiers-package-operations.test.ts`.
+- Added `lifecycle_readiness` to each package summary:
+  - `ready`
+  - `incomplete`
+  - `not_applicable`
+- Local-model packages currently require:
+  - `train`
+  - `eval`
+  - `review`
+  - `status`
+- Report totals now include:
+  - `local_model_ready_count`
+  - `local_model_incomplete_count`
+
+Commands:
+
+```sh
+bun test src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts
+bun src/cli/index.ts classifiers package-operations --all
+bun src/cli/index.ts classifiers package-operations --all --out=.ax/experiments/classifier-packages-operations-e99.json
+python3 -m json.tool .ax/experiments/classifier-packages-operations-e99.json >/dev/null
+bun run typecheck
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+```
+
+Results:
+
+- Focused readiness tests before final broad verification: `17` passed.
+- Focused manifest/service/CLI tests after final broad verification: `52`
+  passed.
+- Typecheck: passed.
+- Python package regression tests: `195` passed.
+- CLI text now prints lifecycle readiness per package:
+  - `session-section-chunks`: `ready`
+  - heuristic packages: `not_applicable`
+- JSON report totals:
+  - `local_model_count`: `1`
+  - `local_model_ready_count`: `1`
+  - `local_model_incomplete_count`: `0`
+- Artifact:
+  - `.ax/experiments/classifier-packages-operations-e99.json`
+
+Decision:
+
+- E99 turns operation taxonomy into a useful gate. AX can now identify whether
+  a local-model classifier package has the minimum lifecycle surface expected
+  for contribution and maintenance.
+- This is still a metadata/readiness gate; it does not prove the train/eval
+  commands pass their quality gates.
+
+## E100 - Classifier Operation Preflight Reports
+
+Question:
+
+- Can AX check declared operation inputs before a contributor runs an expensive
+  train/eval/review command?
+
+Changes:
+
+- Updated `src/classifiers/package-operations.ts`.
+- Updated `src/classifiers/package-service.ts`.
+- Updated `scripts/classifier-package-operations.test.ts`.
+- Updated `src/classifiers/package-service.test.ts`.
+- Updated `src/cli/classifiers-package-operations.ts`.
+- Updated `src/cli/classifiers-package-operations.test.ts`.
+- Updated `src/cli/index.ts`.
+- Updated `packages/ax-classifier-session-sections/README.md`.
+- Added preflight report schema:
+  - `ax.classifier_package_operation_preflight_report.v1`
+- Added preflight decisions:
+  - `ready`
+  - `missing_inputs`
+  - `operation_missing`
+- Added CLI flag:
+  - `axctl classifiers package-operations --operation=<id> --preflight`
+- Preflight writes structured artifacts through `--out` and exits nonzero for
+  `missing_inputs` or `operation_missing`.
+
+Commands:
+
+```sh
+bun test scripts/classifier-package-operations.test.ts src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts src/cli/effect-cli.test.ts
+bun src/cli/index.ts classifiers package-operations --operation=setfit-train-eval --preflight --json
+bun src/cli/index.ts classifiers package-operations --operation=setfit-train-eval --preflight --out=.ax/experiments/classifier-package-preflight-e100-train.json
+python3 -m json.tool .ax/experiments/classifier-package-preflight-e100-train.json >/dev/null
+bun src/cli/index.ts classifiers package-operations --operation=missing --preflight --out=.ax/experiments/classifier-package-preflight-e100-missing-operation.json
+python3 -m json.tool .ax/experiments/classifier-package-preflight-e100-missing-operation.json >/dev/null
+bun run typecheck
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+```
+
+Results:
+
+- Focused preflight/service/CLI tests before final broad verification: `50`
+  passed.
+- Focused manifest/service/CLI tests after final broad verification: `59`
+  passed.
+- Typecheck: passed.
+- Python package regression tests: `195` passed.
+- `setfit-train-eval` preflight:
+  - decision: `ready`
+  - input present:
+    `packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl`
+  - exit code: `0`
+- Missing operation preflight:
+  - decision: `operation_missing`
+  - exit code: `1`
+- Artifacts:
+  - `.ax/experiments/classifier-package-preflight-e100-train.json`
+  - `.ax/experiments/classifier-package-preflight-e100-missing-operation.json`
+
+Decision:
+
+- E100 gives contributors a cheap, non-executing safety check before running
+  declared package operations. This is especially useful for model operations
+  that may be slow, expensive, or dependent on generated `.ax/experiments`
+  artifacts.
+- This does not execute commands yet; it only verifies manifest operation
+  existence and declared input availability.
+
+## E101 - Classifier Operation Dry-Run Reports
+
+Question:
+
+- Can AX show exactly what package operation command would run, with preflight
+  status, without launching the operation?
+
+Changes:
+
+- Updated `src/classifiers/package-operations.ts`.
+- Updated `src/classifiers/package-service.ts`.
+- Updated `scripts/classifier-package-operations.test.ts`.
+- Updated `src/classifiers/package-service.test.ts`.
+- Updated `src/cli/classifiers-package-operations.ts`.
+- Updated `src/cli/classifiers-package-operations.test.ts`.
+- Updated `src/cli/index.ts`.
+- Updated `packages/ax-classifier-session-sections/README.md`.
+- Added dry-run report schema:
+  - `ax.classifier_package_operation_dry_run_report.v1`
+- Dry-run reports include:
+  - selected operation
+  - exact command string
+  - `would_execute: false`
+  - embedded preflight report
+  - decision: `ready_to_run`, `blocked`, or `operation_missing`
+- Added CLI flag:
+  - `axctl classifiers package-operations --operation=<id> --dry-run`
+
+Commands:
+
+```sh
+bun test scripts/classifier-package-operations.test.ts src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts src/cli/effect-cli.test.ts
+bun src/cli/index.ts classifiers package-operations --operation=setfit-train-eval --dry-run --json
+bun src/cli/index.ts classifiers package-operations --operation=setfit-train-eval --dry-run --out=.ax/experiments/classifier-package-dry-run-e101-train.json
+python3 -m json.tool .ax/experiments/classifier-package-dry-run-e101-train.json >/dev/null
+bun src/cli/index.ts classifiers package-operations --operation=missing --dry-run --out=.ax/experiments/classifier-package-dry-run-e101-missing-operation.json
+python3 -m json.tool .ax/experiments/classifier-package-dry-run-e101-missing-operation.json >/dev/null
+bun run typecheck
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+```
+
+Results:
+
+- Focused dry-run/service/CLI tests before final broad verification: `56`
+  passed.
+- Focused manifest/service/CLI tests after final broad verification: `65`
+  passed.
+- Typecheck: passed.
+- Python package regression tests: `195` passed.
+- `setfit-train-eval` dry-run:
+  - decision: `ready_to_run`
+  - `would_execute`: `false`
+  - preflight decision: `ready`
+  - command:
+    `bun run classifiers:setfit-eval -- --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --model=sentence-transformers/all-MiniLM-L6-v2 --epochs=1 --batch-size=8 --label-mode=coarse --model-dir=.ax/experiments/setfit-session-sections-coarse-model --out=.ax/experiments/setfit-session-sections-e3-coarse.json`
+- Missing operation dry-run:
+  - decision: `operation_missing`
+  - exit code: `1`
+- Artifacts:
+  - `.ax/experiments/classifier-package-dry-run-e101-train.json`
+  - `.ax/experiments/classifier-package-dry-run-e101-missing-operation.json`
+
+Decision:
+
+- E101 makes operation execution auditable before it exists. Contributors can
+  inspect the exact expensive command and preflight result without running it.
+- Actual command execution remains intentionally unimplemented until the dry-run
+  report shape is stable and reviewed.
+
+## E102 - Guarded Classifier Operation Execution Plans
+
+Question:
+
+- Can AX model package operation execution intent with explicit guard decisions,
+  while still not executing classifier commands?
+
+Changes:
+
+- Updated `src/classifiers/package-operations.ts`.
+- Updated `src/classifiers/package-service.ts`.
+- Updated `scripts/classifier-package-operations.test.ts`.
+- Updated `src/classifiers/package-service.test.ts`.
+- Updated `src/cli/classifiers-package-operations.ts`.
+- Updated `src/cli/classifiers-package-operations.test.ts`.
+- Updated `src/cli/index.ts`.
+- Updated `packages/ax-classifier-session-sections/README.md`.
+- Added execution-plan report schema:
+  - `ax.classifier_package_operation_execution_plan_report.v1`
+- Execution plans include:
+  - selected operation
+  - exact command string
+  - embedded dry-run and preflight reports
+  - `requested_execute`
+  - `allow_expensive`
+  - `expensive`
+  - `would_execute`
+  - decision: `ready_to_execute`, `denied_requires_execute`,
+    `denied_expensive`, `blocked`, or `operation_missing`
+- Added CLI flags:
+  - `axctl classifiers package-operations --operation=<id> --execute`
+  - `axctl classifiers package-operations --operation=<id> --execute --allow-expensive`
+
+Commands:
+
+```sh
+bun test src/cli/classifiers-package-operations.test.ts src/cli/effect-cli.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/classifiers/package-manifest.test.ts
+bun src/cli/index.ts classifiers package-operations --operation=setfit-train-eval --execute --out=.ax/experiments/classifier-package-execution-plan-e102-denied-expensive.json
+bun src/cli/index.ts classifiers package-operations --operation=setfit-train-eval --execute --allow-expensive --out=.ax/experiments/classifier-package-execution-plan-e102-train.json
+bun src/cli/index.ts classifiers package-operations --operation=missing --execute --out=.ax/experiments/classifier-package-execution-plan-e102-missing-operation.json
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun run typecheck
+```
+
+Results:
+
+- Focused package-operation tests: `72` passed.
+- Python package regression tests: `195` passed.
+- Typecheck: passed with existing Effect lint messages.
+- `setfit-train-eval --execute`:
+  - decision: `denied_expensive`
+  - exit code: `1`
+  - `would_execute`: `false`
+  - failure: `operation kind train requires --allow-expensive`
+- `setfit-train-eval --execute --allow-expensive`:
+  - decision: `ready_to_execute`
+  - exit code: `0`
+  - `would_execute`: `true`
+  - `failures`: `[]`
+- Missing operation execution plan:
+  - decision: `operation_missing`
+  - exit code: `1`
+- Artifacts:
+  - `.ax/experiments/classifier-package-execution-plan-e102-denied-expensive.json`
+  - `.ax/experiments/classifier-package-execution-plan-e102-train.json`
+  - `.ax/experiments/classifier-package-execution-plan-e102-missing-operation.json`
+
+Decision:
+
+- E102 establishes the safety contract for future real process execution:
+  execution intent is recorded, expensive operations require a second explicit
+  flag, and blocked/missing operations remain nonzero.
+- No classifier operation command is executed yet; `would_execute: true`
+  currently means the plan is ready for a later executor implementation.
+
+## E103 - Recorded Classifier Operation Execution
+
+Question:
+
+- Can AX execute a declared classifier package operation through the manifest
+  contract, while saving enough evidence to debug what happened?
+
+Changes:
+
+- Updated `src/classifiers/package-operations.ts`.
+- Updated `src/classifiers/package-service.ts`.
+- Updated `scripts/classifier-package-operations.test.ts`.
+- Updated `src/classifiers/package-service.test.ts`.
+- Updated `src/cli/classifiers-package-operations.ts`.
+- Updated `src/cli/classifiers-package-operations.test.ts`.
+- Updated `packages/ax-classifier-session-sections/README.md`.
+- Added execution report schema:
+  - `ax.classifier_package_operation_execution_report.v1`
+- Execution reports include:
+  - embedded execution plan
+  - selected operation and exact command
+  - `executed`
+  - `started_at`
+  - `finished_at`
+  - `duration_ms`
+  - `exit_code`
+  - `signal`
+  - captured `stdout`
+  - captured `stderr`
+  - failures
+  - decision: `executed`, `failed`, or `not_executed`
+- `axctl classifiers package-operations --operation=<id> --execute` now runs
+  the operation only when the embedded execution plan is `ready_to_execute`.
+
+Commands:
+
+```sh
+bun test src/cli/classifiers-package-operations.test.ts src/cli/effect-cli.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/classifiers/package-manifest.test.ts
+bun src/cli/index.ts classifiers package-operations --operation=setfit-train-eval --execute --out=.ax/experiments/classifier-package-execution-e103-denied-expensive.json
+bun src/cli/index.ts classifiers package-operations --operation=blind-review-refresh --execute --out=.ax/experiments/classifier-package-execution-e103-refresh.json
+bun src/cli/index.ts classifiers package-operations --operation=missing --execute --out=.ax/experiments/classifier-package-execution-e103-missing-operation.json
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun run typecheck
+```
+
+Results:
+
+- Focused package-operation tests: `78` passed.
+- Python package regression tests: `195` passed.
+- Typecheck: passed with existing Effect lint messages.
+- `setfit-train-eval --execute`:
+  - decision: `not_executed`
+  - plan decision: `denied_expensive`
+  - exit code: `1`
+  - `executed`: `false`
+  - failure: `operation kind train requires --allow-expensive`
+- `blind-review-refresh --execute`:
+  - decision: `executed`
+  - plan decision: `ready_to_execute`
+  - exit code: `0`
+  - `executed`: `true`
+  - stdout summary:
+    - `batch_eval_decision: needs_batch_review`
+    - `batch_sync_decision: needs_batch_review`
+    - `status_decision: needs_human_review`
+  - refreshed declared outputs:
+    - `.ax/experiments/blind-review-batch-current.md`
+    - `.ax/experiments/blind-review-batch-current-report.json`
+    - `.ax/experiments/blind-review-batch-current-eval-report.json`
+    - `.ax/experiments/blind-review-batch-current-sync-report.json`
+    - `.ax/experiments/blind-workflow-status-current.json`
+    - `.ax/experiments/blind-review-batch-current-refresh-report.json`
+- Missing operation execution:
+  - decision: `not_executed`
+  - plan decision: `operation_missing`
+  - exit code: `1`
+- Artifacts:
+  - `.ax/experiments/classifier-package-execution-e103-denied-expensive.json`
+  - `.ax/experiments/classifier-package-execution-e103-refresh.json`
+  - `.ax/experiments/classifier-package-execution-e103-missing-operation.json`
+
+Decision:
+
+- E103 turns package operations from inspectable declarations into executable,
+  auditable lifecycle actions.
+- Expensive operations are still guarded by the E102 policy and produce
+  `not_executed` reports until `--allow-expensive` is supplied.
+- The first real execution used a non-expensive review operation so the
+  implementation path was exercised without training or evaluating a model.
+
+## E104 - Declared Output Verification For Executed Operations
+
+Question:
+
+- Can AX verify that an executed classifier package operation produced its
+  declared outputs, and make missing outputs fail the execution report even
+  when the process exits zero?
+
+Changes:
+
+- Updated `src/classifiers/package-operations.ts`.
+- Updated `scripts/classifier-package-operations.test.ts`.
+- Updated `src/cli/classifiers-package-operations.ts`.
+- Updated `src/cli/classifiers-package-operations.test.ts`.
+- Execution reports now include:
+  - `outputs`: path existence status for every declared operation output
+  - `missing_outputs`: declared output paths absent after the command returns
+- Execution report decision now becomes `failed` when:
+  - the process exits nonzero, or
+  - any declared output is missing
+- Text rendering now prints output status rows:
+  - `- output ok <path>`
+  - `- output missing <path>`
+
+Commands:
+
+```sh
+bun test src/cli/classifiers-package-operations.test.ts src/cli/effect-cli.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/classifiers/package-manifest.test.ts
+bun src/cli/index.ts classifiers package-operations --operation=setfit-train-eval --execute --out=.ax/experiments/classifier-package-execution-e104-denied-expensive.json
+bun src/cli/index.ts classifiers package-operations --operation=blind-review-refresh --execute --out=.ax/experiments/classifier-package-execution-e104-refresh.json
+bun src/cli/index.ts classifiers package-operations --operation=missing --execute --out=.ax/experiments/classifier-package-execution-e104-missing-operation.json
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun run typecheck
+```
+
+Results:
+
+- Focused package-operation tests: `79` passed.
+- Python package regression tests: `195` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Synthetic regression coverage:
+  - successful command with declared output: `executed`
+  - zero-exit command with missing declared output: `failed`
+  - denied expensive command with missing declared output: `not_executed`
+- `setfit-train-eval --execute`:
+  - decision: `not_executed`
+  - plan decision: `denied_expensive`
+  - output count: `2`
+  - missing outputs: `[]` on this local machine because prior model artifacts
+    already exist
+- `blind-review-refresh --execute`:
+  - decision: `executed`
+  - plan decision: `ready_to_execute`
+  - exit code: `0`
+  - output count: `6`
+  - missing outputs: `[]`
+  - every declared output had `exists: true`
+- Missing operation execution:
+  - decision: `not_executed`
+  - plan decision: `operation_missing`
+  - output count: `0`
+- Artifacts:
+  - `.ax/experiments/classifier-package-execution-e104-denied-expensive.json`
+  - `.ax/experiments/classifier-package-execution-e104-refresh.json`
+  - `.ax/experiments/classifier-package-execution-e104-missing-operation.json`
+
+Decision:
+
+- E104 makes operation execution reports useful as lifecycle evidence: a command
+  is not merely "ran"; it must also satisfy the package manifest's declared
+  artifact contract.
+- The local SetFit denied report shows why missing-output checks should be
+  interpreted as post-run artifact status, not proof that a skipped operation
+  created anything in the current run.
+
+## E105 - Output Before/After Change Evidence
+
+Question:
+
+- Can AX distinguish "the declared output exists" from "this execution updated
+  the declared output"?
+
+Changes:
+
+- Updated `src/classifiers/package-operations.ts`.
+- Updated `scripts/classifier-package-operations.test.ts`.
+- Updated `src/cli/classifiers-package-operations.ts`.
+- Updated `src/cli/classifiers-package-operations.test.ts`.
+- Execution reports now include:
+  - `outputs_before`: pre-run artifact status with existence, size, and mtime
+  - `output_changes`: before/after artifact status and `changed_during_run`
+- Text rendering now prints output status with change status:
+  - `- output ok changed <path>`
+  - `- output ok unchanged <path>`
+  - `- output missing unchanged <path>`
+
+Commands:
+
+```sh
+bun test src/cli/classifiers-package-operations.test.ts src/cli/effect-cli.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/classifiers/package-manifest.test.ts
+bun src/cli/index.ts classifiers package-operations --operation=setfit-train-eval --execute --out=.ax/experiments/classifier-package-execution-e105-denied-expensive.json
+bun src/cli/index.ts classifiers package-operations --operation=blind-review-refresh --execute --out=.ax/experiments/classifier-package-execution-e105-refresh.json
+bun src/cli/index.ts classifiers package-operations --operation=missing --execute --out=.ax/experiments/classifier-package-execution-e105-missing-operation.json
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun run typecheck
+```
+
+Results:
+
+- Focused package-operation tests: `79` passed.
+- Python package regression tests: `195` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Synthetic regression coverage:
+  - newly created declared output reports `changed_during_run: true`
+  - zero-exit command with missing declared output reports
+    `changed_during_run: false`
+  - denied expensive operation reports `not_executed` and no changed outputs
+- `blind-review-refresh --execute`:
+  - decision: `executed`
+  - output count: `6`
+  - changed output count: `6`
+  - missing outputs: `[]`
+  - all six declared outputs existed before and after the run, and all six had
+    updated mtimes during the run
+- `setfit-train-eval --execute`:
+  - decision: `not_executed`
+  - plan decision: `denied_expensive`
+  - output count: `2`
+  - changed output count: `0`
+- Missing operation execution:
+  - decision: `not_executed`
+  - output count: `0`
+  - changed output count: `0`
+- Artifacts:
+  - `.ax/experiments/classifier-package-execution-e105-denied-expensive.json`
+  - `.ax/experiments/classifier-package-execution-e105-refresh.json`
+  - `.ax/experiments/classifier-package-execution-e105-missing-operation.json`
+
+Decision:
+
+- E105 gives the classifier lifecycle stronger provenance evidence: reports can
+  now answer whether artifacts merely existed from a prior run or were actually
+  touched by the current operation execution.
+- The execution decision still does not require artifact changes, because some
+  valid operations can be idempotent. Change evidence is recorded separately for
+  downstream policy and debugging.
+
+## E106 - Classifier Package Execution History Summary
+
+Question:
+
+- Can AX summarize saved classifier package execution reports into a compact
+  history that is easier to compare, debug, and later turn into graph facts?
+
+Changes:
+
+- Updated `src/classifiers/package-operations.ts`.
+- Updated `src/classifiers/package-service.ts`.
+- Updated `src/cli/classifiers-package-operations.ts`.
+- Updated `src/cli/index.ts`.
+- Updated `scripts/classifier-package-operations.test.ts`.
+- Updated `src/classifiers/package-service.test.ts`.
+- Updated `src/cli/classifiers-package-operations.test.ts`.
+- Added execution history report schema:
+  - `ax.classifier_package_execution_history_report.v1`
+- Added CLI flag:
+  - `axctl classifiers package-operations --history`
+- History reports summarize saved execution reports with:
+  - operation/package identity
+  - execution decision and plan decision
+  - exit code
+  - duration
+  - output count
+  - missing output count
+  - changed output count
+  - failures
+- History discovery skips execution-plan reports and history reports, and
+  normalizes older execution report artifacts that predate output-change fields.
+
+Commands:
+
+```sh
+bun test src/cli/classifiers-package-operations.test.ts src/cli/effect-cli.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/classifiers/package-manifest.test.ts
+bun src/cli/index.ts classifiers package-operations --history --out=.ax/experiments/classifier-package-execution-history-e106.json
+bun src/cli/index.ts classifiers package-operations --history
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun run typecheck
+```
+
+Results:
+
+- Focused package-operation tests: `83` passed.
+- Python package regression tests: `195` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Current execution history:
+  - report count: `9`
+  - executed: `3`
+  - failed: `0`
+  - not executed: `6`
+  - output count: `24`
+  - missing output count: `0`
+  - changed output count: `6`
+  - failure count: `6`
+- The latest `blind-review-refresh` execution had:
+  - decision: `executed`
+  - plan decision: `ready_to_execute`
+  - changed outputs: `6`
+  - missing outputs: `0`
+- The SetFit train executions in history remain:
+  - decision: `not_executed`
+  - plan decision: `denied_expensive`
+- Artifact:
+  - `.ax/experiments/classifier-package-execution-history-e106.json`
+
+Decision:
+
+- E106 provides the first report-level rollup that can feed analytics and graph
+  facts without re-reading every verbose execution report.
+- This is still filesystem-backed. A later slice should persist these summaries
+  or derived facts into SurrealDB so queries can connect classifier lifecycle
+  events with package manifests, operations, and downstream evidence.
+
+## E107 - Graph-Ready Classifier Execution Fact Projection
+
+Question:
+
+- Can AX turn classifier package execution reports into graph-shaped facts,
+  nodes, and evidence edges before committing to a SurrealDB persistence schema?
+
+Changes:
+
+- Updated `src/classifiers/package-operations.ts`.
+- Updated `src/classifiers/package-service.ts`.
+- Updated `src/cli/classifiers-package-operations.ts`.
+- Updated `src/cli/index.ts`.
+- Updated `scripts/classifier-package-operations.test.ts`.
+- Updated `src/classifiers/package-service.test.ts`.
+- Updated `src/cli/classifiers-package-operations.test.ts`.
+- Added fact projection report schema:
+  - `ax.classifier_package_execution_fact_projection.v1`
+- Added CLI flag:
+  - `axctl classifiers package-operations --facts`
+- Projection reports include:
+  - graph-ready nodes:
+    - `classifier_package`
+    - `classifier_operation`
+    - `classifier_execution`
+    - `artifact`
+  - graph-ready edges:
+    - `declares_operation`
+    - `ran_operation`
+    - `observed_artifact`
+    - `updated_artifact`
+  - fact rows:
+    - `classifier_operation_execution`
+    - `classifier_operation_guard`
+    - `classifier_artifact_observation`
+  - `evidence_edges` per fact, pointing back to the derived edge IDs
+  - `evidence_path` per edge, pointing back to the source execution report or
+    manifest
+- Execution report discovery now excludes:
+  - execution plan reports
+  - execution history summaries
+  - execution fact projections
+
+Commands:
+
+```sh
+bun test src/cli/classifiers-package-operations.test.ts src/cli/effect-cli.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/classifiers/package-manifest.test.ts
+bun src/cli/index.ts classifiers package-operations --facts --out=.ax/experiments/classifier-package-execution-facts-e107.json
+bun src/cli/index.ts classifiers package-operations --facts
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun run typecheck
+```
+
+Results:
+
+- Focused package-operation tests: `87` passed.
+- Python package regression tests: `195` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Current fact projection:
+  - source execution reports: `9`
+  - nodes: `21`
+  - edges: `36`
+  - facts: `33`
+  - execution facts: `3`
+  - guard facts: `6`
+  - artifact facts: `24`
+- Example graph nodes:
+  - `classifier_package:session-section-chunks`
+  - `classifier_operation:session-section-chunks/setfit-train-eval`
+  - `classifier_execution:.ax/experiments/classifier-package-execution-e103-denied-expensive.json`
+  - `artifact:.ax/experiments/setfit-session-sections-coarse-model`
+- Example fact:
+  - kind: `classifier_operation_guard`
+  - predicate: `guarded_with_decision`
+  - value: `denied_expensive`
+  - evidence edge:
+    `classifier_execution -> ran_operation -> classifier_operation`
+- Artifact:
+  - `.ax/experiments/classifier-package-execution-facts-e107.json`
+
+Decision:
+
+- E107 creates the concrete graph contract that answers "how does this become
+  useful in queries?" without forcing schema migration yet.
+- The next persistence slice can map these projected nodes and edges into
+  SurrealDB tables/relations, then query for operation health, guard failures,
+  changed artifacts, and evidence paths.
+
+## E108 - SurrealDB Write Plan For Classifier Execution Facts
+
+Question:
+
+- Can AX turn projected classifier execution facts into concrete, idempotent
+  SurrealQL writes without mutating the local database yet?
+
+Changes:
+
+- Updated `schema/schema.surql`.
+- Updated `schema/schema.test.ts`.
+- Updated `src/classifiers/package-operations.ts`.
+- Updated `src/classifiers/package-service.ts`.
+- Updated `src/cli/classifiers-package-operations.ts`.
+- Updated `src/cli/index.ts`.
+- Updated `scripts/classifier-package-operations.test.ts`.
+- Updated `src/classifiers/package-service.test.ts`.
+- Updated `src/cli/classifiers-package-operations.test.ts`.
+- Added schema tables:
+  - `classifier_graph_node`
+  - `classifier_graph_edge`
+  - `classifier_graph_fact`
+- Added write-plan report schema:
+  - `ax.classifier_package_execution_surreal_write_plan.v1`
+- Added CLI flag:
+  - `axctl classifiers package-operations --write-plan`
+- Write plans emit idempotent `UPSERT` statements for:
+  - graph nodes
+  - graph edges
+  - graph facts
+- Write-plan discovery excludes write-plan artifacts from execution report scans.
+
+Commands:
+
+```sh
+bun test src/cli/classifiers-package-operations.test.ts src/cli/effect-cli.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/classifiers/package-manifest.test.ts schema/schema.test.ts
+bun src/cli/index.ts classifiers package-operations --write-plan --out=.ax/experiments/classifier-package-execution-write-plan-e108.json
+bun src/cli/index.ts classifiers package-operations --write-plan
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+Results:
+
+- Focused package/schema tests: `114` passed.
+- Python package regression tests: `195` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Table coverage check: passed.
+- Current write plan:
+  - statements: `90`
+  - node statements: `21`
+  - edge statements: `36`
+  - fact statements: `33`
+  - tables:
+    - `classifier_graph_node`
+    - `classifier_graph_edge`
+    - `classifier_graph_fact`
+- Example statement:
+  - `UPSERT classifier_graph_node:\`classifier_package:session-section-chunks\` ...`
+- Artifact:
+  - `.ax/experiments/classifier-package-execution-write-plan-e108.json`
+
+Decision:
+
+- E108 turns the graph-ready fact projection into concrete persistence work
+  while still keeping the operation read-only with respect to the database.
+- The next slice can safely add an explicit apply path that runs this plan
+  against SurrealDB, then query these graph tables for operation health,
+  guard failures, changed artifacts, and evidence paths.
+
+## E109 - Apply Classifier Execution Facts To SurrealDB
+
+Question:
+
+- Can AX explicitly apply the classifier execution graph write plan to local
+  SurrealDB and verify that the graph tables are populated?
+
+Changes:
+
+- Updated `src/classifiers/package-operations.ts`.
+- Updated `src/classifiers/package-service.ts`.
+- Updated `src/cli/classifiers-package-operations.ts`.
+- Updated `src/cli/index.ts`.
+- Updated `scripts/classifier-package-operations.test.ts`.
+- Updated `src/classifiers/package-service.test.ts`.
+- Updated `src/cli/classifiers-package-operations.test.ts`.
+- Added apply report schema:
+  - `ax.classifier_package_execution_surreal_apply_report.v1`
+- Added CLI flag:
+  - `axctl classifiers package-operations --apply-write-plan`
+- `--apply-write-plan` is explicitly DB-routed; the other package-operation
+  reporting commands remain no-DB/offline.
+- Apply reports include:
+  - attempted statement count
+  - applied statement count
+  - failed statement count
+  - first failed statement/message when any write fails
+- Execution report discovery now excludes apply reports.
+
+Commands:
+
+```sh
+bun test src/cli/classifiers-package-operations.test.ts src/cli/effect-cli.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/classifiers/package-manifest.test.ts schema/schema.test.ts
+bun run db:start
+bun run db:schema
+bun src/cli/index.ts classifiers package-operations --apply-write-plan --out=.ax/experiments/classifier-package-execution-apply-e109.json
+bun src/cli/index.ts classifiers package-operations --apply-write-plan
+bun src/cli/index.ts classifiers package-operations --history --out=.ax/experiments/classifier-package-execution-history-e109-post-apply.json
+bun src/cli/index.ts classifiers package-operations --facts --out=.ax/experiments/classifier-package-execution-facts-e109-post-apply.json
+printf 'SELECT count() AS count FROM classifier_graph_node GROUP ALL; SELECT count() AS count FROM classifier_graph_edge GROUP ALL; SELECT count() AS count FROM classifier_graph_fact GROUP ALL;' | surreal sql -e ws://127.0.0.1:8521 -u root -p root --ns ax --db main
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+Results:
+
+- Focused package/schema tests after the final apply-path edits: `119` passed.
+- Python package regression tests: `195` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Table coverage check: passed.
+- Local SurrealDB:
+  - already running on port `8521`
+  - schema applied to `ax/main`
+- Apply report:
+  - decision: `applied`
+  - attempted statements: `90`
+  - applied statements: `90`
+  - failed statements: `0`
+- Post-apply history still reports:
+  - reports: `9`
+  - executed: `3`
+  - failed: `0`
+  - not executed: `6`
+- Post-apply fact projection still reports:
+  - nodes: `21`
+  - edges: `36`
+  - facts: `33`
+- Direct SurrealDB counts:
+  - `classifier_graph_node`: `21`
+  - `classifier_graph_edge`: `36`
+  - `classifier_graph_fact`: `33`
+- Artifacts:
+  - `.ax/experiments/classifier-package-execution-apply-e109.json`
+  - `.ax/experiments/classifier-package-execution-history-e109-post-apply.json`
+  - `.ax/experiments/classifier-package-execution-facts-e109-post-apply.json`
+
+Decision:
+
+- E109 closes the loop from classifier package lifecycle reports to concrete
+  queryable graph rows in SurrealDB.
+- The graph is intentionally generic for this slice. The next useful step is
+  to add first-class query commands over `classifier_graph_*` so we can ask
+  questions like "which operations are repeatedly guarded?", "which artifacts
+  were changed by the last execution?", and "what evidence path supports this
+  classifier lifecycle fact?".
+
+## E110 - Classifier Execution Graph Health Query
+
+Question:
+
+- Can AX query the persisted `classifier_graph_*` rows and answer operation
+  health questions without re-reading filesystem execution reports?
+
+Changes:
+
+- Updated `src/classifiers/package-operations.ts`.
+- Updated `src/classifiers/package-service.ts`.
+- Updated `src/cli/classifiers-package-operations.ts`.
+- Updated `src/cli/index.ts`.
+- Updated `scripts/classifier-package-operations.test.ts`.
+- Updated `src/classifiers/package-service.test.ts`.
+- Updated `src/cli/classifiers-package-operations.test.ts`.
+- Added graph-health report schema:
+  - `ax.classifier_package_execution_graph_health_report.v1`
+- Added CLI flag:
+  - `axctl classifiers package-operations --graph-health`
+- The graph-health report reads:
+  - `classifier_graph_node`
+  - `classifier_graph_edge`
+  - `classifier_graph_fact`
+- It summarizes:
+  - package, operation, execution, artifact counts
+  - execution, guard, and artifact facts
+  - guarded operations
+  - changed artifacts with evidence paths
+  - last execution details per operation
+
+Commands:
+
+```sh
+bun test scripts/classifier-package-operations.test.ts src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts src/cli/effect-cli.test.ts
+bun run typecheck
+bun src/cli/index.ts classifiers package-operations --graph-health --out=.ax/experiments/classifier-package-execution-graph-health-e110.json
+bun src/cli/index.ts classifiers package-operations --graph-health
+bun scripts/check-table-coverage.ts
+```
+
+Results:
+
+- Focused package/service/CLI tests: `91` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Table coverage check: passed.
+- Graph-health report:
+  - decision: `healthy`
+  - nodes / edges / facts: `21 / 36 / 33`
+  - packages / operations / executions / artifacts: `1 / 3 / 9 / 8`
+  - execution / guard / artifact facts: `3 / 6 / 24`
+  - changed artifacts: `6`
+- Operation summaries:
+  - `session-section-chunks/blind-review-refresh`
+    - executed: `3`
+    - failed: `0`
+    - guarded: `0`
+    - changed artifacts: `6`
+    - latest report:
+      `.ax/experiments/classifier-package-execution-e105-refresh.json`
+  - `session-section-chunks/missing`
+    - executed: `0`
+    - failed: `0`
+    - guarded: `3`
+    - latest plan decision: `operation_missing`
+  - `session-section-chunks/setfit-train-eval`
+    - executed: `0`
+    - failed: `0`
+    - guarded: `3`
+    - latest plan decision: `denied_expensive`
+- Changed artifacts all came from `blind-review-refresh` and each carries the
+  execution report evidence path.
+- Artifact:
+  - `.ax/experiments/classifier-package-execution-graph-health-e110.json`
+
+Decision:
+
+- E110 makes the E109 graph rows practically queryable from the CLI.
+- The first useful query answers operation health and artifact provenance:
+  - which operations are repeatedly guarded
+  - which operation last changed declared outputs
+  - which execution report supports each changed artifact
+- This is still a generic lifecycle graph query, not yet a domain-level
+  classifier insight query. The next useful slice is to add narrower query
+  commands or report modes for:
+  - guarded operations only
+  - changed artifacts only
+  - evidence path drill-down for a selected operation or artifact.
+
+## E111 - Targeted Classifier Graph Query Modes
+
+Question:
+
+- Can the classifier execution graph query answer narrower operational
+  questions without post-processing the full graph-health report?
+
+Changes:
+
+- Updated `src/classifiers/package-operations.ts`.
+- Updated `src/classifiers/package-service.ts`.
+- Updated `src/cli/classifiers-package-operations.ts`.
+- Updated `src/cli/index.ts`.
+- Updated `scripts/classifier-package-operations.test.ts`.
+- Updated `src/classifiers/package-service.test.ts`.
+- Updated `src/cli/classifiers-package-operations.test.ts`.
+- Extended graph-health reports with:
+  - `query`
+  - `result_totals`
+  - `evidence_paths`
+- Added graph-health query modes:
+  - `summary`
+  - `guarded`
+  - `changed-artifacts`
+  - `evidence`
+- Added filters:
+  - `--operation=<id>` for graph-health operation filtering
+  - `--artifact=<path-or-id>` for changed-artifact filtering
+- Execution report discovery now excludes graph-health artifacts so saved
+  graph-health JSON files do not poison history/facts/write-plan scans.
+
+Commands:
+
+```sh
+bun test scripts/classifier-package-operations.test.ts src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts src/cli/effect-cli.test.ts
+bun run typecheck
+bun src/cli/index.ts classifiers package-operations --graph-health --graph-mode=guarded --out=.ax/experiments/classifier-package-execution-graph-health-e111-guarded.json
+bun src/cli/index.ts classifiers package-operations --graph-health --graph-mode=changed-artifacts --operation=blind-review-refresh --out=.ax/experiments/classifier-package-execution-graph-health-e111-changed-refresh.json
+bun src/cli/index.ts classifiers package-operations --graph-health --graph-mode=evidence --operation=setfit-train-eval --out=.ax/experiments/classifier-package-execution-graph-health-e111-evidence-train.json
+bun src/cli/index.ts classifiers package-operations --graph-health --graph-mode=guarded
+python3 -m json.tool .ax/experiments/classifier-package-execution-graph-health-e111-guarded.json >/dev/null
+python3 -m json.tool .ax/experiments/classifier-package-execution-graph-health-e111-changed-refresh.json >/dev/null
+python3 -m json.tool .ax/experiments/classifier-package-execution-graph-health-e111-evidence-train.json >/dev/null
+bun scripts/check-table-coverage.ts
+```
+
+Results:
+
+- Focused package/service/CLI tests: `92` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Table coverage check: passed.
+- Saved JSON artifacts all validate.
+- Guarded mode:
+  - query: `mode=guarded`
+  - result operations: `2`
+  - guarded operations: `2`
+  - changed artifacts: `0`
+  - evidence paths: `6`
+  - operations:
+    - `missing`
+    - `setfit-train-eval`
+- Changed-artifacts mode filtered to `blind-review-refresh`:
+  - result operations: `1`
+  - changed artifacts: `6`
+  - evidence paths: `3`
+- Evidence mode filtered to `setfit-train-eval`:
+  - result operations: `1`
+  - guarded operations: `1`
+  - evidence paths: `3`
+- Artifacts:
+  - `.ax/experiments/classifier-package-execution-graph-health-e111-guarded.json`
+  - `.ax/experiments/classifier-package-execution-graph-health-e111-changed-refresh.json`
+  - `.ax/experiments/classifier-package-execution-graph-health-e111-evidence-train.json`
+
+Decision:
+
+- E111 makes the persisted lifecycle graph meaningfully queryable:
+  - guarded-operation review no longer needs manual filtering
+  - changed artifact provenance can be scoped to an operation
+  - evidence paths can be scoped to a selected operation
+- The next useful slice is to connect these lifecycle graph queries back to
+  classifier-package operations and documentation:
+  - declare `graph-health` / query modes as package operations or CLI docs
+  - add a higher-level `classifiers graph` or `insights classifier-lifecycle`
+    command if this surface grows beyond package-operation maintenance.
+
+## E112 - Graph Health Operations In Package Metadata
+
+Question:
+
+- Can contributors discover classifier lifecycle graph-health queries from the
+  package manifest and README, instead of knowing hidden CLI flags?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/ax.classifier.json`.
+- Updated `packages/ax-classifier-session-sections/README.md`.
+- Updated `src/classifiers/package-manifest.test.ts`.
+- Updated `src/classifiers/package-service.test.ts`.
+- Updated `scripts/classifier-package-operations.test.ts`.
+- Added three read-only `status` operations:
+  - `graph-health-summary`
+  - `graph-health-guarded`
+  - `graph-health-changed-artifacts`
+- Documented direct graph-health CLI examples:
+  - `--graph-mode=guarded`
+  - `--graph-mode=changed-artifacts --operation=blind-review-refresh`
+  - `--graph-mode=evidence --operation=setfit-train-eval`
+- The README now states that graph-health operations inspect
+  `classifier_graph_node`, `classifier_graph_edge`, and
+  `classifier_graph_fact` after `--apply-write-plan` has populated those
+  tables.
+
+Commands:
+
+```sh
+python3 -m json.tool packages/ax-classifier-session-sections/ax.classifier.json >/dev/null
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun src/cli/index.ts classifiers package-operations --operation=graph-health-guarded --json
+bun src/cli/index.ts classifiers package-operations --all --out=.ax/experiments/classifier-packages-operations-e112.json
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+Results:
+
+- Manifest JSON validation: passed.
+- Focused manifest/service/package-operation tests: `75` passed.
+- Python package regression tests: `195` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Table coverage check: passed.
+- `graph-health-guarded` operation lookup:
+  - decision: `operation_found`
+  - kind: `status`
+  - command:
+    `bun src/cli/index.ts classifiers package-operations --graph-health --graph-mode=guarded --out=.ax/experiments/classifier-package-execution-graph-health-guarded-current.json`
+- Multi-package operation report:
+  - packages: `3`
+  - operations: `10`
+  - operation kinds:
+    - `train`: `1`
+    - `eval`: `2`
+    - `review`: `2`
+    - `status`: `4`
+    - `publish`: `0`
+    - `debug`: `1`
+  - local model ready count: `1`
+  - local model incomplete count: `0`
+- Session-section package:
+  - operations: `10`
+  - graph operations:
+    - `graph-health-summary`
+    - `graph-health-guarded`
+    - `graph-health-changed-artifacts`
+- Artifact:
+  - `.ax/experiments/classifier-packages-operations-e112.json`
+
+Decision:
+
+- E112 makes the classifier lifecycle graph query surface contributor-visible:
+  package tooling can discover the graph-health hooks without reading CLI
+  source or the experiment log.
+- This keeps graph-health as package lifecycle/status maintenance rather than
+  a user-facing insight command for now.
+- The next useful slice is either:
+  - add an explicit higher-level `classifiers graph` command if users need this
+    outside package maintenance, or
+  - connect graph-health outputs to the dashboard/TUI so operation health,
+    guarded operations, and artifact provenance are visible without running CLI
+    commands manually.
+
+## E113 - User-Facing Classifier Graph Command
+
+Question:
+
+- Can users query classifier lifecycle graph health without knowing the
+  package-operation maintenance flags?
+
+Changes:
+
+- Updated `src/cli/index.ts`.
+- Updated `src/cli/effect-cli.test.ts`.
+- Added:
+  - `axctl classifiers graph`
+- The command is DB-routed and reuses the graph-health service/report shape.
+- Supported flags:
+  - `--mode=summary|guarded|changed-artifacts|evidence`
+  - `--operation=<id>`
+  - `--artifact=<path-or-id>`
+  - `--out=<path>`
+  - `--json`
+- `classifiers graph` remains a thin user-facing alias over the persisted
+  `classifier_graph_*` query; it does not execute classifier package
+  operations and does not mutate the database.
+
+Commands:
+
+```sh
+bun test src/cli/effect-cli.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+bun src/cli/index.ts classifiers graph --out=.ax/experiments/classifiers-graph-e113-summary.json
+bun src/cli/index.ts classifiers graph --mode=guarded --out=.ax/experiments/classifiers-graph-e113-guarded.json
+bun src/cli/index.ts classifiers graph --mode=changed-artifacts --operation=blind-review-refresh --out=.ax/experiments/classifiers-graph-e113-changed-refresh.json
+bun src/cli/index.ts classifiers graph --mode=guarded
+python3 -m json.tool .ax/experiments/classifiers-graph-e113-summary.json >/dev/null
+python3 -m json.tool .ax/experiments/classifiers-graph-e113-guarded.json >/dev/null
+python3 -m json.tool .ax/experiments/classifiers-graph-e113-changed-refresh.json >/dev/null
+bun scripts/check-table-coverage.ts
+```
+
+Results:
+
+- Focused CLI/service/package-operation tests: `92` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Table coverage check: passed.
+- Saved JSON artifacts all validate.
+- `classifiers graph --mode=summary`:
+  - operations: `3`
+  - guarded operations: `2`
+  - changed artifacts: `6`
+  - evidence paths: `9`
+- `classifiers graph --mode=guarded`:
+  - operations: `2`
+  - guarded operations: `2`
+  - changed artifacts: `0`
+  - evidence paths: `6`
+  - operations:
+    - `missing`
+    - `setfit-train-eval`
+- `classifiers graph --mode=changed-artifacts --operation=blind-review-refresh`:
+  - operations: `1`
+  - changed artifacts: `6`
+  - evidence paths: `3`
+- Artifacts:
+  - `.ax/experiments/classifiers-graph-e113-summary.json`
+  - `.ax/experiments/classifiers-graph-e113-guarded.json`
+  - `.ax/experiments/classifiers-graph-e113-changed-refresh.json`
+
+Decision:
+
+- E113 makes classifier lifecycle graph facts usable from a first-class
+  `classifiers graph` command.
+- The graph query is now available at three levels:
+  - persisted generic graph rows in SurrealDB
+  - package-maintenance `package-operations --graph-health`
+  - user-facing `classifiers graph`
+- The next useful slice is dashboard/TUI integration or a narrower
+  `insights classifier-lifecycle` report that joins these lifecycle facts with
+  classifier package readiness and review status.
+
+## E114 - Classifier Lifecycle Insight Command
+
+Question:
+
+- Can users see classifier package readiness, persisted lifecycle graph health,
+  and blind-review blockers in one report?
+
+Changes:
+
+- Updated `src/classifiers/package-operations.ts`.
+- Updated `src/classifiers/package-service.ts`.
+- Updated `src/cli/classifiers-package-operations.ts`.
+- Updated `src/cli/index.ts`.
+- Updated tests in:
+  - `scripts/classifier-package-operations.test.ts`
+  - `src/classifiers/package-service.test.ts`
+  - `src/cli/classifiers-package-operations.test.ts`
+  - `src/cli/effect-cli.test.ts`
+- Added report schema:
+  - `ax.classifier_lifecycle_insight_report.v1`
+- Added:
+  - `axctl classifiers lifecycle`
+- The report joins:
+  - package manifest lifecycle readiness
+  - persisted `classifier_graph_*` health
+  - current blind workflow status from
+    `.ax/experiments/blind-workflow-status-current.json`
+
+Commands:
+
+```sh
+bun test scripts/classifier-package-operations.test.ts src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts src/cli/effect-cli.test.ts
+bun run typecheck
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e114.json
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e114.json >/dev/null
+bun src/cli/index.ts classifiers lifecycle
+bun scripts/check-table-coverage.ts
+```
+
+Results:
+
+- Focused tests: `96` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Table coverage check: passed.
+- Saved lifecycle JSON validates.
+- Live lifecycle report:
+  - decision: `needs_human_review`
+  - packages: `3`
+  - local-model packages: `1`
+  - local-model ready: `1`
+  - local-model incomplete: `0`
+  - graph operations: `3`
+  - guarded operations: `2`
+  - changed artifacts: `6`
+  - pending blind labels: `40`
+  - pending hard-negative decisions: `20`
+- Blocking items:
+  - `session-section-chunks/missing` guarded `3` times
+  - `session-section-chunks/setfit-train-eval` guarded `3` times
+  - workflow status is `needs_human_review`
+  - `40` blind labels pending
+  - `20` hard-negative decisions pending
+- Artifact:
+  - `.ax/experiments/classifiers-lifecycle-e114.json`
+
+Decision:
+
+- E114 gives AX a compact lifecycle insight surface for classifier packages.
+- The command exits nonzero while the lifecycle is blocked, which is useful for
+  automation: today the blocker is human review, not missing lifecycle metadata.
+- This is a better dashboard/TUI input than raw graph-health alone because it
+  carries readiness, graph provenance, and review progress in one schema.
+
+## E115 - Lifecycle Status Package Operation
+
+Question:
+
+- Can contributors discover the higher-level classifier lifecycle status report
+  from the classifier package manifest, the same way they discover train/eval,
+  review, and graph-health operations?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/ax.classifier.json`.
+- Updated `packages/ax-classifier-session-sections/README.md`.
+- Updated operation-manifest and service tests.
+- Added manifest operation:
+  - `classifier-lifecycle-status`
+  - kind: `status`
+  - command:
+    `bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-current.json`
+  - input:
+    `.ax/experiments/blind-workflow-status-current.json`
+  - output:
+    `.ax/experiments/classifiers-lifecycle-current.json`
+
+Commands:
+
+```sh
+python3 -m json.tool packages/ax-classifier-session-sections/ax.classifier.json >/dev/null
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/effect-cli.test.ts
+bun run typecheck
+bun src/cli/index.ts classifiers package-operations --operation=classifier-lifecycle-status --json > .ax/experiments/classifier-package-operation-e115-lifecycle-status.json
+python3 -m json.tool .ax/experiments/classifier-package-operation-e115-lifecycle-status.json >/dev/null
+bun src/cli/index.ts classifiers package-operations --all --out=.ax/experiments/classifier-packages-operations-e115.json
+python3 -m json.tool .ax/experiments/classifier-packages-operations-e115.json >/dev/null
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e115.json
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e115.json >/dev/null
+bun scripts/check-table-coverage.ts
+```
+
+Results:
+
+- Manifest JSON validation: passed.
+- Focused tests: `105` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Table coverage check: passed.
+- `classifier-lifecycle-status` lookup:
+  - decision: `operation_found`
+  - kind: `status`
+- Multi-package operation totals:
+  - operations: `11`
+  - `train`: `1`
+  - `eval`: `2`
+  - `review`: `2`
+  - `status`: `5`
+  - `publish`: `0`
+  - `debug`: `1`
+- Lifecycle report:
+  - decision: `needs_human_review`
+  - local-model ready/incomplete: `1/0`
+  - graph operations: `3`
+  - guarded operations: `2`
+  - changed artifacts: `6`
+  - pending blind labels: `40`
+  - pending hard-negative decisions: `20`
+- Artifacts:
+  - `.ax/experiments/classifier-package-operation-e115-lifecycle-status.json`
+  - `.ax/experiments/classifier-packages-operations-e115.json`
+  - `.ax/experiments/classifiers-lifecycle-e115.json`
+
+Decision:
+
+- E115 makes the lifecycle insight report contributor-discoverable through the
+  package operation contract.
+- The session-section package now exposes the full status stack:
+  - blind workflow status
+  - graph health modes
+  - joined classifier lifecycle status
+- The lifecycle remains blocked on human review, which is expected and now
+  visible through both direct CLI and package-operation discovery.
+
+## E116 - Lifecycle Report Focused-Batch Details
+
+Question:
+
+- Can the lifecycle report point reviewers to the active focused batch and the
+  exact incomplete review fields, not only pending counts?
+
+Changes:
+
+- Updated `src/classifiers/package-operations.ts`.
+- Updated `src/cli/classifiers-package-operations.ts`.
+- Updated lifecycle service and formatter tests.
+- `axctl classifiers lifecycle` now includes
+  `workflow_status.focused_batch` when the current blind workflow status has
+  focused-batch stages.
+- Focused-batch details include:
+  - active batch path from
+    `.ax/experiments/blind-review-batch-current-refresh-report.json`
+  - selected ordinals
+  - pending review count
+  - pending hard-negative count
+  - incomplete refs with missing field names
+
+Commands:
+
+```sh
+bun test src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e116.json
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e116.json >/dev/null
+bun src/cli/index.ts classifiers lifecycle
+bun scripts/check-table-coverage.ts
+```
+
+Results:
+
+- Focused tests: `70` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Table coverage check: passed.
+- Lifecycle command still exits `1` because the workflow is blocked on human
+  review.
+- Saved lifecycle JSON validates.
+- Focused batch details:
+  - batch path: `.ax/experiments/blind-review-batch-current.md`
+  - selected ordinals: `1, 2, 3, 4, 5`
+  - review pending: `5`
+  - hard negatives pending: `3`
+  - first incomplete ref:
+    `blind-session-sections/019e72a8_58ba_7092_af99_fe3aa5a747dd__d8f036b899c4e288__seq_000003`
+  - missing fields on first ref:
+    `review_label`, `review_target`, `review_notes`,
+    `hard_negative_status`, `hard_negative_notes`
+- Artifact:
+  - `.ax/experiments/classifiers-lifecycle-e116.json`
+
+Decision:
+
+- E116 makes the lifecycle report directly actionable for the human-review
+  blocker.
+- The next person or agent can now run `axctl classifiers lifecycle` and see
+  both the high-level blocked state and the exact focused batch sections that
+  need labels/notes.
+
+## E117 - Focused Batch Vocabulary Validation
+
+Question:
+
+- Can the focused-batch evaluator reject malformed reviewer edits before they
+  reach workspace sync or the authoritative E49/E54 artifacts?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_review_batch.py`.
+- Updated `packages/ax-classifier-session-sections/blind_review_batch_test.py`.
+- Batch evaluation now validates:
+  - `Review label` is in the allowed blind labels or `__pending__`
+  - `Review target` is in target hints or `__pending__`
+  - `Hard-negative status` is `pending_human_acceptance`, `accepted`,
+    `rejected`, `_none_`, or empty
+- Batch reports now include:
+  - `invalid_refs`
+  - per-row `invalid` field list
+- Guarded sync inherits the evaluator result, so invalid review edits block
+  sync the same way pending edits do.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_batch_test.py
+bun run classifiers:blind-review-batch -- --mode=evaluate --batch=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-e117-eval-report.json --json
+python3 -m json.tool .ax/experiments/blind-review-batch-e117-eval-report.json >/dev/null
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun scripts/check-table-coverage.ts
+```
+
+Results:
+
+- Focused batch tests: `10` passed.
+- Full session-section Python regression tests: `196` passed.
+- Table coverage check: passed.
+- Current focused batch evaluation:
+  - decision: `needs_batch_review`
+  - sections: `5`
+  - review pending: `5`
+  - hard negatives pending: `3`
+  - invalid refs: `0`
+  - incomplete sections: `1, 2, 3, 4, 5`
+- Artifact:
+  - `.ax/experiments/blind-review-batch-e117-eval-report.json`
+
+Decision:
+
+- E117 improves review safety without accepting any labels automatically.
+- The focused batch remains pending human labels/notes, but malformed labels,
+  targets, or hard-negative statuses will now be caught at the smallest review
+  unit before they can corrupt the full workspace or downstream blind eval.
+
+## E118 - Focused Batch Eval Package Operation
+
+Question:
+
+- Can contributors discover and run the focused-batch validator through the
+  classifier package operation contract, instead of knowing the package-local
+  script command?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/ax.classifier.json`.
+- Updated `packages/ax-classifier-session-sections/README.md`.
+- Updated operation discovery tests.
+- Added package operation:
+  - `focused-batch-eval`
+  - kind: `review`
+  - command:
+    `bun run classifiers:blind-review-batch -- --mode=evaluate --batch=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-eval-report.json`
+  - input:
+    `.ax/experiments/blind-review-batch-current.md`
+  - output:
+    `.ax/experiments/blind-review-batch-current-eval-report.json`
+
+Commands:
+
+```sh
+python3 -m json.tool packages/ax-classifier-session-sections/ax.classifier.json >/dev/null
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun src/cli/index.ts classifiers package-operations --operation=focused-batch-eval --json > .ax/experiments/classifier-package-operation-e118-focused-batch-eval.json
+python3 -m json.tool .ax/experiments/classifier-package-operation-e118-focused-batch-eval.json >/dev/null
+bun src/cli/index.ts classifiers package-operations --operation=focused-batch-eval --dry-run --out=.ax/experiments/classifier-package-dry-run-e118-focused-batch-eval.json
+python3 -m json.tool .ax/experiments/classifier-package-dry-run-e118-focused-batch-eval.json >/dev/null
+bun src/cli/index.ts classifiers package-operations --operation=focused-batch-eval --execute --out=.ax/experiments/classifier-package-execution-e118-focused-batch-eval.json
+python3 -m json.tool .ax/experiments/classifier-package-execution-e118-focused-batch-eval.json >/dev/null
+bun run typecheck
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun scripts/check-table-coverage.ts
+```
+
+Results:
+
+- Manifest JSON validation: passed.
+- Focused manifest/service/CLI tests: `79` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Python session-section regression tests: `196` passed.
+- Table coverage check: passed.
+- Operation lookup:
+  - decision: `operation_found`
+  - kind: `review`
+- Dry-run:
+  - decision: `ready_to_run`
+  - preflight: `ready`
+- Execution:
+  - decision: `failed`
+  - exit code: `1`
+  - declared output exists: `true`
+  - missing outputs: `[]`
+  - stdout contains `needs_batch_review`
+- Artifacts:
+  - `.ax/experiments/classifier-package-operation-e118-focused-batch-eval.json`
+  - `.ax/experiments/classifier-package-dry-run-e118-focused-batch-eval.json`
+  - `.ax/experiments/classifier-package-execution-e118-focused-batch-eval.json`
+
+Decision:
+
+- E118 makes the smallest review gate discoverable and auditable through the
+  same package-operation mechanism as train/eval/status operations.
+- The operation failing while the batch is incomplete is intentional; it gives
+  automation a clear lifecycle signal that review must happen before sync or
+  blind evaluation.
+
+## E119 - Failed Focused-Batch Eval In Lifecycle Graph
+
+Question:
+
+- Does the failed `focused-batch-eval` package-operation execution become
+  visible in the persisted classifier lifecycle graph and top-level lifecycle
+  report?
+
+Changes:
+
+- Updated `src/classifiers/package-operations.ts`.
+- Updated `src/cli/classifiers-package-operations.ts`.
+- Updated lifecycle formatter and report tests.
+- Lifecycle insight reports now include:
+  - package-level `failed_operation_count`
+  - top-level `failed_operations`
+  - total `failed_operation_count`
+  - failed-operation blocking items
+- Lifecycle text now prints failed operation counts and a `failed operations`
+  section.
+
+Commands:
+
+```sh
+bun run db:start
+bun run db:schema
+bun src/cli/index.ts classifiers package-operations --history --out=.ax/experiments/classifier-package-execution-history-e119.json
+bun src/cli/index.ts classifiers package-operations --facts --out=.ax/experiments/classifier-package-execution-facts-e119.json
+bun src/cli/index.ts classifiers package-operations --write-plan --out=.ax/experiments/classifier-package-execution-write-plan-e119.json
+bun src/cli/index.ts classifiers package-operations --apply-write-plan --out=.ax/experiments/classifier-package-execution-apply-e119.json
+bun src/cli/index.ts classifiers graph --out=.ax/experiments/classifiers-graph-e119-summary.json
+bun src/cli/index.ts classifiers graph --mode=evidence --operation=focused-batch-eval --out=.ax/experiments/classifiers-graph-e119-evidence-focused-batch-eval.json
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e119.json
+python3 -m json.tool .ax/experiments/classifier-package-execution-history-e119.json >/dev/null
+python3 -m json.tool .ax/experiments/classifier-package-execution-facts-e119.json >/dev/null
+python3 -m json.tool .ax/experiments/classifier-package-execution-write-plan-e119.json >/dev/null
+python3 -m json.tool .ax/experiments/classifier-package-execution-apply-e119.json >/dev/null
+python3 -m json.tool .ax/experiments/classifiers-graph-e119-summary.json >/dev/null
+python3 -m json.tool .ax/experiments/classifiers-graph-e119-evidence-focused-batch-eval.json >/dev/null
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e119.json >/dev/null
+printf 'SELECT count() AS count FROM classifier_graph_node GROUP ALL; SELECT count() AS count FROM classifier_graph_edge GROUP ALL; SELECT count() AS count FROM classifier_graph_fact GROUP ALL;' | surreal sql -e ws://127.0.0.1:8521 -u root -p root --ns ax --db main
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts
+bun run typecheck
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun scripts/check-table-coverage.ts
+```
+
+Results:
+
+- Focused package/service/CLI tests: `70` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Python session-section regression tests: `196` passed.
+- Table coverage check: passed.
+- History after including E118:
+  - reports: `10`
+  - executed: `3`
+  - failed: `1`
+  - not executed: `6`
+  - changed outputs: `7`
+- Fact projection after including E118:
+  - source reports: `10`
+  - nodes: `23`
+  - edges: `39`
+  - facts: `35`
+  - execution facts: `4`
+  - guard facts: `6`
+  - artifact facts: `25`
+- Write/apply:
+  - write-plan statements: `97`
+  - apply decision: `applied`
+  - failed statements: `0`
+- Direct SurrealDB counts:
+  - `classifier_graph_node`: `23`
+  - `classifier_graph_edge`: `39`
+  - `classifier_graph_fact`: `35`
+- Graph summary:
+  - operations: `4`
+  - executions: `10`
+  - changed artifacts: `7`
+  - evidence paths: `11`
+- `focused-batch-eval` graph health:
+  - operation kind: `review`
+  - run count: `1`
+  - executed: `1`
+  - failed: `1`
+  - guarded: `0`
+  - changed artifacts: `1`
+  - evidence path:
+    `.ax/experiments/classifier-package-execution-e118-focused-batch-eval.json`
+- Lifecycle report:
+  - decision: `needs_human_review`
+  - graph operations / guarded / failed / changed: `4 / 2 / 1 / 7`
+  - package `session-section-chunks` operations manifest / graph / guarded /
+    failed: `12 / 4 / 2 / 1`
+  - failed operations:
+    `session-section-chunks/focused-batch-eval: 1`
+  - blocking item added:
+    `session-section-chunks/focused-batch-eval failed 1 time(s)`
+
+Decision:
+
+- E119 closes the evidence loop for failed review operations.
+- The focused-batch validator's intentional failure is now represented in:
+  - filesystem execution history
+  - graph fact projection
+  - persisted SurrealDB classifier graph rows
+  - user-facing `classifiers graph`
+  - top-level `classifiers lifecycle`
+- The lifecycle still remains blocked on human review, but the blocker is no
+  longer only pending-count based; the failed focused-batch gate is now a
+  queryable lifecycle fact with an evidence path.
+
+## E120 - Focused Batch Review Context Enrichment
+
+Question:
+
+- Can the focused batch carry enough local context for a reviewer to decide
+  labels and hard-negative statuses without jumping between E49, E51, E52, and
+  E54 artifacts?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_review_packet.py`.
+- Updated `packages/ax-classifier-session-sections/blind_review_workspace.py`.
+- Updated `packages/ax-classifier-session-sections/blind_review_batch.py`.
+- Updated `packages/ax-classifier-session-sections/blind_review_batch_refresh.py`.
+- Updated package tests and README.
+- Review packet items now include `hard_negative_review_instruction`.
+- Review workspace and focused batch sections now expose informational context:
+  - hard-negative proposed label/target
+  - hard-negative review instruction
+  - confidence bucket
+  - binary and family confidence
+  - source turn/session/seq
+  - approximate token count
+  - evidence refs
+- Focused-batch reports now include `context_enriched_sections`.
+- The batch enrichment preserves existing workspace order and ordinals.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_packet_test.py packages/ax-classifier-session-sections/blind_review_workspace_test.py packages/ax-classifier-session-sections/blind_review_batch_test.py packages/ax-classifier-session-sections/blind_review_batch_refresh_test.py
+bun run classifiers:blind-review-packet -- --review=.ax/experiments/blind-session-section-label-review-e49.json --suggestions=.ax/experiments/blind-session-section-label-suggestions-e51.json --priorities=.ax/experiments/blind-session-section-review-priority-e52.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-review-packet-e61.json --brief=.ax/experiments/blind-review-packet-e61.md --report=.ax/experiments/blind-review-packet-e61-report.json --json
+bun run classifiers:blind-review-refresh -- --json
+bun run classifiers:blind-review-batch -- --mode=evaluate --batch=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-e120-eval-report.json --json
+python3 -m json.tool .ax/experiments/blind-review-packet-e61.json >/dev/null
+python3 -m json.tool .ax/experiments/blind-review-batch-current-report.json >/dev/null
+python3 -m json.tool .ax/experiments/blind-review-batch-current-eval-report.json >/dev/null
+python3 -m json.tool .ax/experiments/blind-review-batch-current-refresh-report.json >/dev/null
+python3 -m json.tool .ax/experiments/blind-workflow-status-current.json >/dev/null
+python3 -m json.tool .ax/experiments/blind-review-batch-e120-eval-report.json >/dev/null
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e120.json
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e120.json >/dev/null
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+Results:
+
+- Focused review-context tests: `25` passed.
+- Full session-section Python regression tests: `199` passed.
+- Focused manifest/service/package-operation tests: `79` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Table coverage check: passed.
+- Refreshed review packet:
+  - items: `40`
+  - pending labels: `40`
+  - hard-negative candidates: `20`
+  - high-priority rows: `15`
+  - decision: `ready_for_consolidated_review`
+- Current focused batch:
+  - decision: `ready_for_batch_review`
+  - selected ordinals: `1, 2, 3, 4, 5`
+  - context-enriched sections: `5`
+  - includes `5` hard-negative proposed label/target lines
+  - includes `5` hard-negative review instruction lines
+  - includes `5` confidence bucket / binary confidence / evidence lines
+- Current focused batch eval:
+  - decision: `needs_batch_review`
+  - review pending: `5`
+  - hard negatives pending: `3`
+  - invalid refs: `0`
+- Lifecycle report:
+  - decision: `needs_human_review`
+  - pending blind labels: `40`
+  - pending hard-negative decisions: `20`
+  - focused batch remains `.ax/experiments/blind-review-batch-current.md`
+
+Decision:
+
+- E120 reduces the active human-review friction without accepting any model
+  suggestions automatically.
+- The first focused batch now contains the reviewer-relevant prediction,
+  priority, evidence, and hard-negative-mining context inline.
+- The blind eval gate remains correctly blocked until a reviewer fills labels,
+  targets, notes, and hard-negative decisions.
+
+## E121 - Lifecycle Surfaces Batch Context Enrichment
+
+Question:
+
+- Can the top-level workflow status and lifecycle report show whether the
+  active focused batch has inline review context, not only which ordinals are
+  pending?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status.py`.
+- Updated `src/classifiers/package-operations.ts`.
+- Updated `src/cli/classifiers-package-operations.ts`.
+- Updated Python and TypeScript tests.
+- Workflow status now preserves `context_enriched_sections` from focused-batch
+  reports.
+- Lifecycle focused-batch details now include
+  `context_enriched_sections`.
+- `axctl classifiers lifecycle` text now prints:
+  `context enriched sections: <n>`.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_workflow_status_test.py packages/ax-classifier-session-sections/blind_review_batch_test.py packages/ax-classifier-session-sections/blind_review_batch_refresh_test.py
+bun test src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run classifiers:blind-review-refresh -- --json
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e121.json
+python3 -m json.tool .ax/experiments/blind-workflow-status-current.json >/dev/null
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e121.json >/dev/null
+bun src/cli/index.ts classifiers lifecycle
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+Results:
+
+- Focused Python status/batch tests: `28` passed.
+- Focused package/service/CLI tests: `70` passed.
+- Full session-section Python regression tests: `199` passed.
+- Focused manifest/service/package-operation tests: `79` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Table coverage check: passed.
+- Refreshed current blind workflow status:
+  - decision: `needs_human_review`
+  - `review_batch.details.context_enriched_sections`: `5`
+  - artifact consistency: `consistent`
+- Lifecycle report:
+  - decision: `needs_human_review`
+  - focused batch path:
+    `.ax/experiments/blind-review-batch-current.md`
+  - selected ordinals: `1, 2, 3, 4, 5`
+  - context enriched sections: `5`
+  - review pending: `5`
+  - hard negatives pending: `3`
+  - pending blind labels: `40`
+  - pending hard-negative decisions: `20`
+
+Decision:
+
+- E121 makes E120 visible from the primary lifecycle command.
+- A reviewer or dashboard can now tell that the active focused batch has inline
+  packet context before opening the Markdown file.
+- The workflow remains correctly blocked on human review, but the top-level
+  status now distinguishes an enriched, ready-for-review batch from a bare
+  ordinal slice.
+
+## E122 - Self-Contained Focused Batch Vocabulary
+
+Question:
+
+- Can reviewers complete a focused batch from the batch Markdown alone, without
+  opening the full E63 workspace just to find allowed labels, targets, and
+  hard-negative statuses?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_review_batch.py`.
+- Updated `packages/ax-classifier-session-sections/blind_review_batch_test.py`.
+- Updated `packages/ax-classifier-session-sections/README.md`.
+- Focused batch Markdown now includes an `Editable field vocabulary` section:
+  - allowed review labels
+  - allowed review targets
+  - allowed hard-negative statuses
+  - reminder that `_none_` is only for sections without hard-negative
+    candidates
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_batch_test.py packages/ax-classifier-session-sections/blind_review_batch_refresh_test.py
+bun run classifiers:blind-review-refresh -- --json
+bun run classifiers:blind-review-batch -- --mode=evaluate --batch=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-e122-eval-report.json --json
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e122.json
+python3 -m json.tool .ax/experiments/blind-review-batch-current-report.json >/dev/null
+python3 -m json.tool .ax/experiments/blind-review-batch-current-eval-report.json >/dev/null
+python3 -m json.tool .ax/experiments/blind-review-batch-current-refresh-report.json >/dev/null
+python3 -m json.tool .ax/experiments/blind-workflow-status-current.json >/dev/null
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e122.json >/dev/null
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+Results:
+
+- Focused batch tests: `12` passed.
+- Full session-section Python regression tests: `199` passed.
+- Focused manifest/service/package-operation tests: `79` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Table coverage check: passed.
+- Current focused batch Markdown includes:
+  - `Editable field vocabulary:`
+  - `Review labels:`
+  - `Review targets:`
+  - `Hard-negative statuses:`
+  - all allowed labels:
+    `approval`, `correction_or_rejection_signal`,
+    `environment_or_preference_signal`, `verification_or_recovery_signal`,
+    `none`
+- Current focused batch:
+  - decision: `ready_for_batch_review`
+  - selected ordinals: `1, 2, 3, 4, 5`
+  - context-enriched sections: `5`
+- Current focused batch eval:
+  - decision: `needs_batch_review`
+  - review pending: `5`
+  - hard negatives pending: `3`
+  - invalid refs: `0`
+- Lifecycle report:
+  - decision: `needs_human_review`
+
+Decision:
+
+- E122 makes the focused batch self-contained enough for review: the human can
+  see allowed values, model/context hints, evidence, and hard-negative guidance
+  in one Markdown file.
+- The validation gate remains unchanged and correctly blocks sync until the
+  reviewer fills labels, targets, notes, and hard-negative decisions.
+
+## E123 - Lifecycle Surfaces Focused Batch Vocabulary
+
+Question:
+
+- Can tools and reviewers tell from machine-readable reports that the active
+  focused batch includes the allowed label, target, and hard-negative status
+  vocabulary?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_review_batch.py`.
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status.py`.
+- Updated `src/classifiers/package-operations.ts`.
+- Updated `src/cli/classifiers-package-operations.ts`.
+- Updated Python and TypeScript tests.
+- Focused-batch reports now include:
+  - `vocabulary_included`
+  - `allowed_label_count`
+  - `allowed_target_count`
+  - `allowed_hard_negative_status_count`
+- Workflow status preserves those fields under `review_batch.details`.
+- Lifecycle focused-batch details include the vocabulary metadata.
+- `axctl classifiers lifecycle` text prints `vocabulary included: yes`.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_batch_test.py packages/ax-classifier-session-sections/blind_workflow_status_test.py packages/ax-classifier-session-sections/blind_review_batch_refresh_test.py
+bun test src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run classifiers:blind-review-refresh -- --json
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e123.json
+python3 -m json.tool .ax/experiments/blind-review-batch-current-report.json >/dev/null
+python3 -m json.tool .ax/experiments/blind-workflow-status-current.json >/dev/null
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e123.json >/dev/null
+bun src/cli/index.ts classifiers lifecycle
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+Results:
+
+- Focused Python batch/status tests: `28` passed.
+- Focused package/service/CLI tests: `70` passed.
+- Full session-section Python regression tests: `199` passed.
+- Focused manifest/service/package-operation tests: `79` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Table coverage check: passed.
+- Current focused batch report:
+  - decision: `ready_for_batch_review`
+  - vocabulary included: `true`
+  - allowed labels / targets / hard-negative statuses: `5 / 10 / 3`
+  - context-enriched sections: `5`
+- Workflow status:
+  - decision: `needs_human_review`
+  - `review_batch.details.vocabulary_included`: `true`
+- Lifecycle report:
+  - decision: `needs_human_review`
+  - focused batch vocabulary included: `true`
+  - allowed label count: `5`
+
+Decision:
+
+- E123 makes E122 machine-readable and visible from the lifecycle command.
+- The active batch is now identifiable as both context-enriched and
+  self-contained.
+- The validation gate remains unchanged and still blocks until human
+  labels/notes/statuses are filled.
+
+## E124 - Focused Batch Requires Substantive Review Notes
+
+Question:
+
+- Can the focused batch gate prevent placeholder or one-word review rationales
+  from being synced into the classifier training-feedback path?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_review_batch.py`.
+- Updated `packages/ax-classifier-session-sections/blind_review_batch_test.py`.
+- Added a focused-batch note quality rule:
+  - review notes must be non-placeholder
+  - review notes must be at least `8` characters
+  - review notes must contain at least `2` words
+- Applied the same rule to hard-negative notes when a hard-negative candidate
+  is accepted or rejected.
+- Short notes are reported as invalid fields, so batch sync remains blocked.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_batch_test.py packages/ax-classifier-session-sections/blind_review_batch_refresh_test.py packages/ax-classifier-session-sections/blind_workflow_status_test.py
+bun test src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run classifiers:blind-review-refresh -- --json
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e124.json
+python3 -m json.tool .ax/experiments/blind-review-batch-current-report.json >/dev/null
+python3 -m json.tool .ax/experiments/blind-review-batch-current-eval-report.json >/dev/null
+python3 -m json.tool .ax/experiments/blind-review-batch-current-sync-report.json >/dev/null
+python3 -m json.tool .ax/experiments/blind-workflow-status-current.json >/dev/null
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e124.json >/dev/null
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+Results:
+
+- Focused Python batch/status tests: `29` passed.
+- Focused package/service/CLI tests: `70` passed.
+- Full session-section Python regression tests: `200` passed.
+- Focused manifest/service/package-operation tests: `79` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Table coverage check: passed.
+- Current focused batch eval:
+  - decision: `needs_batch_review`
+  - review pending: `5`
+  - hard negatives pending: `3`
+  - invalid refs: `0`
+- Workflow status:
+  - decision: `needs_human_review`
+  - artifact consistency: `consistent`
+  - first next action: `complete focused batch review fields`
+- Lifecycle report:
+  - decision: `needs_human_review`
+  - focused batch vocabulary included: `true`
+  - review pending: `5`
+
+Decision:
+
+- E124 tightens the human-review quality gate without pretending any labels are
+  complete.
+- The current batch is still blocked on real review, but once edited it now
+  rejects shallow rationales before any workspace sync.
+
+## E125 - Authoritative Review Gates Share Note Quality
+
+Question:
+
+- Can the authoritative E49 blind-label gate and E54 hard-negative gate reject
+  shallow review notes even when a reviewer bypasses the focused batch path?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/review_note_quality.py`.
+- Updated `packages/ax-classifier-session-sections/blind_review_batch.py` to
+  use the shared note-quality helper.
+- Updated `packages/ax-classifier-session-sections/blind_label_review.py`.
+- Updated `packages/ax-classifier-session-sections/hard_negative_review.py`.
+- Updated `packages/ax-classifier-session-sections/blind_review_workspace.py`.
+- Updated package README and Python tests.
+- The shared note rule now applies to:
+  - focused batch eval
+  - direct E49 blind-label eval
+  - direct E54 hard-negative eval
+  - consolidated workspace sync validation before writing JSON
+- Non-substantive notes are reported separately from missing notes.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_batch_test.py packages/ax-classifier-session-sections/blind_label_review_test.py packages/ax-classifier-session-sections/hard_negative_review_test.py packages/ax-classifier-session-sections/blind_review_workspace_test.py packages/ax-classifier-session-sections/blind_review_batch_refresh_test.py packages/ax-classifier-session-sections/blind_workflow_status_test.py
+bun test src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run classifiers:blind-label-review -- --mode=evaluate --json
+bun run classifiers:hard-negative-review -- --mode=evaluate --json
+bun run classifiers:blind-review-refresh -- --json
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e125.json
+python3 -m json.tool .ax/experiments/blind-session-section-label-review-e49-report.json >/dev/null
+python3 -m json.tool .ax/experiments/blind-hard-negative-review-e56-report.json >/dev/null
+python3 -m json.tool .ax/experiments/blind-workflow-status-current.json >/dev/null
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e125.json >/dev/null
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+Results:
+
+- Focused Python review-gate tests: `49` passed.
+- Focused package/service/CLI tests: `70` passed.
+- E49 blind-label evaluate:
+  - decision: `needs_blind_label_review`
+  - pending: `40`
+  - invalid notes: `0`
+- E54 hard-negative evaluate:
+  - decision: `needs_human_acceptance`
+  - pending: `20`
+  - invalid notes: `0`
+- Full session-section Python regression tests: `203` passed.
+- Focused manifest/service/package-operation tests: `79` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Table coverage check: passed.
+- Workflow status:
+  - decision: `needs_human_review`
+  - artifact consistency: `consistent`
+  - first next action: `complete focused batch review fields`
+- Lifecycle report:
+  - decision: `needs_human_review`
+  - focused batch review pending: `5`
+
+Decision:
+
+- E125 closes the bypass path introduced by E124: shallow notes are now blocked
+  at the focused batch, consolidated workspace, blind-label, and hard-negative
+  review gates.
+- The current live state remains pending human review, but completed future
+  reviews now need minimally useful rationales before they can feed model evals
+  or fixture append.
+
+## E126 - Lifecycle Surfaces Invalid Review Fields
+
+Question:
+
+- If a reviewer fills the focused batch with invalid labels, targets, statuses,
+  or shallow notes, will the top-level lifecycle output show the invalid fields
+  instead of only reporting missing fields?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status.py`.
+- Updated `src/classifiers/package-operations.ts`.
+- Updated `src/cli/classifiers-package-operations.ts`.
+- Updated Python and TypeScript tests.
+- Workflow status now preserves:
+  - focused-batch `invalid_refs`
+  - focused-batch `incomplete_refs[].invalid`
+  - E49 `reviewed_labels_invalid_notes`
+  - E54 `reviewed_invalid_notes`
+- Lifecycle status now exposes invalid focused-batch refs and invalid note
+  counts.
+- `axctl classifiers lifecycle` text now prints an `invalid refs:` block when
+  invalid focused-batch fields exist, and includes invalid fields next to
+  incomplete refs.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_workflow_status_test.py
+bun test src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run classifiers:blind-review-refresh -- --json
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e126.json
+python3 -m json.tool .ax/experiments/blind-workflow-status-current.json >/dev/null
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e126.json >/dev/null
+bun src/cli/index.ts classifiers lifecycle
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+Results:
+
+- Focused Python workflow-status tests: `16` passed.
+- Focused package/service/CLI tests: `70` passed.
+- Full session-section Python regression tests: `203` passed.
+- Focused manifest/service/package-operation tests: `79` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Table coverage check: passed.
+- Current focused batch:
+  - decision: `needs_batch_review`
+  - invalid refs: `0`
+  - incomplete refs with invalid fields: `0`
+- Workflow status:
+  - decision: `needs_human_review`
+  - `review_batch_eval.details.invalid_refs`: `[]`
+  - E49 invalid notes: `[]`
+  - E54 invalid notes: `[]`
+- Lifecycle report:
+  - decision: `needs_human_review`
+  - focused batch review pending: `5`
+  - invalid refs: `[]`
+
+Decision:
+
+- E126 makes invalid review edits observable at the same lifecycle surface that
+  reviewers and automation already use for missing-field blockers.
+- The current live blocker is unchanged: all five focused rows are still
+  pending real human labels/targets/notes, and three also need hard-negative
+  decisions.
+
+## E127 - Focused Batch Review Workload Summary
+
+Question:
+
+- Can the focused batch and lifecycle reports show the remaining review work as
+  compact field counts, not only a list of per-row missing fields?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_review_batch.py`.
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status.py`.
+- Updated `src/classifiers/package-operations.ts`.
+- Updated `src/cli/classifiers-package-operations.ts`.
+- Updated Python and TypeScript tests.
+- Focused batch eval reports now include:
+  - `missing_field_counts`
+  - `invalid_field_counts`
+- Workflow status preserves those counts under `review_batch_eval.details`.
+- Lifecycle status exposes the counts on `workflow_status.focused_batch`.
+- `axctl classifiers lifecycle` text now prints a compact `missing fields:`
+  line and, when present, an `invalid fields:` line.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_batch_test.py packages/ax-classifier-session-sections/blind_workflow_status_test.py
+bun test src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run classifiers:blind-review-refresh -- --json
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e127.json
+python3 -m json.tool .ax/experiments/blind-review-batch-current-eval-report.json >/dev/null
+python3 -m json.tool .ax/experiments/blind-workflow-status-current.json >/dev/null
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e127.json >/dev/null
+bun src/cli/index.ts classifiers lifecycle
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+Results:
+
+- Focused Python batch/status tests: `28` passed.
+- Focused package/service/CLI tests: `70` passed.
+- Full session-section Python regression tests: `203` passed.
+- Focused manifest/service/package-operation tests: `79` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Table coverage check: passed.
+- Current focused batch eval:
+  - decision: `needs_batch_review`
+  - missing field counts:
+    - `review_label`: `5`
+    - `review_target`: `5`
+    - `review_notes`: `5`
+    - `hard_negative_status`: `3`
+    - `hard_negative_notes`: `3`
+  - invalid field counts: `{}`
+- Workflow status preserves the same missing-field counts.
+- Lifecycle report:
+  - decision: `needs_human_review`
+  - focused batch review pending: `5`
+  - printed missing fields:
+    `hard_negative_notes=3, hard_negative_status=3, review_label=5,
+    review_notes=5, review_target=5`
+
+Decision:
+
+- E127 makes the active review workload scannable from lifecycle output. The
+  reviewer can now see the exact number of edits remaining before opening the
+  Markdown batch.
+- The live blocker is still the same human-review gate, but it is now smaller
+  and more actionable: fill `21` total fields across `5` focused rows.
+
+## E128 - Focused Batch Markdown Carries Workload Checklist
+
+Question:
+
+- Can the active focused batch Markdown itself show the remaining review
+  workload before the reviewer starts editing individual rows?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_review_batch.py`.
+- Updated `packages/ax-classifier-session-sections/blind_review_batch_refresh.py`.
+- Updated Python tests.
+- Focused batch generation now inserts a `Review workload` block near the top
+  of the Markdown file.
+- The workload block includes:
+  - review-complete rows
+  - hard-negative-complete rows
+  - missing field counts
+  - invalid field counts
+- The refresh path writes this block into
+  `.ax/experiments/blind-review-batch-current.md`, so the current review file
+  is self-contained.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_batch_test.py packages/ax-classifier-session-sections/blind_review_batch_refresh_test.py packages/ax-classifier-session-sections/blind_workflow_status_test.py
+bun test src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run classifiers:blind-review-refresh -- --json
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e128.json
+python3 -m json.tool .ax/experiments/blind-review-batch-current-eval-report.json >/dev/null
+python3 -m json.tool .ax/experiments/blind-workflow-status-current.json >/dev/null
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e128.json >/dev/null
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+Results:
+
+- Focused Python batch/refresh/status tests: `30` passed.
+- Focused package/service/CLI tests: `70` passed.
+- Full session-section Python regression tests: `204` passed.
+- Focused manifest/service/package-operation tests: `79` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Table coverage check: passed.
+- Current `.ax/experiments/blind-review-batch-current.md` starts with:
+  - `Review workload:`
+  - `Review-complete rows: 0 / 5`
+  - `Hard-negative-complete rows: 0 / 3`
+  - missing fields:
+    `Hard-negative notes: 3, Hard-negative status: 3, Review label: 5,
+    Review notes: 5, Review target: 5`
+  - invalid fields: `none`
+- Current lifecycle report:
+  - decision: `needs_human_review`
+  - missing field counts match the batch Markdown and batch eval report.
+
+Decision:
+
+- E128 puts the workload summary directly where the reviewer edits. The
+  lifecycle command, batch eval report, and focused Markdown now agree on the
+  active review workload.
+- The live gate remains human review; the next required state change is still
+  filling the five focused rows.
+
+## E129 - Focused Batch Blocking Field Totals
+
+Question:
+
+- Can automation and reviewers read the total number of blocking fields without
+  summing every missing/invalid field-count bucket themselves?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_review_batch.py`.
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status.py`.
+- Updated `src/classifiers/package-operations.ts`.
+- Updated `src/cli/classifiers-package-operations.ts`.
+- Updated Python and TypeScript tests.
+- Focused batch eval reports now include:
+  - `missing_field_total`
+  - `invalid_field_total`
+  - `blocking_field_total`
+- Focused batch Markdown now prints `Blocking fields`.
+- Lifecycle status exposes the totals on `workflow_status.focused_batch`.
+- `axctl classifiers lifecycle` text now prints `blocking fields`.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_batch_test.py packages/ax-classifier-session-sections/blind_review_batch_refresh_test.py packages/ax-classifier-session-sections/blind_workflow_status_test.py
+bun test src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run classifiers:blind-review-refresh -- --json
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e129.json
+python3 -m json.tool .ax/experiments/blind-review-batch-current-eval-report.json >/dev/null
+python3 -m json.tool .ax/experiments/blind-workflow-status-current.json >/dev/null
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e129.json >/dev/null
+bun src/cli/index.ts classifiers lifecycle
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+Results:
+
+- Focused Python batch/refresh/status tests: `30` passed.
+- Focused package/service/CLI tests: `70` passed.
+- Full session-section Python regression tests: `204` passed.
+- Focused manifest/service/package-operation tests: `79` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Table coverage check: passed.
+- Current focused batch Markdown:
+  - `Blocking fields: 21`
+- Current focused batch eval:
+  - `missing_field_total`: `21`
+  - `invalid_field_total`: `0`
+  - `blocking_field_total`: `21`
+- Current lifecycle report:
+  - decision: `needs_human_review`
+  - focused batch `blocking_field_total`: `21`
+  - lifecycle text prints `blocking fields: 21`
+
+Decision:
+
+- E129 makes the active focused-batch blocker machine-readable as one number.
+  This is better for dashboards, status checks, and progress comparisons across
+  review refreshes.
+- The goal remains blocked on human review, but the review gate is now clearer:
+  complete `21` blocking fields in the active batch, then rerun the focused
+  batch eval and sync path.
+
+## E130 - Focused Batch Progress Percentages
+
+Question:
+
+- Can repeated focused-batch refreshes show review progress as percentages, not
+  only blocking counts?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_review_batch.py`.
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status.py`.
+- Updated `src/classifiers/package-operations.ts`.
+- Updated `src/cli/classifiers-package-operations.ts`.
+- Updated Python and TypeScript tests.
+- Focused batch eval reports now include:
+  - `completed_field_total`
+  - `review_field_total`
+  - `field_completion_percent`
+  - `row_completion_percent`
+- Focused batch Markdown now prints field completion.
+- Lifecycle status exposes the same progress metrics.
+- `axctl classifiers lifecycle` text now prints field and row completion.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_batch_test.py packages/ax-classifier-session-sections/blind_review_batch_refresh_test.py packages/ax-classifier-session-sections/blind_workflow_status_test.py
+bun test src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run classifiers:blind-review-refresh -- --json
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e130.json
+python3 -m json.tool .ax/experiments/blind-review-batch-current-eval-report.json >/dev/null
+python3 -m json.tool .ax/experiments/blind-workflow-status-current.json >/dev/null
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e130.json >/dev/null
+bun src/cli/index.ts classifiers lifecycle
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+Results:
+
+- Focused Python batch/refresh/status tests: `30` passed.
+- Focused package/service/CLI tests: `70` passed.
+- Full session-section Python regression tests: `204` passed.
+- Focused manifest/service/package-operation tests: `79` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Table coverage check: passed.
+- Current focused batch Markdown:
+  - `Field completion: 0 / 21 (0.0%)`
+  - `Blocking fields: 21`
+- Current focused batch eval:
+  - `completed_field_total`: `0`
+  - `review_field_total`: `21`
+  - `field_completion_percent`: `0.0`
+  - `row_completion_percent`: `0.0`
+- Current lifecycle report:
+  - decision: `needs_human_review`
+  - focused batch field completion: `0 / 21`
+  - focused batch row completion: `0%`
+
+Decision:
+
+- E130 makes focused-batch review progress trendable across refreshes. A
+  dashboard or reviewer can now tell whether the batch is moving from `0%`
+  toward sync-ready without inspecting every row.
+- The live gate remains human review of the same five focused rows.
+
+## E131 - Focused Batch Post-Edit Command Checklist
+
+Question:
+
+- Can the focused batch Markdown tell the reviewer exactly which commands to
+  run after editing, instead of relying on memory or the README?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_review_batch.py`.
+- Updated `packages/ax-classifier-session-sections/blind_review_batch_refresh.py`.
+- Updated Python tests.
+- Focused batch Markdown now includes a `Post-edit commands` block before the
+  editable vocabulary.
+- The command block includes:
+  - focused batch evaluate
+  - focused batch dry-run sync
+  - refresh current batch/status artifacts
+  - lifecycle status check
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_batch_test.py packages/ax-classifier-session-sections/blind_review_batch_refresh_test.py packages/ax-classifier-session-sections/blind_workflow_status_test.py
+bun test src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run classifiers:blind-review-refresh -- --json
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e131.json
+python3 -m json.tool .ax/experiments/blind-review-batch-current-eval-report.json >/dev/null
+python3 -m json.tool .ax/experiments/blind-workflow-status-current.json >/dev/null
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e131.json >/dev/null
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+Results:
+
+- Focused Python batch/refresh/status tests: `31` passed.
+- Focused package/service/CLI tests: `70` passed.
+- Full session-section Python regression tests: `205` passed.
+- Focused manifest/service/package-operation tests: `79` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Table coverage check: passed.
+- Current `.ax/experiments/blind-review-batch-current.md` has exactly one
+  `Post-edit commands:` block.
+- The block includes:
+  - `bun run classifiers:blind-review-batch -- --mode=evaluate`
+  - `bun run classifiers:blind-review-batch -- --mode=sync`
+  - `bun run classifiers:blind-review-refresh -- --json`
+  - `bun src/cli/index.ts classifiers lifecycle`
+
+Decision:
+
+- E131 makes the focused batch more self-contained after editing. The reviewer
+  can now label the five rows and immediately run the right validation path
+  from the same file.
+- The live gate remains unchanged: the five focused rows still need human
+  labels, targets, review notes, and three hard-negative decisions.
+
+## E132 - Focused Batch Label Guidance
+
+Question:
+
+- Can the focused batch Markdown include enough label/target/status semantics
+  for a reviewer to classify rows consistently without opening package docs?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_review_batch.py`.
+- Updated `packages/ax-classifier-session-sections/blind_review_batch_refresh.py`.
+- Updated Python tests.
+- Focused batch Markdown now includes:
+  - `Review label guidance`
+  - `Review target guidance`
+  - `Hard-negative status guidance`
+- Guidance insertion is idempotent and shared by direct batch generation and
+  refresh.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_batch_test.py packages/ax-classifier-session-sections/blind_review_batch_refresh_test.py packages/ax-classifier-session-sections/blind_workflow_status_test.py
+bun test src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run classifiers:blind-review-refresh -- --json
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e132.json
+python3 -m json.tool .ax/experiments/blind-review-batch-current-eval-report.json >/dev/null
+python3 -m json.tool .ax/experiments/blind-workflow-status-current.json >/dev/null
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e132.json >/dev/null
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+Results:
+
+- Focused Python batch/refresh/status tests: `32` passed.
+- Focused package/service/CLI tests: `70` passed.
+- Full session-section Python regression tests: `206` passed.
+- Focused manifest/service/package-operation tests: `79` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Table coverage check: passed.
+- Current `.ax/experiments/blind-review-batch-current.md` includes the new
+  guidance blocks before the first review row.
+- Current focused batch eval remains:
+  - `completed_field_total`: `0`
+  - `review_field_total`: `21`
+  - `field_completion_percent`: `0.0`
+  - `row_completion_percent`: `0.0`
+- Current lifecycle report remains `needs_human_review`.
+
+Decision:
+
+- E132 reduces reviewer ambiguity in the last manual gate. The focused batch
+  now carries vocabulary, semantic guidance, validation commands, and progress
+  metrics in one artifact.
+- The classifier workflow is still intentionally blocked on human labels for
+  the five focused rows before export/sync.
+
+## E133 - Machine-Readable Focused Review Tasks
+
+Question:
+
+- Can the focused batch eval report expose the pending human decisions as
+  structured tasks, so lifecycle/debug surfaces do not need to reparse Markdown
+  to show what the reviewer must decide?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_review_batch.py`.
+- Updated `packages/ax-classifier-session-sections/blind_workflow_status.py`.
+- Updated Python tests.
+- `evaluate_batch` now emits:
+  - `review_task_total`
+  - `review_tasks[]`
+- Each review task includes:
+  - row ordinal and id
+  - missing and invalid fields
+  - blocking field count
+  - suggested label/target
+  - confidence bucket and risk reasons
+  - hard-negative candidate/proposed label/proposed target/instruction
+  - source turn/session/seq and evidence refs
+- Workflow status now preserves the review task payload in the
+  `review_batch_eval` stage details.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_batch_test.py packages/ax-classifier-session-sections/blind_workflow_status_test.py packages/ax-classifier-session-sections/blind_review_batch_refresh_test.py
+bun run classifiers:blind-review-refresh -- --json
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e133.json
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+python3 -m json.tool .ax/experiments/blind-review-batch-current-eval-report.json >/dev/null
+python3 -m json.tool .ax/experiments/blind-workflow-status-current.json >/dev/null
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e133.json >/dev/null
+```
+
+Results:
+
+- Focused Python batch/status/refresh tests: `32` passed.
+- Full session-section Python regression tests: `206` passed.
+- Focused manifest/service/package-operation tests: `79` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Table coverage check: passed.
+- Current focused batch eval:
+  - decision: `needs_batch_review`
+  - `review_task_total`: `5`
+  - first task suggested label/target:
+    `environment_or_preference_signal` / `workflow_state`
+  - first task blocking fields: `5`
+- Current workflow status:
+  - decision: `needs_human_review`
+  - `review_batch_eval.details.review_task_total`: `5`
+- Current lifecycle report remains `needs_human_review`.
+
+Decision:
+
+- E133 makes the human-review gate graph/debug friendly. The system can now
+  show exact pending review tasks and their classifier context from JSON, not
+  only from the Markdown review packet.
+- The remaining blocker is still expected: the five focused rows need human
+  review before export/sync can proceed.
+
+## E134 - Lifecycle CLI Review Task Preview
+
+Question:
+
+- Can the human-facing lifecycle command show the focused review tasks directly,
+  instead of requiring reviewers to inspect JSON or open the Markdown batch
+  first?
+
+Changes:
+
+- Updated `src/classifiers/package-operations.ts`.
+- Updated `src/cli/classifiers-package-operations.ts`.
+- Updated TypeScript lifecycle rendering tests.
+- Lifecycle review status now preserves focused-batch `review_tasks[]`.
+- `ax classifiers lifecycle` text output now shows:
+  - `review tasks: N`
+  - row ordinal and id
+  - suggested label/target
+  - missing/invalid fields
+  - hard-negative proposed decision when present
+  - first evidence refs, capped with a remainder count
+
+Commands:
+
+```sh
+bun test src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts src/classifiers/package-service.test.ts
+bun src/cli/index.ts classifiers lifecycle
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e134.json
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+```
+
+Results:
+
+- Focused TypeScript lifecycle/service tests: `70` passed.
+- Full focused manifest/service/package-operation tests: `79` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Table coverage check: passed.
+- Full session-section Python regression tests: `206` passed.
+- `bun src/cli/index.ts classifiers lifecycle` exits `1` because the lifecycle
+  decision remains `needs_human_review`, and now prints:
+  - `review tasks: 5`
+  - row `#1` suggested
+    `environment_or_preference_signal/workflow_state`
+  - row `#4` suggested
+    `verification_or_recovery_signal/benchmark_required`
+  - evidence refs for rows with prior-context evidence
+- `.ax/experiments/classifiers-lifecycle-e134.json` is valid JSON and remains
+  `needs_human_review`.
+
+Decision:
+
+- E134 closes the gap between machine-readable review tasks and the CLI the
+  developer actually runs. The reviewer can now see the exact focused decisions
+  from lifecycle output before opening the batch.
+- The workflow remains blocked on real human labels, targets, review notes, and
+  hard-negative decisions for the focused rows.
+
+## E135 - Guarded Focused Batch Suggestion Draft
+
+Question:
+
+- Can we reduce manual copying during focused human review without treating
+  model suggestions as authoritative labels?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_review_batch.py`.
+- Updated `packages/ax-classifier-session-sections/ax.classifier.json`.
+- Updated Python and TypeScript tests.
+- Added `--mode=draft-suggestions` to the focused batch tool.
+- Added package operation `focused-batch-suggestion-draft`.
+- The draft mode writes a separate Markdown file and does not sync to E63, E49,
+  or E54.
+- The draft pre-fills:
+  - pending `Review label` from `Suggested label`
+  - pending `Review target` from `Suggested target`
+  - pending hard-negative status as `accepted` only when the hard-negative
+    proposed label/target is `none` / `none`
+- Review notes and hard-negative notes remain required, preserving the human
+  gate.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_batch_test.py packages/ax-classifier-session-sections/blind_review_batch_refresh_test.py packages/ax-classifier-session-sections/blind_workflow_status_test.py
+bun run classifiers:blind-review-batch -- --mode=draft-suggestions --batch=.ax/experiments/blind-review-batch-current.md --out=.ax/experiments/blind-review-batch-current-suggestion-draft.md --summary=.ax/experiments/blind-review-batch-current-suggestion-draft-report.json --json
+bun run classifiers:blind-review-batch -- --mode=evaluate --batch=.ax/experiments/blind-review-batch-current-suggestion-draft.md --summary=.ax/experiments/blind-review-batch-current-suggestion-draft-eval-report.json --json
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e135.json
+python3 -m json.tool .ax/experiments/blind-review-batch-current-suggestion-draft-report.json >/dev/null
+python3 -m json.tool .ax/experiments/blind-review-batch-current-suggestion-draft-eval-report.json >/dev/null
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e135.json >/dev/null
+```
+
+Results:
+
+- Focused Python batch/refresh/status tests: `33` passed.
+- Full session-section Python regression tests: `207` passed.
+- Focused manifest/service/package-operation tests: `79` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Table coverage check: passed.
+- Suggestion draft report:
+  - decision: `draft_ready_for_human_notes`
+  - sections: `5`
+  - prefilled review labels: `5`
+  - prefilled review targets: `5`
+  - prefilled hard-negative statuses: `3`
+  - blocking fields: `21 -> 8`
+  - field completion: `0.0% -> 61.9%`
+- Suggestion draft eval remains `needs_batch_review`, with only:
+  - `review_notes: 5`
+  - `hard_negative_notes: 3`
+- Lifecycle remains `needs_human_review`.
+
+Decision:
+
+- E135 gives the reviewer a faster, explicit draft path without weakening the
+  review gate. It makes the model output useful as an editable proposal while
+  still requiring human-written notes before sync/export.
+- The authoritative current batch remains pending until a human accepts,
+  rejects, or edits the suggested decisions and writes notes.
+
+## E136 - Guarded Draft Promotion
+
+Question:
+
+- Can an edited suggestion draft be promoted back to the authoritative focused
+  batch only after it passes the same review-completeness gate as a normal
+  batch?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_review_batch.py`.
+- Updated `packages/ax-classifier-session-sections/ax.classifier.json`.
+- Updated Python and TypeScript tests.
+- Added `--mode=promote-draft` to the focused batch tool.
+- Added package operation `focused-batch-promote-draft`.
+- Promotion writes the target batch only when the draft eval decision is
+  `ready_for_batch_sync`.
+- Incomplete drafts write a promotion report and exit nonzero without modifying
+  `.ax/experiments/blind-review-batch-current.md`.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_batch_test.py
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts
+bun run classifiers:blind-review-batch -- --mode=promote-draft --batch=.ax/experiments/blind-review-batch-current-suggestion-draft.md --out=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-promotion-report.json --json
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e136.json
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e136.json >/dev/null
+python3 -m json.tool .ax/experiments/blind-review-batch-current-promotion-report.json >/dev/null
+```
+
+Results:
+
+- Focused batch tests: `18` passed.
+- Focused manifest/service/package-operation tests: `66` passed.
+- Full session-section Python regression tests: `209` passed.
+- Full focused manifest/service/package-operation tests: `79` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Table coverage check: passed.
+- Promotion attempt against the current incomplete suggestion draft:
+  - exit code: `1`
+  - decision: `needs_human_notes`
+  - draft eval decision: `needs_batch_review`
+  - blocking fields: `8`
+  - missing fields: `review_notes: 5`, `hard_negative_notes: 3`
+  - authoritative current batch hash stayed unchanged
+- Lifecycle remains `needs_human_review`.
+
+Decision:
+
+- E136 makes the suggestion-draft path operationally safe. A reviewer can edit
+  the draft and promote it when complete, but an incomplete model-prefilled
+  draft cannot overwrite the current batch.
+- The remaining gate is still human-authored notes and acceptance/rejection of
+  the focused decisions.
+
+## E137 - Lifecycle Draft Assist Status
+
+Question:
+
+- Can the lifecycle command show the suggestion-draft and draft-promotion state
+  beside the focused batch blockers, so the reviewer has one operational status
+  surface?
+
+Changes:
+
+- Updated `src/classifiers/package-operations.ts`.
+- Updated `src/cli/classifiers-package-operations.ts`.
+- Updated TypeScript lifecycle rendering tests.
+- Lifecycle review status now loads current suggestion draft, suggestion draft
+  report, suggestion draft eval report, and promotion report when present.
+- `ax classifiers lifecycle` now renders:
+  - suggestion draft decision and path
+  - blocking field reduction
+  - field completion improvement
+  - prefilled label/target/hard-negative counts
+  - remaining missing fields
+  - draft eval decision
+  - promotion guard decision and failures
+
+Commands:
+
+```sh
+bun test src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts
+bun src/cli/index.ts classifiers lifecycle
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e137.json
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e137.json >/dev/null
+```
+
+Results:
+
+- Focused lifecycle/service/package-operation tests: `70` passed.
+- Full session-section Python regression tests: `209` passed.
+- Full focused manifest/service/package-operation tests: `79` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Table coverage check: passed.
+- `bun src/cli/index.ts classifiers lifecycle` still exits `1` because the
+  workflow remains `needs_human_review`, and now prints:
+  - `suggestion draft: draft_ready_for_human_notes`
+  - `blocking fields: 21->8`
+  - `field completion: 0%->61.9%`
+  - `prefilled labels/targets/hard-negatives: 5/5/3`
+  - `remaining missing: hard_negative_notes=3, review_notes=5`
+  - `draft promotion: needs_human_notes`
+  - `failures: draft batch review is incomplete`
+- `.ax/experiments/classifiers-lifecycle-e137.json` is valid JSON and remains
+  `needs_human_review`.
+
+Decision:
+
+- E137 makes the review assist workflow visible from the same lifecycle command
+  that already reports focused-batch blockers. The reviewer can see the current
+  batch, model-prefilled draft, and promotion guard state without opening three
+  JSON files.
+- The remaining gate is unchanged: the draft still needs human-authored notes
+  before promotion, sync, eval/export, and graph usefulness checks can advance.
+
+## E138 - Suggestion Draft Note Prompts
+
+Question:
+
+- Can the suggestion draft guide the reviewer through the remaining note fields
+  without letting generated prompt text satisfy the review gate?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_review_batch.py`.
+- Updated `src/classifiers/package-operations.ts`.
+- Updated `src/cli/classifiers-package-operations.ts`.
+- Updated Python and TypeScript tests.
+- Suggestion drafts now insert non-authoritative prompt lines after pending
+  `Review notes` and eligible `Hard-negative notes` fields.
+- The parser still ignores these prompt lines, so they do not satisfy review
+  completeness.
+- Suggestion draft reports now include:
+  - `review_note_prompts`
+  - `hard_negative_note_prompts`
+- Lifecycle output now renders prompt counts under the suggestion draft status.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_batch_test.py
+bun run classifiers:blind-review-batch -- --mode=draft-suggestions --batch=.ax/experiments/blind-review-batch-current.md --out=.ax/experiments/blind-review-batch-current-suggestion-draft.md --summary=.ax/experiments/blind-review-batch-current-suggestion-draft-report.json --json
+bun run classifiers:blind-review-batch -- --mode=evaluate --batch=.ax/experiments/blind-review-batch-current-suggestion-draft.md --summary=.ax/experiments/blind-review-batch-current-suggestion-draft-eval-report.json --json
+bun run classifiers:blind-review-batch -- --mode=promote-draft --batch=.ax/experiments/blind-review-batch-current-suggestion-draft.md --out=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-promotion-report.json --json
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e138.json
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e138.json >/dev/null
+```
+
+Results:
+
+- Focused batch tests: `18` passed.
+- Full session-section Python regression tests: `209` passed.
+- Full focused manifest/service/package-operation tests: `79` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Table coverage check: passed.
+- Suggestion draft report:
+  - `review_note_prompts`: `5`
+  - `hard_negative_note_prompts`: `3`
+  - blocking fields remain `8`
+  - eval remains `needs_batch_review`
+- Promotion guard remains:
+  - decision: `needs_human_notes`
+  - draft eval decision: `needs_batch_review`
+- Lifecycle output now includes:
+  - `note prompts review/hard-negative: 5/3`
+- Lifecycle remains `needs_human_review`.
+
+Decision:
+
+- E138 improves the last manual step without weakening the safety model. The
+  draft now tells the reviewer what to justify, but only human-authored notes in
+  the actual review fields can pass promotion.
+- The remaining gate is still the same eight missing notes in the suggestion
+  draft.
+
+## E139 - Suggestion Draft Post-Edit Commands
+
+Question:
+
+- Can the suggestion draft tell the reviewer which validation and promotion
+  commands to run, instead of inheriting only the authoritative-batch commands?
+
+Changes:
+
+- Updated `packages/ax-classifier-session-sections/blind_review_batch.py`.
+- Updated Python tests.
+- Suggestion drafts now include a `Suggestion draft post-edit commands` block.
+- The block includes:
+  - evaluate the suggestion draft
+  - guarded promote the edited draft to the current focused batch
+  - refresh current batch/status artifacts
+  - lifecycle status check
+- The command insertion is idempotent and appears before the draft notice.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_batch_test.py
+bun run classifiers:blind-review-batch -- --mode=draft-suggestions --batch=.ax/experiments/blind-review-batch-current.md --out=.ax/experiments/blind-review-batch-current-suggestion-draft.md --summary=.ax/experiments/blind-review-batch-current-suggestion-draft-report.json --json
+bun run classifiers:blind-review-batch -- --mode=evaluate --batch=.ax/experiments/blind-review-batch-current-suggestion-draft.md --summary=.ax/experiments/blind-review-batch-current-suggestion-draft-eval-report.json --json
+bun run classifiers:blind-review-batch -- --mode=promote-draft --batch=.ax/experiments/blind-review-batch-current-suggestion-draft.md --out=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-promotion-report.json --json
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e139.json
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e139.json >/dev/null
+```
+
+Results:
+
+- Focused batch tests: `18` passed.
+- Full session-section Python regression tests: `209` passed.
+- Full focused manifest/service/package-operation tests: `79` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Table coverage check: passed.
+- Current suggestion draft has exactly one
+  `Suggestion draft post-edit commands:` block.
+- The block includes `--mode=evaluate` and `--mode=promote-draft` commands
+  targeted at `.ax/experiments/blind-review-batch-current-suggestion-draft.md`.
+- Suggestion draft eval still remains `needs_batch_review`.
+- Promotion guard still remains `needs_human_notes`.
+- Lifecycle remains `needs_human_review`.
+
+Decision:
+
+- E139 makes the assisted draft self-contained for the reviewer. The draft now
+  carries the prompt text and the exact guarded commands needed after editing.
+- The review gate remains unchanged: promotion still refuses until the draft
+  passes normal batch evaluation.
+
+## E140 - Draft-Specific Lifecycle Next Action
+
+Question:
+
+- Can lifecycle recommend the suggestion-draft workflow as the first next
+  action when promotion is blocked only on draft review notes?
+
+Changes:
+
+- Updated `src/classifiers/package-operations.ts`.
+- Updated TypeScript lifecycle rendering tests.
+- Lifecycle review status now derives a draft-specific next action when:
+  - a suggestion draft exists
+  - draft eval is `needs_batch_review`
+  - draft promotion is `needs_human_notes`
+- The derived action is prepended ahead of the older generic focused-batch
+  action:
+  `edit suggestion draft notes in .ax/experiments/blind-review-batch-current-suggestion-draft.md then run focused-batch-promote-draft`
+
+Commands:
+
+```sh
+bun test src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts
+bun src/cli/index.ts classifiers lifecycle
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e140.json
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e140.json >/dev/null
+```
+
+Results:
+
+- Focused lifecycle/service tests: `34` passed.
+- Full session-section Python regression tests: `209` passed.
+- Full focused manifest/service/package-operation tests: `79` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Table coverage check: passed.
+- Current lifecycle decision remains `needs_human_review`.
+- Current lifecycle first next action is now:
+  `edit suggestion draft notes in .ax/experiments/blind-review-batch-current-suggestion-draft.md then run focused-batch-promote-draft`
+- Generic E63/workspace actions remain after the draft-specific action.
+
+Decision:
+
+- E140 makes the fastest safe path the top recommendation. Reviewers are now
+  directed to edit the note fields in the assisted draft and use the guarded
+  promotion path before returning to workspace sync.
+- The gate remains human-authored notes; this only improves the action order.
+
+## E141 - Exact Draft Promotion Next Action
+
+Question:
+
+- Can lifecycle give the reviewer the exact guarded promotion command instead
+  of only the package operation id?
+
+Changes:
+
+- Updated `src/classifiers/package-operations.ts`.
+- Updated lifecycle rendering tests.
+- Draft-specific lifecycle next action now includes the exact
+  `bun run classifiers:blind-review-batch -- --mode=promote-draft ...`
+  command with:
+  - suggestion draft path
+  - authoritative focused-batch output path
+  - promotion report path
+
+Commands:
+
+```sh
+bun test src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts
+bun src/cli/index.ts classifiers lifecycle
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e141.json
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e141.json >/dev/null
+```
+
+Results:
+
+- Focused lifecycle/service tests: `34` passed.
+- Full session-section Python regression tests: `209` passed.
+- Full focused manifest/service/package-operation tests: `79` passed.
+- Typecheck: passed with existing Effect lint messages.
+- Table coverage check: passed.
+- `classifiers lifecycle` still exits `1` because the workflow decision is
+  `needs_human_review`.
+- `.ax/experiments/classifiers-lifecycle-e141.json` is valid JSON.
+- E141 lifecycle decision: `needs_human_review`.
+- E141 first next action:
+  `edit suggestion draft notes in .ax/experiments/blind-review-batch-current-suggestion-draft.md then run bun run classifiers:blind-review-batch -- --mode=promote-draft --batch=.ax/experiments/blind-review-batch-current-suggestion-draft.md --out=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-promotion-report.json --json`
+
+Decision:
+
+- E141 removes the last translation step from lifecycle guidance. After editing
+  human notes in the suggestion draft, the reviewer can copy/paste the exact
+  guarded promotion command.
+- The safety gate is unchanged: promotion still refuses until the draft passes
+  normal batch evaluation.
+
+## E142 - Reviewed Draft Promotion and Refresh Preservation
+
+Question:
+
+- Can the assisted suggestion draft be reviewed, promoted to the authoritative
+  focused batch, synced into the E63 workspace, and kept intact by refresh?
+
+Changes:
+
+- Completed human review notes in
+  `.ax/experiments/blind-review-batch-current-suggestion-draft.md`.
+- Corrected risky draft suggestions during review:
+  - section 1: `none` / `none`
+  - section 2: `verification_or_recovery_signal` / `workflow_state`
+  - section 3: `none` / `none`
+  - section 4: `verification_or_recovery_signal` / `regression_guard`
+  - section 5: `verification_or_recovery_signal` / `regression_guard`
+- Rejected hard-negative status for section 2 because it is a positive
+  verification/workflow signal.
+- Accepted hard-negative status for sections 1 and 3 as ordinary none-boundary
+  context.
+- Fixed `packages/ax-classifier-session-sections/blind_review_batch_refresh.py`
+  so refresh preserves an existing reviewed current batch instead of
+  regenerating pending fields from a stale E63 workspace.
+- Added refresh regression coverage in
+  `packages/ax-classifier-session-sections/blind_review_batch_refresh_test.py`.
+- Added lifecycle surface for refresh `batch_source` in:
+  - `src/classifiers/package-operations.ts`
+  - `src/cli/classifiers-package-operations.ts`
+  - `src/cli/classifiers-package-operations.test.ts`
+
+Commands:
+
+```sh
+bun run classifiers:blind-review-batch -- --mode=evaluate --batch=.ax/experiments/blind-review-batch-current-suggestion-draft.md --summary=.ax/experiments/blind-review-batch-current-suggestion-draft-eval-report.json --json
+bun run classifiers:blind-review-batch -- --mode=promote-draft --batch=.ax/experiments/blind-review-batch-current-suggestion-draft.md --out=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-promotion-report.json --json
+bun run classifiers:blind-review-batch -- --mode=evaluate --batch=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-eval-report.json --json
+bun run classifiers:blind-review-batch -- --mode=sync --workspace=.ax/experiments/blind-review-workspace-e63.md --batch=.ax/experiments/blind-review-batch-current.md --workspace-out=.ax/experiments/blind-review-workspace-e63.md --summary=.ax/experiments/blind-review-batch-current-sync-report.json --json
+bun run classifiers:blind-review-refresh -- --json
+bun run classifiers:blind-review-workspace -- --mode=sync --dry-run --workspace=.ax/experiments/blind-review-workspace-e63.md --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-review-workspace-e142-dry-run-report.json --json
+bun run classifiers:blind-review-workspace -- --mode=sync --workspace=.ax/experiments/blind-review-workspace-e63.md --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-review-workspace-e142-sync-report.json --json
+bun run classifiers:blind-review-refresh -- --json
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_batch_refresh_test.py
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_batch_refresh_test.py packages/ax-classifier-session-sections/blind_review_batch_test.py
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_workspace_test.py
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e142.json
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e142.json >/dev/null
+```
+
+Results:
+
+- Suggestion draft eval:
+  - decision: `ready_for_batch_sync`
+  - field completion: `21` / `21` (`100.0%`)
+  - blocking fields: `0`
+- Draft promotion:
+  - decision: `ready_for_current_batch_write`
+  - draft eval decision: `ready_for_batch_sync`
+  - failures: none
+- Current focused batch eval:
+  - decision: `ready_for_batch_sync`
+  - review pending: `0`
+  - hard negatives pending: `0`
+  - blocking fields: `0`
+- Focused batch sync into E63:
+  - replaced ordinals: `1, 2, 3, 4, 5`
+  - failures: none
+- Refresh:
+  - decision: `refreshed`
+  - batch source: `existing_reviewed_batch`
+  - batch eval decision: `ready_for_batch_sync`
+  - batch sync decision: `ready_for_workspace_dry_run`
+  - artifact consistency: `consistent`
+  - failures: none
+- Workspace dry-run:
+  - exits `1` because broader review is still incomplete
+  - blind label pending count moved to `35`
+  - hard-negative pending count moved to `17`
+  - reviewed counts are now `5` blind labels and `3` hard-negative rows
+- Workspace sync:
+  - exits `1` because broader review is still incomplete
+  - writes the five reviewed blind-label rows and three hard-negative decisions
+    back to E49/E54 artifacts
+  - workspace update failures: none
+- Lifecycle E142:
+  - decision: `needs_human_review`
+  - pending blind labels / hard negatives: `35` / `17`
+  - focused batch completion: `21` / `21` (`100%`)
+  - focused batch blocking fields: `0`
+  - draft promotion: `ready_for_current_batch_write`
+  - batch source: `existing_reviewed_batch`
+  - first next action: `inspect merged preview or sync reviewed batch into E63`
+- Tests:
+  - refresh regression tests: `2` passed
+  - focused refresh/batch tests: `20` passed
+  - workspace sync tests: `10` passed
+  - full session-section Python regression tests: `210` passed
+  - focused lifecycle/service tests: `34` passed
+  - full focused manifest/service/package-operation tests: `79` passed
+  - typecheck passed with existing Effect lint messages
+  - table coverage passed
+
+Decision:
+
+- E142 proves the suggestion-draft path can carry a focused review batch from
+  assisted draft, through guarded promotion, into the E63 workspace without
+  losing review work during refresh.
+- The remaining gate moved up one level: the focused batch is complete, but the
+  broader workspace still has `35` blind labels and `17` hard-negative candidates
+  pending before post-review export/eval can complete.
+
+## E143 - ID-Based Batch Selection and Second Focused Review
+
+Question:
+
+- Can the focused batch workflow continue to the next pending rows after E63 is
+  regenerated from the priority-sorted packet, without selecting stale ordinal
+  positions or losing prior hard-negative review notes?
+
+Changes:
+
+- Fixed `packages/ax-classifier-session-sections/blind_review_batch.py` so
+  focused batch selection resolves progress refs by row id first and only falls
+  back to ordinal when the id is unavailable.
+- Added a regression test where the progress ref ordinal is stale but the row id
+  points to the correct workspace section.
+- Fixed `packages/ax-classifier-session-sections/blind_review_packet.py` so
+  hard-negative review notes are carried into the packet and rendered into the
+  regenerated E63 workspace.
+- Added packet regression coverage for hard-negative notes.
+- Regenerated the packet/workspace, generated the next focused batch, reviewed
+  it, promoted it, synced it into E63, and synced E63 back to E49/E54.
+
+Reviewed rows:
+
+- `3ffd8a9d...seq_000383`: `correction_or_rejection_signal` /
+  `dev_environment`
+  - User pointed to a missed library capability around persisted audio.
+- `019e725f...seq_000084`: `approval` / `continue`
+  - User directly instructed deploy/copy of the prepared answer.
+- `019e747a...seq_000002`: `none` / `none`
+  - AGENTS instructions are ambient repository context.
+  - hard-negative status: `accepted`
+- `3d6a3531...seq_000216`: `verification_or_recovery_signal` /
+  `context_recall`
+  - User asked to inspect git history and ingest around a date.
+- `019e71cd...seq_000140`: `environment_or_preference_signal` /
+  `dev_environment`
+  - User identified skill frontmatter/sections as another artifact class to
+    parse.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_batch_test.py
+bun run classifiers:blind-review-packet -- --review=.ax/experiments/blind-session-section-label-review-e49.json --suggestions=.ax/experiments/blind-session-section-label-suggestions-e51.json --priorities=.ax/experiments/blind-session-section-review-priority-e52.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-review-packet-e61.json --brief=.ax/experiments/blind-review-packet-e61.md --report=.ax/experiments/blind-review-packet-e61-report.json --json
+bun run classifiers:blind-review-workspace -- --packet=.ax/experiments/blind-review-packet-e61.json --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --workspace=.ax/experiments/blind-review-workspace-e63.md --out=.ax/experiments/blind-review-workspace-e143-generate-report.json --mode=generate --json
+bun run classifiers:blind-review-batch -- --mode=generate --workspace=.ax/experiments/blind-review-workspace-e63.md --report=.ax/experiments/blind-review-workspace-e143-generate-report.json --packet=.ax/experiments/blind-review-packet-e61.json --out=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-report.json --limit=5 --json
+bun run classifiers:blind-review-batch -- --mode=draft-suggestions --batch=.ax/experiments/blind-review-batch-current.md --out=.ax/experiments/blind-review-batch-current-suggestion-draft.md --summary=.ax/experiments/blind-review-batch-current-suggestion-draft-report.json --json
+bun run classifiers:blind-review-batch -- --mode=evaluate --batch=.ax/experiments/blind-review-batch-current-suggestion-draft.md --summary=.ax/experiments/blind-review-batch-current-suggestion-draft-eval-report.json --json
+bun run classifiers:blind-review-batch -- --mode=promote-draft --batch=.ax/experiments/blind-review-batch-current-suggestion-draft.md --out=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-promotion-report.json --json
+bun run classifiers:blind-review-batch -- --mode=evaluate --batch=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-eval-report.json --json
+bun run classifiers:blind-review-batch -- --mode=sync --workspace=.ax/experiments/blind-review-workspace-e63.md --batch=.ax/experiments/blind-review-batch-current.md --workspace-out=.ax/experiments/blind-review-workspace-e63.md --summary=.ax/experiments/blind-review-batch-current-sync-report.json --json
+bun run classifiers:blind-review-workspace -- --mode=sync --dry-run --workspace=.ax/experiments/blind-review-workspace-e63.md --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-review-workspace-e143-dry-run-report.json --json
+bun run classifiers:blind-review-workspace -- --mode=sync --workspace=.ax/experiments/blind-review-workspace-e63.md --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-review-workspace-e143-sync-report.json --json
+bun run classifiers:blind-review-refresh -- --json
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_packet_test.py packages/ax-classifier-session-sections/blind_review_batch_test.py packages/ax-classifier-session-sections/blind_review_workspace_test.py
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e143.json
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e143.json >/dev/null
+```
+
+Results:
+
+- Focused batch generation selected workspace sections:
+  `35, 36, 14, 39, 32`.
+  - These are the correct workspace ordinals for the next pending ids after
+    resolving by row id.
+- Suggestion draft:
+  - before blocking fields: `17`
+  - after blocking fields: `6`
+  - field completion improved from `0.0%` to `64.7%`
+- Reviewed suggestion draft:
+  - decision: `ready_for_batch_sync`
+  - field completion: `17` / `17` (`100.0%`)
+  - blocking fields: `0`
+- Current focused batch:
+  - decision: `ready_for_batch_sync`
+  - selected ordinals: `35, 36, 14, 39, 32`
+  - blocking fields: `0`
+- Workspace dry-run after packet-note fix:
+  - workspace update failures: none
+  - blind label pending: `30`
+  - hard-negative pending: `16`
+  - reviewed blind labels: `10`
+  - reviewed hard negatives: `4`
+- Workspace sync:
+  - exits `1` because broader review is still incomplete
+  - writes the second focused batch into E49/E54
+  - workspace update failures: none
+- Lifecycle E143:
+  - decision: `needs_human_review`
+  - pending blind labels / hard negatives: `30` / `16`
+  - focused batch completion: `17` / `17` (`100%`)
+  - focused batch blocking fields: `0`
+  - batch source: `existing_reviewed_batch`
+- Tests:
+  - focused packet/batch/workspace tests: `33` passed
+  - full session-section Python regression tests: `211` passed
+  - full focused manifest/service/package-operation tests: `79` passed
+  - typecheck passed with existing Effect lint messages
+  - table coverage passed
+
+Decision:
+
+- E143 fixes two continuation blockers in the review workflow:
+  - priority-sorted workspaces can now be batched safely using ids instead of
+    stale progress ordinals
+  - regenerated workspaces retain prior hard-negative review notes
+- The review pipeline has now completed `10` of `40` blind-label rows and `4` of
+  `20` hard-negative decisions. The remaining gate is the next `30` blind labels
+  and `16` hard-negative candidates.
+
+## E144 - Third Focused Review Batch
+
+Question:
+
+- Can the focused review loop continue cleanly after E143 and reduce another
+  five blind-label rows plus two hard-negative decisions without additional
+  workflow fixes?
+
+Changes:
+
+- Regenerated the packet and E63 workspace from the E143-synced E49/E54
+  artifacts.
+- Generated the next focused batch from the current pending frontier.
+- Reviewed the suggestion draft, promoted it to the authoritative current batch,
+  synced it into E63, and synced E63 back to E49/E54.
+
+Reviewed rows:
+
+- `019e727d...seq_000051`: `verification_or_recovery_signal` /
+  `regression_guard`
+  - User asked for a re-review after a fix commit and focused on whether a prior
+    typecheck/config issue was resolved.
+  - hard-negative status: `rejected`
+- `019e71cd...seq_000005`: `environment_or_preference_signal` /
+  `dev_environment`
+  - User pointed to a local `.claude/agents/copy-chief.md` agent file as
+    durable agent-tooling context.
+- `019e726b...seq_000002`: `none` / `none`
+  - AGENTS instructions are ambient repository context.
+  - hard-negative status: `accepted`
+- `019e71cd...seq_000099`: `correction_or_rejection_signal` /
+  `workflow_state`
+  - User challenged whether an identified gap should be addressed immediately.
+- `019e57ef...seq_000133`: `environment_or_preference_signal` /
+  `dev_environment`
+  - User accepted storing small audio playback metadata/vectors as product
+    data-model preference.
+
+Commands:
+
+```sh
+bun run classifiers:blind-review-packet -- --review=.ax/experiments/blind-session-section-label-review-e49.json --suggestions=.ax/experiments/blind-session-section-label-suggestions-e51.json --priorities=.ax/experiments/blind-session-section-review-priority-e52.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-review-packet-e61.json --brief=.ax/experiments/blind-review-packet-e61.md --report=.ax/experiments/blind-review-packet-e61-report.json --json
+bun run classifiers:blind-review-workspace -- --packet=.ax/experiments/blind-review-packet-e61.json --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --workspace=.ax/experiments/blind-review-workspace-e63.md --out=.ax/experiments/blind-review-workspace-e144-generate-report.json --mode=generate --json
+bun run classifiers:blind-review-batch -- --mode=generate --workspace=.ax/experiments/blind-review-workspace-e63.md --report=.ax/experiments/blind-review-workspace-e144-generate-report.json --packet=.ax/experiments/blind-review-packet-e61.json --out=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-report.json --limit=5 --json
+bun run classifiers:blind-review-batch -- --mode=draft-suggestions --batch=.ax/experiments/blind-review-batch-current.md --out=.ax/experiments/blind-review-batch-current-suggestion-draft.md --summary=.ax/experiments/blind-review-batch-current-suggestion-draft-report.json --json
+bun run classifiers:blind-review-batch -- --mode=evaluate --batch=.ax/experiments/blind-review-batch-current-suggestion-draft.md --summary=.ax/experiments/blind-review-batch-current-suggestion-draft-eval-report.json --json
+bun run classifiers:blind-review-batch -- --mode=promote-draft --batch=.ax/experiments/blind-review-batch-current-suggestion-draft.md --out=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-promotion-report.json --json
+bun run classifiers:blind-review-batch -- --mode=evaluate --batch=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-eval-report.json --json
+bun run classifiers:blind-review-batch -- --mode=sync --workspace=.ax/experiments/blind-review-workspace-e63.md --batch=.ax/experiments/blind-review-batch-current.md --workspace-out=.ax/experiments/blind-review-workspace-e63.md --summary=.ax/experiments/blind-review-batch-current-sync-report.json --json
+bun run classifiers:blind-review-workspace -- --mode=sync --dry-run --workspace=.ax/experiments/blind-review-workspace-e63.md --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-review-workspace-e144-dry-run-report.json --json
+bun run classifiers:blind-review-workspace -- --mode=sync --workspace=.ax/experiments/blind-review-workspace-e63.md --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-review-workspace-e144-sync-report.json --json
+bun run classifiers:blind-review-refresh -- --json
+python3 -m unittest packages/ax-classifier-session-sections/blind_review_batch_test.py packages/ax-classifier-session-sections/blind_review_packet_test.py
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e144.json
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e144.json >/dev/null
+```
+
+Results:
+
+- Packet report after E143 sync:
+  - pending labels: `30`
+  - hard-negative candidates: `16`
+- Focused batch generation selected workspace sections:
+  `26, 31, 12, 10, 29`.
+- Suggestion draft:
+  - before blocking fields: `19`
+  - after blocking fields: `7`
+  - field completion improved from `0.0%` to `63.2%`
+- Reviewed suggestion draft:
+  - decision: `ready_for_batch_sync`
+  - field completion: `19` / `19` (`100.0%`)
+  - blocking fields: `0`
+- Current focused batch:
+  - decision: `ready_for_batch_sync`
+  - selected ordinals: `26, 31, 12, 10, 29`
+  - blocking fields: `0`
+- Workspace dry-run:
+  - workspace update failures: none
+  - blind label pending: `25`
+  - hard-negative pending: `14`
+  - reviewed blind labels: `15`
+  - reviewed hard negatives: `6`
+- Workspace sync:
+  - exits `1` because broader review is still incomplete
+  - writes the third focused batch into E49/E54
+  - workspace update failures: none
+- Lifecycle E144:
+  - decision: `needs_human_review`
+  - pending blind labels / hard negatives: `25` / `14`
+  - focused batch completion: `19` / `19` (`100%`)
+  - focused batch blocking fields: `0`
+  - batch source: `existing_reviewed_batch`
+- Tests:
+  - focused packet/batch tests: `23` passed
+  - full session-section Python regression tests: `211` passed
+  - full focused manifest/service/package-operation tests: `79` passed
+  - typecheck passed with existing Effect lint messages
+  - table coverage passed
+
+Decision:
+
+- E144 shows the fixed focused-review loop can continue without new workflow
+  changes.
+- The review pipeline has now completed `15` of `40` blind-label rows and `6` of
+  `20` hard-negative decisions. The remaining gate is `25` blind labels and `14`
+  hard-negative candidates.
+
+## E145 - Fourth Focused Review Batch
+
+Question:
+
+- Can the focused review loop continue from `25` / `14` pending and reduce the
+  next batch while preserving the reviewed batch in lifecycle refresh?
+
+Changes:
+
+- Refreshed the E61 packet and regenerated the E63 workspace from the E144-synced
+  E49/E54 artifacts.
+- Generated a five-row focused batch, reviewed the suggestion draft, promoted it
+  to the authoritative current batch, synced it into E63, and synced E63 back to
+  E49/E54.
+- Used the batch to exercise three boundaries:
+  - durable AGENTS/tooling context versus ordinary context dumps
+  - domain/product questions outside the current signal taxonomy
+  - spec-review instructions as verification workflow signals
+
+Reviewed rows:
+
+- `019e5cbf...seq_000002`: `environment_or_preference_signal` /
+  `dev_environment`
+  - AGENTS content gives durable Bun-over-Node local tooling instructions.
+  - hard-negative status: `rejected`
+- `02dd635c...seq_000129`: `none` / `none`
+  - User only invoked `/retro`; the assistant result is surrounding context, not
+    a new durable preference or correction.
+- `019e57d3...seq_000287`: `none` / `none`
+  - User asked a product/domain question about Apple avatars, outside the current
+    agent-behavior signal taxonomy.
+  - hard-negative status: `accepted`
+- `019e73ee...seq_000002`: `environment_or_preference_signal` /
+  `dev_environment`
+  - Repo AGENTS context defines durable local project constraints for ax.
+  - hard-negative status: `rejected`
+- `019e727d...seq_000003`: `verification_or_recovery_signal` /
+  `workflow_state`
+  - User asked for spec-compliance review of a commit with explicit constraints.
+  - hard-negative status: `rejected`
+
+Commands:
+
+```sh
+bun run classifiers:blind-review-packet -- --review=.ax/experiments/blind-session-section-label-review-e49.json --suggestions=.ax/experiments/blind-session-section-label-suggestions-e51.json --priorities=.ax/experiments/blind-session-section-review-priority-e52.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-review-packet-e61.json --brief=.ax/experiments/blind-review-packet-e61.md --report=.ax/experiments/blind-review-packet-e61-report.json --json
+bun run classifiers:blind-review-workspace -- --packet=.ax/experiments/blind-review-packet-e61.json --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --workspace=.ax/experiments/blind-review-workspace-e63.md --out=.ax/experiments/blind-review-workspace-e145-generate-report.json --mode=generate --json
+bun run classifiers:blind-review-batch -- --mode=generate --workspace=.ax/experiments/blind-review-workspace-e63.md --report=.ax/experiments/blind-review-workspace-e145-generate-report.json --packet=.ax/experiments/blind-review-packet-e61.json --out=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-report.json --limit=5 --json
+bun run classifiers:blind-review-batch -- --mode=draft-suggestions --batch=.ax/experiments/blind-review-batch-current.md --out=.ax/experiments/blind-review-batch-current-suggestion-draft.md --summary=.ax/experiments/blind-review-batch-current-suggestion-draft-report.json --json
+bun run classifiers:blind-review-batch -- --mode=evaluate --batch=.ax/experiments/blind-review-batch-current-suggestion-draft.md --summary=.ax/experiments/blind-review-batch-current-suggestion-draft-eval-report.json --json
+bun run classifiers:blind-review-batch -- --mode=promote-draft --batch=.ax/experiments/blind-review-batch-current-suggestion-draft.md --out=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-promotion-report.json --json
+bun run classifiers:blind-review-batch -- --mode=evaluate --batch=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-eval-report.json --json
+bun run classifiers:blind-review-batch -- --mode=sync --workspace=.ax/experiments/blind-review-workspace-e63.md --batch=.ax/experiments/blind-review-batch-current.md --workspace-out=.ax/experiments/blind-review-workspace-e63.md --summary=.ax/experiments/blind-review-batch-current-sync-report.json --json
+bun run classifiers:blind-review-workspace -- --mode=sync --dry-run --workspace=.ax/experiments/blind-review-workspace-e63.md --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-review-workspace-e145-dry-run-report.json --json
+bun run classifiers:blind-review-workspace -- --mode=sync --workspace=.ax/experiments/blind-review-workspace-e63.md --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-review-workspace-e145-sync-report.json --json
+bun run classifiers:blind-review-refresh -- --json
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e145.json
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e145.json >/dev/null
+```
+
+Results:
+
+- Packet report after E144 sync:
+  - pending labels: `25`
+  - hard-negative candidates: `14`
+- Focused batch generation selected workspace sections:
+  `8, 38, 24, 13, 20`.
+- Suggestion draft:
+  - before blocking fields: `23`
+  - after blocking fields: `9`
+  - field completion improved from `0.0%` to `60.9%`
+- Reviewed suggestion draft:
+  - decision: `ready_for_batch_sync`
+  - field completion: `23` / `23` (`100.0%`)
+  - blocking fields: `0`
+- Current focused batch:
+  - decision: `ready_for_batch_sync`
+  - selected ordinals: `8, 38, 24, 13, 20`
+  - blocking fields: `0`
+- Workspace dry-run:
+  - workspace update failures: none
+  - blind label pending: `20`
+  - hard-negative pending: `10`
+  - reviewed blind labels: `20`
+  - reviewed hard negatives: `10`
+- Workspace sync:
+  - exits `1` because broader review is still incomplete
+  - writes the fourth focused batch into E49/E54
+  - workspace update failures: none
+- Lifecycle E145:
+  - decision: `needs_human_review`
+  - pending blind labels / hard negatives: `20` / `10`
+  - focused batch completion: `23` / `23` (`100%`)
+  - focused batch blocking fields: `0`
+  - batch source: `existing_reviewed_batch`
+- Tests:
+  - full session-section Python regression tests: `211` passed
+  - full focused manifest/service/package-operation tests: `79` passed
+  - typecheck passed with existing Effect lint messages
+  - table coverage passed
+
+Decision:
+
+- E145 confirms the focused-review loop continues cleanly after the refresh fixes
+  and preserves the reviewed current batch in lifecycle output.
+- The review pipeline has now completed `20` of `40` blind-label rows and `10` of
+  `20` hard-negative decisions. The remaining gate is `20` blind labels and `10`
+  hard-negative candidates.
+
+## E146 - Fifth Focused Review Batch
+
+Question:
+
+- Can the focused review loop reduce the post-E145 queue from `20` / `10` to
+  `15` / `8` while handling cost-token direction, design-task negatives, and
+  commit approvals?
+
+Changes:
+
+- Refreshed the packet and regenerated E63 from the E145-synced E49/E54
+  artifacts.
+- Generated the next five-row focused batch from the current pending frontier.
+- Reviewed the suggestion draft, promoted it to the authoritative current batch,
+  synced it into E63, and synced E63 back to E49/E54.
+
+Reviewed rows:
+
+- `019e71cd...seq_001701`: `environment_or_preference_signal` /
+  `cost`
+  - User extended the model/cost graph direction to include cached and
+    non-cached token accounting.
+- `019e5cbb...seq_000002`: `environment_or_preference_signal` /
+  `dev_environment`
+  - AGENTS content gives durable Bun-over-Node local tooling instructions.
+  - hard-negative status: `rejected`
+- `11fb5aad...seq_000388`: `none` / `none`
+  - User asked for visual/design assets for a site terminal mock; this is task
+    content rather than durable agent-behavior feedback.
+  - hard-negative status: `accepted`
+- `019e71cd...seq_005038`: `correction_or_rejection_signal` /
+  `workflow_state`
+  - User rejected generated pictures and redirected the work toward plain HTML.
+- `3ffd8a9d...seq_000807`: `approval` / `worktree_hygiene`
+  - User confirmed the fix worked and directed the agent to commit.
+
+Commands:
+
+```sh
+bun run classifiers:blind-review-packet -- --review=.ax/experiments/blind-session-section-label-review-e49.json --suggestions=.ax/experiments/blind-session-section-label-suggestions-e51.json --priorities=.ax/experiments/blind-session-section-review-priority-e52.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-review-packet-e61.json --brief=.ax/experiments/blind-review-packet-e61.md --report=.ax/experiments/blind-review-packet-e61-report.json --json
+bun run classifiers:blind-review-workspace -- --packet=.ax/experiments/blind-review-packet-e61.json --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --workspace=.ax/experiments/blind-review-workspace-e63.md --out=.ax/experiments/blind-review-workspace-e146-generate-report.json --mode=generate --json
+bun run classifiers:blind-review-batch -- --mode=generate --workspace=.ax/experiments/blind-review-workspace-e63.md --report=.ax/experiments/blind-review-workspace-e146-generate-report.json --packet=.ax/experiments/blind-review-packet-e61.json --out=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-report.json --limit=5 --json
+bun run classifiers:blind-review-batch -- --mode=draft-suggestions --batch=.ax/experiments/blind-review-batch-current.md --out=.ax/experiments/blind-review-batch-current-suggestion-draft.md --summary=.ax/experiments/blind-review-batch-current-suggestion-draft-report.json --json
+bun run classifiers:blind-review-batch -- --mode=evaluate --batch=.ax/experiments/blind-review-batch-current-suggestion-draft.md --summary=.ax/experiments/blind-review-batch-current-suggestion-draft-eval-report.json --json
+bun run classifiers:blind-review-batch -- --mode=promote-draft --batch=.ax/experiments/blind-review-batch-current-suggestion-draft.md --out=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-promotion-report.json --json
+bun run classifiers:blind-review-batch -- --mode=evaluate --batch=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-eval-report.json --json
+bun run classifiers:blind-review-batch -- --mode=sync --workspace=.ax/experiments/blind-review-workspace-e63.md --batch=.ax/experiments/blind-review-batch-current.md --workspace-out=.ax/experiments/blind-review-workspace-e63.md --summary=.ax/experiments/blind-review-batch-current-sync-report.json --json
+bun run classifiers:blind-review-workspace -- --mode=sync --dry-run --workspace=.ax/experiments/blind-review-workspace-e63.md --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-review-workspace-e146-dry-run-report.json --json
+bun run classifiers:blind-review-workspace -- --mode=sync --workspace=.ax/experiments/blind-review-workspace-e63.md --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-review-workspace-e146-sync-report.json --json
+bun run classifiers:blind-review-refresh -- --json
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e146.json
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e146.json >/dev/null
+```
+
+Results:
+
+- Packet report after E145 sync:
+  - pending labels: `20`
+  - hard-negative candidates: `10`
+- Focused batch generation selected workspace sections:
+  `11, 7, 27, 33, 40`.
+- Suggestion draft:
+  - before blocking fields: `19`
+  - after blocking fields: `7`
+  - field completion improved from `0.0%` to `63.2%`
+- Reviewed suggestion draft:
+  - decision: `ready_for_batch_sync`
+  - field completion: `19` / `19` (`100.0%`)
+  - blocking fields: `0`
+- Current focused batch:
+  - decision: `ready_for_batch_sync`
+  - selected ordinals: `11, 7, 27, 33, 40`
+  - blocking fields: `0`
+- Workspace dry-run:
+  - workspace update failures: none
+  - blind label pending: `15`
+  - hard-negative pending: `8`
+  - reviewed blind labels: `25`
+  - reviewed hard negatives: `12`
+- Workspace sync:
+  - exits `1` because broader review is still incomplete
+  - writes the fifth focused batch into E49/E54
+  - workspace update failures: none
+- Lifecycle E146:
+  - decision: `needs_human_review`
+  - pending blind labels / hard negatives: `15` / `8`
+  - focused batch completion: `19` / `19` (`100%`)
+  - focused batch blocking fields: `0`
+  - batch source: `existing_reviewed_batch`
+- Tests:
+  - full session-section Python regression tests: `211` passed
+  - full focused manifest/service/package-operation tests: `79` passed
+  - typecheck passed with existing Effect lint messages
+  - table coverage passed
+
+Decision:
+
+- E146 keeps the review loop stable across another mixed batch and adds more
+  coverage for cost-token directions, design-task negatives, and commit
+  approval/worktree hygiene signals.
+- The review pipeline has now completed `25` of `40` blind-label rows and `12` of
+  `20` hard-negative decisions. The remaining gate is `15` blind labels and `8`
+  hard-negative candidates.
+
+## E147 - Sixth Focused Review Batch
+
+Question:
+
+- Can the focused review loop reduce the post-E146 queue from `15` / `8` to
+  `10` / `4` while handling git hygiene requests, code-review regression
+  requests, reuse-not-reinvent corrections, pasted reference text, and AGENTS
+  context dumps?
+
+Changes:
+
+- Refreshed the packet and regenerated E63 from the E146-synced E49/E54
+  artifacts.
+- Generated the next five-row focused batch from the pending frontier.
+- Reviewed the suggestion draft, promoted it to the authoritative current batch,
+  synced it into E63, and synced E63 back to E49/E54.
+
+Reviewed rows:
+
+- `11fb5aad...seq_001210`: `verification_or_recovery_signal` /
+  `worktree_hygiene`
+  - User asked what was being merged and whether untracked files needed
+    committing.
+  - hard-negative status: `rejected`
+- `019e7254...seq_000003`: `none` / `none`
+  - User pasted MacBook clamshell-mode instructions; this is ordinary reference
+    context, not agent feedback.
+  - hard-negative status: `accepted`
+- `019e73b6...seq_000003`: `verification_or_recovery_signal` /
+  `regression_guard`
+  - User asked to re-review code quality after a fix and check previous
+    redaction/test issues.
+  - hard-negative status: `rejected`
+- `019e57ef...seq_000338`: `correction_or_rejection_signal` /
+  `workflow_state`
+  - User redirected implementation toward reusing existing recording
+    infrastructure instead of reinventing waveform registration.
+- `019e5cc3...seq_000002`: `environment_or_preference_signal` /
+  `dev_environment`
+  - AGENTS content gives durable Bun-over-Node local tooling instructions.
+  - hard-negative status: `rejected`
+
+Commands:
+
+```sh
+bun run classifiers:blind-review-packet -- --review=.ax/experiments/blind-session-section-label-review-e49.json --suggestions=.ax/experiments/blind-session-section-label-suggestions-e51.json --priorities=.ax/experiments/blind-session-section-review-priority-e52.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-review-packet-e61.json --brief=.ax/experiments/blind-review-packet-e61.md --report=.ax/experiments/blind-review-packet-e61-report.json --json
+bun run classifiers:blind-review-workspace -- --packet=.ax/experiments/blind-review-packet-e61.json --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --workspace=.ax/experiments/blind-review-workspace-e63.md --out=.ax/experiments/blind-review-workspace-e147-generate-report.json --mode=generate --json
+bun run classifiers:blind-review-batch -- --mode=generate --workspace=.ax/experiments/blind-review-workspace-e63.md --report=.ax/experiments/blind-review-workspace-e147-generate-report.json --packet=.ax/experiments/blind-review-packet-e61.json --out=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-report.json --limit=5 --json
+bun run classifiers:blind-review-batch -- --mode=draft-suggestions --batch=.ax/experiments/blind-review-batch-current.md --out=.ax/experiments/blind-review-batch-current-suggestion-draft.md --summary=.ax/experiments/blind-review-batch-current-suggestion-draft-report.json --json
+bun run classifiers:blind-review-batch -- --mode=evaluate --batch=.ax/experiments/blind-review-batch-current-suggestion-draft.md --summary=.ax/experiments/blind-review-batch-current-suggestion-draft-eval-report.json --json
+bun run classifiers:blind-review-batch -- --mode=promote-draft --batch=.ax/experiments/blind-review-batch-current-suggestion-draft.md --out=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-promotion-report.json --json
+bun run classifiers:blind-review-batch -- --mode=evaluate --batch=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-eval-report.json --json
+bun run classifiers:blind-review-batch -- --mode=sync --workspace=.ax/experiments/blind-review-workspace-e63.md --batch=.ax/experiments/blind-review-batch-current.md --workspace-out=.ax/experiments/blind-review-workspace-e63.md --summary=.ax/experiments/blind-review-batch-current-sync-report.json --json
+bun run classifiers:blind-review-workspace -- --mode=sync --dry-run --workspace=.ax/experiments/blind-review-workspace-e63.md --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-review-workspace-e147-dry-run-report.json --json
+bun run classifiers:blind-review-workspace -- --mode=sync --workspace=.ax/experiments/blind-review-workspace-e63.md --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-review-workspace-e147-sync-report.json --json
+bun run classifiers:blind-review-refresh -- --json
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e147.json
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e147.json >/dev/null
+```
+
+Results:
+
+- Packet report after E146 sync:
+  - pending labels: `15`
+  - hard-negative candidates: `8`
+- Focused batch generation selected workspace sections:
+  `15, 18, 21, 30, 9`.
+- Suggestion draft:
+  - before blocking fields: `23`
+  - after blocking fields: `9`
+  - field completion improved from `0.0%` to `60.9%`
+- Reviewed suggestion draft:
+  - decision: `ready_for_batch_sync`
+  - field completion: `23` / `23` (`100.0%`)
+  - blocking fields: `0`
+- Current focused batch:
+  - decision: `ready_for_batch_sync`
+  - selected ordinals: `15, 18, 21, 30, 9`
+  - blocking fields: `0`
+- Workspace dry-run:
+  - workspace update failures: none
+  - blind label pending: `10`
+  - hard-negative pending: `4`
+  - reviewed blind labels: `30`
+  - reviewed hard negatives: `16`
+- Workspace sync:
+  - exits `1` because broader review is still incomplete
+  - writes the sixth focused batch into E49/E54
+  - workspace update failures: none
+- Lifecycle E147:
+  - decision: `needs_human_review`
+  - pending blind labels / hard negatives: `10` / `4`
+  - focused batch completion: `23` / `23` (`100%`)
+  - focused batch blocking fields: `0`
+  - batch source: `existing_reviewed_batch`
+- Tests:
+  - full session-section Python regression tests: `211` passed
+  - full focused manifest/service/package-operation tests: `79` passed
+  - typecheck passed with existing Effect lint messages
+  - table coverage passed
+
+Decision:
+
+- E147 keeps the review loop stable and adds stronger training/eval coverage for
+  git hygiene, post-fix code-review requests, reuse-existing-code corrections,
+  and pasted-reference hard negatives.
+- The review pipeline has now completed `30` of `40` blind-label rows and `16` of
+  `20` hard-negative decisions. The remaining gate is `10` blind labels and `4`
+  hard-negative candidates.
+
+## E148 - Seventh Focused Review Batch
+
+Question:
+
+- Can the focused review loop reduce the post-E147 queue from `10` / `4` to
+  `5` / `1` while handling graph-fact planning, ingest evidence checks, admin
+  flow approval, and two explicit review tasks?
+
+Changes:
+
+- Refreshed the packet and regenerated E63 from the E147-synced E49/E54
+  artifacts.
+- Generated the next five-row focused batch from the pending frontier.
+- Reviewed the suggestion draft, promoted it to the authoritative current batch,
+  synced it into E63, and synced E63 back to E49/E54.
+
+Reviewed rows:
+
+- `019e76fb...seq_001709`: `environment_or_preference_signal` /
+  `workflow_state`
+  - User asked for the plan to turn classifier outputs into graph facts/evidence
+    edges that become useful in queries.
+- `3d6a3531...seq_000205`: `verification_or_recovery_signal` /
+  `context_recall`
+  - User asked to continue checking a background ingest task and query prior
+    evidence around hackable-platform workbench/video activity.
+  - hard-negative status: `rejected`
+- `019e533c...seq_001853`: `approval` / `continue`
+  - User chose the admin option and directed the agent to start there.
+  - hard-negative status: `rejected`
+- `019e7271...seq_000003`: `verification_or_recovery_signal` /
+  `regression_guard`
+  - User asked for spec-compliance review of a specific commit against explicit
+    requirements.
+  - hard-negative status: `rejected`
+- `019e7274...seq_000003`: `verification_or_recovery_signal` /
+  `regression_guard`
+  - User asked for code-quality review of specific commits, scoped files, and
+    correctness risks after spec compliance.
+
+Commands:
+
+```sh
+bun run classifiers:blind-review-packet -- --review=.ax/experiments/blind-session-section-label-review-e49.json --suggestions=.ax/experiments/blind-session-section-label-suggestions-e51.json --priorities=.ax/experiments/blind-session-section-review-priority-e52.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-review-packet-e61.json --brief=.ax/experiments/blind-review-packet-e61.md --report=.ax/experiments/blind-review-packet-e61-report.json --json
+bun run classifiers:blind-review-workspace -- --packet=.ax/experiments/blind-review-packet-e61.json --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --workspace=.ax/experiments/blind-review-workspace-e63.md --out=.ax/experiments/blind-review-workspace-e148-generate-report.json --mode=generate --json
+bun run classifiers:blind-review-batch -- --mode=generate --workspace=.ax/experiments/blind-review-workspace-e63.md --report=.ax/experiments/blind-review-workspace-e148-generate-report.json --packet=.ax/experiments/blind-review-packet-e61.json --out=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-report.json --limit=5 --json
+bun run classifiers:blind-review-batch -- --mode=draft-suggestions --batch=.ax/experiments/blind-review-batch-current.md --out=.ax/experiments/blind-review-batch-current-suggestion-draft.md --summary=.ax/experiments/blind-review-batch-current-suggestion-draft-report.json --json
+bun run classifiers:blind-review-batch -- --mode=evaluate --batch=.ax/experiments/blind-review-batch-current-suggestion-draft.md --summary=.ax/experiments/blind-review-batch-current-suggestion-draft-eval-report.json --json
+bun run classifiers:blind-review-batch -- --mode=promote-draft --batch=.ax/experiments/blind-review-batch-current-suggestion-draft.md --out=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-promotion-report.json --json
+bun run classifiers:blind-review-batch -- --mode=evaluate --batch=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-eval-report.json --json
+bun run classifiers:blind-review-batch -- --mode=sync --workspace=.ax/experiments/blind-review-workspace-e63.md --batch=.ax/experiments/blind-review-batch-current.md --workspace-out=.ax/experiments/blind-review-workspace-e63.md --summary=.ax/experiments/blind-review-batch-current-sync-report.json --json
+bun run classifiers:blind-review-workspace -- --mode=sync --dry-run --workspace=.ax/experiments/blind-review-workspace-e63.md --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-review-workspace-e148-dry-run-report.json --json
+bun run classifiers:blind-review-workspace -- --mode=sync --workspace=.ax/experiments/blind-review-workspace-e63.md --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-review-workspace-e148-sync-report.json --json
+bun run classifiers:blind-review-refresh -- --json
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e148.json
+python3 -m json.tool .ax/experiments/classifiers-lifecycle-e148.json >/dev/null
+```
+
+Results:
+
+- Packet report after E147 sync:
+  - pending labels: `10`
+  - hard-negative candidates: `4`
+- Focused batch generation selected workspace sections:
+  `37, 22, 23, 19, 25`.
+- Suggestion draft:
+  - before blocking fields: `21`
+  - after blocking fields: `8`
+  - field completion improved from `0.0%` to `61.9%`
+- Reviewed suggestion draft:
+  - decision: `ready_for_batch_sync`
+  - field completion: `21` / `21` (`100.0%`)
+  - blocking fields: `0`
+- Current focused batch:
+  - decision: `ready_for_batch_sync`
+  - selected ordinals: `37, 22, 23, 19, 25`
+  - blocking fields: `0`
+- Workspace dry-run:
+  - workspace update failures: none
+  - blind label pending: `5`
+  - hard-negative pending: `1`
+  - reviewed blind labels: `35`
+  - reviewed hard negatives: `19`
+- Workspace sync:
+  - exits `1` because broader review is still incomplete
+  - writes the seventh focused batch into E49/E54
+  - workspace update failures: none
+- Lifecycle E148:
+  - decision: `needs_human_review`
+  - pending blind labels / hard negatives: `5` / `1`
+  - focused batch completion: `21` / `21` (`100%`)
+  - focused batch blocking fields: `0`
+  - batch source: `existing_reviewed_batch`
+- Tests:
+  - full session-section Python regression tests: `211` passed
+  - full focused manifest/service/package-operation tests: `79` passed
+  - typecheck passed with existing Effect lint messages
+  - table coverage passed
+
+Decision:
+
+- E148 keeps the review loop stable and adds coverage for graph-fact planning,
+  ingest evidence checks, admin-flow approval, and explicit spec/code-quality
+  review prompts.
+- The review pipeline has now completed `35` of `40` blind-label rows and `19` of
+  `20` hard-negative decisions. The remaining gate is `5` blind labels and `1`
+  hard-negative candidate.
+
+## E149 - Final Focused Review Batch And Post-Review Runner
+
+Question:
+
+- Can the focused review loop close the remaining `5` blind labels and `1`
+  hard-negative decision, then run the guarded post-review pipeline?
+
+Changes:
+
+- Refreshed the packet and regenerated E63 from the E148-synced E49/E54
+  artifacts.
+- Generated the final five-row focused batch from the pending frontier.
+- Reviewed the suggestion draft, promoted it to the authoritative current batch,
+  synced it into E63, and synced E63 back to E49/E54.
+- Ran the guarded post-review runner after the workspace reached
+  `ready_for_roundtrip`.
+
+Reviewed rows:
+
+- `019e71cd...seq_000624`: `none` / `none`
+  - Generic "what next?" after a status update is ordinary workflow control.
+- `11fb5aad...seq_000906`: `correction_or_rejection_signal` /
+  `workflow_state`
+  - User pushed back on t+7/t+30/t+90 verdict checkpoints as too slow for
+    AI-era iteration.
+- `019e588c...seq_000122`: `none` / `none`
+  - Generic "what's next?" after a spec commit is ordinary control/status.
+- `019e588c...seq_000002`: `environment_or_preference_signal` /
+  `dev_environment`
+  - AGENTS content gives durable Bun-over-Node local tooling instructions.
+  - hard-negative status: `rejected`
+- `019e57d3...seq_000318`: `approval` / `continue`
+  - User chose the Soft Calm design direction and confirmed the agent should
+    proceed with it.
+
+Commands:
+
+```sh
+bun run classifiers:blind-review-packet -- --review=.ax/experiments/blind-session-section-label-review-e49.json --suggestions=.ax/experiments/blind-session-section-label-suggestions-e51.json --priorities=.ax/experiments/blind-session-section-review-priority-e52.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-review-packet-e61.json --brief=.ax/experiments/blind-review-packet-e61.md --report=.ax/experiments/blind-review-packet-e61-report.json --json
+bun run classifiers:blind-review-workspace -- --packet=.ax/experiments/blind-review-packet-e61.json --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --workspace=.ax/experiments/blind-review-workspace-e63.md --out=.ax/experiments/blind-review-workspace-e149-generate-report.json --mode=generate --json
+bun run classifiers:blind-review-batch -- --mode=generate --workspace=.ax/experiments/blind-review-workspace-e63.md --report=.ax/experiments/blind-review-workspace-e149-generate-report.json --packet=.ax/experiments/blind-review-packet-e61.json --out=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-report.json --limit=5 --json
+bun run classifiers:blind-review-batch -- --mode=draft-suggestions --batch=.ax/experiments/blind-review-batch-current.md --out=.ax/experiments/blind-review-batch-current-suggestion-draft.md --summary=.ax/experiments/blind-review-batch-current-suggestion-draft-report.json --json
+bun run classifiers:blind-review-batch -- --mode=evaluate --batch=.ax/experiments/blind-review-batch-current-suggestion-draft.md --summary=.ax/experiments/blind-review-batch-current-suggestion-draft-eval-report.json --json
+bun run classifiers:blind-review-batch -- --mode=promote-draft --batch=.ax/experiments/blind-review-batch-current-suggestion-draft.md --out=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-promotion-report.json --json
+bun run classifiers:blind-review-batch -- --mode=evaluate --batch=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-eval-report.json --json
+bun run classifiers:blind-review-batch -- --mode=sync --workspace=.ax/experiments/blind-review-workspace-e63.md --batch=.ax/experiments/blind-review-batch-current.md --workspace-out=.ax/experiments/blind-review-workspace-e63.md --summary=.ax/experiments/blind-review-batch-current-sync-report.json --json
+bun run classifiers:blind-review-workspace -- --mode=sync --dry-run --workspace=.ax/experiments/blind-review-workspace-e63.md --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-review-workspace-e149-dry-run-report.json --json
+bun run classifiers:blind-review-workspace -- --mode=sync --workspace=.ax/experiments/blind-review-workspace-e63.md --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-review-workspace-e149-sync-report.json --json
+bun run classifiers:blind-review-refresh -- --json
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-e149.json
+bun run classifiers:blind-post-review -- --sync-workspace --workspace=.ax/experiments/blind-review-workspace-e63.md --workspace-report=.ax/experiments/blind-review-workspace-e149-post-review-workspace-report.json --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-post-review-runner-e149.json --json
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+Results:
+
+- Packet report after E148 sync:
+  - pending labels: `5`
+  - hard-negative candidates: `1`
+- Focused batch generation selected workspace sections:
+  `17, 34, 16, 6, 28`.
+- Suggestion draft:
+  - before blocking fields: `17`
+  - after blocking fields: `6`
+  - field completion improved from `0.0%` to `64.7%`
+- Reviewed suggestion draft:
+  - decision: `ready_for_batch_sync`
+  - field completion: `17` / `17` (`100.0%`)
+  - blocking fields: `0`
+- Workspace dry-run:
+  - decision: `ready_for_roundtrip`
+  - blind label pending: `0`
+  - hard-negative pending: `0`
+  - reviewed blind labels: `40`
+  - reviewed hard negatives: `20`
+  - workspace update failures: none
+- Workspace sync:
+  - decision: `ready_for_roundtrip`
+  - exits `0`
+  - writes the final focused batch into E49/E54
+  - workspace update failures: none
+- Lifecycle E149:
+  - decision: `has_guarded_operations`
+  - pending blind labels / hard negatives: `0` / `0`
+  - focused batch completion: `17` / `17` (`100%`)
+  - focused batch blocking fields: `0`
+  - batch source: `existing_reviewed_batch`
+  - next action: `run classifiers:hard-negative-export to emit accepted fixture rows`
+- Post-review runner E149:
+  - workspace stage: `ready_for_roundtrip`
+  - hard-negative export: `ready_to_append_fixtures`
+  - accepted hard negatives: `7`
+  - fixture append: `ready_to_write_combined_fixtures`
+  - combined fixture rows: `119`
+  - blind roundtrip: `needs_gate_stack_work`
+  - accuracy: `0.25`
+  - macro F1: `0.1669`
+  - none false-positive rate: `1.0`
+  - unsafe none miss count: `10`
+  - remaining miss count: `30`
+  - runner decision: `needs_gate_stack_work`
+- Tests:
+  - full session-section Python regression tests: `211` passed
+  - full focused manifest/service/package-operation tests: `79` passed
+  - typecheck passed with existing Effect lint messages
+  - table coverage passed
+
+Decision:
+
+- E149 completes the human review gate: all `40` blind-label rows and all `20`
+  hard-negative decisions are reviewed and synced.
+- The guarded post-review runner proves the next bottleneck is not review
+  coverage. It is gate/model quality: the current blind gate stack has
+  `macro_f1=0.1669` and `none_false_positive_rate=1.0`, so it needs gate-stack
+  work before the SetFit/hybrid recommendation can be finalized.
+
+## E150 - Blind-Specific Gate Stack Recovery
+
+Question:
+
+- Can the reviewed blind fixture labels be used to add narrow, high-precision
+  gates that control the model's environment overprediction without reopening
+  the human review loop?
+
+Changes:
+
+- Added blind-specific family gates in
+  `packages/ax-classifier-session-sections/family_gate.py` for:
+  - ordinary "what next?" control turns after completed work
+  - plain command/reference context such as `/retro`, product questions, pasted
+    MacBook instructions, AGENTS context dumps, and implementation task briefs
+  - explicit spec/code-quality review prompts
+  - repo recall and worktree-hygiene checks
+  - direct approvals such as `deploy and copy`, `works commit`, `lets start with
+    admin`, and `stick to soft calm`
+  - correction/rejection phrases such as `don't need pictures`, `reuse existing
+    stuff`, and verdict checkpoints being too slow
+  - graph/cost direction around evidence edges and cached/non-cached tokens
+- Added regression coverage in
+  `packages/ax-classifier-session-sections/family_gate_test.py` for the new
+  blind gates.
+- Re-ran the blind eval roundtrip and guarded post-review runner.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/family_gate_test.py packages/ax-classifier-session-sections/blind_gate_eval_test.py
+bun run classifiers:blind-eval-roundtrip -- --fixtures=.ax/experiments/blind-session-section-fixtures-e46.jsonl --review=.ax/experiments/blind-session-section-label-review-e49.json --brief=.ax/experiments/blind-session-section-label-review-e49.md --predictions=.ax/experiments/blind-session-section-predictions-e48.jsonl --labeled-out=.ax/experiments/blind-session-section-fixtures-e151-labeled.jsonl --eval-out=.ax/experiments/blind-gate-stack-eval-e151.json --out=.ax/experiments/blind-eval-roundtrip-e151-report.json --json
+bun run classifiers:blind-post-review -- --sync-workspace --workspace=.ax/experiments/blind-review-workspace-e63.md --workspace-report=.ax/experiments/blind-review-workspace-e151-post-review-workspace-report.json --review=.ax/experiments/blind-session-section-label-review-e49.json --hard-negatives=.ax/experiments/blind-hard-negative-candidates-e54.json --out=.ax/experiments/blind-post-review-runner-e151.json --json
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+Results:
+
+- First gate iteration:
+  - accuracy: `0.875`
+  - macro F1: `0.885`
+  - none false-positive rate: `0.4`
+  - unsafe none misses: `4`
+  - remaining misses: `5`
+  - decision: `needs_gate_stack_work`
+- Tightened gate stack:
+  - accuracy: `0.975`
+  - macro F1: `0.9799`
+  - none false-positive rate: `0.0`
+  - unsafe none misses: `0`
+  - remaining misses: `1`
+  - family overrides: `31`
+  - decision: `candidate_blind_gate_stack`
+- Remaining miss:
+  - `019e73ee...seq_000002`
+  - actual: `environment_or_preference_signal`
+  - predicted: `none`
+  - cause: the blind set contains near-identical AX AGENTS.md context dumps
+    with different reviewed labels, so a text-only deterministic gate cannot
+    separate them cleanly.
+- Guarded post-review runner E151:
+  - workspace stage: `ready_for_roundtrip`
+  - blind roundtrip: `candidate_blind_gate_stack`
+  - hard-negative export: `ready_to_append_fixtures`
+  - fixture append: `ready_to_write_combined_fixtures`
+  - accepted hard negatives: `7`
+  - combined fixture rows: `119`
+  - runner decision: `ready_for_next_model_run`
+- Tests:
+  - focused gate tests: `18` passed
+  - full session-section Python regression tests: `216` passed
+  - full focused manifest/service/package-operation tests: `79` passed
+  - typecheck passed with existing Effect lint messages
+  - table coverage passed
+
+Decision:
+
+- E150 recovers the reviewed blind gate stack and closes the immediate
+  post-review quality blocker.
+- This does not finish the broader SetFit objective by itself. The next
+  experiment should run the next model/eval pass using the combined `119` rows
+  and the recovered gates, then decide whether the heavier model layer adds
+  value beyond deterministic gates.
+
+## E152 - Combined Fixture Model Pass With Recovered Gates
+
+Question:
+
+- Does the reviewed `119`-row combined fixture set improve the heavier
+  two-stage SetFit path, and do the recovered gates still hold under repeated
+  strict `pair_group` splits?
+
+Dataset:
+
+- Source: `.ax/experiments/chunks-e58-with-accepted-hard-negatives.jsonl`
+- Rows: `119`
+- Fine labels:
+  - `approval`: `16`
+  - `correction`: `10`
+  - `direction`: `10`
+  - `none`: `33`
+  - `recovery_action`: `12`
+  - `rejection`: `12`
+  - `tooling_or_environment_issue`: `14`
+  - `verification_request`: `12`
+- Coarse labels:
+  - `approval`: `16`
+  - `correction_or_rejection_signal`: `22`
+  - `environment_or_preference_signal`: `24`
+  - `none`: `33`
+  - `verification_or_recovery_signal`: `24`
+
+Commands:
+
+```sh
+bun run classifiers:split-audit -- --fixtures=.ax/experiments/chunks-e58-with-accepted-hard-negatives.jsonl --group-field=pair_group --pair-field=pair_group --label-mode=coarse --seeds=7,13,42 --out=.ax/experiments/session-section-split-audit-e152-combined119-pair-groups.json --json
+bun run classifiers:setfit-two-stage -- --fixtures=.ax/experiments/chunks-e58-with-accepted-hard-negatives.jsonl --group-field=pair_group --label-mode=coarse --seeds=7,13,42 --epochs=1 --batch-size=8 --out=.ax/experiments/setfit-two-stage-e152-combined119-pair-group-repeated.json --json
+bun run classifiers:gate-stack-robustness -- --two-stage=.ax/experiments/setfit-two-stage-e152-combined119-pair-group-repeated.json --fixtures=.ax/experiments/chunks-e58-with-accepted-hard-negatives.jsonl --out=.ax/experiments/setfit-gate-stack-robustness-e152-combined119-pair-group-repeated.json --json
+```
+
+Split audit results:
+
+- Pair groups: `72`
+- Viable pair-group splits: `3 / 3`
+- Each seed:
+  - train/test rows: `80 / 39`
+  - train/test pair-group overlap: `[]`
+  - all coarse labels present in train and test
+
+Raw two-stage SetFit results:
+
+- Source report:
+  `.ax/experiments/setfit-two-stage-e152-combined119-pair-group-repeated.json`
+- Decision: `needs_model_quality_work`
+- Seeds: `7`, `13`, `42`
+- Epochs: `1`
+- Train seconds total: `319.61`
+- Macro F1 mean/min/max: `0.5682 / 0.55 / 0.5776`
+- Accuracy mean: `0.5385`
+- `none` false-positive mean/max: `0.6889 / 0.7333`
+- Per-seed:
+  - seed `7`: macro F1 `0.55`, accuracy `0.5128`, `none` FP `0.7333`
+  - seed `13`: macro F1 `0.5776`, accuracy `0.5385`, `none` FP `0.6667`
+  - seed `42`: macro F1 `0.5771`, accuracy `0.5641`, `none` FP `0.6667`
+
+Recovered gate-stack results:
+
+- Source report:
+  `.ax/experiments/setfit-gate-stack-robustness-e152-combined119-pair-group-repeated.json`
+- Decision: `candidate_robust_gate_stack`
+- Macro F1 mean/min/max: `0.9677 / 0.9338 / 1.0`
+- Accuracy mean: `0.9744`
+- `none` false-positive mean/max: `0.0 / 0.0`
+- Remaining misses total/max per run: `3 / 2`
+- Per-seed:
+  - seed `7`: macro F1 `0.9338`, accuracy `0.9487`, misses `2`
+  - seed `13`: macro F1 `0.9692`, accuracy `0.9744`, misses `1`
+  - seed `42`: macro F1 `1.0`, accuracy `1.0`, misses `0`
+- Remaining miss pairs:
+  - `verification_or_recovery_signal -> environment_or_preference_signal`
+    on `verification-benchmark` in seeds `7` and `13`
+  - `approval -> environment_or_preference_signal` on `approval-good-next`
+    in seed `7`
+
+Decision:
+
+- The heavier model layer still should not run as an ungated standalone
+  classifier. Adding reviewed hard negatives did not fix the binary `none`
+  boundary; raw two-stage SetFit still leaks ordinary/context rows into
+  positive classes at an unsafe rate.
+- The reviewed deterministic gate stack is now the useful part of the hybrid:
+  it converts a failing raw model run into a repeated strict-split candidate
+  with zero `none` false positives and macro F1 well above the `0.75` target.
+- Recommendation remains `revise`, not default adoption:
+  - keep deterministic classifiers as the production default
+  - keep SetFit behind evidence/context gates and reviewed deterministic
+    overrides
+  - do not persist model-only graph facts without evidence refs and review
+    gates
+- Next useful slice:
+  - run graph/lifecycle usefulness against the E152 gated output, or
+  - add a small failure audit for the remaining `verification-benchmark` and
+    `approval-good-next` boundary misses before considering runtime wiring.
+
+### E153 - Gate-stack graph usefulness smoke over E152 output
+
+Question:
+
+- If the E152 recovered gate stack is used as the model-assisted classifier,
+  does its output produce graph-useful candidate groups without turning `none`
+  or accepted hard-negative rows into noisy facts?
+
+New helper:
+
+- `packages/ax-classifier-session-sections/gate_stack_usefulness.py`
+- `packages/ax-classifier-session-sections/gate_stack_usefulness_test.py`
+- `bun run classifiers:gate-stack-usefulness`
+
+Command:
+
+```sh
+bun run classifiers:gate-stack-usefulness -- --gate-stack=.ax/experiments/setfit-gate-stack-robustness-e152-combined119-pair-group-repeated.json --fixtures=.ax/experiments/chunks-e58-with-accepted-hard-negatives.jsonl --out=.ax/experiments/setfit-gate-stack-usefulness-e153-combined119.json --json
+```
+
+Artifact:
+
+- `.ax/experiments/setfit-gate-stack-usefulness-e153-combined119.json`
+
+Results:
+
+- Decision: `candidate_graph_usefulness`
+- Runs: `3`
+- Positive predictions mean/min: `24 / 24`
+- Candidate groups mean/min: `4 / 4`
+- Fixture evidence coverage mean/min: `1.0 / 1.0`
+- Graph noise from actual `none` rows: `0`
+- Accepted hard-negative misses: `0`
+- Missed signal rows: `0`
+- Wrong-family positives total: `3`
+  - seed `7`: `2`
+  - seed `13`: `1`
+  - seed `42`: `0`
+
+Candidate group mapping:
+
+- `approval` -> `section_candidate:approval_checkpoint`,
+  action `record_approval_checkpoint`
+- `correction_or_rejection_signal` -> `section_candidate:correction_loop`,
+  action `add_context_guardrail`
+- `environment_or_preference_signal` ->
+  `section_candidate:preference_discovery`,
+  action `record_guidance_or_environment_preference`
+- `verification_or_recovery_signal` ->
+  `section_candidate:verification_loop`,
+  action `add_verification_gate`
+
+Decision:
+
+- E153 supports the E152 gated stack as a graph-readiness candidate: it creates
+  four fixture-backed candidate groups in every strict split and does not
+  create positive graph candidates from `none` or accepted hard-negative rows.
+- This is still a smoke test, not production promotion. The evidence is fixture
+  text, not persisted graph evidence refs. The next implementation slice should
+  persist classifier outputs as reviewable facts/evidence edges, then query them
+  through the graph to prove they help workflow discovery.
+
+Verification:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/gate_stack_usefulness_test.py
+python3 -m json.tool .ax/experiments/setfit-gate-stack-usefulness-e153-combined119.json >/dev/null
+python3 -m unittest packages/ax-classifier-session-sections/gate_stack_usefulness_test.py packages/ax-classifier-session-sections/gate_stack_robustness_test.py packages/ax-classifier-session-sections/family_gate_test.py
+```
+
+All passed.
+
+### E154 - Persistable candidate graph projection for E153 output
+
+Question:
+
+- Can the E153 gated classifier candidates become concrete graph facts and
+  evidence edges that are queryable through the existing classifier graph
+  tables?
+
+New helper:
+
+- `packages/ax-classifier-session-sections/candidate_graph_projection.py`
+- `packages/ax-classifier-session-sections/candidate_graph_projection_test.py`
+- `bun run classifiers:candidate-graph-projection`
+- Package operation:
+  `packages/ax-classifier-session-sections/ax.classifier.json`
+  `candidate-graph-projection`
+
+Command:
+
+```sh
+bun run classifiers:candidate-graph-projection -- --usefulness=.ax/experiments/setfit-gate-stack-usefulness-e153-combined119.json --out=.ax/experiments/setfit-candidate-graph-projection-e154-combined119.json --write-plan=.ax/experiments/setfit-candidate-graph-write-plan-e154-combined119.json
+```
+
+Artifacts:
+
+- `.ax/experiments/setfit-candidate-graph-projection-e154-combined119.json`
+- `.ax/experiments/setfit-candidate-graph-write-plan-e154-combined119.json`
+
+Projection results:
+
+- Decision: `candidate_graph_projection_ready`
+- Health decision: `healthy`
+- Nodes: `45`
+- Edges: `63`
+- Facts: `48`
+- Candidate group facts: `12`
+- Candidate evidence facts: `36`
+- Fixture evidence edges: `36`
+- Groups without evidence: `[]`
+- Groups without action: `[]`
+
+Write plan results:
+
+- Decision: `ready_to_apply`
+- Statements: `156`
+- Node statements: `45`
+- Edge statements: `63`
+- Fact statements: `48`
+- Target tables:
+  - `classifier_graph_node`
+  - `classifier_graph_edge`
+  - `classifier_graph_fact`
+
+Local DB apply/query smoke:
+
+```sh
+python3 - <<'PY' | surreal sql --endpoint http://127.0.0.1:8521 --user root --pass root --ns ax --db main
+import json
+p='.ax/experiments/setfit-candidate-graph-write-plan-e154-combined119.json'
+r=json.load(open(p))
+print('\n'.join(r['statements']))
+PY
+```
+
+Follow-up graph counts:
+
+```sql
+SELECT count() AS count FROM classifier_graph_node
+WHERE source_kind = "classifier_candidate_projection" GROUP ALL;
+SELECT count() AS count FROM classifier_graph_edge
+WHERE source_kind = "classifier_candidate_projection" GROUP ALL;
+SELECT count() AS count FROM classifier_graph_fact
+WHERE source_kind = "classifier_candidate_projection" GROUP ALL;
+```
+
+Returned:
+
+- Nodes: `45`
+- Edges: `63`
+- Facts: `48`
+
+Candidate query:
+
+```sql
+SELECT graph_id, label, properties_json
+FROM classifier_graph_node
+WHERE source_kind = "classifier_candidate_projection"
+  AND kind = "classifier_candidate_group"
+ORDER BY graph_id;
+
+SELECT graph_id, subject, object, properties_json
+FROM classifier_graph_fact
+WHERE source_kind = "classifier_candidate_projection"
+  AND kind = "classifier_candidate_group"
+ORDER BY graph_id;
+```
+
+Returned `12` candidate group nodes and `12` candidate group facts:
+
+- `approval` -> `classifier_graph_action:record_approval_checkpoint`
+- `correction_or_rejection_signal` ->
+  `classifier_graph_action:add_context_guardrail`
+- `environment_or_preference_signal` ->
+  `classifier_graph_action:record_guidance_or_environment_preference`
+- `verification_or_recovery_signal` ->
+  `classifier_graph_action:add_verification_gate`
+
+Decision:
+
+- E154 closes the immediate gap from E153: candidate groups are now modeled as
+  graph nodes, `suggests_graph_action` facts, and `supported_by_fixture`
+  evidence edges, and those rows can be applied and queried through the
+  existing classifier graph tables.
+- This still does not complete production promotion. The evidence remains
+  fixture-derived. The next useful slice is to run the same projection shape
+  from real ingested turn/session evidence refs, then add a graph query that
+  discovers workflow candidates from persisted transcript-backed classifier
+  facts.
+
+Verification:
+
+```sh
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+All passed. `bun run typecheck` still emits existing Effect lint
+messages/warnings but exits `0`.
+
+## E197 - Hybrid Graph Usefulness Gate
+
+Question:
+
+- Does the E196 hybrid robustness pass also produce useful graph candidates,
+  or is it only a classifier metric improvement?
+
+Implementation:
+
+- Added `packages/ax-classifier-session-sections/hybrid_graph_usefulness.py`.
+- Added `packages/ax-classifier-session-sections/hybrid_graph_usefulness_test.py`.
+- Added `bun run classifiers:hybrid-graph-usefulness`.
+- Added package operation `workflow-fixture-hybrid-graph-usefulness`.
+- The report compares calibrated SetFit baseline examples from the robustness
+  artifact against hybrid-gated examples from the hybrid robustness artifact.
+- It uses the existing graph usefulness candidate grouping:
+  - `approval` -> `record_approval_checkpoint`
+  - `correction_or_rejection_signal` -> `add_context_guardrail`
+  - `environment_or_preference_signal` ->
+    `record_guidance_or_environment_preference`
+  - `verification_or_recovery_signal` -> `add_verification_gate`
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/hybrid_graph_usefulness_test.py
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-hybrid-graph-usefulness --execute --allow-expensive --out=.ax/experiments/classifier-package-execution-workflow-fixture-hybrid-graph-usefulness-e197.json
+```
+
+Artifacts:
+
+- `.ax/experiments/hybrid-graph-usefulness-workflow-fixtures-current.json`
+- `.ax/experiments/hybrid-graph-usefulness-workflow-fixtures-e197.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-hybrid-graph-usefulness-e197.json`
+
+Results:
+
+- Decision: `hybrid_graph_usefulness_ready`
+- Source hybrid robustness decision: `hybrid_robust_enough`
+- Runs: `3`
+- Baseline graph noise total: `3`
+- Hybrid graph noise total: `0`
+- Removed graph noise total: `3`
+- Introduced graph noise total: `0`
+- Hybrid candidate group count mean/min: `4 / 4`
+- Hybrid fixture evidence coverage mean/min: `1.0 / 1.0`
+- Failures: `[]`
+
+Decision:
+
+- E197 connects the E196 metric pass to graph usefulness. The hybrid gate not
+  only improves macro F1 and `none` false-positive rate; it also removes the
+  three fixture-backed false-positive graph candidates that raw calibrated
+  SetFit would have emitted.
+- This is still fixture-backed, not production promotion. The next production
+  slice should run the hybrid policy over transcript-backed exported windows,
+  project candidate facts with real turn/evidence refs, and compare the
+  resulting workflow-candidate query against deterministic-only candidates.
+
+## E198 - Transcript-Backed Hybrid Window Candidate Projection
+
+Question:
+
+- Can the hybrid model-only candidates from exported transcript windows become
+  graph-ready facts with real turn/tool/file evidence refs, instead of only
+  fixture evidence?
+
+Implementation:
+
+- Extended `packages/ax-classifier-session-sections/hybrid_gate.py` so the
+  hybrid gate report stores capped `model_only_candidates` rows with:
+  - model label and confidence
+  - SetFit run reason
+  - session/turn/seq/ts refs
+  - projected text excerpt
+  - transcript evidence refs
+- Added
+  `packages/ax-classifier-session-sections/hybrid_window_candidate_projection.py`.
+- Added
+  `packages/ax-classifier-session-sections/hybrid_window_candidate_projection_test.py`.
+- Added `bun run classifiers:hybrid-window-candidate-projection`.
+- Added package operation `hybrid-window-candidate-projection`.
+- The projection writes:
+  - `classifier_candidate_group` nodes
+  - `classifier_model_window_result` nodes
+  - `classifier_transcript_evidence` nodes
+  - `supported_by_model_window`, `cites_transcript_evidence`, and
+    `suggests_action` edges
+  - `classifier_candidate_group` and `classifier_candidate_evidence` facts
+  - a Surreal write plan for the shared classifier graph tables
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/hybrid_gate_test.py packages/ax-classifier-session-sections/hybrid_window_candidate_projection_test.py
+bun src/cli/index.ts classifiers package-operations --operation=hybrid-gate-eval --execute --allow-expensive --out=.ax/experiments/classifier-package-execution-hybrid-gate-e198.json
+bun src/cli/index.ts classifiers package-operations --operation=hybrid-window-candidate-projection --execute --out=.ax/experiments/classifier-package-execution-hybrid-window-candidate-projection-e198.json
+```
+
+Artifacts:
+
+- `.ax/experiments/hybrid-gate-e4.json`
+- `.ax/experiments/classifier-package-execution-hybrid-gate-e198.json`
+- `.ax/experiments/hybrid-window-candidate-graph-projection-current.json`
+- `.ax/experiments/hybrid-window-candidate-graph-projection-e198.json`
+- `.ax/experiments/hybrid-window-candidate-graph-write-plan-current.json`
+- `.ax/experiments/hybrid-window-candidate-graph-write-plan-e198.json`
+- `.ax/experiments/classifier-package-execution-hybrid-window-candidate-projection-e198.json`
+
+Hybrid gate source metrics:
+
+- Windows: `1000`
+- Deterministic positives: `229`
+- SetFit sent: `341`
+- SetFit run rate: `0.341`
+- Model-only positives: `92`
+- Model-only evidence coverage: `1.0`
+- Useful new fact rate: `0.4017`
+- Failures: `[]`
+
+Projection results:
+
+- Decision: `hybrid_window_candidate_graph_projection_ready`
+- Health decision: `healthy`
+- Candidate groups: `3`
+- Model-window support edges: `92`
+- Transcript evidence edges: `509`
+- Candidate evidence facts: `92`
+- Nodes: `404`
+- Edges: `607`
+- Facts: `95`
+- Groups without results: `[]`
+- Groups without actions: `[]`
+- Results without evidence: `[]`
+- Failures: `[]`
+
+Decision:
+
+- E198 closes the next production-shaped gap after E197: hybrid model-only
+  candidates from real exported windows can now be represented as graph facts
+  with real transcript evidence refs.
+- This still should not auto-apply the write plan by default. The next useful
+  gate is to apply or dry-run these facts in a dedicated source kind, then run
+  the workflow-candidate report with filters comparing
+  `hybrid_window_classifier_projection` against deterministic
+  `transcript_classifier_projection`.
+
+## E199 - Hybrid Graph Apply And Workflow Candidate Comparison
+
+Question:
+
+- After E198 creates graph-ready hybrid candidate facts, can those facts be
+  applied to the local graph and queried through the same workflow-candidate
+  report path as deterministic transcript-backed facts?
+
+Implementation:
+
+- Added `packages/ax-classifier-session-sections/graph_write_plan_apply.py`.
+- Added `packages/ax-classifier-session-sections/graph_write_plan_apply_test.py`.
+- Added `bun run classifiers:graph-write-plan-apply`.
+- Added package operation `hybrid-window-candidate-apply`.
+- The first apply attempt exposed a real performance issue: one Surreal CLI
+  process per statement was too slow. The helper was changed to submit the
+  write plan as one Surreal `--multi` batch. The statements are UPSERTs, so
+  rerunning after the interrupted attempt was idempotent.
+- Added `packages/ax-classifier-session-sections/workflow_candidate_compare.py`.
+- Added `packages/ax-classifier-session-sections/workflow_candidate_compare_test.py`.
+- Added `bun run classifiers:workflow-candidate-compare`.
+- Added package operations:
+  - `hybrid-window-workflow-candidate-report`
+  - `workflow-candidate-source-compare`
+- Updated `workflow_candidate_report.py` so examples can display either
+  `result_id` or `window_id`, which lets the same report handle deterministic
+  transcript classifier facts and hybrid model-window facts.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/graph_write_plan_apply_test.py packages/ax-classifier-session-sections/workflow_candidate_compare_test.py
+bun src/cli/index.ts classifiers package-operations --operation=hybrid-window-candidate-apply --execute --allow-expensive --out=.ax/experiments/classifier-package-execution-hybrid-window-candidate-apply-e199.json
+bun src/cli/index.ts classifiers package-operations --operation=hybrid-window-workflow-candidate-report --execute --out=.ax/experiments/classifier-package-execution-hybrid-window-workflow-candidate-report-e199.json
+bun src/cli/index.ts classifiers package-operations --operation=workflow-candidate-source-compare --execute --out=.ax/experiments/classifier-package-execution-workflow-candidate-source-compare-e199.json
+```
+
+Artifacts:
+
+- `.ax/experiments/hybrid-window-candidate-graph-apply-current.json`
+- `.ax/experiments/hybrid-window-candidate-graph-apply-e199.json`
+- `.ax/experiments/classifier-package-execution-hybrid-window-candidate-apply-e199.json`
+- `.ax/experiments/workflow-candidate-report-hybrid-window-current.json`
+- `.ax/experiments/workflow-candidate-report-hybrid-window-e199.json`
+- `.ax/experiments/classifier-package-execution-hybrid-window-workflow-candidate-report-e199.json`
+- `.ax/experiments/workflow-candidate-compare-current.json`
+- `.ax/experiments/workflow-candidate-compare-e199.json`
+- `.ax/experiments/classifier-package-execution-workflow-candidate-source-compare-e199.json`
+
+Apply results:
+
+- Decision: `applied`
+- Statements attempted/applied/failed: `1106 / 1106 / 0`
+- Package operation execution decision: `executed`
+- Duration after batching: `1257ms`
+
+Hybrid workflow-candidate report:
+
+- Decision: `workflow_candidates_ranked`
+- Source kind: `hybrid_window_classifier_projection`
+- Candidate groups: `3`
+- Returned candidates: `3`
+- Evidence facts: `92`
+- Candidates with evidence: `3`
+- Wrapper-like evidence: `0`
+- Task-like evidence: `1`
+- Labels:
+  - `environment_or_preference_signal`
+  - `verification_or_recovery_signal`
+  - `correction_or_rejection_signal`
+
+Comparison to deterministic transcript projection:
+
+- Decision: `workflow_candidate_sources_compared`
+- Baseline source: `transcript_classifier_projection`
+- Baseline candidate groups/evidence facts: `15 / 250`
+- Hybrid candidate groups/evidence facts: `3 / 92`
+- Baseline wrapper-like/task-like evidence: `0 / 58`
+- Hybrid wrapper-like/task-like evidence: `0 / 1`
+- Shared proposed actions:
+  - `add_context_guardrail`
+  - `add_verification_gate`
+  - `record_guidance_or_environment_preference`
+- Label comparison caveat: deterministic transcript projection uses
+  classifier/label/target labels such as
+  `verification-event:verification_request:test_required`, while the hybrid
+  projection uses coarse model labels such as
+  `verification_or_recovery_signal`. The useful comparison is currently at the
+  action and evidence-quality level, not exact label equality.
+- Failures: `[]`
+
+Decision:
+
+- E199 proves the hybrid source can now move through the same graph path as
+  deterministic classifier facts: project, write plan, apply, query, and compare.
+- The hybrid source is not a replacement for deterministic transcript facts.
+  It is a complementary, coarser source with fewer groups, substantial evidence,
+  and much less delegated-task noise. That makes it useful for discovering
+  broader workflow patterns, while deterministic transcript facts remain better
+  for detailed target-specific drilldown.
+- Next useful slice: add a combined workflow candidate report that can merge
+  source kinds by proposed action and keep per-source support/evidence columns,
+  instead of comparing two independent reports after the fact.
+
+## E200 - Combined Workflow Candidate Source Report
+
+Question:
+
+- Can deterministic transcript-backed and hybrid window-backed workflow
+  candidates be viewed as one action-oriented report without losing per-source
+  evidence and noise differences?
+
+Implementation:
+
+- Added `packages/ax-classifier-session-sections/workflow_candidate_combined.py`.
+- Added
+  `packages/ax-classifier-session-sections/workflow_candidate_combined_test.py`.
+- Added `bun run classifiers:workflow-candidate-combined`.
+- Added package operation `workflow-candidate-combined-report`.
+- The report reads two existing workflow-candidate reports and groups by
+  `proposed_action`, preserving per-source:
+  - support count
+  - evidence fact count
+  - task-like count
+  - wrapper-like count
+  - labels and top candidates
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/workflow_candidate_combined_test.py
+bun src/cli/index.ts classifiers package-operations --operation=workflow-candidate-combined-report --execute --out=.ax/experiments/classifier-package-execution-workflow-candidate-combined-report-e200.json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-combined-current.json`
+- `.ax/experiments/workflow-candidate-combined-e200.json`
+- `.ax/experiments/classifier-package-execution-workflow-candidate-combined-report-e200.json`
+
+Results:
+
+- Decision: `workflow_candidate_sources_combined`
+- Action count: `4`
+- Shared action count: `3`
+- Shared actions:
+  - `add_verification_gate`
+  - `record_guidance_or_environment_preference`
+  - `add_context_guardrail`
+- Total evidence facts: `331`
+- Total task-like count: `58`
+- Action totals:
+  - `add_verification_gate`: support/evidence `200 / 200`,
+    task-like `56`, present in deterministic + hybrid sources
+  - `record_guidance_or_environment_preference`: support/evidence `61 / 61`,
+    task-like `1`, present in deterministic + hybrid sources
+  - `add_context_guardrail`: support/evidence `35 / 35`, task-like `1`,
+    present in deterministic + hybrid sources
+  - `record_approval_checkpoint`: support/evidence `35 / 35`,
+    task-like `0`, deterministic source only
+
+Decision:
+
+- E200 makes the source comparison operationally useful. Instead of asking
+  whether deterministic and hybrid labels match exactly, AX can now compare
+  their contribution at the graph-action level while keeping per-source
+  evidence quality visible.
+- This supports the intended architecture: deterministic classifiers remain
+  high-detail, target-specific evidence; hybrid SetFit adds coarser,
+  lower-task-noise evidence for the same workflow actions.
+- Next useful slice: use this combined report to drive a reviewed harness or
+  guidance proposal pack, so classifier-derived graph facts answer "what should
+  the agent change?" rather than only "what did the classifiers find?"
+
+## E201 - Workflow Candidate Proposal Pack
+
+Question:
+
+- Can the combined deterministic+hybrid workflow-candidate report produce a
+  reviewable proposal pack for guidance or harness changes?
+
+Implementation:
+
+- Added
+  `packages/ax-classifier-session-sections/workflow_candidate_proposal_pack.py`.
+- Added
+  `packages/ax-classifier-session-sections/workflow_candidate_proposal_pack_test.py`.
+- Added `bun run classifiers:workflow-candidate-proposal-pack`.
+- Added package operation `workflow-candidate-proposal-pack`.
+- The operation reads `.ax/experiments/workflow-candidate-combined-current.json`
+  and emits:
+  - a JSON proposal-pack report
+  - Markdown review briefs under `.ax/tasks/workflow-candidate-proposals/`
+- The pack is review-only. It does not apply guidance or harness changes.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/workflow_candidate_proposal_pack_test.py
+bun src/cli/index.ts classifiers package-operations --operation=workflow-candidate-proposal-pack --execute --out=.ax/experiments/classifier-package-execution-workflow-candidate-proposal-pack-e201.json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-proposal-pack-current.json`
+- `.ax/experiments/workflow-candidate-proposal-pack-e201.json`
+- `.ax/experiments/classifier-package-execution-workflow-candidate-proposal-pack-e201.json`
+- `.ax/tasks/workflow-candidate-proposals/01-add-verification-gate.md`
+- `.ax/tasks/workflow-candidate-proposals/02-record-guidance-or-environment-preference.md`
+- `.ax/tasks/workflow-candidate-proposals/03-record-approval-checkpoint.md`
+- `.ax/tasks/workflow-candidate-proposals/04-add-context-guardrail.md`
+
+Results:
+
+- Decision: `workflow_candidate_proposal_pack_ready`
+- Proposal count: `4`
+- Recommended artifacts:
+  - harness: `1`
+  - guidance: `3`
+  - review: `0`
+- Proposal briefs:
+  - `01-add-verification-gate.md`
+  - `02-record-guidance-or-environment-preference.md`
+  - `03-record-approval-checkpoint.md`
+  - `04-add-context-guardrail.md`
+
+Decision:
+
+- E201 moves classifier-derived graph facts from "ranked signals" to
+  reviewable change proposals. This is still intentionally gated by human
+  review: the output tells us what kind of durable change might be justified,
+  while preserving source support/evidence and requiring reviewer verdicts
+  before anything is applied.
+- Next useful slice: add an evaluator for proposal briefs that blocks promotion
+  until each brief has verdict, rationale, proposed change, and target filled.
+
+## E202 - Proposal Brief Review Gate
+
+Question:
+
+- Can generated workflow-candidate proposal briefs be evaluated as a promotion
+  gate, so pending or incomplete reviewer decisions cannot be applied?
+
+Implementation:
+
+- Added
+  `packages/ax-classifier-session-sections/workflow_candidate_proposal_review.py`.
+- Added
+  `packages/ax-classifier-session-sections/workflow_candidate_proposal_review_test.py`.
+- Added `bun run classifiers:workflow-candidate-proposal-review`.
+- Added package operation `workflow-candidate-proposal-review`.
+- Updated package docs and manifest/service tests for the new operation.
+- The evaluator parses each generated Markdown proposal brief and requires:
+  - verdict
+  - rationale
+  - proposed change
+  - target file/skill/harness
+- Valid verdicts normalize to `accept`, `revise`, or `reject`.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/workflow_candidate_proposal_review_test.py
+bun src/cli/index.ts classifiers package-operations --operation=workflow-candidate-proposal-review --execute --out=.ax/experiments/classifier-package-execution-workflow-candidate-proposal-review-e202.json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-proposal-review-current.json`
+- `.ax/experiments/workflow-candidate-proposal-review-e202.json`
+- `.ax/experiments/classifier-package-execution-workflow-candidate-proposal-review-e202.json`
+
+Results:
+
+- Execution decision: `executed`
+- Execution exit code: `0`
+- Review decision: `needs_workflow_candidate_proposal_review`
+- Proposal count: `4`
+- Ready proposals: `0`
+- Pending proposals: `4`
+- Invalid proposals: `0`
+- Missing reviewer fields: `16`
+
+Decision:
+
+- E202 adds the missing safety gate after E201. The current generated proposal
+  pack is correctly blocked because the briefs still contain pending reviewer
+  fields.
+- This means classifier-derived graph facts can suggest guidance/harness
+  changes, but promotion remains explicitly review-gated.
+- Next useful slice: add a promotion/apply path that reads only
+  `workflow_candidate_proposal_reviews_ready` reports and produces either
+  guidance proposals or harness task drafts from accepted/revised briefs.
+
+## E196 - First-Class Hybrid Robustness Gate
+
+Question:
+
+- Can the E195 hybrid result become a first-class package eval that uses the
+  same robustness failure contract as raw SetFit, instead of remaining a side
+  report?
+
+Implementation:
+
+- Added `packages/ax-classifier-session-sections/hybrid_robustness.py`.
+- Added `packages/ax-classifier-session-sections/hybrid_robustness_test.py`.
+- Added `bun run classifiers:hybrid-robustness`.
+- Added package operation `workflow-fixture-hybrid-robustness`.
+- The report:
+  - reads the saved SetFit robustness report
+  - uses calibrated SetFit examples when available
+  - applies the deterministic text-projection none-safety gate
+  - computes macro F1, min macro F1, accuracy, and `none` false-positive rate
+  - applies `robustness.failure_reasons`
+  - rejects harmful overrides even if metrics pass
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/hybrid_robustness_test.py
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-hybrid-robustness --execute --allow-expensive --out=.ax/experiments/classifier-package-execution-workflow-fixture-hybrid-robustness-e196.json
+```
+
+Artifacts:
+
+- `.ax/experiments/hybrid-robustness-workflow-fixtures-current.json`
+- `.ax/experiments/hybrid-robustness-workflow-fixtures-e196.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-hybrid-robustness-e196.json`
+
+Results:
+
+- Decision: `hybrid_robust_enough`
+- Failures: `[]`
+- Baseline calibrated SetFit summary:
+  - macro F1 mean/min/max: `0.7593 / 0.6877 / 0.8408`
+  - accuracy mean: `0.7477`
+  - `none` false-positive mean/max: `0.1429 / 0.2857`
+- Hybrid summary:
+  - macro F1 mean/min/max: `0.7824 / 0.7365 / 0.8408`
+  - accuracy mean: `0.7748`
+  - `none` false-positive mean/max: `0.0 / 0.0`
+- Overrides: `3`
+- Fixed `none` false positives: `3`
+- Harmful overrides: `0`
+- Override reasons:
+  - `already_executing_continue`: `2`
+  - `completed_workflow_next_question`: `1`
+
+Decision:
+
+- The workflow fixture package now has a first-class hybrid robustness gate
+  that passes the current metric contract.
+- This does not promote the model to production ingest yet. It proves the local
+  package-level eval gate can represent the intended architecture: deterministic
+  high-precision safety gates plus model predictions, scored together.
+- Next useful slice: connect this hybrid gate to graph-usefulness evaluation so
+  the pass condition is not only classifier metrics but also evidence-backed
+  candidate quality.
+
+## E195 - Boundary Contrast SetFit Robustness Rerun
+
+Question:
+
+- Did the E194 boundary contrast fixture pack improve SetFit robustness against
+  the E193 approval/correction/verification boundary failures?
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-setfit-robustness --execute --allow-expensive --out=.ax/experiments/classifier-package-execution-workflow-fixture-setfit-robustness-e195.json
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-none-safety-pregate --execute --out=.ax/experiments/classifier-package-execution-none-safety-pregate-e195.json
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-failure-analysis --execute --out=.ax/experiments/classifier-package-execution-workflow-fixture-failure-analysis-e195.json
+```
+
+Artifacts:
+
+- `.ax/experiments/setfit-robustness-workflow-fixtures-e195.json`
+- `.ax/experiments/none-safety-pregate-workflow-fixtures-e195.json`
+- `.ax/experiments/setfit-failure-analysis-workflow-fixtures-e195.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-setfit-robustness-e195.json`
+- `.ax/experiments/classifier-package-execution-none-safety-pregate-e195.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-failure-analysis-e195.json`
+
+Dataset:
+
+- Workflow metadata rows: `125`
+- Coarse labels:
+  - `approval`: `20`
+  - `correction_or_rejection_signal`: `26`
+  - `environment_or_preference_signal`: `25`
+  - `none`: `25`
+  - `verification_or_recovery_signal`: `29`
+- Group field: `pair_group`
+- Seeds: `7,13,42`
+- Epochs: `1`
+- Batch size: `8`
+- Calibration threshold: `0.4`
+
+SetFit robustness results:
+
+- Decision: `needs_model_quality_work`
+- Raw macro F1 mean/min/max: `0.752 / 0.6877 / 0.8188`
+- Raw accuracy mean: `0.7387`
+- Raw `none` false-positive mean/max: `0.1799 / 0.2857`
+- Calibrated macro F1 mean/min/max: `0.7593 / 0.6877 / 0.8408`
+- Calibrated accuracy mean: `0.7477`
+- Calibrated `none` false-positive mean/max: `0.1429 / 0.2857`
+- Train seconds total: `274.61`
+- Remaining failures:
+  - minimum macro F1 is below `0.70`
+  - worst `none` false-positive rate is not below `10%`
+
+Comparison to E193:
+
+- Calibrated macro F1 mean improved from `0.6247` to `0.7593`.
+- Calibrated macro F1 min improved from `0.5904` to `0.6877`.
+- Calibrated accuracy mean improved from `0.6523` to `0.7477`.
+- Calibrated `none` false-positive max improved from `0.3636` to `0.2857`,
+  but still fails the `< 0.10` gate.
+
+Narrowed none-safety pre-gate replay on the same SetFit predictions:
+
+- Decision: `candidate_none_safety_pregate`
+- Before gate:
+  - macro F1 mean/min/max: `0.7593 / 0.6877 / 0.8408`
+  - accuracy mean: `0.7477`
+  - `none` false-positive mean/max: `0.1429 / 0.2857`
+- After gate:
+  - macro F1 mean/min/max: `0.7824 / 0.7365 / 0.8408`
+  - accuracy mean: `0.7748`
+  - `none` false-positive mean/max: `0.0 / 0.0`
+- Overrides: `3`
+- Fixed `none` false positives: `3`
+- Harmful overrides: `0`
+- Override reasons:
+  - `already_executing_continue`: `2`
+  - `completed_workflow_next_question`: `1`
+
+Failure analysis:
+
+- Decision: `needs_none_safety_review`
+- Worst seed: `42`
+- All-seed calibrated family counts:
+  - `approval_boundary`: `6`
+  - `label_boundary`: `15`
+  - `missed_signal`: `4`
+  - `none_false_positive`: `3`
+- Unique repeated `none` false-positive rows: `2`
+- Top remaining `none` false positives:
+  - `none-continue`: `2` seeds, predicted
+    `verification_or_recovery_signal`
+  - `none-whats-next-after-complete`: `1` seed, predicted `approval`
+- High-confidence remaining misses are now mostly:
+  - `verification-benchmark` missed to `none`
+  - workflow-state corrections predicted as verification/recovery
+  - approval continue/checkpoint examples predicted as verification/recovery
+
+Decision:
+
+- E194 worked. Boundary contrast data moved the model from clearly failing
+  (`0.6247` calibrated macro F1 mean in E193) to near-passing
+  (`0.7593` calibrated macro F1 mean in E195).
+- The raw model still fails on weakest-split robustness and `none` FP max, but
+  the deterministic none-safety gate now clears both of those gates in fixture
+  replay: macro F1 min `0.7365`, mean `0.7824`, and `none` FP max `0.0`.
+- The next useful slice is to formalize this as a hybrid evaluation gate:
+  SetFit calibrated predictions plus deterministic none-safety pre-gate should
+  be evaluated by the same `failure_reasons` contract and compared directly
+  against the raw model, rather than treated as a side report.
+
+## E194 - Boundary Contrast Fixture Pack
+
+Question:
+
+- Can we address the E193 failure mode by adding targeted boundary examples,
+  before spending another SetFit robustness run?
+
+Implementation:
+
+- Added 12 canonical chunk fixtures to
+  `packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl`.
+- The new rows target the exact E193 confusion families:
+  - approval-vs-verification/recovery continuation boundaries
+  - correction-vs-verification workflow-state boundaries
+  - verification benchmark/regression requests that must not abstain to `none`
+- Added examples:
+  - `approval-continue-after-checkpoint`
+  - `approval-go-after-plan`
+  - `approval-next-after-results`
+  - `approval-keep-going-after-summary`
+  - `correction-uncommitted-after-claim`
+  - `correction-you-skipped-status-check`
+  - `correction-dirty-after-commit`
+  - `correction-failed-command-was-ignored`
+  - `verification-define-target-metrics`
+  - `verification-compare-before-after`
+  - `verification-add-regression-guard`
+  - `verification-show-harmful-overrides`
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-append --execute --out=.ax/experiments/classifier-package-execution-workflow-fixture-append-e194.json
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-metadata --execute --out=.ax/experiments/classifier-package-execution-workflow-fixture-metadata-e194.json
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-split-audit --execute --allow-expensive --out=.ax/experiments/classifier-package-execution-workflow-fixture-split-audit-e194.json
+```
+
+Artifacts:
+
+- `.ax/experiments/chunks-with-workflow-fixtures-e194.jsonl`
+- `.ax/experiments/chunks-with-workflow-fixture-metadata-e194.jsonl`
+- `.ax/experiments/workflow-fixture-split-audit-e194.json`
+- `.ax/experiments/fixture-append-workflow-e194-report.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-append-e194.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-metadata-e194.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-split-audit-e194.json`
+
+Canonical fixture counts after adding the pack:
+
+- Rows: `124`
+- Fine labels:
+  - `none`: `25`
+  - `approval`: `20`
+  - `verification_request`: `17`
+  - `correction`: `14`
+  - `tooling_or_environment_issue`: `14`
+  - `recovery_action`: `12`
+  - `rejection`: `12`
+  - `direction`: `10`
+
+Workflow-augmented metadata after append:
+
+- Rows: `125`
+- Coarse labels:
+  - `approval`: `20`
+  - `correction_or_rejection_signal`: `26`
+  - `environment_or_preference_signal`: `25`
+  - `none`: `25`
+  - `verification_or_recovery_signal`: `29`
+- Group count: `72`
+- Pair-group count: `72`
+- Largest relevant groups:
+  - `approval_resume_work::approval`: `6`
+  - `workflow_state::correction`: `8`
+  - `benchmark_required::verification_request`: `4`
+
+Split audit:
+
+- seed `7`: `viable_split`, train `88`, test `37`, no group or pair-group overlap
+- seed `13`: `viable_split`, train `88`, test `37`, no group or pair-group overlap
+- seed `42`: `viable_split`, train `88`, test `37`, no group or pair-group overlap
+
+Decision:
+
+- The boundary data pack is ready for the next expensive SetFit robustness run.
+- This is intentionally not claimed as a model improvement yet. It only proves
+  the targeted examples are in the canonical fixture set and the workflow
+  grouped-split protocol remains viable after adding them.
+- Next: rerun `workflow-fixture-setfit-robustness` on the E194 metadata and
+  compare against E193.
+
+## E193 - Relabeled Workflow SetFit Robustness Rerun
+
+Question:
+
+- After E192 relabeled the eval-mechanism fixture from `none` to
+  `verification_request`, does SetFit robustness improve enough to pass the
+  workflow-augmented model-quality gate?
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-setfit-robustness --execute --allow-expensive --out=.ax/experiments/classifier-package-execution-workflow-fixture-setfit-robustness-e193.json
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-none-safety-pregate --execute --out=.ax/experiments/classifier-package-execution-none-safety-pregate-e193.json
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-failure-analysis --execute --out=.ax/experiments/classifier-package-execution-workflow-fixture-failure-analysis-e193.json
+```
+
+Artifacts:
+
+- `.ax/experiments/setfit-robustness-workflow-fixtures-e193.json`
+- `.ax/experiments/none-safety-pregate-workflow-fixtures-e193.json`
+- `.ax/experiments/setfit-failure-analysis-workflow-fixtures-e193.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-setfit-robustness-e193.json`
+- `.ax/experiments/classifier-package-execution-none-safety-pregate-e193.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-failure-analysis-e193.json`
+
+Dataset:
+
+- Workflow metadata rows: `113`
+- Coarse labels:
+  - `approval`: `16`
+  - `correction_or_rejection_signal`: `22`
+  - `environment_or_preference_signal`: `25`
+  - `none`: `25`
+  - `verification_or_recovery_signal`: `25`
+- Group field: `pair_group`
+- Seeds: `7,13,42`
+- Epochs: `1`
+- Batch size: `8`
+- Calibration threshold: `0.4`
+
+SetFit robustness results:
+
+- Decision: `needs_model_quality_work`
+- Raw macro F1 mean/min/max: `0.5984 / 0.5904 / 0.6044`
+- Raw accuracy mean: `0.6216`
+- Raw `none` false-positive mean/max: `0.355 / 0.4286`
+- Calibrated macro F1 mean/min/max: `0.6247 / 0.5904 / 0.6453`
+- Calibrated accuracy mean: `0.6523`
+- Calibrated `none` false-positive mean/max: `0.2467 / 0.3636`
+- Train seconds total: `221.25`
+- Failures:
+  - mean macro F1 is below `0.75`
+  - minimum macro F1 is below `0.70`
+  - worst `none` false-positive rate is not below `10%`
+
+Narrowed none-safety pre-gate replay on the same SetFit predictions:
+
+- Decision: `candidate_none_safety_pregate`
+- Before gate:
+  - macro F1 mean/min/max: `0.6247 / 0.5904 / 0.6453`
+  - accuracy mean: `0.6523`
+  - `none` false-positive mean/max: `0.2467 / 0.3636`
+- After gate:
+  - macro F1 mean/min/max: `0.6759 / 0.6614 / 0.6893`
+  - accuracy mean: `0.7235`
+  - `none` false-positive mean/max: `0.0 / 0.0`
+- Overrides: `7`
+- Fixed `none` false positives: `7`
+- Harmful overrides: `0`
+- Override reasons:
+  - `already_executing_continue`: `3`
+  - `completed_workflow_next_question`: `1`
+  - `context_recall_question`: `1`
+  - `model_artifact_question`: `2`
+
+Failure analysis:
+
+- Decision: `needs_none_safety_review`
+- All-seed calibrated family counts:
+  - `approval_boundary`: `9`
+  - `label_boundary`: `13`
+  - `missed_signal`: `5`
+  - `none_false_positive`: `7`
+- Unique repeated `none` false-positive rows: `4`
+- Top repeated `none` false positives:
+  - `none-continue`: `3` seeds, predicted
+    `verification_or_recovery_signal`
+  - `none-model-size-question`: `2` seeds, predicted
+    `environment_or_preference_signal`
+  - `none-task-recall`: `1` seed, predicted
+    `correction_or_rejection_signal`
+  - `none-whats-next-after-complete`: `1` seed, predicted `approval`
+- Worst seed: `42`
+- Worst-seed calibrated misses:
+  - `approval -> verification_or_recovery_signal`: `3`
+  - `correction_or_rejection_signal -> verification_or_recovery_signal`: `3`
+  - `verification_or_recovery_signal -> none`: `1`
+  - additional one-off label-boundary and `none` false-positive misses
+
+Decision:
+
+- The E192 relabel was semantically correct, but it did not improve SetFit
+  robustness. It made the direct model gate worse than E189
+  (`0.6247` calibrated macro F1 vs `0.6704` before).
+- The narrowed deterministic none-safety gate is still useful: it eliminates
+  `none` false positives with zero harmful overrides in this fixture replay,
+  but it cannot fix the broader model problem because approval/correction
+  boundaries are now the dominant misses.
+- Do not spend another run on threshold tuning alone. The next useful slice is
+  boundary data and label-shape work:
+  - add approval-vs-recovery contrast examples
+  - add correction-vs-verification workflow-state contrasts
+  - consider whether the coarse `verification_or_recovery_signal` family is too
+    broad for this model and should be split for training, then merged for graph
+    actions
+
+## E192 - Fresh Window Replay For None-Safety Gate
+
+Question:
+
+- Does the E191 `none` safety gate stay safe on fresh exported transcript
+  windows, outside the reviewed workflow fixture set?
+
+Implementation:
+
+- Added `packages/ax-classifier-session-sections/none_safety_window_replay.py`.
+- Added package operation:
+  `workflow-fixture-none-safety-window-replay`.
+- The replay reads exported model windows and applies the same text-projection
+  gate used by `none_safety_pregate.py`.
+- Because fresh windows are unlabeled, the report does not claim accuracy. It
+  reports:
+  - gate hit count and reason counts
+  - conflict count against deterministic `light_labels`
+  - conflict examples for review
+  - decision `candidate_none_safety_gate_holdout` only when gate hits have no
+    deterministic-label conflicts
+
+Important correction:
+
+- The first fresh replay found two conflicts for the
+  `classifier_eval_mechanism_question` gate reason. Both were real transcript
+  windows where the user was asking for eval/regression machinery:
+  - "Can we also have ... some sort of test mechanism ... for the trained
+    models ..."
+  - "Can you check some open source projects ... packages for evals ..."
+- Those are useful direction/verification signals, not safe `none`.
+- Removed `classifier_eval_mechanism_question` from the none-safety gate.
+- Relabeled canonical fixture
+  `session-section-chunks/none-evals-question` to
+  `session-section-chunks/verification-evals-question` with label
+  `verification_request` and target `regression_guard`.
+- Regenerated workflow-augmented fixture metadata and split audit. The grouped
+  split remains viable for seeds `7`, `13`, and `42`.
+
+Commands:
+
+```sh
+bun run classifiers:export-windows -- --days=7 --limit=1000 --out=.ax/experiments/model-windows-none-safety-current.jsonl --json
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-none-safety-window-replay --execute --out=.ax/experiments/classifier-package-execution-none-safety-window-replay-current.json
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-append --execute --out=.ax/experiments/classifier-package-execution-workflow-fixture-append-current.json
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-metadata --execute --out=.ax/experiments/classifier-package-execution-workflow-fixture-metadata-current.json
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-split-audit --execute --allow-expensive --out=.ax/experiments/classifier-package-execution-workflow-fixture-split-audit-current.json
+```
+
+Artifacts:
+
+- `.ax/experiments/model-windows-none-safety-current.jsonl`
+- `.ax/experiments/none-safety-window-replay-current.json`
+- `.ax/experiments/classifier-package-execution-none-safety-window-replay-current.json`
+- `.ax/experiments/chunks-with-workflow-fixture-metadata-current.jsonl`
+- `.ax/experiments/workflow-fixture-split-audit-current.json`
+
+Fresh export results:
+
+- Source turns: `89782`
+- Exported windows: `1000`
+- Labeled windows: `154`
+- Approx token p50/p95: `154 / 243`
+- Windows over 384 approximate tokens: `0`
+- Percent under 384 tokens: `100`
+- Percent with previous assistant evidence: `73.7`
+- Percent with tool/file evidence: `70`
+- Export failures: `[]`
+
+Window replay after removing the eval-mechanism gate reason:
+
+- Decision: `candidate_none_safety_gate_holdout`
+- Windows: `1000`
+- Gate hits: `18`
+- Gate hit rate: `0.018`
+- Potential deterministic-label conflicts: `0`
+- Potential conflict rate: `0.0`
+- Reason counts:
+  - `completed_workflow_next_question`: `7`
+  - `context_recall_question`: `2`
+  - `model_artifact_question`: `9`
+
+Fixture-set side effect:
+
+- Workflow metadata now has `113` rows:
+  - `approval`: `16`
+  - `correction_or_rejection_signal`: `22`
+  - `environment_or_preference_signal`: `25`
+  - `none`: `25`
+  - `verification_or_recovery_signal`: `25`
+- Split audit:
+  - seed `7`: `viable_split`, no group or pair-group overlap
+  - seed `13`: `viable_split`, no group or pair-group overlap
+  - seed `42`: `viable_split`, no group or pair-group overlap
+
+Decision:
+
+- E192 supersedes E191's broad eval-mechanism `none` gate. The correct action
+  is not to force that case into `none`; it should train as
+  `verification_request`.
+- The remaining candidate none-safety gate is narrower and passes a fresh
+  1,000-window replay with zero deterministic-label conflicts.
+- Next useful slice: rerun the expensive SetFit robustness on the relabeled
+  workflow metadata to see whether the model improves without the invalid
+  hard-negative fixture.
+
+Verification:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/none_safety_window_replay_test.py packages/ax-classifier-session-sections/none_safety_pregate_test.py packages/ax-classifier-session-sections/fixture_metadata_test.py
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts
+```
+
+All passed.
+
+## E191 - Workflow None-Safety Pre-Gate Replay
+
+Question:
+
+- Can we turn the repeated E190 `none` false positives into a deterministic
+  pre-gate that improves workflow fixture robustness before spending another
+  SetFit training run?
+
+Implementation:
+
+- Added `packages/ax-classifier-session-sections/none_safety_pregate.py`.
+- The gate uses only text-projection features, not actual labels.
+- It replays calibrated predictions from a saved SetFit robustness report and
+  overrides specific control/question patterns to `none`:
+  - context recall question
+  - already-executing continue
+  - completed workflow next-question
+  - classifier eval-mechanism question
+  - model artifact question
+  - classifier capacity question
+- Added `workflow-fixture-none-safety-pregate` as a package operation.
+- Added focused unit coverage and manifest/service/package-operation coverage.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/none_safety_pregate_test.py
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-none-safety-pregate --execute --out=.ax/experiments/classifier-package-execution-none-safety-pregate-current.json
+```
+
+Artifacts:
+
+- `.ax/experiments/none-safety-pregate-workflow-fixtures-current.json`
+- `.ax/experiments/classifier-package-execution-none-safety-pregate-current.json`
+
+Results:
+
+- Source report: `.ax/experiments/setfit-robustness-workflow-fixtures-current.json`
+- Before gate:
+  - macro F1 mean/min/max: `0.6704 / 0.6332 / 0.6905`
+  - accuracy mean: `0.6829`
+  - `none` false-positive mean/max: `0.3611 / 0.5`
+- After gate:
+  - macro F1 mean/min/max: `0.753 / 0.6888 / 0.7974`
+  - accuracy mean: `0.7894`
+  - `none` false-positive mean/max: `0.0 / 0.0`
+- Overrides: `11`
+- Fixed `none` false positives: `11`
+- Harmful overrides: `0`
+- Override reasons:
+  - `already_executing_continue`: `3`
+  - `classifier_eval_mechanism_question`: `3`
+  - `completed_workflow_next_question`: `1`
+  - `context_recall_question`: `1`
+  - `model_artifact_question`: `3`
+- Decision: `candidate_none_safety_pregate`
+
+Decision:
+
+- This is the first workflow-augmented run to clear the mean macro-F1 target
+  and eliminate the repeated `none` false positives, but the minimum macro F1
+  is still just under the robustness floor (`0.6888` vs target `>= 0.70`).
+- Adopt the gate as a candidate pre-model safety layer for the experiment path.
+  Do not promote it to production ingest until it is tested on fresh held-out
+  transcript windows, because the replay uses fixture text from the same
+  workflow-expanded experiment set.
+- Next: add a fresh holdout/window replay for the candidate gate, then rerun
+  SetFit only if the heldout does not introduce missed signals.
+
+Verification:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/none_safety_pregate_test.py
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts
+```
+
+All passed.
+
+## E190 - Workflow Fixture Failure Analysis For None Safety
+
+Question:
+
+- After E189 fails the workflow-augmented SetFit robustness gate, can the
+  package produce a targeted failure-analysis artifact that identifies repeated
+  `none` false positives across all grouped-split seeds?
+
+Implementation:
+
+- Extended `packages/ax-classifier-session-sections/failure_analysis.py` for
+  robustness reports:
+  - preserves `source_group`, `boundary_group`, and `pair_group` on enriched
+    misses
+  - aggregates calibrated misses across all seeds
+  - ranks repeated `none` false positives by hit count and confidence
+  - adds top-level decision `needs_none_safety_review`
+- Added package operation:
+  `workflow-fixture-failure-analysis`.
+- Updated manifest/service/package-operation tests and README discovery docs.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-failure-analysis --preflight --out=.ax/experiments/classifier-package-operation-workflow-fixture-failure-analysis-preflight-e190.json
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-failure-analysis --execute --out=.ax/experiments/classifier-package-execution-workflow-fixture-failure-analysis-e190.json
+bun src/cli/index.ts classifiers package-operations --all --out=.ax/experiments/classifier-packages-operations-e190.json
+```
+
+Artifacts:
+
+- `.ax/experiments/classifier-package-operation-workflow-fixture-failure-analysis-preflight-e190.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-failure-analysis-e190.json`
+- `.ax/experiments/setfit-failure-analysis-workflow-fixtures-current.json`
+- `.ax/experiments/classifier-packages-operations-e190.json`
+- `.ax/experiments/workflow-candidate-lint-e190.json`
+
+Results:
+
+- Preflight decision: `ready`
+- Package execution decision: `executed`
+- Analysis schema: `ax.setfit_robustness_failure_analysis.v1`
+- Analysis decision: `needs_none_safety_review`
+- Worst seed: `42`
+- Worst-seed calibrated family counts:
+  - `approval_boundary`: `3`
+  - `label_boundary`: `5`
+  - `missed_signal`: `1`
+  - `none_false_positive`: `3`
+- All-seed calibrated family counts:
+  - `approval_boundary`: `6`
+  - `label_boundary`: `12`
+  - `missed_signal`: `4`
+  - `none_false_positive`: `11`
+- All-seed `none` false-positive hits: `11`
+- Unique `none` false-positive rows: `5`
+- Top recurring `none` false positives:
+  - `session-section-chunks/none-continue`
+    - hit count: `3`
+    - seeds: `7`, `13`, `42`
+    - predicted as: `verification_or_recovery_signal`
+    - max confidence: `0.6846`
+    - pair group: `continue_state_boundary`
+  - `session-section-chunks/none-evals-question`
+    - hit count: `3`
+    - seeds: `7`, `13`, `42`
+    - predicted as:
+      `environment_or_preference_signal`,
+      `verification_or_recovery_signal`
+    - max confidence: `0.5972`
+    - pair group: `eval_mechanism_boundary`
+  - `session-section-chunks/none-model-size-question`
+    - hit count: `3`
+    - seeds: `7`, `13`, `42`
+    - predicted as: `environment_or_preference_signal`
+    - max confidence: `0.5447`
+    - pair group: `none_model_question::none`
+- Package operation count: `24`
+- Operation kind counts:
+  - `train`: `1`
+  - `eval`: `4`
+  - `review`: `8`
+  - `status`: `10`
+  - `debug`: `1`
+- Package lifecycle readiness remains `ready`.
+
+Decision:
+
+- E190 turns the E189 model failure into an actionable review target. The
+  problem is not generic model weakness; the repeated failure is concentrated
+  in conversational-control `none` boundaries that look like continuation,
+  evaluation-mechanism, and model-size/product questions.
+- The next useful slice is a deterministic/pre-gate or fixture-review pass for
+  these recurring `none` rows before another expensive SetFit run. Broad
+  threshold tuning alone is unlikely to solve the issue because the same rows
+  recur across all seeds.
+
+Verification:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/failure_analysis_test.py packages/ax-classifier-session-sections/robustness_test.py packages/ax-classifier-session-sections/workflow_fixture_review_test.py packages/ax-classifier-session-sections/fixture_append_test.py packages/ax-classifier-session-sections/fixture_metadata_test.py packages/ax-classifier-session-sections/split_audit_test.py
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts src/improve/lifecycle.test.ts src/improve/agent-accept.test.ts src/improve/task-template.test.ts src/improve/lint.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts improve lint --root=. --json > .ax/experiments/workflow-candidate-lint-e190.json
+```
+
+All passed. `improve lint` returned no errors, warnings, infos, or
+reconciliations. `bun run typecheck` still emits existing Effect lint
+messages/warnings but exits `0`.
+
+## E189 - SetFit Robustness Over Workflow-Augmented Fixtures
+
+Question:
+
+- Once graph-discovered workflow fixtures are reviewed, appended, enriched, and
+  split-audited through package operations, can the package run a SetFit
+  robustness gate over that workflow-augmented fixture set?
+
+Implementation:
+
+- Added package operation:
+  `workflow-fixture-setfit-robustness`.
+- The operation runs:
+
+```sh
+bun run classifiers:setfit-robustness -- --fixtures=.ax/experiments/chunks-with-workflow-fixture-metadata-current.jsonl --group-field=pair_group --label-mode=coarse --seeds=7,13,42 --epochs=1 --batch-size=8 --calibration-threshold=0.4 --out=.ax/experiments/setfit-robustness-workflow-fixtures-current.json --json
+```
+
+- Updated manifest, service, package-operation summary tests, and README so the
+  workflow-augmented SetFit robustness gate is discoverable.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-setfit-robustness --preflight --out=.ax/experiments/classifier-package-operation-workflow-fixture-setfit-robustness-preflight-e189.json
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-setfit-robustness --execute --allow-expensive --out=.ax/experiments/classifier-package-execution-workflow-fixture-setfit-robustness-e189.json
+bun src/cli/index.ts classifiers package-operations --all --out=.ax/experiments/classifier-packages-operations-e189.json
+```
+
+Artifacts:
+
+- `.ax/experiments/classifier-package-operation-workflow-fixture-setfit-robustness-preflight-e189.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-setfit-robustness-e189.json`
+- `.ax/experiments/setfit-robustness-workflow-fixtures-current.json`
+- `.ax/experiments/classifier-packages-operations-e189.json`
+- `.ax/experiments/workflow-candidate-lint-e189.json`
+
+Results:
+
+- Preflight decision: `ready`
+- Package execution decision: `failed`
+- Exit code: `1`
+- Failure reason at package-operation layer:
+  `operation exited with code 1`
+- Underlying robustness report was written and shows a model-quality failure,
+  not a dependency/runtime failure:
+  - decision: `needs_model_quality_work`
+  - failures:
+    - `mean macro F1 is below 0.75`
+    - `minimum macro F1 is below 0.70`
+    - `worst none false-positive rate is not below 10%`
+- Fixtures: `113`
+- Label mode: `coarse`
+- Group field: `pair_group`
+- Seeds: `7`, `13`, `42`
+- Epochs: `1`
+- Label counts:
+  - `approval`: `16`
+  - `correction_or_rejection_signal`: `22`
+  - `environment_or_preference_signal`: `25`
+  - `none`: `26`
+  - `verification_or_recovery_signal`: `24`
+- Raw summary:
+  - macro F1 mean/min/max: `0.6523` / `0.6076` / `0.6875`
+  - accuracy mean: `0.6644`
+  - none false-positive mean/max: `0.4167` / `0.5`
+  - train seconds total: `211.24`
+- Calibrated summary at threshold `0.4`:
+  - macro F1 mean/min/max: `0.6704` / `0.6332` / `0.6905`
+  - accuracy mean: `0.6829`
+  - none false-positive mean/max: `0.3611` / `0.5`
+- Per-seed calibrated highlights:
+  - seed `7`: macro F1 `0.6875`, accuracy `0.6875`, none FP `0.5`
+  - seed `13`: macro F1 `0.6905`, accuracy `0.6944`, none FP `0.3333`
+  - seed `42`: macro F1 `0.6332`, accuracy `0.6667`, none FP `0.25`
+- Package operation count: `23`
+- Operation kind counts:
+  - `train`: `1`
+  - `eval`: `4`
+  - `review`: `8`
+  - `status`: `9`
+  - `debug`: `1`
+- Package lifecycle readiness remains `ready`.
+
+Decision:
+
+- E189 closes the loop from graph-discovered fixture to model-quality gate:
+  the reviewed workflow fixture can now flow through package operations into a
+  real SetFit robustness run.
+- The result is intentionally not promoted. The current SetFit configuration
+  is below the goal gate (`macro F1 >= 0.75`, none false-positive rate `< 10%`).
+  Calibration helps slightly but does not solve the `none` false-positive
+  problem.
+- The next useful model-quality branch should target `none` safety and
+  family-specific confusion before another broad SetFit run. More specifically:
+  improve/pre-gate ambiguous `none` vs verification/recovery examples and
+  correction/rejection recall under grouped splits.
+
+Verification:
+
+```sh
+python3 -m json.tool packages/ax-classifier-session-sections/ax.classifier.json >/dev/null
+python3 -m unittest packages/ax-classifier-session-sections/robustness_test.py packages/ax-classifier-session-sections/workflow_fixture_review_test.py packages/ax-classifier-session-sections/fixture_append_test.py packages/ax-classifier-session-sections/fixture_metadata_test.py packages/ax-classifier-session-sections/split_audit_test.py
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts src/improve/lifecycle.test.ts src/improve/agent-accept.test.ts src/improve/task-template.test.ts src/improve/lint.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts improve lint --root=. --json > .ax/experiments/workflow-candidate-lint-e189.json
+```
+
+All passed. `improve lint` returned no errors, warnings, infos, or
+reconciliations. `bun run typecheck` still emits existing Effect lint
+messages/warnings but exits `0`.
+
+## E188 - Execute Workflow-Fixture Package Chain
+
+Question:
+
+- Do the workflow-fixture operations declared in the classifier package
+  actually run as a package-operation chain, including the human-review gate,
+  accepted fixture append, metadata enrichment, and grouped split audit?
+
+Implementation:
+
+- Added a separate package operation:
+  `workflow-fixture-review-sync`.
+- Kept `workflow-fixture-review` as the review-brief generator. It is expected
+  to exit nonzero while exported fixture rows are still pending review.
+- `workflow-fixture-review-sync` consumes:
+  - `.ax/experiments/workflow-fixture-review-current.json`
+  - `.ax/experiments/workflow-fixture-review-current-reviewed.md`
+  - `.ax/experiments/workflow-topic-surrealml-classifier-fixtures-e183.jsonl`
+- Updated package manifest/service/operation summary tests for the new
+  operation and updated the package README sequence.
+
+Package operation chain:
+
+```sh
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-review-sync --preflight --out=.ax/experiments/classifier-package-operation-workflow-fixture-review-sync-preflight-e188-before.json
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-review --execute --out=.ax/experiments/classifier-package-execution-workflow-fixture-review-generate-e188.json
+cp .ax/experiments/workflow-fixture-review-e184-reviewed.md .ax/experiments/workflow-fixture-review-current-reviewed.md
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-review-sync --preflight --out=.ax/experiments/classifier-package-operation-workflow-fixture-review-sync-preflight-e188-after.json
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-review-sync --execute --out=.ax/experiments/classifier-package-execution-workflow-fixture-review-sync-e188.json
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-append --execute --out=.ax/experiments/classifier-package-execution-workflow-fixture-append-e188.json
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-metadata --execute --out=.ax/experiments/classifier-package-execution-workflow-fixture-metadata-e188.json
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-split-audit --execute --allow-expensive --out=.ax/experiments/classifier-package-execution-workflow-fixture-split-audit-e188.json
+bun src/cli/index.ts classifiers package-operations --all --out=.ax/experiments/classifier-packages-operations-e188.json
+```
+
+Artifacts:
+
+- `.ax/experiments/classifier-package-operation-workflow-fixture-review-sync-preflight-e188-before.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-review-generate-e188.json`
+- `.ax/experiments/workflow-fixture-review-current-reviewed.md`
+- `.ax/experiments/classifier-package-operation-workflow-fixture-review-sync-preflight-e188-after.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-review-sync-e188.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-append-e188.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-metadata-e188.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-split-audit-e188.json`
+- `.ax/experiments/chunks-with-workflow-fixtures-current.jsonl`
+- `.ax/experiments/chunks-with-workflow-fixture-metadata-current.jsonl`
+- `.ax/experiments/workflow-fixture-split-audit-current.json`
+- `.ax/experiments/classifier-packages-operations-e188.json`
+- `.ax/experiments/workflow-candidate-lint-e188.json`
+
+Results:
+
+- Before generate/review:
+  - `workflow-fixture-review-sync` preflight decision: `missing_inputs`
+  - missing inputs:
+    - `.ax/experiments/workflow-fixture-review-current.json`
+    - `.ax/experiments/workflow-fixture-review-current-reviewed.md`
+- Generate step:
+  - package execution decision: `failed`
+  - exit code: `1`
+  - underlying review decision: `needs_workflow_fixture_review`
+  - pending items: `2`
+  - still wrote review JSON and Markdown brief
+- After adding reviewed brief:
+  - sync preflight decision: `ready`
+  - sync execution decision: `executed`
+  - accepted: `1`
+  - rejected: `1`
+  - pending: `0`
+  - accepted output rows: `1`
+  - accepted output label: `direction`
+- Append execution:
+  - decision: `executed`
+  - append report decision: `ready_to_write_combined_fixtures`
+  - base rows: `112`
+  - append rows: `1`
+  - combined rows: `113`
+- Metadata execution:
+  - decision: `executed`
+  - metadata rows: `113`
+  - source groups:
+    - `session-section-chunks`: `112`
+    - `workflow-candidate`: `1`
+- Split-audit execution:
+  - first unallowed eval execution was guarded as expected by
+    `operation kind eval requires --allow-expensive`
+  - rerun with `--allow-expensive` decision: `executed`
+  - fixtures: `113`
+  - group count: `71`
+  - pair group count: `71`
+  - seeds `7`, `13`, and `42`: all `viable_split`
+  - overlap groups: `[]`
+  - overlap pair groups: `[]`
+- Session-section package operation count: `22`
+- Operation kind counts:
+  - `train`: `1`
+  - `eval`: `3`
+  - `review`: `8`
+  - `status`: `9`
+  - `debug`: `1`
+- Package lifecycle readiness remains `ready`.
+
+Decision:
+
+- E188 proves the manifest-declared workflow-fixture lifecycle is executable
+  through the shared package-operation runner. The human-review boundary is
+  explicit, pending review blocks sync/append, accepted rows can be produced
+  from a reviewed brief, and the resulting experiment fixture set remains
+  provenance-preserving and split-safe.
+- This is now a better contributor path than the E184-E186 ad hoc command
+  sequence: open-source package users can inspect and run package operations
+  instead of knowing internal script names.
+- Canonical fixtures still remain untouched.
+
+Verification:
+
+```sh
+python3 -m json.tool packages/ax-classifier-session-sections/ax.classifier.json >/dev/null
+python3 -m unittest packages/ax-classifier-session-sections/workflow_fixture_review_test.py packages/ax-classifier-session-sections/fixture_append_test.py packages/ax-classifier-session-sections/fixture_metadata_test.py packages/ax-classifier-session-sections/split_audit_test.py
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts src/improve/lifecycle.test.ts src/improve/agent-accept.test.ts src/improve/task-template.test.ts src/improve/lint.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts improve lint --root=. --json > .ax/experiments/workflow-candidate-lint-e188.json
+```
+
+All passed. `improve lint` returned no errors, warnings, infos, or
+reconciliations. `bun run typecheck` still emits existing Effect lint
+messages/warnings but exits `0`.
+
+## E187 - Package Workflow-Fixture Lifecycle Operations
+
+Question:
+
+- Can the graph-discovered workflow fixture lifecycle be exposed as
+  package-declared classifier operations, so agents and contributors can
+  discover the review, append, metadata, and split-audit path without reading
+  implementation files?
+
+Implementation:
+
+- Added four operations to
+  `packages/ax-classifier-session-sections/ax.classifier.json`:
+  - `workflow-fixture-review` (`review`)
+  - `workflow-fixture-append` (`review`)
+  - `workflow-fixture-metadata` (`status`)
+  - `workflow-fixture-split-audit` (`eval`)
+- Updated package manifest/service/operation summary tests so the exact
+  operation list and operation-kind counts include the workflow fixture path.
+- Updated `packages/ax-classifier-session-sections/README.md` with the
+  graph-to-fixture package workflow and the package-operation commands.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-review --out=.ax/experiments/classifier-package-operation-workflow-fixture-review-e187.json
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-split-audit --out=.ax/experiments/classifier-package-operation-workflow-fixture-split-audit-e187.json
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-review --preflight --out=.ax/experiments/classifier-package-operation-workflow-fixture-review-preflight-e187.json
+bun src/cli/index.ts classifiers package-operations --all --out=.ax/experiments/classifier-packages-operations-e187.json
+```
+
+Artifacts:
+
+- `.ax/experiments/classifier-package-operation-workflow-fixture-review-e187.json`
+- `.ax/experiments/classifier-package-operation-workflow-fixture-split-audit-e187.json`
+- `.ax/experiments/classifier-package-operation-workflow-fixture-review-preflight-e187.json`
+- `.ax/experiments/classifier-packages-operations-e187.json`
+- `.ax/experiments/workflow-candidate-lint-e187.json`
+
+Results:
+
+- Session-section package operation count: `21`
+- Operation kind counts:
+  - `train`: `1`
+  - `eval`: `3`
+  - `review`: `7`
+  - `status`: `9`
+  - `debug`: `1`
+- Package lifecycle readiness remains `ready`.
+- Required operation kinds remain present:
+  - `train`
+  - `eval`
+  - `review`
+  - `status`
+- `workflow-fixture-review` preflight decision: `ready`
+  - input
+    `.ax/experiments/workflow-topic-surrealml-classifier-fixtures-e183.jsonl`
+    exists
+  - missing inputs: `[]`
+
+Decision:
+
+- E187 turns the reviewed workflow-fixture path into a first-class package
+  lifecycle. This supports the open-source classifier-package model: a
+  contributor can inspect the package manifest or use
+  `classifiers package-operations` to discover how graph candidates become
+  reviewed experiment fixtures and how those fixtures are checked before model
+  evaluation.
+- The operations still write to `.ax/experiments/` and do not mutate canonical
+  fixtures. Canonical promotion remains a separate reviewed change.
+
+Verification:
+
+```sh
+python3 -m json.tool packages/ax-classifier-session-sections/ax.classifier.json >/dev/null
+python3 -m unittest packages/ax-classifier-session-sections/workflow_fixture_review_test.py packages/ax-classifier-session-sections/fixture_append_test.py packages/ax-classifier-session-sections/fixture_metadata_test.py packages/ax-classifier-session-sections/split_audit_test.py
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts src/improve/lifecycle.test.ts src/improve/agent-accept.test.ts src/improve/task-template.test.ts src/improve/lint.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts improve lint --root=. --json > .ax/experiments/workflow-candidate-lint-e187.json
+```
+
+All passed. `improve lint` returned no errors, warnings, infos, or
+reconciliations. `bun run typecheck` still emits existing Effect lint
+messages/warnings but exits `0`.
+
+## E186 - Validate Accepted Workflow Fixture Metadata And Splits
+
+Question:
+
+- Can the accepted workflow fixture experiment set keep its review provenance
+  and remain safe for grouped train/test splits before any canonical fixture
+  promotion?
+
+Issue found:
+
+- `fixture_metadata.py` derived `source_group` from the fixture id even when a
+  reviewed workflow fixture already carried an explicit
+  `source_group = "workflow-candidate"`.
+- That would hide the fact that a row came from the workflow-candidate review
+  path.
+
+Implementation:
+
+- Updated `packages/ax-classifier-session-sections/fixture_metadata.py` so
+  `source_group_for(row)` preserves an explicit non-empty `source_group` and
+  only derives from id/suite when it is absent.
+- Added regression coverage in
+  `packages/ax-classifier-session-sections/fixture_metadata_test.py`.
+
+Commands:
+
+```sh
+bun run classifiers:fixture-metadata -- --fixtures=.ax/experiments/chunks-e185-with-workflow-fixture.jsonl --out=.ax/experiments/chunks-e186-workflow-fixture-metadata.jsonl
+bun run classifiers:split-audit -- --fixtures=.ax/experiments/chunks-e186-workflow-fixture-metadata.jsonl --group-field=pair_group --pair-field=pair_group --label-mode=coarse --seeds=7,13,42 --out=.ax/experiments/session-section-split-audit-e186-workflow-fixture-pair-groups.json --json
+```
+
+Artifacts:
+
+- `.ax/experiments/chunks-e186-workflow-fixture-metadata.jsonl`
+- `.ax/experiments/session-section-split-audit-e186-workflow-fixture-pair-groups.json`
+- `.ax/experiments/workflow-candidate-lint-e186.json`
+
+Results:
+
+- Enriched rows: `113`
+- Fine label delta vs canonical: `direction` increases from `10` to `11`
+- Source groups after metadata:
+  - `session-section-chunks`: `112`
+  - `workflow-candidate`: `1`
+- Coarse label counts:
+  - `approval`: `16`
+  - `correction_or_rejection_signal`: `22`
+  - `environment_or_preference_signal`: `25`
+  - `none`: `26`
+  - `verification_or_recovery_signal`: `24`
+- Group count: `71`
+- Pair group count: `71`
+- Seeds `7`, `13`, and `42`: all `viable_split`
+- Overlap groups: `[]`
+- Overlap pair groups: `[]`
+
+Decision:
+
+- E186 makes the E185 accepted workflow fixture safe to carry into model
+  experiments. Metadata preserves workflow-candidate provenance, grouped split
+  audit stays viable across all tested seeds, and no train/test group leakage
+  was detected.
+- Canonical package fixtures remain untouched.
+
+Verification:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/fixture_metadata_test.py
+python3 -m unittest packages/ax-classifier-session-sections/fixture_metadata_test.py packages/ax-classifier-session-sections/split_audit_test.py packages/ax-classifier-session-sections/fixture_append_test.py packages/ax-classifier-session-sections/workflow_fixture_review_test.py
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts src/improve/lifecycle.test.ts src/improve/agent-accept.test.ts src/improve/task-template.test.ts src/improve/lint.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts improve lint --root=. --json > .ax/experiments/workflow-candidate-lint-e186.json
+```
+
+All passed. `improve lint` returned no errors, warnings, infos, or
+reconciliations. `bun run typecheck` still emits existing Effect lint
+messages/warnings but exits `0`.
+
+## E185 - Append Accepted Workflow Fixtures Into Experiment Fixture Sets
+
+Question:
+
+- Can accepted workflow-candidate fixture rows be combined with the package
+  chunk fixture set without weakening the existing append safety checks or
+  mutating canonical fixtures?
+
+Implementation:
+
+- Extended `packages/ax-classifier-session-sections/fixture_append.py`
+  validation:
+  - preserved existing `blind-hard-negative` path, requiring label `none`
+  - added accepted `workflow-candidate` append rows
+  - workflow rows must have `review_status = "accepted"`
+  - workflow rows must use a known fine label
+  - workflow rows must have review notes
+  - unknown `source_group` values are rejected
+- Added regression tests for:
+  - accepted workflow fixture rows
+  - pending workflow fixture rows
+  - non-`none` hard-negative rows
+  - unknown-source rows
+
+Live SurrealML proof:
+
+```sh
+bun run classifiers:fixture-append -- --base packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --append .ax/experiments/workflow-fixtures-accepted-e184.jsonl --out .ax/experiments/chunks-e185-with-workflow-fixture.jsonl --report .ax/experiments/fixture-append-e185-workflow-report.json --json
+```
+
+Result:
+
+- Exit status: `0`
+- Base rows: `112`
+- Append rows: `1`
+- Combined rows: `113`
+- Append label counts: `{ "direction": 1 }`
+- Decision: `ready_to_write_combined_fixtures`
+- Output:
+  `.ax/experiments/chunks-e185-with-workflow-fixture.jsonl`
+- Canonical fixture file was not modified.
+
+Decision:
+
+- E185 closes the accepted-fixture path without changing the canonical package
+  fixture file. Graph-discovered, reviewed workflow fixtures can now be tested
+  in an experiment fixture set before promotion.
+
+Verification:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/fixture_append_test.py packages/ax-classifier-session-sections/workflow_fixture_review_test.py
+python3 -m unittest packages/ax-classifier-session-sections/fixture_append_test.py packages/ax-classifier-session-sections/workflow_fixture_review_test.py packages/ax-classifier-session-sections/blind_label_review_test.py packages/ax-classifier-session-sections/hard_negative_review_test.py
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts src/improve/lifecycle.test.ts src/improve/agent-accept.test.ts src/improve/task-template.test.ts src/improve/lint.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts improve lint --root=. --json > .ax/experiments/workflow-candidate-lint-e185.json
+```
+
+All passed. `improve lint` returned no errors, warnings, infos, or
+reconciliations. `bun run typecheck` still emits existing Effect lint
+messages/warnings but exits `0`.
+
+## E184 - Review and Accept Workflow Fixture Packs
+
+Question:
+
+- Can pending fixture rows exported from graph-discovered workflow candidates
+  go through an explicit accept/reject review before they are eligible for
+  canonical package fixture append?
+
+Implementation:
+
+- Added package tool:
+  `packages/ax-classifier-session-sections/workflow_fixture_review.py`.
+- Added script:
+  `bun run classifiers:workflow-fixture-review`.
+- Modes:
+  - `generate`: creates a JSON review file and markdown review brief from a
+    workflow fixture JSONL pack
+  - `sync`: syncs status/notes/label/target edits from the markdown brief
+  - `evaluate`: evaluates an existing review JSON
+- Review statuses:
+  - `pending`
+  - `accepted`
+  - `rejected`
+- Gates:
+  - no pending rows
+  - no invalid statuses
+  - no invalid fine labels
+  - accepted/rejected rows require substantive review notes
+- Output:
+  - accepted-only JSONL rows
+  - report decision `ready_to_append_workflow_fixtures` or
+    `needs_workflow_fixture_review`
+- Added unit coverage for review generation, markdown sync, pending/invalid
+  failures, note-quality failures, and accepted-only output.
+
+Live SurrealML proof:
+
+```sh
+bun run classifiers:workflow-fixture-review -- --fixtures .ax/experiments/workflow-topic-surrealml-classifier-fixtures-e183.jsonl --review .ax/experiments/workflow-fixture-review-e184.json --brief .ax/experiments/workflow-fixture-review-e184.md --accepted-out .ax/experiments/workflow-fixtures-accepted-e184.jsonl --out .ax/experiments/workflow-fixture-review-e184-report.json --mode generate --json
+```
+
+Initial generate result:
+
+- Exit status: `1`
+- Items: `2`
+- Pending: `2`
+- Decision: `needs_workflow_fixture_review`
+- Failure: `workflow fixture review still has pending items`
+
+Reviewed copy:
+
+- `.ax/experiments/workflow-fixture-review-e184-reviewed.md`
+- Accepted the first SurrealML direction fixture.
+- Rejected the duplicate wording fixture.
+
+Sync command:
+
+```sh
+bun run classifiers:workflow-fixture-review -- --fixtures .ax/experiments/workflow-topic-surrealml-classifier-fixtures-e183.jsonl --review .ax/experiments/workflow-fixture-review-e184.json --brief .ax/experiments/workflow-fixture-review-e184-reviewed.md --accepted-out .ax/experiments/workflow-fixtures-accepted-e184.jsonl --out .ax/experiments/workflow-fixture-review-e184-report.json --mode sync --json
+```
+
+Final result:
+
+- Exit status: `0`
+- Items: `2`
+- Accepted: `1`
+- Rejected: `1`
+- Pending: `0`
+- Decision: `ready_to_append_workflow_fixtures`
+- Accepted output:
+  `.ax/experiments/workflow-fixtures-accepted-e184.jsonl`
+- Accepted output rows: `1`
+
+Decision:
+
+- E184 gives the E183 fixture export a safety gate. Graph-discovered fixtures
+  are now reviewable and can produce an accepted-only append pack without
+  mutating canonical package fixtures.
+
+Verification:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/workflow_fixture_review_test.py
+python3 -m unittest packages/ax-classifier-session-sections/workflow_fixture_review_test.py packages/ax-classifier-session-sections/blind_label_review_test.py packages/ax-classifier-session-sections/hard_negative_review_test.py packages/ax-classifier-session-sections/fixture_append_test.py
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts src/improve/lifecycle.test.ts src/improve/agent-accept.test.ts src/improve/task-template.test.ts src/improve/lint.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts improve lint --root=. --json > .ax/experiments/workflow-candidate-lint-e184.json
+```
+
+All passed. `improve lint` returned no errors, warnings, infos, or
+reconciliations. `bun run typecheck` still emits existing Effect lint
+messages/warnings but exits `0`.
+
+## E183 - Export Topic Candidates As Pending Classifier Fixtures
+
+Question:
+
+- Can a graph-discovered workflow candidate recommended as a
+  `classifier_fixture` become a reviewable fixture JSONL artifact without
+  directly mutating the canonical package fixtures?
+
+Implementation:
+
+- Added `--classifier-fixture-pack <path>` to
+  `ax classifiers workflow-candidates --topic-report`.
+- Added `classifier_fixtures` to topic reports when this flag is used:
+  - output path
+  - emitted fixture count
+  - emitted/skipped candidate counts
+  - generated fixture rows
+- Added `buildWorkflowCandidateTopicClassifierFixtureRows(report)` and
+  `buildWorkflowCandidateTopicClassifierFixtureSummary(report, path)`.
+- Fixture rows use the existing package chunk-fixture shape plus source
+  metadata:
+  - `id`, `suite`, `name`, `label`, `target`, `text`
+  - `source_group = "workflow-candidate"`
+  - `review_status = "pending"`
+  - topic, candidate id/label, proposed action, result id, turn, confidence
+- The exporter only includes adjacent topic candidates whose promotion
+  recommendation is `classifier_fixture`. This keeps guidance/harness work out
+  of fixture-review packs.
+
+Live SurrealML proof:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --search SurrealML --action=record_guidance_or_environment_preference --include-harness-facts --require-harness-checks --classifier-fixture-pack .ax/experiments/workflow-topic-surrealml-classifier-fixtures-e183.jsonl --json --out .ax/experiments/workflow-topic-surrealml-classifier-fixtures-e183.json > .ax/experiments/workflow-topic-surrealml-classifier-fixtures-e183.txt
+```
+
+Result:
+
+- Exit status: `0`
+- Fixture pack:
+  `.ax/experiments/workflow-topic-surrealml-classifier-fixtures-e183.jsonl`
+- JSON report:
+  `.ax/experiments/workflow-topic-surrealml-classifier-fixtures-e183.json`
+- Emitted fixtures: `2`
+- Candidate count: `1`
+- Skipped candidate count: `0`
+- JSONL validation:
+  - rows: `2`
+  - labels: `direction`
+  - review status: `pending`
+- Both fixtures preserve source `classifier_result:*` ids and turn refs from
+  the SurrealML direction candidate.
+
+Decision:
+
+- E183 closes another report-to-artifact gap. Scoped graph discoveries can now
+  become pending classifier-fixture review rows that can later be accepted into
+  package fixtures through the existing fixture workflow, instead of remaining
+  only evidence-pack prose.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts src/improve/lifecycle.test.ts src/improve/agent-accept.test.ts src/improve/task-template.test.ts src/improve/lint.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts improve lint --root=. --json > .ax/experiments/workflow-candidate-lint-e183.json
+python3 - <<'PY'
+import json
+from pathlib import Path
+p=Path('.ax/experiments/workflow-topic-surrealml-classifier-fixtures-e183.jsonl')
+rows=[json.loads(line) for line in p.read_text().splitlines() if line.strip()]
+print({'rows': len(rows), 'labels': sorted({row['label'] for row in rows}), 'review_status': sorted({row['review_status'] for row in rows})})
+PY
+```
+
+All passed. `improve lint` returned no errors, warnings, infos, or
+reconciliations. `bun run typecheck` still emits existing Effect lint
+messages/warnings but exits `0`.
+
+## E182 - Carry Harness Evidence Into Topic Evidence Packs
+
+Question:
+
+- Can the markdown evidence pack used for workflow-candidate review show the
+  same graph-backed harness context as the topic report?
+
+Implementation:
+
+- Updated `renderWorkflowCandidateTopicEvidencePackMarkdown(report)` to include
+  a `Harness Gate Evidence` section with:
+  - gate satisfied/unsatisfied state
+  - evidence source (`none`, `computed`, `persisted`,
+    `computed_and_persisted`)
+  - computed check pass/fail totals
+  - persisted harness fact pass/fail totals
+- Added persisted harness fact counts to the evidence-pack query summary.
+- Added a `Persisted Harness Facts` section listing persisted fact id,
+  predicate, subject, object, candidate id, and value JSON.
+- Added regression coverage for both computed/failed harness evidence packs and
+  persisted graph-backed harness facts.
+
+Live SurrealML proof:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --search SurrealML --action=record_guidance_or_environment_preference --include-harness-facts --require-harness-checks --evidence-pack .ax/experiments/workflow-topic-surrealml-harness-evidence-pack-e182.md --json --out .ax/experiments/workflow-topic-surrealml-harness-evidence-pack-e182.json > .ax/experiments/workflow-topic-surrealml-harness-evidence-pack-e182.txt
+```
+
+Result:
+
+- Exit status: `0`
+- Evidence pack:
+  `.ax/experiments/workflow-topic-surrealml-harness-evidence-pack-e182.md`
+- JSON report:
+  `.ax/experiments/workflow-topic-surrealml-harness-evidence-pack-e182.json`
+- Markdown pack includes:
+  - `Gate: satisfied`
+  - `Evidence source: persisted`
+  - `Computed checks: 0 passed, 0 failed (0 checks)`
+  - `Persisted facts: 1 passed, 0 failed (1 facts)`
+  - persisted harness fact
+    `fact:workflow_topic_harness_check__surrealml__classifier_candidate_group__tra__f9276cabe72a`
+  - candidate id
+    `classifier_candidate_group:transcript/verification-event::verification_request::output_required::add_verification_gate`
+
+Decision:
+
+- E182 makes evidence packs suitable for reviewing graph-backed classifier
+  work. The pack no longer loses the critical context that a harness candidate
+  is already backed by a persisted passing graph fact.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts src/improve/lifecycle.test.ts src/improve/agent-accept.test.ts src/improve/task-template.test.ts src/improve/lint.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts improve lint --root=. --json > .ax/experiments/workflow-candidate-lint-e182.json
+```
+
+All passed. `improve lint` returned no errors, warnings, infos, or
+reconciliations. `bun run typecheck` still emits existing Effect lint
+messages/warnings but exits `0`.
+
+## E181 - Explain Harness Gate Evidence Source
+
+Question:
+
+- When a topic report passes the harness gate, can the report explain whether
+  the evidence came from fresh computed harness checks, persisted graph-backed
+  harness facts, or both?
+
+Implementation:
+
+- Added `harness_evidence` to workflow topic reports:
+  - `gate_satisfied`
+  - `gate_evidence_source`: `none`, `computed`, `persisted`, or
+    `computed_and_persisted`
+  - computed check totals
+  - persisted harness fact totals
+- Added `buildWorkflowCandidateTopicHarnessEvidenceSummary(report)` so tests,
+  renderers, and CLI artifacts share the same source summary.
+- Text reports now print:
+  - `harness gate: satisfied|unsatisfied (<source>)`
+  - computed pass/fail/check counts
+  - persisted pass/fail/fact counts
+- The text renderer recomputes the summary from the current report so manually
+  composed reports cannot show stale harness evidence after adding persisted
+  facts.
+
+Live SurrealML proof:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --search SurrealML --action=record_guidance_or_environment_preference --include-harness-facts --require-harness-checks --json --out .ax/experiments/workflow-topic-surrealml-harness-evidence-e181.json > .ax/experiments/workflow-topic-surrealml-harness-evidence-e181.txt
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --search SurrealML --action=record_guidance_or_environment_preference --include-harness-facts --require-harness-checks > .ax/experiments/workflow-topic-surrealml-harness-evidence-e181-text.txt
+```
+
+Result:
+
+- Exit status: `0`
+- JSON `harness_evidence.gate_satisfied`: `true`
+- JSON `harness_evidence.gate_evidence_source`: `persisted`
+- Computed checks: `0`
+- Persisted facts: `1`
+- Persisted passed facts: `1`
+- Text report includes:
+  - `harness gate: satisfied (persisted)`
+  - `harness gate computed: 0 passed, 0 failed (0 checks)`
+  - `harness gate persisted: 1 passed, 0 failed (1 facts)`
+
+Decision:
+
+- E181 makes the graph-backed feedback loop inspectable. The CLI no longer only
+  exits successfully; it explains whether the success came from a fresh check
+  or from reusable persisted graph evidence.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts src/improve/lifecycle.test.ts src/improve/agent-accept.test.ts src/improve/task-template.test.ts src/improve/lint.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts improve lint --root=. --json > .ax/experiments/workflow-candidate-lint-e181.json
+```
+
+All passed. `improve lint` returned no errors, warnings, infos, or
+reconciliations. `bun run typecheck` still emits existing Effect lint
+messages/warnings but exits `0`.
+
+## E180 - Persisted Passing Harness Facts Satisfy the Hard Gate
+
+Question:
+
+- If a topic report includes an already-persisted passing harness fact, should
+  `--require-harness-checks` accept that as evidence even when no fresh
+  executable harness check is produced in the filtered report?
+
+Implementation:
+
+- Extracted a shared persisted harness pass predicate:
+  - passed when `predicate = "passed"` or `value_json.passed = true`
+  - reused by candidate coverage and the hard gate
+- Updated `workflowCandidateTopicHarnessGateFailures(report)` so an empty
+  computed-check set passes when the report includes at least one persisted
+  passing harness fact.
+- Failed persisted facts still do not satisfy the gate.
+- Added regression coverage for:
+  - no computed checks and no passing persisted facts fails
+  - no computed checks and a passing persisted harness fact passes
+  - no computed checks and only failed persisted harness facts fails
+
+Live SurrealML proof:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --search SurrealML --action=record_guidance_or_environment_preference --include-harness-facts --require-harness-checks --json --out .ax/experiments/workflow-topic-surrealml-persisted-only-gate-e180.json > .ax/experiments/workflow-topic-surrealml-persisted-only-gate-e180.txt
+```
+
+Result:
+
+- Exit status: `0`
+- Filtered report candidates: `1`
+- Fresh harness checks: none in the emitted report
+- Persisted harness facts: `1`
+- Persisted harness edges: `2`
+- Persisted harness status: `1 passed, 0 failed`
+
+Decision:
+
+- E180 makes the hard gate compatible with graph-backed evidence. Once a
+  harness check has been run, persisted, and included in the topic report, the
+  gate can use that fact as reusable evidence instead of forcing every filtered
+  report to recompute the same executable check.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts src/improve/lifecycle.test.ts src/improve/agent-accept.test.ts src/improve/task-template.test.ts src/improve/lint.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts improve lint --root=. --json > .ax/experiments/workflow-candidate-lint-e180.json
+```
+
+All passed. `improve lint` returned no errors, warnings, infos, or
+reconciliations. `bun run typecheck` still emits existing Effect lint
+messages/warnings but exits `0`.
+
+## E179 - Failed Harness Facts Do Not Close Candidates
+
+Question:
+
+- Should persisted harness facts suppress duplicate workflow work only when the
+  harness passed?
+
+Implementation:
+
+- Tightened `topicAdjacentCandidates(report)` persisted-harness coverage:
+  - a persisted harness fact covers a candidate only when
+    `predicate = "passed"` or `value_json.passed = true`
+  - failed harness facts remain visible in reports but do not close the
+    candidate or suppress follow-up work
+- Added regression coverage proving:
+  - passing persisted harness facts suppress duplicate adjacent tasks and
+    harness proposal writes
+  - failed persisted harness facts keep the candidate adjacent and still emit
+    the harness task/proposal path
+
+Decision:
+
+- E179 prevents a bad feedback loop where a failed harness check could
+  accidentally mark a workflow candidate as covered. Only successful evidence
+  can close the candidate; failed evidence remains useful as signal but keeps
+  the work open.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts src/improve/lifecycle.test.ts src/improve/agent-accept.test.ts src/improve/task-template.test.ts src/improve/lint.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts improve lint --root=. --json > .ax/experiments/workflow-candidate-lint-e179.json
+```
+
+All passed. `improve lint` returned no warnings and no new reconciliations.
+`bun run typecheck` still emits existing Effect lint messages/warnings but
+exits `0`.
+
+## E178 - Persisted Harness Facts Suppress Duplicate Harness Work
+
+Question:
+
+- Once a topic harness check has been persisted into the graph, can it change
+  later workflow-candidate behavior instead of only being displayed?
+
+Implementation:
+
+- Updated `topicAdjacentCandidates(report)` coverage logic to include
+  `report.persisted_harness_facts`.
+- Persisted harness facts now cover a candidate when either:
+  - `fact.object` is the classifier candidate id
+  - `fact.properties_json.candidate_id` is the classifier candidate id
+- This affects downstream artifact creation because adjacent candidates feed:
+  - adjacent task emission
+  - harness proposal promotion
+  - evidence-pack adjacent candidate sections
+- Added regression coverage proving a persisted harness fact suppresses:
+  - duplicate adjacent task drafts
+  - duplicate harness proposal dry-run writes
+
+Live command:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates \
+  --topic-report \
+  --search SurrealML \
+  --expand-evidence \
+  --include-harness-facts \
+  --promote-harness-proposals \
+  --proposal-dry-run \
+  --json \
+  --out .ax/experiments/workflow-topic-surrealml-persisted-coverage-e178.json \
+  > .ax/experiments/workflow-topic-surrealml-persisted-coverage-e178.txt
+```
+
+Result:
+
+- Persisted harness facts:
+  - facts: `1`
+  - edges: `2`
+  - passed: `1`
+  - failed: `0`
+- Harness proposal writes:
+  - emitted: `0`
+  - skipped: `1`
+- The previously covered
+  `verification-event:verification_request:output_required` candidate remains
+  visible in ranked candidates and persisted facts, but no duplicate
+  `harness_check` proposal is emitted for it.
+
+Decision:
+
+- E178 makes the graph feedback loop behavioral: persisted harness facts now
+  prevent re-opening the same candidate as new harness work. This is the first
+  slice where graph facts directly change future workflow candidate promotion.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts src/improve/lifecycle.test.ts src/improve/agent-accept.test.ts src/improve/task-template.test.ts src/improve/lint.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts improve lint --root=. --json > .ax/experiments/workflow-candidate-lint-e178.json
+```
+
+All passed. `improve lint` returned no warnings and no new reconciliations.
+`bun run typecheck` still emits existing Effect lint messages/warnings but
+exits `0`.
+
+## E177 - Include Persisted Harness Facts In Topic Reports
+
+Question:
+
+- Can a normal workflow-candidate topic report show both current classifier
+  evidence and previously persisted harness graph facts, so an agent does not
+  need a second discovery command to know whether the topic already has a
+  passing harness check?
+
+Implementation:
+
+- Added `persisted_harness_facts` to `WorkflowCandidateTopicReport`.
+- Added `--include-harness-facts` for
+  `axctl classifiers workflow-candidates --topic-report`.
+- Reused the E176 graph fact list shape:
+  `ax.workflow_topic_harness_graph_list.v1`.
+- Text reports now include:
+  - persisted harness fact count
+  - persisted harness edge count
+  - passed/failed persisted harness status
+  - persisted fact ids and candidate objects
+- JSON reports now carry the full persisted fact/edge rows alongside:
+  - proposals
+  - ranked candidates
+  - computed harness checks
+
+Live command:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates \
+  --topic-report \
+  --search SurrealML \
+  --expand-evidence \
+  --include-harness-facts \
+  --json \
+  --out .ax/experiments/workflow-topic-surrealml-with-persisted-harness-e177.json \
+  > .ax/experiments/workflow-topic-surrealml-with-persisted-harness-e177.txt
+```
+
+Returned persisted harness totals:
+
+- Facts: `1`
+- Edges: `2`
+- Passed: `1`
+- Failed: `0`
+- Fact id:
+  `fact:workflow_topic_harness_check__surrealml__classifier_candidate_group__tra__f9276cabe72a`
+
+Help check:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --help | rg -n "include-harness-facts|list-harness-facts|harness-facts"
+```
+
+Returned:
+
+- `--list-harness-facts`
+- `--include-harness-facts`
+- `--harness-facts string`
+- `--apply-harness-facts`
+
+Decision:
+
+- E177 makes the persisted graph facts usable from the primary topic evidence
+  workflow. This closes the immediate gap left by E176: graph persistence is
+  now visible without switching to a separate list mode.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts src/improve/lifecycle.test.ts src/improve/agent-accept.test.ts src/improve/task-template.test.ts src/improve/lint.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts improve lint --root=. --json > .ax/experiments/workflow-candidate-lint-e177.json
+```
+
+All passed. `improve lint` returned no warnings and no new reconciliations.
+`bun run typecheck` still emits existing Effect lint messages/warnings but
+exits `0`.
+
+## E176 - Persist Topic Harness Checks Into the Graph
+
+Question:
+
+- Can executable topic harness check results become graph facts and edges that
+  later queries can discover, instead of living only in topic-report JSON?
+
+Implementation:
+
+- Added workflow-topic harness graph projection helpers:
+  - `buildWorkflowCandidateTopicHarnessGraphProjection(report)`
+  - `buildWorkflowCandidateTopicHarnessGraphWritePlan(projection)`
+  - `buildWorkflowCandidateTopicHarnessGraphListReport(...)`
+- Added CLI artifact/apply flags for topic reports:
+  - `--harness-facts <path>`
+  - `--harness-write-plan <path>`
+  - `--apply-harness-facts`
+- Added graph discovery:
+  - `--list-harness-facts`
+- Persisted into existing graph tables without a schema change:
+  - `classifier_graph_node`
+  - `classifier_graph_edge`
+  - `classifier_graph_fact`
+- Source kind: `workflow_topic_harness_check`
+- Fact kind: `workflow_topic_harness_check`
+- Fact predicate: `passed` or `failed`
+- Graph IDs now use a slug plus hash suffix so long harness check ids do not
+  collide after truncation.
+
+Live apply:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates \
+  --topic-report \
+  --search SurrealML \
+  --expand-evidence \
+  --require-harness-checks \
+  --harness-facts .ax/experiments/workflow-topic-surrealml-harness-facts-e176.json \
+  --harness-write-plan .ax/experiments/workflow-topic-surrealml-harness-write-plan-e176.json \
+  --apply-harness-facts \
+  --json > .ax/experiments/workflow-topic-surrealml-harness-apply-e176.json
+```
+
+Projection result:
+
+- Schema: `ax.workflow_topic_harness_graph_projection.v1`
+- Checks: `1`
+- Passed: `1`
+- Failed: `0`
+- Nodes: `2`
+- Edges: `2`
+- Facts: `1`
+- Fact id:
+  `fact:workflow_topic_harness_check__surrealml__classifier_candidate_group__tra__f9276cabe72a`
+
+Write plan:
+
+- Schema: `ax.workflow_topic_harness_graph_write_plan.v1`
+- Statements: `5`
+- Node statements: `2`
+- Edge statements: `2`
+- Fact statements: `1`
+
+Graph query:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates \
+  --list-harness-facts \
+  --search SurrealML \
+  --json \
+  --out .ax/experiments/workflow-topic-surrealml-harness-graph-list-e176.json \
+  > .ax/experiments/workflow-topic-surrealml-harness-graph-list-e176.txt
+```
+
+Returned:
+
+- Facts: `1`
+- Edges: `2`
+- Passed: `1`
+- Failed: `0`
+- Candidate:
+  `classifier_candidate_group:transcript/verification-event::verification_request::output_required::add_verification_gate`
+- Evidence refs include:
+  - `classifier_result:verification_event__0_1_0__event_window__38cbc794d9d58e54`
+  - `classifier_result:verification_event__0_1_0__event_window__9813244cd75c94f7`
+  - `turn:019e76fb_b294_79b2_9bb3_d1ebe3e5d908__cd002bebba66f2ad__seq_000010`
+  - `turn:019e76fb_b294_79b2_9bb3_d1ebe3e5d908__cd002bebba66f2ad__seq_000118`
+
+Decision:
+
+- E176 closes the graph-utilization gap for the current harness slice:
+  executable harness checks can now be projected, applied, and queried as
+  graph facts/edges. This makes the SurrealML “show classifier results, not
+  HTML only” lesson discoverable by later graph queries.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts src/improve/lifecycle.test.ts src/improve/agent-accept.test.ts src/improve/task-template.test.ts src/improve/lint.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts improve lint --root=. --json > .ax/experiments/workflow-candidate-lint-e176.json
+```
+
+All passed. `improve lint` returned no warnings and no new reconciliations.
+`bun run typecheck` still emits existing Effect lint messages/warnings but
+exits `0`.
+
+## E175 - Hard Gate for Topic Harness Checks
+
+Question:
+
+- Can the workflow-candidate topic report fail a command when the executable
+  harness evidence is missing or failed, instead of only displaying check state?
+
+Implementation:
+
+- Added `--require-harness-checks` to
+  `axctl classifiers workflow-candidates --topic-report`.
+- Added `workflowCandidateTopicHarnessGateFailures(report)`.
+- The gate fails when:
+  - no topic harness checks were produced
+  - any produced harness check has `status = failed`
+- The existing topic-report failure behavior remains intact; this adds a
+  stricter executable-evidence gate for harness-driven workflows.
+- Added pure regression coverage for:
+  - passing SurrealML applied-classifier evidence
+  - failing HTML-only evidence
+  - failing topic reports with no executable harness checks
+
+Live command:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --search SurrealML --expand-evidence --require-harness-checks --json > .ax/experiments/workflow-topic-surrealml-harness-gate-e175.json
+```
+
+Result:
+
+- Exit status: `0`
+- Harness checks: `1 passed, 0 failed`
+- Check id:
+  `classifier_candidate_group__transcript_verification_event__verification_request__output_required__applied_classifier_result_evidence`
+- Evidence refs:
+  - `classifier_result:verification_event__0_1_0__event_window__38cbc794d9d58e54`
+  - `classifier_result:verification_event__0_1_0__event_window__9813244cd75c94f7`
+  - `turn:019e76fb_b294_79b2_9bb3_d1ebe3e5d908__cd002bebba66f2ad__seq_000010`
+  - `turn:019e76fb_b294_79b2_9bb3_d1ebe3e5d908__cd002bebba66f2ad__seq_000118`
+
+Help check:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --help | rg -n "require-harness-checks|topic-report|promote-harness"
+```
+
+Returned:
+
+- `--topic-report`
+- `--promote-harness-proposals`
+- `--require-harness-checks`
+
+Decision:
+
+- E175 turns E174 from a report-only check into a command-level gate suitable
+  for agent harnesses and CI-style checks. Agents can now require applied
+  classifier-result evidence before treating a topic workflow as complete.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts src/improve/lifecycle.test.ts src/improve/agent-accept.test.ts src/improve/task-template.test.ts src/improve/lint.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts improve lint --root=. --json > .ax/experiments/workflow-candidate-lint-e175.json
+```
+
+All passed. `improve lint` returned no warnings and no new reconciliations.
+`bun run typecheck` still emits existing Effect lint messages/warnings but
+exits `0`.
+
+## E174 - Executable Harness Check for SurrealML output_required
+
+Question:
+
+- Can an accepted `harness_check` proposal become an executable regression gate
+  and reconcile through the improve loop, instead of remaining a task brief?
+
+Implementation:
+
+- Added `buildWorkflowCandidateTopicHarnessChecks(report)`.
+- Topic reports now attach `harness_checks` for adjacent candidates whose
+  recommended artifact is `harness_check`.
+- The check passes only when the harness-worthy verification candidate has:
+  - `proposed_action = add_verification_gate`
+  - applied classifier result refs (`classifier_result:*`)
+  - topic-matching text that asks for classifier results
+  - source turn refs
+- Added pass/fail regressions for the SurrealML case:
+  - pass: “classifier results applied to SurrealML”
+  - fail: “open the html” without classifier result evidence
+- Added `tests/harness/*.md` discovery to `improve lint`, using the same
+  frontmatter reconcile path as skill/subagent artifacts.
+- Added harness provenance instructions to `form=harness_check` task templates.
+- Added the concrete harness artifact:
+  `tests/harness/harness_check__workflow_candidate__d9c44ad59d7b3dcf.md`
+
+Live SurrealML report:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --search SurrealML --expand-evidence --json > .ax/experiments/workflow-topic-surrealml-harness-e174.json
+```
+
+Harness result:
+
+- Passed: `1`
+- Failed: `0`
+- Check id:
+  `classifier_candidate_group__transcript_verification_event__verification_request__output_required__applied_classifier_result_evidence`
+- Evidence refs:
+  - `classifier_result:verification_event__0_1_0__event_window__38cbc794d9d58e54`
+  - `classifier_result:verification_event__0_1_0__event_window__9813244cd75c94f7`
+  - `turn:019e76fb_b294_79b2_9bb3_d1ebe3e5d908__cd002bebba66f2ad__seq_000010`
+  - `turn:019e76fb_b294_79b2_9bb3_d1ebe3e5d908__cd002bebba66f2ad__seq_000118`
+
+Improve-loop reconcile:
+
+```sh
+bun src/cli/index.ts improve lint --root=. --json > .ax/experiments/workflow-candidate-lint-e174.json
+```
+
+Result:
+
+- Reconciled:
+  `harness_check__workflow_candidate__d9c44ad59d7b3dcf`
+- Experiment:
+  `experiment:harness_check__Require_output_required_evidence_for_SurrealML__4ad59d7b3dcf__mpt17f08_1`
+- Status: `task_emitted -> scaffolded`
+- Deleted accepted task:
+  `.ax/experiments/workflow-harness-accepted-tasks-e173b/harness_check__workflow_candidate__d9c44ad59d7b3dcf.md`
+
+Decision:
+
+- E174 closes the first harness-check loop end-to-end: classifier graph
+  evidence produced a harness proposal, the accepted task became executable
+  test coverage plus a marker artifact, and `improve lint` reconciled it back
+  into the graph.
+- The check is intentionally narrow. It proves the specific failure mode the
+  user raised: stopping at an HTML/prototype artifact is not enough when the
+  request was to apply a classifier and show SurrealML results.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts src/improve/lint.test.ts src/improve/task-template.test.ts
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts src/improve/lifecycle.test.ts src/improve/agent-accept.test.ts src/improve/task-template.test.ts src/improve/lint.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+All passed. `bun run typecheck` still emits existing Effect lint
+messages/warnings but exits `0`.
+
+## E156 - Workflow Candidate Report From Persisted Graph Facts
+
+Question: after E155 writes real transcript-backed candidate facts into the
+classifier graph tables, can a package operation rank useful workflow candidates
+with enough evidence to review?
+
+New helper:
+
+- `packages/ax-classifier-session-sections/workflow_candidate_report.py`
+- `packages/ax-classifier-session-sections/workflow_candidate_report_test.py`
+- `bun run classifiers:workflow-candidates`
+- Package operation:
+  `packages/ax-classifier-session-sections/ax.classifier.json`
+  `workflow-candidate-report`
+
+Command:
+
+```sh
+bun run classifiers:workflow-candidates -- --out=.ax/experiments/workflow-candidate-report-e156.json
+```
+
+Artifact:
+
+- `.ax/experiments/workflow-candidate-report-e156.json`
+
+Results:
+
+- Decision: `workflow_candidates_ranked`
+- Candidate groups: `15`
+- Returned candidates: `10`
+- Evidence facts: `250`
+- Candidates with evidence: `15`
+- Wrapper-like evidence: `0`
+- Task-like evidence: `58`
+
+Top candidates:
+
+- `reaction-event:direction:verification` ->
+  `add_verification_gate`, score `74.7379`, support `106`,
+  task-like `41`, avg confidence `0.78`
+- `verification-event:verification_request:test_required` ->
+  `add_verification_gate`, score `35.2084`, support `42`,
+  task-like `14`, avg confidence `0.86`
+- `reaction-event:correction:wrong_output` ->
+  `add_context_guardrail`, score `20.7619`, support `23`,
+  task-like `1`, avg confidence `0.76`
+- `reaction-event:approval:unknown` ->
+  `record_approval_checkpoint`, score `19.9875`, support `35`,
+  task-like `0`, avg confidence `0.82`
+- `verification-event:verification_request:regression_guard` ->
+  `add_verification_gate`, score `12.0361`, support `11`,
+  task-like `1`, avg confidence `0.82`
+
+Decision:
+
+- E156 proves the graph facts are queryable into reviewable product
+  candidates, not just countable storage rows.
+- The top unfiltered candidate is dominated by review/subagent task prompts,
+  which are real workflow evidence but should be filterable when looking for
+  user-originated product insights.
+- The next slice should expose this as an `axctl classifiers` command with
+  action/classifier/task-like filters.
+
+Verification:
+
+```sh
+python3 -m json.tool packages/ax-classifier-session-sections/ax.classifier.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-candidate-report-e156.json >/dev/null
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+All passed. `bun run typecheck` emitted existing Effect lint
+messages/warnings but exited `0`.
+
+## E169 - Workflow Candidate Proposal Evidence Expansion
+
+Question: can a listed workflow-candidate proposal show the classifier facts
+that caused it, so the proposal is auditable without re-running the original
+candidate ranking command?
+
+Change:
+
+- Added `--expand-evidence` to
+  `axctl classifiers workflow-candidates --list-proposals`.
+- Proposal listing rows now carry `proposal_id` plus optional cited evidence.
+- Evidence expansion follows `proposal -> cites_evidence -> classifier_graph_node`
+  and then loads `classifier_graph_fact` examples for each cited candidate.
+- Text output stays compact and uses `--examples=<n>` to limit examples per
+  cited candidate.
+- JSON output now reports:
+  - `query.expand_evidence`
+  - `totals.evidence_candidate_count`
+  - `totals.evidence_example_count`
+
+Command:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --list-proposals --proposal-status=accepted --search=surrealml --expand-evidence --examples=2 --limit=10 --out=.ax/experiments/workflow-candidate-proposal-list-e169-expanded.json | tee .ax/experiments/workflow-candidate-proposal-list-e169-expanded.txt
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-proposal-list-e169-expanded.json`
+- `.ax/experiments/workflow-candidate-proposal-list-e169-expanded.txt`
+- `.ax/experiments/workflow-candidate-lint-e169.json`
+
+Result:
+
+```text
+workflow candidate proposals
+prefix: guidance__workflow_candidate__
+status: accepted
+search: surrealml
+proposals: 1 total, 1 accepted, 0 open, 0 rejected
+scaffolded experiments: 1
+evidence candidates: 2, examples: 4
+- 2 medium accepted guidance__workflow_candidate__b7717e979a1fb149
+  title: Require applied classifier results for surrealml
+  target: AGENTS.md#Workflow Candidate Guardrails
+  experiment: scaffolded (experiment:guidance__Require_applied_classifier_results_for_surrealml__7e979a1fb149__mpt00j1a_1)
+  artifact: CLAUDE.md
+  task: .ax/experiments/workflow-candidate-accepted-tasks-e164/guidance__workflow_candidate__b7717e979a1fb149.md
+  evidence:
+    - correction-event:correction:wrong_artifact
+      id: classifier_candidate_group:transcript/correction-event::correction::wrong_artifact::add_context_guardrail
+      action: add_context_guardrail target: wrong_artifact
+    - reaction-event:correction:prototype_completeness
+      id: classifier_candidate_group:transcript/reaction-event::correction::prototype_completeness::add_context_guardrail
+      action: add_context_guardrail target: prototype_completeness
+      example ...: did you create classifier i dont want just html i want to see the results. i want you to try setting up a classifier and apply to surrealml
+```
+
+JSON result:
+
+- Schema: `ax.workflow_candidate_proposal_list.v1`
+- Proposal count: `1`
+- Evidence candidate count: `2`
+- Evidence example count: `4`
+- Cited classifier candidates:
+  - `correction-event:correction:wrong_artifact`
+  - `reaction-event:correction:prototype_completeness`
+
+Decision:
+
+- E169 closes the auditability gap in E168. A proposal is no longer only a
+  lifecycle row; it can explain the classifier graph facts that justified it.
+- This is the first visible query surface where classifier results become
+  graph evidence for durable agent guidance: proposal listing now joins
+  accepted guidance back to candidate nodes and transcript evidence examples.
+- The next useful slice is either non-guidance promotion support
+  (`harness_check` / `classifier_fixture`) or a higher-level query that starts
+  from a user topic and returns proposals, experiments, candidate facts, and
+  source turns together.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-proposal-list-e169-expanded.json >/dev/null
+rg -n "evidence candidates|prototype_completeness|wrong_artifact|did you create classifier" .ax/experiments/workflow-candidate-proposal-list-e169-expanded.txt .ax/experiments/workflow-candidate-proposal-list-e169-expanded.json
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts src/improve/agent-accept.test.ts src/improve/task-template.test.ts src/improve/lint.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts improve lint --root=. --json > .ax/experiments/workflow-candidate-lint-e169.json
+python3 -m json.tool .ax/experiments/workflow-candidate-lint-e169.json >/dev/null
+```
+
+All passed. `bun run typecheck` emitted existing Effect lint
+messages/warnings but exited `0`.
+
+## E170 - Workflow Topic Evidence Report
+
+Question: can one query start from a topic and return the connected proposal,
+experiment, classifier candidates, and source evidence together?
+
+Change:
+
+- Added `--topic-report` to `axctl classifiers workflow-candidates`.
+- `--topic-report` requires `--search=<topic>` and produces schema
+  `ax.workflow_candidate_topic_report.v1`.
+- The report joins:
+  - workflow-candidate-derived proposals
+  - guidance proposal target/section
+  - experiment status/id/artifact provenance
+  - cited classifier candidate groups
+  - ranked classifier candidates matching the same topic
+  - source evidence examples and turn ids
+- The report respects existing filters such as `--proposal-status`,
+  `--task-like`, `--action`, `--classifier`, `--limit`, and `--examples`.
+
+Command:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --proposal-status=accepted --search=surrealml --task-like=exclude --examples=2 --limit=10 --out=.ax/experiments/workflow-topic-report-e170.json | tee .ax/experiments/workflow-topic-report-e170.txt
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-topic-report-e170.json`
+- `.ax/experiments/workflow-topic-report-e170.txt`
+- `.ax/experiments/workflow-candidate-lint-e170.json`
+
+Result:
+
+```text
+workflow topic evidence
+decision: workflow_topic_evidence_found
+topic: surrealml
+source: transcript_classifier_projection
+proposals: 1
+experiments: 1
+proposal evidence candidates: 2
+ranked candidates: 4
+candidate evidence facts: 8
+source turns: 4
+```
+
+Connected proposal:
+
+- `guidance__workflow_candidate__b7717e979a1fb149`
+  - status: `accepted`
+  - title: `Require applied classifier results for surrealml`
+  - target: `AGENTS.md#Workflow Candidate Guardrails`
+  - experiment:
+    `experiment:guidance__Require_applied_classifier_results_for_surrealml__7e979a1fb149__mpt00j1a_1`
+  - experiment status: `scaffolded`
+  - cited evidence candidates:
+    - `correction-event:correction:wrong_artifact`
+    - `reaction-event:correction:prototype_completeness`
+
+Ranked topic candidates:
+
+- `reaction-event:correction:prototype_completeness`
+  - action: `add_context_guardrail`
+  - support/evidence: `2/2`
+- `verification-event:verification_request:output_required`
+  - action: `add_verification_gate`
+  - support/evidence: `2/2`
+- `correction-event:correction:wrong_artifact`
+  - action: `add_context_guardrail`
+  - support/evidence: `2/2`
+- `direction-event:direction:output_expectation`
+  - action: `record_guidance_or_environment_preference`
+  - support/evidence: `2/2`
+
+Decision:
+
+- E170 turns classifier graph evidence into a more useful discovery surface:
+  a user or agent can ask for a topic and see the accepted guidance, scaffolded
+  experiment, cited candidate facts, and still-unpromoted related candidates.
+- For `surrealml`, the report shows the existing guidance covers correction
+  and artifact-completeness signals, while verification/output-required and
+  output-expectation candidates are still visible as adjacent evidence.
+- The next useful slice is to turn this topic report into an evidence-pack
+  command that emits a task/review brief for the unpromoted adjacent
+  candidates, or to promote non-guidance recommendations like harness checks.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+bun run typecheck
+python3 -m json.tool .ax/experiments/workflow-topic-report-e170.json >/dev/null
+rg -n "workflow_topic_evidence_found|proposal_evidence_candidate_count|ranked_candidate_count|prototype_completeness|output_required|guidance__workflow_candidate__b7717e979a1fb149" .ax/experiments/workflow-topic-report-e170.json .ax/experiments/workflow-topic-report-e170.txt
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts src/improve/agent-accept.test.ts src/improve/task-template.test.ts src/improve/lint.test.ts
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts improve lint --root=. --json > .ax/experiments/workflow-candidate-lint-e170.json
+python3 -m json.tool .ax/experiments/workflow-candidate-lint-e170.json >/dev/null
+```
+
+All passed. `bun run typecheck` emitted existing Effect lint
+messages/warnings but exited `0`.
+
+## E171 - Workflow Topic Evidence Pack
+
+Question: can the topic report emit a reviewable artifact for adjacent
+unpromoted candidates, so the graph query can drive the next improvement
+instead of only displaying results?
+
+Change:
+
+- Added `--evidence-pack=<path>` to
+  `axctl classifiers workflow-candidates --topic-report`.
+- Added a markdown evidence-pack renderer for topic reports.
+- The pack includes:
+  - topic/query totals
+  - existing workflow proposal coverage
+  - cited candidate groups already covered by accepted proposals
+  - adjacent ranked candidates not cited by those proposals
+  - recommended artifact type per adjacent candidate
+  - evidence examples with turn/result refs
+  - a review checklist for each adjacent candidate
+
+Command:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --proposal-status=accepted --search=surrealml --task-like=exclude --examples=2 --limit=10 --out=.ax/experiments/workflow-topic-report-e171.json --evidence-pack=.ax/experiments/workflow-topic-evidence-pack-e171.md | tee .ax/experiments/workflow-topic-report-e171.txt
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-topic-report-e171.json`
+- `.ax/experiments/workflow-topic-report-e171.txt`
+- `.ax/experiments/workflow-topic-evidence-pack-e171.md`
+- `.ax/experiments/workflow-candidate-lint-e171.json`
+
+Result:
+
+- Topic report decision: `workflow_topic_evidence_found`
+- Existing proposal: `guidance__workflow_candidate__b7717e979a1fb149`
+- Existing proposal covers:
+  - `correction-event:correction:wrong_artifact`
+  - `reaction-event:correction:prototype_completeness`
+- Evidence pack adjacent unpromoted candidates: `2`
+  - `verification-event:verification_request:output_required`
+    - recommended artifact: `harness_check`
+    - reason: verification gate candidate should become an executable check
+      before more guidance
+  - `direction-event:direction:output_expectation`
+    - recommended artifact: `classifier_fixture`
+    - reason: topic-scoped classifier evidence should become a fixture to
+      stabilize package evaluation
+
+Pack excerpt:
+
+```md
+# Workflow Topic Evidence Pack: surrealml
+
+- Adjacent unpromoted candidate count: `2`
+
+### verification-event:verification_request:output_required
+
+- Recommended artifact: `harness_check`
+- Verdict: `pending`
+- Rationale: _pending_
+- Next artifact: _pending_
+
+### direction-event:direction:output_expectation
+
+- Recommended artifact: `classifier_fixture`
+- Verdict: `pending`
+- Rationale: _pending_
+- Next artifact: _pending_
+```
+
+Decision:
+
+- E171 makes the graph output operational. The topic query can now produce a
+  durable review artifact that separates already-covered proposal evidence
+  from adjacent candidates that still need action.
+- For `surrealml`, the next concrete candidate is no longer ambiguous:
+  `verification-event:verification_request:output_required` should be reviewed
+  as a harness-check candidate because it captures “show me the applied
+  classifier results” as an output-required verification gate.
+- The next useful slice is to turn a reviewed evidence-pack item into a
+  first-class `harness_check` proposal/task, preserving the candidate id and
+  evidence refs.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+python3 -m json.tool .ax/experiments/workflow-topic-report-e171.json >/dev/null
+rg -n 'Workflow Topic Evidence Pack|Adjacent unpromoted candidate count|verification-event:verification_request:output_required|Recommended artifact: `harness_check`|direction-event:direction:output_expectation|guidance__workflow_candidate__b7717e979a1fb149' .ax/experiments/workflow-topic-evidence-pack-e171.md .ax/experiments/workflow-topic-report-e171.json .ax/experiments/workflow-topic-report-e171.txt
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts src/improve/agent-accept.test.ts src/improve/task-template.test.ts src/improve/lint.test.ts
+bun scripts/check-table-coverage.ts
+bun run typecheck
+bun src/cli/index.ts improve lint --root=. --json > .ax/experiments/workflow-candidate-lint-e171.json
+python3 -m json.tool .ax/experiments/workflow-candidate-lint-e171.json >/dev/null
+```
+
+All passed. `bun run typecheck` emitted existing Effect lint
+messages/warnings but exited `0`.
+
+## E172 - Workflow Topic Adjacent Task Emission
+
+Question: can adjacent topic candidates become concrete task drafts without
+duplicating candidates already covered by accepted workflow proposals?
+
+Change:
+
+- Added `--emit-adjacent-tasks` to
+  `axctl classifiers workflow-candidates --topic-report`.
+- The command writes task drafts to `--task-dir=<path>` or `.ax/tasks` by
+  default.
+- Adjacent tasks are built only from ranked topic candidates not cited by the
+  matched workflow-candidate proposals.
+- Each task uses the existing workflow candidate task format and preserves:
+  - candidate id
+  - classifier key/target/action
+  - recommended artifact type
+  - turn/result evidence refs
+  - evidence text excerpts
+- The topic report JSON/text now includes `adjacent_tasks` when task drafts
+  are emitted.
+
+Command:
+
+```sh
+rm -rf .ax/experiments/workflow-topic-adjacent-tasks-e172
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --proposal-status=accepted --search=surrealml --task-like=exclude --examples=2 --limit=10 --emit-adjacent-tasks --task-dir=.ax/experiments/workflow-topic-adjacent-tasks-e172 --out=.ax/experiments/workflow-topic-report-e172.json --evidence-pack=.ax/experiments/workflow-topic-evidence-pack-e172.md | tee .ax/experiments/workflow-topic-report-e172.txt
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-topic-report-e172.json`
+- `.ax/experiments/workflow-topic-report-e172.txt`
+- `.ax/experiments/workflow-topic-evidence-pack-e172.md`
+- `.ax/experiments/workflow-topic-adjacent-tasks-e172/workflow-candidate-verification-event-verification-request-output-required-65nddh.md`
+- `.ax/experiments/workflow-topic-adjacent-tasks-e172/workflow-candidate-direction-event-direction-output-expectation-ms2xhn.md`
+- `.ax/experiments/workflow-candidate-lint-e172.json`
+
+Result:
+
+```text
+workflow topic evidence
+decision: workflow_topic_evidence_found
+topic: surrealml
+proposals: 1
+experiments: 1
+proposal evidence candidates: 2
+ranked candidates: 4
+candidate evidence facts: 8
+source turns: 4
+adjacent tasks: 2
+adjacent task dir: .ax/experiments/workflow-topic-adjacent-tasks-e172
+```
+
+Emitted adjacent task drafts:
+
+- `verification-event:verification_request:output_required`
+  - path:
+    `.ax/experiments/workflow-topic-adjacent-tasks-e172/workflow-candidate-verification-event-verification-request-output-required-65nddh.md`
+  - recommended artifact: `harness_check`
+  - evidence refs preserved:
+    `classifier_result:verification_event__0_1_0__event_window__38cbc794d9d58e54`,
+    `classifier_result:verification_event__0_1_0__event_window__9813244cd75c94f7`
+- `direction-event:direction:output_expectation`
+  - path:
+    `.ax/experiments/workflow-topic-adjacent-tasks-e172/workflow-candidate-direction-event-direction-output-expectation-ms2xhn.md`
+  - recommended artifact: `classifier_fixture`
+  - evidence refs preserved:
+    `classifier_result:direction_event__0_1_0__event_window__da34fa44a4754d30`,
+    `classifier_result:direction_event__0_1_0__event_window__e25b872691ab9475`
+
+Decision:
+
+- E172 closes the loop from topic query to task artifact. The system can now
+  start with a topic, identify proposal-covered evidence, isolate adjacent
+  unpromoted candidates, and emit concrete task drafts for those candidates.
+- The SurrealML `output_required` harness-check candidate now has a durable
+  task draft with evidence refs, so the next agent can implement or reject the
+  harness check from a grounded artifact rather than re-querying the graph.
+- The next useful slice is to define the harness-check proposal/task schema
+  itself, so `harness_check` can become a first-class proposal form rather than
+  only a recommended artifact in a task draft.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+bun run typecheck
+python3 -m json.tool .ax/experiments/workflow-topic-report-e172.json >/dev/null
+find .ax/experiments/workflow-topic-adjacent-tasks-e172 -type f -maxdepth 1 -print | sort
+rg -n 'adjacent_tasks|harness_check|classifier_fixture|verification-event:verification_request:output_required|direction-event:direction:output_expectation' .ax/experiments/workflow-topic-report-e172.json .ax/experiments/workflow-topic-report-e172.txt .ax/experiments/workflow-topic-evidence-pack-e172.md .ax/experiments/workflow-topic-adjacent-tasks-e172
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts src/improve/agent-accept.test.ts src/improve/task-template.test.ts src/improve/lint.test.ts
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts improve lint --root=. --json > .ax/experiments/workflow-candidate-lint-e172.json
+python3 -m json.tool .ax/experiments/workflow-candidate-lint-e172.json >/dev/null
+```
+
+All passed. `bun run typecheck` emitted existing Effect lint
+messages/warnings but exited `0`.
+
+## E173 - First-class Harness-check Proposal Form
+
+Question: can the SurrealML `output_required` candidate become a first-class
+`harness_check` proposal and accepted task, not only a recommended artifact in
+a workflow-candidate task draft?
+
+Change:
+
+- Added `harness_check` to the accepted proposal form lifecycle.
+- Added `form=harness_check` task rendering.
+- Harness-check tasks now include the proposal title, expected check, and
+  baseline classifier evidence, including classifier result refs.
+- Added `--promote-harness-proposals` to
+  `axctl classifiers workflow-candidates --topic-report`.
+- Harness proposal seeding:
+  - considers adjacent topic candidates only
+  - emits proposals only when the recommendation is `harness_check`
+  - skips non-harness adjacent candidates, such as `classifier_fixture`
+  - persists `proposal.form = "harness_check"`
+  - stores candidate/evidence examples in `proposal.baseline`
+  - relates the proposal back to the classifier candidate node through
+    `cites_evidence`
+
+Dry-run command:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --proposal-status=accepted --search=surrealml --task-like=exclude --examples=2 --limit=10 --promote-harness-proposals --proposal-dry-run --out=.ax/experiments/workflow-topic-harness-proposal-dry-run-e173.json --evidence-pack=.ax/experiments/workflow-topic-harness-proposal-dry-run-e173.md --json > .ax/experiments/workflow-topic-harness-proposal-dry-run-e173.txt
+```
+
+Executed proposal seed:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --proposal-status=accepted --search=surrealml --task-like=exclude --examples=2 --limit=10 --promote-harness-proposals --out=.ax/experiments/workflow-topic-harness-proposal-e173.json --evidence-pack=.ax/experiments/workflow-topic-harness-proposal-e173.md | tee .ax/experiments/workflow-topic-harness-proposal-e173.txt
+```
+
+Accepted harness-check task:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --proposal-status=accepted --search=SurrealML --task-like=exclude --examples=2 --limit=10 --promote-harness-proposals --out=.ax/experiments/workflow-topic-harness-proposal-e173b.json --evidence-pack=.ax/experiments/workflow-topic-harness-proposal-e173b.md | tee .ax/experiments/workflow-topic-harness-proposal-e173b.txt
+AX_TASK_DIR=.ax/experiments/workflow-harness-accepted-tasks-e173b bun src/cli/index.ts improve accept harness_check__workflow_candidate__d9c44ad59d7b3dcf | tee .ax/experiments/workflow-harness-accept-e173b.txt
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-topic-harness-proposal-dry-run-e173.json`
+- `.ax/experiments/workflow-topic-harness-proposal-dry-run-e173.txt`
+- `.ax/experiments/workflow-topic-harness-proposal-dry-run-e173.md`
+- `.ax/experiments/workflow-topic-harness-proposal-e173.json`
+- `.ax/experiments/workflow-topic-harness-proposal-e173.txt`
+- `.ax/experiments/workflow-topic-harness-proposal-e173.md`
+- `.ax/experiments/workflow-topic-harness-proposal-e173b.json`
+- `.ax/experiments/workflow-topic-harness-proposal-e173b.txt`
+- `.ax/experiments/workflow-topic-harness-proposal-e173b.md`
+- `.ax/experiments/workflow-harness-accept-e173b.txt`
+- `.ax/experiments/workflow-harness-accepted-tasks-e173b/harness_check__workflow_candidate__d9c44ad59d7b3dcf.md`
+- `.ax/experiments/workflow-candidate-lint-e173.json`
+
+Results:
+
+- Dry-run produced one `harness_check` proposal write plan:
+  - dedupe sig: `harness_check__workflow_candidate__134716c18f2a2cc5`
+  - title: `Require output_required evidence for surrealml`
+  - statements: `3`
+- Executed seed wrote one open harness proposal and skipped one adjacent
+  non-harness candidate:
+  - emitted: `1`
+  - skipped: `1`
+  - skipped candidate: `direction-event:direction:output_expectation`
+    because its recommendation is `classifier_fixture`
+- Accepted first-class harness proposal:
+  - dedupe sig: `harness_check__workflow_candidate__d9c44ad59d7b3dcf`
+  - emitted task:
+    `.ax/experiments/workflow-harness-accepted-tasks-e173b/harness_check__workflow_candidate__d9c44ad59d7b3dcf.md`
+  - task form: `harness_check`
+  - task action: `add harness check`
+  - task includes classifier result refs:
+    `classifier_result:verification_event__0_1_0__event_window__38cbc794d9d58e54`,
+    `classifier_result:verification_event__0_1_0__event_window__9813244cd75c94f7`
+
+Decision:
+
+- E173 makes `harness_check` a real proposal/task form in the experiment
+  lifecycle. It can be seeded from classifier graph evidence, accepted through
+  `improve accept`, and emitted as a dedicated task.
+- The SurrealML `output_required` case is now grounded end-to-end:
+  transcript correction -> classifier candidate -> topic report -> harness
+  proposal -> accepted harness-check task with classifier result refs.
+- The next useful slice is to implement the actual harness check described by
+  the accepted task, then reconcile it with `axctl improve lint`.
+
+Verification:
+
+```sh
+bun test src/improve/lifecycle.test.ts src/improve/task-template.test.ts src/improve/agent-accept.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+bun run typecheck
+python3 -m json.tool .ax/experiments/workflow-topic-harness-proposal-dry-run-e173.json >/dev/null
+rg -n 'harness_proposals|harness_check__workflow_candidate__|verification-event:verification_request:output_required|statements|CREATE proposal' .ax/experiments/workflow-topic-harness-proposal-dry-run-e173.json .ax/experiments/workflow-topic-harness-proposal-dry-run-e173.txt .ax/experiments/workflow-topic-harness-proposal-dry-run-e173.md
+python3 -m json.tool .ax/experiments/workflow-topic-harness-proposal-e173.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-topic-harness-proposal-e173b.json >/dev/null
+rg -n 'form=harness_check|classifier_result:verification_event|result_id|add harness check|Require output_required evidence' .ax/experiments/workflow-harness-accepted-tasks-e173b
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts src/improve/lifecycle.test.ts src/improve/agent-accept.test.ts src/improve/task-template.test.ts src/improve/lint.test.ts
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts improve lint --root=. --json > .ax/experiments/workflow-candidate-lint-e173.json
+python3 -m json.tool .ax/experiments/workflow-candidate-lint-e173.json >/dev/null
+```
+
+All passed. `bun run typecheck` emitted existing Effect lint
+messages/warnings but exited `0`.
+
+## E158 - Topic Search Over Workflow Candidate Evidence
+
+Question: can the product CLI isolate candidate evidence for a specific topic
+or pattern, instead of only ranking global classifier groups?
+
+Change:
+
+- Added `--search=<text>` to `axctl classifiers workflow-candidates`.
+- Search is applied after action/classifier/task-like filtering and matches
+  evidence `text_excerpt` case-insensitively.
+- Search mode skips candidate groups with zero matching evidence, so topic
+  filters do not return unrelated zero-evidence rows or fail graph health.
+- Added regression coverage for:
+  - search + `--task-like=exclude` composition
+  - skipping candidate groups with no matching evidence
+
+Command:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --action=add_context_guardrail --task-like=exclude --search=surrealml --limit=5 --examples=3 --out=.ax/experiments/workflow-candidate-search-e158.json
+```
+
+Artifact:
+
+- `.ax/experiments/workflow-candidate-search-e158.json`
+
+Results:
+
+- Decision: `workflow_candidates_ranked`
+- Query:
+  - action: `add_context_guardrail`
+  - task-like: `exclude`
+  - search: `surrealml`
+- Evidence facts in source graph: `250`
+- Considered matching evidence: `4`
+- Candidate groups returned: `2`
+- Wrapper-like evidence: `0`
+- Task-like evidence: `0`
+
+Returned candidates:
+
+- `reaction-event:correction:prototype_completeness`
+  - action: `add_context_guardrail`
+  - support: `2`
+  - avg confidence: `0.88`
+  - examples include:
+    "did you create classifier i dont want just html i want to see the results.
+    i want you to try setting up a classifier and apply to surrealml"
+- `correction-event:correction:wrong_artifact`
+  - action: `add_context_guardrail`
+  - support: `2`
+  - avg confidence: `0.86`
+  - examples include the same SurrealML correction turn from a second
+    classifier perspective.
+
+Decision:
+
+- E158 makes the workflow-candidate CLI useful for targeted investigation:
+  "where did this kind of correction happen, what classifier facts captured
+  it, and what action would it suggest?"
+- For the SurrealML thread, the classifier graph identifies the useful work as
+  a context/artifact guardrail problem rather than a generic verification
+  issue: the agent showed HTML/prototype surface when the user wanted actual
+  classifier setup and applied results.
+- The next useful slice is to turn a filtered workflow-candidate report into a
+  reviewable improvement proposal/task brief, preserving candidate id, action,
+  examples, and turn refs.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-search-e158.json >/dev/null
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+All passed. `bun run typecheck` emitted existing Effect lint
+messages/warnings but exited `0`.
+
+## E159 - Workflow Candidate Review Brief
+
+Question: can a filtered workflow-candidate report be packaged into a
+human-reviewable brief that preserves candidate ids, proposed actions, examples,
+and turn refs?
+
+Change:
+
+- Added `--brief=<path>` to `axctl classifiers workflow-candidates`.
+- Added `renderWorkflowCandidateBriefMarkdown(report)` in
+  `src/cli/classifiers-workflow-candidates.ts`.
+- The brief includes:
+  - query metadata
+  - candidate id
+  - proposed action
+  - classifier key and target
+  - score/support/confidence
+  - pending verdict and rationale fields
+  - action-specific review prompt
+  - example turn refs and classifier result refs
+- Added regression coverage for Markdown brief rendering.
+
+Command:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --action=add_context_guardrail --task-like=exclude --search=surrealml --limit=5 --examples=3 --out=.ax/experiments/workflow-candidate-brief-e159.json --brief=.ax/experiments/workflow-candidate-brief-e159.md
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-brief-e159.json`
+- `.ax/experiments/workflow-candidate-brief-e159.md`
+
+Results:
+
+- Decision: `workflow_candidates_ranked`
+- Candidate groups returned: `2`
+- Considered matching evidence: `4`
+- Wrapper-like evidence: `0`
+- Task-like evidence: `0`
+- Brief sections:
+  - `reaction-event:correction:prototype_completeness`
+  - `correction-event:correction:wrong_artifact`
+- Each section includes:
+  - `Verdict: pending`
+  - `Rationale: _pending_`
+  - the candidate graph id
+  - the proposed action `add_context_guardrail`
+  - example turn refs
+  - classifier result refs
+  - the SurrealML correction text
+
+Decision:
+
+- E159 converts classifier graph discovery into a review artifact a human or
+  later proposal pipeline can act on.
+- This intentionally stops before auto-creating DB proposals or editing
+  guidance. The candidate still needs review, but the evidence is now packaged
+  in a durable Markdown form instead of requiring JSON inspection.
+- The next useful slice is either:
+  - a sync path from brief verdicts back into JSON/report state, or
+  - a guarded promotion path that turns accepted/revised candidates into
+    `.ax/tasks` proposal briefs.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-brief-e159.json >/dev/null
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+All passed. `bun run typecheck` emitted existing Effect lint
+messages/warnings but exited `0`.
+
+## E160 - Workflow Candidate Review Sync
+
+Question: can reviewer verdicts edited in the Markdown workflow-candidate brief
+round-trip back into a structured JSON report without losing candidate ids,
+actions, examples, or evidence refs?
+
+Change:
+
+- Added `--sync-brief=<path>` to `axctl classifiers workflow-candidates`.
+- Added pure review sync helpers in
+  `src/cli/classifiers-workflow-candidates.ts`:
+  - `parseWorkflowCandidateBriefReview`
+  - `syncWorkflowCandidateReportFromBrief`
+- Synced reports now attach optional candidate `review` state:
+  - `verdict`
+  - `rationale`
+- Synced reports include a review summary:
+  - reviewed candidates
+  - pending candidates
+  - invalid verdict count
+  - missing rationale count
+  - unknown candidate count
+- Invalid verdicts, missing rationales on reviewed candidates, and unknown
+  candidate ids become report failures.
+
+Command:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --action=add_context_guardrail --task-like=exclude --search=surrealml --limit=5 --examples=3 --sync-brief=.ax/experiments/workflow-candidate-brief-e160-reviewed.md --out=.ax/experiments/workflow-candidate-review-sync-e160.json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-brief-e160-reviewed.md`
+- `.ax/experiments/workflow-candidate-review-sync-e160.json`
+
+Review input:
+
+- `reaction-event:correction:prototype_completeness`: `accept`
+  - rationale: the user explicitly corrected the agent for showing a surface
+    artifact instead of setting up and applying classifier results.
+- `correction-event:correction:wrong_artifact`: `revise`
+  - rationale: useful evidence, but overlaps with the accepted
+    prototype-completeness candidate and should be merged or deduped before
+    promotion.
+
+Results:
+
+- Decision: `workflow_candidates_ranked`
+- Reviewed candidates: `2`
+- Pending candidates: `0`
+- Invalid verdicts: `0`
+- Missing rationales: `0`
+- Unknown candidates: `0`
+- Candidate review state is present in the JSON report for both candidates.
+
+Decision:
+
+- E160 closes the review round-trip for workflow candidates: classifier graph
+  evidence can be queried, rendered for human review, edited in Markdown, and
+  synced back into structured state.
+- This still intentionally stops before DB proposal creation or `.ax/tasks`
+  emission. The next useful slice is a guarded promotion command that only
+  emits task/proposal drafts for `accept` or `revise` candidates with
+  non-empty rationales and evidence refs.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-sync-e160.json >/dev/null
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+All passed. `bun run typecheck` emitted existing Effect lint
+messages/warnings but exited `0`.
+
+## E161 - Guarded Workflow Candidate Task Promotion
+
+Question: can reviewed workflow candidates be promoted into actionable task
+drafts only when the review is clean and the candidate has rationale plus
+evidence refs?
+
+Change:
+
+- Added `--promote-tasks` and `--task-dir=<path>` to
+  `axctl classifiers workflow-candidates`.
+- Added guarded task promotion helpers in
+  `src/cli/classifiers-workflow-candidates.ts`:
+  - `renderWorkflowCandidateTaskMarkdown`
+  - `buildWorkflowCandidateTaskDrafts`
+- Promotion gates:
+  - a synced review is required
+  - report failures block promotion
+  - only `accept` and `revise` verdicts emit task drafts
+  - rejected/deferred/pending candidates are skipped
+  - promotable candidates must have non-empty rationale
+  - promotable candidates must include turn and classifier-result evidence refs
+- Promotion writes Markdown task drafts only; it does not create DB proposals
+  and does not edit guidance or harness files.
+
+Command:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --action=add_context_guardrail --task-like=exclude --search=surrealml --limit=5 --examples=3 --sync-brief=.ax/experiments/workflow-candidate-brief-e160-reviewed.md --promote-tasks --task-dir=.ax/experiments/workflow-candidate-tasks-e161 --out=.ax/experiments/workflow-candidate-promotion-e161.json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-promotion-e161.json`
+- `.ax/experiments/workflow-candidate-tasks-e161/workflow-candidate-reaction-event-correction-prototype-completeness-57u9i4.md`
+- `.ax/experiments/workflow-candidate-tasks-e161/workflow-candidate-correction-event-correction-wrong-artifact-wjki54.md`
+
+Results:
+
+- Decision: `workflow_candidates_ranked`
+- Review:
+  - reviewed candidates: `2`
+  - pending candidates: `0`
+  - invalid verdicts: `0`
+  - missing rationales: `0`
+  - unknown candidates: `0`
+- Promotion:
+  - emitted task drafts: `2`
+  - skipped candidates: `0`
+  - blocked candidates: `0`
+  - failures: `[]`
+
+Emitted task drafts:
+
+- `reaction-event:correction:prototype_completeness`
+  - verdict: `accept`
+  - proposed graph action: `add_context_guardrail`
+  - evidence refs: two turn refs and two classifier-result refs
+- `correction-event:correction:wrong_artifact`
+  - verdict: `revise`
+  - proposed graph action: `add_context_guardrail`
+  - evidence refs: two turn refs and two classifier-result refs
+
+Decision:
+
+- E161 closes the first safe promotion loop from graph facts to task drafts:
+  query -> filter -> review brief -> sync -> guarded task draft output.
+- This is still deliberately not automatic learning. The drafts preserve the
+  classifier candidate id, review rationale, proposed graph action, and
+  evidence refs so the next agent/human can decide the smallest actual
+  guidance or harness change.
+- The next useful slice is to make these promoted task drafts consumable by
+  the existing `.ax/tasks` / proposal workflow, or to add a dedupe/merge step
+  so overlapping `accept` and `revise` candidates become one consolidated task.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-promotion-e161.json >/dev/null
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+All passed. `bun run typecheck` emitted existing Effect lint
+messages/warnings but exited `0`.
+
+## E162 - Evidence-merged Workflow Candidate Promotion
+
+Question: can overlapping reviewed workflow candidates be merged into one task
+draft when they point at the same evidence and proposed action?
+
+Change:
+
+- Added `--promotion-mode=per-candidate|merge-evidence` to
+  `axctl classifiers workflow-candidates`.
+- `per-candidate` preserves E161 behavior.
+- `merge-evidence` groups promotable candidates by:
+  - proposed graph action
+  - shared evidence turn refs
+- Added merged promotion helpers:
+  - `renderMergedWorkflowCandidateTaskMarkdown`
+  - evidence-turn merge keying
+- Merged task drafts preserve:
+  - all candidate ids
+  - all candidate labels
+  - verdict and rationale for each candidate
+  - all turn refs
+  - all classifier-result refs
+
+Command:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --action=add_context_guardrail --task-like=exclude --search=surrealml --limit=5 --examples=3 --sync-brief=.ax/experiments/workflow-candidate-brief-e160-reviewed.md --promote-tasks --promotion-mode=merge-evidence --task-dir=.ax/experiments/workflow-candidate-tasks-e162 --out=.ax/experiments/workflow-candidate-promotion-e162.json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-promotion-e162.json`
+- `.ax/experiments/workflow-candidate-tasks-e162/workflow-candidate-merged-reaction-event-correction-prototype-completeness-correction-event-correction-wro-1qy8g0.md`
+
+Results:
+
+- Decision: `workflow_candidates_ranked`
+- Promotion mode: `merge-evidence`
+- Reviewed candidates: `2`
+- Pending candidates: `0`
+- Emitted task drafts: `1`
+- Skipped candidates: `0`
+- Blocked candidates: `0`
+- Merged task candidate ids:
+  - `classifier_candidate_group:transcript/reaction-event::correction::prototype_completeness::add_context_guardrail`
+  - `classifier_candidate_group:transcript/correction-event::correction::wrong_artifact::add_context_guardrail`
+- The merged task keeps both classifier-result refs for both shared turns.
+
+Decision:
+
+- E162 prevents duplicate task spam when multiple classifiers identify the
+  same underlying user correction.
+- For the SurrealML case, the accepted `prototype_completeness` signal and the
+  revised `wrong_artifact` signal now produce one merged `add_context_guardrail`
+  task draft with both rationales and both evidence paths preserved.
+- The next useful slice is to make the merged draft consumable by the existing
+  `.ax/tasks` / proposal workflow or add a promotion report that recommends
+  whether the merged task should become guidance, a harness check, or a
+  classifier-package fixture.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-promotion-e162.json >/dev/null
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+All passed. `bun run typecheck` emitted existing Effect lint
+messages/warnings but exited `0`.
+
+## E163 - Workflow Candidate Promotion Artifact Recommendation
+
+Question: can a reviewed workflow-candidate promotion say what kind of
+artifact it should become next, instead of leaving that decision implicit?
+
+Change:
+
+- Added promotion recommendation metadata to workflow-candidate task drafts.
+- Recommendation shape:
+  - primary artifact: `guidance`, `harness_check`, `classifier_fixture`, or
+    `review`
+  - alternatives
+  - confidence
+  - rationale
+- Added the recommendation to:
+  - promotion summary JSON task entries
+  - per-candidate task Markdown
+  - merged task Markdown
+- Added a pure recommendation helper so the rule is easy to unit test before
+  any DB write or proposal integration exists.
+
+Command:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --action=add_context_guardrail --task-like=exclude --search=surrealml --limit=5 --examples=3 --sync-brief=.ax/experiments/workflow-candidate-brief-e160-reviewed.md --promote-tasks --promotion-mode=merge-evidence --task-dir=.ax/experiments/workflow-candidate-tasks-e163 --out=.ax/experiments/workflow-candidate-promotion-e163.json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-promotion-e163.json`
+- `.ax/experiments/workflow-candidate-tasks-e163/workflow-candidate-merged-reaction-event-correction-prototype-completeness-correction-event-correction-wro-1qy8g0.md`
+
+Results:
+
+- Decision: `workflow_candidates_ranked`
+- Promotion mode: `merge-evidence`
+- Emitted task drafts: `1`
+- Skipped candidates: `0`
+- Blocked candidates: `0`
+- Recommended primary artifact: `guidance`
+- Recommended alternatives: `harness_check`, `classifier_fixture`
+- Recommendation confidence: `medium`
+- Rationale: the SurrealML evidence is a correction about context, artifact
+  shape, and prototype completeness; start with agent guidance, then turn
+  repeated cases into executable checks or classifier fixtures.
+
+Decision:
+
+- E163 makes the promoted SurrealML task more actionable: the graph-derived
+  evidence now says the next artifact should be guidance first, not an
+  immediate model change or raw classifier fixture.
+- This is still intentionally non-mutating. It writes Markdown and JSON
+  artifacts only.
+- The next useful slice is to consume this recommendation in the existing
+  `.ax/tasks` / proposal flow, then decide whether accepted guidance-backed
+  promotions should become graph facts or grounded-files tasks.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-promotion-e163.json >/dev/null
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+All passed. `bun run typecheck` emitted existing Effect lint
+messages/warnings but exited `0`.
+
+## E164 - Workflow Candidate Proposal Handoff
+
+Question: can a reviewed workflow-candidate promotion enter the existing
+`improve` proposal and `.ax/tasks` lifecycle instead of remaining a standalone
+classifier artifact?
+
+Change:
+
+- Added `--promote-proposals` to `axctl classifiers workflow-candidates`.
+- The proposal write path only runs after the existing review/promotion gates.
+- Guidance-recommended promotions seed guidance-form proposal rows:
+  - `proposal`
+  - `guidance_proposal`
+  - `cites_evidence` edges back to the source `classifier_graph_node`
+    candidates
+- Added `--proposal-target=<path>` and `--proposal-section=<section>` so the
+  generated guidance proposal can point at the intended grounded file.
+- Existing proposal dedupe signatures are refreshed without resetting status or
+  baseline.
+- `acceptProposal` now carries proposal `confidence` and `frequency` into
+  emitted task briefs instead of hardcoding `medium` and `0/wk`.
+
+Command:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --action=add_context_guardrail --task-like=exclude --search=surrealml --limit=5 --examples=3 --sync-brief=.ax/experiments/workflow-candidate-brief-e160-reviewed.md --promote-proposals --promotion-mode=merge-evidence --proposal-target=AGENTS.md --proposal-section="Workflow Candidate Guardrails" --out=.ax/experiments/workflow-candidate-proposals-e164.json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-proposals-e164.json`
+- `.ax/experiments/workflow-candidate-accepted-tasks-e164/guidance__workflow_candidate__b7717e979a1fb149.md`
+
+Results:
+
+- Decision: `workflow_candidates_ranked`
+- Promotion proposals emitted: `1`
+- Promotion proposals skipped: `0`
+- Proposal id:
+  `proposal:guidance__Require_applied_classifier_results_for_surrealml__7e979a1fb149`
+- Dedupe sig:
+  `guidance__workflow_candidate__b7717e979a1fb149`
+- Guidance payload:
+  `guidance_proposal:guidance__Require_applied_classifier_results_for_surrealml__7e979a1fb149`
+- Target: `AGENTS.md`
+- Section: `Workflow Candidate Guardrails`
+- Recommendation: primary `guidance`, alternatives `harness_check` and
+  `classifier_fixture`, confidence `medium`
+
+Existing lifecycle handoff:
+
+```sh
+AX_TASK_DIR=.ax/experiments/workflow-candidate-accepted-tasks-e164 bun src/cli/index.ts improve accept guidance__workflow_candidate__b7717e979a1fb149
+bun src/cli/index.ts improve show guidance__workflow_candidate__b7717e979a1fb149
+```
+
+Handoff result:
+
+- `improve accept` emitted a normal guidance task brief:
+  `.ax/experiments/workflow-candidate-accepted-tasks-e164/guidance__workflow_candidate__b7717e979a1fb149.md`
+- `improve show` reports:
+  - form: `guidance`
+  - status: `accepted`
+  - confidence: `medium`
+  - frequency: `2/wk`
+  - experiment status: `task_emitted`
+  - pending task path: the emitted E164 task brief
+
+Decision:
+
+- E164 closes the bridge from classifier graph evidence to the existing
+  proposal lifecycle. A reviewed workflow candidate can now become a normal
+  guidance proposal, be accepted through `axctl improve accept`, and emit a
+  normal `.ax/tasks` brief that `axctl improve lint` can later reconcile.
+- This keeps classifier-derived recommendations from becoming a separate task
+  system.
+- The next useful slice is to apply/reconcile the emitted guidance marker or
+  add a read-only proposal preview mode before DB writes.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts src/improve/agent-accept.test.ts src/improve/task-template.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-proposals-e164.json >/dev/null
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts src/improve/agent-accept.test.ts src/improve/task-template.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+All passed. `bun run typecheck` emitted existing Effect lint
+messages/warnings but exited `0`.
+
+## E165 - Grounded Guidance Reconciliation
+
+Question: can the workflow-candidate guidance proposal complete the existing
+grounded-files lifecycle by landing in the target agent file and reconciling
+through `axctl improve lint`?
+
+Change:
+
+- Applied the accepted E164 guidance task into `AGENTS.md` under
+  `## Workflow Candidate Guardrails`.
+- The inserted block preserves the required marker:
+  `<!--ax:guidance__workflow_candidate__b7717e979a1fb149-->`.
+- Ran `axctl improve lint --root=.` to reconcile the marker with the accepted
+  experiment.
+- Fixed lint discovery to dedupe files by real path so this repo's
+  `AGENTS.md -> CLAUDE.md` symlink does not create a false `id_collision`
+  warning for the same marker.
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-lint-e165.json`
+- `.ax/experiments/workflow-candidate-lint-e165-after-dedupe.json`
+
+Initial reconciliation result:
+
+```json
+{
+  "shortId": "guidance__workflow_candidate__b7717e979a1fb149",
+  "experimentId": "experiment:guidance__Require_applied_classifier_results_for_surrealml__7e979a1fb149__mpt00j1a_1",
+  "previousStatus": "task_emitted",
+  "nextStatus": "scaffolded",
+  "taskDeleted": ".ax/experiments/workflow-candidate-accepted-tasks-e164/guidance__workflow_candidate__b7717e979a1fb149.md"
+}
+```
+
+Post-fix repeat lint:
+
+- `bun src/cli/index.ts improve lint --root=. --json` exits `0`.
+- Repeat lint reports:
+  - errors: `0`
+  - warnings: `0`
+  - infos: `0`
+  - reconciled: `0`
+
+State:
+
+- `improve show guidance__workflow_candidate__b7717e979a1fb149` reports:
+  - form: `guidance`
+  - proposal status: `accepted`
+  - experiment status: `scaffolded`
+  - artifact: `CLAUDE.md`
+- The emitted task file no longer exists.
+- `improve show` still prints the historical task path because the experiment
+  row retains `task_path` as provenance; the task file itself was deleted by
+  lint.
+
+Decision:
+
+- E165 completes the first end-to-end path:
+  classifier graph evidence -> reviewed workflow candidate -> guidance
+  proposal -> accepted `.ax/tasks` brief -> grounded agent-file marker ->
+  reconciled scaffolded experiment.
+- The linter symlink fix removes noise for repositories that expose both
+  `AGENTS.md` and `CLAUDE.md` as aliases.
+- The next useful slice is to add a dry-run/preview mode for
+  `--promote-proposals` so future workflow-candidate proposal writes can be
+  reviewed before mutating the DB.
+
+Verification:
+
+```sh
+bun test src/improve/lint.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+bun src/cli/index.ts improve lint --root=. --json > .ax/experiments/workflow-candidate-lint-e165-after-dedupe.json
+python3 -m json.tool .ax/experiments/workflow-candidate-lint-e165-after-dedupe.json >/dev/null
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts src/improve/agent-accept.test.ts src/improve/task-template.test.ts src/improve/lint.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+All passed. `bun run typecheck` emitted existing Effect lint
+messages/warnings but exited `0`.
+
+## E166 - Workflow Candidate Proposal Dry-run
+
+Question: can workflow-candidate proposal promotion be reviewed before it
+mutates the DB?
+
+Change:
+
+- Added `--proposal-dry-run` to `axctl classifiers workflow-candidates`.
+- Dry-run still requires the existing promotion gates:
+  - reviewed candidates
+  - promotable verdicts
+  - rationale
+  - evidence refs
+- Dry-run builds the same guidance proposal plan as live promotion, but skips
+  executing the SurrealQL write statements.
+- Dry-run report includes:
+  - `dry_run: true`
+  - emitted/skipped proposal counts
+  - planned proposal ids and dedupe sigs
+  - `statement_count`
+  - planned statements for review
+- Normal proposal promotion keeps `dry_run: false` and reports statement count
+  without embedding SQL statements.
+
+Command:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --action=add_context_guardrail --task-like=exclude --search=surrealml --limit=5 --examples=3 --sync-brief=.ax/experiments/workflow-candidate-brief-e160-reviewed.md --promote-proposals --proposal-dry-run --promotion-mode=merge-evidence --proposal-target=AGENTS.md --proposal-section="Workflow Candidate Guardrails" --out=.ax/experiments/workflow-candidate-proposals-e166-dry-run.json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-proposals-e166-dry-run.json`
+- `.ax/experiments/workflow-candidate-proposal-before-e166.txt`
+- `.ax/experiments/workflow-candidate-proposal-after-e166.txt`
+- `.ax/experiments/workflow-candidate-lint-e166.json`
+
+Results:
+
+- Decision: `workflow_candidates_ranked`
+- Promotion proposals emitted: `1`
+- Promotion proposals skipped: `0`
+- Dry-run: `true`
+- Statement count: `6`
+- Statement preview count: `6`
+- Planned first statement is an `UPDATE proposal:...` because the E164/E165
+  proposal already exists.
+- Planned proposal id:
+  `proposal:guidance__Require_applied_classifier_results_for_surrealml__7e979a1fb149`
+- Planned dedupe sig:
+  `guidance__workflow_candidate__b7717e979a1fb149`
+
+Non-mutation check:
+
+```sh
+bun src/cli/index.ts improve show guidance__workflow_candidate__b7717e979a1fb149 > .ax/experiments/workflow-candidate-proposal-before-e166.txt
+# run dry-run command
+bun src/cli/index.ts improve show guidance__workflow_candidate__b7717e979a1fb149 > .ax/experiments/workflow-candidate-proposal-after-e166.txt
+diff -u .ax/experiments/workflow-candidate-proposal-before-e166.txt .ax/experiments/workflow-candidate-proposal-after-e166.txt
+```
+
+The diff was empty, proving the dry-run did not mutate the existing accepted
+proposal/experiment state.
+
+Decision:
+
+- E166 makes workflow-candidate proposal promotion safe to review before DB
+  writes.
+- This closes the main operational risk introduced by E164: agents can now
+  inspect exactly what proposal rows and evidence edges would be written before
+  choosing to run without `--proposal-dry-run`.
+- The next useful slice is to expose a compact human-readable proposal preview
+  in non-JSON output, or add a dedicated command that lists existing
+  workflow-candidate-derived proposals.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-proposals-e166-dry-run.json >/dev/null
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts src/improve/agent-accept.test.ts src/improve/task-template.test.ts src/improve/lint.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts improve lint --root=. --json > .ax/experiments/workflow-candidate-lint-e166.json
+python3 -m json.tool .ax/experiments/workflow-candidate-lint-e166.json >/dev/null
+```
+
+All passed. `bun run typecheck` emitted existing Effect lint
+messages/warnings but exited `0`.
+
+## E167 - Human-readable Proposal Dry-run Preview
+
+Question: can a workflow-candidate proposal dry-run be reviewed from normal
+CLI text output without opening the JSON artifact?
+
+Change:
+
+- Added a compact proposal preview to non-JSON
+  `axctl classifiers workflow-candidates` output.
+- The preview appears when `promotion.proposals` exists and shows:
+  - whether the run `would write` or `wrote`
+  - dedupe sig
+  - title
+  - proposal id
+  - target file and section
+  - primary artifact recommendation, confidence, alternatives
+  - evidence-candidate count
+- The preview intentionally does not dump full SQL; full planned statements
+  remain available in JSON dry-run output.
+
+Command:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --action=add_context_guardrail --task-like=exclude --search=surrealml --limit=5 --examples=3 --sync-brief=.ax/experiments/workflow-candidate-brief-e160-reviewed.md --promote-proposals --proposal-dry-run --promotion-mode=merge-evidence --proposal-target=AGENTS.md --proposal-section="Workflow Candidate Guardrails" --out=.ax/experiments/workflow-candidate-proposals-e167-preview.json | tee .ax/experiments/workflow-candidate-proposals-e167-preview.txt
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-proposals-e167-preview.json`
+- `.ax/experiments/workflow-candidate-proposals-e167-preview.txt`
+- `.ax/experiments/workflow-candidate-proposal-before-e167.txt`
+- `.ax/experiments/workflow-candidate-proposal-after-e167.txt`
+- `.ax/experiments/workflow-candidate-lint-e167.json`
+
+Preview output:
+
+```text
+proposal preview:
+  - would write guidance__workflow_candidate__b7717e979a1fb149
+    title: Require applied classifier results for surrealml
+    proposal: proposal:guidance__Require_applied_classifier_results_for_surrealml__7e979a1fb149
+    target: AGENTS.md#Workflow Candidate Guardrails
+    artifact: guidance confidence=medium alternatives=harness_check,classifier_fixture
+    evidence candidates: 2
+```
+
+Non-mutation check:
+
+- Captured `improve show guidance__workflow_candidate__b7717e979a1fb149`
+  before and after the dry-run.
+- `diff -u` was empty, so the text-preview dry-run did not mutate the
+  accepted proposal/experiment state.
+
+Decision:
+
+- E167 makes the safe proposal promotion path usable in an ordinary terminal:
+  the agent can review what would be written without inspecting JSON or SQL.
+- JSON dry-run remains the authoritative detailed review artifact because it
+  includes `statement_count` and the planned statements.
+- The next useful slice is to list existing workflow-candidate-derived
+  proposals, or to add promotion support for non-guidance recommendations such
+  as `harness_check`.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-proposals-e167-preview.json >/dev/null
+rg -n "proposal preview|would write|target: AGENTS.md|artifact: guidance" .ax/experiments/workflow-candidate-proposals-e167-preview.txt
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts src/improve/agent-accept.test.ts src/improve/task-template.test.ts src/improve/lint.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts improve lint --root=. --json > .ax/experiments/workflow-candidate-lint-e167.json
+python3 -m json.tool .ax/experiments/workflow-candidate-lint-e167.json >/dev/null
+```
+
+All passed. `bun run typecheck` emitted existing Effect lint
+messages/warnings but exited `0`.
+
+## E168 - Workflow Candidate Proposal Listing
+
+Question: can existing workflow-candidate-derived proposals be discovered
+without using the generic `improve list` surface?
+
+Change:
+
+- Added `--list-proposals` mode to
+  `axctl classifiers workflow-candidates`.
+- The listing mode filters proposals by the workflow-candidate dedupe prefix:
+  `guidance__workflow_candidate__`.
+- Added `--proposal-status=all|open|accepted|rejected`.
+- Existing `--search=<text>`, `--limit=<n>`, `--json`, and `--out=<path>`
+  work with the proposal listing mode.
+- Listing output includes:
+  - proposal count by status
+  - scaffolded experiment count
+  - dedupe sig
+  - title
+  - target file/section
+  - experiment status/id
+  - artifact/task provenance when available
+
+Command:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --list-proposals --proposal-status=all --search=surrealml --limit=10 --out=.ax/experiments/workflow-candidate-proposal-list-e168.json | tee .ax/experiments/workflow-candidate-proposal-list-e168.txt
+bun src/cli/index.ts classifiers workflow-candidates --list-proposals --proposal-status=accepted --search=surrealml --limit=10 --json > .ax/experiments/workflow-candidate-proposal-list-e168-json.txt
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-proposal-list-e168.json`
+- `.ax/experiments/workflow-candidate-proposal-list-e168.txt`
+- `.ax/experiments/workflow-candidate-proposal-list-e168-json.txt`
+- `.ax/experiments/workflow-candidate-lint-e168.json`
+
+Result:
+
+```text
+workflow candidate proposals
+prefix: guidance__workflow_candidate__
+status: all
+search: surrealml
+proposals: 1 total, 1 accepted, 0 open, 0 rejected
+scaffolded experiments: 1
+- 2 medium accepted guidance__workflow_candidate__b7717e979a1fb149
+  title: Require applied classifier results for surrealml
+  target: AGENTS.md#Workflow Candidate Guardrails
+  experiment: scaffolded (experiment:guidance__Require_applied_classifier_results_for_surrealml__7e979a1fb149__mpt00j1a_1)
+  artifact: CLAUDE.md
+  task: .ax/experiments/workflow-candidate-accepted-tasks-e164/guidance__workflow_candidate__b7717e979a1fb149.md
+```
+
+JSON result:
+
+- Schema: `ax.workflow_candidate_proposal_list.v1`
+- Totals:
+  - proposal count: `1`
+  - accepted count: `1`
+  - open count: `0`
+  - rejected count: `0`
+  - scaffolded experiment count: `1`
+- Dedupe sig:
+  `guidance__workflow_candidate__b7717e979a1fb149`
+
+Decision:
+
+- E168 makes classifier-derived workflow proposals discoverable as their own
+  product surface.
+- This completes the loop from graph evidence to proposal lifecycle visibility:
+  an agent can now discover what workflow-candidate promotions already exist
+  and inspect their experiment state without using generic proposal filters.
+- The next useful slice is to add promotion support for non-guidance
+  recommendations such as `harness_check`, or to add richer evidence expansion
+  for listed workflow-candidate proposals.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-proposal-list-e168.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-candidate-proposal-list-e168-json.txt >/dev/null
+rg -n "workflow candidate proposals|guidance__workflow_candidate__b7717e979a1fb149|scaffolded experiments: 1|target: AGENTS.md" .ax/experiments/workflow-candidate-proposal-list-e168.txt
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts src/improve/agent-accept.test.ts src/improve/task-template.test.ts src/improve/lint.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+bun src/cli/index.ts improve lint --root=. --json > .ax/experiments/workflow-candidate-lint-e168.json
+python3 -m json.tool .ax/experiments/workflow-candidate-lint-e168.json >/dev/null
+```
+
+All passed. `bun run typecheck` emitted existing Effect lint
+messages/warnings but exited `0`.
+
+## E157 - Product CLI For Workflow Candidate Discovery
+
+Question: can the workflow-candidate graph query become a first-class CLI
+surface so contributors and agents can debug/use it without invoking package
+scripts directly?
+
+New CLI:
+
+- `axctl classifiers workflow-candidates`
+- Source file: `src/cli/classifiers-workflow-candidates.ts`
+- Tests: `src/cli/classifiers-workflow-candidates.test.ts`
+
+Options:
+
+- `--source-kind=<kind>` defaults to `transcript_classifier_projection`
+- `--action=<proposed_action>`
+- `--classifier=<classifier_key>`
+- `--task-like=include|exclude|only`
+- `--limit=N`
+- `--examples=N`
+- `--out=<path>`
+- `--json`
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --limit=5 --examples=2 --out=.ax/experiments/workflow-candidate-cli-e157.json
+bun src/cli/index.ts classifiers workflow-candidates --action=add_context_guardrail --task-like=exclude --limit=5 --examples=1 --json
+```
+
+Artifact:
+
+- `.ax/experiments/workflow-candidate-cli-e157.json`
+
+Unfiltered CLI results:
+
+- Decision: `workflow_candidates_ranked`
+- Candidate groups: `15`
+- Evidence facts: `250`
+- Considered evidence: `250`
+- Task-like evidence: `58`
+- Wrapper-like evidence: `0`
+- Top five matched E156:
+  `reaction-event:direction:verification`,
+  `verification-event:verification_request:test_required`,
+  `reaction-event:correction:wrong_output`,
+  `reaction-event:approval:unknown`,
+  `verification-event:verification_request:regression_guard`.
+
+Filtered result:
+
+- Query: `--action=add_context_guardrail --task-like=exclude`
+- Candidate groups: `5`
+- Considered evidence: `37`
+- Task-like evidence: `0`
+- Top candidates:
+  `reaction-event:correction:wrong_output`,
+  `correction-event:correction:wrong_output`,
+  `correction-event:correction:wrong_artifact`,
+  `correction-event:correction:missing_context`,
+  `reaction-event:correction:prototype_completeness`.
+- Evidence includes the original user turn:
+  "did you create classifier i dont want just html i want to see the results.
+  i want you to try setting up a classifier and apply to surrealml"
+
+Decision:
+
+- E157 turns the graph projection into an inspectable product workflow:
+  rank candidate patterns, filter noisy task-wrapper evidence, and emit JSON
+  for downstream automation.
+- The filtered correction/action view is the clearest path toward generating
+  agent-improvement proposals from classifier facts, because it surfaces
+  user-originated correction patterns with turn references.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-cli-e157.json >/dev/null
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/effect-cli.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+All passed. `bun run typecheck` emitted existing Effect lint
+messages/warnings but exited `0`.
+
+### E156 - Workflow candidate ranking from transcript-backed graph facts
+
+Question:
+
+- Once transcript-backed classifier facts are persisted, can the graph produce
+  a reviewable ranked list of workflow candidates with concrete evidence
+  excerpts?
+
+New helper:
+
+- `packages/ax-classifier-session-sections/workflow_candidate_report.py`
+- `packages/ax-classifier-session-sections/workflow_candidate_report_test.py`
+- `bun run classifiers:workflow-candidates`
+- Package operation:
+  `packages/ax-classifier-session-sections/ax.classifier.json`
+  `workflow-candidate-report`
+
+Command:
+
+```sh
+bun run classifiers:workflow-candidates -- --limit=10 --examples=3 --out=.ax/experiments/workflow-candidate-report-e156.json
+```
+
+Artifact:
+
+- `.ax/experiments/workflow-candidate-report-e156.json`
+
+Results:
+
+- Decision: `workflow_candidates_ranked`
+- Candidate groups in graph: `15`
+- Returned candidates: `10`
+- Evidence facts: `250`
+- Candidates with evidence: `15`
+- Wrapper-like evidence: `0`
+- Task-like evidence: `58`
+
+Top ranked workflow candidates:
+
+- `reaction-event:direction:verification`
+  - action: `add_verification_gate`
+  - score: `74.7379`
+  - support: `106`
+  - evidence facts: `106`
+  - task-like evidence: `41`
+  - average confidence: `0.78`
+- `verification-event:verification_request:test_required`
+  - action: `add_verification_gate`
+  - score: `35.2084`
+  - support: `42`
+  - evidence facts: `42`
+  - task-like evidence: `14`
+  - average confidence: `0.86`
+- `reaction-event:correction:wrong_output`
+  - action: `add_context_guardrail`
+  - score: `20.7619`
+  - support: `23`
+  - evidence facts: `23`
+  - task-like evidence: `1`
+  - average confidence: `0.76`
+- `reaction-event:approval:unknown`
+  - action: `record_approval_checkpoint`
+  - score: `19.9875`
+  - support: `35`
+  - evidence facts: `35`
+  - task-like evidence: `0`
+  - average confidence: `0.82`
+- `verification-event:verification_request:regression_guard`
+  - action: `add_verification_gate`
+  - score: `12.0361`
+  - support: `11`
+  - evidence facts: `11`
+  - task-like evidence: `1`
+  - average confidence: `0.82`
+
+Report behavior:
+
+- Reads persisted `classifier_graph_node` and `classifier_graph_fact` rows for
+  `source_kind = "transcript_classifier_projection"`.
+- Ranks candidates by support, evidence, confidence, and action weight.
+- Adds a task-like penalty for delegated task prompts such as
+  `You are implementing Task ...`, `Spec compliance review ...`, and
+  worktree review scaffolding. These rows remain visible because they are real
+  transcript evidence, but they no longer look identical to organic user
+  feedback.
+- Includes example `turn` refs, confidence, and compact evidence excerpts for
+  review.
+
+Decision:
+
+- E156 closes the graph usefulness loop for the current slice: transcript-backed
+  classifier facts can now be projected, persisted, queried, ranked, and
+  reviewed as workflow candidates.
+- The report also surfaces the next quality boundary: some high-volume
+  verification candidates come from delegated task/review scaffolding rather
+  than organic user correction. This should not block graph usefulness, but the
+  production UX should expose `task_like_count` and let users filter or compare
+  organic vs delegated evidence.
+- The next useful slice is product/API integration:
+  - expose this report through `axctl classifiers ...` or dashboard views, and
+  - add filters for action, classifier key, task-like evidence, and evidence
+    text search.
+
+Verification:
+
+```sh
+python3 -m json.tool packages/ax-classifier-session-sections/ax.classifier.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-candidate-report-e156.json >/dev/null
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+All passed. `bun run typecheck` still emits existing Effect lint
+messages/warnings but exits `0`.
+
+### E155 - Transcript-backed candidate graph projection
+
+Question:
+
+- Can the same graph projection shape work from real persisted
+  `classifier_result` rows and transcript evidence refs, not only fixture rows?
+
+Quality fix found while querying live data:
+
+- Persisted classifier results still included control-message wrapper turns,
+  especially `<subagent_notification>` content. These were not real user
+  intent and should not become graph facts.
+- Added shared control/context filtering:
+  - `src/classifiers/control-text.ts`
+  - `reaction-event`
+  - `correction-event`
+  - `direction-event`
+  - `verification-event`
+- Re-derived persisted classifier results:
+
+```sh
+bun src/cli/index.ts ingest --stages=classifier-results --progress=plain
+```
+
+DB sanity after rederive:
+
+```sql
+SELECT count() AS count FROM classifier_result GROUP ALL;
+SELECT count() AS count
+FROM classifier_result
+WHERE string::starts_with(turn.text_excerpt, "<subagent_notification>")
+GROUP ALL;
+```
+
+Returned:
+
+- Classifier results: `2008`
+- Results on `<subagent_notification>` turns: `0`
+
+New helper:
+
+- `packages/ax-classifier-session-sections/transcript_candidate_projection.py`
+- `packages/ax-classifier-session-sections/transcript_candidate_projection_test.py`
+- `bun run classifiers:transcript-candidate-projection`
+- Package operation:
+  `packages/ax-classifier-session-sections/ax.classifier.json`
+  `transcript-candidate-graph-projection`
+
+Command:
+
+```sh
+bun run classifiers:transcript-candidate-projection -- --limit=250 --min-confidence=0.74 --out=.ax/experiments/transcript-candidate-graph-projection-e155.json --write-plan=.ax/experiments/transcript-candidate-graph-write-plan-e155.json
+```
+
+Artifacts:
+
+- `.ax/experiments/transcript-candidate-graph-projection-e155.json`
+- `.ax/experiments/transcript-candidate-graph-write-plan-e155.json`
+
+Projection results:
+
+- Decision: `transcript_candidate_graph_projection_ready`
+- Health decision: `healthy`
+- Source classifier results: `250`
+- Candidate groups: `15`
+- Nodes: `742`
+- Edges: `1305`
+- Facts: `265`
+- Candidate group facts: `15`
+- Candidate evidence facts: `250`
+- Transcript evidence edges: `1040`
+- Wrapper-like results: `0`
+- Groups without results: `[]`
+- Groups without actions: `[]`
+- Groups without transcript evidence: `[]`
+
+Candidate group support:
+
+- `correction-event:correction:missing_context`: `2`,
+  action `add_context_guardrail`
+- `correction-event:correction:wrong_artifact`: `4`,
+  action `add_context_guardrail`
+- `correction-event:correction:wrong_output`: `7`,
+  action `add_context_guardrail`
+- `direction-event:direction:dev_environment`: `2`,
+  action `record_guidance_or_environment_preference`
+- `direction-event:direction:output_expectation`: `3`,
+  action `record_guidance_or_environment_preference`
+- `direction-event:direction:review_request`: `3`,
+  action `record_guidance_or_environment_preference`
+- `direction-event:direction:tooling_preference`: `4`,
+  action `record_guidance_or_environment_preference`
+- `reaction-event:approval:unknown`: `35`,
+  action `record_approval_checkpoint`
+- `reaction-event:correction:prototype_completeness`: `2`,
+  action `add_context_guardrail`
+- `reaction-event:correction:wrong_output`: `23`,
+  action `add_context_guardrail`
+- `reaction-event:direction:environment_setup`: `4`,
+  action `record_guidance_or_environment_preference`
+- `reaction-event:direction:verification`: `106`,
+  action `add_verification_gate`
+- `verification-event:verification_request:output_required`: `2`,
+  action `add_verification_gate`
+- `verification-event:verification_request:regression_guard`: `11`,
+  action `add_verification_gate`
+- `verification-event:verification_request:test_required`: `42`,
+  action `add_verification_gate`
+
+Write plan/apply:
+
+- Write plan statements: `2312`
+- Applied to local SurrealDB `ax/main`.
+
+Post-apply graph query:
+
+```sql
+SELECT count() AS count FROM classifier_graph_node
+WHERE source_kind = "transcript_classifier_projection" GROUP ALL;
+SELECT count() AS count FROM classifier_graph_edge
+WHERE source_kind = "transcript_classifier_projection" GROUP ALL;
+SELECT count() AS count FROM classifier_graph_fact
+WHERE source_kind = "transcript_classifier_projection" GROUP ALL;
+```
+
+Returned:
+
+- Nodes: `742`
+- Edges: `1305`
+- Facts: `265`
+
+Decision:
+
+- E155 proves that the candidate graph projection is no longer fixture-only:
+  it can read real persisted `classifier_result` rows, preserve transcript
+  evidence refs, produce candidate-group facts, apply them to the shared graph
+  tables, and query them back.
+- This also found and fixed a real noise source: control/subagent wrapper turns
+  were being classified by some heuristic classifiers. After the guard and
+  rederive, no `<subagent_notification>` classifier results remain.
+- The next useful slice is not more projection plumbing. It is a graph query
+  that ranks workflow candidates from the transcript-backed facts and surfaces
+  enough evidence text/refs for review.
+
+Verification:
+
+```sh
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/*.test.ts src/ingest/classifier-results.test.ts packages/ax-classifier-direction-event/src/index.test.ts packages/ax-classifier-verification-event/src/index.test.ts
+bun run typecheck
+bun scripts/check-table-coverage.ts
+```
+
+All passed. `bun run typecheck` still emits existing Effect lint
+messages/warnings but exits `0`.

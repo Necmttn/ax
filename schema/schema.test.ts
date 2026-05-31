@@ -129,6 +129,15 @@ describe("turn feedback graph schema", () => {
         expect(schema).toContain("DEFINE TABLE IF NOT EXISTS has_classification TYPE RELATION FROM turn TO classifier_result SCHEMAFULL");
         expect(schema).toContain("DEFINE INDEX IF NOT EXISTS classifier_result_theme ON classifier_result FIELDS classifier_key, label, target, durability");
     });
+
+    test("classifier lifecycle graph projection tables are defined", () => {
+        expect(schema).toContain("DEFINE TABLE IF NOT EXISTS classifier_graph_node SCHEMAFULL");
+        expect(schema).toContain("DEFINE TABLE IF NOT EXISTS classifier_graph_edge SCHEMAFULL");
+        expect(schema).toContain("DEFINE TABLE IF NOT EXISTS classifier_graph_fact SCHEMAFULL");
+        expect(schema).toContain("DEFINE FIELD evidence_path   ON classifier_graph_edge TYPE string");
+        expect(schema).toContain("DEFINE FIELD evidence_edges_json ON classifier_graph_fact TYPE string");
+        expect(schema).toContain("DEFINE INDEX IF NOT EXISTS classifier_graph_fact_theme ON classifier_graph_fact FIELDS kind, predicate");
+    });
 });
 
 describe("content block artifact schema", () => {

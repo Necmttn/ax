@@ -1,0 +1,139 @@
+{
+  "name": "session-section-assembly",
+  "sessions": [
+    {
+      "id": "fixture-session-01",
+      "turns": [
+        {"seq": 1, "label": "none"},
+        {"seq": 2, "label": "direction", "evidence": ["turn:01-2", "tool_call:01-a"]},
+        {"seq": 3, "label": "tooling_or_environment_issue", "evidence": ["tool_call:01-b"]},
+        {"seq": 6, "label": "verification_request", "evidence": ["turn:01-6"]},
+        {"seq": 7, "label": "recovery_action", "evidence": ["tool_call:01-c"]}
+      ],
+      "expected": [
+        {"section_type": "preference_discovery", "start_seq": 2, "end_seq": 3},
+        {"section_type": "verification_loop", "start_seq": 6, "end_seq": 7}
+      ]
+    },
+    {
+      "id": "fixture-session-02",
+      "turns": [
+        {"seq": 1, "label": "correction", "evidence": ["turn:02-1"]},
+        {"seq": 2, "label": "recovery_action", "evidence": ["tool_call:02-a"]},
+        {"seq": 3, "label": "verification_request", "evidence": ["turn:02-3"]},
+        {"seq": 8, "label": "direction", "evidence": ["turn:02-8"]}
+      ],
+      "expected": [
+        {"section_type": "correction_loop", "start_seq": 1, "end_seq": 1},
+        {"section_type": "verification_loop", "start_seq": 2, "end_seq": 3},
+        {"section_type": "preference_discovery", "start_seq": 8, "end_seq": 8}
+      ]
+    },
+    {
+      "id": "fixture-session-03",
+      "turns": [
+        {"seq": 4, "label": "environment_or_preference_signal", "evidence": ["turn:03-4", "file:docker_compose"]},
+        {"seq": 5, "label": "environment_or_preference_signal", "evidence": ["tool_call:03-a"]},
+        {"seq": 9, "label": "correction_or_rejection_signal", "evidence": ["turn:03-9"]}
+      ],
+      "expected": [
+        {"section_type": "preference_discovery", "start_seq": 4, "end_seq": 5},
+        {"section_type": "correction_loop", "start_seq": 9, "end_seq": 9}
+      ]
+    },
+    {
+      "id": "fixture-session-04",
+      "turns": [
+        {"seq": 1, "label": "none"},
+        {"seq": 2, "label": "verification_or_recovery_signal", "evidence": ["turn:04-2"]},
+        {"seq": 3, "label": "verification_or_recovery_signal", "evidence": ["tool_call:04-a"]},
+        {"seq": 4, "label": "approval", "evidence": ["turn:04-4"]},
+        {"seq": 9, "label": "rejection", "evidence": ["turn:04-9"]}
+      ],
+      "expected": [
+        {"section_type": "verification_loop", "start_seq": 2, "end_seq": 3},
+        {"section_type": "correction_loop", "start_seq": 9, "end_seq": 9}
+      ]
+    },
+    {
+      "id": "fixture-session-05",
+      "turns": [
+        {"seq": 10, "label": "direction", "evidence": ["turn:05-10"]},
+        {"seq": 11, "label": "none"},
+        {"seq": 12, "label": "direction", "evidence": ["turn:05-12"]},
+        {"seq": 16, "label": "correction", "evidence": ["turn:05-16"]},
+        {"seq": 17, "label": "rejection", "evidence": ["turn:05-17"]}
+      ],
+      "expected": [
+        {"section_type": "preference_discovery", "start_seq": 10, "end_seq": 12},
+        {"section_type": "correction_loop", "start_seq": 16, "end_seq": 17}
+      ]
+    },
+    {
+      "id": "fixture-session-06",
+      "turns": [
+        {"seq": 1, "label": "tooling_or_environment_issue", "evidence": ["tool_call:06-a"]},
+        {"seq": 5, "label": "tooling_or_environment_issue", "evidence": ["tool_call:06-b"]},
+        {"seq": 6, "label": "direction", "evidence": ["turn:06-6"]}
+      ],
+      "expected": [
+        {"section_type": "preference_discovery", "start_seq": 1, "end_seq": 1},
+        {"section_type": "preference_discovery", "start_seq": 5, "end_seq": 6}
+      ]
+    },
+    {
+      "id": "fixture-session-07",
+      "turns": [
+        {"seq": 2, "label": "correction", "evidence": ["turn:07-2"]},
+        {"seq": 3, "label": "verification_request", "evidence": ["turn:07-3"]},
+        {"seq": 4, "label": "recovery_action", "evidence": ["tool_call:07-a"]},
+        {"seq": 10, "label": "approval", "evidence": ["turn:07-10"]}
+      ],
+      "expected": [
+        {"section_type": "correction_loop", "start_seq": 2, "end_seq": 2},
+        {"section_type": "verification_loop", "start_seq": 3, "end_seq": 4}
+      ]
+    },
+    {
+      "id": "fixture-session-08",
+      "turns": [
+        {"seq": 1, "label": "environment_or_preference_signal", "evidence": ["turn:08-1"]},
+        {"seq": 2, "label": "none"},
+        {"seq": 3, "label": "environment_or_preference_signal", "evidence": ["file:AGENTS_md"]},
+        {"seq": 4, "label": "verification_or_recovery_signal", "evidence": ["tool_call:08-a"]}
+      ],
+      "expected": [
+        {"section_type": "preference_discovery", "start_seq": 1, "end_seq": 3},
+        {"section_type": "verification_loop", "start_seq": 4, "end_seq": 4}
+      ]
+    },
+    {
+      "id": "fixture-session-09",
+      "turns": [
+        {"seq": 5, "label": "none"},
+        {"seq": 6, "label": "correction_or_rejection_signal", "evidence": ["turn:09-6"]},
+        {"seq": 7, "label": "correction_or_rejection_signal", "evidence": ["turn:09-7"]},
+        {"seq": 12, "label": "verification_or_recovery_signal", "evidence": ["turn:09-12"]}
+      ],
+      "expected": [
+        {"section_type": "correction_loop", "start_seq": 6, "end_seq": 7},
+        {"section_type": "verification_loop", "start_seq": 12, "end_seq": 12}
+      ]
+    },
+    {
+      "id": "fixture-session-10",
+      "turns": [
+        {"seq": 1, "label": "direction", "evidence": ["turn:10-1"]},
+        {"seq": 2, "label": "tooling_or_environment_issue", "evidence": ["tool_call:10-a"]},
+        {"seq": 6, "label": "correction", "evidence": ["turn:10-6"]},
+        {"seq": 8, "label": "correction", "evidence": ["turn:10-8"]},
+        {"seq": 13, "label": "verification_request", "evidence": ["turn:10-13"]}
+      ],
+      "expected": [
+        {"section_type": "preference_discovery", "start_seq": 1, "end_seq": 2},
+        {"section_type": "correction_loop", "start_seq": 6, "end_seq": 8},
+        {"section_type": "verification_loop", "start_seq": 13, "end_seq": 13}
+      ]
+    }
+  ]
+}

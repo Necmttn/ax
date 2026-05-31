@@ -581,6 +581,46 @@ DEFINE INDEX IF NOT EXISTS classifier_result_classifier ON classifier_result FIE
 DEFINE INDEX IF NOT EXISTS classifier_result_turn ON classifier_result FIELDS turn;
 DEFINE INDEX IF NOT EXISTS classifier_result_theme ON classifier_result FIELDS classifier_key, label, target, durability;
 
+DEFINE TABLE IF NOT EXISTS classifier_graph_node SCHEMAFULL;
+DEFINE FIELD graph_id        ON classifier_graph_node TYPE string;
+DEFINE FIELD kind            ON classifier_graph_node TYPE string;
+DEFINE FIELD label           ON classifier_graph_node TYPE string;
+DEFINE FIELD properties_json ON classifier_graph_node TYPE string;
+DEFINE FIELD source_kind     ON classifier_graph_node TYPE string;
+DEFINE FIELD updated_at      ON classifier_graph_node TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS classifier_graph_node_graph_id ON classifier_graph_node FIELDS graph_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS classifier_graph_node_kind ON classifier_graph_node FIELDS kind;
+
+DEFINE TABLE IF NOT EXISTS classifier_graph_edge SCHEMAFULL;
+DEFINE FIELD graph_id        ON classifier_graph_edge TYPE string;
+DEFINE FIELD kind            ON classifier_graph_edge TYPE string;
+DEFINE FIELD from_id         ON classifier_graph_edge TYPE string;
+DEFINE FIELD to_id           ON classifier_graph_edge TYPE string;
+DEFINE FIELD evidence_path   ON classifier_graph_edge TYPE string;
+DEFINE FIELD properties_json ON classifier_graph_edge TYPE string;
+DEFINE FIELD source_kind     ON classifier_graph_edge TYPE string;
+DEFINE FIELD updated_at      ON classifier_graph_edge TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS classifier_graph_edge_graph_id ON classifier_graph_edge FIELDS graph_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS classifier_graph_edge_kind ON classifier_graph_edge FIELDS kind;
+DEFINE INDEX IF NOT EXISTS classifier_graph_edge_from ON classifier_graph_edge FIELDS from_id;
+DEFINE INDEX IF NOT EXISTS classifier_graph_edge_to ON classifier_graph_edge FIELDS to_id;
+
+DEFINE TABLE IF NOT EXISTS classifier_graph_fact SCHEMAFULL;
+DEFINE FIELD graph_id            ON classifier_graph_fact TYPE string;
+DEFINE FIELD kind                ON classifier_graph_fact TYPE string;
+DEFINE FIELD subject             ON classifier_graph_fact TYPE string;
+DEFINE FIELD predicate           ON classifier_graph_fact TYPE string;
+DEFINE FIELD object              ON classifier_graph_fact TYPE option<string>;
+DEFINE FIELD value_json          ON classifier_graph_fact TYPE option<string>;
+DEFINE FIELD evidence_edges_json ON classifier_graph_fact TYPE string;
+DEFINE FIELD properties_json     ON classifier_graph_fact TYPE string;
+DEFINE FIELD source_kind         ON classifier_graph_fact TYPE string;
+DEFINE FIELD updated_at          ON classifier_graph_fact TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS classifier_graph_fact_graph_id ON classifier_graph_fact FIELDS graph_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS classifier_graph_fact_kind ON classifier_graph_fact FIELDS kind;
+DEFINE INDEX IF NOT EXISTS classifier_graph_fact_subject ON classifier_graph_fact FIELDS subject;
+DEFINE INDEX IF NOT EXISTS classifier_graph_fact_theme ON classifier_graph_fact FIELDS kind, predicate;
+
 DEFINE TABLE IF NOT EXISTS semantic_signal SCHEMAFULL;
 DEFINE FIELD kind           ON semantic_signal TYPE string;
 DEFINE FIELD label          ON semantic_signal TYPE string;

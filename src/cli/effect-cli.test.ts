@@ -84,13 +84,13 @@ describe("effect cli", () => {
         ]));
     });
 
-    test("classifiers group exposes eval", () => {
+    test("classifiers group exposes eval, graph, lifecycle, package operations, and workflow candidates", () => {
         const classifiers = rootCommand.subcommands
             .flatMap((g) => g.commands)
             .find((c) => c.name === "classifiers");
         expect(classifiers).toBeDefined();
         const subNames = classifiers!.subcommands.flatMap((g) => g.commands.map((c) => c.name));
-        expect(subNames).toEqual(expect.arrayContaining(["list", "eval", "explain"]));
+        expect(subNames).toEqual(expect.arrayContaining(["list", "eval", "explain", "graph", "lifecycle", "package-operations", "workflow-candidates"]));
     });
 
     test("--insights-only rejects --since", () => {

@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { defineClassifier, label, type ClassifierResult, type EventWindow } from "../core.ts";
+import { isControlOrContextText } from "../control-text.ts";
 
 const classifierKey = "correction-event";
 const classifierVersion = "0.1.0";
@@ -12,7 +13,7 @@ const evidenceFor = (window: EventWindow, matched: string): Record<string, unkno
 
 function classify(window: EventWindow): readonly ClassifierResult[] {
     const text = window.userTurn.text.trim();
-    if (text.length === 0) return [];
+    if (text.length === 0 || isControlOrContextText(text)) return [];
     const lower = text.toLowerCase();
 
     if (/\b(don'?t want just html|not just html|want to see the results|actually useful things|apply to surrealml)\b/i.test(lower)) {

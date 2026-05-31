@@ -42,4 +42,10 @@ describe("direction-event package classifier", () => {
             durability: "repo_preference",
         });
     });
+
+    test("ignores subagent notification wrappers", async () => {
+        const results = await run("<subagent_notification>\n{\"completed\":\"use uv next\"}");
+
+        expect(results).toEqual([]);
+    });
 });

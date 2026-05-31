@@ -1,0 +1,493 @@
+{
+  "schema": "ax.classifier.v1",
+  "key": "session-section-chunks",
+  "version": "0.1.0",
+  "package": "@ax-classifier/session-sections",
+  "entrypoint": "./predict.py",
+  "kind": "local_model",
+  "input": "event_window",
+  "description": "Local SetFit event-window chunk classifier plus session-section assembly experiments.",
+  "labels": [
+    "approval",
+    "correction",
+    "direction",
+    "none",
+    "recovery_action",
+    "rejection",
+    "tooling_or_environment_issue",
+    "verification_request"
+  ],
+  "targets": [
+    "correction_loop",
+    "preference_discovery",
+    "verification_loop",
+    "section_candidate"
+  ],
+  "fixtures": [
+    "./eval-fixtures/chunks.jsonl",
+    "./eval-fixtures/fixed-fold-seed7-test-ids.json",
+    "./eval-fixtures/sections.json"
+  ],
+  "assets": [
+    {
+      "id": "setfit-session-sections-model",
+      "kind": "model",
+      "path": ".ax/experiments/setfit-session-sections-model",
+      "optional": true
+    },
+    {
+      "id": "setfit-session-sections-coarse-model",
+      "kind": "model",
+      "path": ".ax/experiments/setfit-session-sections-coarse-model",
+      "optional": true
+    }
+  ],
+  "operations": [
+    {
+      "id": "setfit-train-eval",
+      "kind": "train",
+      "description": "Train and evaluate the local SetFit chunk classifier on public fixtures, writing model and metrics artifacts.",
+      "command": "bun run classifiers:setfit-eval -- --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --model=sentence-transformers/all-MiniLM-L6-v2 --epochs=1 --batch-size=8 --label-mode=coarse --model-dir=.ax/experiments/setfit-session-sections-coarse-model --out=.ax/experiments/setfit-session-sections-e3-coarse.json",
+      "inputs": [
+        "packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl"
+      ],
+      "outputs": [
+        ".ax/experiments/setfit-session-sections-coarse-model",
+        ".ax/experiments/setfit-session-sections-e3-coarse.json"
+      ]
+    },
+    {
+      "id": "setfit-fixture-eval",
+      "kind": "eval",
+      "description": "Run fixed-fold SetFit robustness evaluation over public chunk fixtures.",
+      "command": "bun run classifiers:setfit-robustness -- --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --test-ids=packages/ax-classifier-session-sections/eval-fixtures/fixed-fold-seed7-test-ids.json --label-mode=coarse --seeds=7,13,42 --epochs=2 --batch-size=8 --calibration-threshold=0.4 --out=.ax/experiments/setfit-robustness-fixed-fold.json",
+      "inputs": [
+        "packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl",
+        "packages/ax-classifier-session-sections/eval-fixtures/fixed-fold-seed7-test-ids.json"
+      ],
+      "outputs": [
+        ".ax/experiments/setfit-robustness-fixed-fold.json"
+      ]
+    },
+    {
+      "id": "hybrid-gate-eval",
+      "kind": "eval",
+      "description": "Evaluate deterministic plus SetFit hybrid gating against exported model windows.",
+      "command": "bun run classifiers:hybrid-gate -- --windows=.ax/experiments/model-windows-e1.jsonl --model-dir=.ax/experiments/setfit-session-sections-coarse-model --limit=1000 --out=.ax/experiments/hybrid-gate-e4.json",
+      "inputs": [
+        ".ax/experiments/model-windows-e1.jsonl",
+        ".ax/experiments/setfit-session-sections-coarse-model"
+      ],
+      "outputs": [
+        ".ax/experiments/hybrid-gate-e4.json"
+      ]
+    },
+    {
+      "id": "hybrid-window-candidate-projection",
+      "kind": "status",
+      "description": "Project hybrid model-only event-window candidates into graph-ready facts, transcript evidence edges, and a Surreal write plan.",
+      "command": "bun run classifiers:hybrid-window-candidate-projection -- --hybrid=.ax/experiments/hybrid-gate-e4.json --out=.ax/experiments/hybrid-window-candidate-graph-projection-current.json --write-plan=.ax/experiments/hybrid-window-candidate-graph-write-plan-current.json --json",
+      "inputs": [
+        ".ax/experiments/hybrid-gate-e4.json"
+      ],
+      "outputs": [
+        ".ax/experiments/hybrid-window-candidate-graph-projection-current.json",
+        ".ax/experiments/hybrid-window-candidate-graph-write-plan-current.json"
+      ]
+    },
+    {
+      "id": "hybrid-window-candidate-apply",
+      "kind": "publish",
+      "description": "Apply the hybrid event-window candidate graph write plan to the local classifier graph tables.",
+      "command": "bun run classifiers:graph-write-plan-apply -- --write-plan=.ax/experiments/hybrid-window-candidate-graph-write-plan-current.json --out=.ax/experiments/hybrid-window-candidate-graph-apply-current.json --json",
+      "inputs": [
+        ".ax/experiments/hybrid-window-candidate-graph-write-plan-current.json"
+      ],
+      "outputs": [
+        ".ax/experiments/hybrid-window-candidate-graph-apply-current.json"
+      ]
+    },
+    {
+      "id": "hybrid-window-workflow-candidate-report",
+      "kind": "status",
+      "description": "Rank workflow candidates from persisted hybrid event-window classifier graph facts.",
+      "command": "bun run classifiers:workflow-candidates -- --source-kind=hybrid_window_classifier_projection --limit=10 --examples=3 --out=.ax/experiments/workflow-candidate-report-hybrid-window-current.json --json",
+      "inputs": [
+        ".ax/experiments/hybrid-window-candidate-graph-apply-current.json"
+      ],
+      "outputs": [
+        ".ax/experiments/workflow-candidate-report-hybrid-window-current.json"
+      ]
+    },
+    {
+      "id": "workflow-candidate-source-compare",
+      "kind": "status",
+      "description": "Compare deterministic transcript workflow candidates against hybrid event-window workflow candidates.",
+      "command": "bun run classifiers:workflow-candidate-compare -- --baseline=.ax/experiments/workflow-candidate-report-e156.json --candidate=.ax/experiments/workflow-candidate-report-hybrid-window-current.json --out=.ax/experiments/workflow-candidate-compare-current.json --json",
+      "inputs": [
+        ".ax/experiments/workflow-candidate-report-e156.json",
+        ".ax/experiments/workflow-candidate-report-hybrid-window-current.json"
+      ],
+      "outputs": [
+        ".ax/experiments/workflow-candidate-compare-current.json"
+      ]
+    },
+    {
+      "id": "workflow-candidate-combined-report",
+      "kind": "status",
+      "description": "Combine deterministic and hybrid workflow candidate reports by proposed action with per-source evidence columns.",
+      "command": "bun run classifiers:workflow-candidate-combined -- --baseline=.ax/experiments/workflow-candidate-report-e156.json --hybrid=.ax/experiments/workflow-candidate-report-hybrid-window-current.json --out=.ax/experiments/workflow-candidate-combined-current.json --json",
+      "inputs": [
+        ".ax/experiments/workflow-candidate-report-e156.json",
+        ".ax/experiments/workflow-candidate-report-hybrid-window-current.json"
+      ],
+      "outputs": [
+        ".ax/experiments/workflow-candidate-combined-current.json"
+      ]
+    },
+    {
+      "id": "workflow-candidate-proposal-pack",
+      "kind": "review",
+      "description": "Create reviewable guidance and harness proposal briefs from the combined workflow-candidate source report.",
+      "command": "bun run classifiers:workflow-candidate-proposal-pack -- --combined=.ax/experiments/workflow-candidate-combined-current.json --out=.ax/experiments/workflow-candidate-proposal-pack-current.json --brief-dir=.ax/tasks/workflow-candidate-proposals --limit=4 --json",
+      "inputs": [
+        ".ax/experiments/workflow-candidate-combined-current.json"
+      ],
+      "outputs": [
+        ".ax/experiments/workflow-candidate-proposal-pack-current.json",
+        ".ax/tasks/workflow-candidate-proposals"
+      ]
+    },
+    {
+      "id": "workflow-candidate-proposal-review",
+      "kind": "review",
+      "description": "Evaluate proposal briefs and block promotion until reviewer verdict, rationale, proposed change, and target fields are complete.",
+      "command": "bun run classifiers:workflow-candidate-proposal-review -- --pack=.ax/experiments/workflow-candidate-proposal-pack-current.json --out=.ax/experiments/workflow-candidate-proposal-review-current.json --json",
+      "inputs": [
+        ".ax/experiments/workflow-candidate-proposal-pack-current.json",
+        ".ax/tasks/workflow-candidate-proposals"
+      ],
+      "outputs": [
+        ".ax/experiments/workflow-candidate-proposal-review-current.json"
+      ]
+    },
+    {
+      "id": "predict-windows",
+      "kind": "debug",
+      "description": "Run the saved SetFit model over exported event windows for local debugging.",
+      "command": "uv run packages/ax-classifier-session-sections/predict.py --model-dir=.ax/experiments/setfit-session-sections-coarse-model --input=.ax/experiments/model-windows-e1.jsonl --output=.ax/experiments/session-section-predictions-debug.jsonl",
+      "inputs": [
+        ".ax/experiments/setfit-session-sections-coarse-model",
+        ".ax/experiments/model-windows-e1.jsonl"
+      ],
+      "outputs": [
+        ".ax/experiments/session-section-predictions-debug.jsonl"
+      ]
+    },
+    {
+      "id": "blind-review-refresh",
+      "kind": "review",
+      "description": "Refresh the focused blind-review batch, batch eval, guarded sync report, and workflow status as a coherent bundle.",
+      "command": "bun run classifiers:blind-review-refresh",
+      "inputs": [
+        ".ax/experiments/blind-review-workspace-e63.md",
+        ".ax/experiments/blind-review-workspace-e76-progress-refs-report.json"
+      ],
+      "outputs": [
+        ".ax/experiments/blind-review-batch-current.md",
+        ".ax/experiments/blind-review-batch-current-report.json",
+        ".ax/experiments/blind-review-batch-current-eval-report.json",
+        ".ax/experiments/blind-review-batch-current-sync-report.json",
+        ".ax/experiments/blind-workflow-status-current.json",
+        ".ax/experiments/blind-review-batch-current-refresh-report.json"
+      ]
+    },
+        {
+            "id": "blind-workflow-status",
+            "kind": "status",
+            "description": "Summarize blind review, hard-negative review, focused-batch gates, artifact consistency, and next actions.",
+            "command": "bun run classifiers:blind-workflow-status",
+      "inputs": [
+        ".ax/experiments/blind-session-section-label-review-e49-report.json",
+        ".ax/experiments/blind-hard-negative-review-e56-report.json",
+        ".ax/experiments/blind-review-batch-current-refresh-report.json"
+      ],
+      "outputs": [
+                ".ax/experiments/blind-workflow-status-current.json"
+            ]
+        },
+        {
+            "id": "focused-batch-eval",
+            "kind": "review",
+            "description": "Evaluate the current focused blind-review batch for pending or invalid label, target, and hard-negative fields.",
+            "command": "bun run classifiers:blind-review-batch -- --mode=evaluate --batch=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-eval-report.json",
+            "inputs": [
+                ".ax/experiments/blind-review-batch-current.md"
+            ],
+            "outputs": [
+                ".ax/experiments/blind-review-batch-current-eval-report.json"
+            ]
+        },
+        {
+            "id": "focused-batch-suggestion-draft",
+            "kind": "review",
+            "description": "Create a separate focused-batch draft with suggested labels, targets, and obvious none hard-negative statuses prefilled for human review.",
+            "command": "bun run classifiers:blind-review-batch -- --mode=draft-suggestions --batch=.ax/experiments/blind-review-batch-current.md --out=.ax/experiments/blind-review-batch-current-suggestion-draft.md --summary=.ax/experiments/blind-review-batch-current-suggestion-draft-report.json",
+            "inputs": [
+                ".ax/experiments/blind-review-batch-current.md"
+            ],
+            "outputs": [
+                ".ax/experiments/blind-review-batch-current-suggestion-draft.md",
+                ".ax/experiments/blind-review-batch-current-suggestion-draft-report.json"
+            ]
+        },
+        {
+            "id": "focused-batch-promote-draft",
+            "kind": "review",
+            "description": "Promote an edited suggestion draft back to the current focused batch only after the draft passes guarded batch eval.",
+            "command": "bun run classifiers:blind-review-batch -- --mode=promote-draft --batch=.ax/experiments/blind-review-batch-current-suggestion-draft.md --out=.ax/experiments/blind-review-batch-current.md --summary=.ax/experiments/blind-review-batch-current-promotion-report.json",
+            "inputs": [
+                ".ax/experiments/blind-review-batch-current-suggestion-draft.md"
+            ],
+            "outputs": [
+                ".ax/experiments/blind-review-batch-current.md",
+                ".ax/experiments/blind-review-batch-current-promotion-report.json"
+            ]
+        },
+        {
+            "id": "graph-health-summary",
+      "kind": "status",
+      "description": "Query persisted classifier lifecycle graph rows and summarize package operation health.",
+      "command": "bun src/cli/index.ts classifiers package-operations --graph-health --graph-mode=summary --out=.ax/experiments/classifier-package-execution-graph-health-current.json",
+      "inputs": [],
+      "outputs": [
+        ".ax/experiments/classifier-package-execution-graph-health-current.json"
+      ]
+    },
+    {
+      "id": "graph-health-guarded",
+      "kind": "status",
+      "description": "Query persisted classifier lifecycle graph rows for guarded operations and evidence paths.",
+      "command": "bun src/cli/index.ts classifiers package-operations --graph-health --graph-mode=guarded --out=.ax/experiments/classifier-package-execution-graph-health-guarded-current.json",
+      "inputs": [],
+      "outputs": [
+        ".ax/experiments/classifier-package-execution-graph-health-guarded-current.json"
+      ]
+    },
+        {
+            "id": "graph-health-changed-artifacts",
+            "kind": "status",
+            "description": "Query persisted classifier lifecycle graph rows for changed classifier operation artifacts and evidence paths.",
+            "command": "bun src/cli/index.ts classifiers package-operations --graph-health --graph-mode=changed-artifacts --out=.ax/experiments/classifier-package-execution-graph-health-changed-current.json",
+            "inputs": [],
+            "outputs": [
+                ".ax/experiments/classifier-package-execution-graph-health-changed-current.json"
+            ]
+        },
+        {
+            "id": "candidate-graph-projection",
+            "kind": "status",
+            "description": "Project gated classifier candidate groups into graph-ready facts, evidence edges, and a Surreal write plan.",
+            "command": "bun run classifiers:candidate-graph-projection -- --usefulness=.ax/experiments/setfit-gate-stack-usefulness-e153-combined119.json --out=.ax/experiments/setfit-candidate-graph-projection-e154-combined119.json --write-plan=.ax/experiments/setfit-candidate-graph-write-plan-e154-combined119.json",
+            "inputs": [
+                ".ax/experiments/setfit-gate-stack-usefulness-e153-combined119.json"
+            ],
+            "outputs": [
+                ".ax/experiments/setfit-candidate-graph-projection-e154-combined119.json",
+                ".ax/experiments/setfit-candidate-graph-write-plan-e154-combined119.json"
+            ]
+        },
+        {
+            "id": "transcript-candidate-graph-projection",
+            "kind": "status",
+            "description": "Project persisted transcript-backed classifier_result rows into graph-ready candidate groups, evidence edges, and a Surreal write plan.",
+            "command": "bun run classifiers:transcript-candidate-projection -- --limit=250 --min-confidence=0.74 --out=.ax/experiments/transcript-candidate-graph-projection-e155.json --write-plan=.ax/experiments/transcript-candidate-graph-write-plan-e155.json",
+            "inputs": [],
+            "outputs": [
+                ".ax/experiments/transcript-candidate-graph-projection-e155.json",
+                ".ax/experiments/transcript-candidate-graph-write-plan-e155.json"
+            ]
+        },
+        {
+            "id": "workflow-candidate-report",
+            "kind": "status",
+            "description": "Rank transcript-backed workflow candidates from persisted classifier graph facts and include reviewable evidence excerpts.",
+            "command": "bun run classifiers:workflow-candidates -- --limit=10 --examples=3 --out=.ax/experiments/workflow-candidate-report-e156.json",
+            "inputs": [],
+            "outputs": [
+                ".ax/experiments/workflow-candidate-report-e156.json"
+            ]
+        },
+        {
+            "id": "workflow-fixture-review",
+            "kind": "review",
+            "description": "Generate or sync an explicit review gate for workflow-candidate fixture packs before they can be appended to package fixtures.",
+            "command": "bun run classifiers:workflow-fixture-review -- --fixtures .ax/experiments/workflow-topic-surrealml-classifier-fixtures-e183.jsonl --review .ax/experiments/workflow-fixture-review-current.json --brief .ax/experiments/workflow-fixture-review-current.md --accepted-out .ax/experiments/workflow-fixtures-accepted-current.jsonl --out .ax/experiments/workflow-fixture-review-current-report.json --mode generate --json",
+            "inputs": [
+                ".ax/experiments/workflow-topic-surrealml-classifier-fixtures-e183.jsonl"
+            ],
+            "outputs": [
+                ".ax/experiments/workflow-fixture-review-current.json",
+                ".ax/experiments/workflow-fixture-review-current.md",
+                ".ax/experiments/workflow-fixtures-accepted-current.jsonl",
+                ".ax/experiments/workflow-fixture-review-current-report.json"
+            ]
+        },
+        {
+            "id": "workflow-fixture-review-sync",
+            "kind": "review",
+            "description": "Sync a reviewed workflow-candidate fixture brief into accepted append-ready fixture rows.",
+            "command": "bun run classifiers:workflow-fixture-review -- --fixtures .ax/experiments/workflow-topic-surrealml-classifier-fixtures-e183.jsonl --review .ax/experiments/workflow-fixture-review-current.json --brief .ax/experiments/workflow-fixture-review-current-reviewed.md --accepted-out .ax/experiments/workflow-fixtures-accepted-current.jsonl --out .ax/experiments/workflow-fixture-review-current-report.json --mode sync --json",
+            "inputs": [
+                ".ax/experiments/workflow-topic-surrealml-classifier-fixtures-e183.jsonl",
+                ".ax/experiments/workflow-fixture-review-current.json",
+                ".ax/experiments/workflow-fixture-review-current-reviewed.md"
+            ],
+            "outputs": [
+                ".ax/experiments/workflow-fixtures-accepted-current.jsonl",
+                ".ax/experiments/workflow-fixture-review-current-report.json"
+            ]
+        },
+        {
+            "id": "workflow-fixture-append",
+            "kind": "review",
+            "description": "Append accepted workflow-candidate fixture rows into an experiment fixture set without mutating canonical package fixtures.",
+            "command": "bun run classifiers:fixture-append -- --base packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --append .ax/experiments/workflow-fixtures-accepted-current.jsonl --out .ax/experiments/chunks-with-workflow-fixtures-current.jsonl --report .ax/experiments/fixture-append-workflow-current-report.json --json",
+            "inputs": [
+                "packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl",
+                ".ax/experiments/workflow-fixtures-accepted-current.jsonl"
+            ],
+            "outputs": [
+                ".ax/experiments/chunks-with-workflow-fixtures-current.jsonl",
+                ".ax/experiments/fixture-append-workflow-current-report.json"
+            ]
+        },
+        {
+            "id": "workflow-fixture-metadata",
+            "kind": "status",
+            "description": "Enrich a workflow-augmented experiment fixture set with source, boundary, and pair-group metadata for split-safe model experiments.",
+            "command": "bun run classifiers:fixture-metadata -- --fixtures=.ax/experiments/chunks-with-workflow-fixtures-current.jsonl --out=.ax/experiments/chunks-with-workflow-fixture-metadata-current.jsonl",
+            "inputs": [
+                ".ax/experiments/chunks-with-workflow-fixtures-current.jsonl"
+            ],
+            "outputs": [
+                ".ax/experiments/chunks-with-workflow-fixture-metadata-current.jsonl"
+            ]
+        },
+        {
+            "id": "workflow-fixture-split-audit",
+            "kind": "eval",
+            "description": "Audit workflow-augmented fixture metadata for grouped split viability and train/test leakage before model evaluation.",
+            "command": "bun run classifiers:split-audit -- --fixtures=.ax/experiments/chunks-with-workflow-fixture-metadata-current.jsonl --group-field=pair_group --pair-field=pair_group --label-mode=coarse --seeds=7,13,42 --out=.ax/experiments/workflow-fixture-split-audit-current.json --json",
+            "inputs": [
+                ".ax/experiments/chunks-with-workflow-fixture-metadata-current.jsonl"
+            ],
+            "outputs": [
+                ".ax/experiments/workflow-fixture-split-audit-current.json"
+            ]
+        },
+        {
+            "id": "workflow-fixture-setfit-robustness",
+            "kind": "eval",
+            "description": "Run SetFit robustness on the workflow-augmented experiment fixture set using split-safe pair groups.",
+            "command": "bun run classifiers:setfit-robustness -- --fixtures=.ax/experiments/chunks-with-workflow-fixture-metadata-current.jsonl --group-field=pair_group --label-mode=coarse --seeds=7,13,42 --epochs=1 --batch-size=8 --calibration-threshold=0.4 --out=.ax/experiments/setfit-robustness-workflow-fixtures-current.json --json",
+            "inputs": [
+                ".ax/experiments/chunks-with-workflow-fixture-metadata-current.jsonl"
+            ],
+            "outputs": [
+                ".ax/experiments/setfit-robustness-workflow-fixtures-current.json"
+            ]
+        },
+        {
+            "id": "workflow-fixture-failure-analysis",
+            "kind": "status",
+            "description": "Analyze workflow-augmented SetFit robustness failures and rank repeated none false positives for review.",
+            "command": "bun run classifiers:failure-analysis -- --robustness=.ax/experiments/setfit-robustness-workflow-fixtures-current.json --fixtures=.ax/experiments/chunks-with-workflow-fixture-metadata-current.jsonl --out=.ax/experiments/setfit-failure-analysis-workflow-fixtures-current.json --json",
+            "inputs": [
+                ".ax/experiments/setfit-robustness-workflow-fixtures-current.json",
+                ".ax/experiments/chunks-with-workflow-fixture-metadata-current.jsonl"
+            ],
+            "outputs": [
+                ".ax/experiments/setfit-failure-analysis-workflow-fixtures-current.json"
+            ]
+        },
+        {
+            "id": "workflow-fixture-none-safety-pregate",
+            "kind": "status",
+            "description": "Replay a deterministic text-projection none-safety pre-gate over workflow SetFit robustness predictions.",
+            "command": "bun run classifiers:none-safety-pregate -- --robustness=.ax/experiments/setfit-robustness-workflow-fixtures-current.json --fixtures=.ax/experiments/chunks-with-workflow-fixture-metadata-current.jsonl --out=.ax/experiments/none-safety-pregate-workflow-fixtures-current.json --json",
+            "inputs": [
+                ".ax/experiments/setfit-robustness-workflow-fixtures-current.json",
+                ".ax/experiments/chunks-with-workflow-fixture-metadata-current.jsonl"
+            ],
+            "outputs": [
+                ".ax/experiments/none-safety-pregate-workflow-fixtures-current.json"
+            ]
+        },
+        {
+            "id": "workflow-fixture-none-safety-window-replay",
+            "kind": "status",
+            "description": "Replay the candidate none-safety gate over fresh exported model windows and report deterministic-label conflicts.",
+            "command": "bun run classifiers:none-safety-window-replay -- --windows=.ax/experiments/model-windows-none-safety-current.jsonl --out=.ax/experiments/none-safety-window-replay-current.json --json",
+            "inputs": [
+                ".ax/experiments/model-windows-none-safety-current.jsonl"
+            ],
+            "outputs": [
+                ".ax/experiments/none-safety-window-replay-current.json"
+            ]
+        },
+        {
+            "id": "workflow-fixture-hybrid-robustness",
+            "kind": "eval",
+            "description": "Evaluate workflow SetFit calibrated predictions plus deterministic none-safety gates with the standard robustness contract.",
+            "command": "bun run classifiers:hybrid-robustness -- --robustness=.ax/experiments/setfit-robustness-workflow-fixtures-current.json --fixtures=.ax/experiments/chunks-with-workflow-fixture-metadata-current.jsonl --out=.ax/experiments/hybrid-robustness-workflow-fixtures-current.json --json",
+            "inputs": [
+                ".ax/experiments/setfit-robustness-workflow-fixtures-current.json",
+                ".ax/experiments/chunks-with-workflow-fixture-metadata-current.jsonl"
+            ],
+            "outputs": [
+                ".ax/experiments/hybrid-robustness-workflow-fixtures-current.json"
+            ]
+        },
+        {
+            "id": "workflow-fixture-hybrid-graph-usefulness",
+            "kind": "eval",
+            "description": "Compare baseline SetFit and hybrid workflow predictions as evidence-backed graph candidate groups.",
+            "command": "bun run classifiers:hybrid-graph-usefulness -- --robustness=.ax/experiments/setfit-robustness-workflow-fixtures-current.json --hybrid=.ax/experiments/hybrid-robustness-workflow-fixtures-current.json --fixtures=.ax/experiments/chunks-with-workflow-fixture-metadata-current.jsonl --out=.ax/experiments/hybrid-graph-usefulness-workflow-fixtures-current.json --json",
+            "inputs": [
+                ".ax/experiments/setfit-robustness-workflow-fixtures-current.json",
+                ".ax/experiments/hybrid-robustness-workflow-fixtures-current.json",
+                ".ax/experiments/chunks-with-workflow-fixture-metadata-current.jsonl"
+            ],
+            "outputs": [
+                ".ax/experiments/hybrid-graph-usefulness-workflow-fixtures-current.json"
+            ]
+        },
+        {
+            "id": "classifier-lifecycle-status",
+            "kind": "status",
+            "description": "Join package readiness, persisted lifecycle graph health, and blind-review blockers into one lifecycle status report.",
+            "command": "bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifiers-lifecycle-current.json",
+            "inputs": [
+                ".ax/experiments/blind-workflow-status-current.json"
+            ],
+            "outputs": [
+                ".ax/experiments/classifiers-lifecycle-current.json"
+            ]
+        },
+        {
+            "id": "blind-post-review",
+            "kind": "review",
+            "description": "Run the guarded post-review pipeline after workspace labels and hard-negative decisions are complete.",
+      "command": "bun run classifiers:blind-post-review -- --sync-workspace",
+      "inputs": [
+        ".ax/experiments/blind-review-workspace-e63.md",
+        ".ax/experiments/blind-session-section-label-review-e49.json",
+        ".ax/experiments/blind-hard-negative-candidates-e54.json"
+      ],
+      "outputs": [
+        ".ax/experiments/blind-post-review-runner-current.json"
+      ]
+    }
+  ]
+}

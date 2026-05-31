@@ -5,6 +5,7 @@ import {
     type ClassifierResult,
     type EventWindow,
 } from "../../../src/classifiers/core.ts";
+import { isControlOrContextText } from "../../../src/classifiers/control-text.ts";
 
 const classifierKey = "verification-event";
 const classifierVersion = "0.1.0";
@@ -17,7 +18,7 @@ const evidenceFor = (window: EventWindow, matched: string): Record<string, unkno
 
 function classify(window: EventWindow): readonly ClassifierResult[] {
     const text = window.userTurn.text.trim();
-    if (text.length === 0) return [];
+    if (text.length === 0 || isControlOrContextText(text)) return [];
     const lower = text.toLowerCase();
 
     if (/\b(did you run|run the tests|test it|verify|typecheck|smoke test)\b/i.test(lower)) {

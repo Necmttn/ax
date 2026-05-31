@@ -43,4 +43,10 @@ describe("verification-event package classifier", () => {
             durability: "repo_preference",
         });
     });
+
+    test("ignores subagent notification wrappers", async () => {
+        const results = await run("<subagent_notification>\n{\"completed\":\"typecheck passed\"}");
+
+        expect(results).toEqual([]);
+    });
 });

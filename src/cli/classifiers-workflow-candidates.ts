@@ -1,0 +1,2859 @@
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { Effect } from "effect";
+import { SurrealClient } from "../lib/db.ts";
+import { prettyPrint } from "../lib/json.ts";
+import { recordKeyPart, safeKeyPart } from "../lib/shared/derive-keys.ts";
+import { safeJsonParse } from "../lib/shared/safe-json.ts";
+import {
+    recordRef,
+    surrealJson,
+    surrealJsonText,
+    surrealJsonTextOption,
+    surrealObject,
+    surrealOptionString,
+    surrealString,
+} from "../lib/shared/surql.ts";
+import { catchDbErrorAndExit } from "./output.ts";
+
+export type WorkflowCandidateTaskLikeMode = "include" | "exclude" | "only";
+export type WorkflowCandidatePromotionMode = "per-candidate" | "merge-evidence";
+export type WorkflowCandidatePromotionArtifact = "guidance" | "harness_check" | "classifier_fixture" | "review";
+export type WorkflowCandidateProposalStatusFilter = "all" | "open" | "accepted" | "rejected";
+
+export interface WorkflowCandidateCommandInput {
+    readonly sourceKind: string;
+    readonly limit: number;
+    readonly examples: number;
+    readonly action?: string;
+    readonly classifier?: string;
+    readonly search?: string;
+    readonly taskLike: WorkflowCandidateTaskLikeMode;
+    readonly topicReport?: boolean;
+    readonly listProposals?: boolean;
+    readonly listHarnessFacts?: boolean;
+    readonly includeHarnessFacts?: boolean;
+    readonly proposalStatus?: WorkflowCandidateProposalStatusFilter;
+    readonly expandEvidence?: boolean;
+    readonly evidencePack?: string;
+    readonly classifierFixturePack?: string;
+    readonly harnessFacts?: string;
+    readonly harnessWritePlan?: string;
+    readonly applyHarnessFacts?: boolean;
+    readonly out?: string;
+    readonly brief?: string;
+    readonly syncBrief?: string;
+    readonly promoteTasks?: boolean;
+    readonly emitAdjacentTasks?: boolean;
+    readonly promoteHarnessProposals?: boolean;
+    readonly requireHarnessChecks?: boolean;
+    readonly promoteProposals?: boolean;
+    readonly proposalDryRun?: boolean;
+    readonly taskDir?: string;
+    readonly promotionMode?: WorkflowCandidatePromotionMode;
+    readonly proposalTarget?: string;
+    readonly proposalSection?: string;
+    readonly json: boolean;
+}
+
+export interface WorkflowCandidateProposalListRow {
+    readonly proposal_id?: string | null;
+    readonly dedupe_sig: string;
+    readonly title: string;
+    readonly form: string;
+    readonly status: string;
+    readonly confidence: string;
+    readonly frequency: number;
+    readonly target?: string | null;
+    readonly section?: string | null;
+    readonly experiment_id?: string | null;
+    readonly experiment_status?: string | null;
+    readonly artifact_path?: string | null;
+    readonly task_path?: string | null;
+    readonly updated_at?: string | null;
+    readonly evidence?: readonly WorkflowCandidateProposalEvidence[];
+}
+
+export interface WorkflowCandidateProposalEvidenceExample {
+    readonly result_id?: unknown;
+    readonly turn?: unknown;
+    readonly confidence?: unknown;
+    readonly text_excerpt: string;
+}
+
+export interface WorkflowCandidateProposalEvidence {
+    readonly candidate_id: string;
+    readonly candidate_label: string;
+    readonly classifier_key?: unknown;
+    readonly target?: unknown;
+    readonly proposed_action?: unknown;
+    readonly examples: readonly WorkflowCandidateProposalEvidenceExample[];
+}
+
+export interface WorkflowCandidateProposalListReport {
+    readonly schema: "ax.workflow_candidate_proposal_list.v1";
+    readonly prefix: "guidance__workflow_candidate__";
+    readonly query: {
+        readonly limit: number;
+        readonly status: WorkflowCandidateProposalStatusFilter;
+        readonly expand_evidence: boolean;
+        readonly search?: string;
+    };
+    readonly proposals: readonly WorkflowCandidateProposalListRow[];
+    readonly totals: {
+        readonly proposal_count: number;
+        readonly accepted_count: number;
+        readonly open_count: number;
+        readonly rejected_count: number;
+        readonly scaffolded_experiment_count: number;
+        readonly evidence_candidate_count: number;
+        readonly evidence_example_count: number;
+    };
+}
+
+export interface WorkflowCandidateProposalEvidenceEdgeRow {
+    readonly proposal_id?: string | null;
+    readonly candidate_ref?: string | null;
+}
+
+export interface WorkflowCandidateTopicReport {
+    readonly schema: "ax.workflow_candidate_topic_report.v1";
+    readonly source_kind: string;
+    readonly topic: string;
+    readonly proposals: WorkflowCandidateProposalListReport;
+    readonly candidates: WorkflowCandidateReport;
+    readonly totals: {
+        readonly proposal_count: number;
+        readonly experiment_count: number;
+        readonly proposal_evidence_candidate_count: number;
+        readonly ranked_candidate_count: number;
+        readonly candidate_evidence_fact_count: number;
+        readonly source_turn_count: number;
+    };
+    readonly decision: "workflow_topic_evidence_found" | "needs_workflow_topic_evidence";
+    readonly failures: readonly string[];
+    readonly adjacent_tasks?: WorkflowCandidateTopicTaskSummary;
+    readonly classifier_fixtures?: WorkflowCandidateTopicClassifierFixtureSummary;
+    readonly harness_proposals?: WorkflowCandidateHarnessProposalSummary;
+    readonly harness_evidence?: WorkflowCandidateTopicHarnessEvidenceSummary;
+    readonly harness_checks?: WorkflowCandidateTopicHarnessCheckSummary;
+    readonly persisted_harness_facts?: WorkflowCandidateTopicHarnessGraphListReport;
+}
+
+export interface WorkflowCandidateTopicTaskSummary {
+    readonly task_dir: string;
+    readonly emitted_task_count: number;
+    readonly tasks: readonly WorkflowCandidatePromotionTask[];
+}
+
+export interface WorkflowCandidateTopicClassifierFixtureSummary {
+    readonly path: string;
+    readonly emitted_fixture_count: number;
+    readonly candidate_count: number;
+    readonly skipped_candidate_count: number;
+    readonly fixtures: readonly WorkflowCandidateTopicClassifierFixtureRow[];
+}
+
+export interface WorkflowCandidateTopicClassifierFixtureRow {
+    readonly id: string;
+    readonly suite: "workflow-candidate-topic";
+    readonly name: string;
+    readonly label: string;
+    readonly target: string;
+    readonly text: string;
+    readonly source_group: "workflow-candidate";
+    readonly review_status: "pending";
+    readonly topic: string;
+    readonly candidate_id: string;
+    readonly candidate_label: string;
+    readonly proposed_action: string;
+    readonly result_id?: string;
+    readonly turn?: string;
+    readonly confidence?: number;
+}
+
+export interface WorkflowCandidateHarnessProposalSummary {
+    readonly dry_run: boolean;
+    readonly emitted_proposal_count: number;
+    readonly skipped_proposal_count: number;
+    readonly statement_count: number;
+    readonly statements?: readonly string[];
+    readonly proposals: readonly WorkflowCandidateHarnessProposal[];
+    readonly failures: readonly string[];
+}
+
+export interface WorkflowCandidateHarnessProposal {
+    readonly candidate_id: string;
+    readonly proposal_id: string;
+    readonly dedupe_sig: string;
+    readonly title: string;
+    readonly recommended_artifact: WorkflowCandidatePromotionRecommendation;
+    readonly status: "created_or_refreshed" | "skipped";
+    readonly reason?: string;
+}
+
+export interface WorkflowCandidateTopicHarnessCheckSummary {
+    readonly passed_count: number;
+    readonly failed_count: number;
+    readonly checks: readonly WorkflowCandidateTopicHarnessCheck[];
+}
+
+export type WorkflowCandidateTopicHarnessGateEvidenceSource =
+    | "none"
+    | "computed"
+    | "persisted"
+    | "computed_and_persisted";
+
+export interface WorkflowCandidateTopicHarnessEvidenceSummary {
+    readonly gate_satisfied: boolean;
+    readonly gate_evidence_source: WorkflowCandidateTopicHarnessGateEvidenceSource;
+    readonly computed_check_count: number;
+    readonly computed_passed_count: number;
+    readonly computed_failed_count: number;
+    readonly persisted_fact_count: number;
+    readonly persisted_passed_count: number;
+    readonly persisted_failed_count: number;
+}
+
+export interface WorkflowCandidateTopicHarnessCheck {
+    readonly id: string;
+    readonly candidate_id: string;
+    readonly label: string;
+    readonly status: "passed" | "failed";
+    readonly expectation: string;
+    readonly evidence_refs: readonly string[];
+    readonly failures: readonly string[];
+}
+
+export interface WorkflowCandidateTopicHarnessGraphNode {
+    readonly id: string;
+    readonly kind: string;
+    readonly label: string;
+    readonly properties: Record<string, unknown>;
+}
+
+export interface WorkflowCandidateTopicHarnessGraphEdge {
+    readonly id: string;
+    readonly kind: string;
+    readonly from: string;
+    readonly to: string;
+    readonly evidence_path: string;
+    readonly properties: Record<string, unknown>;
+}
+
+export interface WorkflowCandidateTopicHarnessGraphFact {
+    readonly id: string;
+    readonly kind: string;
+    readonly subject: string;
+    readonly predicate: string;
+    readonly object: string | null;
+    readonly value: unknown;
+    readonly evidence_edges: readonly string[];
+    readonly properties: Record<string, unknown>;
+}
+
+export interface WorkflowCandidateTopicHarnessGraphProjection {
+    readonly schema: "ax.workflow_topic_harness_graph_projection.v1";
+    readonly source_report_schema: WorkflowCandidateTopicReport["schema"];
+    readonly topic: string;
+    readonly nodes: readonly WorkflowCandidateTopicHarnessGraphNode[];
+    readonly edges: readonly WorkflowCandidateTopicHarnessGraphEdge[];
+    readonly facts: readonly WorkflowCandidateTopicHarnessGraphFact[];
+    readonly totals: {
+        readonly check_count: number;
+        readonly passed_count: number;
+        readonly failed_count: number;
+        readonly node_count: number;
+        readonly edge_count: number;
+        readonly fact_count: number;
+    };
+}
+
+export interface WorkflowCandidateTopicHarnessGraphWritePlan {
+    readonly schema: "ax.workflow_topic_harness_graph_write_plan.v1";
+    readonly source_projection_schema: WorkflowCandidateTopicHarnessGraphProjection["schema"];
+    readonly topic: string;
+    readonly statements: readonly string[];
+    readonly tables: readonly string[];
+    readonly totals: {
+        readonly statement_count: number;
+        readonly node_statement_count: number;
+        readonly edge_statement_count: number;
+        readonly fact_statement_count: number;
+    };
+}
+
+export interface WorkflowCandidateTopicHarnessGraphFactRow {
+    readonly graph_id?: string;
+    readonly subject?: string;
+    readonly predicate?: string;
+    readonly object?: string | null;
+    readonly value_json?: string | null;
+    readonly properties_json?: string;
+    readonly updated_at?: string | null;
+}
+
+export interface WorkflowCandidateTopicHarnessGraphEdgeRow {
+    readonly graph_id?: string;
+    readonly kind?: string;
+    readonly from_id?: string;
+    readonly to_id?: string;
+    readonly evidence_path?: string;
+    readonly properties_json?: string;
+    readonly updated_at?: string | null;
+}
+
+export interface WorkflowCandidateTopicHarnessGraphListReport {
+    readonly schema: "ax.workflow_topic_harness_graph_list.v1";
+    readonly topic?: string;
+    readonly facts: readonly WorkflowCandidateTopicHarnessGraphFactRow[];
+    readonly edges: readonly WorkflowCandidateTopicHarnessGraphEdgeRow[];
+    readonly totals: {
+        readonly fact_count: number;
+        readonly edge_count: number;
+        readonly passed_count: number;
+        readonly failed_count: number;
+    };
+}
+
+export interface WorkflowCandidateGroupRow {
+    readonly graph_id?: string;
+    readonly label?: string;
+    readonly properties_json?: string;
+}
+
+export interface WorkflowCandidateEvidenceRow {
+    readonly graph_id?: string;
+    readonly subject?: string;
+    readonly object?: string | null;
+    readonly properties_json?: string;
+}
+
+export interface WorkflowCandidateExample {
+    readonly result_id?: unknown;
+    readonly turn?: unknown;
+    readonly confidence?: unknown;
+    readonly task_like: boolean;
+    readonly text_excerpt: string;
+}
+
+export interface WorkflowCandidate {
+    readonly group_id: string;
+    readonly label: string;
+    readonly classifier_key?: unknown;
+    readonly classifier_label?: unknown;
+    readonly target?: unknown;
+    readonly proposed_action: string;
+    readonly raw_support_count: number;
+    readonly support_count: number;
+    readonly evidence_count: number;
+    readonly turn_ref_count: number;
+    readonly average_confidence: number;
+    readonly wrapper_like_count: number;
+    readonly task_like_count: number;
+    readonly task_like_ratio: number;
+    readonly score: number;
+    readonly examples: readonly WorkflowCandidateExample[];
+    readonly review?: WorkflowCandidateReview;
+}
+
+export interface WorkflowCandidateReview {
+    readonly verdict: string;
+    readonly rationale: string;
+}
+
+export interface WorkflowCandidateReport {
+    readonly schema: "ax.workflow_candidate_report.v1";
+    readonly source_kind: string;
+    readonly query: {
+        readonly limit: number;
+        readonly examples_per_group: number;
+        readonly action?: string;
+        readonly classifier?: string;
+        readonly search?: string;
+        readonly task_like: WorkflowCandidateTaskLikeMode;
+    };
+    readonly candidates: readonly WorkflowCandidate[];
+    readonly all_candidate_labels: readonly string[];
+    readonly totals: {
+        readonly candidate_group_count: number;
+        readonly returned_candidate_count: number;
+        readonly evidence_fact_count: number;
+        readonly considered_evidence_fact_count: number;
+        readonly candidate_with_evidence_count: number;
+        readonly wrapper_like_count: number;
+        readonly task_like_count: number;
+    };
+    readonly failures: readonly string[];
+    readonly decision: "workflow_candidates_ranked" | "needs_workflow_candidate_review";
+    readonly review?: WorkflowCandidateReviewSummary;
+    readonly promotion?: WorkflowCandidatePromotionSummary;
+}
+
+export interface WorkflowCandidateReviewSummary {
+    readonly synced_from: string;
+    readonly reviewed_candidate_count: number;
+    readonly pending_candidate_count: number;
+    readonly invalid_verdict_count: number;
+    readonly missing_rationale_count: number;
+    readonly unknown_candidate_count: number;
+}
+
+export interface WorkflowCandidatePromotionTask {
+    readonly candidate_id: string;
+    readonly candidate_ids?: readonly string[];
+    readonly label: string;
+    readonly verdict: string;
+    readonly recommended_artifact: WorkflowCandidatePromotionRecommendation;
+    readonly path: string;
+}
+
+export interface WorkflowCandidatePromotionRecommendation {
+    readonly primary: WorkflowCandidatePromotionArtifact;
+    readonly alternatives: readonly WorkflowCandidatePromotionArtifact[];
+    readonly confidence: "low" | "medium" | "high";
+    readonly rationale: string;
+}
+
+export interface WorkflowCandidatePromotionSummary {
+    readonly mode: WorkflowCandidatePromotionMode;
+    readonly task_dir: string;
+    readonly emitted_task_count: number;
+    readonly skipped_candidate_count: number;
+    readonly blocked_candidate_count: number;
+    readonly tasks: readonly WorkflowCandidatePromotionTask[];
+    readonly failures: readonly string[];
+    readonly proposals?: WorkflowCandidateProposalPromotionSummary;
+}
+
+export interface WorkflowCandidateProposalPromotionSummary {
+    readonly dry_run: boolean;
+    readonly emitted_proposal_count: number;
+    readonly skipped_proposal_count: number;
+    readonly statement_count: number;
+    readonly statements?: readonly string[];
+    readonly proposals: readonly WorkflowCandidateProposalPromotion[];
+    readonly failures: readonly string[];
+}
+
+export interface WorkflowCandidateProposalPromotion {
+    readonly candidate_id: string;
+    readonly candidate_ids?: readonly string[];
+    readonly proposal_id: string;
+    readonly guidance_payload_id: string;
+    readonly dedupe_sig: string;
+    readonly title: string;
+    readonly file_target: string;
+    readonly section: string;
+    readonly recommended_artifact: WorkflowCandidatePromotionRecommendation;
+    readonly status: "created_or_refreshed" | "skipped";
+    readonly reason?: string;
+}
+
+interface WorkflowCandidateTaskDraft {
+    readonly path: string;
+    readonly content: string;
+    readonly task: WorkflowCandidatePromotionTask;
+}
+
+interface WorkflowCandidateProposalPlan {
+    readonly summary: WorkflowCandidateProposalPromotionSummary;
+    readonly statements: readonly string[];
+}
+
+interface CandidateBuildInput {
+    readonly groupRows: readonly WorkflowCandidateGroupRow[];
+    readonly evidenceRows: readonly WorkflowCandidateEvidenceRow[];
+    readonly sourceKind: string;
+    readonly limit: number;
+    readonly examplesPerGroup: number;
+    readonly action?: string;
+    readonly classifier?: string;
+    readonly search?: string;
+    readonly taskLike: WorkflowCandidateTaskLikeMode;
+}
+
+const workflowCandidateSql = `
+SELECT graph_id, label, properties_json
+FROM classifier_graph_node
+WHERE source_kind = $sourceKind AND kind = "classifier_candidate_group";
+SELECT graph_id, subject, object, properties_json
+FROM classifier_graph_fact
+WHERE source_kind = $sourceKind AND kind = "classifier_candidate_evidence";
+`;
+
+const WORKFLOW_CANDIDATE_PROPOSAL_PREFIX = "guidance__workflow_candidate__" as const;
+const WORKFLOW_CANDIDATE_HARNESS_PROPOSAL_PREFIX = "harness_check__workflow_candidate__" as const;
+
+const isObject = (value: unknown): value is Record<string, unknown> =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+
+const parseProperties = (value: string | undefined): Record<string, unknown> => {
+    if (!value) return {};
+    const parsed = safeJsonParse<unknown>(value);
+    return isObject(parsed) ? parsed : {};
+};
+
+const asNumber = (value: unknown): number | undefined =>
+    typeof value === "number" && Number.isFinite(value) ? value : undefined;
+
+const compactText = (text: string, limit = 220): string => {
+    const squashed = text.split(/\s+/).filter(Boolean).join(" ");
+    if (squashed.length <= limit) return squashed;
+    return `${squashed.slice(0, Math.max(0, limit - 3)).trimEnd()}...`;
+};
+
+export function isTaskLikeWorkflowText(text: string): boolean {
+    const lowered = text.split(/\s+/).filter(Boolean).join(" ").toLowerCase();
+    return lowered.startsWith("you are implementing task") ||
+        lowered.startsWith("implement task ") ||
+        lowered.startsWith("spec compliance review") ||
+        lowered.startsWith("re-review task") ||
+        lowered.startsWith("quick review of") ||
+        lowered.includes("worktree:") ||
+        lowered.includes("do not edit files. review only");
+}
+
+const containsSearchText = (text: string, search: string | undefined): boolean =>
+    search === undefined || text.toLowerCase().includes(search.toLowerCase());
+
+const stripInlineCode = (value: string): string => {
+    const trimmed = value.trim();
+    if (trimmed.startsWith("`") && trimmed.endsWith("`") && trimmed.length >= 2) {
+        return trimmed.slice(1, -1).trim();
+    }
+    return trimmed;
+};
+
+export function parseWorkflowCandidateBriefReview(brief: string): Record<string, WorkflowCandidateReview> {
+    const updates: Record<string, WorkflowCandidateReview> = {};
+    let currentCandidateId: string | undefined;
+    for (const rawLine of brief.split(/\r?\n/)) {
+        const line = rawLine.trim();
+        const candidateMatch = line.match(/^- Candidate id:\s*(.+)$/);
+        if (candidateMatch) {
+            currentCandidateId = stripInlineCode(candidateMatch[1]);
+            updates[currentCandidateId] = updates[currentCandidateId] ?? { verdict: "pending", rationale: "" };
+            continue;
+        }
+        if (currentCandidateId === undefined) continue;
+        const verdictMatch = line.match(/^- Verdict:\s*(.+)$/);
+        if (verdictMatch) {
+            updates[currentCandidateId] = {
+                ...updates[currentCandidateId],
+                verdict: stripInlineCode(verdictMatch[1]).toLowerCase(),
+            };
+            continue;
+        }
+        const rationaleMatch = line.match(/^- Rationale:\s*(.*)$/);
+        if (rationaleMatch) {
+            const rationale = rationaleMatch[1].trim();
+            updates[currentCandidateId] = {
+                ...updates[currentCandidateId],
+                rationale: rationale === "_pending_" ? "" : rationale,
+            };
+        }
+    }
+    return updates;
+}
+
+const REVIEWED_VERDICTS = new Set(["accept", "revise", "reject", "defer"]);
+const VALID_VERDICTS = new Set(["pending", ...REVIEWED_VERDICTS]);
+const PROMOTABLE_VERDICTS = new Set(["accept", "revise"]);
+
+export function syncWorkflowCandidateReportFromBrief(
+    report: WorkflowCandidateReport,
+    brief: string,
+    syncedFrom: string,
+): WorkflowCandidateReport {
+    const updates = parseWorkflowCandidateBriefReview(brief);
+    const knownIds = new Set(report.candidates.map((candidate) => candidate.group_id));
+    const candidates = report.candidates.map((candidate) => {
+        const review = updates[candidate.group_id];
+        return review === undefined ? candidate : { ...candidate, review };
+    });
+    let reviewedCandidateCount = 0;
+    let pendingCandidateCount = 0;
+    let invalidVerdictCount = 0;
+    let missingRationaleCount = 0;
+    for (const candidate of candidates) {
+        const verdict = candidate.review?.verdict ?? "pending";
+        if (!VALID_VERDICTS.has(verdict)) invalidVerdictCount += 1;
+        if (REVIEWED_VERDICTS.has(verdict)) {
+            reviewedCandidateCount += 1;
+            if ((candidate.review?.rationale ?? "").trim().length === 0) missingRationaleCount += 1;
+        } else {
+            pendingCandidateCount += 1;
+        }
+    }
+    const unknownCandidateCount = Object.keys(updates).filter((id) => !knownIds.has(id)).length;
+    const review = {
+        synced_from: syncedFrom,
+        reviewed_candidate_count: reviewedCandidateCount,
+        pending_candidate_count: pendingCandidateCount,
+        invalid_verdict_count: invalidVerdictCount,
+        missing_rationale_count: missingRationaleCount,
+        unknown_candidate_count: unknownCandidateCount,
+    };
+    const reviewFailures = [
+        ...(invalidVerdictCount > 0 ? [`review has invalid verdicts: ${invalidVerdictCount}`] : []),
+        ...(missingRationaleCount > 0 ? [`reviewed candidates missing rationale: ${missingRationaleCount}`] : []),
+        ...(unknownCandidateCount > 0 ? [`brief references unknown candidates: ${unknownCandidateCount}`] : []),
+    ];
+    const failures = [...report.failures, ...reviewFailures];
+    return {
+        ...report,
+        candidates,
+        failures,
+        review,
+        decision: failures.length === 0 ? "workflow_candidates_ranked" : "needs_workflow_candidate_review",
+    };
+}
+
+const shortHash = (value: string): string => {
+    let hash = 0;
+    for (const char of value) {
+        hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0;
+    }
+    return Math.abs(hash).toString(36).padStart(6, "0").slice(0, 6);
+};
+
+const slugPart = (value: string): string => {
+    const slug = value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    return slug.length > 0 ? slug.slice(0, 80) : "candidate";
+};
+
+const taskPathForCandidate = (taskDir: string, candidate: WorkflowCandidate): string =>
+    join(taskDir, `workflow-candidate-${slugPart(candidate.label)}-${shortHash(candidate.group_id)}.md`);
+
+const evidenceTurnsForCandidate = (candidate: WorkflowCandidate): readonly string[] => {
+    const turns = candidate.examples
+        .map((example) => typeof example.turn === "string" ? example.turn : "")
+        .filter((turn) => turn.length > 0);
+    return [...new Set(turns)].sort();
+};
+
+const evidenceMergeKeyForCandidate = (candidate: WorkflowCandidate): string => {
+    const turns = evidenceTurnsForCandidate(candidate);
+    return [
+        candidate.proposed_action,
+        turns.length > 0 ? turns.join("|") : candidate.group_id,
+    ].join("::");
+};
+
+const taskPathForCandidateGroup = (taskDir: string, candidates: readonly WorkflowCandidate[]): string => {
+    const label = candidates.map((candidate) => candidate.label).join("--");
+    const hash = shortHash(candidates.map((candidate) => candidate.group_id).sort().join("|"));
+    return join(taskDir, `workflow-candidate-merged-${slugPart(label)}-${hash}.md`);
+};
+
+const includesAny = (values: readonly unknown[], needles: readonly string[]): boolean => {
+    const text = values.map((value) => String(value ?? "").toLowerCase()).join(" ");
+    return needles.some((needle) => text.includes(needle));
+};
+
+export function recommendWorkflowCandidatePromotionArtifact(
+    candidates: readonly WorkflowCandidate[],
+    report: WorkflowCandidateReport,
+): WorkflowCandidatePromotionRecommendation {
+    const actions = candidates.map((candidate) => candidate.proposed_action);
+    const targets = candidates.map((candidate) => candidate.target);
+    const labels = candidates.map((candidate) => candidate.label);
+    const support = candidates.reduce((sum, candidate) => sum + candidate.support_count, 0);
+    const searchScoped = (report.query.search ?? "").trim().length > 0;
+    const hasVerification = actions.includes("add_verification_gate");
+    const hasContextGuardrail = actions.includes("add_context_guardrail");
+    const hasArtifactOrCompleteness = includesAny([...targets, ...labels], [
+        "wrong_artifact",
+        "wrong_output",
+        "prototype_completeness",
+        "missing_context",
+    ]);
+
+    if (hasVerification) {
+        return {
+            primary: "harness_check",
+            alternatives: ["guidance", "classifier_fixture"],
+            confidence: support >= 2 ? "high" : "medium",
+            rationale: "The candidate asks for a verification gate, so the next artifact should make the expected check executable before changing guidance.",
+        };
+    }
+
+    if (hasContextGuardrail && hasArtifactOrCompleteness) {
+        return {
+            primary: "guidance",
+            alternatives: ["harness_check", "classifier_fixture"],
+            confidence: searchScoped || support >= 2 ? "medium" : "low",
+            rationale: "The evidence is a correction about context, artifact shape, or prototype completeness; start with agent guidance, then convert repeated cases into harness checks or classifier fixtures.",
+        };
+    }
+
+    if (searchScoped) {
+        return {
+            primary: "classifier_fixture",
+            alternatives: ["review", "guidance"],
+            confidence: "medium",
+            rationale: "The candidate was found through a scoped search, so preserving it as a classifier fixture can stabilize future package evaluation.",
+        };
+    }
+
+    return {
+        primary: "review",
+        alternatives: ["guidance", "harness_check"],
+        confidence: "low",
+        rationale: "The candidate is promotable but does not clearly indicate the artifact type; keep it as a reviewed task before choosing durable guidance or executable checks.",
+    };
+}
+
+const renderPromotionRecommendationLines = (
+    recommendation: WorkflowCandidatePromotionRecommendation,
+): readonly string[] => [
+    "## Promotion Recommendation",
+    "",
+    `- Primary: \`${recommendation.primary}\``,
+    `- Alternatives: \`${recommendation.alternatives.join("`, `")}\``,
+    `- Confidence: \`${recommendation.confidence}\``,
+    `- Rationale: ${recommendation.rationale}`,
+    "",
+];
+
+const workflowCandidateProposalSig = (task: WorkflowCandidatePromotionTask): string =>
+    `guidance__workflow_candidate__${Bun.hash([
+        task.label,
+        task.candidate_id,
+        ...(task.candidate_ids ?? []),
+    ].join("|")).toString(16).slice(0, 16)}`;
+
+const workflowCandidateProposalTitle = (
+    task: WorkflowCandidatePromotionTask,
+    report: WorkflowCandidateReport,
+): string => {
+    const search = report.query.search?.trim();
+    if (search) return `Require applied classifier results for ${search}`;
+    return `Workflow guardrail for ${task.label}`;
+};
+
+const workflowCandidateProposalKey = (title: string, sig: string): string =>
+    `guidance__${safeKeyPart(title).slice(0, 60)}__${sig.slice(-12)}`;
+
+const workflowCandidateSuggestedGuidance = (
+    task: WorkflowCandidatePromotionTask,
+    report: WorkflowCandidateReport,
+): string => [
+    `When a user correction matches \`${task.label}\`, do not stop at a surface artifact or plan.`,
+    "Use the preceding agent action and the user correction as context, then produce the concrete result the user asked for.",
+    report.query.search
+        ? `For the scoped topic \`${report.query.search}\`, set up and run the relevant classifier or explain the blocking reason, then show the applied result evidence.`
+        : "If the request involves a classifier, setup, or evaluation, run it or explain the blocking reason, then show concrete result evidence.",
+    "Preserve the classifier candidate ids and evidence refs when turning this into a durable guidance or harness change.",
+].join(" ");
+
+const workflowCandidateProposalHypothesis = (
+    task: WorkflowCandidatePromotionTask,
+    report: WorkflowCandidateReport,
+): string => {
+    const candidates = report.candidates.filter((candidate) =>
+        (task.candidate_ids ?? [task.candidate_id]).includes(candidate.group_id)
+    );
+    const labels = candidates.map((candidate) => candidate.label).join(", ");
+    return [
+        task.recommended_artifact.rationale,
+        labels.length > 0 ? `Evidence-backed workflow candidates: ${labels}.` : "",
+    ].filter(Boolean).join(" ");
+};
+
+export const buildWorkflowCandidateGuidanceProposalPlan = (
+    report: WorkflowCandidateReport,
+    existingSigs: ReadonlySet<string>,
+    opts: {
+        readonly fileTarget?: string;
+        readonly section?: string;
+        readonly dryRun?: boolean;
+        readonly includeStatements?: boolean;
+    } = {},
+): WorkflowCandidateProposalPlan => {
+    const promotion = report.promotion;
+    if (promotion === undefined) {
+        return {
+            summary: {
+                dry_run: opts.dryRun ?? false,
+                emitted_proposal_count: 0,
+                skipped_proposal_count: 0,
+                statement_count: 0,
+                ...(opts.includeStatements ? { statements: [] } : {}),
+                proposals: [],
+                failures: ["promotion required before proposal seeding"],
+            },
+            statements: [],
+        };
+    }
+
+    const proposals: WorkflowCandidateProposalPromotion[] = [];
+    const statements: string[] = [];
+    const failures: string[] = [];
+    let skipped = 0;
+    for (const task of promotion.tasks) {
+        if (task.recommended_artifact.primary !== "guidance") {
+            skipped += 1;
+            proposals.push({
+                candidate_id: task.candidate_id,
+                ...(task.candidate_ids === undefined ? {} : { candidate_ids: task.candidate_ids }),
+                proposal_id: "",
+                guidance_payload_id: "",
+                dedupe_sig: "",
+                title: task.label,
+                file_target: opts.fileTarget ?? "AGENTS.md",
+                section: opts.section ?? "Workflow Candidate Guardrails",
+                recommended_artifact: task.recommended_artifact,
+                status: "skipped",
+                reason: `recommended artifact is ${task.recommended_artifact.primary}`,
+            });
+            continue;
+        }
+
+        const title = workflowCandidateProposalTitle(task, report);
+        const sig = workflowCandidateProposalSig(task);
+        const proposalKey = workflowCandidateProposalKey(title, sig);
+        const proposalRef = recordRef("proposal", proposalKey);
+        const payloadRef = recordRef("guidance_proposal", proposalKey);
+        const fileTarget = opts.fileTarget ?? "AGENTS.md";
+        const section = opts.section ?? "Workflow Candidate Guardrails";
+        const candidateIds = task.candidate_ids ?? [task.candidate_id];
+        const baseline = prettyPrint({
+            source: "workflow_candidates",
+            frequency: Math.max(1, candidateIds.length),
+            candidate_ids: candidateIds,
+            recommendation: task.recommended_artifact,
+        });
+        const existing = existingSigs.has(sig);
+
+        if (existing) {
+            statements.push(
+                `UPDATE ${proposalRef} SET ${[
+                    ["title", surrealString(title)],
+                    ["hypothesis", surrealString(workflowCandidateProposalHypothesis(task, report))],
+                    ["frequency", String(Math.max(1, candidateIds.length))],
+                    ["confidence", surrealString(task.recommended_artifact.confidence)],
+                    ["updated_at", "time::now()"],
+                ].map(([name, value]) => `${name} = ${value}`).join(", ")};`,
+            );
+        } else {
+            statements.push(
+                `CREATE ${proposalRef} CONTENT ${surrealObject([
+                    ["form", surrealString("guidance")],
+                    ["title", surrealString(title)],
+                    ["hypothesis", surrealString(workflowCandidateProposalHypothesis(task, report))],
+                    ["dedupe_sig", surrealString(sig)],
+                    ["frequency", String(Math.max(1, candidateIds.length))],
+                    ["confidence", surrealString(task.recommended_artifact.confidence)],
+                    ["status", surrealString("open")],
+                    ["baseline", surrealOptionString(baseline)],
+                    ["updated_at", "time::now()"],
+                ])};`,
+            );
+        }
+
+        statements.push(
+            `UPSERT ${payloadRef} MERGE ${surrealObject([
+                ["proposal", proposalRef],
+                ["file_target", surrealString(fileTarget)],
+                ["section", surrealOptionString(section)],
+                ["suggested_text", surrealString(workflowCandidateSuggestedGuidance(task, report))],
+            ])};`,
+        );
+        for (const candidateId of candidateIds) {
+            const candidateKey = safeKeyPart(candidateId);
+            const edgeKey = `${proposalKey}__${candidateKey}`;
+            statements.push(
+                `DELETE ${recordRef("cites_evidence", edgeKey)};`,
+                `RELATE ${proposalRef}->cites_evidence:\`${edgeKey}\`->${recordRef("classifier_graph_node", candidateId)} SET count = 1, kind = "workflow_candidate", ts = time::now();`,
+            );
+        }
+
+        proposals.push({
+            candidate_id: task.candidate_id,
+            ...(task.candidate_ids === undefined ? {} : { candidate_ids: task.candidate_ids }),
+            proposal_id: `proposal:${proposalKey}`,
+            guidance_payload_id: `guidance_proposal:${proposalKey}`,
+            dedupe_sig: sig,
+            title,
+            file_target: fileTarget,
+            section,
+            recommended_artifact: task.recommended_artifact,
+            status: "created_or_refreshed",
+        });
+    }
+
+    return {
+        summary: {
+            dry_run: opts.dryRun ?? false,
+            emitted_proposal_count: proposals.filter((proposal) => proposal.status === "created_or_refreshed").length,
+            skipped_proposal_count: skipped,
+            statement_count: statements.length,
+            ...(opts.includeStatements ? { statements } : {}),
+            proposals,
+            failures,
+        },
+        statements,
+    };
+};
+
+export function renderWorkflowCandidateTaskMarkdown(candidate: WorkflowCandidate, report: WorkflowCandidateReport): string {
+    const review = candidate.review;
+    const recommendation = recommendWorkflowCandidatePromotionArtifact([candidate], report);
+    const lines = [
+        `# ax workflow candidate task: ${candidate.label}`,
+        "",
+        "**Action:** draft candidate-backed improvement",
+        `**Candidate:** \`${candidate.group_id}\``,
+        `**Verdict:** \`${review?.verdict ?? "pending"}\``,
+        `**Proposed graph action:** \`${candidate.proposed_action}\``,
+        "",
+        "## Why",
+        "",
+        review?.rationale ?? "",
+        "",
+        "## Candidate Signal",
+        "",
+        `- Source kind: \`${report.source_kind}\``,
+        `- Query search: \`${report.query.search ?? "none"}\``,
+        `- Classifier: \`${String(candidate.classifier_key ?? "unknown")}\``,
+        `- Target: \`${String(candidate.target ?? "unknown")}\``,
+        `- Score: \`${candidate.score}\``,
+        `- Support: \`${candidate.support_count}\``,
+        `- Evidence facts: \`${candidate.evidence_count}\``,
+        `- Average confidence: \`${candidate.average_confidence}\``,
+        "",
+        ...renderPromotionRecommendationLines(recommendation),
+        "## Apply",
+        "",
+        "1. Review the evidence below and decide the smallest durable improvement.",
+        "2. If this becomes guidance, preserve the candidate id and evidence refs in the task or commit.",
+        "3. If this becomes a harness/check, make the failing pattern executable before changing behavior.",
+        "4. Do not promote model-derived conclusions without these evidence refs.",
+        "",
+        "## Evidence",
+        "",
+    ];
+    for (const example of candidate.examples) {
+        lines.push(
+            `- Turn: \`${typeof example.turn === "string" ? example.turn : "unknown-turn"}\``,
+            `  - Result: \`${String(example.result_id ?? "unknown-result")}\``,
+            `  - Confidence: \`${typeof example.confidence === "number" ? example.confidence : "n/a"}\``,
+            `  - Task-like: \`${example.task_like ? "yes" : "no"}\``,
+            `  - Text: ${example.text_excerpt}`,
+        );
+    }
+    lines.push(
+        "",
+        "## References",
+        "",
+        `- workflow-candidate-report-source: \`${report.source_kind}\``,
+        `- candidate-id: \`${candidate.group_id}\``,
+    );
+    return `${lines.join("\n").trimEnd()}\n`;
+}
+
+export function renderMergedWorkflowCandidateTaskMarkdown(candidates: readonly WorkflowCandidate[], report: WorkflowCandidateReport): string {
+    const primary = candidates[0];
+    const recommendation = recommendWorkflowCandidatePromotionArtifact(candidates, report);
+    const lines = [
+        `# ax workflow candidate task: merged ${primary?.proposed_action ?? "workflow-candidate"}`,
+        "",
+        "**Action:** draft merged candidate-backed improvement",
+        `**Proposed graph action:** \`${primary?.proposed_action ?? "unknown"}\``,
+        `**Candidates:** \`${candidates.length}\``,
+        "",
+        "## Why",
+        "",
+    ];
+    for (const candidate of candidates) {
+        lines.push(
+            `- \`${candidate.label}\` (${candidate.review?.verdict ?? "pending"}): ${candidate.review?.rationale ?? ""}`,
+        );
+    }
+    lines.push(
+        "",
+        "## Candidate Signals",
+        "",
+    );
+    for (const candidate of candidates) {
+        lines.push(
+            `- Candidate: \`${candidate.group_id}\``,
+            `  - Label: \`${candidate.label}\``,
+            `  - Classifier: \`${String(candidate.classifier_key ?? "unknown")}\``,
+            `  - Target: \`${String(candidate.target ?? "unknown")}\``,
+            `  - Verdict: \`${candidate.review?.verdict ?? "pending"}\``,
+            `  - Score/support/confidence: \`${candidate.score}\` / \`${candidate.support_count}\` / \`${candidate.average_confidence}\``,
+        );
+    }
+    lines.push(
+        "",
+        ...renderPromotionRecommendationLines(recommendation),
+        "## Apply",
+        "",
+        "1. Treat these candidates as overlapping evidence for one improvement.",
+        "2. Prefer one guidance or harness change that addresses the shared evidence.",
+        "3. Preserve all candidate ids and evidence refs in the final task or commit.",
+        "4. Do not promote model-derived conclusions without these evidence refs.",
+        "",
+        "## Evidence",
+        "",
+    );
+    for (const candidate of candidates) {
+        lines.push(`### ${candidate.label}`, "");
+        for (const example of candidate.examples) {
+            lines.push(
+                `- Turn: \`${typeof example.turn === "string" ? example.turn : "unknown-turn"}\``,
+                `  - Result: \`${String(example.result_id ?? "unknown-result")}\``,
+                `  - Confidence: \`${typeof example.confidence === "number" ? example.confidence : "n/a"}\``,
+                `  - Task-like: \`${example.task_like ? "yes" : "no"}\``,
+                `  - Text: ${example.text_excerpt}`,
+            );
+        }
+        lines.push("");
+    }
+    lines.push(
+        "## References",
+        "",
+        `- workflow-candidate-report-source: \`${report.source_kind}\``,
+    );
+    for (const candidate of candidates) {
+        lines.push(`- candidate-id: \`${candidate.group_id}\``);
+    }
+    return `${lines.join("\n").trimEnd()}\n`;
+}
+
+const candidateHasPromotionEvidence = (candidate: WorkflowCandidate): boolean =>
+    candidate.examples.some((example) =>
+        typeof example.turn === "string" && example.turn.length > 0 &&
+        typeof example.result_id === "string" && example.result_id.length > 0
+    );
+
+export function buildWorkflowCandidateTaskDrafts(
+    report: WorkflowCandidateReport,
+    taskDir: string,
+    mode: WorkflowCandidatePromotionMode = "per-candidate",
+): { readonly report: WorkflowCandidateReport; readonly drafts: readonly WorkflowCandidateTaskDraft[] } {
+    const failures: string[] = [];
+    if (report.review === undefined) failures.push("review sync required before promotion");
+    if (report.failures.length > 0) failures.push("report has failures; refusing promotion");
+    const drafts: WorkflowCandidateTaskDraft[] = [];
+    let skippedCandidateCount = 0;
+    let blockedCandidateCount = 0;
+    const promotableCandidates: WorkflowCandidate[] = [];
+    if (failures.length === 0) {
+        for (const candidate of report.candidates) {
+            const verdict = candidate.review?.verdict ?? "pending";
+            if (!PROMOTABLE_VERDICTS.has(verdict)) {
+                skippedCandidateCount += 1;
+                continue;
+            }
+            const rationale = candidate.review?.rationale.trim() ?? "";
+            if (rationale.length === 0 || !candidateHasPromotionEvidence(candidate)) {
+                blockedCandidateCount += 1;
+                failures.push(`candidate ${candidate.group_id} missing rationale or evidence refs`);
+                continue;
+            }
+            promotableCandidates.push(candidate);
+        }
+        if (mode === "per-candidate") {
+            for (const candidate of promotableCandidates) {
+                const verdict = candidate.review?.verdict ?? "pending";
+                const path = taskPathForCandidate(taskDir, candidate);
+                const recommendedArtifact = recommendWorkflowCandidatePromotionArtifact([candidate], report);
+                drafts.push({
+                    path,
+                    content: renderWorkflowCandidateTaskMarkdown(candidate, report),
+                    task: {
+                        candidate_id: candidate.group_id,
+                        label: candidate.label,
+                        verdict,
+                        recommended_artifact: recommendedArtifact,
+                        path,
+                    },
+                });
+            }
+        } else {
+            const groups = new Map<string, WorkflowCandidate[]>();
+            for (const candidate of promotableCandidates) {
+                const key = evidenceMergeKeyForCandidate(candidate);
+                groups.set(key, [...(groups.get(key) ?? []), candidate]);
+            }
+            for (const candidates of groups.values()) {
+                const sortedCandidates = [...candidates].sort((a, b) => {
+                    const verdictScore = (candidate: WorkflowCandidate) => candidate.review?.verdict === "accept" ? 0 : 1;
+                    return verdictScore(a) - verdictScore(b) || b.score - a.score || a.label.localeCompare(b.label);
+                });
+                const primary = sortedCandidates[0];
+                const path = taskPathForCandidateGroup(taskDir, sortedCandidates);
+                const recommendedArtifact = recommendWorkflowCandidatePromotionArtifact(sortedCandidates, report);
+                drafts.push({
+                    path,
+                    content: renderMergedWorkflowCandidateTaskMarkdown(sortedCandidates, report),
+                    task: {
+                        candidate_id: `merged:${shortHash(sortedCandidates.map((candidate) => candidate.group_id).sort().join("|"))}`,
+                        candidate_ids: sortedCandidates.map((candidate) => candidate.group_id),
+                        label: sortedCandidates.map((candidate) => candidate.label).join(" + "),
+                        verdict: sortedCandidates.some((candidate) => candidate.review?.verdict === "accept") ? "accept" : primary.review?.verdict ?? "revise",
+                        recommended_artifact: recommendedArtifact,
+                        path,
+                    },
+                });
+            }
+        }
+    }
+    const promotion: WorkflowCandidatePromotionSummary = {
+        mode,
+        task_dir: taskDir,
+        emitted_task_count: drafts.length,
+        skipped_candidate_count: skippedCandidateCount,
+        blocked_candidate_count: blockedCandidateCount,
+        tasks: drafts.map((draft) => draft.task),
+        failures,
+    };
+    const nextFailures = [...report.failures, ...failures];
+    return {
+        report: {
+            ...report,
+            promotion,
+            failures: nextFailures,
+            decision: nextFailures.length === 0 ? "workflow_candidates_ranked" : "needs_workflow_candidate_review",
+        },
+        drafts,
+    };
+}
+
+const averageConfidence = (values: readonly number[]): number => {
+    if (values.length === 0) return 0;
+    const total = values.reduce((sum, value) => sum + value, 0);
+    return Number((total / values.length).toFixed(4));
+};
+
+export function workflowCandidateScore(
+    supportCount: number,
+    evidenceCount: number,
+    averageConfidenceValue: number,
+    action: string,
+    taskLikeCount: number,
+): number {
+    const actionWeight = ({
+        add_verification_gate: 1.15,
+        add_context_guardrail: 1.1,
+        record_guidance_or_environment_preference: 1.0,
+        record_approval_checkpoint: 0.65,
+    } as Record<string, number>)[action] ?? 0.8;
+    const rawScore = (supportCount + Math.min(evidenceCount, 10) * 0.25) *
+        Math.max(averageConfidenceValue, 0.1) *
+        actionWeight;
+    const taskRatio = supportCount > 0 ? taskLikeCount / supportCount : 0;
+    const penalty = 1 - Math.min(taskRatio, 0.75) * 0.6;
+    return Number((rawScore * penalty).toFixed(4));
+}
+
+export function buildWorkflowCandidateReport(input: CandidateBuildInput): WorkflowCandidateReport {
+    const evidenceByGroup = new Map<string, WorkflowCandidateEvidenceRow[]>();
+    for (const row of input.evidenceRows) {
+        const subject = String(row.subject ?? "");
+        if (!evidenceByGroup.has(subject)) evidenceByGroup.set(subject, []);
+        evidenceByGroup.get(subject)!.push(row);
+    }
+
+    const candidates: WorkflowCandidate[] = [];
+    let consideredEvidenceFactCount = 0;
+
+    for (const groupRow of input.groupRows) {
+        const groupId = String(groupRow.graph_id ?? "");
+        const props = parseProperties(groupRow.properties_json);
+        const action = String(props.proposed_action ?? "review_section_pattern");
+        const classifierKey = typeof props.classifier_key === "string" ? props.classifier_key : undefined;
+        if (input.action && action !== input.action) continue;
+        if (input.classifier && classifierKey !== input.classifier) continue;
+
+        const rawEvidence = evidenceByGroup.get(groupId) ?? [];
+        const evidence = rawEvidence.filter((evidenceRow) => {
+            const evidenceProps = parseProperties(evidenceRow.properties_json);
+            const textExcerpt = String(evidenceProps.text_excerpt ?? "");
+            const taskLike = isTaskLikeWorkflowText(textExcerpt);
+            if (input.taskLike === "exclude" && taskLike) return false;
+            if (input.taskLike === "only" && !taskLike) return false;
+            return containsSearchText(textExcerpt, input.search);
+        });
+        consideredEvidenceFactCount += evidence.length;
+        if (input.search && evidence.length === 0) continue;
+
+        const examples: WorkflowCandidateExample[] = [];
+        const confidenceValues: number[] = [];
+        const turnRefs = new Set<string>();
+        let wrapperLikeCount = 0;
+        let taskLikeCount = 0;
+
+        for (const evidenceRow of evidence) {
+            const evidenceProps = parseProperties(evidenceRow.properties_json);
+            const confidence = asNumber(evidenceProps.confidence);
+            if (confidence !== undefined) confidenceValues.push(confidence);
+            if (evidenceProps.wrapper_like === true) wrapperLikeCount += 1;
+            const textExcerpt = String(evidenceProps.text_excerpt ?? "");
+            const taskLike = isTaskLikeWorkflowText(textExcerpt);
+            if (taskLike) taskLikeCount += 1;
+            const turn = evidenceProps.turn;
+            if (typeof turn === "string" && turn.length > 0) turnRefs.add(turn);
+            if (examples.length < input.examplesPerGroup) {
+                examples.push({
+                    result_id: evidenceProps.result_id,
+                    turn,
+                    confidence: evidenceProps.confidence,
+                    task_like: taskLike,
+                    text_excerpt: compactText(textExcerpt),
+                });
+            }
+        }
+
+        const rawSupportCount = Math.trunc(asNumber(props.support_count) ?? rawEvidence.length);
+        const supportCount = evidence.length;
+        const avgConfidence = averageConfidence(confidenceValues);
+        candidates.push({
+            group_id: groupId,
+            label: String(groupRow.label ?? ""),
+            classifier_key: props.classifier_key,
+            classifier_label: props.label,
+            target: props.target,
+            proposed_action: action,
+            raw_support_count: rawSupportCount,
+            support_count: supportCount,
+            evidence_count: evidence.length,
+            turn_ref_count: turnRefs.size,
+            average_confidence: avgConfidence,
+            wrapper_like_count: wrapperLikeCount,
+            task_like_count: taskLikeCount,
+            task_like_ratio: supportCount > 0 ? Number((taskLikeCount / supportCount).toFixed(4)) : 0,
+            score: workflowCandidateScore(supportCount, evidence.length, avgConfidence, action, taskLikeCount),
+            examples,
+        });
+    }
+
+    candidates.sort((a, b) =>
+        b.score - a.score ||
+        b.support_count - a.support_count ||
+        a.label.localeCompare(b.label)
+    );
+    const topCandidates = candidates.slice(0, Math.max(1, input.limit));
+    const failures: string[] = [];
+    if (candidates.length === 0) failures.push("no transcript-backed workflow candidates");
+    if (candidates.some((candidate) => candidate.wrapper_like_count > 0)) {
+        failures.push("candidate evidence includes wrapper-like turns");
+    }
+    if (candidates.some((candidate) => candidate.evidence_count === 0)) {
+        failures.push("candidate missing evidence facts");
+    }
+
+    const query = {
+        limit: input.limit,
+        examples_per_group: input.examplesPerGroup,
+        task_like: input.taskLike,
+        ...(input.action ? { action: input.action } : {}),
+        ...(input.classifier ? { classifier: input.classifier } : {}),
+        ...(input.search ? { search: input.search } : {}),
+    } satisfies WorkflowCandidateReport["query"];
+
+    return {
+        schema: "ax.workflow_candidate_report.v1",
+        source_kind: input.sourceKind,
+        query,
+        candidates: topCandidates,
+        all_candidate_labels: candidates.map((candidate) => candidate.label),
+        totals: {
+            candidate_group_count: candidates.length,
+            returned_candidate_count: topCandidates.length,
+            evidence_fact_count: input.evidenceRows.length,
+            considered_evidence_fact_count: consideredEvidenceFactCount,
+            candidate_with_evidence_count: candidates.filter((candidate) => candidate.evidence_count > 0).length,
+            wrapper_like_count: candidates.reduce((sum, candidate) => sum + candidate.wrapper_like_count, 0),
+            task_like_count: candidates.reduce((sum, candidate) => sum + candidate.task_like_count, 0),
+        },
+        failures,
+        decision: failures.length === 0 ? "workflow_candidates_ranked" : "needs_workflow_candidate_review",
+    };
+}
+
+export function renderWorkflowCandidateReportText(report: WorkflowCandidateReport): string {
+    const proposalPreviewLines = (summary: WorkflowCandidateProposalPromotionSummary): readonly string[] => {
+        const lines = ["proposal preview:"];
+        for (const proposal of summary.proposals) {
+            if (proposal.status === "skipped") {
+                lines.push(`  - skipped ${proposal.title}: ${proposal.reason ?? "no reason"}`);
+                continue;
+            }
+            const candidateCount = proposal.candidate_ids?.length ?? 1;
+            lines.push(
+                `  - ${summary.dry_run ? "would write" : "wrote"} ${proposal.dedupe_sig}`,
+                `    title: ${proposal.title}`,
+                `    proposal: ${proposal.proposal_id}`,
+                `    target: ${proposal.file_target}#${proposal.section}`,
+                `    artifact: ${proposal.recommended_artifact.primary} confidence=${proposal.recommended_artifact.confidence} alternatives=${proposal.recommended_artifact.alternatives.join(",")}`,
+                `    evidence candidates: ${candidateCount}`,
+            );
+        }
+        return lines;
+    };
+    const lines = [
+        "workflow candidate report",
+        `decision: ${report.decision}`,
+        `source: ${report.source_kind}`,
+        `candidate groups: ${report.totals.candidate_group_count}`,
+        `evidence facts: ${report.totals.evidence_fact_count}`,
+        `considered evidence: ${report.totals.considered_evidence_fact_count}`,
+        ...(report.query.search ? [`search: ${report.query.search}`] : []),
+        `task-like mode/count: ${report.query.task_like}/${report.totals.task_like_count}`,
+        `wrapper-like evidence: ${report.totals.wrapper_like_count}`,
+        ...(report.review ? [
+            `reviewed/pending: ${report.review.reviewed_candidate_count}/${report.review.pending_candidate_count}`,
+            `review issues: invalid=${report.review.invalid_verdict_count} missing_rationale=${report.review.missing_rationale_count} unknown=${report.review.unknown_candidate_count}`,
+        ] : []),
+        ...(report.promotion ? [
+            `promotion tasks: ${report.promotion.emitted_task_count} emitted, ${report.promotion.skipped_candidate_count} skipped, ${report.promotion.blocked_candidate_count} blocked`,
+            `promotion dir: ${report.promotion.task_dir}`,
+            ...(report.promotion.proposals ? [
+                `promotion proposals: ${report.promotion.proposals.emitted_proposal_count} emitted, ${report.promotion.proposals.skipped_proposal_count} skipped`,
+                `promotion proposal writes: ${report.promotion.proposals.dry_run ? "dry-run" : "executed"} (${report.promotion.proposals.statement_count} statements)`,
+                ...proposalPreviewLines(report.promotion.proposals),
+            ] : []),
+        ] : []),
+    ];
+    for (const candidate of report.candidates) {
+        lines.push(`- ${candidate.score} ${candidate.label} -> ${candidate.proposed_action} support=${candidate.support_count} evidence=${candidate.evidence_count} avg_conf=${candidate.average_confidence}`);
+        if (candidate.review) {
+            lines.push(`  review: ${candidate.review.verdict}${candidate.review.rationale ? ` - ${candidate.review.rationale}` : ""}`);
+        }
+        for (const example of candidate.examples) {
+            const turn = typeof example.turn === "string" ? example.turn : "unknown-turn";
+            const confidence = typeof example.confidence === "number" ? example.confidence.toFixed(2) : "n/a";
+            lines.push(`  example ${turn} conf=${confidence}${example.task_like ? " task-like" : ""}: ${example.text_excerpt}`);
+        }
+    }
+    for (const failure of report.failures) {
+        lines.push(`failure: ${failure}`);
+    }
+    return lines.join("\n");
+}
+
+export function renderWorkflowCandidateProposalListText(report: WorkflowCandidateProposalListReport): string {
+    const lines = [
+        "workflow candidate proposals",
+        `prefix: ${report.prefix}`,
+        `status: ${report.query.status}`,
+        ...(report.query.search ? [`search: ${report.query.search}`] : []),
+        `proposals: ${report.totals.proposal_count} total, ${report.totals.accepted_count} accepted, ${report.totals.open_count} open, ${report.totals.rejected_count} rejected`,
+        `scaffolded experiments: ${report.totals.scaffolded_experiment_count}`,
+        ...(report.query.expand_evidence ? [
+            `evidence candidates: ${report.totals.evidence_candidate_count}, examples: ${report.totals.evidence_example_count}`,
+        ] : []),
+    ];
+    for (const proposal of report.proposals) {
+        lines.push(
+            `- ${proposal.frequency} ${proposal.confidence} ${proposal.status} ${proposal.dedupe_sig}`,
+            `  title: ${proposal.title}`,
+            `  target: ${proposal.target ?? "unknown"}${proposal.section ? `#${proposal.section}` : ""}`,
+            `  experiment: ${proposal.experiment_status ?? "none"}${proposal.experiment_id ? ` (${proposal.experiment_id})` : ""}`,
+        );
+        if (proposal.artifact_path) lines.push(`  artifact: ${proposal.artifact_path}`);
+        if (proposal.task_path) lines.push(`  task: ${proposal.task_path}`);
+        if ((proposal.evidence?.length ?? 0) > 0) {
+            lines.push("  evidence:");
+            for (const candidate of proposal.evidence ?? []) {
+                lines.push(
+                    `    - ${candidate.candidate_label}`,
+                    `      id: ${candidate.candidate_id}`,
+                    `      action: ${String(candidate.proposed_action ?? "unknown")} target: ${String(candidate.target ?? "unknown")}`,
+                );
+                for (const example of candidate.examples) {
+                    const turn = typeof example.turn === "string" ? example.turn : "unknown-turn";
+                    const confidence = typeof example.confidence === "number" ? example.confidence.toFixed(2) : "n/a";
+                    lines.push(`      example ${turn} conf=${confidence}: ${example.text_excerpt}`);
+                }
+            }
+        }
+    }
+    if (report.proposals.length === 0) lines.push("(no workflow-candidate proposals match)");
+    return lines.join("\n");
+}
+
+export function attachWorkflowCandidateProposalEvidence(input: {
+    readonly rows: readonly WorkflowCandidateProposalListRow[];
+    readonly edges: readonly WorkflowCandidateProposalEvidenceEdgeRow[];
+    readonly candidateRows: readonly WorkflowCandidateGroupRow[];
+    readonly factRows: readonly WorkflowCandidateEvidenceRow[];
+    readonly examplesPerCandidate: number;
+}): readonly WorkflowCandidateProposalListRow[] {
+    const candidateById = new Map(input.candidateRows.map((row) => [String(row.graph_id ?? ""), row]));
+    const factsByCandidate = new Map<string, WorkflowCandidateEvidenceRow[]>();
+    for (const row of input.factRows) {
+        const subject = String(row.subject ?? "");
+        factsByCandidate.set(subject, [...(factsByCandidate.get(subject) ?? []), row]);
+    }
+    const edgesByProposal = new Map<string, string[]>();
+    for (const edge of input.edges) {
+        const proposalId = String(edge.proposal_id ?? "");
+        const candidateId = recordKeyPart(edge.candidate_ref, "classifier_graph_node");
+        if (proposalId.length === 0 || candidateId === null) continue;
+        edgesByProposal.set(proposalId, [...(edgesByProposal.get(proposalId) ?? []), candidateId]);
+    }
+
+    return input.rows.map((row) => {
+        const proposalId = row.proposal_id ?? "";
+        const candidateIds = [...new Set(edgesByProposal.get(proposalId) ?? [])].sort();
+        if (candidateIds.length === 0) return row;
+        const evidence = candidateIds.map((candidateId): WorkflowCandidateProposalEvidence => {
+            const candidateRow = candidateById.get(candidateId);
+            const candidateProps = parseProperties(candidateRow?.properties_json);
+            const examples = (factsByCandidate.get(candidateId) ?? [])
+                .slice(0, Math.max(0, input.examplesPerCandidate))
+                .map((fact): WorkflowCandidateProposalEvidenceExample => {
+                    const props = parseProperties(fact.properties_json);
+                    return {
+                        result_id: props.result_id,
+                        turn: props.turn,
+                        confidence: props.confidence,
+                        text_excerpt: compactText(String(props.text_excerpt ?? "")),
+                    };
+                });
+            return {
+                candidate_id: candidateId,
+                candidate_label: String(candidateRow?.label ?? candidateId),
+                classifier_key: candidateProps.classifier_key,
+                target: candidateProps.target,
+                proposed_action: candidateProps.proposed_action,
+                examples,
+            };
+        });
+        return { ...row, evidence };
+    });
+}
+
+export function buildWorkflowCandidateProposalListReport(input: {
+    readonly rows: readonly WorkflowCandidateProposalListRow[];
+    readonly limit: number;
+    readonly status: WorkflowCandidateProposalStatusFilter;
+    readonly expandEvidence?: boolean;
+    readonly search?: string;
+}): WorkflowCandidateProposalListReport {
+    const evidenceCandidateCount = input.rows.reduce((sum, row) => sum + (row.evidence?.length ?? 0), 0);
+    const evidenceExampleCount = input.rows.reduce(
+        (sum, row) => sum + (row.evidence ?? []).reduce((innerSum, evidence) => innerSum + evidence.examples.length, 0),
+        0,
+    );
+    return {
+        schema: "ax.workflow_candidate_proposal_list.v1",
+        prefix: WORKFLOW_CANDIDATE_PROPOSAL_PREFIX,
+        query: {
+            limit: input.limit,
+            status: input.status,
+            expand_evidence: input.expandEvidence ?? false,
+            ...(input.search === undefined ? {} : { search: input.search }),
+        },
+        proposals: input.rows,
+        totals: {
+            proposal_count: input.rows.length,
+            accepted_count: input.rows.filter((row) => row.status === "accepted").length,
+            open_count: input.rows.filter((row) => row.status === "open").length,
+            rejected_count: input.rows.filter((row) => row.status === "rejected").length,
+            scaffolded_experiment_count: input.rows.filter((row) => row.experiment_status === "scaffolded").length,
+            evidence_candidate_count: evidenceCandidateCount,
+            evidence_example_count: evidenceExampleCount,
+        },
+    };
+}
+
+export function buildWorkflowCandidateTopicReport(input: {
+    readonly sourceKind: string;
+    readonly topic: string;
+    readonly proposals: WorkflowCandidateProposalListReport;
+    readonly candidates: WorkflowCandidateReport;
+}): WorkflowCandidateTopicReport {
+    const sourceTurns = new Set<string>();
+    for (const proposal of input.proposals.proposals) {
+        for (const evidence of proposal.evidence ?? []) {
+            for (const example of evidence.examples) {
+                if (typeof example.turn === "string" && example.turn.length > 0) sourceTurns.add(example.turn);
+            }
+        }
+    }
+    for (const candidate of input.candidates.candidates) {
+        for (const example of candidate.examples) {
+            if (typeof example.turn === "string" && example.turn.length > 0) sourceTurns.add(example.turn);
+        }
+    }
+    const experimentCount = input.proposals.proposals
+        .filter((proposal) => (proposal.experiment_id ?? "").length > 0)
+        .length;
+    const failures = [
+        ...(input.proposals.totals.proposal_count === 0 ? ["no workflow-candidate proposals matched topic"] : []),
+        ...(input.candidates.totals.returned_candidate_count === 0 ? ["no classifier candidates matched topic"] : []),
+        ...input.candidates.failures,
+    ];
+    const report: WorkflowCandidateTopicReport = {
+        schema: "ax.workflow_candidate_topic_report.v1",
+        source_kind: input.sourceKind,
+        topic: input.topic,
+        proposals: input.proposals,
+        candidates: input.candidates,
+        totals: {
+            proposal_count: input.proposals.totals.proposal_count,
+            experiment_count: experimentCount,
+            proposal_evidence_candidate_count: input.proposals.totals.evidence_candidate_count,
+            ranked_candidate_count: input.candidates.totals.returned_candidate_count,
+            candidate_evidence_fact_count: input.candidates.totals.considered_evidence_fact_count,
+            source_turn_count: sourceTurns.size,
+        },
+        decision: failures.length === 0 ? "workflow_topic_evidence_found" : "needs_workflow_topic_evidence",
+        failures,
+    };
+    const harnessChecks = buildWorkflowCandidateTopicHarnessChecks(report);
+    return withWorkflowCandidateTopicHarnessEvidence(
+        harnessChecks.checks.length > 0
+            ? { ...report, harness_checks: harnessChecks }
+            : report,
+    );
+}
+
+export function renderWorkflowCandidateTopicReportText(report: WorkflowCandidateTopicReport): string {
+    const harnessEvidence = buildWorkflowCandidateTopicHarnessEvidenceSummary(report);
+    const lines = [
+        "workflow topic evidence",
+        `decision: ${report.decision}`,
+        `topic: ${report.topic}`,
+        `source: ${report.source_kind}`,
+        `proposals: ${report.totals.proposal_count}`,
+        `experiments: ${report.totals.experiment_count}`,
+        `proposal evidence candidates: ${report.totals.proposal_evidence_candidate_count}`,
+        `ranked candidates: ${report.totals.ranked_candidate_count}`,
+        `candidate evidence facts: ${report.totals.candidate_evidence_fact_count}`,
+        `source turns: ${report.totals.source_turn_count}`,
+        ...(report.adjacent_tasks ? [
+            `adjacent tasks: ${report.adjacent_tasks.emitted_task_count}`,
+            `adjacent task dir: ${report.adjacent_tasks.task_dir}`,
+        ] : []),
+        ...(report.classifier_fixtures ? [
+            `classifier fixture pack: ${report.classifier_fixtures.emitted_fixture_count} fixtures`,
+            `classifier fixture candidates: ${report.classifier_fixtures.candidate_count} emitted, ${report.classifier_fixtures.skipped_candidate_count} skipped`,
+            `classifier fixture path: ${report.classifier_fixtures.path}`,
+        ] : []),
+        ...(report.harness_proposals ? [
+            `harness proposals: ${report.harness_proposals.emitted_proposal_count} emitted, ${report.harness_proposals.skipped_proposal_count} skipped`,
+            `harness proposal writes: ${report.harness_proposals.dry_run ? "dry-run" : "executed"} (${report.harness_proposals.statement_count} statements)`,
+        ] : []),
+        ...(report.harness_checks ? [
+            `harness checks: ${report.harness_checks.passed_count} passed, ${report.harness_checks.failed_count} failed`,
+        ] : []),
+        ...(report.persisted_harness_facts ? [
+            `persisted harness facts: ${report.persisted_harness_facts.totals.fact_count}`,
+            `persisted harness edges: ${report.persisted_harness_facts.totals.edge_count}`,
+            `persisted harness status: ${report.persisted_harness_facts.totals.passed_count} passed, ${report.persisted_harness_facts.totals.failed_count} failed`,
+        ] : []),
+        `harness gate: ${harnessEvidence.gate_satisfied ? "satisfied" : "unsatisfied"} (${harnessEvidence.gate_evidence_source})`,
+        `harness gate computed: ${harnessEvidence.computed_passed_count} passed, ${harnessEvidence.computed_failed_count} failed (${harnessEvidence.computed_check_count} checks)`,
+        `harness gate persisted: ${harnessEvidence.persisted_passed_count} passed, ${harnessEvidence.persisted_failed_count} failed (${harnessEvidence.persisted_fact_count} facts)`,
+        "",
+        "proposals:",
+    ];
+    if (report.proposals.proposals.length === 0) {
+        lines.push("  (none)");
+    }
+    for (const proposal of report.proposals.proposals) {
+        lines.push(
+            `  - ${proposal.status} ${proposal.dedupe_sig}`,
+            `    title: ${proposal.title}`,
+            `    target: ${proposal.target ?? "unknown"}${proposal.section ? `#${proposal.section}` : ""}`,
+            `    experiment: ${proposal.experiment_status ?? "none"}${proposal.experiment_id ? ` (${proposal.experiment_id})` : ""}`,
+        );
+        for (const evidence of proposal.evidence ?? []) {
+            lines.push(`    evidence: ${evidence.candidate_label} (${evidence.examples.length} examples)`);
+        }
+    }
+    lines.push("", "ranked candidates:");
+    if (report.candidates.candidates.length === 0) {
+        lines.push("  (none)");
+    }
+    for (const candidate of report.candidates.candidates) {
+        lines.push(
+            `  - ${candidate.score} ${candidate.label}`,
+            `    action: ${candidate.proposed_action} target=${String(candidate.target ?? "unknown")} support=${candidate.support_count} evidence=${candidate.evidence_count}`,
+        );
+        for (const example of candidate.examples) {
+            const turn = typeof example.turn === "string" ? example.turn : "unknown-turn";
+            const confidence = typeof example.confidence === "number" ? example.confidence.toFixed(2) : "n/a";
+            lines.push(`    example ${turn} conf=${confidence}: ${example.text_excerpt}`);
+        }
+    }
+    if (report.harness_checks && report.harness_checks.checks.length > 0) {
+        lines.push("", "harness checks:");
+        for (const check of report.harness_checks.checks) {
+            lines.push(
+                `  - ${check.status} ${check.id}`,
+                `    candidate: ${check.label}`,
+            );
+            for (const failure of check.failures) lines.push(`    failure: ${failure}`);
+        }
+    }
+    if (report.persisted_harness_facts && report.persisted_harness_facts.facts.length > 0) {
+        lines.push("", "persisted harness facts:");
+        for (const fact of report.persisted_harness_facts.facts) {
+            lines.push(
+                `  - ${fact.predicate ?? "unknown"} ${fact.graph_id ?? "unknown-fact"}`,
+                `    subject: ${fact.subject ?? "unknown-subject"}`,
+                `    object: ${fact.object ?? "unknown-object"}`,
+            );
+        }
+    }
+    for (const failure of report.failures) lines.push(`failure: ${failure}`);
+    return lines.join("\n");
+}
+
+const persistedHarnessFactPassed = (fact: WorkflowCandidateTopicHarnessGraphFactRow): boolean => {
+    const value = safeJsonParse(fact.value_json ?? "null") as { passed?: unknown } | null;
+    return fact.predicate === "passed" || value?.passed === true;
+};
+
+export function buildWorkflowCandidateTopicHarnessEvidenceSummary(
+    report: WorkflowCandidateTopicReport,
+): WorkflowCandidateTopicHarnessEvidenceSummary {
+    const checks = report.harness_checks?.checks ?? [];
+    const computedPassedCount = checks.filter((check) => check.status === "passed").length;
+    const computedFailedCount = checks.filter((check) => check.status === "failed").length;
+    const persistedFacts = report.persisted_harness_facts?.facts ?? [];
+    const persistedPassedCount = persistedFacts.filter(persistedHarnessFactPassed).length;
+    const persistedFailedCount = Math.max(0, persistedFacts.length - persistedPassedCount);
+    const hasComputedEvidence = computedPassedCount > 0;
+    const hasPersistedEvidence = persistedPassedCount > 0;
+    const gateEvidenceSource: WorkflowCandidateTopicHarnessGateEvidenceSource = hasComputedEvidence && hasPersistedEvidence
+        ? "computed_and_persisted"
+        : hasComputedEvidence
+            ? "computed"
+            : hasPersistedEvidence
+                ? "persisted"
+                : "none";
+    return {
+        gate_satisfied: computedFailedCount === 0 && (checks.length > 0 || persistedPassedCount > 0),
+        gate_evidence_source: gateEvidenceSource,
+        computed_check_count: checks.length,
+        computed_passed_count: computedPassedCount,
+        computed_failed_count: computedFailedCount,
+        persisted_fact_count: persistedFacts.length,
+        persisted_passed_count: persistedPassedCount,
+        persisted_failed_count: persistedFailedCount,
+    };
+}
+
+const withWorkflowCandidateTopicHarnessEvidence = (
+    report: WorkflowCandidateTopicReport,
+): WorkflowCandidateTopicReport => ({
+    ...report,
+    harness_evidence: buildWorkflowCandidateTopicHarnessEvidenceSummary(report),
+});
+
+const citedCandidateIdsForTopic = (report: WorkflowCandidateTopicReport): ReadonlySet<string> => {
+    const ids = new Set<string>();
+    for (const proposal of report.proposals.proposals) {
+        for (const evidence of proposal.evidence ?? []) ids.add(evidence.candidate_id);
+    }
+    for (const fact of report.persisted_harness_facts?.facts ?? []) {
+        if (!persistedHarnessFactPassed(fact)) continue;
+        if (typeof fact.object === "string" && fact.object.length > 0) ids.add(fact.object);
+        const props = parseProperties(fact.properties_json);
+        if (typeof props.candidate_id === "string" && props.candidate_id.length > 0) ids.add(props.candidate_id);
+    }
+    return ids;
+};
+
+export function topicAdjacentCandidates(report: WorkflowCandidateTopicReport): readonly WorkflowCandidate[] {
+    const citedCandidateIds = citedCandidateIdsForTopic(report);
+    return report.candidates.candidates.filter((candidate) => !citedCandidateIds.has(candidate.group_id));
+}
+
+const exampleTextMatchesTopic = (example: WorkflowCandidateExample, topic: string): boolean => {
+    const normalizedTopic = topic.trim().toLowerCase();
+    if (normalizedTopic.length === 0) return true;
+    return example.text_excerpt.toLowerCase().includes(normalizedTopic);
+};
+
+const exampleHasAppliedClassifierResultEvidence = (example: WorkflowCandidateExample, topic: string): boolean => {
+    const resultId = typeof example.result_id === "string" ? example.result_id : "";
+    const text = example.text_excerpt.toLowerCase();
+    return resultId.startsWith("classifier_result:")
+        && exampleTextMatchesTopic(example, topic)
+        && text.includes("classifier")
+        && /\bresults?\b/.test(text);
+};
+
+const evidenceRefsForExamples = (examples: readonly WorkflowCandidateExample[]): readonly string[] => {
+    const refs: string[] = [];
+    for (const example of examples) {
+        if (typeof example.result_id === "string" && example.result_id.length > 0) refs.push(example.result_id);
+        if (typeof example.turn === "string" && example.turn.length > 0) refs.push(example.turn);
+    }
+    return [...new Set(refs)].sort();
+};
+
+export function buildWorkflowCandidateTopicHarnessChecks(
+    report: WorkflowCandidateTopicReport,
+): WorkflowCandidateTopicHarnessCheckSummary {
+    const checks: WorkflowCandidateTopicHarnessCheck[] = [];
+    for (const candidate of topicAdjacentCandidates(report)) {
+        const recommendation = recommendWorkflowCandidatePromotionArtifact([candidate], report.candidates);
+        if (recommendation.primary !== "harness_check") continue;
+
+        const matchingExamples = candidate.examples.filter((example) =>
+            exampleHasAppliedClassifierResultEvidence(example, report.topic)
+        );
+        const turns = evidenceTurnsForCandidate(candidate);
+        const failures = [
+            ...(candidate.proposed_action === "add_verification_gate" ? [] : ["candidate is not an add_verification_gate action"]),
+            ...(matchingExamples.length > 0 ? [] : ["missing applied classifier result evidence for topic"]),
+            ...(turns.length > 0 ? [] : ["missing source turn evidence"]),
+        ];
+        checks.push({
+            id: `${safeKeyPart(candidate.group_id)}__applied_classifier_result_evidence`,
+            candidate_id: candidate.group_id,
+            label: candidate.label,
+            status: failures.length === 0 ? "passed" : "failed",
+            expectation: "harness-worthy verification candidates must include applied classifier result evidence before guidance changes",
+            evidence_refs: evidenceRefsForExamples(matchingExamples.length > 0 ? matchingExamples : candidate.examples),
+            failures,
+        });
+    }
+    return {
+        passed_count: checks.filter((check) => check.status === "passed").length,
+        failed_count: checks.filter((check) => check.status === "failed").length,
+        checks,
+    };
+}
+
+export function workflowCandidateTopicHarnessGateFailures(report: WorkflowCandidateTopicReport): readonly string[] {
+    const checks = report.harness_checks?.checks ?? [];
+    const persistedPassingFacts = (report.persisted_harness_facts?.facts ?? []).filter(persistedHarnessFactPassed);
+    if (checks.length === 0 && persistedPassingFacts.length === 0) {
+        return ["no passing topic harness checks were produced or persisted"];
+    }
+    const failures: string[] = [];
+    for (const check of checks) {
+        if (check.status === "passed") continue;
+        failures.push(
+            `harness check ${check.id} failed`
+                + (check.failures.length > 0 ? `: ${check.failures.join("; ")}` : ""),
+        );
+    }
+    return failures;
+}
+
+const topicHarnessGraphId = (topic: string): string =>
+    `workflow_topic:${safeKeyPart(topic.toLowerCase()) || "unknown_topic"}`;
+
+const graphKeyWithHash = (value: string, slugLength = 72): string =>
+    `${safeKeyPart(value).slice(0, slugLength)}__${Bun.hash(value).toString(16).slice(0, 12)}`;
+
+const harnessCheckGraphId = (topic: string, checkId: string): string =>
+    `workflow_topic_harness_check:${safeKeyPart(topic.toLowerCase()) || "unknown_topic"}:${graphKeyWithHash(checkId)}`;
+
+export function buildWorkflowCandidateTopicHarnessGraphProjection(
+    report: WorkflowCandidateTopicReport,
+): WorkflowCandidateTopicHarnessGraphProjection {
+    const checks = report.harness_checks?.checks ?? [];
+    const topicNode = topicHarnessGraphId(report.topic);
+    const nodes = new Map<string, WorkflowCandidateTopicHarnessGraphNode>();
+    const edges: WorkflowCandidateTopicHarnessGraphEdge[] = [];
+    const facts: WorkflowCandidateTopicHarnessGraphFact[] = [];
+
+    nodes.set(topicNode, {
+        id: topicNode,
+        kind: "workflow_topic",
+        label: report.topic || "unknown-topic",
+        properties: {
+            topic: report.topic,
+            source_kind: report.source_kind,
+            decision: report.decision,
+        },
+    });
+
+    for (const check of checks) {
+        const checkNode = harnessCheckGraphId(report.topic, check.id);
+        nodes.set(checkNode, {
+            id: checkNode,
+            kind: "workflow_topic_harness_check",
+            label: check.label,
+            properties: {
+                topic: report.topic,
+                check_id: check.id,
+                candidate_id: check.candidate_id,
+                status: check.status,
+                expectation: check.expectation,
+                failures: check.failures,
+                evidence_refs: check.evidence_refs,
+            },
+        });
+        const topicEdge = `edge:${graphKeyWithHash(`${topicNode}:has_harness_check:${checkNode}`)}`;
+        edges.push({
+            id: topicEdge,
+            kind: "topic_has_harness_check",
+            from: topicNode,
+            to: checkNode,
+            evidence_path: report.topic,
+            properties: {
+                topic: report.topic,
+                status: check.status,
+            },
+        });
+        const candidateEdge = `edge:${graphKeyWithHash(`${checkNode}:checks_candidate:${check.candidate_id}`)}`;
+        edges.push({
+            id: candidateEdge,
+            kind: "harness_check_checks_candidate",
+            from: checkNode,
+            to: check.candidate_id,
+            evidence_path: check.evidence_refs.join(" "),
+            properties: {
+                topic: report.topic,
+                candidate_id: check.candidate_id,
+                evidence_refs: check.evidence_refs,
+            },
+        });
+        facts.push({
+            id: `fact:${graphKeyWithHash(`${checkNode}:status`)}`,
+            kind: "workflow_topic_harness_check",
+            subject: checkNode,
+            predicate: check.status === "passed" ? "passed" : "failed",
+            object: check.candidate_id,
+            value: {
+                passed: check.status === "passed",
+                status: check.status,
+                failure_count: check.failures.length,
+            },
+            evidence_edges: [topicEdge, candidateEdge],
+            properties: {
+                topic: report.topic,
+                check_id: check.id,
+                candidate_id: check.candidate_id,
+                label: check.label,
+                expectation: check.expectation,
+                failures: check.failures,
+                evidence_refs: check.evidence_refs,
+            },
+        });
+    }
+
+    return {
+        schema: "ax.workflow_topic_harness_graph_projection.v1",
+        source_report_schema: report.schema,
+        topic: report.topic,
+        nodes: [...nodes.values()],
+        edges,
+        facts,
+        totals: {
+            check_count: checks.length,
+            passed_count: checks.filter((check) => check.status === "passed").length,
+            failed_count: checks.filter((check) => check.status === "failed").length,
+            node_count: nodes.size,
+            edge_count: edges.length,
+            fact_count: facts.length,
+        },
+    };
+}
+
+export function buildWorkflowCandidateTopicHarnessGraphWritePlan(
+    projection: WorkflowCandidateTopicHarnessGraphProjection,
+): WorkflowCandidateTopicHarnessGraphWritePlan {
+    const sourceKind = "workflow_topic_harness_check";
+    const nodeStatements = projection.nodes.map((node) =>
+        `UPSERT ${recordRef("classifier_graph_node", node.id)} CONTENT ${surrealObject([
+            ["graph_id", surrealString(node.id)],
+            ["kind", surrealString(node.kind)],
+            ["label", surrealString(node.label)],
+            ["properties_json", surrealJson(node.properties)],
+            ["source_kind", surrealString(sourceKind)],
+            ["updated_at", "time::now()"],
+        ])};`
+    );
+    const edgeStatements = projection.edges.map((edge) =>
+        `UPSERT ${recordRef("classifier_graph_edge", edge.id)} CONTENT ${surrealObject([
+            ["graph_id", surrealString(edge.id)],
+            ["kind", surrealString(edge.kind)],
+            ["from_id", surrealString(edge.from)],
+            ["to_id", surrealString(edge.to)],
+            ["evidence_path", surrealString(edge.evidence_path)],
+            ["properties_json", surrealJson(edge.properties)],
+            ["source_kind", surrealString(sourceKind)],
+            ["updated_at", "time::now()"],
+        ])};`
+    );
+    const factStatements = projection.facts.map((fact) =>
+        `UPSERT ${recordRef("classifier_graph_fact", fact.id)} CONTENT ${surrealObject([
+            ["graph_id", surrealString(fact.id)],
+            ["kind", surrealString(fact.kind)],
+            ["subject", surrealString(fact.subject)],
+            ["predicate", surrealString(fact.predicate)],
+            ["object", surrealOptionString(fact.object)],
+            ["value_json", surrealJsonTextOption(fact.value)],
+            ["evidence_edges_json", surrealJsonText(fact.evidence_edges)],
+            ["properties_json", surrealJson(fact.properties)],
+            ["source_kind", surrealString(sourceKind)],
+            ["updated_at", "time::now()"],
+        ])};`
+    );
+    const statements = [...nodeStatements, ...edgeStatements, ...factStatements];
+    return {
+        schema: "ax.workflow_topic_harness_graph_write_plan.v1",
+        source_projection_schema: projection.schema,
+        topic: projection.topic,
+        statements,
+        tables: ["classifier_graph_node", "classifier_graph_edge", "classifier_graph_fact"],
+        totals: {
+            statement_count: statements.length,
+            node_statement_count: nodeStatements.length,
+            edge_statement_count: edgeStatements.length,
+            fact_statement_count: factStatements.length,
+        },
+    };
+}
+
+export function buildWorkflowCandidateTopicHarnessGraphListReport(input: {
+    readonly topic?: string;
+    readonly facts: readonly WorkflowCandidateTopicHarnessGraphFactRow[];
+    readonly edges: readonly WorkflowCandidateTopicHarnessGraphEdgeRow[];
+}): WorkflowCandidateTopicHarnessGraphListReport {
+    return {
+        schema: "ax.workflow_topic_harness_graph_list.v1",
+        ...(input.topic === undefined ? {} : { topic: input.topic }),
+        facts: input.facts,
+        edges: input.edges,
+        totals: {
+            fact_count: input.facts.length,
+            edge_count: input.edges.length,
+            passed_count: input.facts.filter((fact) => fact.predicate === "passed").length,
+            failed_count: input.facts.filter((fact) => fact.predicate === "failed").length,
+        },
+    };
+}
+
+export function renderWorkflowCandidateTopicHarnessGraphListText(
+    report: WorkflowCandidateTopicHarnessGraphListReport,
+): string {
+    const lines = [
+        "workflow topic harness graph facts",
+        `topic: ${report.topic ?? "all"}`,
+        `facts: ${report.totals.fact_count}`,
+        `edges: ${report.totals.edge_count}`,
+        `passed: ${report.totals.passed_count}`,
+        `failed: ${report.totals.failed_count}`,
+        "",
+        "facts:",
+    ];
+    if (report.facts.length === 0) lines.push("  (none)");
+    for (const fact of report.facts) {
+        lines.push(
+            `  - ${fact.predicate ?? "unknown"} ${fact.graph_id ?? "unknown-fact"}`,
+            `    subject: ${fact.subject ?? "unknown-subject"}`,
+            `    object: ${fact.object ?? "unknown-object"}`,
+        );
+    }
+    return lines.join("\n");
+}
+
+export function buildWorkflowCandidateTopicTaskDrafts(
+    report: WorkflowCandidateTopicReport,
+    taskDir: string,
+): { readonly summary: WorkflowCandidateTopicTaskSummary; readonly drafts: readonly WorkflowCandidateTaskDraft[] } {
+    const drafts = topicAdjacentCandidates(report).map((candidate): WorkflowCandidateTaskDraft => {
+        const recommendation = recommendWorkflowCandidatePromotionArtifact([candidate], report.candidates);
+        const path = taskPathForCandidate(taskDir, candidate);
+        return {
+            path,
+            content: renderWorkflowCandidateTaskMarkdown(candidate, report.candidates),
+            task: {
+                candidate_id: candidate.group_id,
+                label: candidate.label,
+                verdict: "pending",
+                recommended_artifact: recommendation,
+                path,
+            },
+        };
+    });
+    return {
+        summary: {
+            task_dir: taskDir,
+            emitted_task_count: drafts.length,
+            tasks: drafts.map((draft) => draft.task),
+        },
+        drafts,
+    };
+}
+
+const classifierFixtureIdForExample = (
+    report: WorkflowCandidateTopicReport,
+    candidate: WorkflowCandidate,
+    example: WorkflowCandidateExample,
+): string => {
+    const evidenceKey = [
+        candidate.group_id,
+        typeof example.result_id === "string" ? example.result_id : "",
+        typeof example.turn === "string" ? example.turn : "",
+        example.text_excerpt,
+    ].join("|");
+    return [
+        "workflow-candidate-topic",
+        safeKeyPart(report.topic.toLowerCase()) || "unknown-topic",
+        safeKeyPart(candidate.label).slice(0, 64) || "candidate",
+        shortHash(evidenceKey),
+    ].join("/");
+};
+
+const classifierFixtureTextForExample = (example: WorkflowCandidateExample): string =>
+    `USER:\n${example.text_excerpt.trim()}\n\nPREVIOUS_ASSISTANT:\n`;
+
+const classifierFixtureNameForCandidate = (
+    report: WorkflowCandidateTopicReport,
+    candidate: WorkflowCandidate,
+    index: number,
+): string => [
+    safeKeyPart(report.topic.toLowerCase()) || "unknown-topic",
+    safeKeyPart(candidate.label).slice(0, 48) || "candidate",
+    String(index + 1).padStart(2, "0"),
+].join("-");
+
+export function buildWorkflowCandidateTopicClassifierFixtureRows(
+    report: WorkflowCandidateTopicReport,
+): readonly WorkflowCandidateTopicClassifierFixtureRow[] {
+    const rows: WorkflowCandidateTopicClassifierFixtureRow[] = [];
+    const fixtureCandidates = topicAdjacentCandidates(report)
+        .map((candidate) => ({
+            candidate,
+            recommendation: recommendWorkflowCandidatePromotionArtifact([candidate], report.candidates),
+        }))
+        .filter(({ recommendation }) => recommendation.primary === "classifier_fixture");
+
+    for (const { candidate } of fixtureCandidates) {
+        candidate.examples.forEach((example, index) => {
+            const resultId = typeof example.result_id === "string" && example.result_id.length > 0
+                ? example.result_id
+                : undefined;
+            const turn = typeof example.turn === "string" && example.turn.length > 0 ? example.turn : undefined;
+            const confidence = typeof example.confidence === "number" ? example.confidence : undefined;
+            rows.push({
+                id: classifierFixtureIdForExample(report, candidate, example),
+                suite: "workflow-candidate-topic",
+                name: classifierFixtureNameForCandidate(report, candidate, index),
+                label: String(candidate.classifier_label ?? "none"),
+                target: String(candidate.target ?? "unknown"),
+                text: classifierFixtureTextForExample(example),
+                source_group: "workflow-candidate",
+                review_status: "pending",
+                topic: report.topic,
+                candidate_id: candidate.group_id,
+                candidate_label: candidate.label,
+                proposed_action: candidate.proposed_action,
+                ...(resultId === undefined ? {} : { result_id: resultId }),
+                ...(turn === undefined ? {} : { turn }),
+                ...(confidence === undefined ? {} : { confidence }),
+            });
+        });
+    }
+    return rows;
+}
+
+export function buildWorkflowCandidateTopicClassifierFixtureSummary(
+    report: WorkflowCandidateTopicReport,
+    path: string,
+): WorkflowCandidateTopicClassifierFixtureSummary {
+    const fixtureCandidates = topicAdjacentCandidates(report)
+        .map((candidate) => ({
+            candidate,
+            recommendation: recommendWorkflowCandidatePromotionArtifact([candidate], report.candidates),
+        }));
+    const rows = buildWorkflowCandidateTopicClassifierFixtureRows(report);
+    const candidateCount = fixtureCandidates.filter(({ recommendation }) =>
+        recommendation.primary === "classifier_fixture"
+    ).length;
+    return {
+        path,
+        emitted_fixture_count: rows.length,
+        candidate_count: candidateCount,
+        skipped_candidate_count: Math.max(0, fixtureCandidates.length - candidateCount),
+        fixtures: rows,
+    };
+}
+
+const renderClassifierFixtureRowsJsonl = (
+    rows: readonly WorkflowCandidateTopicClassifierFixtureRow[],
+): string => rows.map((row) => JSON.stringify(row)).join("\n") + (rows.length > 0 ? "\n" : "");
+
+const workflowCandidateHarnessProposalSig = (candidate: WorkflowCandidate, topic: string): string =>
+    `${WORKFLOW_CANDIDATE_HARNESS_PROPOSAL_PREFIX}${Bun.hash([
+        topic,
+        candidate.label,
+        candidate.group_id,
+    ].join("|")).toString(16).slice(0, 16)}`;
+
+const workflowCandidateHarnessProposalTitle = (candidate: WorkflowCandidate, topic: string): string =>
+    topic.trim().length > 0
+        ? `Require ${String(candidate.target ?? "workflow")} evidence for ${topic}`
+        : `Harness check for ${candidate.label}`;
+
+export function buildWorkflowCandidateHarnessProposalPlan(
+    report: WorkflowCandidateTopicReport,
+    existingSigs: ReadonlySet<string>,
+    opts: {
+        readonly dryRun?: boolean;
+        readonly includeStatements?: boolean;
+    } = {},
+): { readonly summary: WorkflowCandidateHarnessProposalSummary; readonly statements: readonly string[] } {
+    const proposals: WorkflowCandidateHarnessProposal[] = [];
+    const statements: string[] = [];
+    let skipped = 0;
+    const harnessCandidates = topicAdjacentCandidates(report)
+        .map((candidate) => ({
+            candidate,
+            recommendation: recommendWorkflowCandidatePromotionArtifact([candidate], report.candidates),
+        }))
+        .filter(({ recommendation }) => recommendation.primary === "harness_check");
+
+    for (const { candidate, recommendation } of harnessCandidates) {
+        const sig = workflowCandidateHarnessProposalSig(candidate, report.topic);
+        const title = workflowCandidateHarnessProposalTitle(candidate, report.topic);
+        const proposalKey = `harness_check__${safeKeyPart(title).slice(0, 60)}__${sig.slice(-12)}`;
+        const proposalRef = recordRef("proposal", proposalKey);
+        const existing = existingSigs.has(sig);
+        const baseline = prettyPrint({
+            source: "workflow_topic_report",
+            topic: report.topic,
+            candidate_id: candidate.group_id,
+            recommendation,
+            examples: candidate.examples,
+        });
+        const hypothesis = [
+            recommendation.rationale,
+            `Evidence-backed workflow candidate: ${candidate.label}.`,
+            "The check should fail when the agent stops before producing applied classifier result evidence.",
+        ].join(" ");
+
+        if (existing) {
+            statements.push(
+                `UPDATE ${proposalRef} SET ${[
+                    ["title", surrealString(title)],
+                    ["hypothesis", surrealString(hypothesis)],
+                    ["frequency", String(Math.max(1, candidate.support_count))],
+                    ["confidence", surrealString(recommendation.confidence)],
+                    ["updated_at", "time::now()"],
+                ].map(([name, value]) => `${name} = ${value}`).join(", ")};`,
+            );
+        } else {
+            statements.push(
+                `CREATE ${proposalRef} CONTENT ${surrealObject([
+                    ["form", surrealString("harness_check")],
+                    ["title", surrealString(title)],
+                    ["hypothesis", surrealString(hypothesis)],
+                    ["dedupe_sig", surrealString(sig)],
+                    ["frequency", String(Math.max(1, candidate.support_count))],
+                    ["confidence", surrealString(recommendation.confidence)],
+                    ["status", surrealString("open")],
+                    ["baseline", surrealOptionString(baseline)],
+                    ["updated_at", "time::now()"],
+                ])};`,
+            );
+        }
+
+        const candidateKey = safeKeyPart(candidate.group_id);
+        const edgeKey = `${proposalKey}__${candidateKey}`;
+        statements.push(
+            `DELETE ${recordRef("cites_evidence", edgeKey)};`,
+            `RELATE ${proposalRef}->cites_evidence:\`${edgeKey}\`->${recordRef("classifier_graph_node", candidate.group_id)} SET count = ${Math.max(1, candidate.support_count)}, kind = "workflow_candidate", ts = time::now();`,
+        );
+        proposals.push({
+            candidate_id: candidate.group_id,
+            proposal_id: `proposal:${proposalKey}`,
+            dedupe_sig: sig,
+            title,
+            recommended_artifact: recommendation,
+            status: "created_or_refreshed",
+        });
+    }
+
+    for (const candidate of topicAdjacentCandidates(report)) {
+        const recommendation = recommendWorkflowCandidatePromotionArtifact([candidate], report.candidates);
+        if (recommendation.primary === "harness_check") continue;
+        skipped += 1;
+        proposals.push({
+            candidate_id: candidate.group_id,
+            proposal_id: "",
+            dedupe_sig: "",
+            title: candidate.label,
+            recommended_artifact: recommendation,
+            status: "skipped",
+            reason: `recommended artifact is ${recommendation.primary}`,
+        });
+    }
+
+    return {
+        summary: {
+            dry_run: opts.dryRun ?? false,
+            emitted_proposal_count: proposals.filter((proposal) => proposal.status === "created_or_refreshed").length,
+            skipped_proposal_count: skipped,
+            statement_count: statements.length,
+            ...(opts.includeStatements ? { statements } : {}),
+            proposals,
+            failures: [],
+        },
+        statements,
+    };
+}
+
+export function renderWorkflowCandidateTopicEvidencePackMarkdown(report: WorkflowCandidateTopicReport): string {
+    const adjacentCandidates = topicAdjacentCandidates(report);
+    const harnessEvidence = buildWorkflowCandidateTopicHarnessEvidenceSummary(report);
+    const lines = [
+        `# Workflow Topic Evidence Pack: ${report.topic || "unknown-topic"}`,
+        "",
+        "## Query",
+        "",
+        `- Source kind: \`${report.source_kind}\``,
+        `- Decision: \`${report.decision}\``,
+        `- Proposal count: \`${report.totals.proposal_count}\``,
+        `- Experiment count: \`${report.totals.experiment_count}\``,
+        `- Ranked candidate count: \`${report.totals.ranked_candidate_count}\``,
+        `- Adjacent unpromoted candidate count: \`${adjacentCandidates.length}\``,
+        ...(report.adjacent_tasks ? [
+            `- Adjacent task count: \`${report.adjacent_tasks.emitted_task_count}\``,
+            `- Adjacent task dir: \`${report.adjacent_tasks.task_dir}\``,
+        ] : []),
+        ...(report.classifier_fixtures ? [
+            `- Classifier fixture pack: \`${report.classifier_fixtures.path}\``,
+            `- Classifier fixtures: \`${report.classifier_fixtures.emitted_fixture_count}\``,
+            `- Classifier fixture candidates: \`${report.classifier_fixtures.candidate_count} emitted, ${report.classifier_fixtures.skipped_candidate_count} skipped\``,
+        ] : []),
+        ...(report.harness_proposals ? [
+            `- Harness proposal count: \`${report.harness_proposals.emitted_proposal_count}\``,
+            `- Harness proposal writes: \`${report.harness_proposals.dry_run ? "dry-run" : "executed"}\``,
+        ] : []),
+        ...(report.harness_checks ? [
+            `- Harness checks: \`${report.harness_checks.passed_count} passed, ${report.harness_checks.failed_count} failed\``,
+        ] : []),
+        ...(report.persisted_harness_facts ? [
+            `- Persisted harness facts: \`${report.persisted_harness_facts.totals.fact_count}\``,
+            `- Persisted harness status: \`${report.persisted_harness_facts.totals.passed_count} passed, ${report.persisted_harness_facts.totals.failed_count} failed\``,
+        ] : []),
+        `- Source turn count: \`${report.totals.source_turn_count}\``,
+        "",
+        "## Harness Gate Evidence",
+        "",
+        `- Gate: \`${harnessEvidence.gate_satisfied ? "satisfied" : "unsatisfied"}\``,
+        `- Evidence source: \`${harnessEvidence.gate_evidence_source}\``,
+        `- Computed checks: \`${harnessEvidence.computed_passed_count} passed, ${harnessEvidence.computed_failed_count} failed (${harnessEvidence.computed_check_count} checks)\``,
+        `- Persisted facts: \`${harnessEvidence.persisted_passed_count} passed, ${harnessEvidence.persisted_failed_count} failed (${harnessEvidence.persisted_fact_count} facts)\``,
+        "",
+        "## Existing Proposal Coverage",
+        "",
+    ];
+    if (report.proposals.proposals.length === 0) {
+        lines.push("- No workflow-candidate proposals matched this topic.", "");
+    }
+    for (const proposal of report.proposals.proposals) {
+        lines.push(
+            `- Proposal: \`${proposal.dedupe_sig}\``,
+            `  - Status: \`${proposal.status}\``,
+            `  - Title: ${proposal.title}`,
+            `  - Target: \`${proposal.target ?? "unknown"}${proposal.section ? `#${proposal.section}` : ""}\``,
+            `  - Experiment: \`${proposal.experiment_status ?? "none"}${proposal.experiment_id ? ` (${proposal.experiment_id})` : ""}\``,
+        );
+        for (const evidence of proposal.evidence ?? []) {
+            lines.push(`  - Covers: \`${evidence.candidate_label}\` (${evidence.examples.length} examples)`);
+        }
+    }
+    lines.push(
+        "",
+        "## Adjacent Candidates To Review",
+        "",
+        "These ranked candidates matched the topic but are not cited by the matched workflow-candidate proposals.",
+        "",
+    );
+    if (adjacentCandidates.length === 0) {
+        lines.push("- No adjacent unpromoted candidates found.", "");
+    }
+    for (const candidate of adjacentCandidates) {
+        const recommendation = recommendWorkflowCandidatePromotionArtifact([candidate], report.candidates);
+        lines.push(
+            `### ${candidate.label}`,
+            "",
+            `- Candidate id: \`${candidate.group_id}\``,
+            `- Proposed action: \`${candidate.proposed_action}\``,
+            `- Classifier: \`${String(candidate.classifier_key ?? "unknown")}\``,
+            `- Target: \`${String(candidate.target ?? "unknown")}\``,
+            `- Score: \`${candidate.score}\``,
+            `- Support: \`${candidate.support_count}\``,
+            `- Evidence facts: \`${candidate.evidence_count}\``,
+            `- Average confidence: \`${candidate.average_confidence}\``,
+            `- Recommended artifact: \`${recommendation.primary}\``,
+            `- Alternatives: \`${recommendation.alternatives.join("`, `")}\``,
+            `- Recommendation confidence: \`${recommendation.confidence}\``,
+            `- Recommendation rationale: ${recommendation.rationale}`,
+            "",
+            "Review checklist:",
+            "",
+            "- Verdict: `pending`",
+            "- Rationale: _pending_",
+            "- Next artifact: _pending_",
+            "",
+            "Examples:",
+            "",
+        );
+        for (const example of candidate.examples) {
+            lines.push(
+                `- Turn: \`${typeof example.turn === "string" ? example.turn : "unknown-turn"}\``,
+                `  - Result: \`${String(example.result_id ?? "unknown-result")}\``,
+                `  - Confidence: \`${typeof example.confidence === "number" ? example.confidence : "n/a"}\``,
+                `  - Text: ${example.text_excerpt}`,
+            );
+        }
+        lines.push("");
+    }
+    if (report.harness_checks && report.harness_checks.checks.length > 0) {
+        lines.push("## Harness Checks", "");
+        for (const check of report.harness_checks.checks) {
+            lines.push(
+                `### ${check.id}`,
+                "",
+                `- Status: \`${check.status}\``,
+                `- Candidate: \`${check.label}\``,
+                `- Expectation: ${check.expectation}`,
+            );
+            for (const ref of check.evidence_refs) lines.push(`- Evidence: \`${ref}\``);
+            for (const failure of check.failures) lines.push(`- Failure: ${failure}`);
+            lines.push("");
+        }
+    }
+    if (report.persisted_harness_facts && report.persisted_harness_facts.facts.length > 0) {
+        lines.push("## Persisted Harness Facts", "");
+        for (const fact of report.persisted_harness_facts.facts) {
+            lines.push(
+                `### ${fact.graph_id ?? "unknown-fact"}`,
+                "",
+                `- Predicate: \`${fact.predicate ?? "unknown"}\``,
+                `- Subject: \`${fact.subject ?? "unknown-subject"}\``,
+                `- Object: \`${fact.object ?? "unknown-object"}\``,
+            );
+            const props = parseProperties(fact.properties_json);
+            if (typeof props.candidate_id === "string" && props.candidate_id.length > 0) {
+                lines.push(`- Candidate id: \`${props.candidate_id}\``);
+            }
+            if (typeof fact.value_json === "string" && fact.value_json.length > 0) {
+                lines.push(`- Value: \`${fact.value_json}\``);
+            }
+            lines.push("");
+        }
+    }
+    if (report.failures.length > 0) {
+        lines.push("## Failures", "");
+        for (const failure of report.failures) lines.push(`- ${failure}`);
+        lines.push("");
+    }
+    return `${lines.join("\n").trimEnd()}\n`;
+}
+
+const actionReviewPrompt = (action: string): string => {
+    switch (action) {
+        case "add_verification_gate":
+            return "Would an explicit verification gate prevent this pattern without blocking normal work?";
+        case "add_context_guardrail":
+            return "Would a context or artifact guardrail help the agent produce the requested result earlier?";
+        case "record_guidance_or_environment_preference":
+            return "Is this a durable user or environment preference worth recording as guidance?";
+        case "record_approval_checkpoint":
+            return "Is this approval pattern useful as a checkpoint signal, or is it just conversational noise?";
+        default:
+            return "Is this candidate specific, evidence-backed, and useful enough to promote?";
+    }
+};
+
+export function renderWorkflowCandidateBriefMarkdown(report: WorkflowCandidateReport): string {
+    const lines = [
+        "# Workflow Candidate Review",
+        "",
+        "Review the classifier-backed candidates below and decide whether any should become an improvement proposal, task brief, guidance change, or harness check.",
+        "",
+        "Allowed verdicts: `accept`, `revise`, `reject`, `defer`.",
+        "",
+        "## Query",
+        "",
+        `- Source kind: \`${report.source_kind}\``,
+        `- Decision: \`${report.decision}\``,
+        `- Action filter: \`${report.query.action ?? "any"}\``,
+        `- Classifier filter: \`${report.query.classifier ?? "any"}\``,
+        `- Search: \`${report.query.search ?? "none"}\``,
+        `- Task-like mode: \`${report.query.task_like}\``,
+        `- Evidence facts: \`${report.totals.evidence_fact_count}\``,
+        `- Considered evidence: \`${report.totals.considered_evidence_fact_count}\``,
+        "",
+    ];
+
+    for (const [index, candidate] of report.candidates.entries()) {
+        lines.push(
+            `## Candidate ${index + 1}: ${candidate.label}`,
+            "",
+            `- Candidate id: \`${candidate.group_id}\``,
+            `- Proposed action: \`${candidate.proposed_action}\``,
+            `- Classifier: \`${String(candidate.classifier_key ?? "unknown")}\``,
+            `- Target: \`${String(candidate.target ?? "unknown")}\``,
+            `- Score: \`${candidate.score}\``,
+            `- Support: \`${candidate.support_count}\``,
+            `- Evidence facts: \`${candidate.evidence_count}\``,
+            `- Average confidence: \`${candidate.average_confidence}\``,
+            `- Task-like evidence: \`${candidate.task_like_count}\``,
+            `- Verdict: \`pending\``,
+            "- Rationale: _pending_",
+            "",
+            "Review prompt:",
+            "",
+            `- ${actionReviewPrompt(candidate.proposed_action)}`,
+            "",
+            "Examples:",
+            "",
+        );
+        for (const example of candidate.examples) {
+            lines.push(
+                `- Turn: \`${typeof example.turn === "string" ? example.turn : "unknown-turn"}\``,
+                `  - Result: \`${String(example.result_id ?? "unknown-result")}\``,
+                `  - Confidence: \`${typeof example.confidence === "number" ? example.confidence : "n/a"}\``,
+                `  - Task-like: \`${example.task_like ? "yes" : "no"}\``,
+                `  - Text: ${example.text_excerpt}`,
+            );
+        }
+        lines.push("");
+    }
+
+    if (report.failures.length > 0) {
+        lines.push("## Failures", "");
+        for (const failure of report.failures) lines.push(`- ${failure}`);
+        lines.push("");
+    }
+
+    return `${lines.join("\n").trimEnd()}\n`;
+}
+
+export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommandInput) =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        if (input.listHarnessFacts) {
+            const topic = input.search?.trim();
+            const topicWhere = topic && topic.length > 0
+                ? `AND string::lowercase(properties_json) CONTAINS ${surrealString(topic.toLowerCase())}`
+                : "";
+            const result = yield* db.query<[
+                WorkflowCandidateTopicHarnessGraphFactRow[],
+                WorkflowCandidateTopicHarnessGraphEdgeRow[],
+            ]>(`
+                SELECT graph_id, subject, predicate, object, value_json, properties_json, type::string(updated_at) AS updated_at
+                FROM classifier_graph_fact
+                WHERE kind = "workflow_topic_harness_check"
+                  AND source_kind = "workflow_topic_harness_check"
+                  ${topicWhere}
+                ORDER BY updated_at DESC
+                LIMIT ${Math.max(1, input.limit)};
+                SELECT graph_id, kind, from_id, to_id, evidence_path, properties_json, type::string(updated_at) AS updated_at
+                FROM classifier_graph_edge
+                WHERE source_kind = "workflow_topic_harness_check"
+                  ${topicWhere}
+                ORDER BY updated_at DESC
+                LIMIT ${Math.max(1, input.limit * 3)};
+            `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+            const report = buildWorkflowCandidateTopicHarnessGraphListReport({
+                ...(topic === undefined ? {} : { topic }),
+                facts: result?.[0] ?? [],
+                edges: result?.[1] ?? [],
+            });
+            if (input.out) {
+                mkdirSync(dirname(input.out), { recursive: true });
+                writeFileSync(input.out, `${prettyPrint(report)}\n`, "utf8");
+            }
+            console.log(input.json ? prettyPrint(report) : renderWorkflowCandidateTopicHarnessGraphListText(report));
+            return;
+        }
+        if (input.topicReport) {
+            const topic = (input.search ?? "").trim();
+            if (topic.length === 0) {
+                const emptyCandidates = buildWorkflowCandidateReport({
+                    groupRows: [],
+                    evidenceRows: [],
+                    sourceKind: input.sourceKind,
+                    limit: input.limit,
+                    examplesPerGroup: input.examples,
+                    taskLike: input.taskLike,
+                });
+                const emptyProposals = buildWorkflowCandidateProposalListReport({
+                    rows: [],
+                    limit: input.limit,
+                    status: input.proposalStatus ?? "all",
+                    expandEvidence: true,
+                });
+                const report = buildWorkflowCandidateTopicReport({
+                    sourceKind: input.sourceKind,
+                    topic,
+                    proposals: emptyProposals,
+                    candidates: {
+                        ...emptyCandidates,
+                        failures: [...emptyCandidates.failures, "--search is required for --topic-report"],
+                        decision: "needs_workflow_candidate_review",
+                    },
+                });
+                console.log(input.json ? prettyPrint(report) : renderWorkflowCandidateTopicReportText(report));
+                process.exitCode = 1;
+                return;
+            }
+            const status = input.proposalStatus ?? "all";
+            const proposalRows = yield* db.query<[WorkflowCandidateProposalListRow[]]>(`
+                SELECT
+                    type::string(id) AS proposal_id,
+                    dedupe_sig,
+                    title,
+                    form,
+                    status,
+                    confidence,
+                    frequency,
+                    (SELECT file_target FROM guidance_proposal WHERE proposal = $parent.id LIMIT 1)[0].file_target AS target,
+                    (SELECT section FROM guidance_proposal WHERE proposal = $parent.id LIMIT 1)[0].section AS section,
+                    type::string((SELECT id FROM experiment WHERE proposal = $parent.id LIMIT 1)[0].id) AS experiment_id,
+                    (SELECT status FROM experiment WHERE proposal = $parent.id LIMIT 1)[0].status AS experiment_status,
+                    (SELECT artifact_path FROM experiment WHERE proposal = $parent.id LIMIT 1)[0].artifact_path AS artifact_path,
+                    (SELECT task_path FROM experiment WHERE proposal = $parent.id LIMIT 1)[0].task_path AS task_path,
+                    type::string(updated_at) AS updated_at
+                FROM proposal
+                WHERE string::starts_with(dedupe_sig, ${surrealString(WORKFLOW_CANDIDATE_PROPOSAL_PREFIX)})
+                    ${status === "all" ? "" : `AND status = ${surrealString(status)}`}
+                    AND (string::lowercase(title) CONTAINS ${surrealString(topic.toLowerCase())} OR string::lowercase(hypothesis) CONTAINS ${surrealString(topic.toLowerCase())})
+                ORDER BY updated_at DESC, frequency DESC
+                LIMIT ${Math.max(1, input.limit)};
+            `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+            let proposalListRows: readonly WorkflowCandidateProposalListRow[] = proposalRows?.[0] ?? [];
+            if (proposalListRows.length > 0) {
+                const proposalRefs = proposalListRows
+                    .map((row) => recordKeyPart(row.proposal_id, "proposal"))
+                    .filter((key): key is string => key !== null)
+                    .map((key) => recordRef("proposal", key));
+                if (proposalRefs.length > 0) {
+                    const edgeRows = yield* db.query<[WorkflowCandidateProposalEvidenceEdgeRow[]]>(`
+                        SELECT type::string(in) AS proposal_id, type::string(out) AS candidate_ref
+                        FROM cites_evidence
+                        WHERE kind = "workflow_candidate" AND in IN [${proposalRefs.join(", ")}];
+                    `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+                    const edges = edgeRows?.[0] ?? [];
+                    const candidateIds = [...new Set(edges
+                        .map((edge) => recordKeyPart(edge.candidate_ref, "classifier_graph_node"))
+                        .filter((id): id is string => id !== null))].sort();
+                    if (candidateIds.length > 0) {
+                        const evidenceRows = yield* db.query<[WorkflowCandidateGroupRow[], WorkflowCandidateEvidenceRow[]]>(`
+                            SELECT graph_id, label, properties_json
+                            FROM classifier_graph_node
+                            WHERE kind = "classifier_candidate_group" AND graph_id IN [${candidateIds.map(surrealString).join(", ")}];
+                            SELECT graph_id, subject, object, properties_json
+                            FROM classifier_graph_fact
+                            WHERE kind = "classifier_candidate_evidence" AND subject IN [${candidateIds.map(surrealString).join(", ")}]
+                            ORDER BY graph_id;
+                        `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+                        proposalListRows = attachWorkflowCandidateProposalEvidence({
+                            rows: proposalListRows,
+                            edges,
+                            candidateRows: evidenceRows?.[0] ?? [],
+                            factRows: evidenceRows?.[1] ?? [],
+                            examplesPerCandidate: input.examples,
+                        });
+                    }
+                }
+            }
+            const proposalReport = buildWorkflowCandidateProposalListReport({
+                rows: proposalListRows,
+                limit: input.limit,
+                status,
+                expandEvidence: true,
+                search: topic,
+            });
+            const candidateRows = yield* db.query<[WorkflowCandidateGroupRow[], WorkflowCandidateEvidenceRow[]]>(
+                workflowCandidateSql,
+                { sourceKind: input.sourceKind },
+            ).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+            const candidateReport = buildWorkflowCandidateReport({
+                groupRows: candidateRows[0] ?? [],
+                evidenceRows: candidateRows[1] ?? [],
+                sourceKind: input.sourceKind,
+                limit: input.limit,
+                examplesPerGroup: input.examples,
+                ...(input.action === undefined ? {} : { action: input.action }),
+                ...(input.classifier === undefined ? {} : { classifier: input.classifier }),
+                search: topic,
+                taskLike: input.taskLike,
+            });
+            let topicReport = buildWorkflowCandidateTopicReport({
+                sourceKind: input.sourceKind,
+                topic,
+                proposals: proposalReport,
+                candidates: candidateReport,
+            });
+            if (input.includeHarnessFacts) {
+                const topicWhere = `AND string::lowercase(properties_json) CONTAINS ${surrealString(topic.toLowerCase())}`;
+                const persistedHarnessRows = yield* db.query<[
+                    WorkflowCandidateTopicHarnessGraphFactRow[],
+                    WorkflowCandidateTopicHarnessGraphEdgeRow[],
+                ]>(`
+                    SELECT graph_id, subject, predicate, object, value_json, properties_json, type::string(updated_at) AS updated_at
+                    FROM classifier_graph_fact
+                    WHERE kind = "workflow_topic_harness_check"
+                      AND source_kind = "workflow_topic_harness_check"
+                      ${topicWhere}
+                    ORDER BY updated_at DESC
+                    LIMIT ${Math.max(1, input.limit)};
+                    SELECT graph_id, kind, from_id, to_id, evidence_path, properties_json, type::string(updated_at) AS updated_at
+                    FROM classifier_graph_edge
+                    WHERE source_kind = "workflow_topic_harness_check"
+                      ${topicWhere}
+                    ORDER BY updated_at DESC
+                    LIMIT ${Math.max(1, input.limit * 3)};
+                `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+                topicReport = withWorkflowCandidateTopicHarnessEvidence({
+                    ...topicReport,
+                    persisted_harness_facts: buildWorkflowCandidateTopicHarnessGraphListReport({
+                        topic,
+                        facts: persistedHarnessRows?.[0] ?? [],
+                        edges: persistedHarnessRows?.[1] ?? [],
+                    }),
+                });
+            }
+            if (input.emitAdjacentTasks) {
+                const taskDir = input.taskDir ?? join(process.cwd(), ".ax", "tasks");
+                const adjacentTasks = buildWorkflowCandidateTopicTaskDrafts(topicReport, taskDir);
+                if (adjacentTasks.drafts.length > 0) mkdirSync(taskDir, { recursive: true });
+                for (const draft of adjacentTasks.drafts) {
+                    writeFileSync(draft.path, draft.content, "utf8");
+                }
+                topicReport = {
+                    ...topicReport,
+                    adjacent_tasks: adjacentTasks.summary,
+                };
+            }
+            if (input.classifierFixturePack) {
+                const summary = buildWorkflowCandidateTopicClassifierFixtureSummary(topicReport, input.classifierFixturePack);
+                mkdirSync(dirname(input.classifierFixturePack), { recursive: true });
+                writeFileSync(input.classifierFixturePack, renderClassifierFixtureRowsJsonl(summary.fixtures), "utf8");
+                topicReport = {
+                    ...topicReport,
+                    classifier_fixtures: summary,
+                };
+            }
+            if (input.promoteHarnessProposals) {
+                const existingProposalRows = yield* db.query<[Array<{ dedupe_sig: string }>]>(
+                    "SELECT dedupe_sig FROM proposal;",
+                ).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+                const existingSigs = new Set((existingProposalRows?.[0] ?? []).map((row) => row.dedupe_sig));
+                const plan = buildWorkflowCandidateHarnessProposalPlan(topicReport, existingSigs, {
+                    dryRun: Boolean(input.proposalDryRun),
+                    includeStatements: Boolean(input.proposalDryRun),
+                });
+                if (plan.statements.length > 0 && !input.proposalDryRun) {
+                    yield* db.query(plan.statements.join("\n")).pipe(
+                        catchDbErrorAndExit("axctl classifiers workflow-candidates"),
+                    );
+                }
+                topicReport = {
+                    ...topicReport,
+                    harness_proposals: plan.summary,
+                };
+            }
+            if (input.out) {
+                mkdirSync(dirname(input.out), { recursive: true });
+                writeFileSync(input.out, `${prettyPrint(topicReport)}\n`, "utf8");
+            }
+            if (input.evidencePack) {
+                mkdirSync(dirname(input.evidencePack), { recursive: true });
+                writeFileSync(input.evidencePack, renderWorkflowCandidateTopicEvidencePackMarkdown(topicReport), "utf8");
+            }
+            if (input.harnessFacts || input.harnessWritePlan || input.applyHarnessFacts) {
+                const harnessProjection = buildWorkflowCandidateTopicHarnessGraphProjection(topicReport);
+                const harnessWritePlan = buildWorkflowCandidateTopicHarnessGraphWritePlan(harnessProjection);
+                if (input.harnessFacts) {
+                    mkdirSync(dirname(input.harnessFacts), { recursive: true });
+                    writeFileSync(input.harnessFacts, `${prettyPrint(harnessProjection)}\n`, "utf8");
+                }
+                if (input.harnessWritePlan) {
+                    mkdirSync(dirname(input.harnessWritePlan), { recursive: true });
+                    writeFileSync(input.harnessWritePlan, `${prettyPrint(harnessWritePlan)}\n`, "utf8");
+                }
+                if (input.applyHarnessFacts && harnessWritePlan.statements.length > 0) {
+                    yield* db.query(harnessWritePlan.statements.join("\n")).pipe(
+                        catchDbErrorAndExit("axctl classifiers workflow-candidates"),
+                    );
+                }
+            }
+            console.log(input.json ? prettyPrint(topicReport) : renderWorkflowCandidateTopicReportText(topicReport));
+            if (topicReport.decision !== "workflow_topic_evidence_found") process.exitCode = 1;
+            if (input.requireHarnessChecks) {
+                const harnessFailures = workflowCandidateTopicHarnessGateFailures(topicReport);
+                if (harnessFailures.length > 0) {
+                    for (const failure of harnessFailures) console.error(`harness gate failure: ${failure}`);
+                    process.exitCode = 1;
+                }
+            }
+            return;
+        }
+        if (input.listProposals) {
+            const status = input.proposalStatus ?? "all";
+            const where = [
+                `string::starts_with(dedupe_sig, ${surrealString(WORKFLOW_CANDIDATE_PROPOSAL_PREFIX)})`,
+                ...(status === "all" ? [] : [`status = ${surrealString(status)}`]),
+                ...(input.search === undefined ? [] : [
+                    `(string::lowercase(title) CONTAINS ${surrealString(input.search.toLowerCase())} OR string::lowercase(hypothesis) CONTAINS ${surrealString(input.search.toLowerCase())})`,
+                ]),
+            ];
+            const proposalRows = yield* db.query<[WorkflowCandidateProposalListRow[]]>(`
+                SELECT
+                    type::string(id) AS proposal_id,
+                    dedupe_sig,
+                    title,
+                    form,
+                    status,
+                    confidence,
+                    frequency,
+                    (SELECT file_target FROM guidance_proposal WHERE proposal = $parent.id LIMIT 1)[0].file_target AS target,
+                    (SELECT section FROM guidance_proposal WHERE proposal = $parent.id LIMIT 1)[0].section AS section,
+                    type::string((SELECT id FROM experiment WHERE proposal = $parent.id LIMIT 1)[0].id) AS experiment_id,
+                    (SELECT status FROM experiment WHERE proposal = $parent.id LIMIT 1)[0].status AS experiment_status,
+                    (SELECT artifact_path FROM experiment WHERE proposal = $parent.id LIMIT 1)[0].artifact_path AS artifact_path,
+                    (SELECT task_path FROM experiment WHERE proposal = $parent.id LIMIT 1)[0].task_path AS task_path,
+                    type::string(updated_at) AS updated_at
+                FROM proposal
+                WHERE ${where.join(" AND ")}
+                ORDER BY updated_at DESC, frequency DESC
+                LIMIT ${Math.max(1, input.limit)};
+            `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+            let rows: readonly WorkflowCandidateProposalListRow[] = proposalRows?.[0] ?? [];
+            if (input.expandEvidence && rows.length > 0) {
+                const proposalKeys = rows
+                    .map((row) => recordKeyPart(row.proposal_id, "proposal"))
+                    .filter((key): key is string => key !== null);
+                const proposalRefs = proposalKeys.map((key) => recordRef("proposal", key));
+                if (proposalRefs.length > 0) {
+                    const edgeRows = yield* db.query<[WorkflowCandidateProposalEvidenceEdgeRow[]]>(`
+                        SELECT type::string(in) AS proposal_id, type::string(out) AS candidate_ref
+                        FROM cites_evidence
+                        WHERE kind = "workflow_candidate" AND in IN [${proposalRefs.join(", ")}];
+                    `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+                    const edges = edgeRows?.[0] ?? [];
+                    const candidateIds = [...new Set(edges
+                        .map((edge) => recordKeyPart(edge.candidate_ref, "classifier_graph_node"))
+                        .filter((id): id is string => id !== null))].sort();
+                    if (candidateIds.length > 0) {
+                        const candidateRows = yield* db.query<[WorkflowCandidateGroupRow[], WorkflowCandidateEvidenceRow[]]>(`
+                            SELECT graph_id, label, properties_json
+                            FROM classifier_graph_node
+                            WHERE kind = "classifier_candidate_group" AND graph_id IN [${candidateIds.map(surrealString).join(", ")}];
+                            SELECT graph_id, subject, object, properties_json
+                            FROM classifier_graph_fact
+                            WHERE kind = "classifier_candidate_evidence" AND subject IN [${candidateIds.map(surrealString).join(", ")}]
+                            ORDER BY graph_id;
+                        `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+                        rows = attachWorkflowCandidateProposalEvidence({
+                            rows,
+                            edges,
+                            candidateRows: candidateRows?.[0] ?? [],
+                            factRows: candidateRows?.[1] ?? [],
+                            examplesPerCandidate: input.examples,
+                        });
+                    }
+                }
+            }
+            const listReport = buildWorkflowCandidateProposalListReport({
+                rows,
+                limit: input.limit,
+                status,
+                expandEvidence: Boolean(input.expandEvidence),
+                ...(input.search === undefined ? {} : { search: input.search }),
+            });
+            if (input.out) {
+                mkdirSync(dirname(input.out), { recursive: true });
+                writeFileSync(input.out, `${prettyPrint(listReport)}\n`, "utf8");
+            }
+            console.log(input.json ? prettyPrint(listReport) : renderWorkflowCandidateProposalListText(listReport));
+            return;
+        }
+        const rows = yield* db.query<[WorkflowCandidateGroupRow[], WorkflowCandidateEvidenceRow[]]>(
+            workflowCandidateSql,
+            { sourceKind: input.sourceKind },
+        ).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+        let report = buildWorkflowCandidateReport({
+            groupRows: rows[0] ?? [],
+            evidenceRows: rows[1] ?? [],
+            sourceKind: input.sourceKind,
+            limit: input.limit,
+            examplesPerGroup: input.examples,
+            ...(input.action === undefined ? {} : { action: input.action }),
+            ...(input.classifier === undefined ? {} : { classifier: input.classifier }),
+            ...(input.search === undefined ? {} : { search: input.search }),
+            taskLike: input.taskLike,
+        });
+        if (input.syncBrief) {
+            report = syncWorkflowCandidateReportFromBrief(
+                report,
+                readFileSync(input.syncBrief, "utf8"),
+                input.syncBrief,
+            );
+        }
+        if (input.promoteTasks || input.promoteProposals) {
+            const taskDir = input.taskDir ?? join(process.cwd(), ".ax", "tasks");
+            const promotion = buildWorkflowCandidateTaskDrafts(report, taskDir, input.promotionMode ?? "per-candidate");
+            report = promotion.report;
+            if (input.promoteTasks) {
+                if (promotion.drafts.length > 0) mkdirSync(taskDir, { recursive: true });
+                for (const draft of promotion.drafts) {
+                    writeFileSync(draft.path, draft.content, "utf8");
+                }
+            }
+        }
+        if (input.promoteProposals) {
+            const existingProposalRows = yield* db.query<[Array<{ dedupe_sig: string }>]>(
+                "SELECT dedupe_sig FROM proposal;",
+            ).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+            const existingSigs = new Set((existingProposalRows?.[0] ?? []).map((row) => row.dedupe_sig));
+            const plan = buildWorkflowCandidateGuidanceProposalPlan(report, existingSigs, {
+                ...(input.proposalTarget === undefined ? {} : { fileTarget: input.proposalTarget }),
+                ...(input.proposalSection === undefined ? {} : { section: input.proposalSection }),
+                dryRun: Boolean(input.proposalDryRun),
+                includeStatements: Boolean(input.proposalDryRun),
+            });
+            if (plan.statements.length > 0 && !input.proposalDryRun) {
+                yield* db.query(plan.statements.join("\n")).pipe(
+                    catchDbErrorAndExit("axctl classifiers workflow-candidates"),
+                );
+            }
+            const promotion = report.promotion;
+            if (promotion === undefined) {
+                const failures = [...report.failures, "promotion required before proposal seeding"];
+                report = {
+                    ...report,
+                    failures,
+                    decision: "needs_workflow_candidate_review",
+                };
+            } else {
+                const failures = [...report.failures, ...plan.summary.failures];
+                report = {
+                    ...report,
+                    promotion: {
+                        ...promotion,
+                        proposals: plan.summary,
+                    },
+                    failures,
+                    decision: failures.length === 0 ? "workflow_candidates_ranked" : "needs_workflow_candidate_review",
+                };
+            }
+        }
+        if (input.out) {
+            mkdirSync(dirname(input.out), { recursive: true });
+            writeFileSync(input.out, `${prettyPrint(report)}\n`, "utf8");
+        }
+        if (input.brief) {
+            mkdirSync(dirname(input.brief), { recursive: true });
+            writeFileSync(input.brief, renderWorkflowCandidateBriefMarkdown(report), "utf8");
+        }
+        console.log(input.json ? prettyPrint(report) : renderWorkflowCandidateReportText(report));
+        if (report.decision !== "workflow_candidates_ranked") process.exitCode = 1;
+    });
