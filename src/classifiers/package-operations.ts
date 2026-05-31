@@ -471,6 +471,9 @@ export interface ClassifierLifecycleReviewStatus {
         readonly can_continue?: boolean;
         readonly missing_required_artifact_count?: number;
         readonly checked_artifact_count?: number;
+        readonly prepared_argv?: readonly string[];
+        readonly output_artifacts?: readonly ClassifierReviewPipelineArtifactSummary[];
+        readonly checked_artifacts?: readonly ClassifierReviewPipelineArtifactSummary[];
         readonly failures: readonly string[];
     };
     readonly focused_batch?: {
@@ -561,6 +564,13 @@ export interface ClassifierLifecycleReviewStatus {
     readonly next_actions: readonly string[];
 }
 
+export interface ClassifierReviewPipelineArtifactSummary {
+    readonly kind?: string;
+    readonly path: string;
+    readonly required_for_handoff?: boolean;
+    readonly exists?: boolean;
+}
+
 export interface ClassifierLifecyclePackageInsight {
     readonly package_key: string;
     readonly package_name: string;
@@ -585,6 +595,9 @@ export interface ClassifierReviewPipelineLifecycleInsight {
     readonly can_continue?: boolean;
     readonly missing_required_artifact_count: number;
     readonly checked_artifact_count: number;
+    readonly prepared_argv?: readonly string[];
+    readonly output_artifacts: readonly ClassifierReviewPipelineArtifactSummary[];
+    readonly checked_artifacts: readonly ClassifierReviewPipelineArtifactSummary[];
     readonly failures: readonly string[];
     readonly next_action: "execute_review_pipeline_command" | "repair_review_pipeline_outputs" | "continue_review_pipeline" | "inspect_review_pipeline_lifecycle";
 }
@@ -731,6 +744,29 @@ function jsonArrayOfStrings(value: unknown): readonly string[] {
     return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
 }
 
+function jsonArrayOfRecords(value: unknown): readonly Record<string, unknown>[] {
+    return Array.isArray(value)
+        ? value.filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object" && !Array.isArray(entry))
+        : [];
+}
+
+function reviewPipelineArtifactSummaries(value: unknown): readonly ClassifierReviewPipelineArtifactSummary[] {
+    return jsonArrayOfRecords(value)
+        .map((entry) => {
+            const path = stringAt(entry, "path");
+            if (!path) return undefined;
+            const requiredForHandoff = jsonBoolean(entry.required_for_handoff);
+            const exists = jsonBoolean(entry.exists);
+            return {
+                ...(stringAt(entry, "kind") === undefined ? {} : { kind: stringAt(entry, "kind") as string }),
+                path,
+                ...(requiredForHandoff === null ? {} : { required_for_handoff: requiredForHandoff }),
+                ...(exists === null ? {} : { exists }),
+            };
+        })
+        .filter((entry): entry is ClassifierReviewPipelineArtifactSummary => entry !== undefined);
+}
+
 function jsonRecordAt(record: Record<string, unknown>, key: string): Record<string, unknown> {
     const value = record[key];
     return value && typeof value === "object" && !Array.isArray(value)
@@ -834,6 +870,9 @@ function loadReviewPipelineLifecycleStatus(baseDir: string): Pick<ClassifierLife
     const checkedArtifacts = Array.isArray(outputVerification.checked_artifacts)
         ? outputVerification.checked_artifacts
         : [];
+    const preparedArgv = jsonArrayOfStrings(prepared.argv);
+    const outputArtifacts = reviewPipelineArtifactSummaries(prepared.output_artifacts);
+    const checkedArtifactSummaries = reviewPipelineArtifactSummaries(outputVerification.checked_artifacts);
     const missingRequiredArtifacts = jsonArrayOfStrings(outputVerification.missing_required_artifacts);
     const failures = [
         ...jsonArrayOfStrings(report.failures),
@@ -851,6 +890,9 @@ function loadReviewPipelineLifecycleStatus(baseDir: string): Pick<ClassifierLife
             ...(jsonBoolean(lifecycle.can_continue) === null ? {} : { can_continue: jsonBoolean(lifecycle.can_continue) as boolean }),
             missing_required_artifact_count: missingRequiredArtifacts.length,
             checked_artifact_count: checkedArtifacts.length,
+            ...(preparedArgv.length === 0 ? {} : { prepared_argv: preparedArgv }),
+            ...(outputArtifacts.length === 0 ? {} : { output_artifacts: outputArtifacts }),
+            ...(checkedArtifactSummaries.length === 0 ? {} : { checked_artifacts: checkedArtifactSummaries }),
             failures,
         },
     };
@@ -2220,6 +2262,11 @@ export function buildClassifierLifecycleInsightReport(input: {
             }),
             missing_required_artifact_count: input.workflowStatus.review_pipeline_lifecycle.missing_required_artifact_count ?? 0,
             checked_artifact_count: input.workflowStatus.review_pipeline_lifecycle.checked_artifact_count ?? 0,
+            ...(input.workflowStatus.review_pipeline_lifecycle.prepared_argv === undefined ? {} : {
+                prepared_argv: input.workflowStatus.review_pipeline_lifecycle.prepared_argv,
+            }),
+            output_artifacts: input.workflowStatus.review_pipeline_lifecycle.output_artifacts ?? [],
+            checked_artifacts: input.workflowStatus.review_pipeline_lifecycle.checked_artifacts ?? [],
             failures: input.workflowStatus.review_pipeline_lifecycle.failures ?? [],
             next_action: reviewPipelineLifecycleNextAction(input.workflowStatus.review_pipeline_lifecycle),
         } satisfies ClassifierReviewPipelineLifecycleInsight

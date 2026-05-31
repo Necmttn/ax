@@ -390,7 +390,16 @@ export function renderClassifierLifecycleInsightText(report: ClassifierLifecycle
         const pipeline = report.review_pipeline;
         lines.push(`review pipeline: ${pipeline.status ?? "unknown"} (${pipeline.report_path})`);
         lines.push(`  command: ${pipeline.command_kind ?? "unknown"} prepared=${pipeline.prepared_status ?? "unknown"}`);
+        if (pipeline.prepared_argv && pipeline.prepared_argv.length > 0) {
+            lines.push(`  argv: ${pipeline.prepared_argv.join(" ")}`);
+        }
         lines.push(`  outputs: ${pipeline.output_verification_status ?? "unknown"} checked=${pipeline.checked_artifact_count} missing=${pipeline.missing_required_artifact_count}`);
+        if (pipeline.output_artifacts.length > 0) {
+            lines.push(`  output artifacts: ${pipeline.output_artifacts.map((artifact) => `${artifact.kind ?? "artifact"}=${artifact.path}`).join(", ")}`);
+        }
+        if (pipeline.checked_artifacts.length > 0) {
+            lines.push(`  checked artifacts: ${pipeline.checked_artifacts.map((artifact) => `${artifact.kind ?? "artifact"}=${artifact.path} ${artifact.exists === true ? "ok" : artifact.exists === false ? "missing" : "unknown"}`).join(", ")}`);
+        }
         lines.push(`  execute/continue: ${pipeline.can_execute === true ? "yes" : pipeline.can_execute === false ? "no" : "unknown"}/${pipeline.can_continue === true ? "yes" : pipeline.can_continue === false ? "no" : "unknown"} next=${pipeline.next_action}`);
         if (pipeline.failures.length > 0) {
             lines.push(`  failures: ${pipeline.failures.join("; ")}`);

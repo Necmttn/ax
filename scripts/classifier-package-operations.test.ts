@@ -574,16 +574,21 @@ describe("classifier package operations report", () => {
                     status: "verified_after_execution",
                     can_execute: true,
                     can_continue: true,
-                    prepared: {
-                        status: "ready_to_execute",
-                    },
                     output_verification: {
                         status: "verified",
                         checked_artifacts: [
-                            { path: "one.json" },
-                            { path: "two.md" },
+                            { kind: "readiness_report", path: "one.json", exists: true },
+                            { kind: "review_brief", path: "two.md", exists: true },
                         ],
                         missing_required_artifacts: [],
+                    },
+                    prepared: {
+                        status: "ready_to_execute",
+                        argv: ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates"],
+                        output_artifacts: [
+                            { kind: "readiness_report", path: "one.json", required_for_handoff: false },
+                            { kind: "review_brief", path: "two.md", required_for_handoff: true },
+                        ],
                     },
                 },
             },
@@ -601,6 +606,15 @@ describe("classifier package operations report", () => {
             can_continue: true,
             missing_required_artifact_count: 0,
             checked_artifact_count: 2,
+            prepared_argv: ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates"],
+            output_artifacts: [
+                { kind: "readiness_report", path: "one.json", required_for_handoff: false },
+                { kind: "review_brief", path: "two.md", required_for_handoff: true },
+            ],
+            checked_artifacts: [
+                { kind: "readiness_report", path: "one.json", exists: true },
+                { kind: "review_brief", path: "two.md", exists: true },
+            ],
         });
     });
 
@@ -1207,6 +1221,17 @@ describe("classifier package operations report", () => {
                     can_continue: false,
                     missing_required_artifact_count: 2,
                     checked_artifact_count: 1,
+                    prepared_argv: ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates"],
+                    output_artifacts: [{
+                        kind: "review_brief",
+                        path: ".ax/experiments/review.md",
+                        required_for_handoff: true,
+                    }],
+                    checked_artifacts: [{
+                        kind: "review_brief",
+                        path: ".ax/experiments/review.md",
+                        exists: false,
+                    }],
                     failures: ["missing required output: review facts"],
                 },
                 next_actions: [],
@@ -1223,6 +1248,17 @@ describe("classifier package operations report", () => {
             missing_required_artifact_count: 2,
             checked_artifact_count: 1,
             next_action: "repair_review_pipeline_outputs",
+            prepared_argv: ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates"],
+            output_artifacts: [{
+                kind: "review_brief",
+                path: ".ax/experiments/review.md",
+                required_for_handoff: true,
+            }],
+            checked_artifacts: [{
+                kind: "review_brief",
+                path: ".ax/experiments/review.md",
+                exists: false,
+            }],
         });
         expect(report.decision).toBe("needs_human_review");
         expect(report.blocking_items).toContain("review pipeline missing 2 required output artifact(s)");

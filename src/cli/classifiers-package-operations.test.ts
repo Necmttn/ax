@@ -681,6 +681,17 @@ describe("classifiers package-operations format", () => {
                     can_continue: true,
                     missing_required_artifact_count: 0,
                     checked_artifact_count: 2,
+                    prepared_argv: ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates"],
+                    output_artifacts: [{
+                        kind: "review_brief",
+                        path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md",
+                        required_for_handoff: true,
+                    }],
+                    checked_artifacts: [{
+                        kind: "review_brief",
+                        path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md",
+                        exists: true,
+                    }],
                     failures: [],
                 },
                     focused_batch: {
@@ -810,6 +821,17 @@ describe("classifiers package-operations format", () => {
                 can_continue: true,
                 missing_required_artifact_count: 0,
                 checked_artifact_count: 2,
+                prepared_argv: ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates"],
+                output_artifacts: [{
+                    kind: "review_brief",
+                    path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md",
+                    required_for_handoff: true,
+                }],
+                checked_artifacts: [{
+                    kind: "review_brief",
+                    path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md",
+                    exists: true,
+                }],
                 failures: [],
                 next_action: "continue_review_pipeline",
             },
@@ -862,7 +884,10 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("failures: draft batch review is incomplete");
         expect(output).toContain("review pipeline: verified_after_execution (.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json)");
         expect(output).toContain("command: stamp_review_provenance prepared=ready_to_execute");
+        expect(output).toContain("argv: bun src/cli/index.ts classifiers workflow-candidates");
         expect(output).toContain("outputs: verified checked=2 missing=0");
+        expect(output).toContain("output artifacts: review_brief=.ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md");
+        expect(output).toContain("checked artifacts: review_brief=.ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md ok");
         expect(output).toContain("execute/continue: yes/yes next=continue_review_pipeline");
         expect(output).toContain("blocking items:");
         expect(output).toContain("edit suggestion draft notes in .ax/experiments/blind-review-batch-current-suggestion-draft.md then run bun run classifiers:blind-review-batch -- --mode=promote-draft");
