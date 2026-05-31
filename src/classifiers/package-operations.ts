@@ -394,6 +394,8 @@ export interface ClassifierGraphRoutingPolicySummary {
     readonly best_available_threshold_by_recall?: string;
     readonly best_available_positive_recall?: number;
     readonly best_available_call_reduction?: number;
+    readonly positive_recall_gap_to_request?: number;
+    readonly call_reduction_gap_to_request?: number;
 }
 
 export type ClassifierGraphHealthMode = "summary" | "guarded" | "changed-artifacts" | "evidence" | "lifecycle" | "embedding-helper";
@@ -2128,6 +2130,10 @@ export function buildExecutionGraphHealthReport(input: {
             (b.setfit_call_reduction_rate_mean! - a.setfit_call_reduction_rate_mean!) ||
             String(a.threshold ?? "").localeCompare(String(b.threshold ?? ""))
         )[0];
+    const routingPolicyGap = (requested: number | undefined, actual: number | undefined): number | undefined =>
+        requested === undefined || actual === undefined
+            ? undefined
+            : Math.round(Math.max(0, requested - actual) * 10000) / 10000;
     const routingPolicySummary: ClassifierGraphRoutingPolicySummary = {
         status: !routingPolicyFloorsRequested
             ? "not_requested"
@@ -2154,6 +2160,8 @@ export function buildExecutionGraphHealthReport(input: {
         ...(bestAvailableRoutingPolicy?.threshold === undefined ? {} : { best_available_threshold_by_recall: bestAvailableRoutingPolicy.threshold }),
         ...(bestAvailableRoutingPolicy?.positive_recall_after_routing_mean === undefined ? {} : { best_available_positive_recall: bestAvailableRoutingPolicy.positive_recall_after_routing_mean }),
         ...(bestAvailableRoutingPolicy?.setfit_call_reduction_rate_mean === undefined ? {} : { best_available_call_reduction: bestAvailableRoutingPolicy.setfit_call_reduction_rate_mean }),
+        ...(routingPolicyGap(query.min_positive_recall, bestAvailableRoutingPolicy?.positive_recall_after_routing_mean) === undefined ? {} : { positive_recall_gap_to_request: routingPolicyGap(query.min_positive_recall, bestAvailableRoutingPolicy?.positive_recall_after_routing_mean) as number }),
+        ...(routingPolicyGap(query.min_call_reduction, bestAvailableRoutingPolicy?.setfit_call_reduction_rate_mean) === undefined ? {} : { call_reduction_gap_to_request: routingPolicyGap(query.min_call_reduction, bestAvailableRoutingPolicy?.setfit_call_reduction_rate_mean) as number }),
     };
 
     return {

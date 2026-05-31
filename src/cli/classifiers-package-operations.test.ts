@@ -659,6 +659,8 @@ describe("classifiers package-operations format", () => {
                 best_available_threshold_by_recall: "none",
                 best_available_positive_recall: 0.9028,
                 best_available_call_reduction: 0.1778,
+                positive_recall_gap_to_request: 0,
+                call_reduction_gap_to_request: 0.0722,
             },
             evidence_paths: [".ax/experiments/embedding-helper-review-e210.json"],
             totals: {
@@ -710,6 +712,8 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("routing policy best available threshold: none");
         expect(output).toContain("routing policy best available positive recall: 0.9028");
         expect(output).toContain("routing policy best available call reduction: 0.1778");
+        expect(output).toContain("routing policy positive recall gap: 0");
+        expect(output).toContain("routing policy call reduction gap: 0.0722");
         expect(output).toContain("routing policy next action: choose_reviewed_routing_threshold");
         expect(output).toContain("routing policy remediation: Use the selected reviewed threshold as an advisory routing policy.");
         expect(output).toContain("embedding helper facts:");

@@ -307,6 +307,8 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `routing policy best available threshold: ${routingPolicySummary.best_available_threshold_by_recall ?? "none"}`,
         `routing policy best available positive recall: ${routingPolicySummary.best_available_positive_recall ?? "none"}`,
         `routing policy best available call reduction: ${routingPolicySummary.best_available_call_reduction ?? "none"}`,
+        `routing policy positive recall gap: ${routingPolicySummary.positive_recall_gap_to_request ?? "none"}`,
+        `routing policy call reduction gap: ${routingPolicySummary.call_reduction_gap_to_request ?? "none"}`,
         `routing policy next action: ${routingPolicySummary.next_action}`,
         `routing policy remediation: ${routingPolicySummary.remediation}`,
     ];

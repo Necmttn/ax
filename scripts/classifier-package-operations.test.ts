@@ -1510,6 +1510,8 @@ describe("classifier package operations report", () => {
             best_available_threshold_by_recall: "none",
             best_available_positive_recall: 0.9028,
             best_available_call_reduction: 0.1778,
+            positive_recall_gap_to_request: 0.0472,
+            call_reduction_gap_to_request: 0.0222,
         });
     });
 
