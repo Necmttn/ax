@@ -945,6 +945,7 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("query suggestion repair remediation: Use the current graph query; no filter repair is needed.");
         expect(output).toContain("query suggestion repair can execute: false");
         expect(output).toContain("query suggestion repair execution status: not_needed");
+        expect(output).toContain("query suggestion repair outcome status: not_applicable");
         expect(output).toContain("query suggestion repair command kind: none");
         expect(output).toContain("query suggestion repair requires inputs: false");
         expect(output).toContain("query suggestion repair required inputs: none");
@@ -956,6 +957,7 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("query suggestion repair can verify: false");
         expect(output).toContain("query suggestion repair verification status: not_needed");
         expect(output).toContain("query suggestion repair verification execution status: not_needed");
+        expect(output).toContain("query suggestion repair verification outcome status: not_applicable");
         expect(output).toContain("query suggestion repair verification next action: skip_verification");
         expect(output).toContain("query suggestion repair verification remediation: Verification is not needed because no repair execution is required.");
         expect(output).toContain("query suggestion repair verification can execute: false");

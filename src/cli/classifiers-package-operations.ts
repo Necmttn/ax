@@ -4,6 +4,7 @@ import {
     ClassifierPackageService,
     type ClassifierPackageOperationReportInput,
 } from "../classifiers/package-service.ts";
+import { classifierGraphQueryExpectedOutcomeStatus } from "../classifiers/package-operations.ts";
 import type {
     ClassifierPackageExecutionFactProjectionReport,
     ClassifierPackageExecutionHistoryReport,
@@ -375,6 +376,12 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         ? "none"
         : String(report.query_suggestion.repair_can_execute);
     const querySuggestionRepairExecutionStatus = report.query_suggestion?.repair_execution_status ?? "none";
+    const querySuggestionRepairOutcomeStatus = report.query_suggestion === undefined
+        ? "none"
+        : classifierGraphQueryExpectedOutcomeStatus(
+            report.query_suggestion.repair_expected_query_match_status,
+            report.query_suggestion.repair_expected_result_count,
+        );
     const querySuggestionRepairCommandKind = report.query_suggestion?.repair_command_kind ?? "none";
     const querySuggestionRepairRequiresInputs = report.query_suggestion === undefined
         ? "none"
@@ -392,6 +399,12 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         : String(report.query_suggestion.repair_can_verify);
     const querySuggestionRepairVerificationStatus = report.query_suggestion?.repair_verification_status ?? "none";
     const querySuggestionRepairVerificationExecutionStatus = report.query_suggestion?.repair_verification_execution_status ?? "none";
+    const querySuggestionRepairVerificationOutcomeStatus = report.query_suggestion === undefined
+        ? "none"
+        : classifierGraphQueryExpectedOutcomeStatus(
+            report.query_suggestion.repair_verification_expected_query_match_status,
+            report.query_suggestion.repair_verification_expected_result_count,
+        );
     const querySuggestionRepairVerificationNextAction = report.query_suggestion?.repair_verification_next_action ?? "none";
     const querySuggestionRepairVerificationRemediation = report.query_suggestion?.repair_verification_remediation ?? "none";
     const querySuggestionRepairVerificationCanExecute = report.query_suggestion === undefined
@@ -464,6 +477,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `query suggestion repair remediation: ${querySuggestionRepairRemediation}`,
         `query suggestion repair can execute: ${querySuggestionRepairCanExecute}`,
         `query suggestion repair execution status: ${querySuggestionRepairExecutionStatus}`,
+        `query suggestion repair outcome status: ${querySuggestionRepairOutcomeStatus}`,
         `query suggestion repair command kind: ${querySuggestionRepairCommandKind}`,
         `query suggestion repair requires inputs: ${querySuggestionRepairRequiresInputs}`,
         `query suggestion repair required inputs: ${querySuggestionRepairRequiredInputs}`,
@@ -475,6 +489,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `query suggestion repair can verify: ${querySuggestionRepairCanVerify}`,
         `query suggestion repair verification status: ${querySuggestionRepairVerificationStatus}`,
         `query suggestion repair verification execution status: ${querySuggestionRepairVerificationExecutionStatus}`,
+        `query suggestion repair verification outcome status: ${querySuggestionRepairVerificationOutcomeStatus}`,
         `query suggestion repair verification next action: ${querySuggestionRepairVerificationNextAction}`,
         `query suggestion repair verification remediation: ${querySuggestionRepairVerificationRemediation}`,
         `query suggestion repair verification can execute: ${querySuggestionRepairVerificationCanExecute}`,

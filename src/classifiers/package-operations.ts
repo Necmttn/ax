@@ -642,6 +642,17 @@ export interface ClassifierGraphQuerySuggestionRoutingSummary {
     };
 }
 
+export function classifierGraphQueryExpectedOutcomeStatus(
+    expectedQueryMatchStatus: ClassifierGraphQuerySuggestion["repair_expected_query_match_status"],
+    expectedResultCount: number | undefined,
+): "expected_matches" | "not_applicable" {
+    return expectedQueryMatchStatus === "matched" &&
+            expectedResultCount !== undefined &&
+            expectedResultCount > 0
+        ? "expected_matches"
+        : "not_applicable";
+}
+
 export function summarizeClassifierGraphQuerySuggestionRouting(
     report: ClassifierPackageExecutionGraphHealthReport,
 ): ClassifierGraphQuerySuggestionRoutingSummary {
@@ -658,11 +669,10 @@ export function summarizeClassifierGraphQuerySuggestionRouting(
 
     const repair = {
         status: suggestion.repair_status,
-        outcome_status: suggestion.repair_expected_query_match_status === "matched" &&
-                suggestion.repair_expected_result_count !== undefined &&
-                suggestion.repair_expected_result_count > 0
-            ? "expected_matches" as const
-            : "not_applicable" as const,
+        outcome_status: classifierGraphQueryExpectedOutcomeStatus(
+            suggestion.repair_expected_query_match_status,
+            suggestion.repair_expected_result_count,
+        ),
         execution_status: suggestion.repair_execution_status,
         next_action: suggestion.repair_next_action,
         command_kind: suggestion.repair_command_kind,
@@ -680,11 +690,10 @@ export function summarizeClassifierGraphQuerySuggestionRouting(
 
     const verification = {
         status: suggestion.repair_verification_status,
-        outcome_status: suggestion.repair_verification_expected_query_match_status === "matched" &&
-                suggestion.repair_verification_expected_result_count !== undefined &&
-                suggestion.repair_verification_expected_result_count > 0
-            ? "expected_matches" as const
-            : "not_applicable" as const,
+        outcome_status: classifierGraphQueryExpectedOutcomeStatus(
+            suggestion.repair_verification_expected_query_match_status,
+            suggestion.repair_verification_expected_result_count,
+        ),
         execution_status: suggestion.repair_verification_execution_status,
         next_action: suggestion.repair_verification_next_action,
         command_kind: suggestion.repair_verification_command_kind,

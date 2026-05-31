@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E423 adds
-  `.ax/experiments/classifier-graph-query-suggestion-routing-repair-outcome-e423.json`
+- Index continuation: E424 adds
+  `.ax/experiments/classifier-graph-query-suggestion-outcomes-graph-health-e424.json`
   and
-  `.ax/experiments/classifier-graph-query-suggestion-routing-repair-outcome-e423.txt`
+  `.ax/experiments/classifier-graph-query-suggestion-outcomes-graph-health-e424.txt`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,55 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E424 - Expose Query Suggestion Outcomes In Graph Health Text
+
+Question:
+- Can the normal `classifiers graph` health text surface the same repair and
+  verification outcome statuses as the dedicated query-suggestion routing
+  summary, so a service/debugger can route from the graph-health view without
+  reconstructing match/count semantics?
+
+Implementation:
+- Added a shared `classifierGraphQueryExpectedOutcomeStatus` helper.
+- Reused that helper in the dedicated query-suggestion routing summary.
+- Rendered `query suggestion repair outcome status` and
+  `query suggestion repair verification outcome status` in graph-health text.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-query-suggestion-outcomes-graph-health-e424.json`
+- `.ax/experiments/classifier-graph-query-suggestion-outcomes-graph-health-e424.txt`
+
+Results:
+- Text output reports
+  `query suggestion repair outcome status: expected_matches`.
+- Text output reports
+  `query suggestion repair verification outcome status: expected_matches`.
+- Text output still reports the supporting expected result counts for both
+  repair and verification routes.
+- JSON output still records the underlying matched query/count evidence.
+
+Decision:
+- E424 makes the standard graph-health text useful for routing repair execution
+  and post-repair verification, while keeping promotion-quality graph facts
+  behind the existing reviewed evidence path.
+
+Verification:
+```sh
+bun test src/cli/classifiers-package-operations.test.ts
+bun test src/classifiers/package-service.test.ts
+bun src/cli/index.ts classifiers graph --mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute > .ax/experiments/classifier-graph-query-suggestion-outcomes-graph-health-e424.txt
+bun src/cli/index.ts classifiers graph --mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --out .ax/experiments/classifier-graph-query-suggestion-outcomes-graph-health-e424.json --json
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-graph-query-suggestion-outcomes-graph-health-e424.json").json(); if (saved.query_suggestion?.repair_expected_query_match_status !== "matched") throw new Error("missing repair match"); if (saved.query_suggestion?.repair_verification_expected_query_match_status !== "matched") throw new Error("missing verification match");'
+rg -n "query suggestion repair outcome status: expected_matches|query suggestion repair verification outcome status: expected_matches|query suggestion repair expected result count: 1|query suggestion repair verification expected result count: 1" .ax/experiments/classifier-graph-query-suggestion-outcomes-graph-health-e424.txt
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun test src/cli/classifiers-workflow-candidates.test.ts
+git diff --check
+bun run typecheck
+```
+
+All passed. `bun run typecheck` still emits the existing Effect advisory
+messages, but exits `0`.
 
 ## E423 - Expose Query Suggestion Repair Outcome
 
