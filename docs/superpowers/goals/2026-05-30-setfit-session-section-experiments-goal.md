@@ -29,7 +29,7 @@ artifact path as the evidence to inspect before trusting any summary row.
 | Blind/review workflow | E46-E65+ | `.ax/experiments/blind-workflow-status-e57.json` and related review artifacts | Human review is mandatory before fixtures or graph facts are promoted. | Pending where review rows are incomplete. | Earlier experiment log | Prefer review queues/workspaces over automatic label edits. |
 | Transcript graph projection | E155-E157 | `.ax/experiments/transcript-candidate-graph-projection-e155.json`, `.ax/experiments/workflow-candidate-report-e156.json`, `.ax/experiments/workflow-candidate-cli-e157.json` | Real persisted classifier facts can become graph-backed workflow candidates. | Passed for projection/query; still needs product review filters and proposal gates. | E155/E156/E157 commits in log | Use graph facts for evidence-backed workflow/harness discovery. |
 | Proposal lifecycle | E168-E208 | `.ax/experiments/workflow-candidate-proposal-list-e168.json`, `.ax/experiments/classifier-package-execution-write-plan-e208.json` | Classifier-derived workflow proposals are discoverable and lifecycle-tracked. | Passed for visibility/lifecycle plumbing; promotion remains review-gated. | Recent proposal lifecycle commits | Continue using review and ready-smoke gates before guidance/harness changes. |
-| Embedding/SVM helper layer | E209-E219 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/embedding-helper-review-batch-e216-report.json`, `.ax/experiments/embedding-helper-review-batch-dry-run-e217-report.json`, `.ax/experiments/embedding-helper-review-progress-e218.json`, `.ax/experiments/embedding-helper-review-partial-sync-e219-report.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. | Blocked correctly by pending review: canonical review still has 15 hard negatives and 1 dedupe cluster pending; synthetic copy-sync proves partial review can reduce pending counts without mutating canonical state. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `4c602d9`, `98312c1`, `0faa935`, `4378a10`, `6ca2b86` | Do real review of E216 batch, dry-run copy-sync, then sync accepted/rejected statuses and export accepted hard negatives/dedupe hints. |
+| Embedding/SVM helper layer | E209-E220 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/embedding-helper-review-batch-e216-report.json`, `.ax/experiments/embedding-helper-review-batch-dry-run-e217-report.json`, `.ax/experiments/embedding-helper-review-progress-e218.json`, `.ax/experiments/embedding-helper-review-partial-sync-e219-report.json`, `.ax/experiments/embedding-helper-export-preview-e220-report.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. | Blocked correctly by pending review: canonical review still has 15 hard negatives and 1 dedupe cluster pending; synthetic copy/preview proves accepted rows can be inspected while remaining non-appendable. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `4c602d9`, `98312c1`, `0faa935`, `4378a10`, `6ca2b86`, `d6948a1` | Do real review of E216 batch, dry-run copy-sync, inspect preview rows, then sync accepted/rejected statuses and run appendable export only when gate is ready. |
 
 Current recommendation:
 
@@ -11186,6 +11186,68 @@ Decision:
   inspect counts, then decide whether to write back to canonical review state.
 - This still intentionally does not satisfy the promotion/export gate because
   the reviewed statuses are synthetic and incomplete.
+
+## E220 - Embedding Helper Partial Export Preview Smoke
+
+Question:
+
+- If a review copy has accepted hard negatives but is still incomplete, can the
+  accepted rows be inspected without becoming appendable training data?
+
+Changes:
+
+- Added `--allow-partial-preview` to `embedding_helper_export.py`.
+- Default export behavior is unchanged: pending review still writes no rows and
+  exits nonzero.
+- Partial preview behavior:
+  - explicitly emits accepted hard-negative fixture rows and accepted dedupe
+    hints for inspection
+  - keeps command exit status nonzero while review is pending
+  - writes `partial_preview: true`
+  - writes `appendable: false`
+  - uses decision `partial_embedding_helper_export_preview`
+
+Command:
+
+```sh
+bun run classifiers:embedding-helper-review-status -- --review=.ax/experiments/embedding-helper-review-e219-synthetic-synced.json --out=.ax/experiments/embedding-helper-review-status-e220-synthetic.json --mode=evaluate --json
+bun run classifiers:embedding-helper-export -- --allow-partial-preview --review=.ax/experiments/embedding-helper-review-e219-synthetic-synced.json --status=.ax/experiments/embedding-helper-review-status-e220-synthetic.json --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --out=.ax/experiments/embedding-helper-fixture-preview-e220.jsonl --hints=.ax/experiments/embedding-helper-dedupe-preview-e220.json --report=.ax/experiments/embedding-helper-export-preview-e220-report.json --json
+```
+
+Artifacts:
+
+- `.ax/experiments/embedding-helper-review-status-e220-synthetic.json`
+- `.ax/experiments/embedding-helper-fixture-preview-e220.jsonl`
+- `.ax/experiments/embedding-helper-dedupe-preview-e220.json`
+- `.ax/experiments/embedding-helper-export-preview-e220-report.json`
+
+Results:
+
+- Status command exit status: `1`, expected because synthetic review copy is
+  still incomplete.
+- Export command exit status: `1`, expected because preview is non-appendable.
+- Synthetic review status:
+  - hard negatives accepted/rejected/pending: `1/1/13`
+  - dedupe accepted/rejected/pending: `0/0/1`
+- Export preview report:
+  - schema: `ax.embedding_helper_export_report.v1`
+  - decision: `partial_embedding_helper_export_preview`
+  - `partial_preview`: `true`
+  - `appendable`: `false`
+  - accepted hard negatives: `1`
+  - exported fixture rows: `1`
+  - accepted dedupe clusters: `0`
+  - exported dedupe hints: `0`
+  - label counts: `{ "none": 1 }`
+- Fixture preview file lines: `1`
+
+Decision:
+
+- E220 proves the accepted-row inspection path without weakening the gate. A
+  reviewer can preview what would be appended from accepted decisions, but the
+  report remains non-appendable until the full review status is ready.
+- This remains synthetic/non-promotion evidence. The canonical E210 review is
+  still pending and default E215 export behavior remains blocked.
 
 ## E197 - Hybrid Graph Usefulness Gate
 

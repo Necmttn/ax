@@ -23,6 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out", default=".ax/experiments/embedding-helper-fixture-append-current.jsonl")
     parser.add_argument("--hints", default=".ax/experiments/embedding-helper-dedupe-hints-current.json")
     parser.add_argument("--report", default=".ax/experiments/embedding-helper-export-current-report.json")
+    parser.add_argument("--allow-partial-preview", action="store_true", help="Emit accepted rows for inspection even while the review gate is pending; result remains non-appendable.")
     parser.add_argument("--json", action="store_true")
     return parser.parse_args()
 
@@ -134,16 +135,22 @@ def build_report(
     rows: list[dict[str, Any]],
     hints: dict[str, Any],
     missing_fixtures: list[str],
+    partial_preview: bool = False,
 ) -> dict[str, Any]:
     failures = []
     if status.get("decision") != "ready_for_embedding_helper_export":
         failures.append("embedding helper review is not ready for export")
     if missing_fixtures:
         failures.append("accepted embedding helper hard-negative candidates reference missing fixtures")
+    decision = "ready_to_append_embedding_helper_fixtures" if not failures else "needs_embedding_helper_review"
+    if partial_preview and rows and status.get("decision") != "ready_for_embedding_helper_export":
+        decision = "partial_embedding_helper_export_preview"
     return {
         "schema": "ax.embedding_helper_export_report.v1",
         "review_decision": review.get("decision"),
         "status_decision": status.get("decision"),
+        "partial_preview": partial_preview,
+        "appendable": decision == "ready_to_append_embedding_helper_fixtures",
         "accepted_hard_negatives": len(accepted_hard_negatives(review)),
         "exported_fixture_rows": len(rows),
         "accepted_dedupe_clusters": len(accepted_dedupe_clusters(review)),
@@ -151,7 +158,7 @@ def build_report(
         "label_counts": dict(sorted(Counter(str(row.get("label")) for row in rows).items())),
         "missing_fixtures": missing_fixtures,
         "failures": failures,
-        "decision": "ready_to_append_embedding_helper_fixtures" if not failures else "needs_embedding_helper_review",
+        "decision": decision,
     }
 
 
@@ -159,8 +166,13 @@ def export_review(
     review: dict[str, Any],
     status: dict[str, Any],
     fixture_index: dict[str, dict[str, Any]],
+    allow_partial_preview: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
     if status.get("decision") != "ready_for_embedding_helper_export":
+        if allow_partial_preview:
+            rows, missing = build_fixture_rows(review, fixture_index)
+            hints = build_dedupe_hints(review)
+            return rows, hints, build_report(review, status, rows, hints, missing, partial_preview=True)
         hints = {"schema": "ax.embedding_helper_dedupe_hints.v1", "clusters": [], "cluster_count": 0}
         report = build_report(review, status, [], hints, [])
         return [], hints, report
@@ -175,7 +187,7 @@ def main() -> int:
     status_path = Path(args.status)
     status = load_json(args.status) if status_path.exists() else evaluate_review(review)
     fixture_index = fixtures_by_id(args.fixtures)
-    rows, hints, report = export_review(review, status, fixture_index)
+    rows, hints, report = export_review(review, status, fixture_index, allow_partial_preview=args.allow_partial_preview)
     write_jsonl(args.out, rows)
     write_json(args.hints, hints)
     write_json(args.report, report)
