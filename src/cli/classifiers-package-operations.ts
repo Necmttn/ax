@@ -11,6 +11,7 @@ import type {
     ClassifierPackageExecutionSurrealWritePlanReport,
     ClassifierPackageExecutionGraphHealthReport,
     ClassifierLifecycleInsightReport,
+    ClassifierLifecycleRoutingSummaryReport,
     ClassifierGraphQuerySuggestionRoutingSummary,
     ClassifierGraphHealthMode,
     ClassifierGraphHealthQuery,
@@ -908,6 +909,27 @@ export function renderClassifierLifecycleInsightText(report: ClassifierLifecycle
     return lines.join("\n");
 }
 
+export function renderClassifierLifecycleRoutingSummaryText(report: ClassifierLifecycleRoutingSummaryReport): string {
+    const lines = [
+        "classifier lifecycle routing",
+        `decision: ${report.decision}`,
+        `routes executable/missing-input/blocked/secondary: ${report.totals.executable_route_count}/${report.totals.missing_input_route_count}/${report.totals.blocked_route_count}/${report.totals.secondary_route_count}`,
+    ];
+    if (report.active_route) {
+        const canExecute = report.active_route_can_execute === true ? "yes" : report.active_route_can_execute === false ? "no" : "unknown";
+        lines.push(`active: ${report.active_route_kind} ${report.active_route_status ?? "unknown"} ${report.active_route_command_kind ?? "unknown"} execution=${report.active_route_execution_status ?? "unknown"} can_execute=${canExecute}`);
+        lines.push(`next action: ${report.next_action}`);
+        if (report.active_route_argv && report.active_route_argv.length > 0) {
+            lines.push(`argv: ${report.active_route_argv.join(" ")}`);
+        }
+    } else {
+        lines.push("active: none");
+        lines.push(`next action: ${report.next_action}`);
+    }
+    lines.push(`remediation: ${report.remediation}`);
+    return lines.join("\n");
+}
+
 const serviceErrorText = (error: unknown): string => {
     if (error && typeof error === "object" && "_tag" in error) {
         if ("message" in error && typeof error.message === "string") {
@@ -1147,6 +1169,7 @@ export const runClassifiersLifecycle = (
     input: {
         readonly root?: string;
         readonly workflowStatusPath?: string;
+        readonly routingSummary?: boolean;
         readonly graphMode?: ClassifierGraphHealthMode;
         readonly predicate?: string;
         readonly subject?: string;
@@ -1159,7 +1182,20 @@ export const runClassifiersLifecycle = (
     Effect.gen(function* () {
         const packages = yield* ClassifierPackageService;
         const graphQuery = buildLifecycleGraphQueryInput(input);
-        const report = input.out
+        const report = input.routingSummary === true
+            ? input.out
+                ? yield* packages.writeLifecycleRoutingSummaryReport({
+                    ...(input.root === undefined ? {} : { root: input.root }),
+                    ...(input.workflowStatusPath === undefined ? {} : { workflowStatusPath: input.workflowStatusPath }),
+                    ...(graphQuery === undefined ? {} : { graphQuery }),
+                    out: input.out,
+                })
+                : yield* packages.lifecycleRoutingSummaryReport({
+                    ...(input.root === undefined ? {} : { root: input.root }),
+                    ...(input.workflowStatusPath === undefined ? {} : { workflowStatusPath: input.workflowStatusPath }),
+                    ...(graphQuery === undefined ? {} : { graphQuery }),
+                })
+            : input.out
             ? yield* packages.writeLifecycleInsightReport({
                 ...(input.root === undefined ? {} : { root: input.root }),
                 ...(input.workflowStatusPath === undefined ? {} : { workflowStatusPath: input.workflowStatusPath }),
@@ -1175,7 +1211,9 @@ export const runClassifiersLifecycle = (
         if (input.json) {
             console.log(JSON.stringify(report, null, 2));
         } else if (!input.out) {
-            console.log(renderClassifierLifecycleInsightText(report));
+            console.log(input.routingSummary === true
+                ? renderClassifierLifecycleRoutingSummaryText(report as ClassifierLifecycleRoutingSummaryReport)
+                : renderClassifierLifecycleInsightText(report as ClassifierLifecycleInsightReport));
         }
         if (!input.out && report.decision !== "healthy") {
             process.exitCode = 1;

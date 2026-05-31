@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E431 adds
-  `.ax/experiments/classifier-lifecycle-route-execution-e431.json`
+- Index continuation: E432 adds
+  `.ax/experiments/classifier-lifecycle-routing-summary-e432.json`
   and
-  `.ax/experiments/classifier-lifecycle-route-execution-e431.txt`
+  `.ax/experiments/classifier-lifecycle-routing-summary-e432.txt`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,54 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E432 - Add Lifecycle Routing Summary Service Helper
+
+Question:
+- Can services and CLI debugging ask for the active classifier lifecycle route
+  directly, instead of parsing the full lifecycle insight report and
+  reimplementing route priority/executability logic?
+
+Implementation:
+- Added `summarizeClassifierLifecycleRouting` and the
+  `ax.classifier_lifecycle_routing_summary.v1` report shape.
+- Added `ClassifierPackageService.lifecycleRoutingSummaryReport` and
+  `writeLifecycleRoutingSummaryReport`.
+- Added `ax classifiers lifecycle --routing-summary` with compact text and
+  JSON output.
+
+Artifacts:
+- `.ax/experiments/classifier-lifecycle-routing-summary-e432.json`
+- `.ax/experiments/classifier-lifecycle-routing-summary-e432.txt`
+
+Results:
+- Current real routing summary reports the active route as
+  `review_pipeline_action` with `execution_status=missing_inputs` and
+  `can_execute=false`.
+- The summary reports `next_action=bind_active_route_inputs`.
+- Totals show one executable secondary route, one missing-input route, zero
+  blocked routes, and one secondary route.
+- Text output renders:
+  `routes executable/missing-input/blocked/secondary: 1/1/0/1`,
+  active route execution state, and the next action.
+
+Decision:
+- E432 gives FX services a smaller route-selection helper: inspect
+  `active_route`, follow `next_action`, and only execute routes from
+  `executable_routes` after active missing inputs are bound or cleared.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun src/cli/index.ts classifiers lifecycle --routing-summary --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --out .ax/experiments/classifier-lifecycle-routing-summary-e432.json --json
+bun src/cli/index.ts classifiers lifecycle --routing-summary --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute > .ax/experiments/classifier-lifecycle-routing-summary-e432.txt || true
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-lifecycle-routing-summary-e432.json").json(); if (saved.schema !== "ax.classifier_lifecycle_routing_summary.v1") throw new Error("bad schema"); if (saved.active_route_kind !== "review_pipeline_action" || saved.active_route_execution_status !== "missing_inputs" || saved.active_route_can_execute !== false) throw new Error(`bad active route ${JSON.stringify(saved.active_route)}`); if (saved.next_action !== "bind_active_route_inputs") throw new Error(`bad next action ${saved.next_action}`); if (saved.totals.executable_route_count !== 1 || saved.totals.missing_input_route_count !== 1 || saved.totals.secondary_route_count !== 1) throw new Error(`bad totals ${JSON.stringify(saved.totals)}`);'
+rg -n -- "active: review_pipeline_action missing_inputs stamp_review_provenance execution=missing_inputs can_execute=no|next action: bind_active_route_inputs|routes executable/missing-input/blocked/secondary: 1/1/0/1" .ax/experiments/classifier-lifecycle-routing-summary-e432.txt
+```
+
+Focused tests, typecheck, and artifact assertions passed. `bun run typecheck`
+still emits the existing Effect advisory messages, but exits `0`.
 
 ## E431 - Normalize Lifecycle Route Execution Status
 

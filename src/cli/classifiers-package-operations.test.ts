@@ -4,6 +4,7 @@ import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
 import { ClassifierPackageService } from "../classifiers/package-service.ts";
 import {
     renderClassifierLifecycleInsightText,
+    renderClassifierLifecycleRoutingSummaryText,
     renderClassifierPackageExecutionFactsText,
     renderClassifierPackageExecutionGraphHealthText,
     renderClassifierPackageExecutionHistoryText,
@@ -20,6 +21,7 @@ import {
 } from "./classifiers-package-operations.ts";
 import type {
     ClassifierLifecycleInsightReport,
+    ClassifierLifecycleRoutingSummaryReport,
     ClassifierPackageExecutionFactProjectionReport,
     ClassifierPackageExecutionGraphHealthReport,
     ClassifierPackageExecutionHistoryReport,
@@ -1562,6 +1564,58 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("- graph query repair available: review_pipeline_recommended_action_execution_phase value execute -> bind_inputs");
         expect(output).toContain("- 40 blind labels pending");
         expect(output).toContain("edit suggestion draft notes in .ax/experiments/blind-review-batch-current-suggestion-draft.md then run bun run classifiers:blind-review-batch -- --mode=promote-draft");
+    });
+
+    test("renders classifier lifecycle routing summaries", () => {
+        const route = {
+            kind: "review_pipeline_action" as const,
+            blocks_decision: true,
+            status: "missing_inputs",
+            execution_status: "missing_inputs" as const,
+            command_kind: "stamp_review_provenance",
+            next_action: "inspect_review_pipeline_lifecycle" as const,
+            action_next_action: "Provide required pipeline input values before executing the command.",
+            can_execute: false,
+            execution_phase: "bind_inputs" as const,
+            missing_inputs: ["reviewer"],
+            argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+            remediation: "Provide required pipeline input values before executing the command.",
+        };
+        const report: ClassifierLifecycleRoutingSummaryReport = {
+            schema: "ax.classifier_lifecycle_routing_summary.v1",
+            source_schema: "ax.classifier_lifecycle_insight_report.v1",
+            decision: "needs_human_review",
+            active_route_kind: "review_pipeline_action",
+            active_route_status: "missing_inputs",
+            active_route_execution_status: "missing_inputs",
+            active_route_can_execute: false,
+            active_route_command_kind: "stamp_review_provenance",
+            active_route_next_action: "inspect_review_pipeline_lifecycle",
+            active_route_argv: route.argv,
+            active_route: route,
+            executable_routes: [],
+            missing_input_routes: [route],
+            blocked_routes: [],
+            secondary_routes: [],
+            next_action: "bind_active_route_inputs",
+            remediation: "Provide required pipeline input values before executing the command.",
+            totals: {
+                route_count: 1,
+                executable_route_count: 0,
+                missing_input_route_count: 1,
+                blocked_route_count: 0,
+                secondary_route_count: 0,
+            },
+        };
+
+        const output = renderClassifierLifecycleRoutingSummaryText(report);
+
+        expect(output).toContain("classifier lifecycle routing");
+        expect(output).toContain("decision: needs_human_review");
+        expect(output).toContain("active: review_pipeline_action missing_inputs stamp_review_provenance execution=missing_inputs can_execute=no");
+        expect(output).toContain("next action: bind_active_route_inputs");
+        expect(output).toContain("argv: bun src/cli/index.ts --review-provenance-reviewer=<reviewer>");
+        expect(output).toContain("routes executable/missing-input/blocked/secondary: 0/1/0/0");
     });
 
     test("renders multi-package summaries", () => {

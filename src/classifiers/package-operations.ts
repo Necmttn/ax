@@ -994,6 +994,33 @@ export interface ClassifierLifecycleInsightReport {
     readonly decision: "healthy" | "needs_graph_apply" | "needs_human_review" | "has_guarded_operations" | "needs_graph_query_repair";
 }
 
+export interface ClassifierLifecycleRoutingSummaryReport {
+    readonly schema: "ax.classifier_lifecycle_routing_summary.v1";
+    readonly source_schema: ClassifierLifecycleInsightReport["schema"];
+    readonly decision: ClassifierLifecycleInsightReport["decision"];
+    readonly active_route?: ClassifierLifecycleRoutingItem;
+    readonly active_route_kind?: ClassifierLifecycleRoutingItem["kind"];
+    readonly active_route_status?: string;
+    readonly active_route_execution_status?: ClassifierLifecycleRoutingItem["execution_status"];
+    readonly active_route_can_execute?: boolean;
+    readonly active_route_command_kind?: string;
+    readonly active_route_next_action?: string;
+    readonly active_route_argv?: readonly string[];
+    readonly executable_routes: readonly ClassifierLifecycleRoutingItem[];
+    readonly missing_input_routes: readonly ClassifierLifecycleRoutingItem[];
+    readonly blocked_routes: readonly ClassifierLifecycleRoutingItem[];
+    readonly secondary_routes: readonly ClassifierLifecycleRoutingItem[];
+    readonly next_action: "execute_active_route" | "bind_active_route_inputs" | "repair_active_route" | "inspect_lifecycle";
+    readonly remediation: string;
+    readonly totals: {
+        readonly route_count: number;
+        readonly executable_route_count: number;
+        readonly missing_input_route_count: number;
+        readonly blocked_route_count: number;
+        readonly secondary_route_count: number;
+    };
+}
+
 function reviewPipelineLifecycleNextAction(
     lifecycle: NonNullable<ClassifierLifecycleReviewStatus["review_pipeline_lifecycle"]>,
 ): ClassifierReviewPipelineLifecycleInsight["next_action"] {
@@ -3529,6 +3556,51 @@ export function buildClassifierLifecycleInsightReport(input: {
     };
 }
 
+export function summarizeClassifierLifecycleRouting(
+    report: ClassifierLifecycleInsightReport,
+): ClassifierLifecycleRoutingSummaryReport {
+    const activeRoute = report.routing_items[0];
+    const executableRoutes = report.routing_items.filter((route) => route.can_execute === true);
+    const missingInputRoutes = report.routing_items.filter((route) => route.execution_status === "missing_inputs");
+    const blockedRoutes = report.routing_items.filter((route) => route.can_execute !== true && route.execution_status !== "missing_inputs");
+    const secondaryRoutes = report.routing_items.slice(1);
+    const nextAction: ClassifierLifecycleRoutingSummaryReport["next_action"] = activeRoute === undefined
+        ? "inspect_lifecycle"
+        : activeRoute.can_execute === true
+        ? "execute_active_route"
+        : activeRoute.execution_status === "missing_inputs"
+        ? "bind_active_route_inputs"
+        : "repair_active_route";
+    return {
+        schema: "ax.classifier_lifecycle_routing_summary.v1",
+        source_schema: report.schema,
+        decision: report.decision,
+        ...(activeRoute === undefined ? {} : {
+            active_route: activeRoute,
+            active_route_kind: activeRoute.kind,
+            active_route_status: activeRoute.status,
+            active_route_execution_status: activeRoute.execution_status,
+            active_route_can_execute: activeRoute.can_execute,
+            active_route_command_kind: activeRoute.command_kind,
+            active_route_next_action: activeRoute.next_action,
+            active_route_argv: activeRoute.argv,
+        }),
+        executable_routes: executableRoutes,
+        missing_input_routes: missingInputRoutes,
+        blocked_routes: blockedRoutes,
+        secondary_routes: secondaryRoutes,
+        next_action: nextAction,
+        remediation: activeRoute?.remediation ?? "No lifecycle route is available. Inspect lifecycle blockers before executing classifier actions.",
+        totals: {
+            route_count: report.routing_items.length,
+            executable_route_count: executableRoutes.length,
+            missing_input_route_count: missingInputRoutes.length,
+            blocked_route_count: blockedRoutes.length,
+            secondary_route_count: secondaryRoutes.length,
+        },
+    };
+}
+
 export function writeOperationsReport(path: string, report: ClassifierPackageOperationsReport): void {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
@@ -3593,6 +3665,11 @@ export function writeClassifierGraphQuerySuggestionRoutingSummary(
 }
 
 export function writeClassifierLifecycleInsightReport(path: string, report: ClassifierLifecycleInsightReport): void {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+}
+
+export function writeClassifierLifecycleRoutingSummaryReport(path: string, report: ClassifierLifecycleRoutingSummaryReport): void {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
 }

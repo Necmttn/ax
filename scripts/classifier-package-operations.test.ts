@@ -19,6 +19,7 @@ import {
     discoverClassifierPackageManifestPaths,
     executeOperationPlanReport,
     loadClassifierLifecycleReviewStatus,
+    summarizeClassifierLifecycleRouting,
     summarizeClassifierPackageOperations,
     writeOperationPreflightReport,
     writeOperationDryRunReport,
@@ -2300,6 +2301,67 @@ describe("classifier package operations report", () => {
         expect(report.graph_query_suggestion?.suggestion?.repair.outcome_status).toBe("expected_matches");
         expect(report.graph_query_suggestion?.suggestion?.verification.outcome_status).toBe("expected_matches");
         expect(report.graph_query_suggestion?.suggestion?.repair.command_kind).toBe("classifier_graph_query_repair");
+    });
+
+    test("summarizes lifecycle routing for service execution helpers", () => {
+        const report = buildClassifierLifecycleInsightReport({
+            packages: buildPackagesOperationsReport("packages", []),
+            graph: buildExecutionGraphHealthReport({
+                nodes: [],
+                edges: [],
+                facts: [],
+            }),
+            workflowStatus: {
+                path: ".ax/experiments/blind-workflow-status-current.json",
+                exists: true,
+                decision: "healthy",
+                review_pipeline_lifecycle: {
+                    report_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                    lifecycle_status: "blocked_before_execution",
+                    command_kind: "stamp_review_provenance",
+                    prepared_status: "missing_inputs",
+                    can_execute: false,
+                    can_continue: false,
+                    missing_required_artifact_count: 0,
+                    checked_artifact_count: 0,
+                    review_provenance_stamp_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+                    recommended_action_kind: "stamp_review_provenance",
+                    recommended_action_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+                    recommended_action_status: "missing_inputs",
+                    recommended_action_can_execute: false,
+                    recommended_action_next_action: "Provide required pipeline input values before executing the command.",
+                    recommended_action_missing_inputs: ["reviewer"],
+                    output_artifacts: [],
+                    checked_artifacts: [],
+                    failures: [],
+                },
+                next_actions: [],
+            },
+        });
+
+        const summary = summarizeClassifierLifecycleRouting(report);
+
+        expect(summary).toMatchObject({
+            schema: "ax.classifier_lifecycle_routing_summary.v1",
+            source_schema: "ax.classifier_lifecycle_insight_report.v1",
+            decision: "needs_graph_apply",
+            next_action: "bind_active_route_inputs",
+            remediation: "Provide required pipeline input values before executing the command.",
+            active_route_kind: "review_pipeline_action",
+            active_route_execution_status: "missing_inputs",
+            active_route_can_execute: false,
+            totals: {
+                route_count: 1,
+                executable_route_count: 0,
+                missing_input_route_count: 1,
+                blocked_route_count: 0,
+                secondary_route_count: 0,
+            },
+        });
+        expect(summary.active_route?.kind).toBe("review_pipeline_action");
+        expect(summary.missing_input_routes).toHaveLength(1);
+        expect(summary.executable_routes).toEqual([]);
+        expect(summary.active_route_argv).toEqual(["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"]);
     });
 
     test("routes lifecycle insight reports to graph query repair when the filtered graph has a suggestion", () => {

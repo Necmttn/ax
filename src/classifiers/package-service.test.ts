@@ -762,17 +762,21 @@ describe("ClassifierPackageService", () => {
             ]),
         } as unknown as SurrealClientShape;
 
-        const report = await runWithServiceAndDb(Effect.gen(function* () {
+        const result = await runWithServiceAndDb(Effect.gen(function* () {
             const packages = yield* ClassifierPackageService;
-            return yield* packages.lifecycleInsightReport({
+            const input = {
                 workflowStatusPath: statusPath,
                 graphQuery: {
                     mode: "lifecycle",
                     predicate: "review_pipeline_recommended_action_execution_phase",
                     value_equals: "execute",
                 },
-            });
+            } as const;
+            const report = yield* packages.lifecycleInsightReport(input);
+            const routing = yield* packages.lifecycleRoutingSummaryReport(input);
+            return { report, routing };
         }), db);
+        const { report, routing } = result;
 
         expect(report.schema).toBe("ax.classifier_lifecycle_insight_report.v1");
         expect(report.decision).toBe("needs_human_review");
@@ -816,5 +820,31 @@ describe("ClassifierPackageService", () => {
         });
         expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.graph_operation_count).toBe(1);
         expect(report.graph_query_suggestion?.suggestion?.repair.outcome_status).toBe("expected_matches");
+        expect(routing).toMatchObject({
+            schema: "ax.classifier_lifecycle_routing_summary.v1",
+            decision: "needs_human_review",
+            active_route_kind: "graph_query_repair",
+            active_route_execution_status: "ready_to_execute",
+            active_route_can_execute: true,
+            next_action: "execute_active_route",
+            totals: {
+                route_count: 1,
+                executable_route_count: 1,
+                missing_input_route_count: 0,
+                blocked_route_count: 0,
+            },
+        });
+        expect(routing.active_route_argv).toEqual([
+            "bun",
+            "src/cli/index.ts",
+            "classifiers",
+            "graph",
+            "--mode",
+            "lifecycle",
+            "--predicate",
+            "review_pipeline_recommended_action_execution_phase",
+            "--value",
+            "bind_inputs",
+        ]);
     });
 });

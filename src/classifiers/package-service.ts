@@ -19,6 +19,7 @@ import {
     loadClassifierPackageExecutionReport,
     loadClassifierLifecycleReviewStatus,
     summarizeClassifierGraphQuerySuggestionRouting,
+    summarizeClassifierLifecycleRouting,
     summarizeClassifierPackageOperations,
     writeExecutionHistoryReport,
     writeExecutionFactProjectionReport,
@@ -27,6 +28,7 @@ import {
     writeExecutionGraphHealthReport,
     writeClassifierGraphQuerySuggestionRoutingSummary,
     writeClassifierLifecycleInsightReport,
+    writeClassifierLifecycleRoutingSummaryReport,
     writePackagesOperationsReport,
     writeOperationPreflightReport,
     writeOperationDryRunReport,
@@ -41,6 +43,7 @@ import {
     type ClassifierPackageExecutionGraphHealthReport,
     type ClassifierGraphQuerySuggestionRoutingSummary,
     type ClassifierLifecycleInsightReport,
+    type ClassifierLifecycleRoutingSummaryReport,
     type ClassifierGraphHealthQuery,
     type ClassifierGraphEdgeRow,
     type ClassifierGraphFactRow,
@@ -193,6 +196,10 @@ export interface ClassifierLifecycleInsightWriteInput extends ClassifierLifecycl
     readonly out: string;
 }
 
+export interface ClassifierLifecycleRoutingSummaryWriteInput extends ClassifierLifecycleInsightInput {
+    readonly out: string;
+}
+
 export interface ClassifierPackageServiceShape {
     readonly loadManifest: (path: string) => Effect.Effect<ClassifierPackageManifest, ClassifierPackageLoadError>;
     readonly listOperations: (manifestPath: string) => Effect.Effect<readonly ClassifierPackageOperation[], ClassifierPackageLoadError>;
@@ -280,6 +287,12 @@ export interface ClassifierPackageServiceShape {
     readonly writeLifecycleInsightReport: (
         input: ClassifierLifecycleInsightWriteInput,
     ) => Effect.Effect<ClassifierLifecycleInsightReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, SurrealClient>;
+    readonly lifecycleRoutingSummaryReport: (
+        input?: ClassifierLifecycleInsightInput,
+    ) => Effect.Effect<ClassifierLifecycleRoutingSummaryReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, SurrealClient>;
+    readonly writeLifecycleRoutingSummaryReport: (
+        input: ClassifierLifecycleRoutingSummaryWriteInput,
+    ) => Effect.Effect<ClassifierLifecycleRoutingSummaryReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, SurrealClient>;
 }
 
 export class ClassifierPackageService extends Context.Service<ClassifierPackageService, ClassifierPackageServiceShape>()(
@@ -636,6 +649,24 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService>
             return report;
         });
 
+        const lifecycleRoutingSummary = Effect.fn("ClassifierPackageService.lifecycleRoutingSummaryReport")(function* (
+            input?: ClassifierLifecycleInsightInput,
+        ) {
+            const report = yield* lifecycleInsight(input);
+            return summarizeClassifierLifecycleRouting(report);
+        });
+
+        const writeLifecycleRoutingSummary = Effect.fn("ClassifierPackageService.writeLifecycleRoutingSummaryReport")(function* (
+            input: ClassifierLifecycleRoutingSummaryWriteInput,
+        ) {
+            const report = yield* lifecycleRoutingSummary(input);
+            yield* Effect.try({
+                try: () => writeClassifierLifecycleRoutingSummaryReport(input.out, report),
+                catch: (error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) }),
+            });
+            return report;
+        });
+
         return ClassifierPackageService.of({
             loadManifest,
             listOperations,
@@ -668,6 +699,8 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService>
             writeExecutionGraphHealthReport: writeExecutionGraphHealth,
             lifecycleInsightReport: lifecycleInsight,
             writeLifecycleInsightReport: writeLifecycleInsight,
+            lifecycleRoutingSummaryReport: lifecycleRoutingSummary,
+            writeLifecycleRoutingSummaryReport: writeLifecycleRoutingSummary,
         });
     }),
 );
