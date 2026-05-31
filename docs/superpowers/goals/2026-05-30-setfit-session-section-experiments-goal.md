@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E355 adds
-  `.ax/experiments/classifier-graph-embedding-helper-routing-policy-floor-adjustments-e355.json`
+- Index continuation: E356 adds
+  `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-query-e356.json`
   and
-  `.ax/experiments/classifier-graph-embedding-helper-routing-policy-floor-adjustments-e355.txt`
+  `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-query-e356.txt`
   as the latest Embedding/SVM helper evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -14503,6 +14503,49 @@ bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=emb
 bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 > .ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.txt || true
 python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.json >/dev/null
 rg -n 'routing policy blocking floors: positive_recall, call_reduction|routing policy largest gap: positive_recall|"blocking_floor_fields"|"largest_gap_floor"|"positive_recall_gap_to_request"|"call_reduction_gap_to_request"' .ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.txt .ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.json
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 84 passed.
+
+## E356 - Expose Recommended Routing Floor Query
+
+Question:
+
+- After a no-match routing policy report recommends relaxed floors, can an FX
+  service rerun the graph query from structured fields without parsing text or
+  recomputing floor values?
+
+Change:
+
+- Added `recommended_floor_query` to `routing_policy_summary`.
+- The recommended query preserves the original non-floor filters and replaces
+  only blocking floor values with the reviewed recommended floors.
+- Text graph output now renders the recommended floor query as key/value
+  filters for quick debugging.
+
+Evidence:
+
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-query-e356.json`
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-query-e356.txt`
+
+Result:
+
+- `classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2` returned 0 matching routing facts.
+- The report has
+  `routing_policy_summary.recommended_floor_query.min_positive_recall=0.9028`
+  and `min_call_reduction=0.1778`.
+- Text output renders:
+  `routing policy recommended floor query: mode=embedding-helper source_kind=embedding_helper_review_projection fact_kind=embedding_helper_routing_candidate min_positive_recall=0.9028 min_call_reduction=0.1778`.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 --out=.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-query-e356.json --json > .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-query-e356.stdout
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 > .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-query-e356.txt || true
+python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-query-e356.json >/dev/null
+rg -n 'routing policy recommended floor query|"recommended_floor_query"|"min_positive_recall": 0.9028|"min_call_reduction": 0.1778|fact_kind=embedding_helper_routing_candidate' .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-query-e356.txt .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-query-e356.json
 ```
 
 Verification:

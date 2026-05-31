@@ -1530,6 +1530,12 @@ describe("classifier package operations report", () => {
                     source_threshold: "none",
                 },
             ],
+            recommended_floor_query: {
+                mode: "embedding-helper",
+                fact_kind: "embedding_helper_routing_candidate",
+                min_positive_recall: 0.9028,
+                min_call_reduction: 0.1778,
+            },
         });
     });
 

@@ -380,6 +380,26 @@ export interface ClassifierGraphEmbeddingHelperFact {
     readonly evidence_paths: readonly string[];
 }
 
+export interface ClassifierGraphRoutingPolicyRecommendedQuery {
+    readonly mode: "embedding-helper" | "evidence";
+    readonly operation_id?: string;
+    readonly artifact_path?: string;
+    readonly source_kind?: string;
+    readonly fact_kind?: string;
+    readonly status?: string;
+    readonly source_fixture_id?: string;
+    readonly proposed_label?: string;
+    readonly threshold?: string;
+    readonly min_seed_count?: number;
+    readonly min_positive_recall?: number;
+    readonly min_call_reduction?: number;
+    readonly min_nearest_similarity?: number;
+    readonly nearest_fixture_id?: string;
+    readonly predicate?: string;
+    readonly subject?: string;
+    readonly value_contains?: string;
+}
+
 export interface ClassifierGraphRoutingPolicySummary {
     readonly status: "not_requested" | "meets_requested_floors" | "no_matching_policy";
     readonly next_action: "set_routing_floors" | "choose_reviewed_routing_threshold" | "lower_floor_or_review_more_candidates";
@@ -405,6 +425,7 @@ export interface ClassifierGraphRoutingPolicySummary {
         readonly gap: number;
         readonly source_threshold?: string;
     }[];
+    readonly recommended_floor_query?: ClassifierGraphRoutingPolicyRecommendedQuery;
 }
 
 export type ClassifierGraphHealthMode = "summary" | "guarded" | "changed-artifacts" | "evidence" | "lifecycle" | "embedding-helper";
@@ -2175,6 +2196,29 @@ export function buildExecutionGraphHealthReport(input: {
             }]
             : []),
     ];
+    const recommendedPositiveRecallFloor = recommendedFloorAdjustments.find((adjustment) => adjustment.floor === "positive_recall")?.recommended ?? query.min_positive_recall;
+    const recommendedCallReductionFloor = recommendedFloorAdjustments.find((adjustment) => adjustment.floor === "call_reduction")?.recommended ?? query.min_call_reduction;
+    const recommendedFloorQuery: ClassifierGraphRoutingPolicyRecommendedQuery | undefined = recommendedFloorAdjustments.length === 0
+        ? undefined
+        : {
+            mode: query.mode === "evidence" ? "evidence" : "embedding-helper",
+            ...(query.operation_id === undefined ? {} : { operation_id: query.operation_id }),
+            ...(query.artifact_path === undefined ? {} : { artifact_path: query.artifact_path }),
+            ...(query.source_kind === undefined ? {} : { source_kind: query.source_kind }),
+            fact_kind: query.fact_kind ?? "embedding_helper_routing_candidate",
+            ...(query.status === undefined ? {} : { status: query.status }),
+            ...(query.source_fixture_id === undefined ? {} : { source_fixture_id: query.source_fixture_id }),
+            ...(query.proposed_label === undefined ? {} : { proposed_label: query.proposed_label }),
+            ...(query.threshold === undefined ? {} : { threshold: query.threshold }),
+            ...(query.min_seed_count === undefined ? {} : { min_seed_count: query.min_seed_count }),
+            ...(recommendedPositiveRecallFloor === undefined ? {} : { min_positive_recall: recommendedPositiveRecallFloor }),
+            ...(recommendedCallReductionFloor === undefined ? {} : { min_call_reduction: recommendedCallReductionFloor }),
+            ...(query.min_nearest_similarity === undefined ? {} : { min_nearest_similarity: query.min_nearest_similarity }),
+            ...(query.nearest_fixture_id === undefined ? {} : { nearest_fixture_id: query.nearest_fixture_id }),
+            ...(query.predicate === undefined ? {} : { predicate: query.predicate }),
+            ...(query.subject === undefined ? {} : { subject: query.subject }),
+            ...(query.value_contains === undefined ? {} : { value_contains: query.value_contains }),
+        };
     const largestGapFloor = positiveRecallGap === undefined && callReductionGap === undefined
         ? undefined
         : (positiveRecallGap ?? 0) >= (callReductionGap ?? 0)
@@ -2211,6 +2255,7 @@ export function buildExecutionGraphHealthReport(input: {
         ...(blockingFloorFields.length === 0 ? {} : { blocking_floor_fields: blockingFloorFields }),
         ...(largestGapFloor === undefined ? {} : { largest_gap_floor: largestGapFloor }),
         ...(recommendedFloorAdjustments.length === 0 ? {} : { recommended_floor_adjustments: recommendedFloorAdjustments }),
+        ...(recommendedFloorQuery === undefined ? {} : { recommended_floor_query: recommendedFloorQuery }),
     };
 
     return {
