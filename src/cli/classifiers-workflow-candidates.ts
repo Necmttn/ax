@@ -208,6 +208,19 @@ export interface WorkflowCandidateTopicGuidanceDecisionReport {
     };
 }
 
+export interface WorkflowCandidateGuidancePendingReviewCandidate {
+    readonly candidate_id: string;
+    readonly label: string;
+    readonly proposed_action: string;
+    readonly recommended_artifact: WorkflowCandidatePromotionArtifact;
+    readonly recommendation_confidence: WorkflowCandidatePromotionRecommendation["confidence"];
+    readonly support_count: number;
+    readonly evidence_count: number;
+    readonly score: number;
+    readonly decision: "needs_human_review";
+    readonly next_action: string;
+}
+
 export interface WorkflowCandidateTopicGuidanceDecisionBatchReport {
     readonly schema: "ax.workflow_topic_guidance_decision_batch.v1";
     readonly source_kind: string;
@@ -216,9 +229,15 @@ export interface WorkflowCandidateTopicGuidanceDecisionBatchReport {
         readonly search?: string;
     };
     readonly decisions: readonly WorkflowCandidateTopicGuidanceDecisionReport[];
+    readonly pending_review_candidates: readonly WorkflowCandidateGuidancePendingReviewCandidate[];
     readonly totals: {
         readonly topic_count: number;
         readonly candidate_count: number;
+        readonly pending_review_candidate_count: number;
+        readonly guidance_pending_review_count: number;
+        readonly harness_pending_review_count: number;
+        readonly classifier_fixture_pending_review_count: number;
+        readonly review_pending_review_count: number;
         readonly guidance_ready_count: number;
         readonly guidance_not_warranted_count: number;
         readonly needs_passing_harness_evidence_count: number;
@@ -2902,11 +2921,37 @@ export function buildWorkflowCandidateTopicGuidanceDecisionBatchReport(input: {
     readonly limit: number;
     readonly search?: string;
     readonly decisions: readonly WorkflowCandidateTopicGuidanceDecisionReport[];
+    readonly pendingCandidateReport?: WorkflowCandidateReport;
 }): WorkflowCandidateTopicGuidanceDecisionBatchReport {
+    const pendingCandidateReport = input.pendingCandidateReport;
+    const pendingReviewCandidates: WorkflowCandidateGuidancePendingReviewCandidate[] = (pendingCandidateReport?.candidates ?? [])
+        .filter((candidate) => (candidate.persisted_review_facts?.length ?? 0) === 0)
+        .map((candidate) => {
+            const recommendation = recommendWorkflowCandidatePromotionArtifact([candidate], pendingCandidateReport!);
+            return {
+                candidate_id: candidate.group_id,
+                label: candidate.label,
+                proposed_action: candidate.proposed_action,
+                recommended_artifact: recommendation.primary,
+                recommendation_confidence: recommendation.confidence,
+                support_count: candidate.support_count,
+                evidence_count: candidate.evidence_count,
+                score: candidate.score,
+                decision: "needs_human_review",
+                next_action: recommendation.primary === "review"
+                    ? "Review this workflow candidate before choosing guidance, harness, fixture, or graph promotion."
+                    : `Review this ${recommendation.primary} candidate before promoting it into guidance, harness, fixture, or graph facts.`,
+            };
+        });
     const totals = input.decisions.reduce(
         (sum, decision) => ({
             topic_count: sum.topic_count + 1,
             candidate_count: sum.candidate_count + decision.totals.candidate_count,
+            pending_review_candidate_count: sum.pending_review_candidate_count,
+            guidance_pending_review_count: sum.guidance_pending_review_count,
+            harness_pending_review_count: sum.harness_pending_review_count,
+            classifier_fixture_pending_review_count: sum.classifier_fixture_pending_review_count,
+            review_pending_review_count: sum.review_pending_review_count,
             guidance_ready_count: sum.guidance_ready_count + decision.totals.guidance_ready_count,
             guidance_not_warranted_count: sum.guidance_not_warranted_count + decision.totals.guidance_not_warranted_count,
             needs_passing_harness_evidence_count: sum.needs_passing_harness_evidence_count + decision.totals.needs_passing_harness_evidence_count,
@@ -2919,6 +2964,11 @@ export function buildWorkflowCandidateTopicGuidanceDecisionBatchReport(input: {
         {
             topic_count: 0,
             candidate_count: 0,
+            pending_review_candidate_count: 0,
+            guidance_pending_review_count: 0,
+            harness_pending_review_count: 0,
+            classifier_fixture_pending_review_count: 0,
+            review_pending_review_count: 0,
             guidance_ready_count: 0,
             guidance_not_warranted_count: 0,
             needs_passing_harness_evidence_count: 0,
@@ -2929,12 +2979,22 @@ export function buildWorkflowCandidateTopicGuidanceDecisionBatchReport(input: {
             guidance_proposal_count: 0,
         },
     );
-    const nextAction = totals.guidance_ready_count > 0
+    const totalsWithPending = {
+        ...totals,
+        pending_review_candidate_count: pendingReviewCandidates.length,
+        guidance_pending_review_count: pendingReviewCandidates.filter((candidate) => candidate.recommended_artifact === "guidance").length,
+        harness_pending_review_count: pendingReviewCandidates.filter((candidate) => candidate.recommended_artifact === "harness_check").length,
+        classifier_fixture_pending_review_count: pendingReviewCandidates.filter((candidate) => candidate.recommended_artifact === "classifier_fixture").length,
+        review_pending_review_count: pendingReviewCandidates.filter((candidate) => candidate.recommended_artifact === "review").length,
+    };
+    const nextAction = totalsWithPending.guidance_ready_count > 0
         ? "Inspect guidance-ready topic decisions and create or refresh guidance proposals."
-        : totals.needs_passing_harness_evidence_count > 0
+        : totalsWithPending.needs_passing_harness_evidence_count > 0
             ? "Accept or run missing harness checks before promoting guidance."
-            : totals.needs_human_review_count > 0
+            : totalsWithPending.needs_human_review_count > 0
                 ? "Review pending topic candidates before promoting guidance."
+                : totalsWithPending.pending_review_candidate_count > 0
+                    ? "Review pending workflow candidates before promoting them into guidance, harness checks, fixtures, or graph facts."
                 : "No guidance promotion is currently warranted by reviewed topic evidence.";
     return {
         schema: "ax.workflow_topic_guidance_decision_batch.v1",
@@ -2944,7 +3004,8 @@ export function buildWorkflowCandidateTopicGuidanceDecisionBatchReport(input: {
             ...(input.search === undefined ? {} : { search: input.search }),
         },
         decisions: input.decisions,
-        totals,
+        pending_review_candidates: pendingReviewCandidates,
+        totals: totalsWithPending,
         next_action: nextAction,
     };
 }
@@ -2959,6 +3020,7 @@ export function renderWorkflowCandidateTopicGuidanceDecisionBatchText(
         `topics: ${report.totals.topic_count}`,
         `candidates: ${report.totals.candidate_count}`,
         `decisions: ready=${report.totals.guidance_ready_count} not_warranted=${report.totals.guidance_not_warranted_count} needs_harness=${report.totals.needs_passing_harness_evidence_count} needs_review=${report.totals.needs_human_review_count}`,
+        `pending review candidates: ${report.totals.pending_review_candidate_count} guidance=${report.totals.guidance_pending_review_count} harness=${report.totals.harness_pending_review_count} classifier_fixture=${report.totals.classifier_fixture_pending_review_count} review=${report.totals.review_pending_review_count}`,
         `evidence: accepted_harness=${report.totals.accepted_harness_proposal_count} scaffolded_harness=${report.totals.scaffolded_harness_experiment_count} passing_harness=${report.totals.passing_harness_evidence_count} guidance_proposals=${report.totals.guidance_proposal_count}`,
         `next action: ${report.next_action}`,
         "",
@@ -2972,6 +3034,18 @@ export function renderWorkflowCandidateTopicGuidanceDecisionBatchText(
             `    counts: ready=${decision.totals.guidance_ready_count} not_warranted=${decision.totals.guidance_not_warranted_count} needs_harness=${decision.totals.needs_passing_harness_evidence_count} needs_review=${decision.totals.needs_human_review_count}`,
             `    evidence: accepted_harness=${decision.totals.accepted_harness_proposal_count} scaffolded_harness=${decision.totals.scaffolded_harness_experiment_count} passing_harness=${decision.totals.passing_harness_evidence_count} guidance_proposals=${decision.totals.guidance_proposal_count}`,
             `    next: ${decision.next_action}`,
+        );
+    }
+    lines.push("", "pending review candidates:");
+    if (report.pending_review_candidates.length === 0) lines.push("  (none)");
+    for (const candidate of report.pending_review_candidates) {
+        lines.push(
+            `  - ${candidate.decision} ${candidate.label}`,
+            `    candidate: ${candidate.candidate_id}`,
+            `    action: ${candidate.proposed_action}`,
+            `    recommended: ${candidate.recommended_artifact} confidence=${candidate.recommendation_confidence}`,
+            `    support/evidence/score: ${candidate.support_count}/${candidate.evidence_count}/${candidate.score.toFixed(4)}`,
+            `    next: ${candidate.next_action}`,
         );
     }
     return lines.join("\n");
@@ -6273,13 +6347,17 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
 
         if (input.guidanceDecisionBatch) {
             const topicRows = yield* db.query<[WorkflowCandidateTopicHarnessGraphFactRow[]]>(`
-                SELECT properties_json, type::string(updated_at) AS updated_at
+                SELECT graph_id, subject, predicate, object, value_json, properties_json, type::string(updated_at) AS updated_at
                 FROM classifier_graph_fact
                 WHERE (kind = "workflow_topic_candidate_review" AND source_kind = "workflow_topic_candidate_review")
                    OR (kind = "workflow_topic_harness_check" AND source_kind = "workflow_topic_harness_check")
                 ORDER BY updated_at DESC
                 LIMIT ${Math.max(1, input.limit * 50)};
             `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+            const reviewFactRows = (topicRows?.[0] ?? []).filter((row) =>
+                row.graph_id?.startsWith("fact:workflow_topic_candidate_review__") ||
+                row.subject?.startsWith("workflow_topic_candidate_review:")
+            );
             const search = input.search?.trim().toLowerCase();
             const topics = [...new Set((topicRows?.[0] ?? [])
                 .map((row) => topicFromPropertiesJson(row.properties_json))
@@ -6290,6 +6368,21 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 .slice(0, Math.max(1, input.limit));
             const reports: WorkflowCandidateTopicReport[] = [];
             for (const topic of topics) reports.push(yield* loadTopicReport(topic));
+            const pendingRows = yield* db.query<[WorkflowCandidateGroupRow[], WorkflowCandidateEvidenceRow[]]>(
+                workflowCandidateSql,
+                { sourceKind: input.sourceKind },
+            ).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+            const pendingCandidateReport = attachWorkflowCandidatePersistedReviewFacts(buildWorkflowCandidateReport({
+                groupRows: pendingRows[0] ?? [],
+                evidenceRows: pendingRows[1] ?? [],
+                sourceKind: input.sourceKind,
+                limit: input.limit,
+                examplesPerGroup: input.examples,
+                ...(input.action === undefined ? {} : { action: input.action }),
+                ...(input.classifier === undefined ? {} : { classifier: input.classifier }),
+                ...(input.search === undefined ? {} : { search: input.search }),
+                taskLike: input.taskLike,
+            }), reviewFactRows);
             const batch = buildWorkflowCandidateTopicGuidanceDecisionBatchReport({
                 sourceKind: input.sourceKind,
                 limit: input.limit,
@@ -6297,6 +6390,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 decisions: reports
                     .map((report) => report.guidance_decision)
                     .filter((decision): decision is WorkflowCandidateTopicGuidanceDecisionReport => decision !== undefined),
+                pendingCandidateReport,
             });
             if (input.out) {
                 mkdirSync(dirname(input.out), { recursive: true });

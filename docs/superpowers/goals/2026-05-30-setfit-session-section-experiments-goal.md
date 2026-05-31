@@ -33,9 +33,9 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E446 adds
-  `.ax/experiments/workflow-topic-guidance-decision-batch-e446.json`,
-  `.ax/experiments/workflow-topic-guidance-decision-batch-e446.txt`,
+- Index continuation: E447 adds
+  `.ax/experiments/workflow-topic-guidance-decision-batch-e447.json`,
+  `.ax/experiments/workflow-topic-guidance-decision-batch-e447.txt`,
   and
   the `ax.workflow_topic_guidance_decision_batch.v1` report surface
   as the latest hybrid classifier review-throughput evidence.
@@ -50,9 +50,77 @@ Current recommendation:
   lifecycle graph facts, and the accepted `review-coverage` harness proposal
   now has a passing persisted harness fact. The batch guidance decision says
   reviewed `review-coverage` and `surrealml` candidates are both
-  `guidance_promotion_not_warranted`, so the immediate bottleneck is finding
-  or reviewing true guidance-ready candidates rather than promoting rejected or
-  harness-only evidence.
+  `guidance_promotion_not_warranted`, and it now also exposes one pending
+  `correction_or_rejection_signal` candidate blocked on human review. The
+  immediate bottleneck is reviewing that pending candidate, not promoting
+  rejected or harness-only evidence.
+
+## E447 - Add Pending Review Queue to Batch Guidance Decisions
+
+Question:
+- Can the batch guidance-decision surface show not only reviewed topic
+  decisions, but also unreviewed workflow candidates that are blocked before
+  they can become guidance, harness checks, fixtures, or graph facts?
+
+Implementation:
+- Extended `ax.workflow_topic_guidance_decision_batch.v1` with
+  `pending_review_candidates`.
+- Each pending row includes candidate id, label, proposed graph action,
+  recommended next artifact family, confidence, support/evidence/score, and a
+  `needs_human_review` decision.
+- The batch totals now include pending review counts split by recommended
+  artifact family: guidance, harness, classifier fixture, and review.
+- The CLI now attaches persisted review facts to the workflow candidate report
+  while building the batch so reviewed candidates are excluded from the pending
+  queue.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e447.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e447.txt`
+
+Results:
+- Reviewed topic decisions remain:
+  - `review-coverage`: `guidance_promotion_not_warranted`
+  - `surrealml`: `guidance_promotion_not_warranted`
+- Pending review queue:
+  - `correction_or_rejection_signal`
+  - candidate:
+    `classifier_candidate_group:hybrid-window/correction_or_rejection_signal`
+  - proposed action: `add_context_guardrail`
+  - recommended artifact family: `review`
+  - support/evidence/score: `1/1/0.83`
+  - decision: `needs_human_review`
+- Totals:
+  - `topic_count=2`
+  - `candidate_count=2`
+  - `pending_review_candidate_count=1`
+  - `review_pending_review_count=1`
+  - `guidance_ready_count=0`
+  - `guidance_not_warranted_count=2`
+  - `needs_human_review_count=0` for already-reviewed topic decisions
+- Next action:
+  `Review pending workflow candidates before promoting them into guidance, harness checks, fixtures, or graph facts.`
+
+Decision:
+- E447 makes the batch surface useful as a service queue: it now distinguishes
+  "reviewed but not promotion-worthy" from "not reviewed yet".
+- The live graph still has no guidance-ready candidate. The only new work item
+  is a low-support correction/rejection signal that should be reviewed before
+  becoming guidance, a harness check, a fixture, or a promoted graph fact.
+- The next aligned slice is to create a compact review handoff from this batch
+  pending queue, so a reviewer can accept/reject the candidate without running
+  the lower-level coverage commands manually.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 --out .ax/experiments/workflow-topic-guidance-decision-batch-e447.json --json
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 > .ax/experiments/workflow-topic-guidance-decision-batch-e447.txt
+rg -n "workflow topic guidance decision batch|topics: 2|pending review candidates: 1 guidance=0 harness=0 classifier_fixture=0 review=1|needs_human_review correction_or_rejection_signal|Review pending workflow candidates|Review this workflow candidate|guidance_promotion_not_warranted review-coverage|guidance_promotion_not_warranted surrealml" .ax/experiments/workflow-topic-guidance-decision-batch-e447.txt
+bun -e 'const r=await Bun.file(".ax/experiments/workflow-topic-guidance-decision-batch-e447.json").json(); if (r.schema !== "ax.workflow_topic_guidance_decision_batch.v1") throw new Error(r.schema); if (r.totals.topic_count !== 2 || r.totals.guidance_not_warranted_count !== 2 || r.totals.pending_review_candidate_count !== 1 || r.totals.review_pending_review_count !== 1 || r.totals.guidance_ready_count !== 0) throw new Error(JSON.stringify(r.totals)); const pending=r.pending_review_candidates?.[0]; if (pending?.label !== "correction_or_rejection_signal" || pending?.decision !== "needs_human_review" || pending?.recommended_artifact !== "review") throw new Error(JSON.stringify(pending));'
+```
+
+DB-backed pending-review batch checks passed.
 
 ## E446 - Batch Guidance Decisions Across Reviewed Topics
 

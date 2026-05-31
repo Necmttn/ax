@@ -3769,6 +3769,44 @@ describe("classifiers workflow-candidates", () => {
                     guidance_proposal_count: 1,
                 },
             }],
+            pendingCandidateReport: {
+                schema: "ax.workflow_candidate_report.v1",
+                source_kind: "hybrid_window_classifier_projection",
+                query: {
+                    limit: 10,
+                    examples_per_group: 1,
+                    task_like: "include",
+                },
+                candidates: [{
+                    group_id: "classifier_candidate_group:hybrid-window/correction_or_rejection_signal",
+                    label: "correction_or_rejection_signal",
+                    proposed_action: "add_context_guardrail",
+                    target: "wrong_output",
+                    raw_support_count: 1,
+                    support_count: 1,
+                    evidence_count: 1,
+                    turn_ref_count: 1,
+                    average_confidence: 1,
+                    wrapper_like_count: 0,
+                    task_like_count: 0,
+                    task_like_ratio: 0,
+                    score: 1,
+                    examples: [],
+                }],
+                all_candidate_labels: ["correction_or_rejection_signal"],
+                totals: {
+                    candidate_group_count: 1,
+                    returned_candidate_count: 1,
+                    evidence_fact_count: 1,
+                    considered_evidence_fact_count: 1,
+                    candidate_with_evidence_count: 1,
+                    wrapper_like_count: 0,
+                    task_like_count: 0,
+                    persisted_review_fact_count: 0,
+                },
+                failures: [],
+                decision: "workflow_candidates_ranked",
+            },
         });
 
         expect(batch).toMatchObject({
@@ -3776,16 +3814,26 @@ describe("classifiers workflow-candidates", () => {
             totals: {
                 topic_count: 2,
                 candidate_count: 2,
+                pending_review_candidate_count: 1,
+                guidance_pending_review_count: 1,
+                review_pending_review_count: 0,
                 guidance_ready_count: 0,
                 guidance_not_warranted_count: 2,
                 passing_harness_evidence_count: 2,
             },
-            next_action: "No guidance promotion is currently warranted by reviewed topic evidence.",
+            pending_review_candidates: [{
+                label: "correction_or_rejection_signal",
+                recommended_artifact: "guidance",
+                decision: "needs_human_review",
+            }],
+            next_action: "Review pending workflow candidates before promoting them into guidance, harness checks, fixtures, or graph facts.",
         });
         const text = renderWorkflowCandidateTopicGuidanceDecisionBatchText(batch);
         expect(text).toContain("workflow topic guidance decision batch");
         expect(text).toContain("decisions: ready=0 not_warranted=2 needs_harness=0 needs_review=0");
+        expect(text).toContain("pending review candidates: 1 guidance=1 harness=0 classifier_fixture=0 review=0");
         expect(text).toContain("guidance_promotion_not_warranted review-coverage");
+        expect(text).toContain("needs_human_review correction_or_rejection_signal");
     });
 
     test("topic harness gates fail with only persisted failed harness facts", () => {
