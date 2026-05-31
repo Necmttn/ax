@@ -14,6 +14,7 @@ import {
     buildWorkflowCandidateTopicHarnessEvidenceSummary,
     buildWorkflowCandidateTopicHelperExplanations,
     buildWorkflowCandidateTopicReviewGraphProjection,
+    buildWorkflowCandidateTopicReviewGraphListReport,
     buildWorkflowCandidateTopicReviewGraphWritePlan,
     buildWorkflowCandidateTopicTaskDrafts,
     buildWorkflowCandidateTopicReport,
@@ -1108,6 +1109,84 @@ describe("classifiers workflow-candidates", () => {
         });
         expect(writePlan.statements.join("\n")).toContain("workflow_topic_candidate_review");
         expect(writePlan.statements.join("\n")).toContain("UPSERT classifier_graph_fact");
+    });
+
+    test("renders persisted topic review facts inside topic reports and packs", () => {
+        const proposals = buildWorkflowCandidateProposalListReport({
+            rows: [],
+            limit: 10,
+            status: "accepted",
+            expandEvidence: true,
+            search: "SurrealML",
+        });
+        const candidates = buildWorkflowCandidateReport({
+            groupRows: [{
+                graph_id: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+                label: "environment_or_preference_signal",
+                properties_json: properties({
+                    classifier_key: "hybrid-window",
+                    label: "environment_or_preference_signal",
+                    proposed_action: "record_guidance_or_environment_preference",
+                    support_count: 50,
+                }),
+            }],
+            evidenceRows: [{
+                graph_id: "fact:maintenance-question",
+                subject: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+                properties_json: properties({
+                    turn: "turn:maintenance-question",
+                    confidence: 0.71,
+                    text_excerpt: "USER: when was the last work around surrealML ? do they actively maintain it or stopped?",
+                }),
+            }],
+            sourceKind: "hybrid_window_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            search: "SurrealML",
+            taskLike: "include",
+        });
+        const persisted_review_facts = buildWorkflowCandidateTopicReviewGraphListReport({
+            topic: "SurrealML",
+            facts: [{
+                graph_id: "fact:surrealml-review",
+                subject: "workflow_topic_candidate_review:surrealml:environment",
+                predicate: "reject",
+                object: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+                value_json: properties({ reviewed: true, verdict: "reject" }),
+                properties_json: properties({
+                    topic: "SurrealML",
+                    candidate_id: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+                    rationale: "Promoted helper control marks this as an information request, not a durable preference.",
+                    helper_source_fixture_ids: ["session-section-chunks/none-maintenance-question"],
+                }),
+            }],
+            edges: [],
+        });
+        const report = {
+            ...buildWorkflowCandidateTopicReport({
+                sourceKind: "hybrid_window_classifier_projection",
+                topic: "SurrealML",
+                proposals,
+                candidates,
+            }),
+            persisted_review_facts,
+        };
+
+        const text = renderWorkflowCandidateTopicReportText(report);
+        const markdown = renderWorkflowCandidateTopicEvidencePackMarkdown(report);
+
+        expect(persisted_review_facts.totals).toMatchObject({
+            fact_count: 1,
+            rejected_count: 1,
+            accepted_count: 0,
+        });
+        expect(text).toContain("persisted review facts: 1");
+        expect(text).toContain("persisted review status: 1 rejected, 0 accepted, 0 deferred, 0 revised");
+        expect(markdown).toContain("- Persisted review facts: `1`");
+        expect(markdown).toContain("## Persisted Review Facts");
+        expect(markdown).toContain("- Predicate: `reject`");
+        expect(markdown).toContain("- Candidate id: `classifier_candidate_group:hybrid-window/environment_or_preference_signal`");
+        expect(markdown).toContain("- Helper source fixture: `session-section-chunks/none-maintenance-question`");
     });
 
     test("renders persisted harness facts inside topic evidence packs", () => {

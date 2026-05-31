@@ -34,6 +34,7 @@ export interface WorkflowCandidateCommandInput {
     readonly listHarnessFacts?: boolean;
     readonly includeHarnessFacts?: boolean;
     readonly includeHelperFacts?: boolean;
+    readonly includeReviewFacts?: boolean;
     readonly proposalStatus?: WorkflowCandidateProposalStatusFilter;
     readonly expandEvidence?: boolean;
     readonly evidencePack?: string;
@@ -142,6 +143,7 @@ export interface WorkflowCandidateTopicReport {
     readonly harness_evidence?: WorkflowCandidateTopicHarnessEvidenceSummary;
     readonly harness_checks?: WorkflowCandidateTopicHarnessCheckSummary;
     readonly persisted_harness_facts?: WorkflowCandidateTopicHarnessGraphListReport;
+    readonly persisted_review_facts?: WorkflowCandidateTopicReviewGraphListReport;
     readonly helper_explanations?: WorkflowCandidateTopicHelperExplanationReport;
 }
 
@@ -351,6 +353,21 @@ export interface WorkflowCandidateTopicHarnessGraphListReport {
         readonly edge_count: number;
         readonly passed_count: number;
         readonly failed_count: number;
+    };
+}
+
+export interface WorkflowCandidateTopicReviewGraphListReport {
+    readonly schema: "ax.workflow_topic_review_graph_list.v1";
+    readonly topic?: string;
+    readonly facts: readonly WorkflowCandidateTopicHarnessGraphFactRow[];
+    readonly edges: readonly WorkflowCandidateTopicHarnessGraphEdgeRow[];
+    readonly totals: {
+        readonly fact_count: number;
+        readonly edge_count: number;
+        readonly rejected_count: number;
+        readonly accepted_count: number;
+        readonly deferred_count: number;
+        readonly revised_count: number;
     };
 }
 
@@ -1685,6 +1702,10 @@ export function renderWorkflowCandidateTopicReportText(report: WorkflowCandidate
             `persisted harness edges: ${report.persisted_harness_facts.totals.edge_count}`,
             `persisted harness status: ${report.persisted_harness_facts.totals.passed_count} passed, ${report.persisted_harness_facts.totals.failed_count} failed`,
         ] : []),
+        ...(report.persisted_review_facts ? [
+            `persisted review facts: ${report.persisted_review_facts.totals.fact_count}`,
+            `persisted review status: ${report.persisted_review_facts.totals.rejected_count} rejected, ${report.persisted_review_facts.totals.accepted_count} accepted, ${report.persisted_review_facts.totals.deferred_count} deferred, ${report.persisted_review_facts.totals.revised_count} revised`,
+        ] : []),
         ...(report.helper_explanations ? [
             `helper explanations: ${report.helper_explanations.totals.matched_example_count}`,
             `helper matched candidates: ${report.helper_explanations.totals.matched_candidate_count}`,
@@ -1737,6 +1758,16 @@ export function renderWorkflowCandidateTopicReportText(report: WorkflowCandidate
     if (report.persisted_harness_facts && report.persisted_harness_facts.facts.length > 0) {
         lines.push("", "persisted harness facts:");
         for (const fact of report.persisted_harness_facts.facts) {
+            lines.push(
+                `  - ${fact.predicate ?? "unknown"} ${fact.graph_id ?? "unknown-fact"}`,
+                `    subject: ${fact.subject ?? "unknown-subject"}`,
+                `    object: ${fact.object ?? "unknown-object"}`,
+            );
+        }
+    }
+    if (report.persisted_review_facts && report.persisted_review_facts.facts.length > 0) {
+        lines.push("", "persisted review facts:");
+        for (const fact of report.persisted_review_facts.facts) {
             lines.push(
                 `  - ${fact.predicate ?? "unknown"} ${fact.graph_id ?? "unknown-fact"}`,
                 `    subject: ${fact.subject ?? "unknown-subject"}`,
@@ -2356,6 +2387,27 @@ export function buildWorkflowCandidateTopicHarnessGraphListReport(input: {
     };
 }
 
+export function buildWorkflowCandidateTopicReviewGraphListReport(input: {
+    readonly topic?: string;
+    readonly facts: readonly WorkflowCandidateTopicHarnessGraphFactRow[];
+    readonly edges: readonly WorkflowCandidateTopicHarnessGraphEdgeRow[];
+}): WorkflowCandidateTopicReviewGraphListReport {
+    return {
+        schema: "ax.workflow_topic_review_graph_list.v1",
+        ...(input.topic === undefined ? {} : { topic: input.topic }),
+        facts: input.facts,
+        edges: input.edges,
+        totals: {
+            fact_count: input.facts.length,
+            edge_count: input.edges.length,
+            rejected_count: input.facts.filter((fact) => fact.predicate === "reject").length,
+            accepted_count: input.facts.filter((fact) => fact.predicate === "accept").length,
+            deferred_count: input.facts.filter((fact) => fact.predicate === "defer").length,
+            revised_count: input.facts.filter((fact) => fact.predicate === "revise").length,
+        },
+    };
+}
+
 export function renderWorkflowCandidateTopicHarnessGraphListText(
     report: WorkflowCandidateTopicHarnessGraphListReport,
 ): string {
@@ -2668,6 +2720,10 @@ export function renderWorkflowCandidateTopicEvidencePackMarkdown(report: Workflo
             `- Persisted harness facts: \`${report.persisted_harness_facts.totals.fact_count}\``,
             `- Persisted harness status: \`${report.persisted_harness_facts.totals.passed_count} passed, ${report.persisted_harness_facts.totals.failed_count} failed\``,
         ] : []),
+        ...(report.persisted_review_facts ? [
+            `- Persisted review facts: \`${report.persisted_review_facts.totals.fact_count}\``,
+            `- Persisted review status: \`${report.persisted_review_facts.totals.rejected_count} rejected, ${report.persisted_review_facts.totals.accepted_count} accepted, ${report.persisted_review_facts.totals.deferred_count} deferred, ${report.persisted_review_facts.totals.revised_count} revised\``,
+        ] : []),
         ...(report.helper_explanations ? [
             `- Helper explanations: \`${report.helper_explanations.totals.matched_example_count}\``,
             `- Helper matched candidates: \`${report.helper_explanations.totals.matched_candidate_count}\``,
@@ -2788,6 +2844,33 @@ export function renderWorkflowCandidateTopicEvidencePackMarkdown(report: Workflo
             if (typeof props.candidate_id === "string" && props.candidate_id.length > 0) {
                 lines.push(`- Candidate id: \`${props.candidate_id}\``);
             }
+            if (typeof fact.value_json === "string" && fact.value_json.length > 0) {
+                lines.push(`- Value: \`${fact.value_json}\``);
+            }
+            lines.push("");
+        }
+    }
+    if (report.persisted_review_facts && report.persisted_review_facts.facts.length > 0) {
+        lines.push("## Persisted Review Facts", "");
+        for (const fact of report.persisted_review_facts.facts) {
+            lines.push(
+                `### ${fact.graph_id ?? "unknown-fact"}`,
+                "",
+                `- Predicate: \`${fact.predicate ?? "unknown"}\``,
+                `- Subject: \`${fact.subject ?? "unknown-subject"}\``,
+                `- Object: \`${fact.object ?? "unknown-object"}\``,
+            );
+            const props = parseProperties(fact.properties_json);
+            if (typeof props.candidate_id === "string" && props.candidate_id.length > 0) {
+                lines.push(`- Candidate id: \`${props.candidate_id}\``);
+            }
+            if (typeof props.rationale === "string" && props.rationale.length > 0) {
+                lines.push(`- Rationale: ${props.rationale}`);
+            }
+            const helperSources = Array.isArray(props.helper_source_fixture_ids)
+                ? props.helper_source_fixture_ids.filter((entry): entry is string => typeof entry === "string")
+                : [];
+            for (const source of helperSources) lines.push(`- Helper source fixture: \`${source}\``);
             if (typeof fact.value_json === "string" && fact.value_json.length > 0) {
                 lines.push(`- Value: \`${fact.value_json}\``);
             }
@@ -3090,6 +3173,35 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                         edges: persistedHarnessRows?.[1] ?? [],
                     }),
                 });
+            }
+            if (input.includeReviewFacts) {
+                const topicWhere = `AND string::lowercase(properties_json) CONTAINS ${surrealString(topic.toLowerCase())}`;
+                const persistedReviewRows = yield* db.query<[
+                    WorkflowCandidateTopicHarnessGraphFactRow[],
+                    WorkflowCandidateTopicHarnessGraphEdgeRow[],
+                ]>(`
+                    SELECT graph_id, subject, predicate, object, value_json, properties_json, type::string(updated_at) AS updated_at
+                    FROM classifier_graph_fact
+                    WHERE kind = "workflow_topic_candidate_review"
+                      AND source_kind = "workflow_topic_candidate_review"
+                      ${topicWhere}
+                    ORDER BY updated_at DESC
+                    LIMIT ${Math.max(1, input.limit)};
+                    SELECT graph_id, kind, from_id, to_id, evidence_path, properties_json, type::string(updated_at) AS updated_at
+                    FROM classifier_graph_edge
+                    WHERE source_kind = "workflow_topic_candidate_review"
+                      ${topicWhere}
+                    ORDER BY updated_at DESC
+                    LIMIT ${Math.max(1, input.limit * 3)};
+                `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+                topicReport = {
+                    ...topicReport,
+                    persisted_review_facts: buildWorkflowCandidateTopicReviewGraphListReport({
+                        topic,
+                        facts: persistedReviewRows?.[0] ?? [],
+                        edges: persistedReviewRows?.[1] ?? [],
+                    }),
+                };
             }
             if (input.includeHelperFacts) {
                 const helperRows = yield* db.query<[

@@ -1922,6 +1922,7 @@ const classifiersWorkflowCandidatesCommand = Command.make(
         listHarnessFacts: Flag.boolean("list-harness-facts").pipe(Flag.withDefault(false)),
         includeHarnessFacts: Flag.boolean("include-harness-facts").pipe(Flag.withDefault(false)),
         includeHelperFacts: Flag.boolean("include-helper-facts").pipe(Flag.withDefault(false)),
+        includeReviewFacts: Flag.boolean("include-review-facts").pipe(Flag.withDefault(false)),
         proposalStatus: Flag.choice("proposal-status", ["all", "open", "accepted", "rejected"] as const).pipe(Flag.withDefault("all")),
         expandEvidence: Flag.boolean("expand-evidence").pipe(Flag.withDefault(false)),
         evidencePack: Flag.string("evidence-pack").pipe(Flag.optional),
@@ -1949,7 +1950,7 @@ const classifiersWorkflowCandidatesCommand = Command.make(
         proposalSection: Flag.string("proposal-section").pipe(Flag.optional),
         json: jsonFlag,
     },
-    ({ sourceKind, action, classifier, search, taskLike, topicReport, listProposals, listHarnessFacts, includeHarnessFacts, includeHelperFacts, proposalStatus, expandEvidence, evidencePack, classifierFixturePack, harnessFacts, harnessWritePlan, applyHarnessFacts, reviewFacts, reviewWritePlan, applyReviewFacts, limit, examples, out, brief, syncBrief, promoteTasks, emitAdjacentTasks, promoteHarnessProposals, requireHarnessChecks, promoteProposals, proposalDryRun, promotionMode, taskDir, proposalTarget, proposalSection, json }) => {
+    ({ sourceKind, action, classifier, search, taskLike, topicReport, listProposals, listHarnessFacts, includeHarnessFacts, includeHelperFacts, includeReviewFacts, proposalStatus, expandEvidence, evidencePack, classifierFixturePack, harnessFacts, harnessWritePlan, applyHarnessFacts, reviewFacts, reviewWritePlan, applyReviewFacts, limit, examples, out, brief, syncBrief, promoteTasks, emitAdjacentTasks, promoteHarnessProposals, requireHarnessChecks, promoteProposals, proposalDryRun, promotionMode, taskDir, proposalTarget, proposalSection, json }) => {
         const actionValue = optionValue(action);
         const classifierValue = optionValue(classifier);
         const searchValue = optionValue(search);
@@ -1978,6 +1979,7 @@ const classifiersWorkflowCandidatesCommand = Command.make(
             listHarnessFacts,
             includeHarnessFacts,
             includeHelperFacts,
+            includeReviewFacts,
             proposalStatus: proposalStatus as WorkflowCandidateProposalStatusFilter,
             expandEvidence,
             ...(evidencePackPath === undefined ? {} : { evidencePack: evidencePackPath }),
