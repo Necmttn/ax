@@ -11790,6 +11790,76 @@ Decision:
 - Hard-negative and dedupe outputs are now review queues with evidence refs,
   which gives the next slice a concrete object to project into graph facts.
 
+## E211 - Embedding Helper Graph Projection
+
+Question:
+
+- Can the reviewed embedding/SVM helper artifact become graph facts that AX can
+  query for advisory routing, hard-negative review candidates, nearest-neighbor
+  evidence, and dedupe review clusters?
+
+Implementation:
+
+- Added
+  `packages/ax-classifier-session-sections/embedding_helper_graph_projection.py`.
+- Added `bun run classifiers:embedding-helper-graph-projection`.
+- Added package operation `embedding-helper-graph-projection`.
+- The projection emits:
+  - an advisory routing candidate fact for the reviewed threshold
+  - pending hard-negative review candidate facts
+  - nearest-neighbor fixture evidence edges
+  - pending dedupe-review cluster facts
+  - a Surreal write plan targeting `classifier_graph_node`,
+    `classifier_graph_edge`, and `classifier_graph_fact`
+- Applied the generated write plan to the local SurrealDB classifier graph.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/embedding_helper_graph_projection_test.py
+bun run classifiers:embedding-helper-graph-projection -- --review=.ax/experiments/embedding-helper-review-e210.json --out=.ax/experiments/embedding-helper-graph-projection-e211.json --write-plan=.ax/experiments/embedding-helper-graph-write-plan-e211.json
+bun run classifiers:graph-write-plan-apply -- --write-plan=.ax/experiments/embedding-helper-graph-write-plan-e211.json --out=.ax/experiments/embedding-helper-graph-apply-e211.json --json
+printf 'SELECT count() AS count FROM classifier_graph_node WHERE source_kind = "embedding_helper_review_projection" GROUP ALL; SELECT count() AS count FROM classifier_graph_edge WHERE source_kind = "embedding_helper_review_projection" GROUP ALL; SELECT count() AS count FROM classifier_graph_fact WHERE source_kind = "embedding_helper_review_projection" GROUP ALL; SELECT predicate, count() AS count FROM classifier_graph_fact WHERE source_kind = "embedding_helper_review_projection" GROUP BY predicate;' | surreal sql --hide-welcome --json --multi --endpoint http://127.0.0.1:8521 --user root --pass root --ns ax --db main
+```
+
+Artifacts:
+
+- `.ax/experiments/embedding-helper-graph-projection-e211.json`
+- `.ax/experiments/embedding-helper-graph-write-plan-e211.json`
+- `.ax/experiments/embedding-helper-graph-apply-e211.json`
+
+Results:
+
+- Projection decision: `embedding_helper_graph_projection_ready`
+- Projection health: `healthy`
+- Nodes/edges/facts: `75/110/17`
+- Fact breakdown:
+  - routing candidate: `1`
+  - hard-negative candidates: `15`
+  - dedupe clusters: `1`
+- Nearest-neighbor edges: `75`
+- Write plan decision: `ready_to_apply`
+- Write plan statements: `202`
+- Apply decision: `applied`
+- Persisted counts by `source_kind = "embedding_helper_review_projection"`:
+  - `classifier_graph_node`: `75`
+  - `classifier_graph_edge`: `110`
+  - `classifier_graph_fact`: `17`
+- Persisted fact predicates:
+  - `recommended_threshold`: `1`
+  - `pending_human_acceptance`: `15`
+  - `pending_dedupe_review`: `1`
+
+Decision:
+
+- The embedding helper layer is now queryable through the classifier graph as
+  advisory evidence, not just raw experiment output.
+- This does not promote SVM routing into runtime behavior. It records the
+  reviewed helper signals needed for later query surfaces and promotion gates.
+- Next useful slice: add a focused graph/list query mode for
+  `embedding_helper_review_projection` so agents can ask "what helper evidence
+  needs review?" without writing raw SurrealQL.
+
 ## Next Candidate - Embedding/SVM Helper Layer
 
 Hypothesis:

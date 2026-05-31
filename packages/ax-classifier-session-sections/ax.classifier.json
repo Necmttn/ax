@@ -96,6 +96,19 @@
       ]
     },
     {
+      "id": "embedding-helper-graph-projection",
+      "kind": "status",
+      "description": "Project reviewed embedding helper routing, hard-negative, nearest-neighbor, and dedupe evidence into graph-ready facts and a Surreal write plan.",
+      "command": "bun run classifiers:embedding-helper-graph-projection -- --review=.ax/experiments/embedding-helper-review-current.json --out=.ax/experiments/embedding-helper-graph-projection-current.json --write-plan=.ax/experiments/embedding-helper-graph-write-plan-current.json",
+      "inputs": [
+        ".ax/experiments/embedding-helper-review-current.json"
+      ],
+      "outputs": [
+        ".ax/experiments/embedding-helper-graph-projection-current.json",
+        ".ax/experiments/embedding-helper-graph-write-plan-current.json"
+      ]
+    },
+    {
       "id": "hybrid-gate-eval",
       "kind": "eval",
       "description": "Evaluate deterministic plus SetFit hybrid gating against exported model windows.",
