@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E369 adds
-  `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-outputs-e369.json`
+- Index continuation: E370 adds
+  `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-output-checks-e370.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-output-artifacts-e369.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-output-checks-e370.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,57 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E370 - Expose Recommended Action Output Checks
+
+Question:
+- E369 exposes recommended action output artifact paths, but can a service
+  also know which checks to run and whether they are required for command
+  success without reopening the source lifecycle artifact?
+
+Implementation:
+- Added `recommended_action_output_checks` to review-pipeline lifecycle status
+  and lifecycle insight.
+- Loaded descriptors from lifecycle `prepared.output_artifact_checks`.
+- Rendered each descriptor as:
+  `kind path=<path> index=<argv_index> check=<check> status=<status> required_for_command_success=<boolean>`.
+- Projected descriptors into lifecycle graph fact
+  `review_pipeline_recommended_action_output_checks`.
+- Lifecycle text now renders `recommended action output checks`.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-output-checks-e370.json`
+- `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-output-checks-e370.json`
+- `.ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-output-checks-e370.json`
+- `.ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-output-checks-e370.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-output-checks-e370.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-output-checks-e370.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-output-checks-e370.txt`
+
+Results:
+- Fact projection and lifecycle graph query expose:
+  - `review_brief path=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-output-checks-e370.md index=10 check=file_exists_after_execution status=pending_execution required_for_command_success=true`
+  - `readiness_report path=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-output-checks-e370.json index=11 check=file_exists_after_execution status=pending_execution required_for_command_success=true`
+- Lifecycle graph query by
+  `review_pipeline_recommended_action_output_checks` returns exactly one
+  lifecycle fact.
+- Lifecycle insight JSON/text render the same output-check descriptors.
+
+Decision:
+- Services can now verify recommended action outputs from graph/lifecycle data
+  after execution, completing the recommended action execution contract with
+  command kind, blockers, input bindings, output artifacts, and output checks.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E370 fact projection and lifecycle graph query include the recommended action
+  output checks with `index=`, `check=file_exists_after_execution`,
+  `status=pending_execution`, and `required_for_command_success=true`.
+- E370 lifecycle insight JSON/text render both output-check descriptors.
 
 ## E369 - Expose Recommended Action Output Artifacts
 

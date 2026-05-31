@@ -524,6 +524,7 @@ describe("classifier package operations report", () => {
                 recommended_action_missing_inputs: ["reviewer"],
                 recommended_action_input_bindings: ["reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string"],
                 recommended_action_output_artifacts: ["review_brief path=.ax/experiments/review.md flag=--coverage-review-brief index=10 prefix=--coverage-review-brief= required_for_handoff=true"],
+                recommended_action_output_checks: ["review_brief path=.ax/experiments/review.md index=10 check=file_exists_after_execution status=pending_execution required_for_command_success=true"],
                 output_artifacts: [
                     { kind: "review_brief", path: ".ax/experiments/review.md", required_for_handoff: true },
                     { kind: "readiness_report", path: ".ax/experiments/readiness.json", required_for_handoff: false },
@@ -537,7 +538,7 @@ describe("classifier package operations report", () => {
             next_actions: [],
         });
 
-        expect(report.totals.lifecycle_fact_count).toBe(23);
+        expect(report.totals.lifecycle_fact_count).toBe(24);
         expect(report.nodes).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 id: "classifier_lifecycle:workflow_candidate_review_pipeline",
@@ -622,6 +623,10 @@ describe("classifier package operations report", () => {
                 value: ["review_brief path=.ax/experiments/review.md flag=--coverage-review-brief index=10 prefix=--coverage-review-brief= required_for_handoff=true"],
             }),
             expect.objectContaining({
+                predicate: "review_pipeline_recommended_action_output_checks",
+                value: ["review_brief path=.ax/experiments/review.md index=10 check=file_exists_after_execution status=pending_execution required_for_command_success=true"],
+            }),
+            expect.objectContaining({
                 predicate: "review_pipeline_output_artifact_paths",
                 value: [".ax/experiments/review.md", ".ax/experiments/readiness.json"],
             }),
@@ -687,6 +692,10 @@ describe("classifier package operations report", () => {
                             { kind: "readiness_report", path: "one.json", argv_flag: "--out", argv_index: 11, argv_value_prefix: "--out=", required_for_handoff: false },
                             { kind: "review_brief", path: "two.md", argv_flag: "--coverage-review-brief", argv_index: 10, argv_value_prefix: "--coverage-review-brief=", required_for_handoff: true },
                         ],
+                        output_artifact_checks: [
+                            { kind: "readiness_report", path: "one.json", argv_index: 11, check: "file_exists_after_execution", status: "pending_execution", required_for_command_success: true },
+                            { kind: "review_brief", path: "two.md", argv_index: 10, check: "file_exists_after_execution", status: "pending_execution", required_for_command_success: true },
+                        ],
                     },
                 },
             },
@@ -718,6 +727,10 @@ describe("classifier package operations report", () => {
             recommended_action_output_artifacts: [
                 "readiness_report path=one.json flag=--out index=11 prefix=--out= required_for_handoff=false",
                 "review_brief path=two.md flag=--coverage-review-brief index=10 prefix=--coverage-review-brief= required_for_handoff=true",
+            ],
+            recommended_action_output_checks: [
+                "readiness_report path=one.json index=11 check=file_exists_after_execution status=pending_execution required_for_command_success=true",
+                "review_brief path=two.md index=10 check=file_exists_after_execution status=pending_execution required_for_command_success=true",
             ],
             output_artifacts: [
                 { kind: "readiness_report", path: "one.json", required_for_handoff: false },
@@ -1883,6 +1896,7 @@ describe("classifier package operations report", () => {
                     recommended_action_missing_inputs: [],
                     recommended_action_input_bindings: ["reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string"],
                     recommended_action_output_artifacts: ["review_brief path=.ax/experiments/review.md flag=--coverage-review-brief index=10 prefix=--coverage-review-brief= required_for_handoff=true"],
+                    recommended_action_output_checks: ["review_brief path=.ax/experiments/review.md index=10 check=file_exists_after_execution status=pending_execution required_for_command_success=true"],
                     review_issue_repair_argv: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
                     output_artifacts: [{
                         kind: "review_brief",
@@ -1920,6 +1934,7 @@ describe("classifier package operations report", () => {
             recommended_action_missing_inputs: [],
             recommended_action_input_bindings: ["reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string"],
             recommended_action_output_artifacts: ["review_brief path=.ax/experiments/review.md flag=--coverage-review-brief index=10 prefix=--coverage-review-brief= required_for_handoff=true"],
+            recommended_action_output_checks: ["review_brief path=.ax/experiments/review.md index=10 check=file_exists_after_execution status=pending_execution required_for_command_success=true"],
             output_artifacts: [{
                 kind: "review_brief",
                 path: ".ax/experiments/review.md",

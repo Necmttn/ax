@@ -496,6 +496,9 @@ export function renderClassifierLifecycleInsightText(report: ClassifierLifecycle
         if (pipeline.recommended_action_output_artifacts && pipeline.recommended_action_output_artifacts.length > 0) {
             lines.push(`  recommended action output artifacts: ${pipeline.recommended_action_output_artifacts.join("; ")}`);
         }
+        if (pipeline.recommended_action_output_checks && pipeline.recommended_action_output_checks.length > 0) {
+            lines.push(`  recommended action output checks: ${pipeline.recommended_action_output_checks.join("; ")}`);
+        }
         lines.push(`  outputs: ${pipeline.output_verification_status ?? "unknown"} checked=${pipeline.checked_artifact_count} missing=${pipeline.missing_required_artifact_count}`);
         if (pipeline.output_artifacts.length > 0) {
             lines.push(`  output artifacts: ${pipeline.output_artifacts.map((artifact) => `${artifact.kind ?? "artifact"}=${artifact.path}`).join(", ")}`);
