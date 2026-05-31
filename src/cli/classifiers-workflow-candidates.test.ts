@@ -1735,6 +1735,11 @@ describe("classifiers workflow-candidates", () => {
         expect(brief).toContain("- Missing reviewed-at timestamps: `0`");
         expect(brief).toContain("- Invalid reviewed-at timestamps: `0`");
         expect(brief).toContain("- Provenance status: `complete_review_provenance`");
+        expect(brief).toContain("- Handoff status: `complete_review_handoff`");
+        expect(brief).toContain("- Handoff missing paths: `none`");
+        expect(brief).toContain("- Handoff apply guard: `no_reviewed_fixtures`");
+        expect(brief).toContain("- Handoff blockers: `no_reviewed_fixtures`");
+        expect(brief).toContain("- Handoff blocker remediations: no_reviewed_fixtures: Review at least one fixture and add a rationale before applying.");
         expect(brief).toContain("- Strict provenance apply guard: `no_reviewed_fixtures`");
         expect(brief).toContain("- Strict provenance blockers: `no_reviewed_fixtures`");
         expect(brief).toContain("- Strict provenance blocker remediations: no_reviewed_fixtures: Review at least one fixture and add a rationale before applying.");

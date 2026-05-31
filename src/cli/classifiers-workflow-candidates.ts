@@ -3040,6 +3040,27 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
     const syncedBriefPath = context.coverageReviewBrief ?? ".ax/experiments/workflow-candidate-review-coverage-reviewed.md";
     const reviewFactsPath = siblingOutputPath(readinessOutputPath, "-review-facts");
     const reviewWritePlanPath = siblingOutputPath(readinessOutputPath, "-review-write-plan");
+    const handoffMissingPaths = workflowCandidateReviewCoverageHandoffMissingPaths({
+        reviewFactsPath,
+        reviewWritePlanPath,
+        ...(context.coverageReviewBrief === undefined ? {} : {
+            reviewBriefPath: context.coverageReviewBrief,
+            syncedReviewBriefPath: context.coverageReviewBrief,
+        }),
+    });
+    const handoffStatus: WorkflowCandidateReviewCoverageHandoffStatus = handoffMissingPaths.length === 0
+        ? "complete_review_handoff"
+        : "incomplete_review_handoff";
+    const handoffApplyGuard: WorkflowCandidateReviewCoverageApplyGuard =
+        applyGuard === "ready_to_apply" && handoffMissingPaths.length > 0
+            ? "missing_review_handoff"
+            : applyGuard;
+    const handoffApplyBlockers: WorkflowCandidateReviewCoverageApplyBlocker[] = [
+        ...applyBlockers,
+        ...(applyGuard === "ready_to_apply" && handoffMissingPaths.length > 0
+            ? ["missing_review_handoff" as const]
+            : []),
+    ];
     const postApplyRecheckCommand = workflowCandidateReviewCoverageRecheckCommand({
         sourceKind,
         ...(context.limit === undefined ? {} : { limit: context.limit }),
@@ -3137,12 +3158,17 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
         `- Missing reviewed-at timestamps: \`${missingReviewedAtCount}\``,
         `- Invalid reviewed-at timestamps: \`${invalidReviewedAtCount}\``,
         `- Provenance status: \`${provenanceStatus}\``,
+        `- Handoff status: \`${handoffStatus}\``,
+        `- Handoff missing paths: ${handoffMissingPaths.length === 0 ? "`none`" : handoffMissingPaths.map((path) => `\`${path}\``).join(", ")}`,
+        `- Handoff apply guard: \`${handoffApplyGuard}\``,
+        `- Handoff blockers: ${handoffApplyBlockers.length === 0 ? "`none`" : handoffApplyBlockers.map((blocker) => `\`${blocker}\``).join(", ")}`,
         `- Smoke markers: \`${smokeMarkerCount}\``,
         `- Apply guard: \`${applyGuard}\``,
         `- Apply blockers: ${applyBlockers.length === 0 ? "`none`" : applyBlockers.map((blocker) => `\`${blocker}\``).join(", ")}`,
         `- Strict provenance apply guard: \`${strictApplyGuard}\``,
         `- Strict provenance blockers: ${strictApplyBlockers.length === 0 ? "`none`" : strictApplyBlockers.map((blocker) => `\`${blocker}\``).join(", ")}`,
         `- Blocker remediations: ${applyBlockers.length === 0 ? "none" : applyBlockers.map((blocker) => `${blocker}: ${workflowCandidateReviewCoverageBlockerRemediation(blocker)}`).join(" | ")}`,
+        `- Handoff blocker remediations: ${handoffApplyBlockers.length === 0 ? "none" : handoffApplyBlockers.map((blocker) => `${blocker}: ${workflowCandidateReviewCoverageBlockerRemediation(blocker)}`).join(" | ")}`,
         `- Strict provenance blocker remediations: ${strictApplyBlockers.length === 0 ? "none" : strictApplyBlockers.map((blocker) => `${blocker}: ${workflowCandidateReviewCoverageBlockerRemediation(blocker)}`).join(" | ")}`,
         `- Next action: ${workflowCandidateReviewCoverageGuardNextAction(applyGuard)}`,
         "",
