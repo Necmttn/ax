@@ -11725,6 +11725,71 @@ Decision:
   facts, with routing treated as advisory until reviewed thresholds pass a
   stricter positive-recall gate.
 
+## E210 - Embedding Helper Review Artifacts
+
+Question:
+
+- Can the E209 embedding/SVM helper output become a reviewable artifact instead
+  of raw JSON, so routing, hard-negative, nearest-neighbor, and dedupe signals
+  can be inspected before any graph projection or model fixture promotion?
+
+Implementation:
+
+- Added `packages/ax-classifier-session-sections/embedding_helper_review.py`.
+- Added `bun run classifiers:embedding-helper-review`.
+- Added package operation `embedding-helper-review`.
+- The review builder:
+  - summarizes routing threshold sweeps across seeds
+  - selects a recommended threshold only when the mean positive-recall floor is
+    met
+  - merges hard-negative candidates across seeds
+  - preserves nearest-neighbor evidence for each candidate
+  - turns dedupe clusters into pending review items
+  - writes JSON, Markdown, and summary report artifacts
+- Updated the package README experiment track.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/embedding_helper_review_test.py
+bun run classifiers:embedding-helper-review -- --report=.ax/experiments/frozen-embedding-helper-svm-e209.json --out=.ax/experiments/embedding-helper-review-e210.json --brief=.ax/experiments/embedding-helper-review-e210.md --summary=.ax/experiments/embedding-helper-review-e210-report.json --min-positive-recall=0.9
+```
+
+Artifacts:
+
+- `.ax/experiments/embedding-helper-review-e210.json`
+- `.ax/experiments/embedding-helper-review-e210.md`
+- `.ax/experiments/embedding-helper-review-e210-report.json`
+
+Results:
+
+- Decision: `ready_for_helper_review`
+- Routing decision: `routing_candidate_ready_for_review`
+- Recommended threshold:
+  - threshold: `none`
+  - run count: `3`
+  - SetFit call reduction mean: `0.1778`
+  - positive recall mean: `0.9028`
+  - none rejection precision mean: `0.5833`
+  - none rejection recall mean: `0.5`
+  - positive false rejections mean: `2.33`
+- Review queues:
+  - hard-negative candidates: `15`
+  - dedupe clusters: `1`
+- Top repeated hard-negative candidates include:
+  - `session-section-chunks/none-start-building`
+  - `session-section-chunks/none-architecture-question`
+  - `session-section-chunks/none-model-size-question`
+
+Decision:
+
+- E210 makes the helper layer actionable without promoting it automatically.
+- The routing threshold is review-ready only as an advisory candidate; it still
+  needs graph projection and a stricter promotion gate before affecting runtime
+  classifier flow.
+- Hard-negative and dedupe outputs are now review queues with evidence refs,
+  which gives the next slice a concrete object to project into graph facts.
+
 ## Next Candidate - Embedding/SVM Helper Layer
 
 Hypothesis:

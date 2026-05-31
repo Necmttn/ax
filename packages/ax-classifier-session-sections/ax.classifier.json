@@ -82,6 +82,20 @@
       ]
     },
     {
+      "id": "embedding-helper-review",
+      "kind": "review",
+      "description": "Turn frozen embedding helper metrics into reviewable routing, hard-negative, nearest-neighbor, and dedupe artifacts.",
+      "command": "bun run classifiers:embedding-helper-review -- --report=.ax/experiments/frozen-embedding-helper-svm-current.json --out=.ax/experiments/embedding-helper-review-current.json --brief=.ax/experiments/embedding-helper-review-current.md --summary=.ax/experiments/embedding-helper-review-current-report.json --min-positive-recall=0.9",
+      "inputs": [
+        ".ax/experiments/frozen-embedding-helper-svm-current.json"
+      ],
+      "outputs": [
+        ".ax/experiments/embedding-helper-review-current.json",
+        ".ax/experiments/embedding-helper-review-current.md",
+        ".ax/experiments/embedding-helper-review-current-report.json"
+      ]
+    },
+    {
       "id": "hybrid-gate-eval",
       "kind": "eval",
       "description": "Evaluate deterministic plus SetFit hybrid gating against exported model windows.",

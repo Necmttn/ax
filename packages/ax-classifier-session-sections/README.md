@@ -80,6 +80,8 @@ Section outputs:
   split-safe model experiments.
 - `strict_none_gate_eval.py` evaluates candidate context/workflow-control
   `none` gates over synthetic blind scenarios without promoting them.
+- `embedding_helper_review.py` turns frozen embedding/SVM helper reports into
+  reviewable routing, hard-negative, nearest-neighbor, and dedupe artifacts.
 
 Optional model assets are expected under `.ax/experiments/`. They are not required to install the package and should not be committed by default.
 
@@ -121,6 +123,8 @@ bun run classifiers:review-sections -- --mode=generate --graph=.ax/experiments/g
 bun run classifiers:promotion-plan -- --review=.ax/experiments/graph-usefulness-review.json --out=.ax/experiments/graph-promotion-plan.json
 bun run classifiers:failure-analysis -- --out=.ax/experiments/setfit-failure-analysis.json
 bun run classifiers:setfit-robustness -- --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --test-ids=packages/ax-classifier-session-sections/eval-fixtures/fixed-fold-seed7-test-ids.json --label-mode=coarse --seeds=7,13,42 --epochs=2 --batch-size=8 --calibration-threshold=0.4 --out=.ax/experiments/setfit-robustness-fixed-fold.json
+bun run classifiers:frozen-embedding -- --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --model=sentence-transformers/all-MiniLM-L6-v2 --classifier=svm --label-mode=coarse --seeds=7,13,42 --calibration-threshold=0.4 --routing-thresholds=none,0.2,0.3,0.4 --nearest-neighbors=5 --dedupe-threshold=0.92 --hard-negative-limit=10 --out=.ax/experiments/frozen-embedding-helper-svm-current.json
+bun run classifiers:embedding-helper-review -- --report=.ax/experiments/frozen-embedding-helper-svm-current.json --out=.ax/experiments/embedding-helper-review-current.json --brief=.ax/experiments/embedding-helper-review-current.md --summary=.ax/experiments/embedding-helper-review-current-report.json --min-positive-recall=0.9
 bun run classifiers:relabel-audit -- --robustness=.ax/experiments/setfit-robustness-fixed-fold.json --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --out=.ax/experiments/setfit-relabel-audit.json
 bun run classifiers:blind-label-review -- --fixtures=.ax/experiments/blind-session-section-fixtures-e46.jsonl --review=.ax/experiments/blind-session-section-label-review-e49.json --brief=.ax/experiments/blind-session-section-label-review-e49.md --labeled-out=.ax/experiments/blind-session-section-fixtures-e49-labeled.jsonl --out=.ax/experiments/blind-session-section-label-review-e49-report.json --mode=generate
 bun run classifiers:blind-label-suggest -- --review=.ax/experiments/blind-session-section-label-review-e49.json --predictions=.ax/experiments/blind-session-section-predictions-e48.jsonl --out=.ax/experiments/blind-session-section-label-suggestions-e51.json --brief=.ax/experiments/blind-session-section-label-suggestions-e51.md --report=.ax/experiments/blind-session-section-label-suggestions-e51-report.json

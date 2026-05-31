@@ -54,6 +54,7 @@
     "classifiers:setfit-two-stage-calibration": "python3 packages/ax-classifier-session-sections/two_stage_calibration.py",
     "classifiers:setfit-two-stage-pregate": "python3 packages/ax-classifier-session-sections/two_stage_pregate.py",
     "classifiers:frozen-embedding": "uv run packages/ax-classifier-session-sections/frozen_embedding.py",
+    "classifiers:embedding-helper-review": "python3 packages/ax-classifier-session-sections/embedding_helper_review.py",
     "classifiers:project-fixtures": "python3 packages/ax-classifier-session-sections/projection.py",
     "classifiers:assemble-sections": "python3 packages/ax-classifier-session-sections/section_assembler.py",
     "classifiers:graph-usefulness": "python3 packages/ax-classifier-session-sections/graph_usefulness.py",
