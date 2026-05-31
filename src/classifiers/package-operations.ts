@@ -488,6 +488,7 @@ export interface ClassifierGraphQuerySuggestion {
     readonly repair_requires_inputs: boolean;
     readonly repair_required_inputs: readonly [];
     readonly repair_expected_query_match_status: "matched" | "not_applicable";
+    readonly repair_outcome_status: "expected_matches" | "not_applicable";
     readonly repair_expected_result_count?: number;
     readonly repair_blockers: readonly ["no_repair_needed"] | readonly [];
     readonly repair_blocker_details: readonly {
@@ -510,6 +511,7 @@ export interface ClassifierGraphQuerySuggestion {
         readonly remediation: string;
     }[];
     readonly repair_verification_expected_query_match_status: "matched" | "not_applicable";
+    readonly repair_verification_outcome_status: "expected_matches" | "not_applicable";
     readonly repair_verification_expected_result_count?: number;
     readonly repair_verification_argv: readonly string[];
     readonly repair_verification_query?: ClassifierGraphHealthQuery;
@@ -669,10 +671,7 @@ export function summarizeClassifierGraphQuerySuggestionRouting(
 
     const repair = {
         status: suggestion.repair_status,
-        outcome_status: classifierGraphQueryExpectedOutcomeStatus(
-            suggestion.repair_expected_query_match_status,
-            suggestion.repair_expected_result_count,
-        ),
+        outcome_status: suggestion.repair_outcome_status,
         execution_status: suggestion.repair_execution_status,
         next_action: suggestion.repair_next_action,
         command_kind: suggestion.repair_command_kind,
@@ -690,10 +689,7 @@ export function summarizeClassifierGraphQuerySuggestionRouting(
 
     const verification = {
         status: suggestion.repair_verification_status,
-        outcome_status: classifierGraphQueryExpectedOutcomeStatus(
-            suggestion.repair_verification_expected_query_match_status,
-            suggestion.repair_verification_expected_result_count,
-        ),
+        outcome_status: suggestion.repair_verification_outcome_status,
         execution_status: suggestion.repair_verification_execution_status,
         next_action: suggestion.repair_verification_next_action,
         command_kind: suggestion.repair_verification_command_kind,
@@ -2704,73 +2700,86 @@ export function buildExecutionGraphHealthReport(input: {
         querySuggestedQuery === undefined ||
         querySuggestedArgv === undefined
             ? undefined
-            : {
-                value_equals: querySuggestedValueEquals,
-                result_count: querySuggestedResultCount,
-                changed_filter_count: query.value_equals === querySuggestedValueEquals ? 0 : 1,
-                unchanged_filter_count: query.value_equals === querySuggestedValueEquals ? 1 : 0,
-                has_changed_filters: query.value_equals !== querySuggestedValueEquals,
-                changed_filters: query.value_equals === querySuggestedValueEquals ? [] : ["value_equals"],
-                unchanged_filters: query.value_equals === querySuggestedValueEquals ? ["value_equals"] : [],
-                repair_status: query.value_equals === querySuggestedValueEquals ? "no_repair_needed" : "repair_available",
-                repair_next_action: query.value_equals === querySuggestedValueEquals ? "use_current_query" : "run_repaired_query",
-                repair_remediation: query.value_equals === querySuggestedValueEquals
-                    ? "Use the current graph query; no filter repair is needed."
-                    : "Run the repaired graph query to inspect matching classifier lifecycle facts.",
-                repair_can_execute: query.value_equals !== querySuggestedValueEquals,
-                repair_execution_status: query.value_equals === querySuggestedValueEquals ? "not_needed" : "ready_to_execute",
-                repair_command_kind: query.value_equals === querySuggestedValueEquals ? "none" : "classifier_graph_query_repair",
-                repair_requires_inputs: false,
-                repair_required_inputs: [],
-                repair_expected_query_match_status: query.value_equals === querySuggestedValueEquals ? "not_applicable" : "matched",
-                ...(query.value_equals === querySuggestedValueEquals ? {} : { repair_expected_result_count: querySuggestedResultCount }),
-                repair_blockers: query.value_equals === querySuggestedValueEquals ? ["no_repair_needed"] : [],
-                repair_blocker_details: query.value_equals === querySuggestedValueEquals
-                    ? [{
-                        blocker: "no_repair_needed",
-                        remediation: "Use the current graph query; no repair execution is required.",
-                    }]
-                    : [],
-                repair_argv: query.value_equals === querySuggestedValueEquals ? [] : querySuggestedArgv,
-                repair_can_verify: query.value_equals !== querySuggestedValueEquals,
-                repair_verification_status: query.value_equals === querySuggestedValueEquals ? "not_needed" : "ready_to_verify",
-                repair_verification_execution_status: query.value_equals === querySuggestedValueEquals ? "not_needed" : "ready_to_execute",
-                repair_verification_next_action: query.value_equals === querySuggestedValueEquals ? "skip_verification" : "run_verification_query",
-                repair_verification_remediation: query.value_equals === querySuggestedValueEquals
-                    ? "Verification is not needed because no repair execution is required."
-                    : "Run the repair verification query and confirm it returns the expected matches.",
-                repair_verification_can_execute: query.value_equals !== querySuggestedValueEquals,
-                repair_verification_command_kind: query.value_equals === querySuggestedValueEquals ? "none" : "classifier_graph_query_repair_verification",
-                repair_verification_requires_inputs: false,
-                repair_verification_required_inputs: [],
-                repair_verification_blockers: query.value_equals === querySuggestedValueEquals ? ["no_repair_needed"] : [],
-                repair_verification_blocker_details: query.value_equals === querySuggestedValueEquals
-                    ? [{
-                        blocker: "no_repair_needed",
-                        remediation: "Use the current graph query; verification execution is not required.",
-                    }]
-                    : [],
-                repair_verification_expected_query_match_status: query.value_equals === querySuggestedValueEquals ? "not_applicable" : "matched",
-                ...(query.value_equals === querySuggestedValueEquals ? {} : { repair_verification_expected_result_count: querySuggestedResultCount }),
-                repair_verification_argv: query.value_equals === querySuggestedValueEquals ? [] : querySuggestedArgv,
-                ...(query.value_equals === querySuggestedValueEquals ? {} : { repair_verification_query: querySuggestedQuery }),
-                ...(query.value_equals === querySuggestedValueEquals ? {} : { repair_query: querySuggestedQuery }),
-                status: querySuggestedStatus,
-                next_action: querySuggestedNextAction,
-                remediation: querySuggestedRemediation,
-                source: "lifecycle_available_value_counts",
-                reason: "available_value_after_relaxing_value_equals",
-                relaxed_filters: ["value_equals"],
-                original_query: query,
-                query: querySuggestedQuery,
-                filter_changes: [{
-                    filter: "value_equals",
-                    ...(query.value_equals === undefined ? {} : { from: query.value_equals }),
-                    to: querySuggestedValueEquals,
-                    status: query.value_equals === querySuggestedValueEquals ? "unchanged" : "changed",
-                }],
-                argv: querySuggestedArgv,
-            };
+            : (() => {
+                const repairExpectedQueryMatchStatus = query.value_equals === querySuggestedValueEquals ? "not_applicable" : "matched";
+                const repairVerificationExpectedQueryMatchStatus = query.value_equals === querySuggestedValueEquals ? "not_applicable" : "matched";
+                const repairExpectedResultCount = query.value_equals === querySuggestedValueEquals ? undefined : querySuggestedResultCount;
+                const repairVerificationExpectedResultCount = query.value_equals === querySuggestedValueEquals ? undefined : querySuggestedResultCount;
+                return {
+                    value_equals: querySuggestedValueEquals,
+                    result_count: querySuggestedResultCount,
+                    changed_filter_count: query.value_equals === querySuggestedValueEquals ? 0 : 1,
+                    unchanged_filter_count: query.value_equals === querySuggestedValueEquals ? 1 : 0,
+                    has_changed_filters: query.value_equals !== querySuggestedValueEquals,
+                    changed_filters: query.value_equals === querySuggestedValueEquals ? [] : ["value_equals"],
+                    unchanged_filters: query.value_equals === querySuggestedValueEquals ? ["value_equals"] : [],
+                    repair_status: query.value_equals === querySuggestedValueEquals ? "no_repair_needed" : "repair_available",
+                    repair_next_action: query.value_equals === querySuggestedValueEquals ? "use_current_query" : "run_repaired_query",
+                    repair_remediation: query.value_equals === querySuggestedValueEquals
+                        ? "Use the current graph query; no filter repair is needed."
+                        : "Run the repaired graph query to inspect matching classifier lifecycle facts.",
+                    repair_can_execute: query.value_equals !== querySuggestedValueEquals,
+                    repair_execution_status: query.value_equals === querySuggestedValueEquals ? "not_needed" : "ready_to_execute",
+                    repair_command_kind: query.value_equals === querySuggestedValueEquals ? "none" : "classifier_graph_query_repair",
+                    repair_requires_inputs: false,
+                    repair_required_inputs: [],
+                    repair_expected_query_match_status: repairExpectedQueryMatchStatus,
+                    repair_outcome_status: classifierGraphQueryExpectedOutcomeStatus(repairExpectedQueryMatchStatus, repairExpectedResultCount),
+                    ...(repairExpectedResultCount === undefined ? {} : { repair_expected_result_count: repairExpectedResultCount }),
+                    repair_blockers: query.value_equals === querySuggestedValueEquals ? ["no_repair_needed"] : [],
+                    repair_blocker_details: query.value_equals === querySuggestedValueEquals
+                        ? [{
+                            blocker: "no_repair_needed",
+                            remediation: "Use the current graph query; no repair execution is required.",
+                        }]
+                        : [],
+                    repair_argv: query.value_equals === querySuggestedValueEquals ? [] : querySuggestedArgv,
+                    repair_can_verify: query.value_equals !== querySuggestedValueEquals,
+                    repair_verification_status: query.value_equals === querySuggestedValueEquals ? "not_needed" : "ready_to_verify",
+                    repair_verification_execution_status: query.value_equals === querySuggestedValueEquals ? "not_needed" : "ready_to_execute",
+                    repair_verification_next_action: query.value_equals === querySuggestedValueEquals ? "skip_verification" : "run_verification_query",
+                    repair_verification_remediation: query.value_equals === querySuggestedValueEquals
+                        ? "Verification is not needed because no repair execution is required."
+                        : "Run the repair verification query and confirm it returns the expected matches.",
+                    repair_verification_can_execute: query.value_equals !== querySuggestedValueEquals,
+                    repair_verification_command_kind: query.value_equals === querySuggestedValueEquals ? "none" : "classifier_graph_query_repair_verification",
+                    repair_verification_requires_inputs: false,
+                    repair_verification_required_inputs: [],
+                    repair_verification_blockers: query.value_equals === querySuggestedValueEquals ? ["no_repair_needed"] : [],
+                    repair_verification_blocker_details: query.value_equals === querySuggestedValueEquals
+                        ? [{
+                            blocker: "no_repair_needed",
+                            remediation: "Use the current graph query; verification execution is not required.",
+                        }]
+                        : [],
+                    repair_verification_expected_query_match_status: repairVerificationExpectedQueryMatchStatus,
+                    repair_verification_outcome_status: classifierGraphQueryExpectedOutcomeStatus(
+                        repairVerificationExpectedQueryMatchStatus,
+                        repairVerificationExpectedResultCount,
+                    ),
+                    ...(repairVerificationExpectedResultCount === undefined ? {} : {
+                        repair_verification_expected_result_count: repairVerificationExpectedResultCount,
+                    }),
+                    repair_verification_argv: query.value_equals === querySuggestedValueEquals ? [] : querySuggestedArgv,
+                    ...(query.value_equals === querySuggestedValueEquals ? {} : { repair_verification_query: querySuggestedQuery }),
+                    ...(query.value_equals === querySuggestedValueEquals ? {} : { repair_query: querySuggestedQuery }),
+                    status: querySuggestedStatus,
+                    next_action: querySuggestedNextAction,
+                    remediation: querySuggestedRemediation,
+                    source: "lifecycle_available_value_counts",
+                    reason: "available_value_after_relaxing_value_equals",
+                    relaxed_filters: ["value_equals"],
+                    original_query: query,
+                    query: querySuggestedQuery,
+                    filter_changes: [{
+                        filter: "value_equals",
+                        ...(query.value_equals === undefined ? {} : { from: query.value_equals }),
+                        to: querySuggestedValueEquals,
+                        status: query.value_equals === querySuggestedValueEquals ? "unchanged" : "changed",
+                    }],
+                    argv: querySuggestedArgv,
+                };
+            })();
     const routingPolicyFloorsRequested = query.min_positive_recall !== undefined || query.min_call_reduction !== undefined;
     const routingPolicyCandidates = resultEmbeddingHelperFacts
         .filter((fact) => fact.kind === "embedding_helper_routing_candidate")

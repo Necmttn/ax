@@ -1292,6 +1292,7 @@ describe("classifier package operations report", () => {
             repair_requires_inputs: false,
             repair_required_inputs: [],
             repair_expected_query_match_status: "matched",
+            repair_outcome_status: "expected_matches",
             repair_expected_result_count: 1,
             repair_blockers: [],
             repair_blocker_details: [],
@@ -1319,6 +1320,7 @@ describe("classifier package operations report", () => {
             repair_verification_blockers: [],
             repair_verification_blocker_details: [],
             repair_verification_expected_query_match_status: "matched",
+            repair_verification_outcome_status: "expected_matches",
             repair_verification_expected_result_count: 1,
             repair_verification_argv: [
                 "bun",

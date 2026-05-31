@@ -795,6 +795,7 @@ describe("classifiers package-operations format", () => {
                 repair_requires_inputs: false,
                 repair_required_inputs: [],
                 repair_expected_query_match_status: "not_applicable",
+                repair_outcome_status: "not_applicable",
                 repair_blockers: ["no_repair_needed"],
                 repair_blocker_details: [{
                     blocker: "no_repair_needed",
@@ -816,6 +817,7 @@ describe("classifiers package-operations format", () => {
                     remediation: "Use the current graph query; verification execution is not required.",
                 }],
                 repair_verification_expected_query_match_status: "not_applicable",
+                repair_verification_outcome_status: "not_applicable",
                 repair_verification_argv: [],
                 status: "expected_matches",
                 next_action: "run_suggested_query",

@@ -4,7 +4,6 @@ import {
     ClassifierPackageService,
     type ClassifierPackageOperationReportInput,
 } from "../classifiers/package-service.ts";
-import { classifierGraphQueryExpectedOutcomeStatus } from "../classifiers/package-operations.ts";
 import type {
     ClassifierPackageExecutionFactProjectionReport,
     ClassifierPackageExecutionHistoryReport,
@@ -376,12 +375,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         ? "none"
         : String(report.query_suggestion.repair_can_execute);
     const querySuggestionRepairExecutionStatus = report.query_suggestion?.repair_execution_status ?? "none";
-    const querySuggestionRepairOutcomeStatus = report.query_suggestion === undefined
-        ? "none"
-        : classifierGraphQueryExpectedOutcomeStatus(
-            report.query_suggestion.repair_expected_query_match_status,
-            report.query_suggestion.repair_expected_result_count,
-        );
+    const querySuggestionRepairOutcomeStatus = report.query_suggestion?.repair_outcome_status ?? "none";
     const querySuggestionRepairCommandKind = report.query_suggestion?.repair_command_kind ?? "none";
     const querySuggestionRepairRequiresInputs = report.query_suggestion === undefined
         ? "none"
@@ -399,12 +393,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         : String(report.query_suggestion.repair_can_verify);
     const querySuggestionRepairVerificationStatus = report.query_suggestion?.repair_verification_status ?? "none";
     const querySuggestionRepairVerificationExecutionStatus = report.query_suggestion?.repair_verification_execution_status ?? "none";
-    const querySuggestionRepairVerificationOutcomeStatus = report.query_suggestion === undefined
-        ? "none"
-        : classifierGraphQueryExpectedOutcomeStatus(
-            report.query_suggestion.repair_verification_expected_query_match_status,
-            report.query_suggestion.repair_verification_expected_result_count,
-        );
+    const querySuggestionRepairVerificationOutcomeStatus = report.query_suggestion?.repair_verification_outcome_status ?? "none";
     const querySuggestionRepairVerificationNextAction = report.query_suggestion?.repair_verification_next_action ?? "none";
     const querySuggestionRepairVerificationRemediation = report.query_suggestion?.repair_verification_remediation ?? "none";
     const querySuggestionRepairVerificationCanExecute = report.query_suggestion === undefined
