@@ -2896,6 +2896,7 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
             ? ["missing_review_provenance" as const]
             : []),
     ];
+    const provenanceIssueRows = workflowCandidateReviewCoverageProvenanceIssueRows(reviewedRows);
     const sourceKind = context.sourceKind ?? "hybrid_window_classifier_projection";
     const readinessOutputPath = context.outputPath ?? ".ax/experiments/workflow-candidate-review-coverage-reviewed.json";
     const syncedBriefPath = context.coverageReviewBrief ?? ".ax/experiments/workflow-candidate-review-coverage-reviewed.md";
@@ -2973,6 +2974,14 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
         `- Blocker remediations: ${applyBlockers.length === 0 ? "none" : applyBlockers.map((blocker) => `${blocker}: ${workflowCandidateReviewCoverageBlockerRemediation(blocker)}`).join(" | ")}`,
         `- Strict provenance blocker remediations: ${strictApplyBlockers.length === 0 ? "none" : strictApplyBlockers.map((blocker) => `${blocker}: ${workflowCandidateReviewCoverageBlockerRemediation(blocker)}`).join(" | ")}`,
         `- Next action: ${workflowCandidateReviewCoverageGuardNextAction(applyGuard)}`,
+        "",
+        "## Provenance Issues",
+        "",
+        ...(provenanceIssueRows.length === 0
+            ? ["- _none_"]
+            : provenanceIssueRows.map((row) =>
+                `- \`${row.issue}\` fixture=\`${row.fixture_id}\` candidate=\`${row.candidate_id}\` reviewed_at=\`${row.reviewed_at || "none"}\``
+            )),
         "",
         ...(nextCommand === undefined ? [] : [
             "## Review Commands",

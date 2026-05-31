@@ -2148,6 +2148,12 @@ describe("classifiers workflow-candidates", () => {
             applied: false,
             requireReviewProvenance: true,
         });
+        const brief = renderWorkflowCandidateReviewCoverageBriefMarkdown(rows, {
+            sourceKind: "hybrid_window_classifier_projection",
+            coverageReviewPack: ".ax/experiments/reviewed-coverage-gaps.jsonl",
+            coverageReviewBrief: ".ax/experiments/reviewed-coverage-gaps.md",
+            outputPath: ".ax/experiments/reviewed-coverage-gaps.json",
+        });
 
         expect(summary).toMatchObject({
             apply_result: "blocked",
@@ -2171,6 +2177,8 @@ describe("classifiers workflow-candidates", () => {
                 reviewed_at: "not-a-date",
             }],
         });
+        expect(brief).toContain("## Provenance Issues");
+        expect(brief).toContain("- `invalid_reviewed_at` fixture=`workflow-candidate-review-coverage/verification_or_recovery_signal/a` candidate=`classifier_candidate_group:hybrid-window/verification_or_recovery_signal` reviewed_at=`not-a-date`");
     });
 
     test("reports applied coverage review statement counts", () => {
