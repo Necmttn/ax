@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E363 adds
-  `.ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363.json`
+- Index continuation: E364 adds
+  `.ax/experiments/classifier-package-execution-facts-review-pipeline-direct-argv-e364.json`
   and
-  `.ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363.txt`
+  `.ax/experiments/classifier-graph-lifecycle-production-apply-argv-e364.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,87 @@ Current recommendation:
   checks.
 - The immediate bottleneck is review throughput, not another expensive model
   run.
+
+## E364 - Project Review Direct Action Argv Facts
+
+Question:
+- After E361-E363 expose direct action argv arrays in readiness output, can
+  services discover those executable commands from graph facts instead of
+  reopening the readiness artifact?
+
+Implementation:
+- Extended review-pipeline lifecycle status loading to capture
+  `production_apply_command_argv`,
+  `review_provenance_stamp_command_argv`, and
+  `review_issue_repair_command_argv` from coverage readiness artifacts.
+- Projected those arrays as lifecycle facts:
+  `review_pipeline_production_apply_argv`,
+  `review_pipeline_provenance_stamp_argv`, and
+  `review_pipeline_issue_repair_argv`.
+- Lifecycle insight JSON/text now carries and renders the same direct action
+  argv arrays.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-direct-argv-e364.md --review-facts=.ax/experiments/workflow-candidate-review-pipeline-direct-argv-e364-review-facts.json --review-write-plan=.ax/experiments/workflow-candidate-review-pipeline-direct-argv-e364-review-write-plan.json --review-pipeline-lifecycle --out=.ax/experiments/workflow-candidate-review-pipeline-direct-argv-e364.json --json > .ax/experiments/workflow-candidate-review-pipeline-direct-argv-e364.stdout
+cp .ax/experiments/workflow-candidate-review-pipeline-direct-argv-e364.json .ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json
+bun src/cli/index.ts classifiers package-operations --facts --out=.ax/experiments/classifier-package-execution-facts-review-pipeline-direct-argv-e364.json --json > .ax/experiments/classifier-package-execution-facts-review-pipeline-direct-argv-e364.stdout
+bun src/cli/index.ts classifiers package-operations --write-plan --out=.ax/experiments/classifier-package-execution-write-plan-review-pipeline-direct-argv-e364.json --json > .ax/experiments/classifier-package-execution-write-plan-review-pipeline-direct-argv-e364.txt
+bun src/cli/index.ts classifiers package-operations --apply-write-plan --out=.ax/experiments/classifier-package-execution-apply-review-pipeline-direct-argv-e364.json --json > .ax/experiments/classifier-package-execution-apply-review-pipeline-direct-argv-e364.stdout
+bun src/cli/index.ts classifiers package-operations --graph-health --graph-mode=lifecycle --predicate=review_pipeline_production_apply_argv --out=.ax/experiments/classifier-graph-lifecycle-production-apply-argv-e364.json --json > .ax/experiments/classifier-graph-lifecycle-production-apply-argv-e364.stdout
+bun src/cli/index.ts classifiers package-operations --graph-health --graph-mode=lifecycle --predicate=review_pipeline_provenance_stamp_argv --out=.ax/experiments/classifier-graph-lifecycle-provenance-stamp-argv-e364.json --json > .ax/experiments/classifier-graph-lifecycle-provenance-stamp-argv-e364.stdout
+bun src/cli/index.ts classifiers package-operations --graph-health --graph-mode=lifecycle --predicate=review_pipeline_issue_repair_argv --out=.ax/experiments/classifier-graph-lifecycle-issue-repair-argv-e364.json --json > .ax/experiments/classifier-graph-lifecycle-issue-repair-argv-e364.stdout
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifier-lifecycle-insight-review-pipeline-direct-argv-e364.json --json > .ax/experiments/classifier-lifecycle-insight-review-pipeline-direct-argv-e364.stdout
+bun src/cli/index.ts classifiers lifecycle > .ax/experiments/classifier-lifecycle-insight-review-pipeline-direct-argv-e364.txt || true
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-pipeline-direct-argv-e364.json`
+- `.ax/experiments/classifier-package-execution-facts-review-pipeline-direct-argv-e364.json`
+- `.ax/experiments/classifier-package-execution-write-plan-review-pipeline-direct-argv-e364.json`
+- `.ax/experiments/classifier-package-execution-apply-review-pipeline-direct-argv-e364.json`
+- `.ax/experiments/classifier-graph-lifecycle-production-apply-argv-e364.json`
+- `.ax/experiments/classifier-graph-lifecycle-provenance-stamp-argv-e364.json`
+- `.ax/experiments/classifier-graph-lifecycle-issue-repair-argv-e364.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-direct-argv-e364.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-direct-argv-e364.txt`
+
+Results:
+- Fact projection emits the three direct action predicates with argv arrays.
+- The write plan contains Surreal `UPSERT classifier_graph_fact` statements
+  for all three predicates.
+- Applying the write plan wrote `587` statements with `0` failures.
+- Lifecycle graph queries by each predicate return exactly one fact for
+  `classifier_lifecycle:workflow_candidate_review_pipeline`.
+- Lifecycle insight text prints `production apply argv`,
+  `provenance stamp argv`, and `issue repair argv`.
+
+Decision:
+- E364 connects the service-executable direct action commands to the graph.
+  Services can now discover and filter review repair, provenance stamp, and
+  production apply argv through lifecycle graph queries rather than scraping
+  readiness text or keeping artifact-specific knowledge.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 - <<'PY'
+import json
+from pathlib import Path
+for name, expected in [
+    ("production-apply", "review_pipeline_production_apply_argv"),
+    ("provenance-stamp", "review_pipeline_provenance_stamp_argv"),
+    ("issue-repair", "review_pipeline_issue_repair_argv"),
+]:
+    data = json.loads(Path(f".ax/experiments/classifier-graph-lifecycle-{name}-argv-e364.json").read_text())
+    assert data["result_totals"]["lifecycle_fact_count"] == 1
+    fact = data["lifecycle_facts"][0]
+    assert fact["predicate"] == expected
+    assert fact["subject"] == "classifier_lifecycle:workflow_candidate_review_pipeline"
+    assert fact["value"][:2] == ["bun", "src/cli/index.ts"]
+PY
+```
 
 ## E363 - Expose Production Apply Argv
 

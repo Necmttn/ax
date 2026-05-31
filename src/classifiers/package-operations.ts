@@ -545,6 +545,9 @@ export interface ClassifierLifecycleReviewStatus {
         readonly missing_required_artifact_count?: number;
         readonly checked_artifact_count?: number;
         readonly prepared_argv?: readonly string[];
+        readonly production_apply_argv?: readonly string[];
+        readonly review_provenance_stamp_argv?: readonly string[];
+        readonly review_issue_repair_argv?: readonly string[];
         readonly output_artifacts?: readonly ClassifierReviewPipelineArtifactSummary[];
         readonly checked_artifacts?: readonly ClassifierReviewPipelineArtifactSummary[];
         readonly failures: readonly string[];
@@ -669,6 +672,9 @@ export interface ClassifierReviewPipelineLifecycleInsight {
     readonly missing_required_artifact_count: number;
     readonly checked_artifact_count: number;
     readonly prepared_argv?: readonly string[];
+    readonly production_apply_argv?: readonly string[];
+    readonly review_provenance_stamp_argv?: readonly string[];
+    readonly review_issue_repair_argv?: readonly string[];
     readonly output_artifacts: readonly ClassifierReviewPipelineArtifactSummary[];
     readonly checked_artifacts: readonly ClassifierReviewPipelineArtifactSummary[];
     readonly failures: readonly string[];
@@ -960,6 +966,9 @@ function loadReviewPipelineLifecycleStatus(baseDir: string): Pick<ClassifierLife
     const outputArtifacts = reviewPipelineArtifactSummaries(prepared.output_artifacts);
     const checkedArtifactSummaries = reviewPipelineArtifactSummaries(outputVerification.checked_artifacts);
     const missingRequiredArtifacts = jsonArrayOfStrings(outputVerification.missing_required_artifacts);
+    const productionApplyArgv = jsonArrayOfStrings(coverageReview.production_apply_command_argv);
+    const reviewProvenanceStampArgv = jsonArrayOfStrings(coverageReview.review_provenance_stamp_command_argv);
+    const reviewIssueRepairArgv = jsonArrayOfStrings(coverageReview.review_issue_repair_command_argv);
     const failures = [
         ...jsonArrayOfStrings(report.failures),
         ...jsonArrayOfStrings(coverageReview.failures),
@@ -977,6 +986,9 @@ function loadReviewPipelineLifecycleStatus(baseDir: string): Pick<ClassifierLife
             missing_required_artifact_count: missingRequiredArtifacts.length,
             checked_artifact_count: checkedArtifacts.length,
             ...(preparedArgv.length === 0 ? {} : { prepared_argv: preparedArgv }),
+            ...(productionApplyArgv.length === 0 ? {} : { production_apply_argv: productionApplyArgv }),
+            ...(reviewProvenanceStampArgv.length === 0 ? {} : { review_provenance_stamp_argv: reviewProvenanceStampArgv }),
+            ...(reviewIssueRepairArgv.length === 0 ? {} : { review_issue_repair_argv: reviewIssueRepairArgv }),
             ...(outputArtifacts.length === 0 ? {} : { output_artifacts: outputArtifacts }),
             ...(checkedArtifactSummaries.length === 0 ? {} : { checked_artifacts: checkedArtifactSummaries }),
             failures,
@@ -1719,6 +1731,9 @@ export function buildExecutionFactProjectionReport(
                 },
                 arrayFacts: {
                     review_pipeline_prepared_argv: workflowStatus.review_pipeline_lifecycle.prepared_argv,
+                    review_pipeline_production_apply_argv: workflowStatus.review_pipeline_lifecycle.production_apply_argv,
+                    review_pipeline_provenance_stamp_argv: workflowStatus.review_pipeline_lifecycle.review_provenance_stamp_argv,
+                    review_pipeline_issue_repair_argv: workflowStatus.review_pipeline_lifecycle.review_issue_repair_argv,
                     review_pipeline_output_artifact_paths: workflowStatus.review_pipeline_lifecycle.output_artifacts?.map((artifact) => artifact.path),
                     review_pipeline_checked_artifact_paths: workflowStatus.review_pipeline_lifecycle.checked_artifacts?.map((artifact) => artifact.path),
                     review_pipeline_checked_artifact_states: workflowStatus.review_pipeline_lifecycle.checked_artifacts?.map((artifact) =>
@@ -2616,6 +2631,15 @@ export function buildClassifierLifecycleInsightReport(input: {
             checked_artifact_count: input.workflowStatus.review_pipeline_lifecycle.checked_artifact_count ?? 0,
             ...(input.workflowStatus.review_pipeline_lifecycle.prepared_argv === undefined ? {} : {
                 prepared_argv: input.workflowStatus.review_pipeline_lifecycle.prepared_argv,
+            }),
+            ...(input.workflowStatus.review_pipeline_lifecycle.production_apply_argv === undefined ? {} : {
+                production_apply_argv: input.workflowStatus.review_pipeline_lifecycle.production_apply_argv,
+            }),
+            ...(input.workflowStatus.review_pipeline_lifecycle.review_provenance_stamp_argv === undefined ? {} : {
+                review_provenance_stamp_argv: input.workflowStatus.review_pipeline_lifecycle.review_provenance_stamp_argv,
+            }),
+            ...(input.workflowStatus.review_pipeline_lifecycle.review_issue_repair_argv === undefined ? {} : {
+                review_issue_repair_argv: input.workflowStatus.review_pipeline_lifecycle.review_issue_repair_argv,
             }),
             output_artifacts: input.workflowStatus.review_pipeline_lifecycle.output_artifacts ?? [],
             checked_artifacts: input.workflowStatus.review_pipeline_lifecycle.checked_artifacts ?? [],

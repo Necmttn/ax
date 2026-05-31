@@ -463,6 +463,15 @@ export function renderClassifierLifecycleInsightText(report: ClassifierLifecycle
         if (pipeline.prepared_argv && pipeline.prepared_argv.length > 0) {
             lines.push(`  argv: ${pipeline.prepared_argv.join(" ")}`);
         }
+        if (pipeline.production_apply_argv && pipeline.production_apply_argv.length > 0) {
+            lines.push(`  production apply argv: ${pipeline.production_apply_argv.join(" ")}`);
+        }
+        if (pipeline.review_provenance_stamp_argv && pipeline.review_provenance_stamp_argv.length > 0) {
+            lines.push(`  provenance stamp argv: ${pipeline.review_provenance_stamp_argv.join(" ")}`);
+        }
+        if (pipeline.review_issue_repair_argv && pipeline.review_issue_repair_argv.length > 0) {
+            lines.push(`  issue repair argv: ${pipeline.review_issue_repair_argv.join(" ")}`);
+        }
         lines.push(`  outputs: ${pipeline.output_verification_status ?? "unknown"} checked=${pipeline.checked_artifact_count} missing=${pipeline.missing_required_artifact_count}`);
         if (pipeline.output_artifacts.length > 0) {
             lines.push(`  output artifacts: ${pipeline.output_artifacts.map((artifact) => `${artifact.kind ?? "artifact"}=${artifact.path}`).join(", ")}`);

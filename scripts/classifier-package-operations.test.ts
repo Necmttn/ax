@@ -513,6 +513,9 @@ describe("classifier package operations report", () => {
                 missing_required_artifact_count: 0,
                 checked_artifact_count: 2,
                 prepared_argv: ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates"],
+                production_apply_argv: ["bun", "src/cli/index.ts", "--apply-review-facts"],
+                review_provenance_stamp_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+                review_issue_repair_argv: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
                 output_artifacts: [
                     { kind: "review_brief", path: ".ax/experiments/review.md", required_for_handoff: true },
                     { kind: "readiness_report", path: ".ax/experiments/readiness.json", required_for_handoff: false },
@@ -526,7 +529,7 @@ describe("classifier package operations report", () => {
             next_actions: [],
         });
 
-        expect(report.totals.lifecycle_fact_count).toBe(12);
+        expect(report.totals.lifecycle_fact_count).toBe(15);
         expect(report.nodes).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 id: "classifier_lifecycle:workflow_candidate_review_pipeline",
@@ -567,6 +570,18 @@ describe("classifier package operations report", () => {
                 value: ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates"],
             }),
             expect.objectContaining({
+                predicate: "review_pipeline_production_apply_argv",
+                value: ["bun", "src/cli/index.ts", "--apply-review-facts"],
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_provenance_stamp_argv",
+                value: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_issue_repair_argv",
+                value: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
+            }),
+            expect.objectContaining({
                 predicate: "review_pipeline_output_artifact_paths",
                 value: [".ax/experiments/review.md", ".ax/experiments/readiness.json"],
             }),
@@ -594,6 +609,9 @@ describe("classifier package operations report", () => {
             schema: "ax.workflow_candidate_review_coverage.v1",
             coverage_review: {
                 review_pipeline_command_kind: "stamp_review_provenance",
+                production_apply_command_argv: ["bun", "src/cli/index.ts", "--apply-review-facts"],
+                review_provenance_stamp_command_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+                review_issue_repair_command_argv: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
                 review_pipeline_lifecycle: {
                     schema: "ax.classifier_review_pipeline_lifecycle.v1",
                     status: "verified_after_execution",
@@ -632,6 +650,9 @@ describe("classifier package operations report", () => {
             missing_required_artifact_count: 0,
             checked_artifact_count: 2,
             prepared_argv: ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates"],
+            production_apply_argv: ["bun", "src/cli/index.ts", "--apply-review-facts"],
+            review_provenance_stamp_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+            review_issue_repair_argv: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
             output_artifacts: [
                 { kind: "readiness_report", path: "one.json", required_for_handoff: false },
                 { kind: "review_brief", path: "two.md", required_for_handoff: true },

@@ -952,6 +952,9 @@ describe("classifiers package-operations format", () => {
                 missing_required_artifact_count: 0,
                 checked_artifact_count: 2,
                 prepared_argv: ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates"],
+                production_apply_argv: ["bun", "src/cli/index.ts", "--apply-review-facts"],
+                review_provenance_stamp_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+                review_issue_repair_argv: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
                 output_artifacts: [{
                     kind: "review_brief",
                     path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md",
@@ -1015,6 +1018,9 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("review pipeline: verified_after_execution (.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json)");
         expect(output).toContain("command: stamp_review_provenance prepared=ready_to_execute");
         expect(output).toContain("argv: bun src/cli/index.ts classifiers workflow-candidates");
+        expect(output).toContain("production apply argv: bun src/cli/index.ts --apply-review-facts");
+        expect(output).toContain("provenance stamp argv: bun src/cli/index.ts --review-provenance-reviewer=<reviewer>");
+        expect(output).toContain("issue repair argv: bun src/cli/index.ts --coverage-review-brief=review.md");
         expect(output).toContain("outputs: verified checked=2 missing=0");
         expect(output).toContain("output artifacts: review_brief=.ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md");
         expect(output).toContain("checked artifacts: review_brief=.ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md ok");
