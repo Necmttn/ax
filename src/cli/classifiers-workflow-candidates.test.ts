@@ -1629,7 +1629,12 @@ describe("classifiers workflow-candidates", () => {
             turn: "turn:verification",
             confidence: 0.83,
         }));
-        const brief = renderWorkflowCandidateReviewCoverageBriefMarkdown(rows);
+        const brief = renderWorkflowCandidateReviewCoverageBriefMarkdown(rows, {
+            sourceKind: "hybrid_window_classifier_projection",
+            coverageFixturePack: ".ax/experiments/review-coverage.jsonl",
+            coverageReviewBrief: ".ax/experiments/review-coverage.md",
+            outputPath: ".ax/experiments/review-coverage.json",
+        });
         const reviewedBrief = brief
             .replace("- Review status: `pending`", "- Review status: `accept`")
             .replace("- Review rationale: _pending_", "- Review rationale: Useful recovery behavior worth preserving.");
@@ -1641,6 +1646,10 @@ describe("classifiers workflow-candidates", () => {
         expect(brief).toContain("- Fixtures: `1`");
         expect(brief).toContain("- Candidate groups: `1`");
         expect(brief).toContain("- Pending fixtures: `1`");
+        expect(brief).toContain("## Review Commands");
+        expect(brief).toContain("--coverage-review-pack=.ax/experiments/review-coverage.jsonl");
+        expect(brief).toContain("--sync-coverage-review-brief=.ax/experiments/review-coverage.md");
+        expect(brief).toContain("--apply-review-facts");
         expect(brief).toContain("## Candidate Queue");
         expect(brief).toContain("verification_or_recovery_signal");
         expect(brief).toContain("- Fixture id: `workflow-candidate-review-coverage/verification_or_recovery_signal/a`");

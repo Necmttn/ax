@@ -207,6 +207,14 @@ export interface WorkflowCandidateFixtureBriefSyncResult {
     readonly unknown_fixture_count: number;
 }
 
+export interface WorkflowCandidateReviewCoverageBriefContext {
+    readonly sourceKind?: string;
+    readonly coverageFixturePack?: string;
+    readonly coverageReviewPack?: string;
+    readonly coverageReviewBrief?: string;
+    readonly outputPath?: string;
+}
+
 export interface WorkflowCandidateTopicClassifierFixtureRow {
     readonly id: string;
     readonly suite: "workflow-candidate-topic" | "workflow-candidate-review-coverage";
@@ -2674,6 +2682,7 @@ export function parseWorkflowCandidateFixtureRowsJsonl(
 
 export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
     rows: readonly WorkflowCandidateTopicClassifierFixtureRow[],
+    context: WorkflowCandidateReviewCoverageBriefContext = {},
 ): string {
     const candidateSummaries = new Map<string, {
         readonly label: string;
@@ -2702,6 +2711,34 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
     );
     const pendingCount = rows.filter((row) => row.review_status === "pending").length;
     const reviewedCount = rows.length - pendingCount;
+    const reviewPackPath = context.coverageReviewPack ?? context.coverageFixturePack;
+    const sourceKind = context.sourceKind ?? "hybrid_window_classifier_projection";
+    const readinessOutputPath = context.outputPath ?? ".ax/experiments/workflow-candidate-review-coverage-reviewed.json";
+    const syncedBriefPath = context.coverageReviewBrief ?? ".ax/experiments/workflow-candidate-review-coverage-reviewed.md";
+    const nextCommand = reviewPackPath === undefined
+        ? undefined
+        : [
+            "bun src/cli/index.ts classifiers workflow-candidates",
+            "--review-coverage",
+            `--source-kind=${sourceKind}`,
+            `--coverage-review-pack=${reviewPackPath}`,
+            context.coverageReviewBrief === undefined ? undefined : `--sync-coverage-review-brief=${context.coverageReviewBrief}`,
+            `--coverage-review-brief=${syncedBriefPath}`,
+            `--out=${readinessOutputPath}`,
+            "--json",
+        ].filter((part): part is string => part !== undefined).join(" ");
+    const applyCommand = reviewPackPath === undefined
+        ? undefined
+        : [
+            "bun src/cli/index.ts classifiers workflow-candidates",
+            "--review-coverage",
+            `--source-kind=${sourceKind}`,
+            `--coverage-review-pack=${reviewPackPath}`,
+            context.coverageReviewBrief === undefined ? undefined : `--sync-coverage-review-brief=${context.coverageReviewBrief}`,
+            "--apply-review-facts",
+            `--out=${readinessOutputPath}`,
+            "--json",
+        ].filter((part): part is string => part !== undefined).join(" ");
     const lines = [
         "# Workflow Candidate Coverage Review",
         "",
@@ -2716,6 +2753,22 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
         `- Pending fixtures: \`${pendingCount}\``,
         `- Reviewed fixtures: \`${reviewedCount}\``,
         "",
+        ...(nextCommand === undefined ? [] : [
+            "## Review Commands",
+            "",
+            "After editing review statuses and rationales, run:",
+            "",
+            "```sh",
+            nextCommand,
+            "```",
+            "",
+            "Apply only after the readiness report returns `ready_to_apply`:",
+            "",
+            "```sh",
+            applyCommand ?? "",
+            "```",
+            "",
+        ]),
         "## Candidate Queue",
         "",
         ...(sortedCandidateSummaries.length === 0
@@ -3848,7 +3901,12 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 writeFileSync(input.coverageFixturePack, renderClassifierFixtureRowsJsonl(fixtureSummary.fixtures), "utf8");
                 if (input.coverageReviewBrief) {
                     mkdirSync(dirname(input.coverageReviewBrief), { recursive: true });
-                    writeFileSync(input.coverageReviewBrief, renderWorkflowCandidateReviewCoverageBriefMarkdown(fixtureSummary.fixtures), "utf8");
+                    writeFileSync(input.coverageReviewBrief, renderWorkflowCandidateReviewCoverageBriefMarkdown(fixtureSummary.fixtures, {
+                        sourceKind: input.sourceKind,
+                        coverageFixturePack: input.coverageFixturePack,
+                        coverageReviewBrief: input.coverageReviewBrief,
+                        ...(input.out === undefined ? {} : { outputPath: input.out }),
+                    }), "utf8");
                 }
                 report = { ...report, fixture_pack: fixtureSummary };
             }
@@ -3870,7 +3928,12 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 }
                 if (input.coverageReviewBrief) {
                     mkdirSync(dirname(input.coverageReviewBrief), { recursive: true });
-                    writeFileSync(input.coverageReviewBrief, renderWorkflowCandidateReviewCoverageBriefMarkdown(reviewedRows), "utf8");
+                    writeFileSync(input.coverageReviewBrief, renderWorkflowCandidateReviewCoverageBriefMarkdown(reviewedRows, {
+                        sourceKind: input.sourceKind,
+                        coverageReviewPack: input.coverageReviewPack,
+                        coverageReviewBrief: input.coverageReviewBrief,
+                        ...(input.out === undefined ? {} : { outputPath: input.out }),
+                    }), "utf8");
                 }
                 const reviewProjection = buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures({
                     rows: reviewedRows,
