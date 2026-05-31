@@ -393,6 +393,7 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly review_pipeline_next_action: string;
     readonly review_pipeline_command_kind?: WorkflowCandidateReviewCoveragePipelineCommandKind;
     readonly review_pipeline_required_inputs: readonly WorkflowCandidateReviewCoveragePipelineRequiredInput[];
+    readonly review_pipeline_command_argv?: readonly string[];
     readonly review_pipeline_command?: string;
     readonly provenance_issue_rows: readonly WorkflowCandidateReviewCoverageProvenanceIssueRow[];
     readonly projection_totals: WorkflowCandidateTopicReviewGraphProjection["totals"];
@@ -2013,6 +2014,9 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
                 `coverage review pipeline command kind: ${report.coverage_review.review_pipeline_command_kind}`,
             ]),
             `coverage review pipeline required inputs: ${report.coverage_review.review_pipeline_required_inputs.length === 0 ? "none" : report.coverage_review.review_pipeline_required_inputs.join(", ")}`,
+            ...(report.coverage_review.review_pipeline_command_argv === undefined ? [] : [
+                `coverage review pipeline command argv: ${report.coverage_review.review_pipeline_command_argv.join(" | ")}`,
+            ]),
             ...(report.coverage_review.review_pipeline_command === undefined ? [] : [
                 `coverage review pipeline command: ${report.coverage_review.review_pipeline_command}`,
             ]),
@@ -3219,10 +3223,13 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
         ...(context.limit === undefined ? {} : { limit: context.limit }),
         outputPath: readinessOutputPath,
     });
-    const nextCommand = reviewPackPath === undefined
+    const nextCommandArgv = reviewPackPath === undefined
         ? undefined
         : [
-            "bun src/cli/index.ts classifiers workflow-candidates",
+            "bun",
+            "src/cli/index.ts",
+            "classifiers",
+            "workflow-candidates",
             "--review-coverage",
             `--source-kind=${sourceKind}`,
             `--coverage-review-pack=${reviewPackPath}`,
@@ -3230,7 +3237,8 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
             `--coverage-review-brief=${syncedBriefPath}`,
             `--out=${readinessOutputPath}`,
             "--json",
-        ].filter((part): part is string => part !== undefined).join(" ");
+        ].filter((part): part is string => part !== undefined);
+    const nextCommand = workflowCandidateReviewCoverageCommandFromArgv(nextCommandArgv);
     const applyCommand = reviewPackPath === undefined
         ? undefined
         : [
@@ -3256,10 +3264,13 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
             `--out=${readinessOutputPath}`,
             "--json",
         ].filter((part): part is string => part !== undefined).join(" ");
-    const strictApplyCommand = reviewPackPath === undefined
+    const strictApplyCommandArgv = reviewPackPath === undefined
         ? undefined
         : [
-            "bun src/cli/index.ts classifiers workflow-candidates",
+            "bun",
+            "src/cli/index.ts",
+            "classifiers",
+            "workflow-candidates",
             "--review-coverage",
             `--source-kind=${sourceKind}`,
             `--coverage-review-pack=${reviewPackPath}`,
@@ -3272,11 +3283,15 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
             "--require-review-handoff",
             `--out=${readinessOutputPath}`,
             "--json",
-        ].filter((part): part is string => part !== undefined).join(" ");
-    const provenanceStampCommand = reviewPackPath === undefined
+        ].filter((part): part is string => part !== undefined);
+    const strictApplyCommand = workflowCandidateReviewCoverageCommandFromArgv(strictApplyCommandArgv);
+    const provenanceStampCommandArgv = reviewPackPath === undefined
         ? undefined
         : [
-            "bun src/cli/index.ts classifiers workflow-candidates",
+            "bun",
+            "src/cli/index.ts",
+            "classifiers",
+            "workflow-candidates",
             "--review-coverage",
             `--source-kind=${sourceKind}`,
             `--coverage-review-pack=${reviewPackPath}`,
@@ -3286,12 +3301,19 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
             `--coverage-review-brief=${syncedBriefPath}`,
             `--out=${readinessOutputPath}`,
             "--json",
-        ].filter((part): part is string => part !== undefined).join(" ");
+        ].filter((part): part is string => part !== undefined);
+    const provenanceStampCommand = workflowCandidateReviewCoverageCommandFromArgv(provenanceStampCommandArgv);
     const reviewIssueRepairCommand = reviewIssueRows.length === 0 ? undefined : nextCommand;
+    const reviewIssueRepairCommandArgv = reviewIssueRows.length === 0 ? undefined : nextCommandArgv;
     const reviewPipelineCommand = workflowCandidateReviewCoveragePipelineCommand(reviewPipelineStage, {
         reviewIssueRepairCommand,
         reviewProvenanceStampCommand: provenanceStampCommand,
         productionApplyCommand: strictApplyCommand,
+    });
+    const reviewPipelineCommandArgv = workflowCandidateReviewCoveragePipelineCommandArgv(reviewPipelineStage, {
+        reviewIssueRepairCommandArgv,
+        reviewProvenanceStampCommandArgv: provenanceStampCommandArgv,
+        productionApplyCommandArgv: strictApplyCommandArgv,
     });
     const reviewPipelineCommandKind = workflowCandidateReviewCoveragePipelineCommandKind(reviewPipelineStage, reviewPipelineCommand);
     const reviewPipelineRequiredInputs = workflowCandidateReviewCoveragePipelineRequiredInputs(reviewPipelineCommandKind);
@@ -3341,6 +3363,7 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
         ...(reviewPipelineCommand === undefined ? [] : [
             `- Pipeline command kind: \`${reviewPipelineCommandKind}\``,
             `- Pipeline required inputs: ${reviewPipelineRequiredInputs.length === 0 ? "`none`" : reviewPipelineRequiredInputs.map((input) => `\`${input}\``).join(", ")}`,
+            `- Pipeline command argv: ${reviewPipelineCommandArgv === undefined ? "`none`" : reviewPipelineCommandArgv.map((part) => `\`${part}\``).join(" ")}`,
             `- Pipeline command: \`${reviewPipelineCommand}\``,
         ]),
         "",
@@ -3922,6 +3945,27 @@ const workflowCandidateReviewCoveragePipelineCommand = (
     }
 };
 
+const workflowCandidateReviewCoveragePipelineCommandArgv = (
+    stage: WorkflowCandidateReviewCoveragePipelineStage,
+    commands: {
+        readonly reviewIssueRepairCommandArgv: readonly string[] | undefined;
+        readonly reviewProvenanceStampCommandArgv: readonly string[] | undefined;
+        readonly productionApplyCommandArgv: readonly string[] | undefined;
+    },
+): readonly string[] | undefined => {
+    switch (stage) {
+        case "needs_review_repair":
+            return commands.reviewIssueRepairCommandArgv;
+        case "needs_review_provenance":
+            return commands.reviewProvenanceStampCommandArgv;
+        case "ready_for_production_apply":
+            return commands.productionApplyCommandArgv;
+        case "needs_review_decisions":
+        case "needs_review_handoff":
+            return undefined;
+    }
+};
+
 const workflowCandidateReviewCoveragePipelineCommandKind = (
     stage: WorkflowCandidateReviewCoveragePipelineStage,
     command: string | undefined,
@@ -3967,7 +4011,10 @@ const workflowCandidateReviewCoverageHandoffMissingPaths = (input: {
     return missing;
 };
 
-const workflowCandidateReviewCoverageProductionApplyCommand = (input: {
+const workflowCandidateReviewCoverageCommandFromArgv = (argv: readonly string[] | undefined): string | undefined =>
+    argv?.join(" ");
+
+const workflowCandidateReviewCoverageProductionApplyCommandArgv = (input: {
     readonly sourcePath: string;
     readonly sourceKind?: string;
     readonly reviewFactsPath?: string;
@@ -3975,7 +4022,7 @@ const workflowCandidateReviewCoverageProductionApplyCommand = (input: {
     readonly reviewBriefPath?: string;
     readonly syncedReviewBriefPath?: string;
     readonly outputPath?: string;
-}): string | undefined => {
+}): readonly string[] | undefined => {
     if (
         input.reviewFactsPath === undefined ||
         input.reviewWritePlanPath === undefined ||
@@ -3983,7 +4030,10 @@ const workflowCandidateReviewCoverageProductionApplyCommand = (input: {
         input.syncedReviewBriefPath === undefined
     ) return undefined;
     return [
-        "bun src/cli/index.ts classifiers workflow-candidates",
+        "bun",
+        "src/cli/index.ts",
+        "classifiers",
+        "workflow-candidates",
         "--review-coverage",
         `--source-kind=${input.sourceKind ?? "hybrid_window_classifier_projection"}`,
         `--coverage-review-pack=${input.sourcePath}`,
@@ -3996,19 +4046,22 @@ const workflowCandidateReviewCoverageProductionApplyCommand = (input: {
         "--require-review-handoff",
         `--out=${input.outputPath ?? ".ax/experiments/workflow-candidate-review-coverage-post-apply.json"}`,
         "--json",
-    ].join(" ");
+    ];
 };
 
-const workflowCandidateReviewCoverageProvenanceStampCommand = (input: {
+const workflowCandidateReviewCoverageProvenanceStampCommandArgv = (input: {
     readonly sourcePath: string;
     readonly sourceKind?: string;
     readonly reviewBriefPath?: string;
     readonly syncedReviewBriefPath?: string;
     readonly outputPath?: string;
-}): string | undefined => {
+}): readonly string[] | undefined => {
     if (input.reviewBriefPath === undefined || input.syncedReviewBriefPath === undefined) return undefined;
     return [
-        "bun src/cli/index.ts classifiers workflow-candidates",
+        "bun",
+        "src/cli/index.ts",
+        "classifiers",
+        "workflow-candidates",
         "--review-coverage",
         `--source-kind=${input.sourceKind ?? "hybrid_window_classifier_projection"}`,
         `--coverage-review-pack=${input.sourcePath}`,
@@ -4018,7 +4071,7 @@ const workflowCandidateReviewCoverageProvenanceStampCommand = (input: {
         `--coverage-review-brief=${input.reviewBriefPath}`,
         `--out=${input.outputPath ?? ".ax/experiments/workflow-candidate-review-coverage-post-apply.json"}`,
         "--json",
-    ].join(" ");
+    ];
 };
 
 const defaultReviewBriefPathForReviewPack = (sourcePath: string): string => {
@@ -4031,19 +4084,22 @@ const defaultReadinessOutputPathForReviewPack = (sourcePath: string): string => 
     return `${sourcePath}.json`;
 };
 
-const workflowCandidateReviewCoverageReviewIssueRepairCommand = (input: {
+const workflowCandidateReviewCoverageReviewIssueRepairCommandArgv = (input: {
     readonly sourcePath: string;
     readonly sourceKind?: string;
     readonly reviewBriefPath?: string;
     readonly syncedReviewBriefPath?: string;
     readonly outputPath?: string;
-}): string => {
+}): readonly string[] => {
     const reviewBriefPath = input.reviewBriefPath
         ?? input.syncedReviewBriefPath
         ?? defaultReviewBriefPathForReviewPack(input.sourcePath);
     const syncedReviewBriefPath = input.syncedReviewBriefPath ?? reviewBriefPath;
     return [
-        "bun src/cli/index.ts classifiers workflow-candidates",
+        "bun",
+        "src/cli/index.ts",
+        "classifiers",
+        "workflow-candidates",
         "--review-coverage",
         `--source-kind=${input.sourceKind ?? "hybrid_window_classifier_projection"}`,
         `--coverage-review-pack=${input.sourcePath}`,
@@ -4051,7 +4107,7 @@ const workflowCandidateReviewCoverageReviewIssueRepairCommand = (input: {
         `--coverage-review-brief=${reviewBriefPath}`,
         `--out=${input.outputPath ?? defaultReadinessOutputPathForReviewPack(input.sourcePath)}`,
         "--json",
-    ].join(" ");
+    ];
 };
 
 export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
@@ -4111,7 +4167,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     const projectedReviewedCandidateCount = currentReviewedCandidateCount + newCandidateCount;
     const projectedUnreviewedCandidateCount = Math.max(0, coverageRows.length - projectedReviewedCandidateCount);
     const reviewHandoffMissingPaths = workflowCandidateReviewCoverageHandoffMissingPaths(input);
-    const productionApplyCommand = workflowCandidateReviewCoverageProductionApplyCommand({
+    const productionApplyCommandArgv = workflowCandidateReviewCoverageProductionApplyCommandArgv({
         sourcePath: input.sourcePath,
         ...(input.sourceKind === undefined ? {} : { sourceKind: input.sourceKind }),
         ...(input.reviewFactsPath === undefined ? {} : { reviewFactsPath: input.reviewFactsPath }),
@@ -4120,13 +4176,15 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         ...(input.syncedReviewBriefPath === undefined ? {} : { syncedReviewBriefPath: input.syncedReviewBriefPath }),
         ...(input.outputPath === undefined ? {} : { outputPath: input.outputPath }),
     });
-    const reviewProvenanceStampCommand = workflowCandidateReviewCoverageProvenanceStampCommand({
+    const productionApplyCommand = workflowCandidateReviewCoverageCommandFromArgv(productionApplyCommandArgv);
+    const reviewProvenanceStampCommandArgv = workflowCandidateReviewCoverageProvenanceStampCommandArgv({
         sourcePath: input.sourcePath,
         ...(input.sourceKind === undefined ? {} : { sourceKind: input.sourceKind }),
         ...(input.reviewBriefPath === undefined ? {} : { reviewBriefPath: input.reviewBriefPath }),
         ...(input.syncedReviewBriefPath === undefined ? {} : { syncedReviewBriefPath: input.syncedReviewBriefPath }),
         ...(input.outputPath === undefined ? {} : { outputPath: input.outputPath }),
     });
+    const reviewProvenanceStampCommand = workflowCandidateReviewCoverageCommandFromArgv(reviewProvenanceStampCommandArgv);
     const smokeMarkerCount = reviewedRows.filter(fixtureRowHasSmokeMarker).length +
         (input.sourcePath.toLowerCase().includes("smoke") ? 1 : 0);
     const baseApplyGuard = invalidRows.length > 0
@@ -4269,19 +4327,25 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         reviewIssueNextAction,
         provenanceNextAction,
     );
-    const reviewIssueRepairCommand = reviewIssueRows.length === 0
+    const reviewIssueRepairCommandArgv = reviewIssueRows.length === 0
         ? undefined
-        : workflowCandidateReviewCoverageReviewIssueRepairCommand({
+        : workflowCandidateReviewCoverageReviewIssueRepairCommandArgv({
             sourcePath: input.sourcePath,
             ...(input.sourceKind === undefined ? {} : { sourceKind: input.sourceKind }),
             ...(input.reviewBriefPath === undefined ? {} : { reviewBriefPath: input.reviewBriefPath }),
             ...(input.syncedReviewBriefPath === undefined ? {} : { syncedReviewBriefPath: input.syncedReviewBriefPath }),
             ...(input.outputPath === undefined ? {} : { outputPath: input.outputPath }),
         });
+    const reviewIssueRepairCommand = workflowCandidateReviewCoverageCommandFromArgv(reviewIssueRepairCommandArgv);
     const reviewPipelineCommand = workflowCandidateReviewCoveragePipelineCommand(reviewPipelineStage, {
         reviewIssueRepairCommand,
         reviewProvenanceStampCommand,
         productionApplyCommand,
+    });
+    const reviewPipelineCommandArgv = workflowCandidateReviewCoveragePipelineCommandArgv(reviewPipelineStage, {
+        reviewIssueRepairCommandArgv,
+        reviewProvenanceStampCommandArgv,
+        productionApplyCommandArgv,
     });
     const reviewPipelineCommandKind = workflowCandidateReviewCoveragePipelineCommandKind(reviewPipelineStage, reviewPipelineCommand);
     const reviewPipelineRequiredInputs = workflowCandidateReviewCoveragePipelineRequiredInputs(reviewPipelineCommandKind);
@@ -4363,6 +4427,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         review_pipeline_next_action: reviewPipelineNextAction,
         ...(reviewPipelineCommandKind === undefined ? {} : { review_pipeline_command_kind: reviewPipelineCommandKind }),
         review_pipeline_required_inputs: reviewPipelineRequiredInputs,
+        ...(reviewPipelineCommandArgv === undefined ? {} : { review_pipeline_command_argv: reviewPipelineCommandArgv }),
         ...(reviewPipelineCommand === undefined ? {} : { review_pipeline_command: reviewPipelineCommand }),
         provenance_issue_rows: provenanceIssueRows,
         projection_totals: input.projection.totals,
