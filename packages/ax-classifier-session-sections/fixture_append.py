@@ -31,6 +31,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--append", default=".ax/experiments/blind-hard-negative-fixture-append-e55.jsonl")
     parser.add_argument("--out", default=".ax/experiments/chunks-e58-with-accepted-hard-negatives.jsonl")
     parser.add_argument("--report", default=".ax/experiments/fixture-append-e58-report.json")
+    parser.add_argument("--allow-existing-identical", action="store_true", help="Treat append rows that already exist in base with identical content as already promoted.")
     parser.add_argument("--json", action="store_true")
     return parser.parse_args()
 
@@ -39,7 +40,19 @@ def load_jsonl(path: str) -> list[dict[str, Any]]:
     return [json.loads(line) for line in Path(path).read_text().splitlines() if line.strip()]
 
 
-def validate_append_rows(base_rows: list[dict[str, Any]], append_rows: list[dict[str, Any]]) -> list[str]:
+def existing_identical_ids(base_rows: list[dict[str, Any]], append_rows: list[dict[str, Any]]) -> set[str]:
+    base_by_id = {str(row.get("id")): row for row in base_rows}
+    return {str(row.get("id")) for row in append_rows if base_by_id.get(str(row.get("id"))) == row}
+
+
+def new_append_rows(base_rows: list[dict[str, Any]], append_rows: list[dict[str, Any]], allow_existing_identical: bool = False) -> list[dict[str, Any]]:
+    if not allow_existing_identical:
+        return append_rows
+    already_existing = existing_identical_ids(base_rows, append_rows)
+    return [row for row in append_rows if str(row.get("id")) not in already_existing]
+
+
+def validate_append_rows(base_rows: list[dict[str, Any]], append_rows: list[dict[str, Any]], allow_existing_identical: bool = False) -> list[str]:
     failures: list[str] = []
     if not append_rows:
         failures.append("no append rows supplied")
@@ -48,8 +61,12 @@ def validate_append_rows(base_rows: list[dict[str, Any]], append_rows: list[dict
     append_ids = [str(row.get("id")) for row in append_rows]
     duplicate_existing = sorted(set(append_ids).intersection(base_ids))
     duplicate_append = sorted({row_id for row_id in append_ids if append_ids.count(row_id) > 1})
-    if duplicate_existing:
+    already_existing = existing_identical_ids(base_rows, append_rows) if allow_existing_identical else set()
+    conflicting_existing = [row_id for row_id in duplicate_existing if row_id not in already_existing]
+    if duplicate_existing and not allow_existing_identical:
         failures.append(f"append rows duplicate existing fixture ids: {', '.join(duplicate_existing[:5])}")
+    elif conflicting_existing:
+        failures.append(f"append rows conflict with existing fixture ids: {', '.join(conflicting_existing[:5])}")
     if duplicate_append:
         failures.append(f"append rows contain duplicate ids: {', '.join(duplicate_append[:5])}")
     invalid_hard_negatives = []
@@ -92,17 +109,21 @@ def validate_append_rows(base_rows: list[dict[str, Any]], append_rows: list[dict
     return failures
 
 
-def combined_rows(base_rows: list[dict[str, Any]], append_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return list(base_rows) + list(append_rows)
+def combined_rows(base_rows: list[dict[str, Any]], append_rows: list[dict[str, Any]], allow_existing_identical: bool = False) -> list[dict[str, Any]]:
+    return list(base_rows) + new_append_rows(base_rows, append_rows, allow_existing_identical)
 
 
-def build_report(base_rows: list[dict[str, Any]], append_rows: list[dict[str, Any]], failures: list[str]) -> dict[str, Any]:
+def build_report(base_rows: list[dict[str, Any]], append_rows: list[dict[str, Any]], failures: list[str], allow_existing_identical: bool = False) -> dict[str, Any]:
     labels = Counter(str(row.get("label")) for row in append_rows)
+    already_existing = existing_identical_ids(base_rows, append_rows) if allow_existing_identical else set()
+    new_rows = new_append_rows(base_rows, append_rows, allow_existing_identical)
     return {
         "schema": "ax.fixture_append_report.v1",
         "base_rows": len(base_rows),
         "append_rows": len(append_rows),
-        "combined_rows": len(base_rows) + len(append_rows),
+        "new_append_rows": len(new_rows),
+        "already_existing_rows": len(already_existing),
+        "combined_rows": len(base_rows) + len(new_rows),
         "append_label_counts": dict(sorted(labels.items())),
         "failures": failures,
         "decision": "ready_to_write_combined_fixtures" if not failures else "needs_accepted_append_rows",
@@ -113,12 +134,12 @@ def main() -> int:
     args = parse_args()
     base_rows = load_jsonl(args.base)
     append_rows = load_jsonl(args.append)
-    failures = validate_append_rows(base_rows, append_rows)
+    failures = validate_append_rows(base_rows, append_rows, allow_existing_identical=args.allow_existing_identical)
     if not failures:
-        write_jsonl(args.out, combined_rows(base_rows, append_rows))
+        write_jsonl(args.out, combined_rows(base_rows, append_rows, allow_existing_identical=args.allow_existing_identical))
     else:
         write_jsonl(args.out, [])
-    report = build_report(base_rows, append_rows, failures)
+    report = build_report(base_rows, append_rows, failures, allow_existing_identical=args.allow_existing_identical)
     write_json(args.report, report)
     if args.json:
         print(json.dumps(report, indent=2))

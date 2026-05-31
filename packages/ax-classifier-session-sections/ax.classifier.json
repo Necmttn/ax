@@ -156,7 +156,7 @@
       "id": "embedding-helper-fixture-append",
       "kind": "publish",
       "description": "Validate and combine accepted embedding-helper hard-negative fixture rows with the package chunk fixtures.",
-      "command": "bun run classifiers:fixture-append -- --base packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --append .ax/experiments/embedding-helper-fixture-append-current.jsonl --out .ax/experiments/chunks-with-embedding-helper-fixtures-current.jsonl --report .ax/experiments/fixture-append-embedding-helper-current-report.json --json",
+      "command": "bun run classifiers:fixture-append -- --base packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --append .ax/experiments/embedding-helper-fixture-append-current.jsonl --out .ax/experiments/chunks-with-embedding-helper-fixtures-current.jsonl --report .ax/experiments/fixture-append-embedding-helper-current-report.json --allow-existing-identical --json",
       "inputs": [
         "packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl",
         ".ax/experiments/embedding-helper-fixture-append-current.jsonl"

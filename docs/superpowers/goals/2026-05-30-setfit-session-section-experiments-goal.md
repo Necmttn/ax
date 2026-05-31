@@ -29,7 +29,7 @@ artifact path as the evidence to inspect before trusting any summary row.
 | Blind/review workflow | E46-E65+ | `.ax/experiments/blind-workflow-status-e57.json` and related review artifacts | Human review is mandatory before fixtures or graph facts are promoted. | Pending where review rows are incomplete. | Earlier experiment log | Prefer review queues/workspaces over automatic label edits. |
 | Transcript graph projection | E155-E157 | `.ax/experiments/transcript-candidate-graph-projection-e155.json`, `.ax/experiments/workflow-candidate-report-e156.json`, `.ax/experiments/workflow-candidate-cli-e157.json` | Real persisted classifier facts can become graph-backed workflow candidates. | Passed for projection/query; still needs product review filters and proposal gates. | E155/E156/E157 commits in log | Use graph facts for evidence-backed workflow/harness discovery. |
 | Proposal lifecycle | E168-E208 | `.ax/experiments/workflow-candidate-proposal-list-e168.json`, `.ax/experiments/classifier-package-execution-write-plan-e208.json` | Classifier-derived workflow proposals are discoverable and lifecycle-tracked. | Passed for visibility/lifecycle plumbing; promotion remains review-gated. | Recent proposal lifecycle commits | Continue using review and ready-smoke gates before guidance/harness changes. |
-| Embedding/SVM helper layer | E209-E230 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/embedding-helper-review-batch-e216-report.json`, `.ax/experiments/embedding-helper-review-progress-e218.json`, `.ax/experiments/classifier-package-execution-embedding-helper-export-preview-e221.json`, `.ax/experiments/classifier-package-execution-embedding-helper-review-progress-e223.json`, `.ax/experiments/embedding-helper-export-e227-report.json`, `.ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e227.json`, `.ax/experiments/embedding-helper-fixture-split-audit-e228.json`, `.ax/experiments/setfit-robustness-embedding-helper-fixtures-e228.json`, `.ax/experiments/setfit-failure-analysis-embedding-helper-fixtures-e229.json`, `.ax/experiments/classifier-package-execution-embedding-helper-fixture-failure-analysis-e229.json`, `.ax/experiments/boundary-miss-review-current.md`, `.ax/experiments/boundary-miss-review-current-report.json`, `.ax/experiments/classifier-package-execution-embedding-helper-boundary-miss-review-e230.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. Reviewed helper hard negatives improve fixture coverage without breaking the SetFit gate, and the helper rows themselves are not the residual miss source. | Passed experiment gate but promotion is blocked by boundary review: E230 generated `8` pending repeated canonical miss rows covering workflow-state correction vs verification, benchmark verification, recovery vs approval, approval continuation, and model-size `none` boundaries. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `65b0b3c`, `4c602d9`, `eeb517c`, `9a6811e`, `31a1b16`, `e41562c`, `0587b67`, `0e0a960`, `3f01787`, `7bea922`, `21f7163`, `24e4a4e`, `f97c8e3`, `722e3e8`, `8b27657` | Review `.ax/experiments/boundary-miss-review-current.md`, sync it, and only then decide whether canonical helper-fixture promotion is allowed or fixture/label-contract changes are required. |
+| Embedding/SVM helper layer | E209-E231 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/embedding-helper-review-batch-e216-report.json`, `.ax/experiments/embedding-helper-review-progress-e218.json`, `.ax/experiments/classifier-package-execution-embedding-helper-export-preview-e221.json`, `.ax/experiments/classifier-package-execution-embedding-helper-review-progress-e223.json`, `.ax/experiments/embedding-helper-export-e227-report.json`, `.ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e227.json`, `.ax/experiments/embedding-helper-fixture-split-audit-e228.json`, `.ax/experiments/setfit-robustness-embedding-helper-fixtures-e228.json`, `.ax/experiments/setfit-failure-analysis-embedding-helper-fixtures-e229.json`, `.ax/experiments/classifier-package-execution-embedding-helper-fixture-failure-analysis-e229.json`, `.ax/experiments/boundary-miss-review-current.md`, `.ax/experiments/boundary-miss-review-current-report.json`, `.ax/experiments/classifier-package-execution-embedding-helper-boundary-miss-review-e230.json`, `.ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e231-post-promotion.json`, `.ax/experiments/embedding-helper-canonical-promotion-split-audit-e231.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. Reviewed helper hard negatives now live in canonical fixtures, and the package append operation is idempotent after promotion. | Passed: boundary review is promotion-ready, canonical fixtures contain `136` unique rows including `12` helper hard negatives, split audit is viable for seeds `7/13/42`, and robustness remains `robust_enough` with macro F1 min `0.7542` and max `none` FP `0.0769`. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `65b0b3c`, `4c602d9`, `eeb517c`, `9a6811e`, `31a1b16`, `e41562c`, `0587b67`, `0e0a960`, `3f01787`, `7bea922`, `21f7163`, `24e4a4e`, `f97c8e3`, `722e3e8`, `8b27657`, this commit | Move from fixture promotion to graph/usefulness work: project the promoted helper evidence into queryable classifier facts and test whether workflow/harness discovery improves. |
 
 Current recommendation:
 
@@ -12122,6 +12122,114 @@ python3 -m json.tool packages/ax-classifier-session-sections/ax.classifier.json 
 bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts
 python3 -m json.tool .ax/experiments/boundary-miss-review-current-report.json >/dev/null
 python3 -m json.tool .ax/experiments/classifier-package-execution-embedding-helper-boundary-miss-review-e230.json >/dev/null
+```
+
+## E231 - Review Boundary Misses And Promote Helper Fixtures
+
+Question:
+
+- After reviewing the residual boundary misses, can the accepted
+  embedding-helper hard negatives move into canonical fixtures without breaking
+  repeatable package operations or split-safe SetFit evaluation?
+
+Implementation:
+
+- Reviewed the E230 boundary queue and accepted the rows whose labels already
+  matched the intended label contract.
+- Rejected and corrected one fixture boundary:
+  `correction-dirty-files-question` was renamed to
+  `verification-dirty-files-question` and relabeled from `correction` /
+  `workflow_state` to `verification_request` / `review_status`.
+- Promoted the `12` reviewed embedding-helper hard negatives into
+  `packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl`.
+- Added an explicit `--allow-existing-identical` mode to
+  `fixture_append.py`, then wired it only into the embedding-helper fixture
+  append package operation. This keeps normal duplicate protection, while
+  allowing the helper append operation to report already-promoted rows instead
+  of failing after canonical promotion.
+
+Commands:
+
+```sh
+bun run classifiers:boundary-miss-review -- --review=.ax/experiments/boundary-miss-review-e231.json --brief=.ax/experiments/boundary-miss-review-e231-reviewed.md --out=.ax/experiments/boundary-miss-review-e231-report.json --mode=sync --json
+bun src/cli/index.ts classifiers package-operations --operation=embedding-helper-fixture-setfit-robustness --execute --allow-expensive --out=.ax/experiments/classifier-package-execution-embedding-helper-fixture-setfit-robustness-e231.json
+bun src/cli/index.ts classifiers package-operations --operation=embedding-helper-fixture-failure-analysis --execute --out=.ax/experiments/classifier-package-execution-embedding-helper-fixture-failure-analysis-e231.json
+bun run classifiers:boundary-miss-review -- --review=.ax/experiments/boundary-miss-review-e231-current.json --brief=.ax/experiments/boundary-miss-review-e231-current-reviewed.md --out=.ax/experiments/boundary-miss-review-e231-current-report.json --mode=sync --json
+bun src/cli/index.ts classifiers package-operations --operation=embedding-helper-boundary-miss-review-sync --execute --out=.ax/experiments/classifier-package-execution-embedding-helper-boundary-miss-review-sync-e231.json
+bun src/cli/index.ts classifiers package-operations --operation=embedding-helper-fixture-append --execute --allow-expensive --out=.ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e231-post-promotion.json
+bun run classifiers:fixture-metadata -- --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --out=.ax/experiments/chunks-canonical-after-helper-promotion-e231-metadata.jsonl
+bun run classifiers:split-audit -- --fixtures=.ax/experiments/chunks-canonical-after-helper-promotion-e231-metadata.jsonl --group-field=pair_group --pair-field=pair_group --label-mode=coarse --seeds=7,13,42 --out=.ax/experiments/embedding-helper-canonical-promotion-split-audit-e231.json --json
+```
+
+Artifacts:
+
+- `.ax/experiments/boundary-miss-review-e231-report.json`
+- `.ax/experiments/boundary-miss-review-e231-current-report.json`
+- `.ax/experiments/classifier-package-execution-embedding-helper-boundary-miss-review-sync-e231.json`
+- `.ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e231-post-promotion.json`
+- `.ax/experiments/chunks-canonical-after-helper-promotion-e231-metadata.jsonl`
+- `.ax/experiments/embedding-helper-canonical-promotion-split-audit-e231.json`
+- `.ax/experiments/setfit-robustness-embedding-helper-fixtures-current.json`
+- `.ax/experiments/setfit-failure-analysis-embedding-helper-fixtures-current.json`
+
+Results:
+
+- Canonical chunk fixture rows: `136`
+- Unique canonical fixture IDs: `136`
+- Promoted helper hard negatives: `12`
+- Label counts:
+  - `approval`: `20`
+  - `correction`: `13`
+  - `direction`: `10`
+  - `none`: `37`
+  - `recovery_action`: `12`
+  - `rejection`: `12`
+  - `tooling_or_environment_issue`: `14`
+  - `verification_request`: `18`
+- Boundary review:
+  - first pass accepted `7`, rejected `1`, pending `0`
+  - second pass accepted `6`, rejected `0`, pending `0`
+  - current decision: `boundary_review_ready_for_fixture_promotion`
+- Post-promotion append operation:
+  - base rows: `136`
+  - append rows: `12`
+  - new append rows: `0`
+  - already existing rows: `12`
+  - combined rows: `136`
+  - failures: `[]`
+- Canonical split audit:
+  - fixtures: `136`
+  - pair groups: `72`
+  - seeds `7/13/42`: all `viable_split`
+  - train/test rows: `96 / 40`
+  - group overlap: `0`
+- SetFit robustness over the promoted fixture content:
+  - decision: `robust_enough`
+  - macro F1 mean/min/max: `0.8108 / 0.7542 / 0.8439`
+  - calibrated macro F1 mean/min/max: `0.8113 / 0.7542 / 0.8452`
+  - accuracy mean: `0.825`
+  - `none` false-positive rate mean/max: `0.0256 / 0.0769`
+  - failures: `[]`
+
+Decision:
+
+- The helper-fixture promotion gate has passed. The promoted canonical fixture
+  set is split-safe, keeps the robustness gate above threshold, and leaves the
+  append helper rerunnable in a clean post-promotion state.
+- The remaining classifier work should now shift from adding more helper
+  hard negatives to proving graph usefulness from the promoted facts:
+  queryability, workflow discovery, harness candidate evidence, and review
+  gates for any fact promotion.
+
+Verification:
+
+```sh
+python3 -m unittest discover packages/ax-classifier-session-sections -p '*_test.py'
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+python3 -m json.tool packages/ax-classifier-session-sections/ax.classifier.json >/dev/null
+python3 -m json.tool .ax/experiments/embedding-helper-canonical-promotion-split-audit-e231.json >/dev/null
+python3 -m json.tool .ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e231-post-promotion.json >/dev/null
 ```
 
 ## E197 - Hybrid Graph Usefulness Gate

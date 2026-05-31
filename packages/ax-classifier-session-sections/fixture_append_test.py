@@ -26,6 +26,37 @@ class FixtureAppendTest(unittest.TestCase):
 
         self.assertIn("append rows duplicate existing fixture ids: a", failures)
 
+    def test_validate_append_rows_accepts_already_promoted_identical_rows_when_allowed(self) -> None:
+        row = {
+            "id": "session-section-chunks/embedding-helper-hard-negative-none-a",
+            "label": "none",
+            "target": "none",
+            "source_group": "embedding-helper-hard-negative",
+            "source_candidate_id": "embedding-hard-negative/session-section-chunks/none-a",
+            "source_fixture_id": "session-section-chunks/none-a",
+            "review_notes": "Reviewed as a none hard negative.",
+        }
+
+        failures = module.validate_append_rows(base_rows=[row], append_rows=[row], allow_existing_identical=True)
+
+        self.assertEqual(failures, [])
+
+    def test_validate_append_rows_blocks_existing_conflict_when_existing_rows_allowed(self) -> None:
+        base = [{
+            "id": "session-section-chunks/embedding-helper-hard-negative-none-a",
+            "label": "none",
+            "target": "none",
+            "source_group": "embedding-helper-hard-negative",
+            "source_candidate_id": "embedding-hard-negative/session-section-chunks/none-a",
+            "source_fixture_id": "session-section-chunks/none-a",
+            "review_notes": "Reviewed as a none hard negative.",
+        }]
+        append = [{**base[0], "review_notes": "Different review note."}]
+
+        failures = module.validate_append_rows(base_rows=base, append_rows=append, allow_existing_identical=True)
+
+        self.assertIn("append rows conflict with existing fixture ids: session-section-chunks/embedding-helper-hard-negative-none-a", failures)
+
     def test_validate_append_rows_blocks_non_none_labels(self) -> None:
         failures = module.validate_append_rows(base_rows=[], append_rows=[{"id": "b", "label": "direction"}])
 
@@ -111,10 +142,41 @@ class FixtureAppendTest(unittest.TestCase):
         self.assertEqual(report["combined_rows"], 2)
         self.assertEqual(report["decision"], "ready_to_write_combined_fixtures")
 
+    def test_build_report_tracks_existing_identical_rows(self) -> None:
+        row = {
+            "id": "session-section-chunks/embedding-helper-hard-negative-none-a",
+            "label": "none",
+            "source_group": "embedding-helper-hard-negative",
+            "source_candidate_id": "embedding-hard-negative/session-section-chunks/none-a",
+            "source_fixture_id": "session-section-chunks/none-a",
+            "review_notes": "Reviewed as a none hard negative.",
+        }
+
+        report = module.build_report([row], [row], [], allow_existing_identical=True)
+
+        self.assertEqual(report["append_rows"], 1)
+        self.assertEqual(report["new_append_rows"], 0)
+        self.assertEqual(report["already_existing_rows"], 1)
+        self.assertEqual(report["combined_rows"], 1)
+
     def test_combined_rows_preserve_order(self) -> None:
         combined = module.combined_rows([{"id": "a"}], [{"id": "b"}])
 
         self.assertEqual([row["id"] for row in combined], ["a", "b"])
+
+    def test_combined_rows_skips_existing_identical_rows_when_allowed(self) -> None:
+        row = {
+            "id": "session-section-chunks/embedding-helper-hard-negative-none-a",
+            "label": "none",
+            "source_group": "embedding-helper-hard-negative",
+            "source_candidate_id": "embedding-hard-negative/session-section-chunks/none-a",
+            "source_fixture_id": "session-section-chunks/none-a",
+            "review_notes": "Reviewed as a none hard negative.",
+        }
+
+        combined = module.combined_rows([row], [row], allow_existing_identical=True)
+
+        self.assertEqual(combined, [row])
 
 
 if __name__ == "__main__":
