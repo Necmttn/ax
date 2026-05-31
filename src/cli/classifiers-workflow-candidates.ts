@@ -382,6 +382,7 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly review_issue_repair_command?: string;
     readonly review_pipeline_stage: WorkflowCandidateReviewCoveragePipelineStage;
     readonly review_pipeline_next_action: string;
+    readonly review_pipeline_command?: string;
     readonly provenance_issue_rows: readonly WorkflowCandidateReviewCoverageProvenanceIssueRow[];
     readonly projection_totals: WorkflowCandidateTopicReviewGraphProjection["totals"];
     readonly write_plan_totals: WorkflowCandidateTopicReviewGraphWritePlan["totals"];
@@ -1997,6 +1998,9 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             `coverage review issue next action: ${report.coverage_review.review_issue_next_action}`,
             `coverage review pipeline stage: ${report.coverage_review.review_pipeline_stage}`,
             `coverage review pipeline next action: ${report.coverage_review.review_pipeline_next_action}`,
+            ...(report.coverage_review.review_pipeline_command === undefined ? [] : [
+                `coverage review pipeline command: ${report.coverage_review.review_pipeline_command}`,
+            ]),
             ...(report.coverage_review.review_issue_repair_command === undefined ? [] : [
                 `coverage review issue repair command: ${report.coverage_review.review_issue_repair_command}`,
             ]),
@@ -3269,6 +3273,11 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
             "--json",
         ].filter((part): part is string => part !== undefined).join(" ");
     const reviewIssueRepairCommand = reviewIssueRows.length === 0 ? undefined : nextCommand;
+    const reviewPipelineCommand = workflowCandidateReviewCoveragePipelineCommand(reviewPipelineStage, {
+        reviewIssueRepairCommand,
+        reviewProvenanceStampCommand: provenanceStampCommand,
+        productionApplyCommand: strictApplyCommand,
+    });
     const lines = [
         "# Workflow Candidate Coverage Review",
         "",
@@ -3312,6 +3321,9 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
         `- Next action: ${workflowCandidateReviewCoverageGuardNextAction(applyGuard)}`,
         `- Pipeline stage: \`${reviewPipelineStage}\``,
         `- Pipeline next action: ${reviewPipelineNextAction}`,
+        ...(reviewPipelineCommand === undefined ? [] : [
+            `- Pipeline command: \`${reviewPipelineCommand}\``,
+        ]),
         "",
         "## Review Issues",
         "",
@@ -3870,6 +3882,27 @@ const workflowCandidateReviewCoveragePipelineNextAction = (
     }
 };
 
+const workflowCandidateReviewCoveragePipelineCommand = (
+    stage: WorkflowCandidateReviewCoveragePipelineStage,
+    commands: {
+        readonly reviewIssueRepairCommand: string | undefined;
+        readonly reviewProvenanceStampCommand: string | undefined;
+        readonly productionApplyCommand: string | undefined;
+    },
+): string | undefined => {
+    switch (stage) {
+        case "needs_review_repair":
+            return commands.reviewIssueRepairCommand;
+        case "needs_review_provenance":
+            return commands.reviewProvenanceStampCommand;
+        case "ready_for_production_apply":
+            return commands.productionApplyCommand;
+        case "needs_review_decisions":
+        case "needs_review_handoff":
+            return undefined;
+    }
+};
+
 const workflowCandidateReviewCoverageHandoffMissingPaths = (input: {
     readonly reviewFactsPath?: string;
     readonly reviewWritePlanPath?: string;
@@ -4195,6 +4228,11 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
             ...(input.syncedReviewBriefPath === undefined ? {} : { syncedReviewBriefPath: input.syncedReviewBriefPath }),
             ...(input.outputPath === undefined ? {} : { outputPath: input.outputPath }),
         });
+    const reviewPipelineCommand = workflowCandidateReviewCoveragePipelineCommand(reviewPipelineStage, {
+        reviewIssueRepairCommand,
+        reviewProvenanceStampCommand,
+        productionApplyCommand,
+    });
     return {
         schema: "ax.workflow_candidate_review_readiness.v1",
         source_path: input.sourcePath,
@@ -4271,6 +4309,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         ...(reviewIssueRepairCommand === undefined ? {} : { review_issue_repair_command: reviewIssueRepairCommand }),
         review_pipeline_stage: reviewPipelineStage,
         review_pipeline_next_action: reviewPipelineNextAction,
+        ...(reviewPipelineCommand === undefined ? {} : { review_pipeline_command: reviewPipelineCommand }),
         provenance_issue_rows: provenanceIssueRows,
         projection_totals: input.projection.totals,
         write_plan_totals: input.writePlan.totals,
