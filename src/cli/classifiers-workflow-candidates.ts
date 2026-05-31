@@ -182,6 +182,8 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly pending_fixture_count: number;
     readonly invalid_fixture_count: number;
     readonly missing_rationale_count: number;
+    readonly synced_fixture_count: number;
+    readonly unknown_fixture_count: number;
     readonly smoke_marker_count: number;
     readonly apply_guard:
         | "ready_to_apply"
@@ -191,6 +193,12 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
         | "no_reviewed_fixtures";
     readonly projection_totals: WorkflowCandidateTopicReviewGraphProjection["totals"];
     readonly write_plan_totals: WorkflowCandidateTopicReviewGraphWritePlan["totals"];
+}
+
+export interface WorkflowCandidateFixtureBriefSyncResult {
+    readonly rows: readonly WorkflowCandidateTopicClassifierFixtureRow[];
+    readonly synced_fixture_count: number;
+    readonly unknown_fixture_count: number;
 }
 
 export interface WorkflowCandidateTopicClassifierFixtureRow {
@@ -1722,6 +1730,7 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
         ...(report.coverage_review ? [
             `coverage review source: ${report.coverage_review.source_path}`,
             `coverage review fixtures: ${report.coverage_review.reviewed_fixture_count} reviewed, ${report.coverage_review.pending_fixture_count} pending`,
+            `coverage review sync: synced=${report.coverage_review.synced_fixture_count} unknown=${report.coverage_review.unknown_fixture_count}`,
             `coverage review issues: invalid=${report.coverage_review.invalid_fixture_count} missing_rationale=${report.coverage_review.missing_rationale_count} smoke=${report.coverage_review.smoke_marker_count}`,
             `coverage review apply guard: ${report.coverage_review.apply_guard}`,
             `coverage review applied: ${report.coverage_review.applied ? "yes" : "no"}`,
@@ -2692,6 +2701,13 @@ export function syncWorkflowCandidateFixtureRowsFromBrief(
     rows: readonly WorkflowCandidateTopicClassifierFixtureRow[],
     brief: string,
 ): readonly WorkflowCandidateTopicClassifierFixtureRow[] {
+    return syncWorkflowCandidateFixtureRowsFromBriefWithSummary(rows, brief).rows;
+}
+
+export function syncWorkflowCandidateFixtureRowsFromBriefWithSummary(
+    rows: readonly WorkflowCandidateTopicClassifierFixtureRow[],
+    brief: string,
+): WorkflowCandidateFixtureBriefSyncResult {
     const updates = new Map<string, { status?: string; rationale?: string }>();
     let currentFixtureId: string | undefined;
     for (const rawLine of brief.split(/\r?\n/)) {
@@ -2720,7 +2736,8 @@ export function syncWorkflowCandidateFixtureRowsFromBrief(
             });
         }
     }
-    return rows.map((row) => {
+    const knownIds = new Set(rows.map((row) => row.id));
+    const rowsWithUpdates = rows.map((row) => {
         const update = updates.get(row.id);
         if (update === undefined) return row;
         return {
@@ -2731,6 +2748,11 @@ export function syncWorkflowCandidateFixtureRowsFromBrief(
             ...(update.rationale === undefined ? {} : { review_rationale: update.rationale }),
         };
     });
+    return {
+        rows: rowsWithUpdates,
+        synced_fixture_count: rows.filter((row) => updates.has(row.id)).length,
+        unknown_fixture_count: [...updates.keys()].filter((fixtureId) => !knownIds.has(fixtureId)).length,
+    };
 }
 
 export function buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures(input: {
@@ -2868,6 +2890,8 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     readonly writePlan: WorkflowCandidateTopicReviewGraphWritePlan;
     readonly applyRequested: boolean;
     readonly applied: boolean;
+    readonly syncedFixtureCount?: number;
+    readonly unknownFixtureCount?: number;
 }): WorkflowCandidateReviewCoverageApplySummary {
     const reviewedRows = input.rows.filter((row) => fixtureReviewVerdict(row) !== undefined);
     const invalidRows = input.rows.filter((row) => !VALID_VERDICTS.has(row.review_status));
@@ -2891,6 +2915,8 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         pending_fixture_count: input.rows.length - reviewedRows.length,
         invalid_fixture_count: invalidRows.length,
         missing_rationale_count: missingRationaleRows.length,
+        synced_fixture_count: input.syncedFixtureCount ?? 0,
+        unknown_fixture_count: input.unknownFixtureCount ?? 0,
         smoke_marker_count: smokeMarkerCount,
         apply_guard: applyGuard,
         projection_totals: input.projection.totals,
@@ -3729,11 +3755,16 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 let reviewedRows = parseWorkflowCandidateFixtureRowsJsonl(
                     readFileSync(input.coverageReviewPack, "utf8"),
                 );
+                let syncedFixtureCount = 0;
+                let unknownFixtureCount = 0;
                 if (input.syncCoverageReviewBrief) {
-                    reviewedRows = syncWorkflowCandidateFixtureRowsFromBrief(
+                    const syncResult = syncWorkflowCandidateFixtureRowsFromBriefWithSummary(
                         reviewedRows,
                         readFileSync(input.syncCoverageReviewBrief, "utf8"),
                     );
+                    reviewedRows = syncResult.rows;
+                    syncedFixtureCount = syncResult.synced_fixture_count;
+                    unknownFixtureCount = syncResult.unknown_fixture_count;
                     writeFileSync(input.coverageReviewPack, renderClassifierFixtureRowsJsonl(reviewedRows), "utf8");
                 }
                 if (input.coverageReviewBrief) {
@@ -3760,6 +3791,8 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     writePlan: reviewWritePlan,
                     applyRequested: Boolean(input.applyReviewFacts),
                     applied: false,
+                    syncedFixtureCount,
+                    unknownFixtureCount,
                 });
                 const canApply = pendingApplySummary.apply_guard === "ready_to_apply" &&
                     reviewWritePlan.statements.length > 0;

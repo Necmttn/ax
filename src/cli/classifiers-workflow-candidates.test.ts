@@ -31,6 +31,7 @@ import {
     renderWorkflowCandidateBriefMarkdown,
     renderWorkflowCandidateReviewCoverageBriefMarkdown,
     syncWorkflowCandidateFixtureRowsFromBrief,
+    syncWorkflowCandidateFixtureRowsFromBriefWithSummary,
     renderWorkflowCandidateTopicEvidencePackMarkdown,
     renderMergedWorkflowCandidateTaskMarkdown,
     renderWorkflowCandidateProposalListText,
@@ -1638,6 +1639,67 @@ describe("classifiers workflow-candidates", () => {
         expect(synced[0]).toMatchObject({
             review_status: "accept",
             review_rationale: "Useful recovery behavior worth preserving.",
+        });
+    });
+
+    test("reports invalid and unknown coverage review brief sync entries", () => {
+        const rows = parseWorkflowCandidateFixtureRowsJsonl(JSON.stringify({
+            id: "workflow-candidate-review-coverage/verification_or_recovery_signal/a",
+            suite: "workflow-candidate-review-coverage",
+            name: "coverage-gap-verification_or_recovery_signal-01",
+            label: "verification_or_recovery_signal",
+            target: "unknown",
+            text: "USER:\ncontinue and make sure the tests prove this does not regress\n\nPREVIOUS_ASSISTANT:\n",
+            source_group: "workflow-candidate",
+            review_status: "pending",
+            topic: "review-coverage",
+            candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+            candidate_label: "verification_or_recovery_signal",
+            proposed_action: "add_verification_gate",
+            result_id: "classifier_result:verification",
+            turn: "turn:verification",
+            confidence: 0.83,
+        }));
+        const brief = `${renderWorkflowCandidateReviewCoverageBriefMarkdown(rows)
+            .replace("- Review status: `pending`", "- Review status: `maybe`")
+            .replace("- Review rationale: _pending_", "- Review rationale: Invalid status should be reported.")}
+## Fixture 99: unknown
+
+- Fixture id: \`workflow-candidate-review-coverage/unknown/x\`
+- Review status: \`accept\`
+- Review rationale: Unknown row should be reported.
+`;
+
+        const syncResult = syncWorkflowCandidateFixtureRowsFromBriefWithSummary(rows, brief);
+        const projection = buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures({
+            rows: syncResult.rows,
+            syncedFrom: ".ax/experiments/reviewed-coverage-gaps.jsonl",
+        });
+        const writePlan = buildWorkflowCandidateTopicReviewGraphWritePlan(projection);
+        const summary = buildWorkflowCandidateReviewCoverageApplySummary({
+            rows: syncResult.rows,
+            sourcePath: ".ax/experiments/reviewed-coverage-gaps.jsonl",
+            projection,
+            writePlan,
+            applyRequested: true,
+            applied: false,
+            syncedFixtureCount: syncResult.synced_fixture_count,
+            unknownFixtureCount: syncResult.unknown_fixture_count,
+        });
+
+        expect(syncResult.synced_fixture_count).toBe(1);
+        expect(syncResult.unknown_fixture_count).toBe(1);
+        expect(syncResult.rows[0]).toMatchObject({
+            review_status: "maybe",
+            review_rationale: "Invalid status should be reported.",
+        });
+        expect(summary).toMatchObject({
+            reviewed_fixture_count: 0,
+            pending_fixture_count: 1,
+            invalid_fixture_count: 1,
+            synced_fixture_count: 1,
+            unknown_fixture_count: 1,
+            apply_guard: "invalid_review_pack",
         });
     });
 
