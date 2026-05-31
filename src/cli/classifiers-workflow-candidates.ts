@@ -313,6 +313,7 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly production_apply_blocker_details: readonly WorkflowCandidateReviewCoverageApplyBlockerDetail[];
     readonly production_next_action: string;
     readonly production_apply_command?: string;
+    readonly review_provenance_stamp_command?: string;
     readonly next_action: string;
     readonly post_apply_recheck_command: string;
     readonly post_apply_recheck?: WorkflowCandidateReviewCoveragePostApplyRecheckSummary;
@@ -1913,6 +1914,9 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             `coverage review production next action: ${report.coverage_review.production_next_action}`,
             ...(report.coverage_review.production_apply_command === undefined ? [] : [
                 `coverage review production apply command: ${report.coverage_review.production_apply_command}`,
+            ]),
+            ...(report.coverage_review.review_provenance_stamp_command === undefined ? [] : [
+                `coverage review provenance stamp command: ${report.coverage_review.review_provenance_stamp_command}`,
             ]),
             `coverage review apply result: ${report.coverage_review.apply_result} statements=${report.coverage_review.applied_statement_count}`,
             `coverage review blockers: ${report.coverage_review.apply_blockers.length === 0 ? "none" : report.coverage_review.apply_blockers.join(", ")}`,
@@ -3610,6 +3614,28 @@ const workflowCandidateReviewCoverageProductionApplyCommand = (input: {
     ].join(" ");
 };
 
+const workflowCandidateReviewCoverageProvenanceStampCommand = (input: {
+    readonly sourcePath: string;
+    readonly sourceKind?: string;
+    readonly reviewBriefPath?: string;
+    readonly syncedReviewBriefPath?: string;
+    readonly outputPath?: string;
+}): string | undefined => {
+    if (input.reviewBriefPath === undefined || input.syncedReviewBriefPath === undefined) return undefined;
+    return [
+        "bun src/cli/index.ts classifiers workflow-candidates",
+        "--review-coverage",
+        `--source-kind=${input.sourceKind ?? "hybrid_window_classifier_projection"}`,
+        `--coverage-review-pack=${input.sourcePath}`,
+        `--sync-coverage-review-brief=${input.syncedReviewBriefPath}`,
+        "--review-provenance-reviewer=<reviewer>",
+        "--review-provenance-reviewed-at=<reviewed-at-iso>",
+        `--coverage-review-brief=${input.reviewBriefPath}`,
+        `--out=${input.outputPath ?? ".ax/experiments/workflow-candidate-review-coverage-post-apply.json"}`,
+        "--json",
+    ].join(" ");
+};
+
 export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     readonly rows: readonly WorkflowCandidateTopicClassifierFixtureRow[];
     readonly sourcePath: string;
@@ -3672,6 +3698,13 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         ...(input.sourceKind === undefined ? {} : { sourceKind: input.sourceKind }),
         ...(input.reviewFactsPath === undefined ? {} : { reviewFactsPath: input.reviewFactsPath }),
         ...(input.reviewWritePlanPath === undefined ? {} : { reviewWritePlanPath: input.reviewWritePlanPath }),
+        ...(input.reviewBriefPath === undefined ? {} : { reviewBriefPath: input.reviewBriefPath }),
+        ...(input.syncedReviewBriefPath === undefined ? {} : { syncedReviewBriefPath: input.syncedReviewBriefPath }),
+        ...(input.outputPath === undefined ? {} : { outputPath: input.outputPath }),
+    });
+    const reviewProvenanceStampCommand = workflowCandidateReviewCoverageProvenanceStampCommand({
+        sourcePath: input.sourcePath,
+        ...(input.sourceKind === undefined ? {} : { sourceKind: input.sourceKind }),
         ...(input.reviewBriefPath === undefined ? {} : { reviewBriefPath: input.reviewBriefPath }),
         ...(input.syncedReviewBriefPath === undefined ? {} : { syncedReviewBriefPath: input.syncedReviewBriefPath }),
         ...(input.outputPath === undefined ? {} : { outputPath: input.outputPath }),
@@ -3849,6 +3882,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         production_apply_blocker_details: productionApplyBlockerDetails,
         production_next_action: workflowCandidateReviewCoverageGuardNextAction(productionApplyGuard),
         ...(productionApplyCommand === undefined ? {} : { production_apply_command: productionApplyCommand }),
+        ...(reviewProvenanceStampCommand === undefined ? {} : { review_provenance_stamp_command: reviewProvenanceStampCommand }),
         next_action: workflowCandidateReviewCoverageGuardNextAction(applyGuard),
         post_apply_recheck_command: workflowCandidateReviewCoverageRecheckCommand({
             ...(input.sourceKind === undefined ? {} : { sourceKind: input.sourceKind }),
