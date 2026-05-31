@@ -188,6 +188,11 @@ export type WorkflowCandidateReviewCoverageApplyBlocker =
     | "missing_review_rationale"
     | "no_reviewed_fixtures";
 
+export interface WorkflowCandidateReviewCoverageApplyBlockerDetail {
+    readonly blocker: WorkflowCandidateReviewCoverageApplyBlocker;
+    readonly count: number;
+}
+
 export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly source_path: string;
     readonly apply_requested: boolean;
@@ -208,6 +213,7 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly apply_guard: WorkflowCandidateReviewCoverageApplyGuard;
     readonly can_apply: boolean;
     readonly apply_blockers: readonly WorkflowCandidateReviewCoverageApplyBlocker[];
+    readonly apply_blocker_details: readonly WorkflowCandidateReviewCoverageApplyBlockerDetail[];
     readonly next_action: string;
     readonly projection_totals: WorkflowCandidateTopicReviewGraphProjection["totals"];
     readonly write_plan_totals: WorkflowCandidateTopicReviewGraphWritePlan["totals"];
@@ -1766,6 +1772,7 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             `coverage review apply guard: ${report.coverage_review.apply_guard}`,
             `coverage review can apply: ${report.coverage_review.can_apply ? "yes" : "no"}`,
             `coverage review blockers: ${report.coverage_review.apply_blockers.length === 0 ? "none" : report.coverage_review.apply_blockers.join(", ")}`,
+            `coverage review blocker details: ${report.coverage_review.apply_blocker_details.length === 0 ? "none" : report.coverage_review.apply_blocker_details.map((detail) => `${detail.blocker}=${detail.count}`).join(", ")}`,
             `coverage review next action: ${report.coverage_review.next_action}`,
             `coverage review applied: ${report.coverage_review.applied ? "yes" : "no"}`,
         ] : []),
@@ -3119,6 +3126,20 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     if (applyGuard === "ready_to_apply" && input.writePlan.statements.length === 0) {
         applyBlockers.push("empty_write_plan");
     }
+    const applyBlockerDetails: WorkflowCandidateReviewCoverageApplyBlockerDetail[] = applyBlockers.map((blocker) => {
+        switch (blocker) {
+            case "invalid_review_pack":
+                return { blocker, count: invalidRows.length };
+            case "no_reviewed_fixtures":
+                return { blocker, count: input.rows.length };
+            case "missing_review_rationale":
+                return { blocker, count: missingRationaleRows.length };
+            case "blocked_smoke_review":
+                return { blocker, count: smokeMarkerCount };
+            case "empty_write_plan":
+                return { blocker, count: 1 };
+        }
+    });
     return {
         source_path: input.sourcePath,
         apply_requested: input.applyRequested,
@@ -3139,6 +3160,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         apply_guard: applyGuard,
         can_apply: canApply,
         apply_blockers: applyBlockers,
+        apply_blocker_details: applyBlockerDetails,
         next_action: workflowCandidateReviewCoverageGuardNextAction(applyGuard),
         projection_totals: input.projection.totals,
         write_plan_totals: input.writePlan.totals,
