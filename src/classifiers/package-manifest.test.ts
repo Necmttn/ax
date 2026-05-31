@@ -48,6 +48,7 @@ describe("classifier package manifest", () => {
         expect(manifest.operations?.find((operation) => operation.id === "workflow-candidate-proposal-pack")?.kind).toBe("review");
         expect(manifest.operations?.find((operation) => operation.id === "workflow-candidate-proposal-review")?.command).toContain("classifiers:workflow-candidate-proposal-review");
         expect(manifest.operations?.find((operation) => operation.id === "workflow-candidate-proposal-promote-drafts")?.command).toContain("classifiers:workflow-candidate-proposal-promote");
+        expect(manifest.operations?.find((operation) => operation.id === "workflow-candidate-proposal-ready-smoke")?.command).toContain("classifiers:workflow-candidate-proposal-promote-smoke");
         expect(manifest.operations?.find((operation) => operation.id === "graph-health-summary")?.kind).toBe("status");
         expect(manifest.operations?.find((operation) => operation.id === "graph-health-guarded")?.command).toContain("--graph-mode=guarded");
         expect(manifest.operations?.find((operation) => operation.id === "classifier-lifecycle-status")?.outputs).toContain(".ax/experiments/classifiers-lifecycle-current.json");
@@ -82,6 +83,7 @@ describe("classifier package manifest", () => {
         const workflowCandidateProposalPack = requireClassifierPackageOperation(manifest, "workflow-candidate-proposal-pack");
         const workflowCandidateProposalReview = requireClassifierPackageOperation(manifest, "workflow-candidate-proposal-review");
         const workflowCandidateProposalPromote = requireClassifierPackageOperation(manifest, "workflow-candidate-proposal-promote-drafts");
+        const workflowCandidateProposalReadySmoke = requireClassifierPackageOperation(manifest, "workflow-candidate-proposal-ready-smoke");
         const graphHealth = requireClassifierPackageOperation(manifest, "graph-health-changed-artifacts");
         const lifecycle = requireClassifierPackageOperation(manifest, "classifier-lifecycle-status");
         const batchEval = requireClassifierPackageOperation(manifest, "focused-batch-eval");
@@ -115,6 +117,8 @@ describe("classifier package manifest", () => {
         expect(workflowCandidateProposalReview.outputs).toContain(".ax/experiments/workflow-candidate-proposal-review-current.md");
         expect(workflowCandidateProposalPromote.inputs).toContain(".ax/experiments/workflow-candidate-proposal-review-current.json");
         expect(workflowCandidateProposalPromote.outputs).toContain(".ax/tasks/workflow-candidate-promotion-drafts");
+        expect(workflowCandidateProposalReadySmoke.inputs).toEqual([]);
+        expect(workflowCandidateProposalReadySmoke.outputs).toContain(".ax/experiments/workflow-candidate-proposal-ready-smoke-drafts");
         expect(graphHealth.outputs).toContain(".ax/experiments/classifier-package-execution-graph-health-changed-current.json");
         expect(lifecycle.command).toContain("classifiers lifecycle");
         expect(batchEval.outputs).toContain(".ax/experiments/blind-review-batch-current-eval-report.json");

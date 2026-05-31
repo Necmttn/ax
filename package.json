@@ -75,6 +75,7 @@
     "classifiers:workflow-candidate-proposal-pack": "python3 packages/ax-classifier-session-sections/workflow_candidate_proposal_pack.py",
     "classifiers:workflow-candidate-proposal-review": "python3 packages/ax-classifier-session-sections/workflow_candidate_proposal_review.py",
     "classifiers:workflow-candidate-proposal-promote": "python3 packages/ax-classifier-session-sections/workflow_candidate_proposal_promote.py",
+    "classifiers:workflow-candidate-proposal-promote-smoke": "python3 packages/ax-classifier-session-sections/workflow_candidate_proposal_promote_smoke.py",
     "classifiers:blind-fixture-pack": "python3 packages/ax-classifier-session-sections/blind_fixture_pack.py",
     "classifiers:blind-gate-eval": "python3 packages/ax-classifier-session-sections/blind_gate_eval.py",
     "classifiers:blind-predict": "uv run packages/ax-classifier-session-sections/blind_predict.py",

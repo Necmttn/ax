@@ -11356,6 +11356,70 @@ Decision:
   review -> promotion-draft path, proving accepted/revised proposals create
   draft files and rejected proposals stay skipped.
 
+## E205 - Ready Review Promotion Smoke
+
+Question:
+
+- Can a deterministic ready-review fixture prove the full proposal review ->
+  promotion-draft path without depending on current pending human-review
+  briefs?
+
+Implementation:
+
+- Added
+  `packages/ax-classifier-session-sections/workflow_candidate_proposal_promote_smoke.py`.
+- Added
+  `packages/ax-classifier-session-sections/workflow_candidate_proposal_promote_smoke_test.py`.
+- Added `bun run classifiers:workflow-candidate-proposal-promote-smoke`.
+- Added package operation `workflow-candidate-proposal-ready-smoke`.
+- The smoke builds a three-proposal ready-review fixture:
+  - `accept` harness proposal
+  - `revise` guidance proposal
+  - `reject` guidance proposal
+- It runs the same promotion helper used by
+  `workflow-candidate-proposal-promote-drafts`.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/workflow_candidate_proposal_promote_smoke_test.py
+bun src/cli/index.ts classifiers package-operations --operation=workflow-candidate-proposal-ready-smoke --execute --out=.ax/experiments/classifier-package-execution-workflow-candidate-proposal-ready-smoke-e205.json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-proposal-ready-smoke-review-current.json`
+- `.ax/experiments/workflow-candidate-proposal-ready-smoke-promotion-current.json`
+- `.ax/experiments/workflow-candidate-proposal-ready-smoke-drafts/`
+- `.ax/experiments/workflow-candidate-proposal-ready-smoke-review-e205.json`
+- `.ax/experiments/workflow-candidate-proposal-ready-smoke-promotion-e205.json`
+- `.ax/experiments/workflow-candidate-proposal-ready-smoke-drafts-e205/`
+- `.ax/experiments/classifier-package-execution-workflow-candidate-proposal-ready-smoke-e205.json`
+
+Results:
+
+- Package execution decision: `executed`
+- Missing package outputs: `[]`
+- Ready-review decision: `workflow_candidate_proposal_reviews_ready`
+- Promotion decision: `workflow_candidate_proposal_promotion_ready`
+- Proposal count: `3`
+- Emitted drafts: `2`
+- Skipped proposals: `1`
+- Drafts:
+  - `01-add-verification-gate.md`
+  - `02-record-guidance-or-environment-preference.md`
+
+Decision:
+
+- E205 proves the post-review path works when the review gate is satisfied:
+  accepted and revised proposals become task drafts, and rejected proposals do
+  not.
+- The production/current proposal pack remains blocked, but the code path after
+  reviewer completion is now covered by a package operation and fixture smoke.
+- Next useful slice: add graph/lifecycle visibility for the proposal-review and
+  promotion-draft operation results, so `classifiers lifecycle` can report
+  proposal review pending vs ready vs smoke-passed without opening raw JSON.
+
 ## E196 - First-Class Hybrid Robustness Gate
 
 Question:

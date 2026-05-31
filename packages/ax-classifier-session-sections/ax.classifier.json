@@ -186,6 +186,18 @@
       ]
     },
     {
+      "id": "workflow-candidate-proposal-ready-smoke",
+      "kind": "review",
+      "description": "Run a fixture-backed ready-review smoke proving accepted and revised proposal reviews emit task drafts while rejected proposals are skipped.",
+      "command": "bun run classifiers:workflow-candidate-proposal-promote-smoke -- --review-out=.ax/experiments/workflow-candidate-proposal-ready-smoke-review-current.json --out=.ax/experiments/workflow-candidate-proposal-ready-smoke-promotion-current.json --task-dir=.ax/experiments/workflow-candidate-proposal-ready-smoke-drafts --json",
+      "inputs": [],
+      "outputs": [
+        ".ax/experiments/workflow-candidate-proposal-ready-smoke-review-current.json",
+        ".ax/experiments/workflow-candidate-proposal-ready-smoke-promotion-current.json",
+        ".ax/experiments/workflow-candidate-proposal-ready-smoke-drafts"
+      ]
+    },
+    {
       "id": "predict-windows",
       "kind": "debug",
       "description": "Run the saved SetFit model over exported event windows for local debugging.",
