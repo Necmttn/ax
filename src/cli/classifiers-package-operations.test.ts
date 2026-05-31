@@ -605,6 +605,7 @@ describe("classifiers package-operations format", () => {
                 mode: "embedding-helper",
                 fact_kind: "embedding_helper_hard_negative_candidate",
                 status: "accepted",
+                source_fixture_id: "session-section-chunks/none-start-building",
                 nearest_fixture_id: "session-section-chunks/approval-alright-go",
             },
             operations: [],
@@ -671,6 +672,7 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("mode: embedding-helper");
         expect(output).toContain("filter fact kind: embedding_helper_hard_negative_candidate");
         expect(output).toContain("filter status: accepted");
+        expect(output).toContain("filter source fixture: session-section-chunks/none-start-building");
         expect(output).toContain("filter nearest fixture: session-section-chunks/approval-alright-go");
         expect(output).toContain("embedding helper facts:");
         expect(output).toContain("- routing recommended_threshold: threshold=none positive_recall=0.9028 call_reduction=0.1778");

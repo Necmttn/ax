@@ -1160,6 +1160,7 @@ describe("classifier package operations report", () => {
                 mode: "embedding-helper",
                 fact_kind: "embedding_helper_hard_negative_candidate",
                 status: "accepted",
+                source_fixture_id: "session-section-chunks/none-start-building",
                 nearest_fixture_id: "session-section-chunks/approval-alright-go",
             },
         });
@@ -1167,6 +1168,7 @@ describe("classifier package operations report", () => {
         expect(report.query.mode).toBe("embedding-helper");
         expect(report.query.fact_kind).toBe("embedding_helper_hard_negative_candidate");
         expect(report.query.status).toBe("accepted");
+        expect(report.query.source_fixture_id).toBe("session-section-chunks/none-start-building");
         expect(report.query.nearest_fixture_id).toBe("session-section-chunks/approval-alright-go");
         expect(report.totals.embedding_helper_fact_count).toBe(4);
         expect(report.result_totals.embedding_helper_fact_count).toBe(1);
