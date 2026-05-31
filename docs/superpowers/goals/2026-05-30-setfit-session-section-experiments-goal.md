@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E361 adds
-  `.ax/experiments/workflow-candidate-review-coverage-repair-argv-e361.json`
+- Index continuation: E362 adds
+  `.ax/experiments/workflow-candidate-review-coverage-stamp-argv-e362.json`
   and
-  `.ax/experiments/workflow-candidate-review-coverage-repair-argv-e361.txt`
+  `.ax/experiments/workflow-candidate-review-coverage-stamp-argv-e362.txt`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,68 @@ Current recommendation:
   checks.
 - The immediate bottleneck is review throughput, not another expensive model
   run.
+
+## E362 - Expose Provenance Stamp Argv
+
+Question:
+- Can services stamp missing review provenance without parsing the shell-style
+  provenance command?
+
+Implementation:
+- Added `review_provenance_stamp_command_argv` to the coverage review
+  readiness summary when a provenance stamp command is available.
+- Text coverage review output now renders
+  `coverage review provenance stamp argv: ...`.
+- Incomplete handoff summaries still omit both the provenance stamp command and
+  argv, so services do not execute a command that cannot produce the expected
+  handoff artifacts.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --out=.ax/experiments/workflow-candidate-review-coverage-stamp-argv-e362.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --out=.ax/experiments/workflow-candidate-review-coverage-stamp-argv-e362.json > .ax/experiments/workflow-candidate-review-coverage-stamp-argv-e362.txt
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-stamp-argv-e362.json`
+- `.ax/experiments/workflow-candidate-review-coverage-stamp-argv-e362.txt`
+
+Results:
+- Missing-provenance readiness reports
+  `review_pipeline_stage=needs_review_provenance`.
+- JSON exposes `coverage_review.review_provenance_stamp_command_argv` with
+  placeholder inputs for `reviewer` and `reviewed_at`.
+- Pipeline input bindings still identify those placeholders as
+  `nonempty_string` and `iso_datetime`.
+- Text output renders `coverage review provenance stamp argv: ...`.
+
+Decision:
+- E362 makes the provenance-stamping branch service-executable without shell
+  parsing. Together with E361, review repair and provenance stamping now expose
+  structured argv at the direct action surface as well as the generic pipeline
+  command surface.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-stamp-argv-e362.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+cr = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-stamp-argv-e362.json").read_text())["coverage_review"]
+text = Path(".ax/experiments/workflow-candidate-review-coverage-stamp-argv-e362.txt").read_text()
+argv = cr["review_provenance_stamp_command_argv"]
+assert cr["review_pipeline_stage"] == "needs_review_provenance"
+assert cr["review_pipeline_command_kind"] == "stamp_review_provenance"
+assert cr["review_pipeline_command_status"] == "requires_inputs"
+assert cr["review_pipeline_required_inputs"] == ["reviewer", "reviewed_at"]
+assert argv[:5] == ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates", "--review-coverage"]
+assert "--review-provenance-reviewer=<reviewer>" in argv
+assert "--review-provenance-reviewed-at=<reviewed-at-iso>" in argv
+assert "--out=.ax/experiments/workflow-candidate-review-coverage-stamp-argv-e362.json" in argv
+assert "coverage review provenance stamp argv: bun | src/cli/index.ts | classifiers | workflow-candidates | --review-coverage" in text
+PY
+```
 
 ## E361 - Expose Review Issue Repair Argv
 

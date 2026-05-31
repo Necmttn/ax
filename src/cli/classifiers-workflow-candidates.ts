@@ -445,6 +445,7 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly production_apply_blocker_details: readonly WorkflowCandidateReviewCoverageApplyBlockerDetail[];
     readonly production_next_action: string;
     readonly production_apply_command?: string;
+    readonly review_provenance_stamp_command_argv?: readonly string[];
     readonly review_provenance_stamp_command?: string;
     readonly next_action: string;
     readonly post_apply_recheck_command: string;
@@ -2083,6 +2084,9 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             ]),
             ...(report.coverage_review.review_provenance_stamp_command === undefined ? [] : [
                 `coverage review provenance stamp command: ${report.coverage_review.review_provenance_stamp_command}`,
+            ]),
+            ...(report.coverage_review.review_provenance_stamp_command_argv === undefined ? [] : [
+                `coverage review provenance stamp argv: ${report.coverage_review.review_provenance_stamp_command_argv.join(" | ")}`,
             ]),
             `coverage review apply result: ${report.coverage_review.apply_result} statements=${report.coverage_review.applied_statement_count}`,
             `coverage review blockers: ${report.coverage_review.apply_blockers.length === 0 ? "none" : report.coverage_review.apply_blockers.join(", ")}`,
@@ -4760,6 +4764,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         production_apply_blocker_details: productionApplyBlockerDetails,
         production_next_action: workflowCandidateReviewCoverageGuardNextAction(productionApplyGuard),
         ...(productionApplyCommand === undefined ? {} : { production_apply_command: productionApplyCommand }),
+        ...(reviewProvenanceStampCommandArgv === undefined ? {} : { review_provenance_stamp_command_argv: reviewProvenanceStampCommandArgv }),
         ...(reviewProvenanceStampCommand === undefined ? {} : { review_provenance_stamp_command: reviewProvenanceStampCommand }),
         next_action: workflowCandidateReviewCoverageGuardNextAction(applyGuard),
         post_apply_recheck_command: workflowCandidateReviewCoverageRecheckCommand({
