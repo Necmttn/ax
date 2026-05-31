@@ -312,6 +312,7 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly production_apply_blockers: readonly WorkflowCandidateReviewCoverageApplyBlocker[];
     readonly production_apply_blocker_details: readonly WorkflowCandidateReviewCoverageApplyBlockerDetail[];
     readonly production_next_action: string;
+    readonly production_apply_command?: string;
     readonly next_action: string;
     readonly post_apply_recheck_command: string;
     readonly post_apply_recheck?: WorkflowCandidateReviewCoveragePostApplyRecheckSummary;
@@ -1910,6 +1911,9 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             `coverage review production apply guard: ${report.coverage_review.production_apply_guard}`,
             `coverage review production can apply: ${report.coverage_review.production_can_apply ? "yes" : "no"}`,
             `coverage review production next action: ${report.coverage_review.production_next_action}`,
+            ...(report.coverage_review.production_apply_command === undefined ? [] : [
+                `coverage review production apply command: ${report.coverage_review.production_apply_command}`,
+            ]),
             `coverage review apply result: ${report.coverage_review.apply_result} statements=${report.coverage_review.applied_statement_count}`,
             `coverage review blockers: ${report.coverage_review.apply_blockers.length === 0 ? "none" : report.coverage_review.apply_blockers.join(", ")}`,
             `coverage review blocker details: ${report.coverage_review.apply_blocker_details.length === 0 ? "none" : report.coverage_review.apply_blocker_details.map((detail) => `${detail.blocker}=${detail.count}`).join(", ")}`,
@@ -3574,6 +3578,38 @@ const workflowCandidateReviewCoverageHandoffMissingPaths = (input: {
     return missing;
 };
 
+const workflowCandidateReviewCoverageProductionApplyCommand = (input: {
+    readonly sourcePath: string;
+    readonly sourceKind?: string;
+    readonly reviewFactsPath?: string;
+    readonly reviewWritePlanPath?: string;
+    readonly reviewBriefPath?: string;
+    readonly syncedReviewBriefPath?: string;
+    readonly outputPath?: string;
+}): string | undefined => {
+    if (
+        input.reviewFactsPath === undefined ||
+        input.reviewWritePlanPath === undefined ||
+        input.reviewBriefPath === undefined ||
+        input.syncedReviewBriefPath === undefined
+    ) return undefined;
+    return [
+        "bun src/cli/index.ts classifiers workflow-candidates",
+        "--review-coverage",
+        `--source-kind=${input.sourceKind ?? "hybrid_window_classifier_projection"}`,
+        `--coverage-review-pack=${input.sourcePath}`,
+        `--sync-coverage-review-brief=${input.syncedReviewBriefPath}`,
+        `--coverage-review-brief=${input.reviewBriefPath}`,
+        `--review-facts=${input.reviewFactsPath}`,
+        `--review-write-plan=${input.reviewWritePlanPath}`,
+        "--apply-review-facts",
+        "--require-review-provenance",
+        "--require-review-handoff",
+        `--out=${input.outputPath ?? ".ax/experiments/workflow-candidate-review-coverage-post-apply.json"}`,
+        "--json",
+    ].join(" ");
+};
+
 export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     readonly rows: readonly WorkflowCandidateTopicClassifierFixtureRow[];
     readonly sourcePath: string;
@@ -3631,6 +3667,15 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     const projectedReviewedCandidateCount = currentReviewedCandidateCount + newCandidateCount;
     const projectedUnreviewedCandidateCount = Math.max(0, coverageRows.length - projectedReviewedCandidateCount);
     const reviewHandoffMissingPaths = workflowCandidateReviewCoverageHandoffMissingPaths(input);
+    const productionApplyCommand = workflowCandidateReviewCoverageProductionApplyCommand({
+        sourcePath: input.sourcePath,
+        ...(input.sourceKind === undefined ? {} : { sourceKind: input.sourceKind }),
+        ...(input.reviewFactsPath === undefined ? {} : { reviewFactsPath: input.reviewFactsPath }),
+        ...(input.reviewWritePlanPath === undefined ? {} : { reviewWritePlanPath: input.reviewWritePlanPath }),
+        ...(input.reviewBriefPath === undefined ? {} : { reviewBriefPath: input.reviewBriefPath }),
+        ...(input.syncedReviewBriefPath === undefined ? {} : { syncedReviewBriefPath: input.syncedReviewBriefPath }),
+        ...(input.outputPath === undefined ? {} : { outputPath: input.outputPath }),
+    });
     const smokeMarkerCount = reviewedRows.filter(fixtureRowHasSmokeMarker).length +
         (input.sourcePath.toLowerCase().includes("smoke") ? 1 : 0);
     const baseApplyGuard = invalidRows.length > 0
@@ -3803,6 +3848,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         production_apply_blockers: productionApplyBlockers,
         production_apply_blocker_details: productionApplyBlockerDetails,
         production_next_action: workflowCandidateReviewCoverageGuardNextAction(productionApplyGuard),
+        ...(productionApplyCommand === undefined ? {} : { production_apply_command: productionApplyCommand }),
         next_action: workflowCandidateReviewCoverageGuardNextAction(applyGuard),
         post_apply_recheck_command: workflowCandidateReviewCoverageRecheckCommand({
             ...(input.sourceKind === undefined ? {} : { sourceKind: input.sourceKind }),
