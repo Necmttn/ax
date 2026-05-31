@@ -1721,8 +1721,14 @@ describe("classifiers workflow-candidates", () => {
                 review_status: "accept",
                 remediation: "Add reviewed-at metadata to this reviewed fixture.",
             }],
+            review_issue_counts: [
+                { issue: "missing_review_rationale", count: 1 },
+                { issue: "missing_reviewer", count: 1 },
+                { issue: "missing_reviewed_at", count: 1 },
+            ],
         });
         expect(text).toContain("coverage review issue rows: 3");
+        expect(text).toContain("coverage review issue counts: missing_review_rationale=1, missing_reviewer=1, missing_reviewed_at=1");
         expect(text).toContain("coverage review issue: missing_review_rationale fixture=workflow-candidate-review-coverage/verification_or_recovery_signal/a candidate=classifier_candidate_group:hybrid-window/verification_or_recovery_signal status=accept");
         expect(text).toContain("coverage review issue: missing_reviewer fixture=workflow-candidate-review-coverage/verification_or_recovery_signal/a candidate=classifier_candidate_group:hybrid-window/verification_or_recovery_signal status=accept");
         expect(text).toContain("coverage review issue: missing_reviewed_at fixture=workflow-candidate-review-coverage/verification_or_recovery_signal/a candidate=classifier_candidate_group:hybrid-window/verification_or_recovery_signal status=accept");
