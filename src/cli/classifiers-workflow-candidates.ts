@@ -2401,6 +2401,13 @@ export function buildWorkflowCandidateHarnessProposalPlan(
 export function renderWorkflowCandidateTopicEvidencePackMarkdown(report: WorkflowCandidateTopicReport): string {
     const adjacentCandidates = topicAdjacentCandidates(report);
     const harnessEvidence = buildWorkflowCandidateTopicHarnessEvidenceSummary(report);
+    const helperExplanationsByCandidate = new Map<string, WorkflowCandidateTopicHelperExplanation[]>();
+    for (const explanation of report.helper_explanations?.explanations ?? []) {
+        helperExplanationsByCandidate.set(explanation.candidate_id, [
+            ...(helperExplanationsByCandidate.get(explanation.candidate_id) ?? []),
+            explanation,
+        ]);
+    }
     const lines = [
         `# Workflow Topic Evidence Pack: ${report.topic || "unknown-topic"}`,
         "",
@@ -2490,6 +2497,19 @@ export function renderWorkflowCandidateTopicEvidencePackMarkdown(report: Workflo
             `- Alternatives: \`${recommendation.alternatives.join("`, `")}\``,
             `- Recommendation confidence: \`${recommendation.confidence}\``,
             `- Recommendation rationale: ${recommendation.rationale}`,
+        );
+        const helperExplanations = helperExplanationsByCandidate.get(candidate.group_id) ?? [];
+        const noneHelperExplanations = helperExplanations.filter((explanation) => explanation.proposed_label === "none");
+        if (noneHelperExplanations.length > 0) {
+            const first = noneHelperExplanations[0];
+            lines.push(
+                "- Helper review hint: `review-as-noise`",
+                `- Helper matched controls: \`${noneHelperExplanations.length}\``,
+                `- Helper rationale: promoted \`none\` control \`${first.source_fixture_id}\` matched this candidate example`,
+                "- Suggested reviewer verdict: `reject`",
+            );
+        }
+        lines.push(
             "",
             "Review checklist:",
             "",

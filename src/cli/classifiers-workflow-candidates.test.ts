@@ -840,6 +840,88 @@ describe("classifiers workflow-candidates", () => {
         expect(markdown).toContain("- Verdict: `pending`");
     });
 
+    test("renders helper review hints on matching adjacent candidates", () => {
+        const helperFacts: WorkflowCandidateEmbeddingHelperGraphFactRow[] = [{
+            graph_id: "fact:embedding-helper-maintenance",
+            subject: "embedding_helper_hard_negative:session-section-chunks/none-maintenance-question",
+            predicate: "promoted_hard_negative_fixture",
+            object: "classifier_promoted_fixture:session-section-chunks/embedding-helper-hard-negative-session-section-chunks-none-maintenance-question",
+            evidence_edges_json: properties(["edge:nearest-surreal-port"]),
+            properties_json: properties({
+                source_fixture_id: "session-section-chunks/none-maintenance-question",
+                status: "accepted",
+                proposed_label: "none",
+                promoted_fixture_id: "session-section-chunks/embedding-helper-hard-negative-session-section-chunks-none-maintenance-question",
+            }),
+        }];
+        const helperEdges: WorkflowCandidateEmbeddingHelperGraphEdgeRow[] = [{
+            graph_id: "edge:nearest-surreal-port",
+            kind: "nearest_reviewed_fixture",
+            to_id: "classifier_evidence:session-section-chunks/tooling-local-surreal-port",
+            evidence_path: ".ax/experiments/embedding-helper-review-current.json",
+            properties_json: properties({ similarity: 0.688 }),
+        }];
+        const helperFixtures: WorkflowCandidateHelperFixtureRow[] = [{
+            id: "session-section-chunks/none-maintenance-question",
+            text: "USER:\nwhen was the last work around surrealML, do they maintain it?",
+        }];
+        const proposals = buildWorkflowCandidateProposalListReport({
+            rows: [],
+            limit: 10,
+            status: "accepted",
+            expandEvidence: true,
+            search: "SurrealML",
+        });
+        const candidates = buildWorkflowCandidateReport({
+            groupRows: [{
+                graph_id: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+                label: "environment_or_preference_signal",
+                properties_json: properties({
+                    classifier_key: "hybrid-window",
+                    label: "environment_or_preference_signal",
+                    proposed_action: "record_guidance_or_environment_preference",
+                    support_count: 50,
+                }),
+            }],
+            evidenceRows: [{
+                graph_id: "fact:maintenance-question",
+                subject: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+                properties_json: properties({
+                    turn: "turn:maintenance-question",
+                    confidence: 0.71,
+                    text_excerpt: "USER: when was the last work around surrealML ? do they actively maintain it or stopped?",
+                }),
+            }],
+            sourceKind: "hybrid_window_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            search: "SurrealML",
+            taskLike: "include",
+        });
+        const baseReport = buildWorkflowCandidateTopicReport({
+            sourceKind: "hybrid_window_classifier_projection",
+            topic: "SurrealML",
+            proposals,
+            candidates,
+        });
+        const helperExplanations = buildWorkflowCandidateTopicHelperExplanations({
+            report: baseReport,
+            facts: helperFacts,
+            edges: helperEdges,
+            fixtures: helperFixtures,
+            minTokenOverlap: 0.72,
+        });
+        const markdown = renderWorkflowCandidateTopicEvidencePackMarkdown({
+            ...baseReport,
+            helper_explanations: helperExplanations,
+        });
+
+        expect(markdown).toContain("- Helper review hint: `review-as-noise`");
+        expect(markdown).toContain("- Helper matched controls: `1`");
+        expect(markdown).toContain("- Helper rationale: promoted `none` control `session-section-chunks/none-maintenance-question` matched this candidate example");
+        expect(markdown).toContain("- Suggested reviewer verdict: `reject`");
+    });
+
     test("renders persisted harness facts inside topic evidence packs", () => {
         const proposals = buildWorkflowCandidateProposalListReport({
             rows: [],
