@@ -2280,6 +2280,18 @@ describe("classifier package operations report", () => {
         expect(report.decision).toBe("needs_human_review");
         expect(report.blocking_items).toContain("review pipeline missing 2 required output artifact(s)");
         expect(report.blocking_items).toContain("review pipeline lifecycle cannot continue: needs_output_verification");
+        expect(report.routing_items).toContainEqual({
+            kind: "review_pipeline_action",
+            status: "missing_outputs",
+            command_kind: "repair_review_issues",
+            next_action: "repair_review_pipeline_outputs",
+            action_next_action: "Repair review pipeline outputs before continuing.",
+            can_execute: false,
+            execution_phase: "repair_outputs",
+            missing_inputs: [],
+            argv: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
+            remediation: "Repair review pipeline outputs before continuing.",
+        });
         expect(report.graph_query_suggestion?.suggestion?.repair.outcome_status).toBe("expected_matches");
         expect(report.graph_query_suggestion?.suggestion?.verification.outcome_status).toBe("expected_matches");
         expect(report.graph_query_suggestion?.suggestion?.repair.command_kind).toBe("classifier_graph_query_repair");

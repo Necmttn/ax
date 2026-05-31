@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E428 adds
-  `.ax/experiments/classifier-lifecycle-routing-items-e428.json`
+- Index continuation: E429 adds
+  `.ax/experiments/classifier-lifecycle-review-routing-items-e429.json`
   and
-  `.ax/experiments/classifier-lifecycle-routing-items-e428.txt`
+  `.ax/experiments/classifier-lifecycle-review-routing-items-e429.txt`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,56 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E429 - Add Review Pipeline Actions To Lifecycle Routing Items
+
+Question:
+- Can lifecycle `routing_items` cover review-pipeline actions as well as graph
+  query repair, so services can consume one queue-like routing surface instead
+  of combining nested `review_pipeline` and `graph_query_suggestion` fields?
+
+Implementation:
+- Extended `ClassifierLifecycleRoutingItem` with `review_pipeline_action`.
+- The routing item carries the recommended action kind/status, lifecycle next
+  action, action-specific next action, can-execute flag, execution phase,
+  missing inputs, argv, and remediation.
+- Lifecycle text renders review-pipeline routing details in the existing
+  `routing items:` section while preserving the detailed `review_pipeline`
+  block for audit/debugging.
+
+Artifacts:
+- `.ax/experiments/classifier-lifecycle-review-routing-items-e429.json`
+- `.ax/experiments/classifier-lifecycle-review-routing-items-e429.txt`
+
+Results:
+- JSON output reports two routing item kinds:
+  `graph_query_repair` and `review_pipeline_action`.
+- Current review-pipeline routing item reports
+  `status=missing_inputs`, `command_kind=stamp_review_provenance`,
+  `can_execute=false`, and `execution_phase=bind_inputs`.
+- Text output renders both routing items, including review-pipeline missing
+  inputs `reviewer, reviewed_at`.
+
+Decision:
+- E429 makes lifecycle insight a single structured routing list for both graph
+  repair and review-pipeline execution. Services can prioritize `routing_items`
+  before consulting nested detail objects.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun src/cli/index.ts classifiers lifecycle --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --out .ax/experiments/classifier-lifecycle-review-routing-items-e429.json --json
+bun src/cli/index.ts classifiers lifecycle --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute > .ax/experiments/classifier-lifecycle-review-routing-items-e429.txt
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-lifecycle-review-routing-items-e429.json").json(); const kinds=saved.routing_items?.map((item)=>item.kind) ?? []; if (!kinds.includes("graph_query_repair")) throw new Error("missing graph query routing item"); if (!kinds.includes("review_pipeline_action")) throw new Error("missing review pipeline routing item");'
+rg -n -- "- review_pipeline_action: missing_inputs stamp_review_provenance next=inspect_review_pipeline_lifecycle|action next: Provide required pipeline input values before executing the command.|missing inputs: reviewer, reviewed_at|- graph_query_repair: ready_to_execute classifier_graph_query_repair next=run_repaired_query" .ax/experiments/classifier-lifecycle-review-routing-items-e429.txt
+bun test scripts/classifier-package-operations.test.ts src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts
+bun test src/cli/classifiers-workflow-candidates.test.ts
+git diff --check
+```
+
+All passed. `bun run typecheck` still emits the existing Effect advisory
+messages, but exits `0`.
 
 ## E428 - Add Structured Lifecycle Routing Items
 

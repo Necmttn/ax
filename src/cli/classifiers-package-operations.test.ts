@@ -1346,6 +1346,17 @@ describe("classifiers package-operations format", () => {
                 next_action: "run_repaired_query",
                 remediation: "Run the repaired graph query to inspect matching classifier lifecycle facts.",
                 argv: ["bun", "src/cli/index.ts", "classifiers", "graph", "--value", "bind_inputs"],
+            }, {
+                kind: "review_pipeline_action",
+                status: "requires_inputs",
+                command_kind: "stamp_review_provenance",
+                next_action: "continue_review_pipeline",
+                action_next_action: "Bind required pipeline inputs before executing the command.",
+                can_execute: false,
+                execution_phase: "bind_inputs",
+                missing_inputs: ["reviewer", "reviewed_at"],
+                argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+                remediation: "Bind required pipeline inputs before executing the command.",
             }],
             graph_query_suggestion: {
                 has_suggestion: true,
@@ -1516,6 +1527,11 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("- graph_query_repair: ready_to_execute classifier_graph_query_repair next=run_repaired_query");
         expect(output).toContain("value repair: review_pipeline_recommended_action_execution_phase execute -> bind_inputs");
         expect(output).toContain("remediation: Run the repaired graph query to inspect matching classifier lifecycle facts.");
+        expect(output).toContain("- review_pipeline_action: requires_inputs stamp_review_provenance next=continue_review_pipeline");
+        expect(output).toContain("action next: Bind required pipeline inputs before executing the command.");
+        expect(output).toContain("can execute: no");
+        expect(output).toContain("execution phase: bind_inputs");
+        expect(output).toContain("missing inputs: reviewer, reviewed_at");
         expect(output).toContain("review pipeline: verified_after_execution (.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json)");
         expect(output).toContain("command: stamp_review_provenance prepared=ready_to_execute");
         expect(output).toContain("argv: bun src/cli/index.ts classifiers workflow-candidates");

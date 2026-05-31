@@ -710,6 +710,15 @@ export function renderClassifierLifecycleInsightText(report: ClassifierLifecycle
             lines.push(`- ${item.kind}: ${item.status} ${item.command_kind} next=${item.next_action}`);
             if (item.kind === "graph_query_repair") {
                 lines.push(`  value repair: ${item.predicate ?? "any_predicate"} ${item.from_value ?? "any"} -> ${item.to_value}`);
+            } else {
+                lines.push(`  action next: ${item.action_next_action ?? "unknown"}`);
+                lines.push(`  can execute: ${item.can_execute === true ? "yes" : item.can_execute === false ? "no" : "unknown"}`);
+                if (item.execution_phase) {
+                    lines.push(`  execution phase: ${item.execution_phase}`);
+                }
+                if (item.missing_inputs.length > 0) {
+                    lines.push(`  missing inputs: ${item.missing_inputs.join(", ")}`);
+                }
             }
             if (item.argv.length > 0) {
                 lines.push(`  argv: ${item.argv.join(" ")}`);

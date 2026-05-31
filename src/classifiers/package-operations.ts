@@ -938,7 +938,7 @@ export interface ClassifierReviewPipelineLifecycleInsight {
     readonly next_action: "execute_review_pipeline_command" | "repair_review_pipeline_outputs" | "continue_review_pipeline" | "inspect_review_pipeline_lifecycle";
 }
 
-export interface ClassifierLifecycleRoutingItem {
+export type ClassifierLifecycleRoutingItem = {
     readonly kind: "graph_query_repair";
     readonly status: ClassifierGraphQuerySuggestionRepairRoutingSummary["execution_status"];
     readonly command_kind: ClassifierGraphQuerySuggestionRepairRoutingSummary["command_kind"];
@@ -948,7 +948,18 @@ export interface ClassifierLifecycleRoutingItem {
     readonly next_action: ClassifierGraphQuerySuggestionRepairRoutingSummary["next_action"];
     readonly remediation: string;
     readonly argv: readonly string[];
-}
+} | {
+    readonly kind: "review_pipeline_action";
+    readonly status?: string;
+    readonly command_kind: string;
+    readonly next_action: ClassifierReviewPipelineLifecycleInsight["next_action"];
+    readonly action_next_action?: string;
+    readonly can_execute?: boolean;
+    readonly execution_phase?: ClassifierReviewPipelineRecommendedActionExecutionPhase;
+    readonly missing_inputs: readonly string[];
+    readonly argv: readonly string[];
+    readonly remediation: string;
+};
 
 export interface ClassifierLifecycleInsightReport {
     readonly schema: "ax.classifier_lifecycle_insight_report.v1";
@@ -3367,7 +3378,7 @@ export function buildClassifierLifecycleInsightReport(input: {
     const queryRepairSuggestion = queryGraphSuggestion.suggestion?.repair.status === "repair_available"
         ? queryGraphSuggestion.suggestion
         : undefined;
-    const routingItems: readonly ClassifierLifecycleRoutingItem[] = queryRepairSuggestion === undefined
+    const graphQueryRoutingItems: readonly ClassifierLifecycleRoutingItem[] = queryRepairSuggestion === undefined
         ? []
         : [{
             kind: "graph_query_repair",
@@ -3380,6 +3391,24 @@ export function buildClassifierLifecycleInsightReport(input: {
             remediation: queryRepairSuggestion.repair.remediation,
             argv: queryRepairSuggestion.repair.argv,
         }];
+    const reviewPipelineRoutingItems: readonly ClassifierLifecycleRoutingItem[] = reviewPipeline?.recommended_action_kind === undefined
+        ? []
+        : [{
+            kind: "review_pipeline_action",
+            ...(reviewPipeline.recommended_action_status === undefined ? {} : { status: reviewPipeline.recommended_action_status }),
+            command_kind: reviewPipeline.recommended_action_kind,
+            next_action: reviewPipeline.next_action,
+            ...(reviewPipeline.recommended_action_next_action === undefined ? {} : { action_next_action: reviewPipeline.recommended_action_next_action }),
+            ...(reviewPipeline.recommended_action_can_execute === undefined ? {} : { can_execute: reviewPipeline.recommended_action_can_execute }),
+            ...(reviewPipeline.recommended_action_execution_phase === undefined ? {} : { execution_phase: reviewPipeline.recommended_action_execution_phase }),
+            missing_inputs: reviewPipeline.recommended_action_missing_inputs ?? [],
+            argv: reviewPipeline.recommended_action_argv ?? [],
+            remediation: reviewPipeline.recommended_action_next_action ?? "Inspect the review pipeline lifecycle before continuing.",
+        }];
+    const routingItems = [
+        ...graphQueryRoutingItems,
+        ...reviewPipelineRoutingItems,
+    ];
     const blockingItems = [
         ...packages
             .filter((entry) => entry.lifecycle_readiness.status === "incomplete")
