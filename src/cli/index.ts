@@ -1841,9 +1841,10 @@ const classifiersPackageOperationsCommand = Command.make(
         root: Flag.string("root").pipe(Flag.optional),
         workflowStatus: Flag.string("workflow-status").pipe(Flag.optional),
         writePlan: Flag.boolean("write-plan").pipe(Flag.withDefault(false)),
+        querySuggestionRouting: Flag.boolean("query-suggestion-routing").pipe(Flag.withDefault(false)),
         json: jsonFlag,
     },
-    ({ allowExpensive, applyWritePlan, all, dryRun, execute, facts, graphHealth, graphMode, history, manifest, operation, artifact, sourceKind, factKind, status, sourceFixture, proposedLabel, threshold, minSeedCount, minPositiveRecall, minCallReduction, minNearestSimilarity, nearestFixture, predicate, subject, valueContains, valueEquals, out, preflight, root, workflowStatus, writePlan, json }) => {
+    ({ allowExpensive, applyWritePlan, all, dryRun, execute, facts, graphHealth, graphMode, history, manifest, operation, artifact, sourceKind, factKind, status, sourceFixture, proposedLabel, threshold, minSeedCount, minPositiveRecall, minCallReduction, minNearestSimilarity, nearestFixture, predicate, subject, valueContains, valueEquals, out, preflight, root, workflowStatus, writePlan, querySuggestionRouting, json }) => {
         const operationId = optionValue(operation);
         const artifactPath = optionValue(artifact);
         const sourceKindName = optionValue(sourceKind);
@@ -1882,6 +1883,7 @@ const classifiersPackageOperationsCommand = Command.make(
             facts,
             graphHealth,
             graphMode,
+            querySuggestionRouting,
             history,
             ...(artifactPath === undefined ? {} : { artifact: artifactPath }),
             ...(sourceKindName === undefined ? {} : { sourceKind: sourceKindName }),
@@ -1930,9 +1932,10 @@ const classifiersGraphCommand = Command.make(
         valueContains: Flag.string("value-contains").pipe(Flag.optional),
         valueEquals: Flag.string("value").pipe(Flag.optional),
         out: Flag.string("out").pipe(Flag.optional),
+        querySuggestionRouting: Flag.boolean("query-suggestion-routing").pipe(Flag.withDefault(false)),
         json: jsonFlag,
     },
-    ({ mode, operation, artifact, sourceKind, factKind, status, sourceFixture, proposedLabel, threshold, minSeedCount, minPositiveRecall, minCallReduction, minNearestSimilarity, nearestFixture, predicate, subject, valueContains, valueEquals, out, json }) => {
+    ({ mode, operation, artifact, sourceKind, factKind, status, sourceFixture, proposedLabel, threshold, minSeedCount, minPositiveRecall, minCallReduction, minNearestSimilarity, nearestFixture, predicate, subject, valueContains, valueEquals, out, querySuggestionRouting, json }) => {
         const operationId = optionValue(operation);
         const artifactPath = optionValue(artifact);
         const sourceKindName = optionValue(sourceKind);
@@ -1955,6 +1958,7 @@ const classifiersGraphCommand = Command.make(
             manifestPath: "packages/ax-classifier-session-sections/ax.classifier.json",
             graphHealth: true,
             graphMode: mode,
+            querySuggestionRouting,
             ...(operationId === undefined ? {} : { operationId }),
             ...(artifactPath === undefined ? {} : { artifact: artifactPath }),
             ...(sourceKindName === undefined ? {} : { sourceKind: sourceKindName }),

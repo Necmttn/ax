@@ -32,6 +32,7 @@ export interface ClassifierPackageOperationsCommandInput extends ClassifierPacka
     readonly writePlan?: boolean;
     readonly applyWritePlan?: boolean;
     readonly graphHealth?: boolean;
+    readonly querySuggestionRouting?: boolean;
     readonly graphMode?: ClassifierGraphHealthMode;
     readonly artifact?: string;
     readonly sourceKind?: string;
@@ -842,6 +843,17 @@ export const runClassifiersPackageOperations = (
                 ...(input.valueContains ? { value_contains: input.valueContains } : {}),
                 ...(input.valueEquals !== undefined ? { value_equals: input.valueEquals } : {}),
             } as const;
+            if (input.querySuggestionRouting) {
+                const report = input.out
+                    ? yield* packages.writeExecutionGraphQuerySuggestionRoutingSummaryReport({ out: input.out, query })
+                    : yield* packages.executionGraphQuerySuggestionRoutingSummary({ query });
+                if (input.json) {
+                    console.log(JSON.stringify(report, null, 2));
+                } else if (!input.out) {
+                    console.log(JSON.stringify(report, null, 2));
+                }
+                return;
+            }
             const report = input.out
                 ? yield* packages.writeExecutionGraphHealthReport({ out: input.out, query })
                 : yield* packages.executionGraphHealthReport({ query });

@@ -33,8 +33,8 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E419 adds
-  `.ax/experiments/classifier-graph-query-suggestion-routing-summary-written-e419.json`
+- Index continuation: E420 adds
+  `.ax/experiments/classifier-graph-query-suggestion-routing-cli-e420.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -42,6 +42,57 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E420 - Expose Query Suggestion Routing In CLI
+
+Question:
+- Can operators generate the compact query-suggestion repair/verification
+  routing summary from `classifiers graph` without writing a custom service
+  caller or saving the full graph-health report?
+
+Implementation:
+- Added `querySuggestionRouting` command-runner support for graph-health
+  requests.
+- Added `--query-suggestion-routing` to `classifiers graph` and
+  `classifiers package-operations --graph-health`.
+- The flag routes graph queries through
+  `executionGraphQuerySuggestionRoutingSummary` or
+  `writeExecutionGraphQuerySuggestionRoutingSummaryReport` instead of the full
+  graph-health report path.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-query-suggestion-routing-cli-e420.json`
+
+Results:
+- Running
+  `bun src/cli/index.ts classifiers graph --mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --query-suggestion-routing --out .ax/experiments/classifier-graph-query-suggestion-routing-cli-e420.json --json`
+  wrote the compact routing summary.
+- The artifact reports `has_suggestion=true`.
+- The artifact reports
+  `suggestion.repair.execution_status=ready_to_execute`.
+- The artifact reports
+  `suggestion.verification.execution_status=ready_to_execute`.
+
+Decision:
+- E420 makes the service-facing query-suggestion routing summary available to
+  shell users and automation. The graph CLI can now emit the exact compact
+  payload FX services consume, keeping repair execution and verification
+  inspectable without dumping the full health report.
+
+Verification:
+```sh
+bun test src/cli/classifiers-package-operations.test.ts
+bun test src/classifiers/package-service.test.ts
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers graph --mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --query-suggestion-routing --out .ax/experiments/classifier-graph-query-suggestion-routing-cli-e420.json --json
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-graph-query-suggestion-routing-cli-e420.json").json(); if (!saved.has_suggestion) throw new Error("missing suggestion"); if (saved.suggestion?.repair?.execution_status !== "ready_to_execute") throw new Error("wrong repair execution status"); if (saved.suggestion?.verification?.execution_status !== "ready_to_execute") throw new Error("wrong verification execution status");'
+git diff --check
+bun run typecheck
+```
+
+All passed. `bun run typecheck` still emits existing Effect advisories but exits
+`0`.
 
 ## E419 - Persist Query Suggestion Routing Summaries
 

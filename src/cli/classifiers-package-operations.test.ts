@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { Effect } from "effect";
+import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
+import { ClassifierPackageService } from "../classifiers/package-service.ts";
 import {
     renderClassifierLifecycleInsightText,
     renderClassifierPackageExecutionFactsText,
@@ -12,6 +15,7 @@ import {
     renderClassifierPackageOperationPreflightText,
     renderClassifierPackageOperationsText,
     renderClassifierPackagesOperationsText,
+    runClassifiersPackageOperations,
 } from "./classifiers-package-operations.ts";
 import type {
     ClassifierLifecycleInsightReport,
@@ -20,6 +24,7 @@ import type {
     ClassifierPackageExecutionHistoryReport,
     ClassifierPackageExecutionSurrealWritePlanReport,
     ClassifierPackageExecutionSurrealApplyReport,
+    ClassifierGraphQuerySuggestionRoutingSummary,
     ClassifierPackageOperationDryRunReport,
     ClassifierPackageOperationExecutionReport,
     ClassifierPackageOperationExecutionPlanReport,
@@ -29,6 +34,108 @@ import type {
 } from "../classifiers/package-operations.ts";
 
 describe("classifiers package-operations format", () => {
+    test("routes graph query suggestion summaries to the compact writer", async () => {
+        const summary: ClassifierGraphQuerySuggestionRoutingSummary = {
+            has_suggestion: true,
+            query_match_status: "no_match",
+            query_next_action: "relax_filters_or_project_facts",
+            suggested_value_equals: "bind_inputs",
+            suggested_status: "expected_matches",
+            suggested_next_action: "run_suggested_query",
+            suggestion: {
+                value_equals: "bind_inputs",
+                result_count: 1,
+                status: "expected_matches",
+                next_action: "run_suggested_query",
+                remediation: "Run the suggested graph query.",
+                source: "lifecycle_available_value_counts",
+                reason: "available_value_after_relaxing_value_equals",
+                original_query: {
+                    mode: "lifecycle",
+                    predicate: "review_pipeline_recommended_action_execution_phase",
+                    value_equals: "execute",
+                },
+                query: {
+                    mode: "lifecycle",
+                    predicate: "review_pipeline_recommended_action_execution_phase",
+                    value_equals: "bind_inputs",
+                },
+                repair: {
+                    status: "repair_available",
+                    execution_status: "ready_to_execute",
+                    next_action: "run_repaired_query",
+                    command_kind: "classifier_graph_query_repair",
+                    can_execute: true,
+                    requires_inputs: false,
+                    required_inputs: [],
+                    blockers: [],
+                    blocker_details: [],
+                    argv: ["bun", "src/cli/index.ts", "classifiers", "graph", "--value", "bind_inputs"],
+                    query: {
+                        mode: "lifecycle",
+                        predicate: "review_pipeline_recommended_action_execution_phase",
+                        value_equals: "bind_inputs",
+                    },
+                    expected_query_match_status: "matched",
+                    expected_result_count: 1,
+                    remediation: "Run the repaired graph query.",
+                },
+                verification: {
+                    status: "ready_to_verify",
+                    execution_status: "ready_to_execute",
+                    next_action: "run_verification_query",
+                    command_kind: "classifier_graph_query_repair_verification",
+                    can_execute: true,
+                    requires_inputs: false,
+                    required_inputs: [],
+                    blockers: [],
+                    blocker_details: [],
+                    argv: ["bun", "src/cli/index.ts", "classifiers", "graph", "--value", "bind_inputs"],
+                    query: {
+                        mode: "lifecycle",
+                        predicate: "review_pipeline_recommended_action_execution_phase",
+                        value_equals: "bind_inputs",
+                    },
+                    expected_query_match_status: "matched",
+                    expected_result_count: 1,
+                    remediation: "Run the verification query.",
+                },
+            },
+        };
+        let calledWith: unknown;
+        const service = ClassifierPackageService.of({
+            writeExecutionGraphQuerySuggestionRoutingSummaryReport: (input: unknown) => Effect.sync(() => {
+                calledWith = input;
+                return summary;
+            }),
+        } as never);
+
+        await Effect.runPromise(
+            runClassifiersPackageOperations({
+                manifestPath: "packages/ax-classifier-session-sections/ax.classifier.json",
+                graphHealth: true,
+                querySuggestionRouting: true,
+                graphMode: "lifecycle",
+                predicate: "review_pipeline_recommended_action_execution_phase",
+                valueEquals: "execute",
+                out: ".ax/experiments/query-routing-summary.json",
+                json: false,
+            } as never).pipe(
+                Effect.provideService(ClassifierPackageService, service),
+                Effect.provideService(SurrealClient, {} as SurrealClientShape),
+            ),
+        );
+
+        expect(calledWith).toEqual({
+            out: ".ax/experiments/query-routing-summary.json",
+            query: {
+                mode: "lifecycle",
+                predicate: "review_pipeline_recommended_action_execution_phase",
+                value_equals: "execute",
+            },
+        });
+    });
+
     test("renders operation commands with inputs and outputs", () => {
         const report: ClassifierPackageOperationsReport = {
             schema: "ax.classifier_package_operations_report.v1",
