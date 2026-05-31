@@ -33,15 +33,16 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E449 adds
-  `.ax/experiments/workflow-topic-guidance-decision-batch-e449.json`,
-  `.ax/experiments/workflow-topic-guidance-decision-batch-e449.txt`,
-  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e449.jsonl`,
-  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e449.md`,
-  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e449.json`,
-  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e449.json`,
+- Index continuation: E450 adds
+  `.ax/experiments/workflow-topic-guidance-decision-batch-e450.json`,
+  `.ax/experiments/workflow-topic-guidance-decision-batch-e450-synced.json`,
+  `.ax/experiments/workflow-topic-guidance-decision-batch-e450-smoke-apply-blocked.json`,
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e450.jsonl`,
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e450.md`,
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e450-synced.md`,
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e450-synced.json`,
   and
-  the `ax.workflow_topic_guidance_decision_batch.v1` report surface
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e450-synced.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -56,9 +57,82 @@ Current recommendation:
   reviewed `review-coverage` and `surrealml` candidates are both
   `guidance_promotion_not_warranted`, and it now also exposes one pending
   `correction_or_rejection_signal` candidate blocked on human review with a
-  generated fixture pack, markdown review handoff, and machine-readable
-  handoff routing summary. The immediate bottleneck is reviewing that pending
-  candidate, not promoting rejected or harness-only evidence.
+  generated fixture pack, markdown review handoff, machine-readable handoff
+  routing summary, and a batch-level sync/readiness path for edited review
+  briefs. A smoke-marked review is correctly blocked from apply, so the
+  immediate bottleneck remains a real human review decision for that pending
+  candidate, not promoting synthetic or harness-only evidence.
+
+## E450 - Sync Batch Pending Review Handoffs
+
+Question:
+- Can the batch guidance-decision handoff consume an edited review pack/brief
+  and surface apply readiness without dropping back to the lower-level
+  review-coverage command?
+
+Implementation:
+- `--guidance-decision-batch` now accepts `--coverage-review-pack`.
+- The batch path can now:
+  - sync review status/rationale edits from `--sync-coverage-review-brief`,
+  - stamp reviewer/reviewed-at provenance when provided,
+  - re-render the review brief,
+  - write review fact projection and write-plan artifacts,
+  - build the same pending-review handoff summary from reviewed rows, and
+  - optionally apply review facts only when existing apply guards allow it.
+- After a successful guarded apply, the batch path refreshes review facts and
+  reattaches them to the pending candidate report before rendering the final
+  batch output.
+- Added a regression proving a synced reviewed pack with rationale,
+  provenance, and complete handoff paths reports `ready_to_apply` and
+  `ready_for_production_apply` through the batch handoff surface.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e450.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e450-synced.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e450-smoke-apply-blocked.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e450.jsonl`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e450.md`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e450-synced.md`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e450-synced.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e450-synced.json`
+
+Results:
+- Initial batch handoff still reports the real pending
+  `correction_or_rejection_signal` candidate as `needs_human_review`.
+- Smoke sync from the generated markdown brief updates the JSONL fixture to
+  `review_status=reject` with a rationale, projects one reviewed candidate
+  fact, and writes a review write plan.
+- The smoke rationale intentionally includes a smoke marker, so the batch
+  handoff reports:
+  - `reviewed_fixture_count=1`
+  - `pending_fixture_count=0`
+  - `handoff_apply_guard=blocked_smoke_review`
+  - `handoff_can_apply=false`
+  - `production_apply_guard=blocked_smoke_review`
+  - `production_can_apply=false`
+  - `review_pipeline_stage=needs_review_repair`
+- A smoke apply attempt exits non-zero and does not apply review facts.
+
+Decision:
+- E450 closes the handoff loop mechanically: services can now start at the
+  batch guidance-decision surface, hand an edited markdown review back to the
+  same batch command, inspect projected graph facts/write plans, and branch on
+  structured readiness fields.
+- This still does not promote the live pending candidate. The smoke review is
+  deliberately blocked. The next aligned slice is to run a real review decision
+  with provenance through this batch path, apply only if guards pass, and
+  verify the pending queue closes or becomes a warranted artifact path.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 --coverage-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e450.jsonl --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e450.md --review-facts=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e450.json --review-write-plan=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e450.json --out .ax/experiments/workflow-topic-guidance-decision-batch-e450.json --json
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 --coverage-review-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e450.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e450.md --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e450-synced.md --review-facts=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e450-synced.json --review-write-plan=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e450-synced.json --out .ax/experiments/workflow-topic-guidance-decision-batch-e450-synced.json --json
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 --coverage-review-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e450.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e450.md --apply-review-facts --out .ax/experiments/workflow-topic-guidance-decision-batch-e450-smoke-apply-blocked.json --json
+```
+
+The third command exits `1` by design because the smoke-marked review is
+blocked from apply.
 
 ## E449 - Add Machine-Readable Pending Review Handoff Routing
 

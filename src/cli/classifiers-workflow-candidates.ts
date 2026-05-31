@@ -6429,7 +6429,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 ORDER BY updated_at DESC
                 LIMIT ${Math.max(1, input.limit * 50)};
             `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
-            const reviewFactRows = (topicRows?.[0] ?? []).filter((row) =>
+            let reviewFactRows = (topicRows?.[0] ?? []).filter((row) =>
                 row.graph_id?.startsWith("fact:workflow_topic_candidate_review__") ||
                 row.subject?.startsWith("workflow_topic_candidate_review:")
             );
@@ -6447,7 +6447,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 workflowCandidateSql,
                 { sourceKind: input.sourceKind },
             ).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
-            const pendingCandidateReport = attachWorkflowCandidatePersistedReviewFacts(buildWorkflowCandidateReport({
+            let pendingCandidateReport = attachWorkflowCandidatePersistedReviewFacts(buildWorkflowCandidateReport({
                 groupRows: pendingRows[0] ?? [],
                 evidenceRows: pendingRows[1] ?? [],
                 sourceKind: input.sourceKind,
@@ -6511,6 +6511,139 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     fixturePack: pendingReviewFixturePack,
                     applySummary,
                 });
+            }
+            if (input.coverageReviewPack !== undefined) {
+                let reviewedRows = parseWorkflowCandidateFixtureRowsJsonl(
+                    readFileSync(input.coverageReviewPack, "utf8"),
+                );
+                let syncedFixtureCount = 0;
+                let unknownFixtureCount = 0;
+                let stampedReviewerCount = 0;
+                let stampedReviewedAtCount = 0;
+                if (input.syncCoverageReviewBrief !== undefined) {
+                    const syncResult = syncWorkflowCandidateFixtureRowsFromBriefWithSummary(
+                        reviewedRows,
+                        readFileSync(input.syncCoverageReviewBrief, "utf8"),
+                    );
+                    reviewedRows = syncResult.rows;
+                    syncedFixtureCount = syncResult.synced_fixture_count;
+                    unknownFixtureCount = syncResult.unknown_fixture_count;
+                    writeFileSync(input.coverageReviewPack, renderClassifierFixtureRowsJsonl(reviewedRows), "utf8");
+                }
+                if (input.reviewProvenanceReviewer !== undefined || input.reviewProvenanceReviewedAt !== undefined) {
+                    const stampResult = stampWorkflowCandidateReviewProvenance(reviewedRows, {
+                        ...(input.reviewProvenanceReviewer === undefined ? {} : { reviewer: input.reviewProvenanceReviewer }),
+                        ...(input.reviewProvenanceReviewedAt === undefined ? {} : { reviewedAt: input.reviewProvenanceReviewedAt }),
+                    });
+                    reviewedRows = stampResult.rows;
+                    stampedReviewerCount = stampResult.stamped_reviewer_count;
+                    stampedReviewedAtCount = stampResult.stamped_reviewed_at_count;
+                    writeFileSync(input.coverageReviewPack, renderClassifierFixtureRowsJsonl(reviewedRows), "utf8");
+                }
+                if (input.coverageReviewBrief !== undefined) {
+                    mkdirSync(dirname(input.coverageReviewBrief), { recursive: true });
+                    writeFileSync(input.coverageReviewBrief, renderWorkflowCandidateReviewCoverageBriefMarkdown(reviewedRows, {
+                        sourceKind: input.sourceKind,
+                        limit: input.limit,
+                        coverageReviewPack: input.coverageReviewPack,
+                        coverageReviewBrief: input.coverageReviewBrief,
+                        ...(input.out === undefined ? {} : { outputPath: input.out }),
+                    }), "utf8");
+                }
+                const reviewProjection = buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures({
+                    rows: reviewedRows,
+                    syncedFrom: input.coverageReviewPack,
+                });
+                const reviewWritePlan = buildWorkflowCandidateTopicReviewGraphWritePlan(reviewProjection);
+                if (input.reviewFacts !== undefined) {
+                    mkdirSync(dirname(input.reviewFacts), { recursive: true });
+                    writeFileSync(input.reviewFacts, `${prettyPrint(reviewProjection)}\n`, "utf8");
+                }
+                if (input.reviewWritePlan !== undefined) {
+                    mkdirSync(dirname(input.reviewWritePlan), { recursive: true });
+                    writeFileSync(input.reviewWritePlan, `${prettyPrint(reviewWritePlan)}\n`, "utf8");
+                }
+                const reviewFixturePack = pendingReviewFixturePack ?? {
+                    path: input.coverageReviewPack,
+                    emitted_fixture_count: reviewedRows.length,
+                    candidate_count: new Set(reviewedRows.map((row) => row.candidate_id)).size,
+                    skipped_candidate_count: 0,
+                    fixtures: reviewedRows,
+                };
+                pendingReviewFixturePack = reviewFixturePack;
+                const pendingApplySummary = buildWorkflowCandidateReviewCoverageApplySummary({
+                    rows: reviewedRows,
+                    sourcePath: input.coverageReviewPack,
+                    projection: reviewProjection,
+                    writePlan: reviewWritePlan,
+                    applyRequested: Boolean(input.applyReviewFacts),
+                    applied: false,
+                    syncedFixtureCount,
+                    unknownFixtureCount,
+                    stampedReviewerCount,
+                    stampedReviewedAtCount,
+                    ...(input.reviewFacts === undefined ? {} : { reviewFactsPath: input.reviewFacts }),
+                    ...(input.reviewWritePlan === undefined ? {} : { reviewWritePlanPath: input.reviewWritePlan }),
+                    ...(input.coverageReviewBrief === undefined ? {} : { reviewBriefPath: input.coverageReviewBrief }),
+                    ...(input.syncCoverageReviewBrief === undefined ? {} : { syncedReviewBriefPath: input.syncCoverageReviewBrief }),
+                    ...(input.requireReviewProvenance === undefined ? {} : { requireReviewProvenance: input.requireReviewProvenance }),
+                    ...(input.requireReviewHandoff === undefined ? {} : { requireReviewHandoff: input.requireReviewHandoff }),
+                    sourceKind: input.sourceKind,
+                    limit: input.limit,
+                    ...(input.out === undefined ? {} : { outputPath: input.out }),
+                });
+                let applySummary = pendingApplySummary;
+                if (input.applyReviewFacts && pendingApplySummary.can_apply) {
+                    yield* db.query(reviewWritePlan.statements.join("\n")).pipe(
+                        catchDbErrorAndExit("axctl classifiers workflow-candidates"),
+                    );
+                    applySummary = buildWorkflowCandidateReviewCoverageApplySummary({
+                        rows: reviewedRows,
+                        sourcePath: input.coverageReviewPack,
+                        projection: reviewProjection,
+                        writePlan: reviewWritePlan,
+                        applyRequested: true,
+                        applied: true,
+                        syncedFixtureCount,
+                        unknownFixtureCount,
+                        stampedReviewerCount,
+                        stampedReviewedAtCount,
+                        ...(input.reviewFacts === undefined ? {} : { reviewFactsPath: input.reviewFacts }),
+                        ...(input.reviewWritePlan === undefined ? {} : { reviewWritePlanPath: input.reviewWritePlan }),
+                        ...(input.coverageReviewBrief === undefined ? {} : { reviewBriefPath: input.coverageReviewBrief }),
+                        ...(input.syncCoverageReviewBrief === undefined ? {} : { syncedReviewBriefPath: input.syncCoverageReviewBrief }),
+                        ...(input.requireReviewProvenance === undefined ? {} : { requireReviewProvenance: input.requireReviewProvenance }),
+                        ...(input.requireReviewHandoff === undefined ? {} : { requireReviewHandoff: input.requireReviewHandoff }),
+                        sourceKind: input.sourceKind,
+                        limit: input.limit,
+                        ...(input.out === undefined ? {} : { outputPath: input.out }),
+                    });
+                    const refreshedReviewRows = yield* db.query<[WorkflowCandidateTopicHarnessGraphFactRow[]]>(`
+                        SELECT graph_id, subject, predicate, object, value_json, properties_json, type::string(updated_at) AS updated_at
+                        FROM classifier_graph_fact
+                        WHERE kind = "workflow_topic_candidate_review"
+                          AND source_kind = "workflow_topic_candidate_review"
+                        ORDER BY updated_at DESC
+                        LIMIT ${Math.max(1, input.limit * 50)};
+                    `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+                    reviewFactRows = refreshedReviewRows?.[0] ?? [];
+                    pendingCandidateReport = attachWorkflowCandidatePersistedReviewFacts(buildWorkflowCandidateReport({
+                        groupRows: pendingRows[0] ?? [],
+                        evidenceRows: pendingRows[1] ?? [],
+                        sourceKind: input.sourceKind,
+                        limit: input.limit,
+                        examplesPerGroup: input.examples,
+                        ...(input.action === undefined ? {} : { action: input.action }),
+                        ...(input.classifier === undefined ? {} : { classifier: input.classifier }),
+                        ...(input.search === undefined ? {} : { search: input.search }),
+                        taskLike: input.taskLike,
+                    }), reviewFactRows);
+                }
+                pendingReviewHandoff = buildWorkflowCandidateGuidancePendingReviewHandoffSummary({
+                    fixturePack: reviewFixturePack,
+                    applySummary,
+                });
+                if (input.applyReviewFacts && !pendingApplySummary.can_apply) process.exitCode = 1;
             }
             const batch = buildWorkflowCandidateTopicGuidanceDecisionBatchReport({
                 sourceKind: input.sourceKind,
