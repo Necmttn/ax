@@ -1202,6 +1202,60 @@ describe("classifier package operations report", () => {
         });
     });
 
+    test("summarizes lifecycle graph fact values", () => {
+        const report = buildExecutionGraphHealthReport({
+            nodes: [],
+            edges: [{
+                graph_id: "edge:lifecycle",
+                kind: "has_evidence",
+                from_id: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                to_id: "artifact:.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                evidence_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                properties_json: JSON.stringify({ lifecycle_key: "review_pipeline_lifecycle" }),
+            }],
+            facts: [{
+                graph_id: "fact:lifecycle:phase-bind-a",
+                kind: "classifier_lifecycle_status",
+                subject: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                predicate: "review_pipeline_recommended_action_execution_phase",
+                value_json: JSON.stringify("bind_inputs"),
+                evidence_edges_json: JSON.stringify(["edge:lifecycle"]),
+                properties_json: JSON.stringify({ lifecycle_key: "review_pipeline_lifecycle" }),
+            }, {
+                graph_id: "fact:lifecycle:phase-bind-b",
+                kind: "classifier_lifecycle_status",
+                subject: "classifier_lifecycle:workflow_candidate_review_pipeline:other",
+                predicate: "review_pipeline_recommended_action_execution_phase",
+                value_json: JSON.stringify("bind_inputs"),
+                evidence_edges_json: JSON.stringify(["edge:lifecycle"]),
+                properties_json: JSON.stringify({ lifecycle_key: "review_pipeline_lifecycle" }),
+            }, {
+                graph_id: "fact:lifecycle:phase-repair",
+                kind: "classifier_lifecycle_status",
+                subject: "classifier_lifecycle:workflow_candidate_review_pipeline:repair",
+                predicate: "review_pipeline_recommended_action_execution_phase",
+                value_json: JSON.stringify("repair_outputs"),
+                evidence_edges_json: JSON.stringify(["edge:lifecycle"]),
+                properties_json: JSON.stringify({ lifecycle_key: "review_pipeline_lifecycle" }),
+            }],
+            query: {
+                mode: "lifecycle",
+                predicate: "review_pipeline_recommended_action_execution_phase",
+            },
+        });
+
+        expect(report.result_totals.lifecycle_fact_count).toBe(3);
+        expect(report.lifecycle_value_counts).toEqual([{
+            predicate: "review_pipeline_recommended_action_execution_phase",
+            value: "bind_inputs",
+            count: 2,
+        }, {
+            predicate: "review_pipeline_recommended_action_execution_phase",
+            value: "repair_outputs",
+            count: 1,
+        }]);
+    });
+
     test("lists embedding helper graph facts in embedding-helper mode", () => {
         const report = buildExecutionGraphHealthReport({
             nodes: [

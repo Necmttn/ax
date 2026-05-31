@@ -556,6 +556,11 @@ describe("classifiers package-operations format", () => {
                 evidence_edges: ["edge:lifecycle"],
                 evidence_paths: [".ax/experiments/workflow-candidate-proposal-review-current.json"],
             }],
+            lifecycle_value_counts: [{
+                predicate: "review_pipeline_prepared_argv",
+                value: "[\"bun\",\"src/cli/index.ts\"]",
+                count: 1,
+            }],
             embedding_helper_facts: [],
             evidence_paths: [".ax/experiments/workflow-candidate-proposal-review-current.json"],
             totals: {
@@ -597,6 +602,8 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("lifecycle facts:");
         expect(output).toContain("- review_pipeline_prepared_argv: [\"bun\",\"src/cli/index.ts\"]");
         expect(output).toContain("source: review_pipeline_lifecycle .ax/experiments/workflow-candidate-proposal-review-current.json");
+        expect(output).toContain("lifecycle value counts:");
+        expect(output).toContain("- review_pipeline_prepared_argv=[\"bun\",\"src/cli/index.ts\"] count=1");
     });
 
     test("renders embedding helper graph facts", () => {

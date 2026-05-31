@@ -355,6 +355,12 @@ export interface ClassifierGraphLifecycleFact {
     readonly evidence_paths: readonly string[];
 }
 
+export interface ClassifierGraphLifecycleValueCount {
+    readonly predicate: string;
+    readonly value: string;
+    readonly count: number;
+}
+
 export interface ClassifierGraphEmbeddingHelperFact {
     readonly graph_id: string;
     readonly kind: string;
@@ -467,6 +473,7 @@ export interface ClassifierPackageExecutionGraphHealthReport {
     readonly guarded_operations: readonly ClassifierGraphOperationHealth[];
     readonly changed_artifacts: readonly ClassifierGraphChangedArtifact[];
     readonly lifecycle_facts: readonly ClassifierGraphLifecycleFact[];
+    readonly lifecycle_value_counts?: readonly ClassifierGraphLifecycleValueCount[];
     readonly embedding_helper_facts: readonly ClassifierGraphEmbeddingHelperFact[];
     readonly routing_policy_summary?: ClassifierGraphRoutingPolicySummary;
     readonly evidence_paths: readonly string[];
@@ -1088,6 +1095,10 @@ function graphFactValueEquals(value: unknown, expected: string | undefined): boo
     if (typeof value === "string") return value === expected;
     if (typeof value === "number" || typeof value === "boolean" || value === null) return String(value) === expected;
     return JSON.stringify(value) === expected;
+}
+
+function graphFactValueKey(value: unknown): string {
+    return typeof value === "string" ? value : JSON.stringify(value);
 }
 
 function numberRecordAt(record: Record<string, unknown>, key: string): Record<string, number> | undefined {
@@ -2397,6 +2408,19 @@ export function buildExecutionGraphHealthReport(input: {
         ...resultLifecycleFacts.flatMap((fact) => fact.evidence_paths),
         ...resultEmbeddingHelperFacts.flatMap((fact) => fact.evidence_paths),
     ])).sort();
+    const lifecycleValueCountByKey = new Map<string, ClassifierGraphLifecycleValueCount>();
+    for (const fact of resultLifecycleFacts) {
+        const value = graphFactValueKey(fact.value);
+        const key = `${fact.predicate}\u0000${value}`;
+        const existing = lifecycleValueCountByKey.get(key);
+        lifecycleValueCountByKey.set(key, {
+            predicate: fact.predicate,
+            value,
+            count: (existing?.count ?? 0) + 1,
+        });
+    }
+    const lifecycleValueCounts = Array.from(lifecycleValueCountByKey.values())
+        .sort((a, b) => `${a.predicate}/${a.value}`.localeCompare(`${b.predicate}/${b.value}`));
     const routingPolicyFloorsRequested = query.min_positive_recall !== undefined || query.min_call_reduction !== undefined;
     const routingPolicyCandidates = resultEmbeddingHelperFacts
         .filter((fact) => fact.kind === "embedding_helper_routing_candidate")
@@ -2583,6 +2607,7 @@ export function buildExecutionGraphHealthReport(input: {
         guarded_operations: resultGuardedOperations,
         changed_artifacts: resultChangedArtifacts,
         lifecycle_facts: resultLifecycleFacts,
+        lifecycle_value_counts: lifecycleValueCounts,
         embedding_helper_facts: resultEmbeddingHelperFacts,
         routing_policy_summary: routingPolicySummary,
         evidence_paths: resultEvidencePaths,

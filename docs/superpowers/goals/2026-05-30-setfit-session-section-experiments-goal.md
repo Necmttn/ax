@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E372 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-value-e372.json`
+- Index continuation: E373 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-counts-e373.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-value-e372-graph.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-counts-e373-graph.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,52 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E373 - Summarize Lifecycle Fact Values
+
+Question:
+- E372 lets services query one exact recommended-action phase, but can they
+  see the current phase distribution without grouping lifecycle facts
+  client-side?
+
+Implementation:
+- Added `lifecycle_value_counts` to classifier graph health reports.
+- Counts are derived from the filtered lifecycle facts returned by the query.
+- Each count row includes `predicate`, normalized string `value`, and `count`.
+- Text graph-health output now renders a `lifecycle value counts` section.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-counts-e373.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-counts-e373-graph.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-counts-e373.txt`
+
+Results:
+- `classifiers package-operations --graph-health --graph-mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase`
+  returns one lifecycle fact and `lifecycle_value_counts=[{predicate:
+  review_pipeline_recommended_action_execution_phase, value: bind_inputs,
+  count: 1}]`.
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase`
+  returns the same count summary through the graph alias.
+- Text output renders
+  `review_pipeline_recommended_action_execution_phase=bind_inputs count=1`.
+
+Decision:
+- Review services and dashboards can now inspect lifecycle enum distributions,
+  such as recommended-action execution phase, directly from the graph report
+  instead of fetching all facts and grouping them client-side.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E373 package-operations and graph-alias reports both include the expected
+  `lifecycle_value_counts` row for `bind_inputs`.
+- Both reports still return exactly one lifecycle fact for the requested
+  recommended-action phase predicate.
+- Text output renders the lifecycle value count section and `bind_inputs`
+  count.
 
 ## E372 - Query Recommended Action Phase by Exact Value
 
