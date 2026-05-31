@@ -1180,6 +1180,55 @@ describe("classifier package operations report", () => {
         expect(report.packages[0]?.failed_operation_count).toBe(1);
     });
 
+    test("summarizes review pipeline lifecycle routing in lifecycle insight reports", () => {
+        const report = buildClassifierLifecycleInsightReport({
+            packages: buildPackagesOperationsReport("packages", []),
+            graph: buildExecutionGraphHealthReport({
+                nodes: [{
+                    graph_id: "classifier_operation:demo/review",
+                    kind: "classifier_operation",
+                    label: "review",
+                    properties_json: JSON.stringify({ package_key: "demo", operation_kind: "review", expensive: false }),
+                }],
+                edges: [],
+                facts: [],
+            }),
+            workflowStatus: {
+                path: ".ax/experiments/blind-workflow-status-current.json",
+                exists: true,
+                decision: "healthy",
+                review_pipeline_lifecycle: {
+                    report_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                    lifecycle_status: "needs_output_verification",
+                    command_kind: "stamp_review_provenance",
+                    prepared_status: "ready_to_execute",
+                    output_verification_status: "missing_required_outputs",
+                    can_execute: true,
+                    can_continue: false,
+                    missing_required_artifact_count: 2,
+                    checked_artifact_count: 1,
+                    failures: ["missing required output: review facts"],
+                },
+                next_actions: [],
+            },
+        });
+
+        expect(report.review_pipeline).toMatchObject({
+            report_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+            status: "needs_output_verification",
+            command_kind: "stamp_review_provenance",
+            output_verification_status: "missing_required_outputs",
+            can_execute: true,
+            can_continue: false,
+            missing_required_artifact_count: 2,
+            checked_artifact_count: 1,
+            next_action: "repair_review_pipeline_outputs",
+        });
+        expect(report.decision).toBe("needs_human_review");
+        expect(report.blocking_items).toContain("review pipeline missing 2 required output artifact(s)");
+        expect(report.blocking_items).toContain("review pipeline lifecycle cannot continue: needs_output_verification");
+    });
+
     test("writes lifecycle insight reports", () => {
         const report = buildClassifierLifecycleInsightReport({
             packages: buildPackagesOperationsReport("packages", []),

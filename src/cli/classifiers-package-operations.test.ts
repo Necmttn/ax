@@ -671,6 +671,18 @@ describe("classifiers package-operations format", () => {
                 pending_blind_labels: 40,
                 pending_hard_negatives: 20,
                 accepted_hard_negatives: 0,
+                review_pipeline_lifecycle: {
+                    report_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                    lifecycle_status: "verified_after_execution",
+                    command_kind: "stamp_review_provenance",
+                    prepared_status: "ready_to_execute",
+                    output_verification_status: "verified",
+                    can_execute: true,
+                    can_continue: true,
+                    missing_required_artifact_count: 0,
+                    checked_artifact_count: 2,
+                    failures: [],
+                },
                     focused_batch: {
                         batch_path: ".ax/experiments/blind-review-batch-current.md",
                         batch_source: "existing_reviewed_batch",
@@ -788,6 +800,19 @@ describe("classifiers package-operations format", () => {
             }],
             changed_artifacts: [],
             blocking_items: ["40 blind labels pending"],
+            review_pipeline: {
+                report_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                status: "verified_after_execution",
+                command_kind: "stamp_review_provenance",
+                prepared_status: "ready_to_execute",
+                output_verification_status: "verified",
+                can_execute: true,
+                can_continue: true,
+                missing_required_artifact_count: 0,
+                checked_artifact_count: 2,
+                failures: [],
+                next_action: "continue_review_pipeline",
+            },
             totals: {
                 package_count: 1,
                 local_model_count: 1,
@@ -835,6 +860,10 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("remaining missing: review_notes=5, hard_negative_notes=3");
         expect(output).toContain("draft promotion: needs_human_notes (.ax/experiments/blind-review-batch-current-promotion-report.json)");
         expect(output).toContain("failures: draft batch review is incomplete");
+        expect(output).toContain("review pipeline: verified_after_execution (.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json)");
+        expect(output).toContain("command: stamp_review_provenance prepared=ready_to_execute");
+        expect(output).toContain("outputs: verified checked=2 missing=0");
+        expect(output).toContain("execute/continue: yes/yes next=continue_review_pipeline");
         expect(output).toContain("blocking items:");
         expect(output).toContain("edit suggestion draft notes in .ax/experiments/blind-review-batch-current-suggestion-draft.md then run bun run classifiers:blind-review-batch -- --mode=promote-draft");
     });

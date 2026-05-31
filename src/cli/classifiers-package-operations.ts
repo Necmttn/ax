@@ -386,6 +386,16 @@ export function renderClassifierLifecycleInsightText(report: ClassifierLifecycle
         lines.push(`proposal ready smoke: ${smoke.promotion_decision ?? "unknown"} (${smoke.promotion_report_path})`);
         lines.push(`  drafts/skipped: ${smoke.emitted_draft_count ?? 0}/${smoke.skipped_proposal_count ?? 0}`);
     }
+    if (report.review_pipeline) {
+        const pipeline = report.review_pipeline;
+        lines.push(`review pipeline: ${pipeline.status ?? "unknown"} (${pipeline.report_path})`);
+        lines.push(`  command: ${pipeline.command_kind ?? "unknown"} prepared=${pipeline.prepared_status ?? "unknown"}`);
+        lines.push(`  outputs: ${pipeline.output_verification_status ?? "unknown"} checked=${pipeline.checked_artifact_count} missing=${pipeline.missing_required_artifact_count}`);
+        lines.push(`  execute/continue: ${pipeline.can_execute === true ? "yes" : pipeline.can_execute === false ? "no" : "unknown"}/${pipeline.can_continue === true ? "yes" : pipeline.can_continue === false ? "no" : "unknown"} next=${pipeline.next_action}`);
+        if (pipeline.failures.length > 0) {
+            lines.push(`  failures: ${pipeline.failures.join("; ")}`);
+        }
+    }
     if (report.workflow_status.focused_batch) {
         const batch = report.workflow_status.focused_batch;
         lines.push(`focused batch: ${batch.batch_path ?? "unknown"}`);

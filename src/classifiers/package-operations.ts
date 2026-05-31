@@ -575,6 +575,20 @@ export interface ClassifierLifecyclePackageInsight {
     readonly last_execution?: ClassifierGraphOperationHealth["last_execution"];
 }
 
+export interface ClassifierReviewPipelineLifecycleInsight {
+    readonly report_path: string;
+    readonly status?: string;
+    readonly command_kind?: string;
+    readonly prepared_status?: string;
+    readonly output_verification_status?: string;
+    readonly can_execute?: boolean;
+    readonly can_continue?: boolean;
+    readonly missing_required_artifact_count: number;
+    readonly checked_artifact_count: number;
+    readonly failures: readonly string[];
+    readonly next_action: "execute_review_pipeline_command" | "repair_review_pipeline_outputs" | "continue_review_pipeline" | "inspect_review_pipeline_lifecycle";
+}
+
 export interface ClassifierLifecycleInsightReport {
     readonly schema: "ax.classifier_lifecycle_insight_report.v1";
     readonly packages_root: string;
@@ -585,6 +599,7 @@ export interface ClassifierLifecycleInsightReport {
     readonly failed_operations: readonly ClassifierGraphOperationHealth[];
     readonly changed_artifacts: readonly ClassifierGraphChangedArtifact[];
     readonly blocking_items: readonly string[];
+    readonly review_pipeline?: ClassifierReviewPipelineLifecycleInsight;
     readonly totals: {
         readonly package_count: number;
         readonly local_model_count: number;
@@ -598,6 +613,25 @@ export interface ClassifierLifecycleInsightReport {
         readonly pending_hard_negatives: number;
     };
     readonly decision: "healthy" | "needs_graph_apply" | "needs_human_review" | "has_guarded_operations";
+}
+
+function reviewPipelineLifecycleNextAction(
+    lifecycle: NonNullable<ClassifierLifecycleReviewStatus["review_pipeline_lifecycle"]>,
+): ClassifierReviewPipelineLifecycleInsight["next_action"] {
+    if (
+        (lifecycle.missing_required_artifact_count ?? 0) > 0 ||
+        lifecycle.output_verification_status === "missing_required_outputs" ||
+        (lifecycle.failures ?? []).length > 0
+    ) {
+        return "repair_review_pipeline_outputs";
+    }
+    if (lifecycle.can_execute === true && lifecycle.lifecycle_status !== "verified_after_execution") {
+        return "execute_review_pipeline_command";
+    }
+    if (lifecycle.can_continue === true) {
+        return "continue_review_pipeline";
+    }
+    return "inspect_review_pipeline_lifecycle";
 }
 
 function countOperationKinds(operations: readonly ClassifierPackageOperation[]): ClassifierPackageOperationKindCounts {
@@ -2163,6 +2197,33 @@ export function buildClassifierLifecycleInsightReport(input: {
             ...(lastExecution ? { last_execution: lastExecution } : {}),
         };
     });
+    const reviewPipeline = input.workflowStatus.review_pipeline_lifecycle
+        ? {
+            report_path: input.workflowStatus.review_pipeline_lifecycle.report_path,
+            ...(input.workflowStatus.review_pipeline_lifecycle.lifecycle_status === undefined ? {} : {
+                status: input.workflowStatus.review_pipeline_lifecycle.lifecycle_status,
+            }),
+            ...(input.workflowStatus.review_pipeline_lifecycle.command_kind === undefined ? {} : {
+                command_kind: input.workflowStatus.review_pipeline_lifecycle.command_kind,
+            }),
+            ...(input.workflowStatus.review_pipeline_lifecycle.prepared_status === undefined ? {} : {
+                prepared_status: input.workflowStatus.review_pipeline_lifecycle.prepared_status,
+            }),
+            ...(input.workflowStatus.review_pipeline_lifecycle.output_verification_status === undefined ? {} : {
+                output_verification_status: input.workflowStatus.review_pipeline_lifecycle.output_verification_status,
+            }),
+            ...(input.workflowStatus.review_pipeline_lifecycle.can_execute === undefined ? {} : {
+                can_execute: input.workflowStatus.review_pipeline_lifecycle.can_execute,
+            }),
+            ...(input.workflowStatus.review_pipeline_lifecycle.can_continue === undefined ? {} : {
+                can_continue: input.workflowStatus.review_pipeline_lifecycle.can_continue,
+            }),
+            missing_required_artifact_count: input.workflowStatus.review_pipeline_lifecycle.missing_required_artifact_count ?? 0,
+            checked_artifact_count: input.workflowStatus.review_pipeline_lifecycle.checked_artifact_count ?? 0,
+            failures: input.workflowStatus.review_pipeline_lifecycle.failures ?? [],
+            next_action: reviewPipelineLifecycleNextAction(input.workflowStatus.review_pipeline_lifecycle),
+        } satisfies ClassifierReviewPipelineLifecycleInsight
+        : undefined;
     const blockingItems = [
         ...packages
             .filter((entry) => entry.lifecycle_readiness.status === "incomplete")
@@ -2183,6 +2244,15 @@ export function buildClassifierLifecycleInsightReport(input: {
         ...(input.workflowStatus.proposal_promotion?.decision === "needs_workflow_candidate_proposal_review"
             ? ["workflow candidate proposal promotion blocked by review"]
             : []),
+        ...(reviewPipeline && reviewPipeline.missing_required_artifact_count > 0
+            ? [`review pipeline missing ${reviewPipeline.missing_required_artifact_count} required output artifact(s)`]
+            : []),
+        ...(reviewPipeline && reviewPipeline.can_continue === false
+            ? [`review pipeline lifecycle cannot continue: ${reviewPipeline.status ?? "unknown"}`]
+            : []),
+        ...(reviewPipeline
+            ? reviewPipeline.failures.map((failure) => `review pipeline failure: ${failure}`)
+            : []),
         ...((input.workflowStatus.pending_blind_labels ?? 0) > 0
             ? [`${input.workflowStatus.pending_blind_labels} blind labels pending`]
             : []),
@@ -2194,9 +2264,10 @@ export function buildClassifierLifecycleInsightReport(input: {
     const pendingHardNegatives = input.workflowStatus.pending_hard_negatives ?? 0;
     const proposalReviewPending = input.workflowStatus.proposal_review?.decision === "needs_workflow_candidate_proposal_review";
     const proposalPromotionBlocked = input.workflowStatus.proposal_promotion?.decision === "needs_workflow_candidate_proposal_review";
+    const reviewPipelineBlocked = reviewPipeline?.next_action === "repair_review_pipeline_outputs" || reviewPipeline?.can_continue === false;
     const decision: ClassifierLifecycleInsightReport["decision"] = input.graph.decision === "empty_graph"
         ? "needs_graph_apply"
-        : pendingBlindLabels > 0 || pendingHardNegatives > 0 || input.workflowStatus.decision === "needs_human_review" || proposalReviewPending || proposalPromotionBlocked
+        : pendingBlindLabels > 0 || pendingHardNegatives > 0 || input.workflowStatus.decision === "needs_human_review" || proposalReviewPending || proposalPromotionBlocked || reviewPipelineBlocked
             ? "needs_human_review"
             : input.graph.guarded_operations.length > 0
                 ? "has_guarded_operations"
@@ -2211,6 +2282,7 @@ export function buildClassifierLifecycleInsightReport(input: {
         failed_operations: failedOperations,
         changed_artifacts: input.graph.changed_artifacts,
         blocking_items: blockingItems,
+        ...(reviewPipeline ? { review_pipeline: reviewPipeline } : {}),
         totals: {
             package_count: input.packages.totals.package_count,
             local_model_count: input.packages.totals.local_model_count,
