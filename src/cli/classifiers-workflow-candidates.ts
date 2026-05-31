@@ -328,6 +328,10 @@ export type WorkflowCandidateReviewCoveragePipelineCommandOutputArtifactCheck =
 export type WorkflowCandidateReviewCoveragePipelineCommandOutputArtifactCheckStatus =
     "pending_execution";
 
+export type WorkflowCandidateReviewCoveragePipelineCommandOutputCheckStatus =
+    | "no_output_artifacts"
+    | "pending_execution";
+
 export interface WorkflowCandidateReviewCoveragePipelineCommandOutputArtifactCheckRow {
     readonly kind: WorkflowCandidateReviewCoveragePipelineCommandOutputArtifactKind;
     readonly path: string;
@@ -455,6 +459,7 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly review_pipeline_command_kind?: WorkflowCandidateReviewCoveragePipelineCommandKind;
     readonly review_pipeline_command_output_artifacts: readonly WorkflowCandidateReviewCoveragePipelineCommandOutputArtifact[];
     readonly review_pipeline_command_output_artifact_checks: readonly WorkflowCandidateReviewCoveragePipelineCommandOutputArtifactCheckRow[];
+    readonly review_pipeline_command_output_check_status: WorkflowCandidateReviewCoveragePipelineCommandOutputCheckStatus;
     readonly review_pipeline_required_inputs: readonly WorkflowCandidateReviewCoveragePipelineRequiredInput[];
     readonly review_pipeline_input_bindings: readonly WorkflowCandidateReviewCoveragePipelineInputBinding[];
     readonly review_pipeline_command_argv?: readonly string[];
@@ -2082,6 +2087,7 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
                 `coverage review pipeline command kind: ${report.coverage_review.review_pipeline_command_kind}`,
             ]),
             `coverage review pipeline command output artifacts: ${report.coverage_review.review_pipeline_command_output_artifacts.length === 0 ? "none" : report.coverage_review.review_pipeline_command_output_artifacts.map((artifact) => `${artifact.kind}@${artifact.argv_index}=${artifact.path}`).join(", ")}`,
+            `coverage review pipeline command output check status: ${report.coverage_review.review_pipeline_command_output_check_status}`,
             `coverage review pipeline command output checks: ${report.coverage_review.review_pipeline_command_output_artifact_checks.length === 0 ? "none" : report.coverage_review.review_pipeline_command_output_artifact_checks.map((check) => `${check.kind}@${check.argv_index}=${check.status}`).join(", ")}`,
             `coverage review pipeline required inputs: ${report.coverage_review.review_pipeline_required_inputs.length === 0 ? "none" : report.coverage_review.review_pipeline_required_inputs.join(", ")}`,
             `coverage review pipeline input bindings: ${report.coverage_review.review_pipeline_input_bindings.length === 0 ? "none" : report.coverage_review.review_pipeline_input_bindings.map((binding) => `${binding.input}@${binding.argv_index}=${binding.argv_flag}:${binding.placeholder}:${binding.value_kind}`).join(", ")}`,
@@ -3404,6 +3410,9 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
     const reviewPipelineCommandOutputArtifactChecks = workflowCandidateReviewCoveragePipelineCommandOutputArtifactChecks(
         reviewPipelineCommandOutputArtifacts,
     );
+    const reviewPipelineCommandOutputCheckStatus = workflowCandidateReviewCoveragePipelineCommandOutputCheckStatus(
+        reviewPipelineCommandOutputArtifactChecks,
+    );
     const lines = [
         "# Workflow Candidate Coverage Review",
         "",
@@ -3453,6 +3462,7 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
         ...(reviewPipelineCommand === undefined ? [] : [
             `- Pipeline command kind: \`${reviewPipelineCommandKind}\``,
             `- Pipeline command output artifacts: ${reviewPipelineCommandOutputArtifacts.length === 0 ? "`none`" : reviewPipelineCommandOutputArtifacts.map((artifact) => `\`${artifact.kind}@${artifact.argv_index}=${artifact.path}\``).join(", ")}`,
+            `- Pipeline command output check status: \`${reviewPipelineCommandOutputCheckStatus}\``,
             `- Pipeline command output checks: ${reviewPipelineCommandOutputArtifactChecks.length === 0 ? "`none`" : reviewPipelineCommandOutputArtifactChecks.map((check) => `\`${check.kind}@${check.argv_index}=${check.status}\``).join(", ")}`,
             `- Pipeline required inputs: ${reviewPipelineRequiredInputs.length === 0 ? "`none`" : reviewPipelineRequiredInputs.map((input) => `\`${input}\``).join(", ")}`,
             `- Pipeline input bindings: ${reviewPipelineInputBindings.length === 0 ? "`none`" : reviewPipelineInputBindings.map((binding) => `\`${binding.input}@${binding.argv_index}=${binding.argv_flag}:${binding.placeholder}:${binding.value_kind}\``).join(", ")}`,
@@ -4179,6 +4189,11 @@ const workflowCandidateReviewCoveragePipelineCommandOutputArtifactChecks = (
         required_for_command_success: true,
     }));
 
+const workflowCandidateReviewCoveragePipelineCommandOutputCheckStatus = (
+    checks: readonly WorkflowCandidateReviewCoveragePipelineCommandOutputArtifactCheckRow[],
+): WorkflowCandidateReviewCoveragePipelineCommandOutputCheckStatus =>
+    checks.length === 0 ? "no_output_artifacts" : "pending_execution";
+
 const workflowCandidateReviewCoveragePipelineInputBindings = (
     commandKind: WorkflowCandidateReviewCoveragePipelineCommandKind | undefined,
     argv: readonly string[] | undefined,
@@ -4581,6 +4596,9 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     const reviewPipelineCommandOutputArtifactChecks = workflowCandidateReviewCoveragePipelineCommandOutputArtifactChecks(
         reviewPipelineCommandOutputArtifacts,
     );
+    const reviewPipelineCommandOutputCheckStatus = workflowCandidateReviewCoveragePipelineCommandOutputCheckStatus(
+        reviewPipelineCommandOutputArtifactChecks,
+    );
     return {
         schema: "ax.workflow_candidate_review_readiness.v1",
         source_path: input.sourcePath,
@@ -4663,6 +4681,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         ...(reviewPipelineCommandKind === undefined ? {} : { review_pipeline_command_kind: reviewPipelineCommandKind }),
         review_pipeline_command_output_artifacts: reviewPipelineCommandOutputArtifacts,
         review_pipeline_command_output_artifact_checks: reviewPipelineCommandOutputArtifactChecks,
+        review_pipeline_command_output_check_status: reviewPipelineCommandOutputCheckStatus,
         review_pipeline_required_inputs: reviewPipelineRequiredInputs,
         review_pipeline_input_bindings: reviewPipelineInputBindings,
         ...(reviewPipelineCommandArgv === undefined ? {} : { review_pipeline_command_argv: reviewPipelineCommandArgv }),
