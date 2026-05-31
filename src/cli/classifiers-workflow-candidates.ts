@@ -2720,6 +2720,17 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
     const missingRationaleCount = reviewedRows.filter((row) => (row.review_rationale ?? "").trim().length === 0).length;
     const completeRationaleCount = reviewedRows.length - missingRationaleCount;
     const reviewPackPath = context.coverageReviewPack ?? context.coverageFixturePack;
+    const smokeMarkerCount = reviewedRows.filter(fixtureRowHasSmokeMarker).length +
+        (reviewPackPath?.toLowerCase().includes("smoke") ? 1 : 0);
+    const applyGuard = invalidCount > 0
+        ? "invalid_review_pack"
+        : reviewedRows.length === 0
+        ? "no_reviewed_fixtures"
+        : missingRationaleCount > 0
+            ? "missing_review_rationale"
+        : smokeMarkerCount > 0
+            ? "blocked_smoke_review"
+            : "ready_to_apply";
     const sourceKind = context.sourceKind ?? "hybrid_window_classifier_projection";
     const readinessOutputPath = context.outputPath ?? ".ax/experiments/workflow-candidate-review-coverage-reviewed.json";
     const syncedBriefPath = context.coverageReviewBrief ?? ".ax/experiments/workflow-candidate-review-coverage-reviewed.md";
@@ -2767,6 +2778,8 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
         `- Invalid fixtures: \`${invalidCount}\``,
         `- Complete rationales: \`${completeRationaleCount}\``,
         `- Missing rationales: \`${missingRationaleCount}\``,
+        `- Smoke markers: \`${smokeMarkerCount}\``,
+        `- Apply guard: \`${applyGuard}\``,
         "",
         ...(nextCommand === undefined ? [] : [
             "## Review Commands",

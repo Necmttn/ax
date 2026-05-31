@@ -1654,6 +1654,8 @@ describe("classifiers workflow-candidates", () => {
         expect(brief).toContain("- Invalid fixtures: `0`");
         expect(brief).toContain("- Complete rationales: `0`");
         expect(brief).toContain("- Missing rationales: `0`");
+        expect(brief).toContain("- Smoke markers: `0`");
+        expect(brief).toContain("- Apply guard: `no_reviewed_fixtures`");
         expect(brief).toContain("## Review Commands");
         expect(brief).toContain("--coverage-review-pack=.ax/experiments/review-coverage.jsonl");
         expect(brief).toContain("--sync-coverage-review-brief=.ax/experiments/review-coverage.md");
