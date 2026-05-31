@@ -747,6 +747,19 @@ export function renderClassifierLifecycleInsightText(report: ClassifierLifecycle
             lines.push(`  remediation: ${item.remediation}`);
         }
     }
+    if (report.graph_recommendations.length > 0) {
+        lines.push("graph recommendations:");
+        for (const recommendation of report.graph_recommendations) {
+            lines.push(`- ${recommendation.kind}: ${recommendation.status} next=${recommendation.next_action}`);
+            lines.push(`  source: ${recommendation.source} ${recommendation.predicate}=${recommendation.value}`);
+            lines.push(`  query argv: ${recommendation.query_argv.join(" ")}`);
+            lines.push(`  candidate argv: ${recommendation.candidate_query_argv.join(" ")}`);
+            if (recommendation.evidence_paths.length > 0) {
+                lines.push(`  evidence: ${recommendation.evidence_paths.join(", ")}`);
+            }
+            lines.push(`  remediation: ${recommendation.remediation}`);
+        }
+    }
     if (report.review_pipeline) {
         const pipeline = report.review_pipeline;
         lines.push(`review pipeline: ${pipeline.status ?? "unknown"} (${pipeline.report_path})`);

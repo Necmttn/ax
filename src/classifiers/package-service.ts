@@ -619,6 +619,14 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService>
         ) {
             const packages = yield* packagesOperationsReport({ root: input?.root ?? "packages" });
             const graph = yield* executionGraphHealth({ query: { mode: "summary" } });
+            const lifecycleSuccessGraph = yield* executionGraphHealth({
+                query: {
+                    mode: "lifecycle",
+                    subject: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                    predicate: "review_pipeline_post_apply_recheck_status",
+                    value_equals: "gap_closed",
+                },
+            });
             const queryGraph = input?.graphQuery === undefined
                 ? undefined
                 : yield* executionGraphHealth({ query: input.graphQuery });
@@ -634,6 +642,7 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService>
                 packages,
                 graph,
                 ...(queryGraph === undefined ? {} : { queryGraph }),
+                lifecycleSuccessGraph,
                 workflowStatus,
             });
         });

@@ -2237,6 +2237,69 @@ describe("classifier package operations report", () => {
         expect(report.packages[0]?.failed_operation_count).toBe(1);
     });
 
+    test("recommends candidate promotion from persisted review pipeline success facts", () => {
+        const lifecycleSuccessGraph = buildExecutionGraphHealthReport({
+            nodes: [],
+            edges: [{
+                graph_id: "edge:lifecycle-success",
+                kind: "has_evidence",
+                from_id: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                to_id: "artifact:.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                evidence_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                properties_json: JSON.stringify({ lifecycle_key: "review_pipeline_lifecycle" }),
+            }],
+            facts: [{
+                graph_id: "fact:lifecycle:gap-closed",
+                kind: "classifier_lifecycle_status",
+                subject: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                predicate: "review_pipeline_post_apply_recheck_status",
+                value_json: JSON.stringify("gap_closed"),
+                evidence_edges_json: JSON.stringify(["edge:lifecycle-success"]),
+                properties_json: JSON.stringify({
+                    lifecycle_key: "review_pipeline_lifecycle",
+                    artifact_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                }),
+            }],
+            query: {
+                mode: "lifecycle",
+                subject: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                predicate: "review_pipeline_post_apply_recheck_status",
+                value_equals: "gap_closed",
+            },
+        });
+
+        const report = buildClassifierLifecycleInsightReport({
+            packages: buildPackagesOperationsReport("packages", []),
+            graph: buildExecutionGraphHealthReport({ nodes: [], edges: [], facts: [] }),
+            lifecycleSuccessGraph,
+            workflowStatus: {
+                path: ".ax/experiments/blind-workflow-status-current.json",
+                exists: true,
+                decision: "healthy",
+                next_actions: [],
+            },
+        });
+
+        expect(report.graph_recommendations).toHaveLength(1);
+        expect(report.graph_recommendations[0]).toMatchObject({
+            kind: "review_pipeline_success_to_candidate_promotion",
+            status: "ready",
+            source: "persisted_lifecycle_fact",
+            predicate: "review_pipeline_post_apply_recheck_status",
+            value: "gap_closed",
+            next_action: "prioritize_reviewed_candidates_for_harness_or_guidance",
+            evidence_paths: [".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json"],
+            query: {
+                mode: "lifecycle",
+                subject: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                predicate: "review_pipeline_post_apply_recheck_status",
+                value_equals: "gap_closed",
+            },
+        });
+        expect(report.graph_recommendations[0]?.candidate_query_argv).toContain("--review-coverage");
+        expect(report.graph_recommendations[0]?.candidate_query_argv).toContain("--source-kind=hybrid_window_classifier_projection");
+    });
+
     test("summarizes review pipeline lifecycle routing in lifecycle insight reports", () => {
         const report = buildClassifierLifecycleInsightReport({
             packages: buildPackagesOperationsReport("packages", []),

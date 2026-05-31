@@ -1377,6 +1377,24 @@ describe("classifiers package-operations format", () => {
                 argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
                 remediation: "Bind required pipeline inputs before executing the command.",
             }],
+            graph_recommendations: [{
+                kind: "review_pipeline_success_to_candidate_promotion",
+                status: "ready",
+                source: "persisted_lifecycle_fact",
+                predicate: "review_pipeline_post_apply_recheck_status",
+                value: "gap_closed",
+                next_action: "prioritize_reviewed_candidates_for_harness_or_guidance",
+                remediation: "Use the persisted successful review-route apply fact to inspect reviewed workflow candidates and choose harness or guidance proposals.",
+                query: {
+                    mode: "lifecycle",
+                    subject: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                    predicate: "review_pipeline_post_apply_recheck_status",
+                    value_equals: "gap_closed",
+                },
+                query_argv: ["bun", "src/cli/index.ts", "classifiers", "package-operations", "--graph-health", "--graph-mode=lifecycle", "--subject=classifier_lifecycle:workflow_candidate_review_pipeline", "--predicate=review_pipeline_post_apply_recheck_status", "--value=gap_closed"],
+                candidate_query_argv: ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates", "--review-coverage", "--source-kind=hybrid_window_classifier_projection", "--limit=10"],
+                evidence_paths: [".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json"],
+            }],
             graph_query_suggestion: {
                 has_suggestion: true,
                 query_match_status: "no_match",
@@ -1552,6 +1570,10 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("execution phase: bind_inputs");
         expect(output).toContain("missing inputs: reviewer, reviewed_at");
         expect(output).toContain("input bindings: reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string; reviewed_at flag=--review-provenance-reviewed-at index=9 prefix=--review-provenance-reviewed-at= placeholder=<reviewed-at-iso> value_kind=iso_datetime");
+        expect(output).toContain("graph recommendations:");
+        expect(output).toContain("- review_pipeline_success_to_candidate_promotion: ready next=prioritize_reviewed_candidates_for_harness_or_guidance");
+        expect(output).toContain("source: persisted_lifecycle_fact review_pipeline_post_apply_recheck_status=gap_closed");
+        expect(output).toContain("candidate argv: bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=10");
         expect(output).toContain("review pipeline: verified_after_execution (.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json)");
         expect(output).toContain("command: stamp_review_provenance prepared=ready_to_execute");
         expect(output).toContain("argv: bun src/cli/index.ts classifiers workflow-candidates");

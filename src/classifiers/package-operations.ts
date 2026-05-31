@@ -949,6 +949,20 @@ export interface ClassifierReviewPipelineLifecycleInsight {
     readonly next_action: "execute_review_pipeline_command" | "repair_review_pipeline_outputs" | "continue_review_pipeline" | "inspect_review_pipeline_lifecycle";
 }
 
+export interface ClassifierLifecycleGraphRecommendation {
+    readonly kind: "review_pipeline_success_to_candidate_promotion";
+    readonly status: "ready";
+    readonly source: "persisted_lifecycle_fact";
+    readonly predicate: string;
+    readonly value: string;
+    readonly next_action: "prioritize_reviewed_candidates_for_harness_or_guidance";
+    readonly remediation: string;
+    readonly query: ClassifierGraphHealthQuery;
+    readonly query_argv: readonly string[];
+    readonly candidate_query_argv: readonly string[];
+    readonly evidence_paths: readonly string[];
+}
+
 export type ClassifierLifecycleRoutingItem = {
     readonly kind: "graph_query_repair";
     readonly blocks_decision: boolean;
@@ -989,6 +1003,7 @@ export interface ClassifierLifecycleInsightReport {
     readonly changed_artifacts: readonly ClassifierGraphChangedArtifact[];
     readonly blocking_items: readonly string[];
     readonly routing_items: readonly ClassifierLifecycleRoutingItem[];
+    readonly graph_recommendations: readonly ClassifierLifecycleGraphRecommendation[];
     readonly graph_query_suggestion?: ClassifierGraphQuerySuggestionRoutingSummary;
     readonly review_pipeline?: ClassifierReviewPipelineLifecycleInsight;
     readonly totals: {
@@ -3443,6 +3458,7 @@ export function buildClassifierLifecycleInsightReport(input: {
     readonly packages: ClassifierPackagesOperationsReport;
     readonly graph: ClassifierPackageExecutionGraphHealthReport;
     readonly queryGraph?: ClassifierPackageExecutionGraphHealthReport;
+    readonly lifecycleSuccessGraph?: ClassifierPackageExecutionGraphHealthReport;
     readonly workflowStatus: ClassifierLifecycleReviewStatus;
 }): ClassifierLifecycleInsightReport {
     const failedOperations = input.graph.operations.filter((operation) => operation.failed_count > 0);
@@ -3605,6 +3621,55 @@ export function buildClassifierLifecycleInsightReport(input: {
         ...graphQueryRoutingItems,
         ...reviewPipelineRoutingItems,
     ].sort((a, b) => Number(b.blocks_decision) - Number(a.blocks_decision));
+    const lifecycleSuccessSubject = "classifier_lifecycle:workflow_candidate_review_pipeline";
+    const lifecycleSuccessPredicate = "review_pipeline_post_apply_recheck_status";
+    const lifecycleSuccessValue = "gap_closed";
+    const lifecycleSuccessQuery: ClassifierGraphHealthQuery = {
+        mode: "lifecycle",
+        subject: lifecycleSuccessSubject,
+        predicate: lifecycleSuccessPredicate,
+        value_equals: lifecycleSuccessValue,
+    };
+    const lifecycleSuccessFacts = (input.lifecycleSuccessGraph ?? input.queryGraph)?.query.mode === "lifecycle"
+        ? (input.lifecycleSuccessGraph ?? input.queryGraph)?.lifecycle_facts.filter((fact) =>
+            fact.subject === lifecycleSuccessSubject &&
+            fact.predicate === lifecycleSuccessPredicate &&
+            fact.value === lifecycleSuccessValue
+        ) ?? []
+        : [];
+    const graphRecommendations: readonly ClassifierLifecycleGraphRecommendation[] = lifecycleSuccessFacts.length === 0
+        ? []
+        : [{
+            kind: "review_pipeline_success_to_candidate_promotion",
+            status: "ready",
+            source: "persisted_lifecycle_fact",
+            predicate: lifecycleSuccessPredicate,
+            value: lifecycleSuccessValue,
+            next_action: "prioritize_reviewed_candidates_for_harness_or_guidance",
+            remediation: "Use the persisted successful review-route apply fact to inspect reviewed workflow candidates and choose harness or guidance proposals.",
+            query: lifecycleSuccessQuery,
+            query_argv: [
+                "bun",
+                "src/cli/index.ts",
+                "classifiers",
+                "package-operations",
+                "--graph-health",
+                "--graph-mode=lifecycle",
+                "--subject=classifier_lifecycle:workflow_candidate_review_pipeline",
+                "--predicate=review_pipeline_post_apply_recheck_status",
+                "--value=gap_closed",
+            ],
+            candidate_query_argv: [
+                "bun",
+                "src/cli/index.ts",
+                "classifiers",
+                "workflow-candidates",
+                "--review-coverage",
+                "--source-kind=hybrid_window_classifier_projection",
+                "--limit=10",
+            ],
+            evidence_paths: Array.from(new Set(lifecycleSuccessFacts.flatMap((fact) => fact.evidence_paths))).sort(),
+        }];
     const blockingItems = [
         ...packages
             .filter((entry) => entry.lifecycle_readiness.status === "incomplete")
@@ -3664,6 +3729,7 @@ export function buildClassifierLifecycleInsightReport(input: {
         changed_artifacts: input.graph.changed_artifacts,
         blocking_items: blockingItems,
         routing_items: routingItems,
+        graph_recommendations: graphRecommendations,
         ...(queryGraphSuggestion.suggestion === undefined ? {} : { graph_query_suggestion: queryGraphSuggestion }),
         ...(reviewPipeline ? { review_pipeline: reviewPipeline } : {}),
         totals: {

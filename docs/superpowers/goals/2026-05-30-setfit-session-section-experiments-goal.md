@@ -33,12 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E440 adds
-  `.ax/experiments/classifier-package-execution-facts-review-pipeline-apply-e440.json`,
-  `.ax/experiments/classifier-package-execution-write-plan-review-pipeline-apply-e440.json`,
-  `.ax/experiments/classifier-package-execution-apply-review-pipeline-apply-e440.json`,
+- Index continuation: E441 adds
+  `.ax/experiments/classifier-lifecycle-insight-graph-recommendations-e441.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-review-pipeline-apply-e440.json`
+  `.ax/experiments/classifier-lifecycle-insight-graph-recommendations-e441.txt`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -48,8 +46,70 @@ Current recommendation:
   `--execute-route` gate, route outputs can be inspected after execution, the
   current handoff artifacts are complete, the guarded production apply has
   closed the reviewed-coverage gap, and the successful loop is now persisted as
-  lifecycle graph facts. The immediate bottleneck is deciding which reviewed
-  classifier candidates should become harness or guidance proposals.
+  lifecycle graph facts. Lifecycle insight now turns the persisted `gap_closed`
+  fact into a candidate inspection recommendation. The immediate bottleneck is
+  executing that recommendation and deciding which reviewed classifier
+  candidates should become harness or guidance proposals.
+
+## E441 - Route Graph Success Facts to Candidate Recommendations
+
+Question:
+- Once the successful review route/apply/recheck loop is persisted as graph
+  facts, can lifecycle insight use those facts to recommend the next
+  harness/guidance candidate inspection path?
+
+Implementation:
+- Added a graph-backed lifecycle recommendation emitted when the persisted
+  lifecycle fact
+  `classifier_lifecycle:workflow_candidate_review_pipeline /
+  review_pipeline_post_apply_recheck_status = gap_closed` is present.
+- The package service now queries that lifecycle success fact when building
+  lifecycle insights.
+- The lifecycle text renderer prints the recommendation, the verifying graph
+  query argv, and the candidate inspection argv:
+  `bun src/cli/index.ts classifiers workflow-candidates
+  --review-coverage --source-kind=hybrid_window_classifier_projection
+  --limit=10`.
+
+Artifacts:
+- `.ax/experiments/classifier-lifecycle-insight-graph-recommendations-e441.json`
+- `.ax/experiments/classifier-lifecycle-insight-graph-recommendations-e441.txt`
+- `.ax/experiments/workflow-candidate-review-coverage-graph-recommended-e441.json`
+
+Results:
+- The lifecycle insight report contains one `graph_recommendations` entry:
+  `review_pipeline_success_to_candidate_promotion`.
+- Its `next_action` is
+  `prioritize_reviewed_candidates_for_harness_or_guidance`.
+- Its evidence path is
+  `.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json`.
+- The text report exposes the same recommendation and candidate query command.
+- Running the recommended review-coverage query returned 3 candidate groups:
+  one accepted verification/recovery signal for `add_verification_gate`, one
+  rejected environment/preference signal, and one unreviewed
+  correction/rejection signal.
+
+Decision:
+- E441 connects persisted lifecycle success facts to an actionable service
+  surface. The next aligned slice is to run the recommended candidate query and
+  use reviewed evidence plus existing harness facts to pick concrete harness or
+  guidance proposals.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts
+bun test src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts
+bun src/cli/index.ts classifiers lifecycle --out .ax/experiments/classifier-lifecycle-insight-graph-recommendations-e441.json --json
+bun -e 'const r=await Bun.file(".ax/experiments/classifier-lifecycle-insight-graph-recommendations-e441.json").json(); const g=r.graph_recommendations?.[0]; if (!g || g.next_action !== "prioritize_reviewed_candidates_for_harness_or_guidance" || !g.evidence_paths?.length) throw new Error(JSON.stringify(r.graph_recommendations));'
+bun src/cli/index.ts classifiers lifecycle > .ax/experiments/classifier-lifecycle-insight-graph-recommendations-e441.txt || true
+rg -n "graph recommendations|review_pipeline_success_to_candidate_promotion|candidate argv: .*--review-coverage|review_pipeline_post_apply_recheck_status=gap_closed" .ax/experiments/classifier-lifecycle-insight-graph-recommendations-e441.txt
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=10 --out .ax/experiments/workflow-candidate-review-coverage-graph-recommended-e441.json --json
+```
+
+Focused tests, DB-backed lifecycle insight JSON, and rendered lifecycle text
+checks passed. The plain text lifecycle command exits nonzero while the broader
+workflow still reports `needs_human_review`; the recommendation is still
+rendered and verified in the output.
 
 ## E440 - Persist Route Apply Recheck Lifecycle Facts
 
