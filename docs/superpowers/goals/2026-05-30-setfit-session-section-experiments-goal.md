@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E388 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-relaxed-filters-no-match-e388.json`
+- Index continuation: E389 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-original-query-no-match-e389.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-relaxed-filters-match-e388.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-original-query-match-e389.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,50 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E389 - Include Original Query In Suggestion
+
+Question:
+- E388 identifies the relaxed filter, but can services compare the original
+  graph query and repaired graph query without retaining external state?
+
+Implementation:
+- Added `original_query` to `query_suggestion`.
+- The suggestion now carries both the caller's original graph query and the
+  repaired graph query.
+- Text graph-health output now renders `query suggestion original query`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-original-query-no-match-e389.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-original-query-match-e389.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-original-query-no-match-e389.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match`,
+  `query_suggestion.original_query.value_equals=execute`, and
+  `query_suggestion.query.value_equals=bind_inputs`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.original_query.value_equals=bind_inputs`.
+- Text output renders the original query as
+  `mode=lifecycle predicate=review_pipeline_recommended_action_execution_phase
+  value_equals=execute`.
+
+Decision:
+- Services can now show and compare before/after graph-query repair state from
+  a single response object.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E389 no-match report includes original `value_equals=execute` and repaired
+  `value_equals=bind_inputs`.
+- E389 match report includes original `value_equals=bind_inputs`.
+- E389 text output includes the original-query summary line.
 
 ## E388 - Expose Suggested Query Relaxed Filters
 

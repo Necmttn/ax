@@ -291,6 +291,11 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         : Object.entries(report.query_suggested_query)
             .map(([key, value]) => `${key}=${value}`)
             .join(" ");
+    const querySuggestionOriginalQuery = report.query_suggestion === undefined
+        ? "none"
+        : Object.entries(report.query_suggestion.original_query)
+            .map(([key, value]) => `${key}=${value}`)
+            .join(" ");
     const querySuggestion = report.query_suggestion === undefined
         ? "none"
         : `status=${report.query_suggestion.status} next_action=${report.query_suggestion.next_action} result_count=${report.query_suggestion.result_count} value_equals=${report.query_suggestion.value_equals}`;
@@ -332,6 +337,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `query suggestion: ${querySuggestion}`,
         `query suggestion provenance: ${querySuggestionProvenance}`,
         `query suggestion relaxed filters: ${querySuggestionRelaxedFilters}`,
+        `query suggestion original query: ${querySuggestionOriginalQuery}`,
         `query suggested argv: ${report.query_suggested_argv?.join(" ") ?? "none"}`,
         `query suggested query: ${querySuggestedQuery}`,
         `nodes/edges/facts: ${report.totals.node_count}/${report.totals.edge_count}/${report.totals.fact_count}`,

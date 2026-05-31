@@ -1284,6 +1284,11 @@ describe("classifier package operations report", () => {
             source: "lifecycle_available_value_counts",
             reason: "available_value_after_relaxing_value_equals",
             relaxed_filters: ["value_equals"],
+            original_query: {
+                mode: "lifecycle",
+                predicate: "review_pipeline_recommended_action_execution_phase",
+                value_equals: "execute",
+            },
             query: {
                 mode: "lifecycle",
                 predicate: "review_pipeline_recommended_action_execution_phase",
