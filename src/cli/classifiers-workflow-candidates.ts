@@ -32,6 +32,7 @@ export interface WorkflowCandidateCommandInput {
     readonly topicReport?: boolean;
     readonly listProposals?: boolean;
     readonly listHarnessFacts?: boolean;
+    readonly reviewCoverage?: boolean;
     readonly includeHarnessFacts?: boolean;
     readonly includeHelperFacts?: boolean;
     readonly includeReviewFacts?: boolean;
@@ -484,6 +485,47 @@ export interface WorkflowCandidatePersistedReviewFact {
     readonly helper_source_fixture_ids: readonly string[];
     readonly updated_at?: string;
     readonly value_json?: string;
+}
+
+export interface WorkflowCandidateReviewCoverageRow {
+    readonly candidate_id: string;
+    readonly label: string;
+    readonly proposed_action: string;
+    readonly support_count: number;
+    readonly evidence_count: number;
+    readonly review_fact_count: number;
+    readonly topics: readonly string[];
+    readonly verdict_counts: {
+        readonly reject: number;
+        readonly accept: number;
+        readonly defer: number;
+        readonly revise: number;
+        readonly other: number;
+    };
+    readonly helper_source_fixture_ids: readonly string[];
+}
+
+export interface WorkflowCandidateReviewCoverageReport {
+    readonly schema: "ax.workflow_candidate_review_coverage.v1";
+    readonly source_kind: string;
+    readonly query: {
+        readonly limit: number;
+        readonly search?: string;
+    };
+    readonly candidates: readonly WorkflowCandidateReviewCoverageRow[];
+    readonly totals: {
+        readonly candidate_group_count: number;
+        readonly returned_candidate_count: number;
+        readonly reviewed_candidate_count: number;
+        readonly unreviewed_candidate_count: number;
+        readonly review_fact_count: number;
+        readonly rejected_fact_count: number;
+        readonly accepted_fact_count: number;
+        readonly deferred_fact_count: number;
+        readonly revised_fact_count: number;
+        readonly helper_source_fixture_count: number;
+    };
+    readonly decision: "workflow_candidate_review_coverage_ready" | "needs_workflow_candidate_reviews";
 }
 
 export interface WorkflowCandidateReport {
@@ -1495,6 +1537,166 @@ export function attachWorkflowCandidatePersistedReviewFacts(
             ),
         },
     };
+}
+
+export function buildWorkflowCandidateReviewCoverageReport(input: {
+    readonly groupRows: readonly WorkflowCandidateGroupRow[];
+    readonly evidenceRows: readonly WorkflowCandidateEvidenceRow[];
+    readonly reviewFactRows: readonly WorkflowCandidateTopicHarnessGraphFactRow[];
+    readonly sourceKind: string;
+    readonly limit: number;
+    readonly search?: string;
+}): WorkflowCandidateReviewCoverageReport {
+    const evidenceByGroup = new Map<string, WorkflowCandidateEvidenceRow[]>();
+    for (const row of input.evidenceRows) {
+        const subject = String(row.subject ?? "");
+        if (!evidenceByGroup.has(subject)) evidenceByGroup.set(subject, []);
+        evidenceByGroup.get(subject)!.push(row);
+    }
+    const reviewsByCandidate = new Map<string, WorkflowCandidatePersistedReviewFact[]>();
+    const allHelperSources = new Set<string>();
+    for (const fact of input.reviewFactRows) {
+        const props = parseProperties(fact.properties_json);
+        const candidateId = typeof fact.object === "string" && fact.object.length > 0
+            ? fact.object
+            : typeof props.candidate_id === "string" && props.candidate_id.length > 0
+                ? props.candidate_id
+                : undefined;
+        if (candidateId === undefined) continue;
+        const helperSourceFixtureIds = Array.isArray(props.helper_source_fixture_ids)
+            ? props.helper_source_fixture_ids.filter((entry): entry is string => typeof entry === "string")
+            : [];
+        for (const fixtureId of helperSourceFixtureIds) allHelperSources.add(fixtureId);
+        const persistedFact: WorkflowCandidatePersistedReviewFact = {
+            ...(fact.graph_id === undefined ? {} : { graph_id: fact.graph_id }),
+            ...(typeof props.topic === "string" ? { topic: props.topic } : {}),
+            ...(fact.subject === undefined ? {} : { subject: fact.subject }),
+            ...(fact.predicate === undefined ? {} : { predicate: fact.predicate }),
+            ...(typeof fact.object === "string" ? { object: fact.object } : {}),
+            candidate_id: candidateId,
+            ...(typeof props.rationale === "string" ? { rationale: props.rationale } : {}),
+            helper_source_fixture_ids: helperSourceFixtureIds,
+            ...(typeof fact.updated_at === "string" ? { updated_at: fact.updated_at } : {}),
+            ...(typeof fact.value_json === "string" ? { value_json: fact.value_json } : {}),
+        };
+        reviewsByCandidate.set(candidateId, [
+            ...(reviewsByCandidate.get(candidateId) ?? []),
+            persistedFact,
+        ]);
+    }
+
+    const search = input.search?.toLowerCase();
+    const rows: WorkflowCandidateReviewCoverageRow[] = [];
+    for (const groupRow of input.groupRows) {
+        const candidateId = String(groupRow.graph_id ?? "");
+        if (candidateId.length === 0) continue;
+        const props = parseProperties(groupRow.properties_json);
+        const label = String(groupRow.label ?? "");
+        const action = String(props.proposed_action ?? "review_section_pattern");
+        const evidence = evidenceByGroup.get(candidateId) ?? [];
+        const reviews = reviewsByCandidate.get(candidateId) ?? [];
+        const topicSet = new Set<string>();
+        const helperSourceSet = new Set<string>();
+        const verdictCounts = { reject: 0, accept: 0, defer: 0, revise: 0, other: 0 };
+        for (const review of reviews) {
+            if (review.topic) topicSet.add(review.topic);
+            for (const fixtureId of review.helper_source_fixture_ids) helperSourceSet.add(fixtureId);
+            switch (review.predicate) {
+                case "reject":
+                    verdictCounts.reject += 1;
+                    break;
+                case "accept":
+                    verdictCounts.accept += 1;
+                    break;
+                case "defer":
+                    verdictCounts.defer += 1;
+                    break;
+                case "revise":
+                    verdictCounts.revise += 1;
+                    break;
+                default:
+                    verdictCounts.other += 1;
+                    break;
+            }
+        }
+        const haystack = [
+            candidateId,
+            label,
+            action,
+            ...topicSet,
+            ...helperSourceSet,
+        ].join("\n").toLowerCase();
+        if (search && !haystack.includes(search)) continue;
+        rows.push({
+            candidate_id: candidateId,
+            label,
+            proposed_action: action,
+            support_count: Math.trunc(asNumber(props.support_count) ?? evidence.length),
+            evidence_count: evidence.length,
+            review_fact_count: reviews.length,
+            topics: [...topicSet].sort(),
+            verdict_counts: verdictCounts,
+            helper_source_fixture_ids: [...helperSourceSet].sort(),
+        });
+    }
+
+    rows.sort((a, b) =>
+        b.review_fact_count - a.review_fact_count ||
+        b.evidence_count - a.evidence_count ||
+        b.support_count - a.support_count ||
+        a.label.localeCompare(b.label)
+    );
+    const returned = rows.slice(0, Math.max(1, input.limit));
+    const reviewedCandidateCount = rows.filter((row) => row.review_fact_count > 0).length;
+    return {
+        schema: "ax.workflow_candidate_review_coverage.v1",
+        source_kind: input.sourceKind,
+        query: {
+            limit: input.limit,
+            ...(input.search === undefined ? {} : { search: input.search }),
+        },
+        candidates: returned,
+        totals: {
+            candidate_group_count: rows.length,
+            returned_candidate_count: returned.length,
+            reviewed_candidate_count: reviewedCandidateCount,
+            unreviewed_candidate_count: rows.length - reviewedCandidateCount,
+            review_fact_count: rows.reduce((sum, row) => sum + row.review_fact_count, 0),
+            rejected_fact_count: rows.reduce((sum, row) => sum + row.verdict_counts.reject, 0),
+            accepted_fact_count: rows.reduce((sum, row) => sum + row.verdict_counts.accept, 0),
+            deferred_fact_count: rows.reduce((sum, row) => sum + row.verdict_counts.defer, 0),
+            revised_fact_count: rows.reduce((sum, row) => sum + row.verdict_counts.revise, 0),
+            helper_source_fixture_count: allHelperSources.size,
+        },
+        decision: reviewedCandidateCount > 0
+            ? "workflow_candidate_review_coverage_ready"
+            : "needs_workflow_candidate_reviews",
+    };
+}
+
+export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandidateReviewCoverageReport): string {
+    const lines = [
+        "workflow candidate review coverage",
+        `decision: ${report.decision}`,
+        `source: ${report.source_kind}`,
+        ...(report.query.search ? [`search: ${report.query.search}`] : []),
+        `candidate groups: ${report.totals.candidate_group_count}`,
+        `reviewed/unreviewed: ${report.totals.reviewed_candidate_count}/${report.totals.unreviewed_candidate_count}`,
+        `review facts: ${report.totals.review_fact_count}`,
+        `review status: ${report.totals.rejected_fact_count} rejected, ${report.totals.accepted_fact_count} accepted, ${report.totals.deferred_fact_count} deferred, ${report.totals.revised_fact_count} revised`,
+        `helper source fixtures: ${report.totals.helper_source_fixture_count}`,
+    ];
+    for (const row of report.candidates) {
+        lines.push(
+            `- ${row.label} reviews=${row.review_fact_count} evidence=${row.evidence_count} support=${row.support_count}`,
+            `  id: ${row.candidate_id}`,
+            `  action: ${row.proposed_action}`,
+            `  verdicts: reject=${row.verdict_counts.reject} accept=${row.verdict_counts.accept} defer=${row.verdict_counts.defer} revise=${row.verdict_counts.revise} other=${row.verdict_counts.other}`,
+            `  topics: ${row.topics.length > 0 ? row.topics.join(", ") : "none"}`,
+            `  helper fixtures: ${row.helper_source_fixture_ids.length > 0 ? row.helper_source_fixture_ids.join(", ") : "none"}`,
+        );
+    }
+    return lines.join("\n");
 }
 
 export function renderWorkflowCandidateReportText(report: WorkflowCandidateReport): string {
@@ -3115,6 +3317,34 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 writeFileSync(input.out, `${prettyPrint(report)}\n`, "utf8");
             }
             console.log(input.json ? prettyPrint(report) : renderWorkflowCandidateTopicHarnessGraphListText(report));
+            return;
+        }
+        if (input.reviewCoverage) {
+            const rows = yield* db.query<[WorkflowCandidateGroupRow[], WorkflowCandidateEvidenceRow[]]>(
+                workflowCandidateSql,
+                { sourceKind: input.sourceKind },
+            ).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+            const reviewRows = yield* db.query<[WorkflowCandidateTopicHarnessGraphFactRow[]]>(`
+                SELECT graph_id, subject, predicate, object, value_json, properties_json, type::string(updated_at) AS updated_at
+                FROM classifier_graph_fact
+                WHERE kind = "workflow_topic_candidate_review"
+                  AND source_kind = "workflow_topic_candidate_review"
+                ORDER BY updated_at DESC
+                LIMIT ${Math.max(1, input.limit * 50)};
+            `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+            const report = buildWorkflowCandidateReviewCoverageReport({
+                groupRows: rows[0] ?? [],
+                evidenceRows: rows[1] ?? [],
+                reviewFactRows: reviewRows?.[0] ?? [],
+                sourceKind: input.sourceKind,
+                limit: input.limit,
+                ...(input.search === undefined ? {} : { search: input.search }),
+            });
+            if (input.out) {
+                mkdirSync(dirname(input.out), { recursive: true });
+                writeFileSync(input.out, `${prettyPrint(report)}\n`, "utf8");
+            }
+            console.log(input.json ? prettyPrint(report) : renderWorkflowCandidateReviewCoverageText(report));
             return;
         }
         if (input.topicReport) {

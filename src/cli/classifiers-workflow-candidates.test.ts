@@ -18,6 +18,7 @@ import {
     buildWorkflowCandidateTopicReviewGraphWritePlan,
     buildWorkflowCandidateTopicTaskDrafts,
     attachWorkflowCandidatePersistedReviewFacts,
+    buildWorkflowCandidateReviewCoverageReport,
     buildWorkflowCandidateTopicReport,
     buildWorkflowCandidateTaskDrafts,
     isTaskLikeWorkflowText,
@@ -31,6 +32,7 @@ import {
     renderWorkflowCandidateTopicReportText,
     renderWorkflowCandidateTopicHarnessGraphListText,
     renderWorkflowCandidateReportText,
+    renderWorkflowCandidateReviewCoverageText,
     syncWorkflowCandidateReportFromBrief,
     syncWorkflowCandidateTopicReportFromBrief,
     topicAdjacentCandidates,
@@ -1249,6 +1251,73 @@ describe("classifiers workflow-candidates", () => {
         expect(brief).toContain("- Persisted review facts: `1`");
         expect(brief).toContain("- Persisted review:");
         expect(brief).toContain("  - Helper source fixture: `session-section-chunks/none-maintenance-question`");
+    });
+
+    test("summarizes persisted review coverage across candidate groups", () => {
+        const report = buildWorkflowCandidateReviewCoverageReport({
+            groupRows: [
+                {
+                    graph_id: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+                    label: "environment_or_preference_signal",
+                    properties_json: properties({
+                        proposed_action: "record_guidance_or_environment_preference",
+                        support_count: 50,
+                    }),
+                },
+                {
+                    graph_id: "classifier_candidate_group:hybrid-window/output_expectation",
+                    label: "output_expectation",
+                    properties_json: properties({
+                        proposed_action: "record_guidance_or_environment_preference",
+                        support_count: 8,
+                    }),
+                },
+            ],
+            evidenceRows: [
+                {
+                    graph_id: "fact:maintenance-question",
+                    subject: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+                    properties_json: properties({ text_excerpt: "surrealml maintenance question" }),
+                },
+                {
+                    graph_id: "fact:output",
+                    subject: "classifier_candidate_group:hybrid-window/output_expectation",
+                    properties_json: properties({ text_excerpt: "show me the results" }),
+                },
+            ],
+            reviewFactRows: [{
+                graph_id: "fact:surrealml-review",
+                subject: "workflow_topic_candidate_review:surrealml:environment",
+                predicate: "reject",
+                object: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+                properties_json: properties({
+                    topic: "surrealml",
+                    helper_source_fixture_ids: ["session-section-chunks/none-maintenance-question"],
+                }),
+            }],
+            sourceKind: "hybrid_window_classifier_projection",
+            limit: 10,
+        });
+        const text = renderWorkflowCandidateReviewCoverageText(report);
+
+        expect(report.decision).toBe("workflow_candidate_review_coverage_ready");
+        expect(report.totals).toMatchObject({
+            candidate_group_count: 2,
+            reviewed_candidate_count: 1,
+            unreviewed_candidate_count: 1,
+            review_fact_count: 1,
+            rejected_fact_count: 1,
+            helper_source_fixture_count: 1,
+        });
+        expect(report.candidates[0]).toMatchObject({
+            candidate_id: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+            review_fact_count: 1,
+            topics: ["surrealml"],
+            helper_source_fixture_ids: ["session-section-chunks/none-maintenance-question"],
+        });
+        expect(text).toContain("reviewed/unreviewed: 1/1");
+        expect(text).toContain("review status: 1 rejected, 0 accepted, 0 deferred, 0 revised");
+        expect(text).toContain("helper fixtures: session-section-chunks/none-maintenance-question");
     });
 
     test("renders persisted harness facts inside topic evidence packs", () => {
