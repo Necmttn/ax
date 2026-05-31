@@ -272,6 +272,12 @@ export type WorkflowCandidateReviewCoverageReviewIssueStatus =
     | "needs_review_repair"
     | "review_repair_complete";
 
+export type WorkflowCandidateReviewCoveragePipelineStage =
+    | "needs_review_decisions"
+    | "needs_review_repair"
+    | "needs_review_handoff"
+    | "ready_for_production_apply";
+
 export type WorkflowCandidateReviewCoverageRecheckStatus =
     | "gap_closed"
     | "gap_reduced"
@@ -373,6 +379,8 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly review_issue_status: WorkflowCandidateReviewCoverageReviewIssueStatus;
     readonly review_issue_next_action: string;
     readonly review_issue_repair_command?: string;
+    readonly review_pipeline_stage: WorkflowCandidateReviewCoveragePipelineStage;
+    readonly review_pipeline_next_action: string;
     readonly provenance_issue_rows: readonly WorkflowCandidateReviewCoverageProvenanceIssueRow[];
     readonly projection_totals: WorkflowCandidateTopicReviewGraphProjection["totals"];
     readonly write_plan_totals: WorkflowCandidateTopicReviewGraphWritePlan["totals"];
@@ -1986,6 +1994,8 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             `coverage review issue candidates: ${report.coverage_review.review_issue_candidate_count}`,
             `coverage review issue status: ${report.coverage_review.review_issue_status}`,
             `coverage review issue next action: ${report.coverage_review.review_issue_next_action}`,
+            `coverage review pipeline stage: ${report.coverage_review.review_pipeline_stage}`,
+            `coverage review pipeline next action: ${report.coverage_review.review_pipeline_next_action}`,
             ...(report.coverage_review.review_issue_repair_command === undefined ? [] : [
                 `coverage review issue repair command: ${report.coverage_review.review_issue_repair_command}`,
             ]),
@@ -3169,6 +3179,13 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
             ? ["missing_review_handoff" as const]
             : []),
     ];
+    const reviewPipelineStage = workflowCandidateReviewCoveragePipelineStage({
+        reviewed_fixture_count: reviewedCount,
+        review_issue_status: reviewIssueStatus,
+        handoff_apply_guard: handoffApplyGuard,
+        production_can_apply: productionApplyGuard === "ready_to_apply",
+    });
+    const reviewPipelineNextAction = workflowCandidateReviewCoveragePipelineNextAction(reviewPipelineStage, reviewIssueNextAction);
     const postApplyRecheckCommand = workflowCandidateReviewCoverageRecheckCommand({
         sourceKind,
         ...(context.limit === undefined ? {} : { limit: context.limit }),
@@ -3284,6 +3301,8 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
         `- Production blocker remediations: ${productionApplyBlockers.length === 0 ? "none" : productionApplyBlockers.map((blocker) => `${blocker}: ${workflowCandidateReviewCoverageBlockerRemediation(blocker)}`).join(" | ")}`,
         `- Production next action: ${workflowCandidateReviewCoverageGuardNextAction(productionApplyGuard)}`,
         `- Next action: ${workflowCandidateReviewCoverageGuardNextAction(applyGuard)}`,
+        `- Pipeline stage: \`${reviewPipelineStage}\``,
+        `- Pipeline next action: ${reviewPipelineNextAction}`,
         "",
         "## Review Issues",
         "",
@@ -3808,6 +3827,35 @@ const workflowCandidateReviewCoverageReviewIssueNextAction = (
         ? "Review issue repairs are complete."
         : "Fix review issue rows before applying reviewed coverage facts.";
 
+const workflowCandidateReviewCoveragePipelineStage = (input: {
+    readonly reviewed_fixture_count: number;
+    readonly review_issue_status: WorkflowCandidateReviewCoverageReviewIssueStatus;
+    readonly handoff_apply_guard: WorkflowCandidateReviewCoverageApplyGuard;
+    readonly production_can_apply: boolean;
+}): WorkflowCandidateReviewCoveragePipelineStage => {
+    if (input.reviewed_fixture_count === 0) return "needs_review_decisions";
+    if (input.review_issue_status === "needs_review_repair") return "needs_review_repair";
+    if (input.production_can_apply) return "ready_for_production_apply";
+    if (input.handoff_apply_guard === "missing_review_handoff") return "needs_review_handoff";
+    return "needs_review_repair";
+};
+
+const workflowCandidateReviewCoveragePipelineNextAction = (
+    stage: WorkflowCandidateReviewCoveragePipelineStage,
+    reviewIssueNextAction: string,
+): string => {
+    switch (stage) {
+        case "needs_review_decisions":
+            return "Set at least one fixture to accept, revise, reject, or defer and add a rationale.";
+        case "needs_review_repair":
+            return reviewIssueNextAction;
+        case "needs_review_handoff":
+            return "Complete the review handoff artifacts before applying.";
+        case "ready_for_production_apply":
+            return "Run the production apply command after confirming the review pack is intentional.";
+    }
+};
+
 const workflowCandidateReviewCoverageHandoffMissingPaths = (input: {
     readonly reviewFactsPath?: string;
     readonly reviewWritePlanPath?: string;
@@ -4112,6 +4160,13 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     const reviewIssueCandidateCount = workflowCandidateReviewCoverageReviewIssueCandidateCount(reviewIssueRows);
     const reviewIssueStatus = workflowCandidateReviewCoverageReviewIssueStatus(reviewIssueRows);
     const reviewIssueNextAction = workflowCandidateReviewCoverageReviewIssueNextAction(reviewIssueStatus);
+    const reviewPipelineStage = workflowCandidateReviewCoveragePipelineStage({
+        reviewed_fixture_count: reviewedRows.length,
+        review_issue_status: reviewIssueStatus,
+        handoff_apply_guard: handoffApplyGuard,
+        production_can_apply: productionCanApply,
+    });
+    const reviewPipelineNextAction = workflowCandidateReviewCoveragePipelineNextAction(reviewPipelineStage, reviewIssueNextAction);
     const reviewIssueRepairCommand = reviewIssueRows.length === 0
         ? undefined
         : workflowCandidateReviewCoverageReviewIssueRepairCommand({
@@ -4195,6 +4250,8 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         review_issue_status: reviewIssueStatus,
         review_issue_next_action: reviewIssueNextAction,
         ...(reviewIssueRepairCommand === undefined ? {} : { review_issue_repair_command: reviewIssueRepairCommand }),
+        review_pipeline_stage: reviewPipelineStage,
+        review_pipeline_next_action: reviewPipelineNextAction,
         provenance_issue_rows: provenanceIssueRows,
         projection_totals: input.projection.totals,
         write_plan_totals: input.writePlan.totals,
