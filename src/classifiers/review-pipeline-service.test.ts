@@ -269,6 +269,77 @@ describe("ClassifierReviewPipelineService", () => {
             ".ax/experiments/workflow-candidate-review-coverage-post-apply.json",
         ]);
     });
+
+    test("builds a lifecycle report for commands blocked before execution", async () => {
+        const source = provenanceCommandSource();
+
+        const report = await runWithService(Effect.gen(function* () {
+            const pipeline = yield* ClassifierReviewPipelineService;
+            return yield* pipeline.commandLifecycle(source, {
+                values: { reviewer: "codex" },
+            });
+        }));
+
+        expect(report.schema).toBe("ax.classifier_review_pipeline_lifecycle.v1");
+        expect(report.status).toBe("blocked_before_execution");
+        expect(report.can_execute).toBe(false);
+        expect(report.can_continue).toBe(false);
+        expect(report.next_action).toBe("Provide required pipeline input values before executing the command.");
+        expect(report.summary.command_status).toBe("requires_inputs");
+        expect(report.prepared.status).toBe("missing_inputs");
+        expect(report.output_verification).toBeUndefined();
+    });
+
+    test("builds a lifecycle report for commands ready for an external executor", async () => {
+        const source = provenanceCommandSource();
+
+        const report = await runWithService(Effect.gen(function* () {
+            const pipeline = yield* ClassifierReviewPipelineService;
+            return yield* pipeline.commandLifecycle(source, {
+                values: {
+                    reviewer: "codex",
+                    reviewed_at: "2026-05-31T10:00:00.000Z",
+                },
+            });
+        }));
+
+        expect(report.status).toBe("ready_to_execute");
+        expect(report.can_execute).toBe(true);
+        expect(report.can_continue).toBe(false);
+        expect(report.next_action).toBe("Execute the prepared argv, then verify required output artifacts.");
+        expect(report.prepared.argv).toEqual([
+            "bun",
+            "src/cli/index.ts",
+            "classifiers",
+            "workflow-candidates",
+            "--review-provenance-reviewer=codex",
+            "--review-provenance-reviewed-at=2026-05-31T10:00:00.000Z",
+        ]);
+        expect(report.output_verification).toBeUndefined();
+    });
+
+    test("builds a lifecycle report after output verification", async () => {
+        const source = provenanceCommandSource();
+
+        const report = await runWithService(Effect.gen(function* () {
+            const pipeline = yield* ClassifierReviewPipelineService;
+            return yield* pipeline.commandLifecycle(source, {
+                values: {
+                    reviewer: "codex",
+                    reviewed_at: "2026-05-31T10:00:00.000Z",
+                },
+                verifier: {
+                    exists: () => Effect.succeed(true),
+                },
+            });
+        }));
+
+        expect(report.status).toBe("verified_after_execution");
+        expect(report.can_execute).toBe(true);
+        expect(report.can_continue).toBe(true);
+        expect(report.next_action).toBe("All required pipeline output artifacts exist; continue with the next review pipeline step.");
+        expect(report.output_verification?.status).toBe("verified");
+    });
 });
 
 const provenanceCommandSource = (): ClassifierReviewPipelineCommandSource => ({

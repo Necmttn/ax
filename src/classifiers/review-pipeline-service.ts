@@ -106,6 +106,28 @@ export interface ClassifierReviewPipelineOutputVerifier {
     readonly exists: (path: string) => Effect.Effect<boolean>;
 }
 
+export type ClassifierReviewPipelineLifecycleStatus =
+    | "blocked_before_execution"
+    | "ready_to_execute"
+    | "verified_after_execution"
+    | "missing_required_outputs";
+
+export interface ClassifierReviewPipelineLifecycleInput {
+    readonly values?: ClassifierReviewPipelineInputValues;
+    readonly verifier?: ClassifierReviewPipelineOutputVerifier;
+}
+
+export interface ClassifierReviewPipelineLifecycleReport {
+    readonly schema: "ax.classifier_review_pipeline_lifecycle.v1";
+    readonly status: ClassifierReviewPipelineLifecycleStatus;
+    readonly can_execute: boolean;
+    readonly can_continue: boolean;
+    readonly next_action: string;
+    readonly summary: ClassifierReviewPipelineCommandSummary;
+    readonly prepared: ClassifierReviewPipelinePreparedCommand;
+    readonly output_verification?: ClassifierReviewPipelineOutputVerificationReport;
+}
+
 export interface ClassifierReviewPipelineServiceShape {
     readonly commandSummary: (
         input: ClassifierReviewPipelineCommandSource,
@@ -118,6 +140,10 @@ export interface ClassifierReviewPipelineServiceShape {
         input: ClassifierReviewPipelinePreparedCommand,
         verifier: ClassifierReviewPipelineOutputVerifier,
     ) => Effect.Effect<ClassifierReviewPipelineOutputVerificationReport>;
+    readonly commandLifecycle: (
+        input: ClassifierReviewPipelineCommandSource,
+        lifecycle?: ClassifierReviewPipelineLifecycleInput,
+    ) => Effect.Effect<ClassifierReviewPipelineLifecycleReport>;
 }
 
 export class ClassifierReviewPipelineService extends Context.Service<
@@ -286,7 +312,48 @@ export const ClassifierReviewPipelineServiceLive: Layer.Layer<ClassifierReviewPi
             });
         });
 
-        return ClassifierReviewPipelineService.of({ commandSummary, prepareCommand, verifyOutputArtifacts });
+        const commandLifecycle = Effect.fn("ClassifierReviewPipelineService.commandLifecycle")(function* (
+            input: ClassifierReviewPipelineCommandSource,
+            lifecycle: ClassifierReviewPipelineLifecycleInput = {},
+        ) {
+            const summary = yield* commandSummary(input);
+            const prepared = yield* prepareCommand(input, lifecycle.values);
+
+            if (!prepared.can_execute) {
+                return lifecycleReport({
+                    status: "blocked_before_execution",
+                    canExecute: false,
+                    canContinue: false,
+                    nextAction: prepared.next_action,
+                    summary,
+                    prepared,
+                });
+            }
+
+            if (lifecycle.verifier === undefined) {
+                return lifecycleReport({
+                    status: "ready_to_execute",
+                    canExecute: true,
+                    canContinue: false,
+                    nextAction: "Execute the prepared argv, then verify required output artifacts.",
+                    summary,
+                    prepared,
+                });
+            }
+
+            const outputVerification = yield* verifyOutputArtifacts(prepared, lifecycle.verifier);
+            return lifecycleReport({
+                status: outputVerification.can_continue ? "verified_after_execution" : "missing_required_outputs",
+                canExecute: true,
+                canContinue: outputVerification.can_continue,
+                nextAction: outputVerification.next_action,
+                summary,
+                prepared,
+                outputVerification,
+            });
+        });
+
+        return ClassifierReviewPipelineService.of({ commandSummary, prepareCommand, verifyOutputArtifacts, commandLifecycle });
     }),
 );
 
@@ -340,4 +407,23 @@ const outputVerificationReport = (input: {
     next_action: input.nextAction,
     checked_artifacts: input.checkedArtifacts,
     missing_required_artifacts: input.missingRequiredArtifacts,
+});
+
+const lifecycleReport = (input: {
+    readonly status: ClassifierReviewPipelineLifecycleStatus;
+    readonly canExecute: boolean;
+    readonly canContinue: boolean;
+    readonly nextAction: string;
+    readonly summary: ClassifierReviewPipelineCommandSummary;
+    readonly prepared: ClassifierReviewPipelinePreparedCommand;
+    readonly outputVerification?: ClassifierReviewPipelineOutputVerificationReport;
+}): ClassifierReviewPipelineLifecycleReport => ({
+    schema: "ax.classifier_review_pipeline_lifecycle.v1",
+    status: input.status,
+    can_execute: input.canExecute,
+    can_continue: input.canContinue,
+    next_action: input.nextAction,
+    summary: input.summary,
+    prepared: input.prepared,
+    ...(input.outputVerification === undefined ? {} : { output_verification: input.outputVerification }),
 });
