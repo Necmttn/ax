@@ -50,6 +50,7 @@ export interface WorkflowCandidateCommandInput {
     readonly reviewFacts?: string;
     readonly reviewWritePlan?: string;
     readonly applyReviewFacts?: boolean;
+    readonly requireReviewProvenance?: boolean;
     readonly out?: string;
     readonly brief?: string;
     readonly syncBrief?: string;
@@ -178,6 +179,7 @@ export type WorkflowCandidateReviewCoverageApplyGuard =
     | "ready_to_apply"
     | "blocked_smoke_review"
     | "invalid_review_pack"
+    | "missing_review_provenance"
     | "missing_review_rationale"
     | "no_reviewed_fixtures";
 
@@ -185,6 +187,7 @@ export type WorkflowCandidateReviewCoverageApplyBlocker =
     | "blocked_smoke_review"
     | "empty_write_plan"
     | "invalid_review_pack"
+    | "missing_review_provenance"
     | "missing_review_rationale"
     | "no_reviewed_fixtures";
 
@@ -2740,6 +2743,8 @@ const workflowCandidateReviewCoverageGuardNextAction = (
             return "Set at least one fixture to accept, revise, reject, or defer and add a rationale.";
         case "missing_review_rationale":
             return "Add rationale text for every reviewed fixture.";
+        case "missing_review_provenance":
+            return "Add reviewer and reviewed-at metadata, or rerun without strict provenance if legacy review packs are acceptable.";
         case "blocked_smoke_review":
             return "Replace smoke or example review markers with real review decisions before applying.";
         case "ready_to_apply":
@@ -2757,6 +2762,8 @@ const workflowCandidateReviewCoverageBlockerRemediation = (
             return "Review at least one fixture and add a rationale before applying.";
         case "missing_review_rationale":
             return "Add rationale text to each reviewed fixture.";
+        case "missing_review_provenance":
+            return "Add reviewer and reviewed-at metadata or rerun without strict provenance.";
         case "blocked_smoke_review":
             return "Replace smoke or example review markers with real review decisions.";
         case "empty_write_plan":
@@ -3170,6 +3177,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     readonly syncedFixtureCount?: number;
     readonly unknownFixtureCount?: number;
     readonly coverageRows?: readonly WorkflowCandidateReviewCoverageRow[];
+    readonly requireReviewProvenance?: boolean;
 }): WorkflowCandidateReviewCoverageApplySummary {
     const reviewedRows = input.rows.filter((row) => fixtureReviewVerdict(row) !== undefined);
     const invalidRows = input.rows.filter((row) => !VALID_VERDICTS.has(row.review_status));
@@ -3212,6 +3220,8 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         ? "no_reviewed_fixtures"
         : missingRationaleRows.length > 0
             ? "missing_review_rationale"
+        : input.requireReviewProvenance === true && provenanceStatus === "missing_review_provenance"
+            ? "missing_review_provenance"
         : smokeMarkerCount > 0
             ? "blocked_smoke_review"
             : "ready_to_apply";
@@ -3225,6 +3235,9 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     if (invalidRows.length > 0) applyBlockers.push("invalid_review_pack");
     if (reviewedRows.length === 0) applyBlockers.push("no_reviewed_fixtures");
     if (missingRationaleRows.length > 0) applyBlockers.push("missing_review_rationale");
+    if (input.requireReviewProvenance === true && provenanceStatus === "missing_review_provenance") {
+        applyBlockers.push("missing_review_provenance");
+    }
     if (smokeMarkerCount > 0) applyBlockers.push("blocked_smoke_review");
     if (applyGuard === "ready_to_apply" && input.writePlan.statements.length === 0) {
         applyBlockers.push("empty_write_plan");
@@ -3237,6 +3250,8 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
                 return { blocker, count: input.rows.length, remediation: workflowCandidateReviewCoverageBlockerRemediation(blocker) };
             case "missing_review_rationale":
                 return { blocker, count: missingRationaleRows.length, remediation: workflowCandidateReviewCoverageBlockerRemediation(blocker) };
+            case "missing_review_provenance":
+                return { blocker, count: missingReviewerRows.length + missingReviewedAtRows.length, remediation: workflowCandidateReviewCoverageBlockerRemediation(blocker) };
             case "blocked_smoke_review":
                 return { blocker, count: smokeMarkerCount, remediation: workflowCandidateReviewCoverageBlockerRemediation(blocker) };
             case "empty_write_plan":
@@ -4185,6 +4200,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     syncedFixtureCount,
                     unknownFixtureCount,
                     coverageRows: report.candidates,
+                    ...(input.requireReviewProvenance === undefined ? {} : { requireReviewProvenance: input.requireReviewProvenance }),
                 });
                 if (input.applyReviewFacts && pendingApplySummary.can_apply) {
                     yield* db.query(reviewWritePlan.statements.join("\n")).pipe(
@@ -4203,6 +4219,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                         syncedFixtureCount,
                         unknownFixtureCount,
                         coverageRows: report.candidates,
+                        ...(input.requireReviewProvenance === undefined ? {} : { requireReviewProvenance: input.requireReviewProvenance }),
                     })
                     : pendingApplySummary;
                 report = {

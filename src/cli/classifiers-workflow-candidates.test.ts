@@ -2003,6 +2003,83 @@ describe("classifiers workflow-candidates", () => {
         ]);
     });
 
+    test("blocks coverage review apply when strict provenance is required", () => {
+        const rows = parseWorkflowCandidateFixtureRowsJsonl(JSON.stringify({
+            id: "workflow-candidate-review-coverage/verification_or_recovery_signal/a",
+            suite: "workflow-candidate-review-coverage",
+            name: "coverage-gap-verification_or_recovery_signal-01",
+            label: "verification_or_recovery_signal",
+            target: "unknown",
+            text: "USER:\ncontinue and verify the fix\n\nPREVIOUS_ASSISTANT:\n",
+            source_group: "workflow-candidate",
+            review_status: "accept",
+            review_rationale: "Useful verification behavior worth preserving.",
+            topic: "review-coverage",
+            candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+            candidate_label: "verification_or_recovery_signal",
+            proposed_action: "add_verification_gate",
+            result_id: "classifier_result:verification",
+            turn: "turn:verification",
+            confidence: 0.83,
+        }));
+        const projection = buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures({
+            rows,
+            syncedFrom: ".ax/experiments/reviewed-coverage-gaps.jsonl",
+        });
+        const writePlan = buildWorkflowCandidateTopicReviewGraphWritePlan(projection);
+
+        const summary = buildWorkflowCandidateReviewCoverageApplySummary({
+            rows,
+            sourcePath: ".ax/experiments/reviewed-coverage-gaps.jsonl",
+            projection,
+            writePlan,
+            applyRequested: true,
+            applied: false,
+            requireReviewProvenance: true,
+        });
+        const text = renderWorkflowCandidateReviewCoverageText({
+            schema: "ax.workflow_candidate_review_coverage.v1",
+            source_kind: "hybrid_window_classifier_projection",
+            query: { limit: 10 },
+            candidates: [],
+            totals: {
+                candidate_group_count: 0,
+                returned_candidate_count: 0,
+                reviewed_candidate_count: 0,
+                unreviewed_candidate_count: 0,
+                review_fact_count: 0,
+                rejected_fact_count: 0,
+                accepted_fact_count: 0,
+                deferred_fact_count: 0,
+                revised_fact_count: 0,
+                helper_source_fixture_count: 0,
+            },
+            coverage_review: summary,
+            decision: "needs_workflow_candidate_reviews",
+        });
+
+        expect(summary).toMatchObject({
+            apply_requested: true,
+            apply_result: "blocked",
+            apply_guard: "missing_review_provenance",
+            can_apply: false,
+            missing_reviewer_count: 1,
+            missing_reviewed_at_count: 1,
+            provenance_status: "missing_review_provenance",
+            apply_blockers: ["missing_review_provenance"],
+            apply_blocker_details: [{
+                blocker: "missing_review_provenance",
+                count: 2,
+                remediation: "Add reviewer and reviewed-at metadata or rerun without strict provenance.",
+            }],
+            next_action: "Add reviewer and reviewed-at metadata, or rerun without strict provenance if legacy review packs are acceptable.",
+        });
+        expect(text).toContain("coverage review apply guard: missing_review_provenance");
+        expect(text).toContain("coverage review can apply: no");
+        expect(text).toContain("coverage review blockers: missing_review_provenance");
+        expect(text).toContain("coverage review blocker remediations: missing_review_provenance: Add reviewer and reviewed-at metadata or rerun without strict provenance.");
+    });
+
     test("reports applied coverage review statement counts", () => {
         const rows = parseWorkflowCandidateFixtureRowsJsonl(JSON.stringify({
             id: "workflow-candidate-review-coverage/verification_or_recovery_signal/a",
