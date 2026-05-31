@@ -29,7 +29,7 @@ artifact path as the evidence to inspect before trusting any summary row.
 | Blind/review workflow | E46-E65+ | `.ax/experiments/blind-workflow-status-e57.json` and related review artifacts | Human review is mandatory before fixtures or graph facts are promoted. | Pending where review rows are incomplete. | Earlier experiment log | Prefer review queues/workspaces over automatic label edits. |
 | Transcript graph projection | E155-E157 | `.ax/experiments/transcript-candidate-graph-projection-e155.json`, `.ax/experiments/workflow-candidate-report-e156.json`, `.ax/experiments/workflow-candidate-cli-e157.json` | Real persisted classifier facts can become graph-backed workflow candidates. | Passed for projection/query; still needs product review filters and proposal gates. | E155/E156/E157 commits in log | Use graph facts for evidence-backed workflow/harness discovery. |
 | Proposal lifecycle | E168-E208 | `.ax/experiments/workflow-candidate-proposal-list-e168.json`, `.ax/experiments/classifier-package-execution-write-plan-e208.json` | Classifier-derived workflow proposals are discoverable and lifecycle-tracked. | Passed for visibility/lifecycle plumbing; promotion remains review-gated. | Recent proposal lifecycle commits | Continue using review and ready-smoke gates before guidance/harness changes. |
-| Embedding/SVM helper layer | E209-E235 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e231-post-promotion.json`, `.ax/experiments/embedding-helper-canonical-promotion-split-audit-e231.json`, `.ax/experiments/embedding-helper-graph-projection-current.json`, `.ax/experiments/embedding-helper-graph-apply-e232.json`, `.ax/experiments/classifier-graph-health-embedding-helper-e232.json`, `.ax/experiments/embedding-helper-graph-usefulness-current.json`, `.ax/experiments/classifier-package-execution-embedding-helper-graph-usefulness-e234.json`, `.ax/experiments/classifier-graph-health-embedding-helper-none-maintenance-e235.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. Promoted helper facts are persisted, measurable, and now explainable through graph queries. | Passed: `ax classifiers graph --mode=embedding-helper --artifact=session-section-chunks/none-maintenance-question` returns the promoted fixture ID, evidence path, and five nearest reviewed fixture neighbors with similarities. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `65b0b3c`, `4c602d9`, `eeb517c`, `9a6811e`, `31a1b16`, `e41562c`, `0587b67`, `0e0a960`, `3f01787`, `7bea922`, `21f7163`, `24e4a4e`, `f97c8e3`, `722e3e8`, `8b27657`, `d700090`, `6237d89`, `2490fdf`, `9f4ee34`, this commit | Keep helper facts as debug/review explanations. Next useful work is broader control collection or wiring these explanations into workflow-candidate evidence packs. |
+| Embedding/SVM helper layer | E209-E236 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e231-post-promotion.json`, `.ax/experiments/embedding-helper-canonical-promotion-split-audit-e231.json`, `.ax/experiments/embedding-helper-graph-projection-current.json`, `.ax/experiments/embedding-helper-graph-apply-e232.json`, `.ax/experiments/classifier-graph-health-embedding-helper-e232.json`, `.ax/experiments/embedding-helper-graph-usefulness-current.json`, `.ax/experiments/classifier-package-execution-embedding-helper-graph-usefulness-e234.json`, `.ax/experiments/classifier-graph-health-embedding-helper-none-maintenance-e235.json`, `.ax/experiments/workflow-topic-evidence-pack-helper-explanations-e236.md` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. Promoted helper facts are persisted, measurable, graph-explainable, and now attached to workflow topic evidence packs. | Passed: `ax classifiers workflow-candidates --topic-report --include-helper-facts --search=surrealml --source-kind=hybrid_window_classifier_projection` attaches `none-maintenance-question` to the noisy hybrid environment/preference candidate with five nearest reviewed fixture explanations. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `65b0b3c`, `4c602d9`, `eeb517c`, `9a6811e`, `31a1b16`, `e41562c`, `0587b67`, `0e0a960`, `3f01787`, `7bea922`, `21f7163`, `24e4a4e`, `f97c8e3`, `722e3e8`, `8b27657`, `d700090`, `6237d89`, `2490fdf`, `9f4ee34`, `2530699`, this commit | Keep helper facts as review/debug evidence. Next useful work is to use this pack output for reviewer decisions or collect broader controls; still no ranking suppression. |
 
 Current recommendation:
 
@@ -12478,6 +12478,78 @@ bun test src/classifiers/package-manifest.test.ts src/classifiers/package-servic
 bun run typecheck
 python3 -m json.tool packages/ax-classifier-session-sections/ax.classifier.json >/dev/null
 python3 -m json.tool .ax/experiments/embedding-helper-graph-usefulness-current.json >/dev/null
+```
+
+## E236 - Attach Helper Controls To Topic Evidence Packs
+
+Question:
+
+- Can promoted embedding-helper controls become useful at the exact review
+  surface where a workflow candidate is inspected?
+
+Implementation:
+
+- Added `--include-helper-facts` to `ax classifiers workflow-candidates`.
+- Topic reports now optionally include
+  `ax.workflow_candidate_topic_helper_explanations.v1`, built from:
+  - promoted `embedding_helper_hard_negative_candidate` graph facts
+  - `nearest_reviewed_fixture` graph edges
+  - local classifier fixture text in
+    `packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl`
+- Topic evidence pack markdown now renders a `Promoted Helper Controls`
+  section with:
+  - source fixture ID
+  - promoted fixture ID
+  - candidate ID/label/action
+  - overlap score
+  - nearest reviewed fixtures and similarities
+  - helper review evidence path
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --search=surrealml --source-kind=hybrid_window_classifier_projection --limit=10 --examples=100 --include-helper-facts --out=.ax/experiments/workflow-topic-report-helper-explanations-e236.json --evidence-pack=.ax/experiments/workflow-topic-evidence-pack-helper-explanations-e236.md --json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-topic-report-helper-explanations-e236.json`
+- `.ax/experiments/workflow-topic-evidence-pack-helper-explanations-e236.md`
+
+Results:
+
+- Promoted helper facts considered: `12`
+- Fixture text rows loaded: `136`
+- Matched helper examples: `1`
+- Matched workflow candidates: `1`
+- Matched candidate:
+  `classifier_candidate_group:hybrid-window/environment_or_preference_signal`
+- Matched helper control:
+  `session-section-chunks/none-maintenance-question`
+- Promoted fixture:
+  `session-section-chunks/embedding-helper-hard-negative-session-section-chunks-none-maintenance-question`
+- Nearest reviewed fixture explanations:
+  - `session-section-chunks/tooling-local-surreal-port`, similarity `0.688`
+  - `session-section-chunks/tooling-surreal-version`, similarity `0.6175`
+  - `session-section-chunks/direction-docker-surreal`, similarity `0.5998`
+  - `session-section-chunks/none-go`, similarity `0.5803`
+  - `session-section-chunks/approval-go-after-plan`, similarity `0.5769`
+
+Decision:
+
+- Helper facts now travel from graph storage into reviewer-facing workflow
+  evidence packs. This makes the helper layer useful for explaining why a
+  candidate may be noise, without changing ranking or promotion gates.
+- The next useful work is reviewer workflow: accept/reject the candidate using
+  the helper explanation, or collect more controls before any ranking change.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun run typecheck
+python3 -m json.tool .ax/experiments/workflow-topic-report-helper-explanations-e236.json >/dev/null
+rg -n 'Helper explanations|Promoted Helper Controls|none-maintenance|Nearest reviewed' .ax/experiments/workflow-topic-evidence-pack-helper-explanations-e236.md
 ```
 
 ## E235 - Explain Promoted Helper Facts From Graph Queries

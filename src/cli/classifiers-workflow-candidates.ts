@@ -33,6 +33,7 @@ export interface WorkflowCandidateCommandInput {
     readonly listProposals?: boolean;
     readonly listHarnessFacts?: boolean;
     readonly includeHarnessFacts?: boolean;
+    readonly includeHelperFacts?: boolean;
     readonly proposalStatus?: WorkflowCandidateProposalStatusFilter;
     readonly expandEvidence?: boolean;
     readonly evidencePack?: string;
@@ -138,6 +139,7 @@ export interface WorkflowCandidateTopicReport {
     readonly harness_evidence?: WorkflowCandidateTopicHarnessEvidenceSummary;
     readonly harness_checks?: WorkflowCandidateTopicHarnessCheckSummary;
     readonly persisted_harness_facts?: WorkflowCandidateTopicHarnessGraphListReport;
+    readonly helper_explanations?: WorkflowCandidateTopicHelperExplanationReport;
 }
 
 export interface WorkflowCandidateTopicTaskSummary {
@@ -313,6 +315,61 @@ export interface WorkflowCandidateTopicHarnessGraphListReport {
         readonly edge_count: number;
         readonly passed_count: number;
         readonly failed_count: number;
+    };
+}
+
+export interface WorkflowCandidateEmbeddingHelperGraphFactRow {
+    readonly graph_id?: string;
+    readonly subject?: string;
+    readonly predicate?: string;
+    readonly object?: string | null;
+    readonly value_json?: string | null;
+    readonly evidence_edges_json?: string | null;
+    readonly properties_json?: string;
+    readonly updated_at?: string;
+}
+
+export interface WorkflowCandidateEmbeddingHelperGraphEdgeRow {
+    readonly graph_id?: string;
+    readonly kind?: string;
+    readonly from_id?: string;
+    readonly to_id?: string;
+    readonly evidence_path?: string;
+    readonly properties_json?: string;
+    readonly updated_at?: string;
+}
+
+export interface WorkflowCandidateHelperFixtureRow {
+    readonly id: string;
+    readonly text: string;
+}
+
+export interface WorkflowCandidateTopicHelperExplanation {
+    readonly source_fixture_id: string;
+    readonly promoted_fixture_id?: string;
+    readonly fact_id: string;
+    readonly status?: string;
+    readonly proposed_label?: string;
+    readonly candidate_id: string;
+    readonly candidate_label: string;
+    readonly proposed_action: string;
+    readonly turn?: string;
+    readonly result_id?: string;
+    readonly match_score: number;
+    readonly text_excerpt: string;
+    readonly nearest_neighbors: readonly { readonly fixture_id: string; readonly similarity?: number }[];
+    readonly evidence_paths: readonly string[];
+}
+
+export interface WorkflowCandidateTopicHelperExplanationReport {
+    readonly schema: "ax.workflow_candidate_topic_helper_explanations.v1";
+    readonly min_token_overlap: number;
+    readonly explanations: readonly WorkflowCandidateTopicHelperExplanation[];
+    readonly totals: {
+        readonly promoted_helper_fact_count: number;
+        readonly fixture_text_count: number;
+        readonly matched_example_count: number;
+        readonly matched_candidate_count: number;
     };
 }
 
@@ -497,10 +554,36 @@ const parseProperties = (value: string | undefined): Record<string, unknown> => 
 const asNumber = (value: unknown): number | undefined =>
     typeof value === "number" && Number.isFinite(value) ? value : undefined;
 
+const asString = (value: unknown): string | undefined =>
+    typeof value === "string" && value.length > 0 ? value : undefined;
+
 const compactText = (text: string, limit = 220): string => {
     const squashed = text.split(/\s+/).filter(Boolean).join(" ");
     if (squashed.length <= limit) return squashed;
     return `${squashed.slice(0, Math.max(0, limit - 3)).trimEnd()}...`;
+};
+
+const userProjectionText = (text: string): string => {
+    const match = text.match(/USER:\s*([\s\S]*?)(?:\n\s*(?:PREVIOUS_ASSISTANT|RECENT_TOOL_FAILURES|RECENT_FILES|NEXT_ACTION):|$)/i);
+    return match?.[1]?.trim() || text;
+};
+
+const textTokens = (text: string): readonly string[] =>
+    text
+        .toLowerCase()
+        .replace(/[^a-z0-9_]+/g, " ")
+        .split(/\s+/)
+        .filter((token) => token.length >= 3 && token !== "previous_assistant");
+
+const tokenOverlapScore = (fixtureText: string, exampleText: string): number => {
+    const fixtureTokens = new Set(textTokens(userProjectionText(fixtureText)));
+    if (fixtureTokens.size === 0) return 0;
+    const exampleTokens = new Set(textTokens(exampleText));
+    let matches = 0;
+    for (const token of fixtureTokens) {
+        if (exampleTokens.has(token)) matches += 1;
+    }
+    return Number((matches / fixtureTokens.size).toFixed(4));
 };
 
 export function isTaskLikeWorkflowText(text: string): boolean {
@@ -1550,6 +1633,10 @@ export function renderWorkflowCandidateTopicReportText(report: WorkflowCandidate
             `persisted harness edges: ${report.persisted_harness_facts.totals.edge_count}`,
             `persisted harness status: ${report.persisted_harness_facts.totals.passed_count} passed, ${report.persisted_harness_facts.totals.failed_count} failed`,
         ] : []),
+        ...(report.helper_explanations ? [
+            `helper explanations: ${report.helper_explanations.totals.matched_example_count}`,
+            `helper matched candidates: ${report.helper_explanations.totals.matched_candidate_count}`,
+        ] : []),
         `harness gate: ${harnessEvidence.gate_satisfied ? "satisfied" : "unsatisfied"} (${harnessEvidence.gate_evidence_source})`,
         `harness gate computed: ${harnessEvidence.computed_passed_count} passed, ${harnessEvidence.computed_failed_count} failed (${harnessEvidence.computed_check_count} checks)`,
         `harness gate persisted: ${harnessEvidence.persisted_passed_count} passed, ${harnessEvidence.persisted_failed_count} failed (${harnessEvidence.persisted_fact_count} facts)`,
@@ -1605,6 +1692,16 @@ export function renderWorkflowCandidateTopicReportText(report: WorkflowCandidate
             );
         }
     }
+    if (report.helper_explanations && report.helper_explanations.explanations.length > 0) {
+        lines.push("", "promoted helper controls:");
+        for (const explanation of report.helper_explanations.explanations) {
+            lines.push(
+                `  - ${explanation.source_fixture_id} match=${explanation.match_score}`,
+                `    candidate: ${explanation.candidate_label}`,
+                `    promoted: ${explanation.promoted_fixture_id ?? "unknown"}`,
+            );
+        }
+    }
     for (const failure of report.failures) lines.push(`failure: ${failure}`);
     return lines.join("\n");
 }
@@ -1650,6 +1747,104 @@ const withWorkflowCandidateTopicHarnessEvidence = (
     ...report,
     harness_evidence: buildWorkflowCandidateTopicHarnessEvidenceSummary(report),
 });
+
+export function readWorkflowCandidateHelperFixtures(path: string): readonly WorkflowCandidateHelperFixtureRow[] {
+    const rows: WorkflowCandidateHelperFixtureRow[] = [];
+    for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
+        const parsed = safeJsonParse<unknown>(line.trim());
+        if (!isObject(parsed)) continue;
+        const id = asString(parsed.id);
+        const text = asString(parsed.text);
+        if (id && text) rows.push({ id, text });
+    }
+    return rows;
+}
+
+export function buildWorkflowCandidateTopicHelperExplanations(input: {
+    readonly report: WorkflowCandidateTopicReport;
+    readonly facts: readonly WorkflowCandidateEmbeddingHelperGraphFactRow[];
+    readonly edges: readonly WorkflowCandidateEmbeddingHelperGraphEdgeRow[];
+    readonly fixtures: readonly WorkflowCandidateHelperFixtureRow[];
+    readonly minTokenOverlap?: number;
+}): WorkflowCandidateTopicHelperExplanationReport {
+    const minTokenOverlap = input.minTokenOverlap ?? 0.72;
+    const fixtureTextById = new Map(input.fixtures.map((fixture) => [fixture.id, fixture.text]));
+    const edgeById = new Map(input.edges.map((edge) => [edge.graph_id, edge]));
+    const explanations: WorkflowCandidateTopicHelperExplanation[] = [];
+    for (const fact of input.facts) {
+        if (fact.predicate !== "promoted_hard_negative_fixture") continue;
+        const props = parseProperties(fact.properties_json);
+        const sourceFixtureId = asString(props.source_fixture_id) ??
+            (fact.subject?.startsWith("embedding_helper_hard_negative:")
+                ? fact.subject.slice("embedding_helper_hard_negative:".length)
+                : undefined);
+        if (!sourceFixtureId) continue;
+        const fixtureText = fixtureTextById.get(sourceFixtureId);
+        if (!fixtureText) continue;
+        const promotedFixtureId = asString(props.promoted_fixture_id) ??
+            (fact.object?.startsWith("classifier_promoted_fixture:")
+                ? fact.object.slice("classifier_promoted_fixture:".length)
+                : undefined);
+        const evidenceEdgesValue = safeJsonParse<unknown>(fact.evidence_edges_json ?? "[]");
+        const evidenceEdges = Array.isArray(evidenceEdgesValue)
+            ? evidenceEdgesValue.filter((edge): edge is string => typeof edge === "string")
+            : [];
+        const nearestNeighbors = evidenceEdges
+            .map((edgeId) => edgeById.get(edgeId))
+            .filter((edge): edge is WorkflowCandidateEmbeddingHelperGraphEdgeRow => edge?.kind === "nearest_reviewed_fixture")
+            .map((edge) => {
+                const edgeProps = parseProperties(edge.properties_json);
+                const fixtureId = edge.to_id?.startsWith("classifier_evidence:")
+                    ? edge.to_id.slice("classifier_evidence:".length)
+                    : edge.to_id ?? "unknown-fixture";
+                const similarity = asNumber(edgeProps.similarity);
+                return {
+                    fixture_id: fixtureId,
+                    ...(similarity === undefined ? {} : { similarity }),
+                };
+            });
+        const evidencePaths = Array.from(new Set(evidenceEdges
+            .map((edgeId) => edgeById.get(edgeId)?.evidence_path)
+            .filter((path): path is string => typeof path === "string" && path.length > 0)))
+            .sort();
+        for (const candidate of input.report.candidates.candidates) {
+            for (const example of candidate.examples) {
+                const matchScore = tokenOverlapScore(fixtureText, example.text_excerpt);
+                if (matchScore < minTokenOverlap) continue;
+                const status = asString(props.status);
+                const proposedLabel = asString(props.proposed_label);
+                explanations.push({
+                    source_fixture_id: sourceFixtureId,
+                    ...(promotedFixtureId ? { promoted_fixture_id: promotedFixtureId } : {}),
+                    fact_id: fact.graph_id ?? sourceFixtureId,
+                    ...(status ? { status } : {}),
+                    ...(proposedLabel ? { proposed_label: proposedLabel } : {}),
+                    candidate_id: candidate.group_id,
+                    candidate_label: candidate.label,
+                    proposed_action: candidate.proposed_action,
+                    ...(typeof example.turn === "string" ? { turn: example.turn } : {}),
+                    ...(typeof example.result_id === "string" ? { result_id: example.result_id } : {}),
+                    match_score: matchScore,
+                    text_excerpt: example.text_excerpt,
+                    nearest_neighbors: nearestNeighbors,
+                    evidence_paths: evidencePaths,
+                });
+            }
+        }
+    }
+    const matchedCandidates = new Set(explanations.map((explanation) => explanation.candidate_id));
+    return {
+        schema: "ax.workflow_candidate_topic_helper_explanations.v1",
+        min_token_overlap: minTokenOverlap,
+        explanations: explanations.sort((a, b) => b.match_score - a.match_score || a.source_fixture_id.localeCompare(b.source_fixture_id)),
+        totals: {
+            promoted_helper_fact_count: input.facts.filter((fact) => fact.predicate === "promoted_hard_negative_fixture").length,
+            fixture_text_count: fixtureTextById.size,
+            matched_example_count: explanations.length,
+            matched_candidate_count: matchedCandidates.size,
+        },
+    };
+}
 
 const citedCandidateIdsForTopic = (report: WorkflowCandidateTopicReport): ReadonlySet<string> => {
     const ids = new Set<string>();
@@ -2237,6 +2432,10 @@ export function renderWorkflowCandidateTopicEvidencePackMarkdown(report: Workflo
             `- Persisted harness facts: \`${report.persisted_harness_facts.totals.fact_count}\``,
             `- Persisted harness status: \`${report.persisted_harness_facts.totals.passed_count} passed, ${report.persisted_harness_facts.totals.failed_count} failed\``,
         ] : []),
+        ...(report.helper_explanations ? [
+            `- Helper explanations: \`${report.helper_explanations.totals.matched_example_count}\``,
+            `- Helper matched candidates: \`${report.helper_explanations.totals.matched_candidate_count}\``,
+        ] : []),
         `- Source turn count: \`${report.totals.source_turn_count}\``,
         "",
         "## Harness Gate Evidence",
@@ -2344,6 +2543,29 @@ export function renderWorkflowCandidateTopicEvidencePackMarkdown(report: Workflo
                 lines.push(`- Value: \`${fact.value_json}\``);
             }
             lines.push("");
+        }
+    }
+    if (report.helper_explanations && report.helper_explanations.explanations.length > 0) {
+        lines.push("## Promoted Helper Controls", "");
+        for (const explanation of report.helper_explanations.explanations) {
+            lines.push(
+                `### ${explanation.source_fixture_id}`,
+                "",
+                `- Promoted fixture: \`${explanation.promoted_fixture_id ?? "unknown"}\``,
+                `- Candidate: \`${explanation.candidate_label}\``,
+                `- Candidate id: \`${explanation.candidate_id}\``,
+                `- Proposed action: \`${explanation.proposed_action}\``,
+                `- Status: \`${explanation.status ?? "unknown"}\``,
+                `- Proposed helper label: \`${explanation.proposed_label ?? "unknown"}\``,
+                `- Match score: \`${explanation.match_score}\``,
+            );
+            if (explanation.turn) lines.push(`- Turn: \`${explanation.turn}\``);
+            if (explanation.result_id) lines.push(`- Result: \`${explanation.result_id}\``);
+            for (const path of explanation.evidence_paths) lines.push(`- Evidence path: \`${path}\``);
+            for (const neighbor of explanation.nearest_neighbors) {
+                lines.push(`- Nearest reviewed fixture: \`${neighbor.fixture_id}\` sim=\`${neighbor.similarity ?? "unknown"}\``);
+            }
+            lines.push(`- Text: ${explanation.text_excerpt}`, "");
         }
     }
     if (report.failures.length > 0) {
@@ -2619,6 +2841,37 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                         edges: persistedHarnessRows?.[1] ?? [],
                     }),
                 });
+            }
+            if (input.includeHelperFacts) {
+                const helperRows = yield* db.query<[
+                    WorkflowCandidateEmbeddingHelperGraphFactRow[],
+                    WorkflowCandidateEmbeddingHelperGraphEdgeRow[],
+                ]>(`
+                    SELECT graph_id, subject, predicate, object, value_json, evidence_edges_json, properties_json, type::string(updated_at) AS updated_at
+                    FROM classifier_graph_fact
+                    WHERE source_kind = "embedding_helper_review_projection"
+                      AND kind = "embedding_helper_hard_negative_candidate"
+                      AND predicate = "promoted_hard_negative_fixture"
+                    ORDER BY updated_at DESC
+                    LIMIT ${Math.max(1, input.limit * 5)};
+                    SELECT graph_id, kind, from_id, to_id, evidence_path, properties_json, type::string(updated_at) AS updated_at
+                    FROM classifier_graph_edge
+                    WHERE source_kind = "embedding_helper_review_projection"
+                      AND kind IN ["nearest_reviewed_fixture", "promoted_as_fixture"]
+                    ORDER BY updated_at DESC
+                    LIMIT ${Math.max(1, input.limit * 25)};
+                `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+                topicReport = {
+                    ...topicReport,
+                    helper_explanations: buildWorkflowCandidateTopicHelperExplanations({
+                        report: topicReport,
+                        facts: helperRows?.[0] ?? [],
+                        edges: helperRows?.[1] ?? [],
+                        fixtures: readWorkflowCandidateHelperFixtures(
+                            join(process.cwd(), "packages", "ax-classifier-session-sections", "eval-fixtures", "chunks.jsonl"),
+                        ),
+                    }),
+                };
             }
             if (input.emitAdjacentTasks) {
                 const taskDir = input.taskDir ?? join(process.cwd(), ".ax", "tasks");

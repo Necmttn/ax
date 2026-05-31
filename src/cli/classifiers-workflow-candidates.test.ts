@@ -12,6 +12,7 @@ import {
     buildWorkflowCandidateTopicHarnessGraphWritePlan,
     buildWorkflowCandidateTopicHarnessChecks,
     buildWorkflowCandidateTopicHarnessEvidenceSummary,
+    buildWorkflowCandidateTopicHelperExplanations,
     buildWorkflowCandidateTopicTaskDrafts,
     buildWorkflowCandidateTopicReport,
     buildWorkflowCandidateTaskDrafts,
@@ -30,12 +31,15 @@ import {
     topicAdjacentCandidates,
     workflowCandidateTopicHarnessGateFailures,
     workflowCandidateScore,
+    type WorkflowCandidateEmbeddingHelperGraphEdgeRow,
+    type WorkflowCandidateEmbeddingHelperGraphFactRow,
     type WorkflowCandidateEvidenceRow,
+    type WorkflowCandidateHelperFixtureRow,
     type WorkflowCandidateProposalEvidenceEdgeRow,
     type WorkflowCandidateGroupRow,
 } from "./classifiers-workflow-candidates.ts";
 
-const properties = (value: Record<string, unknown>) => JSON.stringify(value);
+const properties = (value: unknown) => JSON.stringify(value);
 
 const groups: WorkflowCandidateGroupRow[] = [
     {
@@ -109,6 +113,93 @@ describe("classifiers workflow-candidates", () => {
     test("detects task-like review wrapper text", () => {
         expect(isTaskLikeWorkflowText("You are implementing task ABC.")).toBe(true);
         expect(isTaskLikeWorkflowText("Please add a regression test for this fix.")).toBe(false);
+    });
+
+    test("renders promoted helper explanations inside topic evidence packs", () => {
+        const helperFacts: WorkflowCandidateEmbeddingHelperGraphFactRow[] = [{
+            graph_id: "fact:embedding-helper-maintenance",
+            subject: "embedding_helper_hard_negative:session-section-chunks/none-maintenance-question",
+            predicate: "promoted_hard_negative_fixture",
+            object: "classifier_promoted_fixture:session-section-chunks/embedding-helper-hard-negative-session-section-chunks-none-maintenance-question",
+            evidence_edges_json: properties(["edge:nearest-surreal-port"]),
+            properties_json: properties({
+                source_fixture_id: "session-section-chunks/none-maintenance-question",
+                status: "accepted",
+                proposed_label: "none",
+                promoted_fixture_id: "session-section-chunks/embedding-helper-hard-negative-session-section-chunks-none-maintenance-question",
+            }),
+        }];
+        const helperEdges: WorkflowCandidateEmbeddingHelperGraphEdgeRow[] = [{
+            graph_id: "edge:nearest-surreal-port",
+            kind: "nearest_reviewed_fixture",
+            to_id: "classifier_evidence:session-section-chunks/tooling-local-surreal-port",
+            evidence_path: ".ax/experiments/embedding-helper-review-current.json",
+            properties_json: properties({ similarity: 0.688 }),
+        }];
+        const helperFixtures: WorkflowCandidateHelperFixtureRow[] = [{
+            id: "session-section-chunks/none-maintenance-question",
+            text: "USER:\nwhen was the last work around surrealML, do they maintain it?\n\nPREVIOUS_ASSISTANT:\nThe user is asking for current project research.",
+        }];
+        const proposals = buildWorkflowCandidateProposalListReport({
+            rows: [],
+            limit: 10,
+            status: "accepted",
+            expandEvidence: true,
+            search: "SurrealML",
+        });
+        const candidates = buildWorkflowCandidateReport({
+            groupRows: [{
+                graph_id: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+                label: "environment_or_preference_signal",
+                properties_json: properties({
+                    classifier_key: "hybrid-window",
+                    label: "environment_or_preference_signal",
+                    proposed_action: "record_guidance_or_environment_preference",
+                    support_count: 50,
+                }),
+            }],
+            evidenceRows: [{
+                graph_id: "fact:maintenance-question",
+                subject: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+                properties_json: properties({
+                    result_id: "event_window:maintenance-question",
+                    turn: "turn:maintenance-question",
+                    confidence: 0.71,
+                    text_excerpt: "USER: when was the last work around surrealML ? do they actively maintain it or stopped? PREVIOUS_ASSISTANT: I would use Nix here, not Docker Compose.",
+                }),
+            }],
+            sourceKind: "hybrid_window_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            search: "SurrealML",
+            taskLike: "include",
+        });
+        const baseReport = buildWorkflowCandidateTopicReport({
+            sourceKind: "hybrid_window_classifier_projection",
+            topic: "SurrealML",
+            proposals,
+            candidates,
+        });
+        const helperExplanations = buildWorkflowCandidateTopicHelperExplanations({
+            report: baseReport,
+            facts: helperFacts,
+            edges: helperEdges,
+            fixtures: helperFixtures,
+            minTokenOverlap: 0.72,
+        });
+        const markdown = renderWorkflowCandidateTopicEvidencePackMarkdown({
+            ...baseReport,
+            helper_explanations: helperExplanations,
+        });
+
+        expect(helperExplanations.totals.matched_example_count).toBe(1);
+        expect(markdown).toContain("- Helper explanations: `1`");
+        expect(markdown).toContain("## Promoted Helper Controls");
+        expect(markdown).toContain("### session-section-chunks/none-maintenance-question");
+        expect(markdown).toContain("- Promoted fixture: `session-section-chunks/embedding-helper-hard-negative-session-section-chunks-none-maintenance-question`");
+        expect(markdown).toContain("- Candidate: `environment_or_preference_signal`");
+        expect(markdown).toContain("- Match score: `1`");
+        expect(markdown).toContain("- Nearest reviewed fixture: `session-section-chunks/tooling-local-surreal-port` sim=`0.688`");
     });
 
     test("scores verification gates above low-weight approvals with equal support", () => {
