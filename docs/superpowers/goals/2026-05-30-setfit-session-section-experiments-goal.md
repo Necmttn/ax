@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E426 adds
-  `.ax/experiments/classifier-lifecycle-query-suggestion-routing-e426.json`
+- Index continuation: E427 adds
+  `.ax/experiments/classifier-lifecycle-query-repair-decision-e427.json`
   and
-  `.ax/experiments/classifier-lifecycle-query-suggestion-routing-e426.txt`
+  `.ax/experiments/classifier-lifecycle-query-repair-decision-e427.txt`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,57 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E427 - Promote Graph Query Repair To Lifecycle Decision Routing
+
+Question:
+- Can lifecycle insight make graph-query repair actionable at the top-level
+  routing surface, instead of requiring services to inspect the nested
+  `graph_query_suggestion` object to discover that a query repair is needed?
+
+Implementation:
+- Added `needs_graph_query_repair` as a lifecycle insight decision for clean
+  reports where the only blocker is a ready graph-query repair.
+- Added a lifecycle blocking item that names the predicate and value repair,
+  for example `execute -> bind_inputs`.
+- Kept higher-priority human-review and graph-apply decisions dominant, while
+  still preserving the graph-query repair blocking item for service queues.
+
+Artifacts:
+- `.ax/experiments/classifier-lifecycle-query-repair-decision-e427.json`
+- `.ax/experiments/classifier-lifecycle-query-repair-decision-e427.txt`
+
+Results:
+- Unit coverage proves a clean lifecycle report with a query miss now returns
+  `decision=needs_graph_query_repair`.
+- Current real CLI output remains `decision=needs_human_review` because
+  proposal/review-pipeline blockers still dominate.
+- Current real JSON and text both include
+  `graph query repair available: review_pipeline_recommended_action_execution_phase value execute -> bind_inputs`.
+- Current real JSON still reports
+  `graph_query_suggestion.suggestion.repair.command_kind=classifier_graph_query_repair`
+  and `repair.outcome_status=expected_matches`.
+
+Decision:
+- E427 makes graph-query repair queueable from the lifecycle surface. Services
+  can now route clean query-repair work from `decision=needs_graph_query_repair`
+  and can still see graph-query repair as a blocking item when human-review
+  gates are the dominant decision.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun src/cli/index.ts classifiers lifecycle --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --out .ax/experiments/classifier-lifecycle-query-repair-decision-e427.json --json
+bun src/cli/index.ts classifiers lifecycle --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute > .ax/experiments/classifier-lifecycle-query-repair-decision-e427.txt
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-lifecycle-query-repair-decision-e427.json").json(); const item="graph query repair available: review_pipeline_recommended_action_execution_phase value execute -> bind_inputs"; if (!saved.blocking_items?.includes(item)) throw new Error("missing graph query repair blocking item"); if (saved.graph_query_suggestion?.suggestion?.repair?.command_kind !== "classifier_graph_query_repair") throw new Error("missing repair command kind");'
+rg -n "decision: needs_human_review|graph query repair available: review_pipeline_recommended_action_execution_phase value execute -> bind_inputs|graph query repair: expected_matches ready_to_execute classifier_graph_query_repair" .ax/experiments/classifier-lifecycle-query-repair-decision-e427.txt
+bun test src/cli/classifiers-workflow-candidates.test.ts
+git diff --check
+```
+
+All passed. `bun run typecheck` still emits the existing Effect advisory
+messages, but exits `0`.
 
 ## E426 - Carry Graph Query Suggestions Into Lifecycle Insight
 

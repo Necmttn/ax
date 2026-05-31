@@ -2285,6 +2285,59 @@ describe("classifier package operations report", () => {
         expect(report.graph_query_suggestion?.suggestion?.repair.command_kind).toBe("classifier_graph_query_repair");
     });
 
+    test("routes lifecycle insight reports to graph query repair when the filtered graph has a suggestion", () => {
+        const graphRows = {
+            nodes: [{
+                graph_id: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                kind: "classifier_lifecycle",
+                label: "workflow candidate review pipeline lifecycle",
+                properties_json: "{}",
+            }],
+            edges: [{
+                graph_id: "edge:lifecycle",
+                kind: "has_evidence",
+                from_id: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                to_id: "artifact:.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                evidence_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                properties_json: JSON.stringify({ lifecycle_key: "review_pipeline_lifecycle" }),
+            }],
+            facts: [{
+                graph_id: "fact:phase",
+                kind: "classifier_lifecycle_status",
+                subject: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                predicate: "review_pipeline_recommended_action_execution_phase",
+                value_json: "\"bind_inputs\"",
+                evidence_edges_json: JSON.stringify(["edge:lifecycle"]),
+                properties_json: JSON.stringify({
+                    lifecycle_key: "review_pipeline_lifecycle",
+                    artifact_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                }),
+            }],
+        };
+        const report = buildClassifierLifecycleInsightReport({
+            packages: buildPackagesOperationsReport("packages", []),
+            graph: buildExecutionGraphHealthReport(graphRows),
+            queryGraph: buildExecutionGraphHealthReport({
+                ...graphRows,
+                query: {
+                    mode: "lifecycle",
+                    predicate: "review_pipeline_recommended_action_execution_phase",
+                    value_equals: "execute",
+                },
+            }),
+            workflowStatus: {
+                path: ".ax/experiments/blind-workflow-status-current.json",
+                exists: true,
+                decision: "healthy",
+                next_actions: [],
+            },
+        });
+
+        expect(report.decision).toBe("needs_graph_query_repair");
+        expect(report.blocking_items).toContain("graph query repair available: review_pipeline_recommended_action_execution_phase value execute -> bind_inputs");
+        expect(report.graph_query_suggestion?.suggestion?.repair.command_kind).toBe("classifier_graph_query_repair");
+    });
+
     test("writes lifecycle insight reports", () => {
         const report = buildClassifierLifecycleInsightReport({
             packages: buildPackagesOperationsReport("packages", []),

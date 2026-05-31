@@ -801,6 +801,7 @@ describe("ClassifierPackageService", () => {
         expect(report.workflow_status.proposal_ready_smoke?.promotion_decision).toBe("workflow_candidate_proposal_promotion_ready");
         expect(report.workflow_status.next_actions[0]).toContain("workflow-candidate-proposal-review-current.md");
         expect(report.blocking_items).toContain("workflow candidate proposal review pending 4 proposal(s)");
+        expect(report.blocking_items).toContain("graph query repair available: review_pipeline_recommended_action_execution_phase value execute -> bind_inputs");
         expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.graph_operation_count).toBe(1);
         expect(report.graph_query_suggestion?.suggestion?.repair.outcome_status).toBe("expected_matches");
     });

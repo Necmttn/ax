@@ -1332,7 +1332,10 @@ describe("classifiers package-operations format", () => {
                 evidence_paths: [".ax/experiments/classifier-package-execution-e118-focused-batch-eval.json"],
             }],
             changed_artifacts: [],
-            blocking_items: ["40 blind labels pending"],
+            blocking_items: [
+                "graph query repair available: review_pipeline_recommended_action_execution_phase value execute -> bind_inputs",
+                "40 blind labels pending",
+            ],
             graph_query_suggestion: {
                 has_suggestion: true,
                 query_match_status: "no_match",
@@ -1520,6 +1523,8 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("checked artifacts: review_brief=.ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md ok");
         expect(output).toContain("execute/continue: yes/yes next=continue_review_pipeline");
         expect(output).toContain("blocking items:");
+        expect(output).toContain("- graph query repair available: review_pipeline_recommended_action_execution_phase value execute -> bind_inputs");
+        expect(output).toContain("- 40 blind labels pending");
         expect(output).toContain("edit suggestion draft notes in .ax/experiments/blind-review-batch-current-suggestion-draft.md then run bun run classifiers:blind-review-batch -- --mode=promote-draft");
     });
 

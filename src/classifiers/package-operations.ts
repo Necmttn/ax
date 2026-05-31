@@ -962,7 +962,7 @@ export interface ClassifierLifecycleInsightReport {
         readonly pending_blind_labels: number;
         readonly pending_hard_negatives: number;
     };
-    readonly decision: "healthy" | "needs_graph_apply" | "needs_human_review" | "has_guarded_operations";
+    readonly decision: "healthy" | "needs_graph_apply" | "needs_human_review" | "has_guarded_operations" | "needs_graph_query_repair";
 }
 
 function reviewPipelineLifecycleNextAction(
@@ -3350,11 +3350,18 @@ export function buildClassifierLifecycleInsightReport(input: {
             } satisfies ClassifierReviewPipelineLifecycleInsight;
         })()
         : undefined;
+    const queryGraphSuggestion = summarizeClassifierGraphQuerySuggestionRouting(input.queryGraph ?? input.graph);
+    const queryRepairSuggestion = queryGraphSuggestion.suggestion?.repair.status === "repair_available"
+        ? queryGraphSuggestion.suggestion
+        : undefined;
     const blockingItems = [
         ...packages
             .filter((entry) => entry.lifecycle_readiness.status === "incomplete")
             .map((entry) => `${entry.package_key} missing lifecycle operation kinds: ${entry.lifecycle_readiness.missing_required_kinds.join(", ")}`),
         ...(input.graph.decision === "empty_graph" ? ["classifier lifecycle graph is empty; run apply-write-plan before graph queries"] : []),
+        ...(queryRepairSuggestion === undefined ? [] : [
+            `graph query repair available: ${queryRepairSuggestion.original_query.predicate ?? "any_predicate"} value ${queryRepairSuggestion.original_query.value_equals ?? "any"} -> ${queryRepairSuggestion.value_equals}`,
+        ]),
         ...input.graph.guarded_operations.map((operation) =>
             `${operation.package_key}/${operation.operation_id} guarded ${operation.guarded_count} time(s)`,
         ),
@@ -3391,13 +3398,16 @@ export function buildClassifierLifecycleInsightReport(input: {
     const proposalReviewPending = input.workflowStatus.proposal_review?.decision === "needs_workflow_candidate_proposal_review";
     const proposalPromotionBlocked = input.workflowStatus.proposal_promotion?.decision === "needs_workflow_candidate_proposal_review";
     const reviewPipelineBlocked = reviewPipeline?.next_action === "repair_review_pipeline_outputs" || reviewPipeline?.can_continue === false;
+    const queryRepairNeeded = queryRepairSuggestion !== undefined;
     const decision: ClassifierLifecycleInsightReport["decision"] = input.graph.decision === "empty_graph"
         ? "needs_graph_apply"
         : pendingBlindLabels > 0 || pendingHardNegatives > 0 || input.workflowStatus.decision === "needs_human_review" || proposalReviewPending || proposalPromotionBlocked || reviewPipelineBlocked
             ? "needs_human_review"
             : input.graph.guarded_operations.length > 0
                 ? "has_guarded_operations"
-                : "healthy";
+                : queryRepairNeeded
+                    ? "needs_graph_query_repair"
+                    : "healthy";
     return {
         schema: "ax.classifier_lifecycle_insight_report.v1",
         packages_root: input.packages.root,
@@ -3408,9 +3418,7 @@ export function buildClassifierLifecycleInsightReport(input: {
         failed_operations: failedOperations,
         changed_artifacts: input.graph.changed_artifacts,
         blocking_items: blockingItems,
-        ...((input.queryGraph ?? input.graph).query_suggestion === undefined ? {} : {
-            graph_query_suggestion: summarizeClassifierGraphQuerySuggestionRouting(input.queryGraph ?? input.graph),
-        }),
+        ...(queryGraphSuggestion.suggestion === undefined ? {} : { graph_query_suggestion: queryGraphSuggestion }),
         ...(reviewPipeline ? { review_pipeline: reviewPipeline } : {}),
         totals: {
             package_count: input.packages.totals.package_count,
