@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E378 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-available-values-no-match-e378.json`
+- Index continuation: E379 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-value-no-match-e379.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-available-values-match-e378.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-value-match-e379.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,48 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E379 - Suggest Exact Lifecycle Values For Query Repair
+
+Question:
+- E378 exposes available lifecycle values, but can services get one
+  deterministic exact-value suggestion without ranking the available counts?
+
+Implementation:
+- Added `query_suggested_value_equals` to classifier graph health reports.
+- The suggestion is derived from `lifecycle_available_value_counts`, choosing
+  the highest count and using predicate/value ordering as a deterministic
+  tie-breaker.
+- Text graph-health output now renders `query suggested value equals`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-value-no-match-e379.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-value-match-e379.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-value-no-match-e379.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggested_value_equals=bind_inputs`.
+- The matching `--value=bind_inputs` query also returns
+  `query_suggested_value_equals=bind_inputs`.
+- Text output renders `query suggested value equals: bind_inputs`.
+
+Decision:
+- Services can now repair exact lifecycle value queries by substituting a
+  suggested available value without implementing their own ranking logic.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E379 no-match report has `query_match_status=no_match` and
+  `query_suggested_value_equals=bind_inputs`.
+- E379 match report has `query_match_status=matched` and the same suggested
+  value.
+- E379 text output includes the suggested value line.
 
 ## E378 - Expose Available Lifecycle Values For No-Match Queries
 

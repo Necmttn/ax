@@ -576,6 +576,7 @@ describe("classifiers package-operations format", () => {
                 kind: "lifecycle_facts",
                 count: 1,
             }],
+            query_suggested_value_equals: "bind_inputs",
             totals: {
                 node_count: 2,
                 edge_count: 1,
@@ -616,6 +617,7 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("query remediation: Use the returned graph rows for the requested classifier workflow.");
         expect(output).toContain("query result kinds: lifecycle_facts");
         expect(output).toContain("query result kind counts: lifecycle_facts=1");
+        expect(output).toContain("query suggested value equals: bind_inputs");
         expect(output).toContain("execution/guard/artifact/lifecycle/helper facts: 0/0/0/1/0");
         expect(output).toContain("lifecycle facts:");
         expect(output).toContain("- review_pipeline_prepared_argv: [\"bun\",\"src/cli/index.ts\"]");

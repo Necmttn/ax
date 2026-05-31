@@ -1253,6 +1253,7 @@ describe("classifier package operations report", () => {
             value: "bind_inputs",
             count: 1,
         }]);
+        expect(report.query_suggested_value_equals).toBe("bind_inputs");
     });
 
     test("summarizes lifecycle graph fact values", () => {
