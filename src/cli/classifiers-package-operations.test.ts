@@ -591,6 +591,7 @@ describe("classifiers package-operations format", () => {
                 unchanged_filters: ["value_equals"],
                 repair_status: "no_repair_needed",
                 repair_next_action: "use_current_query",
+                repair_remediation: "Use the current graph query; no filter repair is needed.",
                 status: "expected_matches",
                 next_action: "run_suggested_query",
                 remediation: "Run the suggested graph query to inspect the available classifier lifecycle facts.",
@@ -716,6 +717,7 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("query suggestion unchanged filters: value_equals");
         expect(output).toContain("query suggestion repair status: no_repair_needed");
         expect(output).toContain("query suggestion repair next action: use_current_query");
+        expect(output).toContain("query suggestion repair remediation: Use the current graph query; no filter repair is needed.");
         expect(output).toContain("query suggestion provenance: source=lifecycle_available_value_counts reason=available_value_after_relaxing_value_equals");
         expect(output).toContain("query suggestion relaxed filters: value_equals");
         expect(output).toContain("query suggestion original query: mode=lifecycle predicate=review_pipeline_prepared_argv subject=classifier_lifecycle:workflow_candidate_proposal source_kind=classifier_package_execution value_contains=src/cli/index.ts value_equals=bind_inputs");

@@ -1285,6 +1285,7 @@ describe("classifier package operations report", () => {
             unchanged_filters: [],
             repair_status: "repair_available",
             repair_next_action: "run_repaired_query",
+            repair_remediation: "Run the repaired graph query to inspect matching classifier lifecycle facts.",
             status: "expected_matches",
             next_action: "run_suggested_query",
             remediation: "Run the suggested graph query to inspect the available classifier lifecycle facts.",
