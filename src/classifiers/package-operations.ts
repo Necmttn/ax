@@ -445,6 +445,11 @@ export interface ClassifierGraphRoutingPolicySummary {
 export type ClassifierGraphHealthMode = "summary" | "guarded" | "changed-artifacts" | "evidence" | "lifecycle" | "embedding-helper";
 export type ClassifierGraphQueryResultKind = "operations" | "guarded_operations" | "changed_artifacts" | "lifecycle_facts" | "embedding_helper_facts";
 
+export interface ClassifierGraphQueryResultKindCount {
+    readonly kind: ClassifierGraphQueryResultKind;
+    readonly count: number;
+}
+
 export interface ClassifierGraphHealthQuery {
     readonly mode: ClassifierGraphHealthMode;
     readonly operation_id?: string;
@@ -482,6 +487,7 @@ export interface ClassifierPackageExecutionGraphHealthReport {
     readonly query_next_action?: "use_query_results" | "relax_filters_or_project_facts";
     readonly query_remediation?: string;
     readonly query_result_kinds?: readonly ClassifierGraphQueryResultKind[];
+    readonly query_result_kind_counts?: readonly ClassifierGraphQueryResultKindCount[];
     readonly totals: {
         readonly node_count: number;
         readonly edge_count: number;
@@ -2617,6 +2623,13 @@ export function buildExecutionGraphHealthReport(input: {
         ...(resultLifecycleFacts.length > 0 ? ["lifecycle_facts" as const] : []),
         ...(resultEmbeddingHelperFacts.length > 0 ? ["embedding_helper_facts" as const] : []),
     ];
+    const queryResultKindCounts: ClassifierGraphQueryResultKindCount[] = [
+        ...(resultOperations.length > 0 ? [{ kind: "operations" as const, count: resultOperations.length }] : []),
+        ...(resultGuardedOperations.length > 0 ? [{ kind: "guarded_operations" as const, count: resultGuardedOperations.length }] : []),
+        ...(resultChangedArtifacts.length > 0 ? [{ kind: "changed_artifacts" as const, count: resultChangedArtifacts.length }] : []),
+        ...(resultLifecycleFacts.length > 0 ? [{ kind: "lifecycle_facts" as const, count: resultLifecycleFacts.length }] : []),
+        ...(resultEmbeddingHelperFacts.length > 0 ? [{ kind: "embedding_helper_facts" as const, count: resultEmbeddingHelperFacts.length }] : []),
+    ];
 
     return {
         schema: "ax.classifier_package_execution_graph_health_report.v1",
@@ -2636,6 +2649,7 @@ export function buildExecutionGraphHealthReport(input: {
             ? "Use the returned graph rows for the requested classifier workflow."
             : "Relax graph filters, inspect available value counts, or project/apply the missing classifier facts before routing from this query.",
         query_result_kinds: queryResultKinds,
+        query_result_kind_counts: queryResultKindCounts,
         totals: {
             node_count: input.nodes.length,
             edge_count: input.edges.length,

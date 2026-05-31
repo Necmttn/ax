@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E376 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-result-kinds-e376.json`
+- Index continuation: E377 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-result-kind-counts-e377.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-result-kinds-no-match-e376.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-result-kind-counts-no-match-e377.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,47 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E377 - Expose Graph Query Result Kind Counts
+
+Question:
+- E376 tells services which result families matched, but can they see matched
+  row counts per family without reading lower-level totals?
+
+Implementation:
+- Added `query_result_kind_counts` to classifier graph health reports.
+- Count rows include `kind` and `count` for each non-empty primary result
+  family.
+- No-match queries return an empty count list.
+- Text graph-health output now renders `query result kind counts`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-result-kind-counts-e377.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-result-kind-counts-no-match-e377.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-result-kind-counts-e377.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=bind_inputs`
+  returns `query_result_kinds=["lifecycle_facts"]` and
+  `query_result_kind_counts=[{kind: lifecycle_facts, count: 1}]`.
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_result_kinds=[]` and `query_result_kind_counts=[]`.
+- Text output renders `query result kind counts: lifecycle_facts=1`.
+
+Decision:
+- Services can now route and size matched graph-query work from one structured
+  field instead of coupling to the report's raw result-total layout.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E377 positive report has `query_result_kinds=["lifecycle_facts"]` and
+  `query_result_kind_counts=[{kind: lifecycle_facts, count: 1}]`.
+- E377 negative report has empty result kinds and result-kind counts.
+- E377 text output includes `query result kind counts: lifecycle_facts=1`.
 
 ## E376 - Expose Graph Query Result Kinds
 
