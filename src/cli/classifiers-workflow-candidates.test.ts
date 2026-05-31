@@ -1513,6 +1513,7 @@ describe("classifiers workflow-candidates", () => {
         });
 
         expect(summary).toMatchObject({
+            schema: "ax.workflow_candidate_review_readiness.v1",
             apply_requested: true,
             applied: false,
             reviewed_fixture_count: 1,
@@ -1586,6 +1587,7 @@ describe("classifiers workflow-candidates", () => {
         });
 
         expect(summary).toMatchObject({
+            schema: "ax.workflow_candidate_review_readiness.v1",
             apply_requested: false,
             applied: false,
             reviewed_fixture_count: 0,
@@ -1603,6 +1605,7 @@ describe("classifiers workflow-candidates", () => {
             }],
             next_action: "Set at least one fixture to accept, revise, reject, or defer and add a rationale.",
         });
+        expect(text).toContain("coverage review schema: ax.workflow_candidate_review_readiness.v1");
         expect(text).toContain("coverage review can apply: no");
         expect(text).toContain("coverage review blockers: no_reviewed_fixtures");
         expect(text).toContain("coverage review blocker details: no_reviewed_fixtures=1");
@@ -1644,6 +1647,7 @@ describe("classifiers workflow-candidates", () => {
         });
 
         expect(summary).toMatchObject({
+            schema: "ax.workflow_candidate_review_readiness.v1",
             reviewed_fixture_count: 1,
             pending_fixture_count: 0,
             invalid_fixture_count: 0,
@@ -1784,6 +1788,7 @@ describe("classifiers workflow-candidates", () => {
             review_rationale: "Invalid status should be reported.",
         });
         expect(summary).toMatchObject({
+            schema: "ax.workflow_candidate_review_readiness.v1",
             reviewed_fixture_count: 0,
             pending_fixture_count: 1,
             invalid_fixture_count: 1,
@@ -1910,6 +1915,7 @@ describe("classifiers workflow-candidates", () => {
         });
 
         expect(summary).toMatchObject({
+            schema: "ax.workflow_candidate_review_readiness.v1",
             reviewed_fixture_count: 3,
             pack_candidate_count: 3,
             new_candidate_count: 1,

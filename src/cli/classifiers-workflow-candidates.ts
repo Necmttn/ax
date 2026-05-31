@@ -195,6 +195,7 @@ export interface WorkflowCandidateReviewCoverageApplyBlockerDetail {
 }
 
 export interface WorkflowCandidateReviewCoverageApplySummary {
+    readonly schema: "ax.workflow_candidate_review_readiness.v1";
     readonly source_path: string;
     readonly apply_requested: boolean;
     readonly applied: boolean;
@@ -1764,6 +1765,7 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
         `review status: ${report.totals.rejected_fact_count} rejected, ${report.totals.accepted_fact_count} accepted, ${report.totals.deferred_fact_count} deferred, ${report.totals.revised_fact_count} revised`,
         `helper source fixtures: ${report.totals.helper_source_fixture_count}`,
         ...(report.coverage_review ? [
+            `coverage review schema: ${report.coverage_review.schema}`,
             `coverage review source: ${report.coverage_review.source_path}`,
             `coverage review fixtures: ${report.coverage_review.reviewed_fixture_count} reviewed, ${report.coverage_review.pending_fixture_count} pending`,
             `coverage review sync: synced=${report.coverage_review.synced_fixture_count} unknown=${report.coverage_review.unknown_fixture_count}`,
@@ -3160,6 +3162,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         }
     });
     return {
+        schema: "ax.workflow_candidate_review_readiness.v1",
         source_path: input.sourcePath,
         apply_requested: input.applyRequested,
         applied: input.applied,
