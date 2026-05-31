@@ -2292,6 +2292,7 @@ describe("classifier package operations report", () => {
             can_execute: false,
             execution_phase: "repair_outputs",
             missing_inputs: [],
+            input_bindings: ["reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string"],
             argv: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
             remediation: "Repair review pipeline outputs before continuing.",
         });
@@ -2331,6 +2332,7 @@ describe("classifier package operations report", () => {
                     recommended_action_can_execute: false,
                     recommended_action_next_action: "Provide required pipeline input values before executing the command.",
                     recommended_action_missing_inputs: ["reviewer"],
+                    recommended_action_input_bindings: ["reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string"],
                     output_artifacts: [],
                     checked_artifacts: [],
                     failures: [],
@@ -2350,6 +2352,8 @@ describe("classifier package operations report", () => {
             active_route_kind: "review_pipeline_action",
             active_route_execution_status: "missing_inputs",
             active_route_can_execute: false,
+            active_route_missing_inputs: ["reviewer"],
+            active_route_input_bindings: ["reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string"],
             totals: {
                 route_count: 1,
                 executable_route_count: 0,
@@ -2360,6 +2364,10 @@ describe("classifier package operations report", () => {
         });
         expect(summary.active_route?.kind).toBe("review_pipeline_action");
         expect(summary.missing_input_routes).toHaveLength(1);
+        expect(summary.missing_input_routes[0]).toMatchObject({
+            missing_inputs: ["reviewer"],
+            input_bindings: ["reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string"],
+        });
         expect(summary.executable_routes).toEqual([]);
         expect(summary.active_route_argv).toEqual(["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"]);
     });

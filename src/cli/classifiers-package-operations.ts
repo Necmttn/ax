@@ -721,6 +721,9 @@ export function renderClassifierLifecycleInsightText(report: ClassifierLifecycle
                 if (item.missing_inputs.length > 0) {
                     lines.push(`  missing inputs: ${item.missing_inputs.join(", ")}`);
                 }
+                if (item.input_bindings.length > 0) {
+                    lines.push(`  input bindings: ${item.input_bindings.join("; ")}`);
+                }
             }
             if (item.argv.length > 0) {
                 lines.push(`  argv: ${item.argv.join(" ")}`);
@@ -919,6 +922,12 @@ export function renderClassifierLifecycleRoutingSummaryText(report: ClassifierLi
         const canExecute = report.active_route_can_execute === true ? "yes" : report.active_route_can_execute === false ? "no" : "unknown";
         lines.push(`active: ${report.active_route_kind} ${report.active_route_status ?? "unknown"} ${report.active_route_command_kind ?? "unknown"} execution=${report.active_route_execution_status ?? "unknown"} can_execute=${canExecute}`);
         lines.push(`next action: ${report.next_action}`);
+        if (report.active_route_missing_inputs.length > 0) {
+            lines.push(`missing inputs: ${report.active_route_missing_inputs.join(", ")}`);
+        }
+        if (report.active_route_input_bindings.length > 0) {
+            lines.push(`input bindings: ${report.active_route_input_bindings.join("; ")}`);
+        }
         if (report.active_route_argv && report.active_route_argv.length > 0) {
             lines.push(`argv: ${report.active_route_argv.join(" ")}`);
         }

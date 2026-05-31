@@ -1362,6 +1362,10 @@ describe("classifiers package-operations format", () => {
                 can_execute: false,
                 execution_phase: "bind_inputs",
                 missing_inputs: ["reviewer", "reviewed_at"],
+                input_bindings: [
+                    "reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string",
+                    "reviewed_at flag=--review-provenance-reviewed-at index=9 prefix=--review-provenance-reviewed-at= placeholder=<reviewed-at-iso> value_kind=iso_datetime",
+                ],
                 argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
                 remediation: "Bind required pipeline inputs before executing the command.",
             }],
@@ -1539,6 +1543,7 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("can execute: no");
         expect(output).toContain("execution phase: bind_inputs");
         expect(output).toContain("missing inputs: reviewer, reviewed_at");
+        expect(output).toContain("input bindings: reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string; reviewed_at flag=--review-provenance-reviewed-at index=9 prefix=--review-provenance-reviewed-at= placeholder=<reviewed-at-iso> value_kind=iso_datetime");
         expect(output).toContain("review pipeline: verified_after_execution (.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json)");
         expect(output).toContain("command: stamp_review_provenance prepared=ready_to_execute");
         expect(output).toContain("argv: bun src/cli/index.ts classifiers workflow-candidates");
@@ -1578,6 +1583,7 @@ describe("classifiers package-operations format", () => {
             can_execute: false,
             execution_phase: "bind_inputs" as const,
             missing_inputs: ["reviewer"],
+            input_bindings: ["reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string"],
             argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
             remediation: "Provide required pipeline input values before executing the command.",
         };
@@ -1589,6 +1595,8 @@ describe("classifiers package-operations format", () => {
             active_route_status: "missing_inputs",
             active_route_execution_status: "missing_inputs",
             active_route_can_execute: false,
+            active_route_missing_inputs: ["reviewer"],
+            active_route_input_bindings: route.input_bindings,
             active_route_command_kind: "stamp_review_provenance",
             active_route_next_action: "inspect_review_pipeline_lifecycle",
             active_route_argv: route.argv,
@@ -1614,6 +1622,8 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("decision: needs_human_review");
         expect(output).toContain("active: review_pipeline_action missing_inputs stamp_review_provenance execution=missing_inputs can_execute=no");
         expect(output).toContain("next action: bind_active_route_inputs");
+        expect(output).toContain("missing inputs: reviewer");
+        expect(output).toContain("input bindings: reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string");
         expect(output).toContain("argv: bun src/cli/index.ts --review-provenance-reviewer=<reviewer>");
         expect(output).toContain("routes executable/missing-input/blocked/secondary: 0/1/0/0");
     });

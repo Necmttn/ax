@@ -826,6 +826,8 @@ describe("ClassifierPackageService", () => {
             active_route_kind: "graph_query_repair",
             active_route_execution_status: "ready_to_execute",
             active_route_can_execute: true,
+            active_route_missing_inputs: [],
+            active_route_input_bindings: [],
             next_action: "execute_active_route",
             totals: {
                 route_count: 1,

@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E432 adds
-  `.ax/experiments/classifier-lifecycle-routing-summary-e432.json`
+- Index continuation: E433 adds
+  `.ax/experiments/classifier-lifecycle-routing-input-bindings-e433.json`
   and
-  `.ax/experiments/classifier-lifecycle-routing-summary-e432.txt`
+  `.ax/experiments/classifier-lifecycle-routing-input-bindings-e433.txt`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,51 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E433 - Surface Active Route Input Bindings
+
+Question:
+- Can lifecycle routing summaries tell services exactly which values are
+  missing and how they bind into the active command, without requiring callers
+  to inspect nested review-pipeline detail?
+
+Implementation:
+- Added `input_bindings` to `review_pipeline_action` routing items.
+- Added `active_route_missing_inputs` and `active_route_input_bindings` to the
+  lifecycle routing summary report.
+- Compact lifecycle routing text now renders missing inputs and input binding
+  metadata for the active route.
+
+Artifacts:
+- `.ax/experiments/classifier-lifecycle-routing-input-bindings-e433.json`
+- `.ax/experiments/classifier-lifecycle-routing-input-bindings-e433.txt`
+
+Results:
+- Current real routing summary reports active missing inputs:
+  `reviewer, reviewed_at`.
+- Current real routing summary reports two input bindings:
+  `--review-provenance-reviewer=<reviewer>` and
+  `--review-provenance-reviewed-at=<reviewed-at-iso>`, including argv indexes,
+  prefixes, placeholders, and value kinds.
+- The active route itself also carries the same `input_bindings`, so callers
+  can consume either the normalized top-level summary or the route object.
+
+Decision:
+- E433 makes the missing-input route actionable for a service/debug UI: ask for
+  the named values, bind them using the provided flag/prefix/placeholder
+  metadata, then re-run lifecycle routing until the active route becomes
+  executable.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts
+bun src/cli/index.ts classifiers lifecycle --routing-summary --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --out .ax/experiments/classifier-lifecycle-routing-input-bindings-e433.json --json
+bun src/cli/index.ts classifiers lifecycle --routing-summary --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute > .ax/experiments/classifier-lifecycle-routing-input-bindings-e433.txt || true
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-lifecycle-routing-input-bindings-e433.json").json(); const inputs=saved.active_route_missing_inputs ?? []; const bindings=saved.active_route_input_bindings ?? []; if (inputs.join(",") !== "reviewer,reviewed_at") throw new Error(`bad inputs ${JSON.stringify(inputs)}`); if (!bindings.some((x)=>x.includes("--review-provenance-reviewer")) || !bindings.some((x)=>x.includes("--review-provenance-reviewed-at"))) throw new Error(`bad bindings ${JSON.stringify(bindings)}`); if (saved.active_route?.input_bindings?.length !== 2) throw new Error("active route missing input_bindings");'
+rg -n -- "missing inputs: reviewer, reviewed_at|input bindings: reviewer flag=--review-provenance-reviewer.*reviewed_at flag=--review-provenance-reviewed-at" .ax/experiments/classifier-lifecycle-routing-input-bindings-e433.txt
+```
+
+Focused tests and artifact assertions passed.
 
 ## E432 - Add Lifecycle Routing Summary Service Helper
 

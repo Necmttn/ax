@@ -962,6 +962,7 @@ export type ClassifierLifecycleRoutingItem = {
     readonly can_execute?: boolean;
     readonly execution_phase?: ClassifierReviewPipelineRecommendedActionExecutionPhase;
     readonly missing_inputs: readonly string[];
+    readonly input_bindings: readonly string[];
     readonly argv: readonly string[];
     readonly remediation: string;
 };
@@ -1006,6 +1007,8 @@ export interface ClassifierLifecycleRoutingSummaryReport {
     readonly active_route_command_kind?: string;
     readonly active_route_next_action?: string;
     readonly active_route_argv?: readonly string[];
+    readonly active_route_missing_inputs: readonly string[];
+    readonly active_route_input_bindings: readonly string[];
     readonly executable_routes: readonly ClassifierLifecycleRoutingItem[];
     readonly missing_input_routes: readonly ClassifierLifecycleRoutingItem[];
     readonly blocked_routes: readonly ClassifierLifecycleRoutingItem[];
@@ -3472,6 +3475,7 @@ export function buildClassifierLifecycleInsightReport(input: {
             ...(reviewPipeline.recommended_action_can_execute === undefined ? {} : { can_execute: reviewPipeline.recommended_action_can_execute }),
             ...(reviewPipeline.recommended_action_execution_phase === undefined ? {} : { execution_phase: reviewPipeline.recommended_action_execution_phase }),
             missing_inputs: reviewPipeline.recommended_action_missing_inputs ?? [],
+            input_bindings: reviewPipeline.recommended_action_input_bindings ?? [],
             argv: reviewPipeline.recommended_action_argv ?? [],
             remediation: reviewPipeline.recommended_action_next_action ?? "Inspect the review pipeline lifecycle before continuing.",
         }];
@@ -3564,6 +3568,8 @@ export function summarizeClassifierLifecycleRouting(
     const missingInputRoutes = report.routing_items.filter((route) => route.execution_status === "missing_inputs");
     const blockedRoutes = report.routing_items.filter((route) => route.can_execute !== true && route.execution_status !== "missing_inputs");
     const secondaryRoutes = report.routing_items.slice(1);
+    const activeRouteMissingInputs = activeRoute?.kind === "review_pipeline_action" ? activeRoute.missing_inputs : [];
+    const activeRouteInputBindings = activeRoute?.kind === "review_pipeline_action" ? activeRoute.input_bindings : [];
     const nextAction: ClassifierLifecycleRoutingSummaryReport["next_action"] = activeRoute === undefined
         ? "inspect_lifecycle"
         : activeRoute.can_execute === true
@@ -3585,6 +3591,8 @@ export function summarizeClassifierLifecycleRouting(
             active_route_next_action: activeRoute.next_action,
             active_route_argv: activeRoute.argv,
         }),
+        active_route_missing_inputs: activeRouteMissingInputs,
+        active_route_input_bindings: activeRouteInputBindings,
         executable_routes: executableRoutes,
         missing_input_routes: missingInputRoutes,
         blocked_routes: blockedRoutes,
