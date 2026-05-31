@@ -1521,6 +1521,7 @@ describe("classifiers workflow-candidates", () => {
             missing_rationale_count: 0,
             smoke_marker_count: 2,
             apply_guard: "blocked_smoke_review",
+            next_action: "Replace smoke or example review markers with real review decisions before applying.",
         });
         expect(summary.projection_totals.fact_count).toBe(1);
         expect(summary.write_plan_totals.fact_statement_count).toBe(1);
@@ -1556,6 +1557,26 @@ describe("classifiers workflow-candidates", () => {
             applyRequested: false,
             applied: false,
         });
+        const text = renderWorkflowCandidateReviewCoverageText({
+            schema: "ax.workflow_candidate_review_coverage.v1",
+            source_kind: "hybrid_window_classifier_projection",
+            query: { limit: 10 },
+            candidates: [],
+            totals: {
+                candidate_group_count: 0,
+                returned_candidate_count: 0,
+                reviewed_candidate_count: 0,
+                unreviewed_candidate_count: 0,
+                review_fact_count: 0,
+                rejected_fact_count: 0,
+                accepted_fact_count: 0,
+                deferred_fact_count: 0,
+                revised_fact_count: 0,
+                helper_source_fixture_count: 0,
+            },
+            coverage_review: summary,
+            decision: "needs_workflow_candidate_reviews",
+        });
 
         expect(summary).toMatchObject({
             apply_requested: false,
@@ -1566,7 +1587,9 @@ describe("classifiers workflow-candidates", () => {
             missing_rationale_count: 0,
             smoke_marker_count: 0,
             apply_guard: "no_reviewed_fixtures",
+            next_action: "Set at least one fixture to accept, revise, reject, or defer and add a rationale.",
         });
+        expect(text).toContain("coverage review next action: Set at least one fixture to accept, revise, reject, or defer and add a rationale.");
         expect(summary.projection_totals.fact_count).toBe(0);
         expect(summary.write_plan_totals.statement_count).toBe(1);
     });
@@ -1608,6 +1631,7 @@ describe("classifiers workflow-candidates", () => {
             invalid_fixture_count: 0,
             missing_rationale_count: 1,
             apply_guard: "missing_review_rationale",
+            next_action: "Add rationale text for every reviewed fixture.",
         });
     });
 
@@ -1747,6 +1771,7 @@ describe("classifiers workflow-candidates", () => {
             projected_reviewed_candidate_count: 0,
             projected_unreviewed_candidate_count: 1,
             apply_guard: "invalid_review_pack",
+            next_action: "Fix invalid review statuses before syncing or applying.",
         });
     });
 
@@ -1854,6 +1879,7 @@ describe("classifiers workflow-candidates", () => {
             projected_reviewed_candidate_count: 2,
             projected_unreviewed_candidate_count: 0,
             apply_guard: "ready_to_apply",
+            next_action: "Run the apply command after confirming the review pack is intentional.",
         });
     });
 

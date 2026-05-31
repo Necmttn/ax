@@ -199,6 +199,7 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly projected_unreviewed_candidate_count: number;
     readonly smoke_marker_count: number;
     readonly apply_guard: WorkflowCandidateReviewCoverageApplyGuard;
+    readonly next_action: string;
     readonly projection_totals: WorkflowCandidateTopicReviewGraphProjection["totals"];
     readonly write_plan_totals: WorkflowCandidateTopicReviewGraphWritePlan["totals"];
 }
@@ -1754,6 +1755,7 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             `coverage review projected coverage: reviewed=${report.coverage_review.projected_reviewed_candidate_count} unreviewed=${report.coverage_review.projected_unreviewed_candidate_count}`,
             `coverage review issues: invalid=${report.coverage_review.invalid_fixture_count} missing_rationale=${report.coverage_review.missing_rationale_count} smoke=${report.coverage_review.smoke_marker_count}`,
             `coverage review apply guard: ${report.coverage_review.apply_guard}`,
+            `coverage review next action: ${report.coverage_review.next_action}`,
             `coverage review applied: ${report.coverage_review.applied ? "yes" : "no"}`,
         ] : []),
         ...(report.fixture_pack ? [
@@ -3115,6 +3117,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         projected_unreviewed_candidate_count: projectedUnreviewedCandidateCount,
         smoke_marker_count: smokeMarkerCount,
         apply_guard: applyGuard,
+        next_action: workflowCandidateReviewCoverageGuardNextAction(applyGuard),
         projection_totals: input.projection.totals,
         write_plan_totals: input.writePlan.totals,
     };

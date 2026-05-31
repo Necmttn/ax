@@ -29,7 +29,7 @@ artifact path as the evidence to inspect before trusting any summary row.
 | Blind/review workflow | E46-E65+ | `.ax/experiments/blind-workflow-status-e57.json` and related review artifacts | Human review is mandatory before fixtures or graph facts are promoted. | Pending where review rows are incomplete. | Earlier experiment log | Prefer review queues/workspaces over automatic label edits. |
 | Transcript graph projection | E155-E157 | `.ax/experiments/transcript-candidate-graph-projection-e155.json`, `.ax/experiments/workflow-candidate-report-e156.json`, `.ax/experiments/workflow-candidate-cli-e157.json` | Real persisted classifier facts can become graph-backed workflow candidates. | Passed for projection/query; still needs product review filters and proposal gates. | E155/E156/E157 commits in log | Use graph facts for evidence-backed workflow/harness discovery. |
 | Proposal lifecycle | E168-E208 | `.ax/experiments/workflow-candidate-proposal-list-e168.json`, `.ax/experiments/classifier-package-execution-write-plan-e208.json` | Classifier-derived workflow proposals are discoverable and lifecycle-tracked. | Passed for visibility/lifecycle plumbing; promotion remains review-gated. | Recent proposal lifecycle commits | Continue using review and ready-smoke gates before guidance/harness changes. |
-| Embedding/SVM helper layer | E209-E257 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e231-post-promotion.json`, `.ax/experiments/embedding-helper-canonical-promotion-split-audit-e231.json`, `.ax/experiments/embedding-helper-graph-projection-current.json`, `.ax/experiments/embedding-helper-graph-apply-e232.json`, `.ax/experiments/classifier-graph-health-embedding-helper-e232.json`, `.ax/experiments/embedding-helper-graph-usefulness-current.json`, `.ax/experiments/classifier-package-execution-embedding-helper-graph-usefulness-e234.json`, `.ax/experiments/classifier-graph-health-embedding-helper-none-maintenance-e235.json`, `.ax/experiments/workflow-topic-review-graph-query-e239.json`, `.ax/experiments/workflow-topic-evidence-pack-persisted-review-context-e240.md`, `.ax/experiments/workflow-candidate-report-persisted-review-context-e241.json`, `.ax/experiments/workflow-candidate-review-coverage-e242.json`, `.ax/experiments/workflow-candidate-review-coverage-with-gaps-e243.json`, `.ax/experiments/workflow-candidate-review-coverage-gaps-e243.jsonl`, `.ax/experiments/workflow-candidate-review-coverage-review-projection-e244.json`, `.ax/experiments/workflow-candidate-review-coverage-apply-guard-e245.json`, `.ax/experiments/workflow-candidate-review-coverage-readiness-e246.json`, `.ax/experiments/workflow-candidate-review-coverage-brief-e247.md`, `.ax/experiments/workflow-candidate-review-coverage-invalid-sync-e248.json`, `.ax/experiments/workflow-candidate-review-coverage-impact-e249.json`, `.ax/experiments/workflow-candidate-review-coverage-projected-e250.json`, `.ax/experiments/workflow-candidate-review-coverage-brief-e251.md`, `.ax/experiments/workflow-candidate-review-coverage-brief-e252.md`, `.ax/experiments/workflow-candidate-review-coverage-brief-e253.md`, `.ax/experiments/workflow-candidate-review-coverage-brief-synced-e254.md`, `.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-synced-e255.md`, `.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-e255.md`, `.ax/experiments/workflow-candidate-review-coverage-brief-smoke-guard-e256.md`, `.ax/experiments/workflow-candidate-review-coverage-brief-e257.md`, `.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e257.md`, `.ax/experiments/workflow-candidate-review-coverage-brief-smoke-guard-e257.md` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. Promoted helper facts now support a human-editable coverage review loop: gap fixtures -> markdown brief -> synced JSONL -> readiness/projection, with explicit guards and no automatic ranking suppression. Unknown fixture ids and invalid statuses in synced markdown are now explicit diagnostics, review packs report whether their reviewed candidates are new, existing, or out of scope for the current coverage query, projected reviewed/unreviewed totals show the payoff before apply, and briefs now include a summary/candidate queue, per-fixture support/evidence/score context, copy-pasteable sync/readiness/apply commands, verdict/rationale counts, smoke counts, the derived apply guard, and a guard-specific next action. | Passed: coverage gap brief emits 3 pending fixtures with `no_reviewed_fixtures` and tells reviewers to set a reviewed status/rationale; synced missing-rationale brief reports `missing_review_rationale` and tells reviewers to add rationales; synced smoke brief reports `blocked_smoke_review` with two smoke markers and tells reviewers to replace smoke/example markers; malformed sync reported `unknown_fixture_count=1`, `invalid_fixture_count=1`, and `apply_guard=invalid_review_pack`. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `65b0b3c`, `4c602d9`, `9a6811e`, `31a1b16`, `e41562c`, `0587b67`, `0e0a960`, `3f01787`, `7bea922`, `21f7163`, `24e4a4e`, `f97c8e3`, `722e3e8`, `8b27657`, `d700090`, `6237d89`, `2490fdf`, `9f4ee34`, `2530699`, `bca5938`, `65bc09a`, `6631d2d`, `85b4df8`, `c9f59e4`, `451b524`, `59adacf`, `83ebdb0`, `fc48156`, `bce421d`, `68e19dd`, `91edc29`, `37a7ef8`, `10529fb`, `3f71886`, `95a908b`, `692ac34`, `3be078f`, `54df4ed`, `ecb0404`, this commit | Next useful work is to complete the coverage brief with real review decisions/rationales, apply those review facts, and re-run coverage to confirm the gap closes. |
+| Embedding/SVM helper layer | E209-E258 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e231-post-promotion.json`, `.ax/experiments/embedding-helper-canonical-promotion-split-audit-e231.json`, `.ax/experiments/embedding-helper-graph-projection-current.json`, `.ax/experiments/embedding-helper-graph-apply-e232.json`, `.ax/experiments/classifier-graph-health-embedding-helper-e232.json`, `.ax/experiments/embedding-helper-graph-usefulness-current.json`, `.ax/experiments/classifier-package-execution-embedding-helper-graph-usefulness-e234.json`, `.ax/experiments/classifier-graph-health-embedding-helper-none-maintenance-e235.json`, `.ax/experiments/workflow-topic-review-graph-query-e239.json`, `.ax/experiments/workflow-topic-evidence-pack-persisted-review-context-e240.md`, `.ax/experiments/workflow-candidate-report-persisted-review-context-e241.json`, `.ax/experiments/workflow-candidate-review-coverage-e242.json`, `.ax/experiments/workflow-candidate-review-coverage-with-gaps-e243.json`, `.ax/experiments/workflow-candidate-review-coverage-gaps-e243.jsonl`, `.ax/experiments/workflow-candidate-review-coverage-review-projection-e244.json`, `.ax/experiments/workflow-candidate-review-coverage-apply-guard-e245.json`, `.ax/experiments/workflow-candidate-review-coverage-readiness-e246.json`, `.ax/experiments/workflow-candidate-review-coverage-brief-e247.md`, `.ax/experiments/workflow-candidate-review-coverage-invalid-sync-e248.json`, `.ax/experiments/workflow-candidate-review-coverage-impact-e249.json`, `.ax/experiments/workflow-candidate-review-coverage-projected-e250.json`, `.ax/experiments/workflow-candidate-review-coverage-brief-e251.md`, `.ax/experiments/workflow-candidate-review-coverage-brief-e252.md`, `.ax/experiments/workflow-candidate-review-coverage-brief-e253.md`, `.ax/experiments/workflow-candidate-review-coverage-brief-synced-e254.md`, `.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-synced-e255.md`, `.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-e255.md`, `.ax/experiments/workflow-candidate-review-coverage-brief-smoke-guard-e256.md`, `.ax/experiments/workflow-candidate-review-coverage-brief-e257.md`, `.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e257.md`, `.ax/experiments/workflow-candidate-review-coverage-brief-smoke-guard-e257.md`, `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e258.json`, `.ax/experiments/workflow-candidate-review-coverage-smoke-guard-e258.json`, `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e258.txt` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. Promoted helper facts now support a human-editable coverage review loop: gap fixtures -> markdown brief -> synced JSONL -> readiness/projection, with explicit guards and no automatic ranking suppression. Unknown fixture ids and invalid statuses in synced markdown are now explicit diagnostics, review packs report whether their reviewed candidates are new, existing, or out of scope for the current coverage query, projected reviewed/unreviewed totals show the payoff before apply, and briefs/readiness outputs now include a summary/candidate queue, per-fixture support/evidence/score context, copy-pasteable sync/readiness/apply commands, verdict/rationale counts, smoke counts, the derived apply guard, and a guard-specific next action. | Passed: coverage gap brief emits 3 pending fixtures with `no_reviewed_fixtures` and tells reviewers to set a reviewed status/rationale; synced missing-rationale JSON/text reports `missing_review_rationale` plus `next_action`; synced smoke JSON reports `blocked_smoke_review` with two smoke markers plus `next_action`; malformed sync reported `unknown_fixture_count=1`, `invalid_fixture_count=1`, and `apply_guard=invalid_review_pack`. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `65b0b3c`, `4c602d9`, `9a6811e`, `31a1b16`, `e41562c`, `0587b67`, `0e0a960`, `3f01787`, `7bea922`, `21f7163`, `24e4a4e`, `f97c8e3`, `722e3e8`, `8b27657`, `d700090`, `6237d89`, `2490fdf`, `9f4ee34`, `2530699`, `bca5938`, `65bc09a`, `6631d2d`, `85b4df8`, `c9f59e4`, `451b524`, `59adacf`, `83ebdb0`, `fc48156`, `bce421d`, `68e19dd`, `91edc29`, `37a7ef8`, `10529fb`, `3f71886`, `95a908b`, `692ac34`, `3be078f`, `54df4ed`, `ecb0404`, `7c3f847`, this commit | Next useful work is to complete the coverage brief with real review decisions/rationales, apply those review facts, and re-run coverage to confirm the gap closes. |
 
 Current recommendation:
 
@@ -14076,6 +14076,77 @@ assert "- Apply guard: `blocked_smoke_review`" in smoke_brief
 assert "- Next action: Replace smoke or example review markers with real review decisions before applying." in smoke_brief
 assert smoke["smoke_marker_count"] == 2
 assert smoke["apply_guard"] == "blocked_smoke_review"
+PY
+```
+
+## E258 - Add Next Action To Coverage Readiness Output
+
+Question:
+
+- Can non-markdown consumers see the same guard-specific unblock instruction
+  that reviewers see in coverage briefs?
+
+Implementation:
+
+- Added `next_action` to `WorkflowCandidateReviewCoverageApplySummary`.
+- `buildWorkflowCandidateReviewCoverageApplySummary` now derives `next_action`
+  from the same apply guard helper used by markdown briefs.
+- `renderWorkflowCandidateReviewCoverageText` now prints the coverage review
+  next action alongside the apply guard.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --examples=2 --coverage-fixture-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-e258.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-e258.md --out=.ax/experiments/workflow-candidate-review-coverage-with-brief-e258.json --json
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e258.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e258.jsonl
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e258.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e255.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e258.md --out=.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e258.json --json
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e258.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-smoke-guard-e258.jsonl
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-smoke-guard-e258.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-reviewed-smoke-e247.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-smoke-guard-e258.md --out=.ax/experiments/workflow-candidate-review-coverage-smoke-guard-e258.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e258.jsonl > .ax/experiments/workflow-candidate-review-coverage-missing-rationale-e258.txt
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e258.json`
+- `.ax/experiments/workflow-candidate-review-coverage-smoke-guard-e258.json`
+- `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e258.txt`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e258.md`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-smoke-guard-e258.md`
+
+Results:
+
+- Missing-rationale JSON now includes:
+  - `apply_guard: missing_review_rationale`
+  - `next_action: Add rationale text for every reviewed fixture.`
+- Smoke-guard JSON now includes:
+  - `apply_guard: blocked_smoke_review`
+  - `next_action: Replace smoke or example review markers with real review decisions before applying.`
+- Text output now includes:
+  - `coverage review next action: Add rationale text for every reviewed fixture.`
+
+Decision:
+
+- E258 makes coverage-review readiness self-explanatory in JSON, text, and
+  markdown. This helps services, dashboards, and review scripts explain blocked
+  applies without duplicating guard interpretation.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-missing-rationale-e258.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-smoke-guard-e258.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+missing = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-missing-rationale-e258.json").read_text())["coverage_review"]
+smoke = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-smoke-guard-e258.json").read_text())["coverage_review"]
+text = Path(".ax/experiments/workflow-candidate-review-coverage-missing-rationale-e258.txt").read_text()
+assert missing["apply_guard"] == "missing_review_rationale"
+assert missing["next_action"] == "Add rationale text for every reviewed fixture."
+assert smoke["apply_guard"] == "blocked_smoke_review"
+assert smoke["next_action"] == "Replace smoke or example review markers with real review decisions before applying."
+assert "coverage review next action: Add rationale text for every reviewed fixture." in text
 PY
 ```
 
