@@ -10,9 +10,9 @@ export const PROPOSAL_STATUS_REJECTED = "rejected";
 
 export const GUIDANCE_STATUS_PROPOSED = "proposed";
 
-export const ACCEPTED_PROPOSAL_FORMS = ["guidance", "skill"] as const;
+export const ACCEPTED_PROPOSAL_FORMS = ["guidance", "skill", "harness_check"] as const;
 export type AcceptedProposalForm = (typeof ACCEPTED_PROPOSAL_FORMS)[number];
-export const MANUAL_TASK_PROPOSAL_FORMS = ["guidance", "skill", "subagent", "hook", "automation"] as const;
+export const MANUAL_TASK_PROPOSAL_FORMS = ["guidance", "skill", "harness_check", "subagent", "hook", "automation"] as const;
 
 export const EXPERIMENT_STATUS_TASK_EMITTED = "task_emitted";
 export const EXPERIMENT_STATUS_SCAFFOLDED = "scaffolded";
@@ -89,7 +89,7 @@ export function isAcceptedProposalForm(form: string): form is AcceptedProposalFo
 }
 
 export function acceptanceFormError(form: string): string {
-    return `accept supports form=guidance, form=skill, form=subagent, form=hook, and form=automation (got ${form})`;
+    return `accept supports form=guidance, form=skill, form=harness_check, form=subagent, form=hook, and form=automation (got ${form})`;
 }
 
 export function acceptedExperimentStatus(input: {

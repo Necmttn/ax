@@ -79,7 +79,10 @@ interface ProposalRow {
     readonly title: string;
     readonly hypothesis: string;
     readonly dedupe_sig: string;
+    readonly frequency?: number;
+    readonly confidence?: string;
     readonly status: string;
+    readonly baseline?: string | null;
     readonly skill_payload?: Record<string, unknown> | null;
 }
 
@@ -178,8 +181,8 @@ const buildTaskInput = (row: FullProposalRow, experimentId: string): TaskInput =
             section: row.guidance_payload?.section ?? null,
             suggestedBody: row.guidance_payload?.suggested_text ?? row.hypothesis,
             proposedBehavior: null,
-            confidence: "medium",
-            frequency: 0,
+            confidence: row.confidence ?? "medium",
+            frequency: row.frequency ?? 0,
             evidence: row.hypothesis,
         };
     }
@@ -237,6 +240,26 @@ const buildTaskInput = (row: FullProposalRow, experimentId: string): TaskInput =
             safety: safetyContractFromPayload(row.automation_payload),
         };
     }
+    if (row.form === "harness_check") {
+        const baselineEvidence = typeof row.baseline === "string" && row.baseline.trim().length > 0
+            ? `\n\nBaseline evidence:\n${row.baseline}`
+            : "";
+        const evidence = `${row.hypothesis}${baselineEvidence}`;
+        return {
+            form: "harness_check",
+            experimentId,
+            proposalId: `proposal:${recordKeyPart(row.id, "proposal") ?? row.dedupe_sig}`,
+            shortId,
+            title: row.title,
+            targetPath: `tests/harness/${row.dedupe_sig}.md`,
+            section: null,
+            suggestedBody: evidence,
+            proposedBehavior: evidence,
+            confidence: row.confidence ?? "medium",
+            frequency: row.frequency ?? 0,
+            evidence,
+        };
+    }
     // skill form
     return {
         form: "skill",
@@ -248,8 +271,8 @@ const buildTaskInput = (row: FullProposalRow, experimentId: string): TaskInput =
         section: null,
         suggestedBody: "",
         proposedBehavior: String(row.skill_payload?.proposed_behavior ?? ""),
-        confidence: "medium",
-        frequency: 0,
+        confidence: row.confidence ?? "medium",
+        frequency: row.frequency ?? 0,
         evidence: row.hypothesis,
     };
 };

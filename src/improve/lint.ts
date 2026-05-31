@@ -6,12 +6,13 @@
  *   - <root>/settings.json, <root>/.claude/settings.json → form=hook
  *   - <root>/LaunchAgents/*.plist, <root>/cron/*,
  *     <root>/automations/*                     → form=automation
+ *   - <root>/tests/harness/<slug>.md           → form=harness_check
  *
  * The default roots are `process.cwd()` (walking up to the git root) and
  * `~/.claude`. Override via `discoverFiles({ roots: [...] })`.
  */
 
-import { existsSync, readdirSync, readFileSync, statSync, unlinkSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
@@ -31,7 +32,7 @@ import {
     planTaskScaffolded,
 } from "./lifecycle.ts";
 
-export type LintForm = "guidance" | "skill" | "subagent" | "hook" | "automation";
+export type LintForm = "guidance" | "skill" | "subagent" | "hook" | "automation" | "harness_check";
 
 export interface LintTarget {
     readonly path: string;
@@ -86,6 +87,14 @@ const walkFlatFilesDir = (
     }
 };
 
+const walkHarnessDir = (out: LintTarget[], harnessDir: string): void => {
+    if (!existsSync(harnessDir)) return;
+    for (const entry of readdirSync(harnessDir)) {
+        if (!entry.endsWith(".md")) continue;
+        tryAddFile(out, join(harnessDir, entry), "harness_check");
+    }
+};
+
 export const defaultRoots = (): string[] => [
     process.cwd(),
     join(homedir(), ".claude"),
@@ -123,10 +132,17 @@ export const discoverFiles = (opts: DiscoverOptions = {}): LintTarget[] => {
         walkFlatFilesDir(out, join(root, "LaunchAgents"), "automation", (entry) => entry.endsWith(".plist"));
         walkFlatFilesDir(out, join(root, "cron"), "automation", () => true);
         walkFlatFilesDir(out, join(root, "automations"), "automation", () => true);
+        walkHarnessDir(out, join(root, "tests", "harness"));
     }
     return out.filter((t) => {
-        if (seen.has(t.path)) return false;
-        seen.add(t.path);
+        let key = t.path;
+        try {
+            key = realpathSync(t.path);
+        } catch {
+            key = t.path;
+        }
+        if (seen.has(key)) return false;
+        seen.add(key);
         return true;
     });
 };

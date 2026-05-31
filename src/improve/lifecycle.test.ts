@@ -18,15 +18,17 @@ describe("intervention lifecycle vocabulary", () => {
     test("separates retro auto-accepted forms from manual task forms", () => {
         expect(isAcceptedProposalForm("guidance")).toBe(true);
         expect(isAcceptedProposalForm("skill")).toBe(true);
+        expect(isAcceptedProposalForm("harness_check")).toBe(true);
         expect(isAcceptedProposalForm("subagent")).toBe(false);
         expect(acceptanceFormError("hook")).toBe(
-            "accept supports form=guidance, form=skill, form=subagent, form=hook, and form=automation (got hook)",
+            "accept supports form=guidance, form=skill, form=harness_check, form=subagent, form=hook, and form=automation (got hook)",
         );
     });
 
     test("maps accept path to the experiment status persisted by actions", () => {
         expect(acceptedExperimentStatus({ form: "guidance", autoScaffold: false })).toBe("task_emitted");
         expect(acceptedExperimentStatus({ form: "skill", autoScaffold: false })).toBe("task_emitted");
+        expect(acceptedExperimentStatus({ form: "harness_check", autoScaffold: false })).toBe("task_emitted");
         expect(acceptedExperimentStatus({ form: "skill", autoScaffold: true })).toBe("scaffolded");
     });
 

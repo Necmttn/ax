@@ -6,7 +6,7 @@
 
 import type { InterventionSafetyContract } from "./lifecycle.ts";
 
-export type TaskForm = "guidance" | "skill" | "subagent" | "hook" | "automation";
+export type TaskForm = "guidance" | "skill" | "harness_check" | "subagent" | "hook" | "automation";
 
 export interface TaskInput {
     readonly form: TaskForm;
@@ -105,6 +105,38 @@ ${body}
 - evidence-cmd: \`axctl improve show ${i.shortId}\`
 `;
 };
+
+const harnessCheck = (i: TaskInput): string => `# ax task: ${i.shortId} (form=harness_check)
+
+**Action:** add harness check
+**Target:** \`${i.targetPath}\`
+**Provenance:** YAML frontmatter \`ax_id: ${i.shortId}\`
+**Title:** ${i.title}
+
+## Why
+${i.evidence}.
+Proposal: ${i.proposalId}
+Experiment: ${i.experimentId}
+Confidence: ${i.confidence}. Frequency: ${i.frequency}/wk.
+
+## Apply
+1. Create or update the smallest executable check that proves this workflow
+   expectation before changing guidance.
+2. Preserve the proposal id, experiment id, and evidence refs in the test,
+   fixture, or task notes. If you create a markdown harness artifact, include:
+   \`ax_id: ${i.shortId}\` and \`ax_experiment: ${i.experimentId}\`.
+3. Run the focused check and any nearby regression tests.
+4. Run \`axctl improve lint\`. Resolve any warnings.
+
+## Expected Check
+
+${(i.proposedBehavior ?? i.suggestedBody).trim() || i.suggestedBody}
+
+## References
+- proposal: ${i.proposalId}
+- experiment: ${i.experimentId}
+- evidence-cmd: \`axctl improve show ${i.shortId}\`
+`;
 
 const subagent = (i: TaskInput): string => `# ax task: ${i.shortId} (form=subagent)
 
@@ -246,6 +278,8 @@ export const renderTaskFile = (input: TaskInput): string => {
             return guidance(input);
         case "skill":
             return skill(input);
+        case "harness_check":
+            return harnessCheck(input);
         case "subagent":
             return subagent(input);
         case "hook":

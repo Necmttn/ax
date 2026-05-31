@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { existsSync as fsExists } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,6 +14,7 @@ const make = () => {
     mkdirSync(join(root, "agents"), { recursive: true });
     mkdirSync(join(root, "LaunchAgents"), { recursive: true });
     mkdirSync(join(root, "cron"), { recursive: true });
+    mkdirSync(join(root, "tests", "harness"), { recursive: true });
     writeFileSync(join(root, "CLAUDE.md"), "# user file");
     writeFileSync(join(root, "AGENTS.md"), "# agents file");
     writeFileSync(join(root, "skills", "foo", "SKILL.md"), "---\n---\nbody");
@@ -23,6 +24,7 @@ const make = () => {
     }));
     writeFileSync(join(root, "LaunchAgents", "com.ax.test.plist"), "<!-- ax:auto_sig experiment:experiment:auto -->");
     writeFileSync(join(root, "cron", "ax-test.cron"), "# ax:cron_sig experiment:experiment:cron\n");
+    writeFileSync(join(root, "tests", "harness", "surrealml-output-required.md"), "---\n---\nharness");
     return root;
 };
 
@@ -37,9 +39,10 @@ describe("discoverFiles", () => {
         expect(paths).toContain(join(root, "settings.json"));
         expect(paths).toContain(join(root, "LaunchAgents", "com.ax.test.plist"));
         expect(paths).toContain(join(root, "cron", "ax-test.cron"));
+        expect(paths).toContain(join(root, "tests", "harness", "surrealml-output-required.md"));
     });
 
-    test("tags each target with form=guidance/skill/subagent/hook/automation", () => {
+    test("tags each target with form=guidance/skill/subagent/hook/automation/harness_check", () => {
         const root = make();
         const out = discoverFiles({ roots: [root] });
         const claude = out.find((t) => t.path.endsWith("CLAUDE.md"));
@@ -50,6 +53,20 @@ describe("discoverFiles", () => {
         expect(settings?.form).toBe("hook");
         const plist = out.find((t) => t.path.endsWith("com.ax.test.plist"));
         expect(plist?.form).toBe("automation");
+        const harness = out.find((t) => t.path.endsWith("surrealml-output-required.md"));
+        expect(harness?.form).toBe("harness_check");
+    });
+
+    test("dedupes guidance aliases that resolve to the same real file", () => {
+        const root = mkdtempSync(join(tmpdir(), "ax-lint-"));
+        writeFileSync(join(root, "CLAUDE.md"), "# shared guidance");
+        symlinkSync("CLAUDE.md", join(root, "AGENTS.md"));
+
+        const out = discoverFiles({ roots: [root] });
+        const guidance = out.filter((target) => target.form === "guidance");
+
+        expect(guidance).toHaveLength(1);
+        expect(guidance[0].path).toBe(join(root, "CLAUDE.md"));
     });
 });
 

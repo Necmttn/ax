@@ -70,6 +70,8 @@ describe("acceptProposal - task emission", () => {
             title: "Add pre-bash guidance",
             hypothesis: "Bash failed repeatedly without pre-checks",
             dedupe_sig: longSig,
+            frequency: 4,
+            confidence: "high",
             status: "open",
             skill_payload: null,
             guidance_payload: {
@@ -97,6 +99,7 @@ describe("acceptProposal - task emission", () => {
 
         const body = readFileSync(result.task_path!, "utf-8");
         expect(body).toContain("form=guidance");
+        expect(body).toContain("Confidence: high. Frequency: 4/wk.");
         // Full sig must appear in the marker; a truncated 8-char slice must not
         expect(body).toContain(`<!--ax:${longSig}-->`);
         // Regression guard: truncated form must not appear as a standalone marker
@@ -144,6 +147,46 @@ describe("acceptProposal - task emission", () => {
         expect(body).toContain(`ax_id: ${longSig}`);
         // Regression guard: the truncated form must not appear as the standalone ax_id value
         expect(body).not.toContain(`ax_id: ${longSig.slice(0, 8)}\n`);
+    });
+
+    test("harness_check form defaults to task emission", async () => {
+        const taskDir = mkdtempSync(join(tmpdir(), "ax-task-"));
+        const sig = "harness_check__workflow_candidate__abc123";
+        const proposalRow = {
+            id: "proposal:harness1",
+            form: "harness_check",
+            title: "Require applied classifier output",
+            hypothesis: "The agent stopped at HTML instead of showing applied classifier results.",
+            dedupe_sig: sig,
+            frequency: 2,
+            confidence: "high",
+            status: "open",
+            baseline: JSON.stringify({ examples: [{ result_id: "classifier_result:verification_event__abc" }] }),
+            skill_payload: null,
+            guidance_payload: null,
+        };
+
+        const layer = fakeRowsLayer([
+            [[proposalRow]],
+            [[]],
+        ]);
+
+        const result = await Effect.runPromise(
+            acceptProposal({ sigOrId: sig, taskDir }).pipe(
+                Effect.provide(layer),
+            ),
+        );
+
+        expect(result.status).toBe("ok");
+        expect(result.task_path).toBeDefined();
+        expect(existsSync(result.task_path!)).toBe(true);
+
+        const body = readFileSync(result.task_path!, "utf-8");
+        expect(body).toContain("form=harness_check");
+        expect(body).toContain("**Action:** add harness check");
+        expect(body).toContain("Require applied classifier output");
+        expect(body).toContain("The agent stopped at HTML");
+        expect(body).toContain("classifier_result:verification_event__abc");
     });
 
     test("skill form with autoScaffold=true preserves direct-write path", async () => {
