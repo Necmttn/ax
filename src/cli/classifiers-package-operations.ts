@@ -267,6 +267,11 @@ export function renderClassifierPackageExecutionApplyText(report: ClassifierPack
 }
 
 export function renderClassifierPackageExecutionGraphHealthText(report: ClassifierPackageExecutionGraphHealthReport): string {
+    const routingPolicySummary = report.routing_policy_summary ?? {
+        status: "not_requested",
+        next_action: "set_routing_floors",
+        candidate_count: 0,
+    };
     const lines = [
         "classifier package execution graph health",
         `decision: ${report.decision}`,
@@ -291,6 +296,12 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `packages/operations/executions/artifacts: ${report.totals.package_count}/${report.totals.operation_count}/${report.totals.execution_count}/${report.totals.artifact_count}`,
         `execution/guard/artifact/lifecycle/helper facts: ${report.totals.execution_fact_count}/${report.totals.guard_fact_count}/${report.totals.artifact_fact_count}/${report.totals.lifecycle_fact_count}/${report.totals.embedding_helper_fact_count}`,
         `results operations/guarded/changed/lifecycle/helper/evidence: ${report.result_totals.operation_count}/${report.result_totals.guarded_operation_count}/${report.result_totals.changed_artifact_count}/${report.result_totals.lifecycle_fact_count}/${report.result_totals.embedding_helper_fact_count}/${report.result_totals.evidence_path_count}`,
+        `routing policy status: ${routingPolicySummary.status}`,
+        `routing policy candidates: ${routingPolicySummary.candidate_count}`,
+        `routing policy best threshold: ${routingPolicySummary.best_threshold_by_call_reduction ?? "none"}`,
+        `routing policy best positive recall: ${routingPolicySummary.best_positive_recall ?? "none"}`,
+        `routing policy best call reduction: ${routingPolicySummary.best_call_reduction ?? "none"}`,
+        `routing policy next action: ${routingPolicySummary.next_action}`,
     ];
     for (const operation of report.operations) {
         lines.push(`- ${operation.package_key}/${operation.operation_id}`);

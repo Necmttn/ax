@@ -380,6 +380,17 @@ export interface ClassifierGraphEmbeddingHelperFact {
     readonly evidence_paths: readonly string[];
 }
 
+export interface ClassifierGraphRoutingPolicySummary {
+    readonly status: "not_requested" | "meets_requested_floors" | "no_matching_policy";
+    readonly next_action: "set_routing_floors" | "choose_reviewed_routing_threshold" | "lower_floor_or_review_more_candidates";
+    readonly requested_min_positive_recall?: number;
+    readonly requested_min_call_reduction?: number;
+    readonly candidate_count: number;
+    readonly best_threshold_by_call_reduction?: string;
+    readonly best_positive_recall?: number;
+    readonly best_call_reduction?: number;
+}
+
 export type ClassifierGraphHealthMode = "summary" | "guarded" | "changed-artifacts" | "evidence" | "lifecycle" | "embedding-helper";
 
 export interface ClassifierGraphHealthQuery {
@@ -411,6 +422,7 @@ export interface ClassifierPackageExecutionGraphHealthReport {
     readonly changed_artifacts: readonly ClassifierGraphChangedArtifact[];
     readonly lifecycle_facts: readonly ClassifierGraphLifecycleFact[];
     readonly embedding_helper_facts: readonly ClassifierGraphEmbeddingHelperFact[];
+    readonly routing_policy_summary?: ClassifierGraphRoutingPolicySummary;
     readonly evidence_paths: readonly string[];
     readonly totals: {
         readonly node_count: number;
@@ -2063,6 +2075,38 @@ export function buildExecutionGraphHealthReport(input: {
         ...resultLifecycleFacts.flatMap((fact) => fact.evidence_paths),
         ...resultEmbeddingHelperFacts.flatMap((fact) => fact.evidence_paths),
     ])).sort();
+    const routingPolicyFloorsRequested = query.min_positive_recall !== undefined || query.min_call_reduction !== undefined;
+    const routingPolicyCandidates = resultEmbeddingHelperFacts
+        .filter((fact) => fact.kind === "embedding_helper_routing_candidate")
+        .filter((fact) =>
+            typeof fact.positive_recall_after_routing_mean === "number" &&
+            typeof fact.setfit_call_reduction_rate_mean === "number"
+        );
+    const bestRoutingPolicy = routingPolicyCandidates
+        .slice()
+        .sort((a, b) =>
+            (b.setfit_call_reduction_rate_mean! - a.setfit_call_reduction_rate_mean!) ||
+            (b.positive_recall_after_routing_mean! - a.positive_recall_after_routing_mean!) ||
+            String(a.threshold ?? "").localeCompare(String(b.threshold ?? ""))
+        )[0];
+    const routingPolicySummary: ClassifierGraphRoutingPolicySummary = {
+        status: !routingPolicyFloorsRequested
+            ? "not_requested"
+            : routingPolicyCandidates.length > 0
+                ? "meets_requested_floors"
+                : "no_matching_policy",
+        next_action: !routingPolicyFloorsRequested
+            ? "set_routing_floors"
+            : routingPolicyCandidates.length > 0
+                ? "choose_reviewed_routing_threshold"
+                : "lower_floor_or_review_more_candidates",
+        ...(query.min_positive_recall === undefined ? {} : { requested_min_positive_recall: query.min_positive_recall }),
+        ...(query.min_call_reduction === undefined ? {} : { requested_min_call_reduction: query.min_call_reduction }),
+        candidate_count: routingPolicyCandidates.length,
+        ...(bestRoutingPolicy?.threshold === undefined ? {} : { best_threshold_by_call_reduction: bestRoutingPolicy.threshold }),
+        ...(bestRoutingPolicy?.positive_recall_after_routing_mean === undefined ? {} : { best_positive_recall: bestRoutingPolicy.positive_recall_after_routing_mean }),
+        ...(bestRoutingPolicy?.setfit_call_reduction_rate_mean === undefined ? {} : { best_call_reduction: bestRoutingPolicy.setfit_call_reduction_rate_mean }),
+    };
 
     return {
         schema: "ax.classifier_package_execution_graph_health_report.v1",
@@ -2073,6 +2117,7 @@ export function buildExecutionGraphHealthReport(input: {
         changed_artifacts: resultChangedArtifacts,
         lifecycle_facts: resultLifecycleFacts,
         embedding_helper_facts: resultEmbeddingHelperFacts,
+        routing_policy_summary: routingPolicySummary,
         evidence_paths: resultEvidencePaths,
         totals: {
             node_count: input.nodes.length,

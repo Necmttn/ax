@@ -645,6 +645,16 @@ describe("classifiers package-operations format", () => {
                 evidence_edges: ["edge:hn"],
                 evidence_paths: [".ax/experiments/embedding-helper-review-e210.json"],
             }],
+            routing_policy_summary: {
+                status: "meets_requested_floors",
+                next_action: "choose_reviewed_routing_threshold",
+                requested_min_positive_recall: 0.9,
+                requested_min_call_reduction: 0.25,
+                candidate_count: 1,
+                best_threshold_by_call_reduction: "none",
+                best_positive_recall: 0.9028,
+                best_call_reduction: 0.1778,
+            },
             evidence_paths: [".ax/experiments/embedding-helper-review-e210.json"],
             totals: {
                 node_count: 75,
@@ -686,6 +696,12 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("filter min call reduction: 0.25");
         expect(output).toContain("filter min nearest similarity: 0.85");
         expect(output).toContain("filter nearest fixture: session-section-chunks/approval-alright-go");
+        expect(output).toContain("routing policy status: meets_requested_floors");
+        expect(output).toContain("routing policy candidates: 1");
+        expect(output).toContain("routing policy best threshold: none");
+        expect(output).toContain("routing policy best positive recall: 0.9028");
+        expect(output).toContain("routing policy best call reduction: 0.1778");
+        expect(output).toContain("routing policy next action: choose_reviewed_routing_threshold");
         expect(output).toContain("embedding helper facts:");
         expect(output).toContain("- routing recommended_threshold: threshold=none positive_recall=0.9028 call_reduction=0.1778");
         expect(output).toContain("- hard-negative session-section-chunks/none-start-building: promoted_hard_negative_fixture status=accepted proposed=none seeds=2 nearest=0.8743 promoted=session-section-chunks/embedding-helper-hard-negative-none-start-building");
