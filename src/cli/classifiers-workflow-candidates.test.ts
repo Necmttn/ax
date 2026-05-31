@@ -17,6 +17,7 @@ import {
     buildWorkflowCandidateTopicReviewGraphListReport,
     buildWorkflowCandidateTopicReviewGraphWritePlan,
     buildWorkflowCandidateTopicTaskDrafts,
+    attachWorkflowCandidatePersistedReviewFacts,
     buildWorkflowCandidateTopicReport,
     buildWorkflowCandidateTaskDrafts,
     isTaskLikeWorkflowText,
@@ -1187,6 +1188,67 @@ describe("classifiers workflow-candidates", () => {
         expect(markdown).toContain("- Predicate: `reject`");
         expect(markdown).toContain("- Candidate id: `classifier_candidate_group:hybrid-window/environment_or_preference_signal`");
         expect(markdown).toContain("- Helper source fixture: `session-section-chunks/none-maintenance-question`");
+    });
+
+    test("attaches persisted review facts to plain candidate reports without suppressing ranking", () => {
+        const report = buildWorkflowCandidateReport({
+            groupRows: [{
+                graph_id: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+                label: "environment_or_preference_signal",
+                properties_json: properties({
+                    classifier_key: "hybrid-window",
+                    label: "environment_or_preference_signal",
+                    proposed_action: "record_guidance_or_environment_preference",
+                    support_count: 50,
+                }),
+            }],
+            evidenceRows: [{
+                graph_id: "fact:maintenance-question",
+                subject: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+                properties_json: properties({
+                    result_id: "classifier_result:maintenance-question",
+                    turn: "turn:maintenance-question",
+                    confidence: 0.71,
+                    text_excerpt: "USER: when was the last work around surrealML ? do they actively maintain it or stopped?",
+                }),
+            }],
+            sourceKind: "hybrid_window_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            search: "SurrealML",
+            taskLike: "include",
+        });
+
+        const withReviews = attachWorkflowCandidatePersistedReviewFacts(report, [{
+            graph_id: "fact:surrealml-review",
+            subject: "workflow_topic_candidate_review:surrealml:environment",
+            predicate: "reject",
+            object: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+            value_json: properties({ reviewed: true, verdict: "reject" }),
+            properties_json: properties({
+                topic: "surrealml",
+                candidate_id: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+                rationale: "Promoted helper control marks this as an information request, not a durable preference.",
+                helper_source_fixture_ids: ["session-section-chunks/none-maintenance-question"],
+            }),
+        }]);
+        const text = renderWorkflowCandidateReportText(withReviews);
+        const brief = renderWorkflowCandidateBriefMarkdown(withReviews);
+
+        expect(withReviews.decision).toBe("workflow_candidates_ranked");
+        expect(withReviews.candidates).toHaveLength(1);
+        expect(withReviews.totals.persisted_review_fact_count).toBe(1);
+        expect(withReviews.candidates[0]?.persisted_review_facts?.[0]).toMatchObject({
+            predicate: "reject",
+            topic: "surrealml",
+            candidate_id: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+            helper_source_fixture_ids: ["session-section-chunks/none-maintenance-question"],
+        });
+        expect(text).toContain("persisted review facts: 1");
+        expect(text).toContain("persisted review: reject topic=surrealml");
+        expect(brief).toContain("- Persisted review facts: `1`");
+        expect(brief).toContain("- Persisted review:");
+        expect(brief).toContain("  - Helper source fixture: `session-section-chunks/none-maintenance-question`");
     });
 
     test("renders persisted harness facts inside topic evidence packs", () => {

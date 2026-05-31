@@ -465,11 +465,25 @@ export interface WorkflowCandidate {
     readonly score: number;
     readonly examples: readonly WorkflowCandidateExample[];
     readonly review?: WorkflowCandidateReview;
+    readonly persisted_review_facts?: readonly WorkflowCandidatePersistedReviewFact[];
 }
 
 export interface WorkflowCandidateReview {
     readonly verdict: string;
     readonly rationale: string;
+}
+
+export interface WorkflowCandidatePersistedReviewFact {
+    readonly graph_id?: string;
+    readonly topic?: string;
+    readonly subject?: string;
+    readonly predicate?: string;
+    readonly object?: string;
+    readonly candidate_id?: string;
+    readonly rationale?: string;
+    readonly helper_source_fixture_ids: readonly string[];
+    readonly updated_at?: string;
+    readonly value_json?: string;
 }
 
 export interface WorkflowCandidateReport {
@@ -493,6 +507,7 @@ export interface WorkflowCandidateReport {
         readonly candidate_with_evidence_count: number;
         readonly wrapper_like_count: number;
         readonly task_like_count: number;
+        readonly persisted_review_fact_count: number;
     };
     readonly failures: readonly string[];
     readonly decision: "workflow_candidates_ranked" | "needs_workflow_candidate_review";
@@ -1422,9 +1437,63 @@ export function buildWorkflowCandidateReport(input: CandidateBuildInput): Workfl
             candidate_with_evidence_count: candidates.filter((candidate) => candidate.evidence_count > 0).length,
             wrapper_like_count: candidates.reduce((sum, candidate) => sum + candidate.wrapper_like_count, 0),
             task_like_count: candidates.reduce((sum, candidate) => sum + candidate.task_like_count, 0),
+            persisted_review_fact_count: 0,
         },
         failures,
         decision: failures.length === 0 ? "workflow_candidates_ranked" : "needs_workflow_candidate_review",
+    };
+}
+
+export function attachWorkflowCandidatePersistedReviewFacts(
+    report: WorkflowCandidateReport,
+    facts: readonly WorkflowCandidateTopicHarnessGraphFactRow[],
+): WorkflowCandidateReport {
+    const factsByCandidate = new Map<string, WorkflowCandidatePersistedReviewFact[]>();
+    for (const fact of facts) {
+        const props = parseProperties(fact.properties_json);
+        const candidateId = typeof fact.object === "string" && fact.object.length > 0
+            ? fact.object
+            : typeof props.candidate_id === "string" && props.candidate_id.length > 0
+                ? props.candidate_id
+                : undefined;
+        if (candidateId === undefined) continue;
+        const helperSourceFixtureIds = Array.isArray(props.helper_source_fixture_ids)
+            ? props.helper_source_fixture_ids.filter((entry): entry is string => typeof entry === "string")
+            : [];
+        const persistedFact: WorkflowCandidatePersistedReviewFact = {
+            ...(fact.graph_id === undefined ? {} : { graph_id: fact.graph_id }),
+            ...(typeof props.topic === "string" ? { topic: props.topic } : {}),
+            ...(fact.subject === undefined ? {} : { subject: fact.subject }),
+            ...(fact.predicate === undefined ? {} : { predicate: fact.predicate }),
+            ...(typeof fact.object === "string" ? { object: fact.object } : {}),
+            candidate_id: candidateId,
+            ...(typeof props.rationale === "string" ? { rationale: props.rationale } : {}),
+            helper_source_fixture_ids: helperSourceFixtureIds,
+            ...(typeof fact.updated_at === "string" ? { updated_at: fact.updated_at } : {}),
+            ...(typeof fact.value_json === "string" ? { value_json: fact.value_json } : {}),
+        };
+        factsByCandidate.set(candidateId, [
+            ...(factsByCandidate.get(candidateId) ?? []),
+            persistedFact,
+        ]);
+    }
+
+    const candidates = report.candidates.map((candidate) => {
+        const persisted = factsByCandidate.get(candidate.group_id) ?? [];
+        return persisted.length === 0
+            ? candidate
+            : { ...candidate, persisted_review_facts: persisted };
+    });
+    return {
+        ...report,
+        candidates,
+        totals: {
+            ...report.totals,
+            persisted_review_fact_count: candidates.reduce(
+                (sum, candidate) => sum + (candidate.persisted_review_facts?.length ?? 0),
+                0,
+            ),
+        },
     };
 }
 
@@ -1458,6 +1527,7 @@ export function renderWorkflowCandidateReportText(report: WorkflowCandidateRepor
         ...(report.query.search ? [`search: ${report.query.search}`] : []),
         `task-like mode/count: ${report.query.task_like}/${report.totals.task_like_count}`,
         `wrapper-like evidence: ${report.totals.wrapper_like_count}`,
+        `persisted review facts: ${report.totals.persisted_review_fact_count}`,
         ...(report.review ? [
             `reviewed/pending: ${report.review.reviewed_candidate_count}/${report.review.pending_candidate_count}`,
             `review issues: invalid=${report.review.invalid_verdict_count} missing_rationale=${report.review.missing_rationale_count} unknown=${report.review.unknown_candidate_count}`,
@@ -1476,6 +1546,14 @@ export function renderWorkflowCandidateReportText(report: WorkflowCandidateRepor
         lines.push(`- ${candidate.score} ${candidate.label} -> ${candidate.proposed_action} support=${candidate.support_count} evidence=${candidate.evidence_count} avg_conf=${candidate.average_confidence}`);
         if (candidate.review) {
             lines.push(`  review: ${candidate.review.verdict}${candidate.review.rationale ? ` - ${candidate.review.rationale}` : ""}`);
+        }
+        for (const fact of candidate.persisted_review_facts ?? []) {
+            lines.push(
+                `  persisted review: ${fact.predicate ?? "unknown"}${fact.topic ? ` topic=${fact.topic}` : ""}${fact.rationale ? ` - ${fact.rationale}` : ""}`,
+            );
+            for (const source of fact.helper_source_fixture_ids) {
+                lines.push(`    helper source fixture: ${source}`);
+            }
         }
         for (const example of candidate.examples) {
             const turn = typeof example.turn === "string" ? example.turn : "unknown-turn";
@@ -2957,6 +3035,7 @@ export function renderWorkflowCandidateBriefMarkdown(report: WorkflowCandidateRe
             `- Evidence facts: \`${candidate.evidence_count}\``,
             `- Average confidence: \`${candidate.average_confidence}\``,
             `- Task-like evidence: \`${candidate.task_like_count}\``,
+            `- Persisted review facts: \`${candidate.persisted_review_facts?.length ?? 0}\``,
             `- Verdict: \`pending\``,
             "- Rationale: _pending_",
             "",
@@ -2967,6 +3046,18 @@ export function renderWorkflowCandidateBriefMarkdown(report: WorkflowCandidateRe
             "Examples:",
             "",
         );
+        for (const fact of candidate.persisted_review_facts ?? []) {
+            lines.push(
+                "- Persisted review:",
+                `  - Predicate: \`${fact.predicate ?? "unknown"}\``,
+                `  - Topic: \`${fact.topic ?? "unknown"}\``,
+                `  - Rationale: ${fact.rationale ?? "_none_"}`,
+            );
+            for (const source of fact.helper_source_fixture_ids) {
+                lines.push(`  - Helper source fixture: \`${source}\``);
+            }
+        }
+        if ((candidate.persisted_review_facts?.length ?? 0) > 0) lines.push("");
         for (const example of candidate.examples) {
             lines.push(
                 `- Turn: \`${typeof example.turn === "string" ? example.turn : "unknown-turn"}\``,
@@ -3429,6 +3520,19 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
             ...(input.search === undefined ? {} : { search: input.search }),
             taskLike: input.taskLike,
         });
+        if (input.includeReviewFacts && report.candidates.length > 0) {
+            const candidateIds = report.candidates.map((candidate) => candidate.group_id);
+            const persistedReviewRows = yield* db.query<[WorkflowCandidateTopicHarnessGraphFactRow[]]>(`
+                SELECT graph_id, subject, predicate, object, value_json, properties_json, type::string(updated_at) AS updated_at
+                FROM classifier_graph_fact
+                WHERE kind = "workflow_topic_candidate_review"
+                  AND source_kind = "workflow_topic_candidate_review"
+                  AND object IN [${candidateIds.map(surrealString).join(", ")}]
+                ORDER BY updated_at DESC
+                LIMIT ${Math.max(1, input.limit * 3)};
+            `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+            report = attachWorkflowCandidatePersistedReviewFacts(report, persistedReviewRows?.[0] ?? []);
+        }
         if (input.syncBrief) {
             report = syncWorkflowCandidateReportFromBrief(
                 report,
