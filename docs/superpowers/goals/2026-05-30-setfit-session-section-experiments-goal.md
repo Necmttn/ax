@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E413 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-query-no-match-e413.json`
+- Index continuation: E414 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-can-execute-no-match-e414.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-query-match-e413.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-can-execute-match-e414.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,49 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E414 - Expose Suggested Query Repair Verification Executability
+
+Question:
+- E413 gives verification its own query, but can services decide whether the
+  verification command is executable without interpreting status, command kind,
+  or argv length?
+
+Implementation:
+- Added `repair_verification_can_execute` to `query_suggestion`.
+- Executable lifecycle graph-query repairs now report `true`.
+- No-op suggestions report `false`.
+- Text graph-health output now renders `query suggestion repair verification
+  can execute`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-can-execute-no-match-e414.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-can-execute-match-e414.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-can-execute-no-match-e414.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_verification_can_execute=true`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.repair_verification_can_execute=false`.
+- Text output renders `query suggestion repair verification can execute: true`.
+
+Decision:
+- Services can now branch on a direct verification executability boolean while
+  still retaining verification status, action, command kind, argv, query, and
+  expected outcomes.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E414 no-match report has `repair_verification_can_execute=true`.
+- E414 match report has `repair_verification_can_execute=false`.
+- E414 text output includes the repair verification can-execute line.
 
 ## E413 - Expose Suggested Query Repair Verification Query
 

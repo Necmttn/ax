@@ -337,6 +337,9 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
     const querySuggestionRepairVerificationStatus = report.query_suggestion?.repair_verification_status ?? "none";
     const querySuggestionRepairVerificationNextAction = report.query_suggestion?.repair_verification_next_action ?? "none";
     const querySuggestionRepairVerificationRemediation = report.query_suggestion?.repair_verification_remediation ?? "none";
+    const querySuggestionRepairVerificationCanExecute = report.query_suggestion === undefined
+        ? "none"
+        : String(report.query_suggestion.repair_verification_can_execute);
     const querySuggestionRepairVerificationCommandKind = report.query_suggestion?.repair_verification_command_kind ?? "none";
     const querySuggestionRepairVerificationExpectedQueryMatch = report.query_suggestion?.repair_verification_expected_query_match_status ?? "none";
     const querySuggestionRepairVerificationExpectedResultCount = report.query_suggestion?.repair_verification_expected_result_count ?? "none";
@@ -408,6 +411,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `query suggestion repair verification status: ${querySuggestionRepairVerificationStatus}`,
         `query suggestion repair verification next action: ${querySuggestionRepairVerificationNextAction}`,
         `query suggestion repair verification remediation: ${querySuggestionRepairVerificationRemediation}`,
+        `query suggestion repair verification can execute: ${querySuggestionRepairVerificationCanExecute}`,
         `query suggestion repair verification command kind: ${querySuggestionRepairVerificationCommandKind}`,
         `query suggestion repair verification expected query match: ${querySuggestionRepairVerificationExpectedQueryMatch}`,
         `query suggestion repair verification expected result count: ${querySuggestionRepairVerificationExpectedResultCount}`,
