@@ -616,7 +616,12 @@ export interface WorkflowCandidateReviewCoverageBriefContext {
     readonly coverageReviewPack?: string;
     readonly coverageReviewBrief?: string;
     readonly outputPath?: string;
+    readonly commandMode?: WorkflowCandidateReviewCoverageBriefCommandMode;
 }
+
+export type WorkflowCandidateReviewCoverageBriefCommandMode =
+    | "review_coverage"
+    | "guidance_decision_batch";
 
 export interface WorkflowCandidateTopicClassifierFixtureRow {
     readonly id: string;
@@ -3708,13 +3713,20 @@ const siblingOutputPath = (outputPath: string, suffix: string): string => {
     return `${outputPath}${suffix}.json`;
 };
 
+const workflowCandidateReviewCoverageBriefCommandFlag = (
+    commandMode: WorkflowCandidateReviewCoverageBriefCommandMode,
+): string => commandMode === "guidance_decision_batch"
+    ? "--guidance-decision-batch"
+    : "--review-coverage";
+
 const workflowCandidateReviewCoverageRecheckCommand = (input: {
     readonly sourceKind?: string;
     readonly limit?: number;
     readonly outputPath?: string;
+    readonly commandMode?: WorkflowCandidateReviewCoverageBriefCommandMode;
 }): string => [
     "bun src/cli/index.ts classifiers workflow-candidates",
-    "--review-coverage",
+    workflowCandidateReviewCoverageBriefCommandFlag(input.commandMode ?? "review_coverage"),
     `--source-kind=${input.sourceKind ?? "hybrid_window_classifier_projection"}`,
     `--limit=${input.limit ?? 10}`,
     `--out=${postApplyOutputPath(input.outputPath ?? ".ax/experiments/workflow-candidate-review-coverage.json")}`,
@@ -3863,6 +3875,9 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
     const reviewIssueStatus = workflowCandidateReviewCoverageReviewIssueStatus(reviewIssueRows);
     const reviewIssueNextAction = workflowCandidateReviewCoverageReviewIssueNextAction(reviewIssueStatus);
     const sourceKind = context.sourceKind ?? "hybrid_window_classifier_projection";
+    const commandMode = context.commandMode ?? "review_coverage";
+    const commandFlag = workflowCandidateReviewCoverageBriefCommandFlag(commandMode);
+    const commandNoun = commandMode === "guidance_decision_batch" ? "batch" : "coverage";
     const readinessOutputPath = context.outputPath ?? ".ax/experiments/workflow-candidate-review-coverage-reviewed.json";
     const syncedBriefPath = context.coverageReviewBrief ?? ".ax/experiments/workflow-candidate-review-coverage-reviewed.md";
     const reviewFactsPath = siblingOutputPath(readinessOutputPath, "-review-facts");
@@ -3914,6 +3929,7 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
         sourceKind,
         ...(context.limit === undefined ? {} : { limit: context.limit }),
         outputPath: readinessOutputPath,
+        commandMode,
     });
     const nextCommandArgv = reviewPackPath === undefined
         ? undefined
@@ -3922,7 +3938,7 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
             "src/cli/index.ts",
             "classifiers",
             "workflow-candidates",
-            "--review-coverage",
+            commandFlag,
             `--source-kind=${sourceKind}`,
             `--coverage-review-pack=${reviewPackPath}`,
             context.coverageReviewBrief === undefined ? undefined : `--sync-coverage-review-brief=${context.coverageReviewBrief}`,
@@ -3935,7 +3951,7 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
         ? undefined
         : [
             "bun src/cli/index.ts classifiers workflow-candidates",
-            "--review-coverage",
+            commandFlag,
             `--source-kind=${sourceKind}`,
             `--coverage-review-pack=${reviewPackPath}`,
             context.coverageReviewBrief === undefined ? undefined : `--sync-coverage-review-brief=${context.coverageReviewBrief}`,
@@ -3947,7 +3963,7 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
         ? undefined
         : [
             "bun src/cli/index.ts classifiers workflow-candidates",
-            "--review-coverage",
+            commandFlag,
             `--source-kind=${sourceKind}`,
             `--coverage-review-pack=${reviewPackPath}`,
             context.coverageReviewBrief === undefined ? undefined : `--sync-coverage-review-brief=${context.coverageReviewBrief}`,
@@ -3963,7 +3979,7 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
             "src/cli/index.ts",
             "classifiers",
             "workflow-candidates",
-            "--review-coverage",
+            commandFlag,
             `--source-kind=${sourceKind}`,
             `--coverage-review-pack=${reviewPackPath}`,
             context.coverageReviewBrief === undefined ? undefined : `--sync-coverage-review-brief=${context.coverageReviewBrief}`,
@@ -3984,7 +4000,7 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
             "src/cli/index.ts",
             "classifiers",
             "workflow-candidates",
-            "--review-coverage",
+            commandFlag,
             `--source-kind=${sourceKind}`,
             `--coverage-review-pack=${reviewPackPath}`,
             context.coverageReviewBrief === undefined ? undefined : `--sync-coverage-review-brief=${context.coverageReviewBrief}`,
@@ -4160,7 +4176,7 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
             provenanceStampCommand ?? "",
             "```",
             "",
-            "After applying, re-run coverage to verify the gap closed:",
+            `After applying, re-run ${commandNoun} to verify the gap closed:`,
             "",
             "```sh",
             postApplyRecheckCommand,
@@ -6485,6 +6501,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                         limit: input.limit,
                         coverageFixturePack,
                         coverageReviewBrief: input.coverageReviewBrief,
+                        commandMode: "guidance_decision_batch",
                         ...(input.out === undefined ? {} : { outputPath: input.out }),
                     }), "utf8");
                 }
@@ -6547,6 +6564,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                         limit: input.limit,
                         coverageReviewPack: input.coverageReviewPack,
                         coverageReviewBrief: input.coverageReviewBrief,
+                        commandMode: "guidance_decision_batch",
                         ...(input.out === undefined ? {} : { outputPath: input.out }),
                     }), "utf8");
                 }

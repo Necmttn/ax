@@ -1982,6 +1982,37 @@ describe("classifiers workflow-candidates", () => {
         });
     });
 
+    test("renders batch review handoff commands when requested", () => {
+        const rows = parseWorkflowCandidateFixtureRowsJsonl(JSON.stringify({
+            id: "workflow-candidate-review-coverage/correction_or_rejection_signal/a",
+            suite: "workflow-candidate-review-coverage",
+            name: "coverage-gap-correction_or_rejection_signal-01",
+            label: "correction_or_rejection_signal",
+            target: "unknown",
+            text: "USER:\nthis needs previous context\n\nPREVIOUS_ASSISTANT:\n",
+            source_group: "workflow-candidate",
+            review_status: "pending",
+            topic: "review-coverage",
+            candidate_id: "classifier_candidate_group:hybrid-window/correction_or_rejection_signal",
+            candidate_label: "correction_or_rejection_signal",
+            proposed_action: "add_context_guardrail",
+        }));
+        const brief = renderWorkflowCandidateReviewCoverageBriefMarkdown(rows, {
+            sourceKind: "hybrid_window_classifier_projection",
+            coverageFixturePack: ".ax/experiments/pending-review.jsonl",
+            coverageReviewBrief: ".ax/experiments/pending-review.md",
+            outputPath: ".ax/experiments/guidance-batch.json",
+            commandMode: "guidance_decision_batch",
+        });
+
+        expect(brief).toContain("bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/pending-review.jsonl --sync-coverage-review-brief=.ax/experiments/pending-review.md --coverage-review-brief=.ax/experiments/pending-review.md --out=.ax/experiments/guidance-batch.json --json");
+        expect(brief).toContain("bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/pending-review.jsonl --sync-coverage-review-brief=.ax/experiments/pending-review.md --review-facts=.ax/experiments/guidance-batch-review-facts.json --review-write-plan=.ax/experiments/guidance-batch-review-write-plan.json --out=.ax/experiments/guidance-batch.json --json");
+        expect(brief).toContain("bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/pending-review.jsonl --sync-coverage-review-brief=.ax/experiments/pending-review.md --coverage-review-brief=.ax/experiments/pending-review.md --review-facts=.ax/experiments/guidance-batch-review-facts.json --review-write-plan=.ax/experiments/guidance-batch-review-write-plan.json --apply-review-facts --require-review-provenance --require-review-handoff --out=.ax/experiments/guidance-batch.json --json");
+        expect(brief).toContain("After applying, re-run batch to verify the gap closed:");
+        expect(brief).toContain("bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 --out=.ax/experiments/guidance-batch-post-apply.json --json");
+        expect(brief).not.toContain(" --review-coverage ");
+    });
+
     test("reports invalid and unknown coverage review brief sync entries", () => {
         const rows = parseWorkflowCandidateFixtureRowsJsonl(JSON.stringify({
             id: "workflow-candidate-review-coverage/verification_or_recovery_signal/a",
