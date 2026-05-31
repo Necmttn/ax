@@ -9,6 +9,8 @@ from typing import Any
 
 TARGET_EXAMPLES_PER_LABEL = 12
 WEAK_F1_THRESHOLD = 0.50
+ROBUST_MACRO_F1_THRESHOLD = 0.75
+ROBUST_NONE_FALSE_POSITIVE_MAX = 0.10
 
 
 def parse_args() -> argparse.Namespace:
@@ -171,6 +173,14 @@ def family_counts(misses: list[dict[str, Any]]) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
+def source_group_counts(misses: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for miss in misses:
+        source_group = str(miss.get("source_group") or "unknown")
+        counts[source_group] = counts.get(source_group, 0) + 1
+    return dict(sorted(counts.items()))
+
+
 def all_seed_calibrated_misses(
     runs: list[dict[str, Any]],
     fixture_index: dict[str, dict[str, Any]],
@@ -225,6 +235,48 @@ def aggregate_none_false_positives(misses: list[dict[str, Any]]) -> list[dict[st
     return sorted(rows, key=lambda item: (-int(item["hit_count"]), -float(item["max_confidence"]), item["id"]))
 
 
+def aggregate_repeated_misses(misses: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_id: dict[str, dict[str, Any]] = {}
+    for miss in misses:
+        row_id = str(miss["id"])
+        entry = by_id.setdefault(row_id, {
+            "id": row_id,
+            "actual": miss.get("actual"),
+            "predicted_labels": [],
+            "families": [],
+            "seeds": [],
+            "hit_count": 0,
+            "max_confidence": 0.0,
+            "fine_label": miss.get("fine_label"),
+            "target": miss.get("target"),
+            "source_group": miss.get("source_group"),
+            "boundary_group": miss.get("boundary_group"),
+            "pair_group": miss.get("pair_group"),
+            "text_excerpt": miss.get("text_excerpt"),
+        })
+        entry["hit_count"] += 1
+        if miss.get("seed") not in entry["seeds"]:
+            entry["seeds"].append(miss.get("seed"))
+        if miss.get("predicted") not in entry["predicted_labels"]:
+            entry["predicted_labels"].append(miss.get("predicted"))
+        if miss.get("family") not in entry["families"]:
+            entry["families"].append(miss.get("family"))
+        entry["max_confidence"] = max(float(entry["max_confidence"]), float(miss.get("confidence") or 0.0))
+
+    rows = []
+    for entry in by_id.values():
+        if int(entry["hit_count"]) < 2:
+            continue
+        rows.append({
+            **entry,
+            "seeds": sorted(entry["seeds"]),
+            "predicted_labels": sorted(entry["predicted_labels"]),
+            "families": sorted(entry["families"]),
+            "max_confidence": round(float(entry["max_confidence"]), 4),
+        })
+    return sorted(rows, key=lambda item: (-int(item["hit_count"]), -float(item["max_confidence"]), item["id"]))
+
+
 def run_summary(run: dict[str, Any]) -> dict[str, Any]:
     summary = {
         "seed": run.get("seed"),
@@ -252,9 +304,52 @@ def worst_run(runs: list[dict[str, Any]]) -> dict[str, Any]:
     )
 
 
+def robust_gate_status(report: dict[str, Any]) -> dict[str, Any]:
+    summary = report.get("calibrated_summary") or report.get("summary") or {}
+    macro_f1_min = float(summary.get("macro_f1_min") or 0.0)
+    none_fp_max = float(summary.get("none_false_positive_rate_max") or 0.0)
+    source_failures = report.get("failures") or []
+    checks = {
+        "source_decision_robust": report.get("decision") == "robust_enough",
+        "no_source_failures": len(source_failures) == 0,
+        "macro_f1_min_at_or_above_threshold": macro_f1_min >= ROBUST_MACRO_F1_THRESHOLD,
+        "none_false_positive_max_below_threshold": none_fp_max < ROBUST_NONE_FALSE_POSITIVE_MAX,
+    }
+    return {
+        "thresholds": {
+            "macro_f1_min": ROBUST_MACRO_F1_THRESHOLD,
+            "none_false_positive_rate_max": ROBUST_NONE_FALSE_POSITIVE_MAX,
+        },
+        "observed": {
+            "source_decision": report.get("decision"),
+            "source_failure_count": len(source_failures),
+            "macro_f1_min": round(macro_f1_min, 4),
+            "none_false_positive_rate_max": round(none_fp_max, 4),
+        },
+        "checks": checks,
+        "passed": all(checks.values()),
+    }
+
+
+def robustness_decision(gate: dict[str, Any], all_none_false_positives: list[dict[str, Any]]) -> str:
+    if gate.get("passed") and not all_none_false_positives:
+        return "ready_for_fixture_promotion_review"
+    if gate.get("passed"):
+        return "robust_with_residual_none_false_positive_review"
+    if all_none_false_positives:
+        return "needs_none_safety_review"
+    return "review_model_failures"
+
+
 def robustness_recommendations(report: dict[str, Any], calibrated_misses: list[dict[str, Any]]) -> list[str]:
     recommendations = []
     calibrated_summary = report.get("calibrated_summary") or report.get("summary") or {}
+    gate = robust_gate_status(report)
+    if gate["passed"]:
+        recommendations.append("Do not run another broad hard-negative mining pass yet; inspect residual repeated confusions first.")
+        recommendations.append("Keep canonical fixture promotion review-gated even when the experiment robustness gate passes.")
+    else:
+        recommendations.append("Keep deterministic classifiers as the production default until repeated-split gates pass.")
     if float(calibrated_summary.get("none_false_positive_rate_max") or 0.0) >= 0.10:
         recommendations.append("Add or relabel hard negatives around approval-to-start messages before more threshold tuning.")
     if float(calibrated_summary.get("macro_f1_min") or 0.0) < 0.70:
@@ -262,8 +357,7 @@ def robustness_recommendations(report: dict[str, Any], calibrated_misses: list[d
     if any(miss["family"] == "approval_boundary" for miss in calibrated_misses):
         recommendations.append("Separate lightweight approval from verification/recovery in the coarse label family or add approval contrast examples.")
     if any(miss["family"] == "missed_signal" for miss in calibrated_misses):
-        recommendations.append("Add open-source/package and review-contract direction examples that should not abstain to none.")
-    recommendations.append("Keep deterministic classifiers as the production default until repeated-split gates pass.")
+        recommendations.append("Review missed-signal examples before promotion; add narrow contrast fixtures only if the same miss repeats across seeds.")
     return recommendations
 
 
@@ -275,6 +369,7 @@ def analyze_robustness(report: dict[str, Any], fixture_index: dict[str, dict[str
     calibrated_misses = enrich_misses((selected.get("calibrated") or {}).get("examples") or [], fixture_index, confidences)
     all_calibrated_misses = all_seed_calibrated_misses(runs, fixture_index)
     all_none_false_positives = aggregate_none_false_positives(all_calibrated_misses)
+    gate = robust_gate_status(report)
     high_confidence_misses = [
         miss
         for miss in calibrated_misses or raw_misses
@@ -282,7 +377,8 @@ def analyze_robustness(report: dict[str, Any], fixture_index: dict[str, dict[str
     ]
     return {
         "schema": "ax.setfit_robustness_failure_analysis.v1",
-        "decision": "needs_none_safety_review" if all_none_false_positives else "review_model_failures",
+        "decision": robustness_decision(gate, all_none_false_positives),
+        "gate": gate,
         "source_report": {
             "model": report.get("model"),
             "label_mode": report.get("label_mode"),
@@ -303,6 +399,9 @@ def analyze_robustness(report: dict[str, Any], fixture_index: dict[str, dict[str
         "calibrated_pair_counts": pair_counts(calibrated_misses),
         "calibrated_family_counts": family_counts(calibrated_misses),
         "all_seed_calibrated_family_counts": family_counts(all_calibrated_misses),
+        "all_seed_calibrated_source_group_counts": source_group_counts(all_calibrated_misses),
+        "all_seed_calibrated_pair_counts": pair_counts(all_calibrated_misses),
+        "all_seed_repeated_misses": aggregate_repeated_misses(all_calibrated_misses),
         "all_seed_none_false_positive_count": sum(int(item["hit_count"]) for item in all_none_false_positives),
         "all_seed_unique_none_false_positive_count": len(all_none_false_positives),
         "all_seed_none_false_positives": all_none_false_positives,

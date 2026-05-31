@@ -49,6 +49,10 @@ describe("classifier package manifest", () => {
         expect(manifest.operations?.find((operation) => operation.id === "workflow-candidate-proposal-review")?.command).toContain("classifiers:workflow-candidate-proposal-review");
         expect(manifest.operations?.find((operation) => operation.id === "workflow-candidate-proposal-promote-drafts")?.command).toContain("classifiers:workflow-candidate-proposal-promote");
         expect(manifest.operations?.find((operation) => operation.id === "workflow-candidate-proposal-ready-smoke")?.command).toContain("classifiers:workflow-candidate-proposal-promote-smoke");
+        expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-fixture-metadata")?.command).toContain("classifiers:fixture-metadata");
+        expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-fixture-split-audit")?.kind).toBe("eval");
+        expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-fixture-setfit-robustness")?.command).toContain("classifiers:setfit-robustness");
+        expect(manifest.operations?.find((operation) => operation.id === "embedding-helper-fixture-failure-analysis")?.command).toContain("classifiers:failure-analysis");
         expect(manifest.operations?.find((operation) => operation.id === "graph-health-summary")?.kind).toBe("status");
         expect(manifest.operations?.find((operation) => operation.id === "graph-health-guarded")?.command).toContain("--graph-mode=guarded");
         expect(manifest.operations?.find((operation) => operation.id === "classifier-lifecycle-status")?.outputs).toContain(".ax/experiments/classifiers-lifecycle-current.json");
@@ -84,6 +88,10 @@ describe("classifier package manifest", () => {
         const workflowCandidateProposalReview = requireClassifierPackageOperation(manifest, "workflow-candidate-proposal-review");
         const workflowCandidateProposalPromote = requireClassifierPackageOperation(manifest, "workflow-candidate-proposal-promote-drafts");
         const workflowCandidateProposalReadySmoke = requireClassifierPackageOperation(manifest, "workflow-candidate-proposal-ready-smoke");
+        const embeddingHelperMetadata = requireClassifierPackageOperation(manifest, "embedding-helper-fixture-metadata");
+        const embeddingHelperSplitAudit = requireClassifierPackageOperation(manifest, "embedding-helper-fixture-split-audit");
+        const embeddingHelperSetFitRobustness = requireClassifierPackageOperation(manifest, "embedding-helper-fixture-setfit-robustness");
+        const embeddingHelperFailureAnalysis = requireClassifierPackageOperation(manifest, "embedding-helper-fixture-failure-analysis");
         const graphHealth = requireClassifierPackageOperation(manifest, "graph-health-changed-artifacts");
         const lifecycle = requireClassifierPackageOperation(manifest, "classifier-lifecycle-status");
         const batchEval = requireClassifierPackageOperation(manifest, "focused-batch-eval");
@@ -119,6 +127,10 @@ describe("classifier package manifest", () => {
         expect(workflowCandidateProposalPromote.outputs).toContain(".ax/tasks/workflow-candidate-promotion-drafts");
         expect(workflowCandidateProposalReadySmoke.inputs).toEqual([]);
         expect(workflowCandidateProposalReadySmoke.outputs).toContain(".ax/experiments/workflow-candidate-proposal-ready-smoke-drafts");
+        expect(embeddingHelperMetadata.outputs).toContain(".ax/experiments/chunks-with-embedding-helper-fixture-metadata-current.jsonl");
+        expect(embeddingHelperSplitAudit.command).toContain("--group-field=pair_group");
+        expect(embeddingHelperSetFitRobustness.outputs).toContain(".ax/experiments/setfit-robustness-embedding-helper-fixtures-current.json");
+        expect(embeddingHelperFailureAnalysis.outputs).toContain(".ax/experiments/setfit-failure-analysis-embedding-helper-fixtures-current.json");
         expect(graphHealth.outputs).toContain(".ax/experiments/classifier-package-execution-graph-health-changed-current.json");
         expect(lifecycle.command).toContain("classifiers lifecycle");
         expect(batchEval.outputs).toContain(".ax/experiments/blind-review-batch-current-eval-report.json");

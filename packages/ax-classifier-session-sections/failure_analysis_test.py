@@ -142,14 +142,16 @@ class FailureAnalysisTest(unittest.TestCase):
 
         self.assertEqual(analysis["schema"], "ax.setfit_robustness_failure_analysis.v1")
         self.assertEqual(analysis["decision"], "needs_none_safety_review")
+        self.assertFalse(analysis["gate"]["passed"])
         self.assertEqual(analysis["worst_seed"], 7)
         self.assertEqual(analysis["calibrated_family_counts"], {"none_false_positive": 1})
         self.assertEqual(analysis["all_seed_calibrated_family_counts"], {"none_false_positive": 1})
+        self.assertEqual(analysis["all_seed_calibrated_source_group_counts"], {"unknown": 1})
         self.assertEqual(analysis["all_seed_none_false_positive_count"], 1)
         self.assertEqual(analysis["all_seed_unique_none_false_positive_count"], 1)
         self.assertEqual(analysis["all_seed_none_false_positives"][0]["seeds"], [7])
         self.assertEqual(analysis["high_confidence_misses"][0]["id"], "none-case")
-        self.assertIn("Keep deterministic classifiers", analysis["recommended_next_actions"][-1])
+        self.assertIn("Keep deterministic classifiers", analysis["recommended_next_actions"][0])
 
     def test_aggregate_none_false_positives_counts_repeated_seed_hits(self) -> None:
         rows = module.aggregate_none_false_positives([
@@ -205,6 +207,116 @@ class FailureAnalysisTest(unittest.TestCase):
                 "text_excerpt": "USER: what next?",
             }
         ])
+
+    def test_analyze_robustness_reports_gate_pass_with_residual_review(self) -> None:
+        report = {
+            "model": "test-model",
+            "label_mode": "coarse",
+            "fixtures": 4,
+            "epochs": 1,
+            "batch_size": 8,
+            "calibration_threshold": 0.4,
+            "decision": "robust_enough",
+            "failures": [],
+            "summary": {"macro_f1_min": 0.76, "none_false_positive_rate_max": 0.05},
+            "calibrated_summary": {"macro_f1_min": 0.76, "none_false_positive_rate_max": 0.05},
+            "runs": [
+                {
+                    "seed": 7,
+                    "accuracy": 0.8,
+                    "macro_f1": 0.76,
+                    "none_false_positive_rate": 0.05,
+                    "examples": [
+                        {"id": "none-case", "actual": "none", "predicted": "environment_or_preference_signal"},
+                        {"id": "helper-case", "actual": "none", "predicted": "none"},
+                    ],
+                    "raw_predictions_with_confidence": [
+                        {"id": "none-case", "actual": "none", "predicted": "environment_or_preference_signal", "confidence": 0.47},
+                        {"id": "helper-case", "actual": "none", "predicted": "none", "confidence": 0.91},
+                    ],
+                    "calibrated": {
+                        "accuracy": 0.8,
+                        "macro_f1": 0.76,
+                        "none_false_positive_rate": 0.05,
+                        "examples": [
+                            {"id": "none-case", "actual": "none", "predicted": "environment_or_preference_signal"},
+                            {"id": "helper-case", "actual": "none", "predicted": "none"},
+                        ],
+                    },
+                },
+                {
+                    "seed": 13,
+                    "accuracy": 0.8,
+                    "macro_f1": 0.77,
+                    "none_false_positive_rate": 0.05,
+                    "examples": [
+                        {"id": "none-case", "actual": "none", "predicted": "environment_or_preference_signal"},
+                    ],
+                    "raw_predictions_with_confidence": [
+                        {"id": "none-case", "actual": "none", "predicted": "environment_or_preference_signal", "confidence": 0.49},
+                    ],
+                    "calibrated": {
+                        "accuracy": 0.8,
+                        "macro_f1": 0.77,
+                        "none_false_positive_rate": 0.05,
+                        "examples": [
+                            {"id": "none-case", "actual": "none", "predicted": "environment_or_preference_signal"},
+                        ],
+                    },
+                },
+            ],
+        }
+        analysis = module.analyze_robustness(report, {
+            "none-case": {
+                "label": "none",
+                "target": "none",
+                "source_group": "session-section-chunks",
+                "boundary_group": "none_model_question",
+                "pair_group": "none_model_question::none",
+                "text": "USER:\nhow big is the model?",
+            },
+            "helper-case": {
+                "label": "none",
+                "target": "none",
+                "source_group": "embedding-helper-hard-negative",
+                "text": "USER:\nwhat was the task?",
+            },
+        })
+
+        self.assertTrue(analysis["gate"]["passed"])
+        self.assertEqual(analysis["decision"], "robust_with_residual_none_false_positive_review")
+        self.assertEqual(analysis["all_seed_calibrated_source_group_counts"], {"session-section-chunks": 2})
+        self.assertEqual(analysis["all_seed_repeated_misses"][0]["id"], "none-case")
+        self.assertIn("Do not run another broad hard-negative mining pass yet", analysis["recommended_next_actions"][0])
+
+    def test_analyze_robustness_reports_ready_when_gate_passes_without_none_fp(self) -> None:
+        report = {
+            "decision": "robust_enough",
+            "failures": [],
+            "summary": {"macro_f1_min": 0.8, "none_false_positive_rate_max": 0.0},
+            "calibrated_summary": {"macro_f1_min": 0.8, "none_false_positive_rate_max": 0.0},
+            "runs": [
+                {
+                    "seed": 7,
+                    "accuracy": 1.0,
+                    "macro_f1": 1.0,
+                    "none_false_positive_rate": 0.0,
+                    "examples": [{"id": "ok", "actual": "none", "predicted": "none"}],
+                    "raw_predictions_with_confidence": [],
+                    "calibrated": {
+                        "accuracy": 1.0,
+                        "macro_f1": 1.0,
+                        "none_false_positive_rate": 0.0,
+                        "examples": [{"id": "ok", "actual": "none", "predicted": "none"}],
+                    },
+                }
+            ],
+        }
+
+        analysis = module.analyze_robustness(report, {"ok": {"label": "none", "text": "USER:\nok"}})
+
+        self.assertEqual(analysis["decision"], "ready_for_fixture_promotion_review")
+        self.assertEqual(analysis["all_seed_repeated_misses"], [])
 
 
 if __name__ == "__main__":

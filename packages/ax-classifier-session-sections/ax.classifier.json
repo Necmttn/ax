@@ -167,6 +167,55 @@
       ]
     },
     {
+      "id": "embedding-helper-fixture-metadata",
+      "kind": "status",
+      "description": "Enrich the embedding-helper augmented experiment fixture set with source, boundary, and pair-group metadata for split-safe model experiments.",
+      "command": "bun run classifiers:fixture-metadata -- --fixtures=.ax/experiments/chunks-with-embedding-helper-fixtures-current.jsonl --out=.ax/experiments/chunks-with-embedding-helper-fixture-metadata-current.jsonl",
+      "inputs": [
+        ".ax/experiments/chunks-with-embedding-helper-fixtures-current.jsonl"
+      ],
+      "outputs": [
+        ".ax/experiments/chunks-with-embedding-helper-fixture-metadata-current.jsonl"
+      ]
+    },
+    {
+      "id": "embedding-helper-fixture-split-audit",
+      "kind": "eval",
+      "description": "Audit embedding-helper augmented fixture metadata for grouped split viability and train/test leakage before model evaluation.",
+      "command": "bun run classifiers:split-audit -- --fixtures=.ax/experiments/chunks-with-embedding-helper-fixture-metadata-current.jsonl --group-field=pair_group --pair-field=pair_group --label-mode=coarse --seeds=7,13,42 --out=.ax/experiments/embedding-helper-fixture-split-audit-current.json --json",
+      "inputs": [
+        ".ax/experiments/chunks-with-embedding-helper-fixture-metadata-current.jsonl"
+      ],
+      "outputs": [
+        ".ax/experiments/embedding-helper-fixture-split-audit-current.json"
+      ]
+    },
+    {
+      "id": "embedding-helper-fixture-setfit-robustness",
+      "kind": "eval",
+      "description": "Run SetFit robustness on the embedding-helper augmented experiment fixture set using split-safe pair groups.",
+      "command": "bun run classifiers:setfit-robustness -- --fixtures=.ax/experiments/chunks-with-embedding-helper-fixture-metadata-current.jsonl --group-field=pair_group --label-mode=coarse --seeds=7,13,42 --epochs=1 --batch-size=8 --calibration-threshold=0.4 --out=.ax/experiments/setfit-robustness-embedding-helper-fixtures-current.json --json",
+      "inputs": [
+        ".ax/experiments/chunks-with-embedding-helper-fixture-metadata-current.jsonl"
+      ],
+      "outputs": [
+        ".ax/experiments/setfit-robustness-embedding-helper-fixtures-current.json"
+      ]
+    },
+    {
+      "id": "embedding-helper-fixture-failure-analysis",
+      "kind": "status",
+      "description": "Analyze embedding-helper augmented SetFit robustness confusions and identify whether residual misses block fixture promotion review.",
+      "command": "bun run classifiers:failure-analysis -- --robustness=.ax/experiments/setfit-robustness-embedding-helper-fixtures-current.json --fixtures=.ax/experiments/chunks-with-embedding-helper-fixture-metadata-current.jsonl --out=.ax/experiments/setfit-failure-analysis-embedding-helper-fixtures-current.json --json",
+      "inputs": [
+        ".ax/experiments/setfit-robustness-embedding-helper-fixtures-current.json",
+        ".ax/experiments/chunks-with-embedding-helper-fixture-metadata-current.jsonl"
+      ],
+      "outputs": [
+        ".ax/experiments/setfit-failure-analysis-embedding-helper-fixtures-current.json"
+      ]
+    },
+    {
       "id": "embedding-helper-export-preview",
       "kind": "review",
       "description": "Preview accepted embedding-helper hard negatives and dedupe hints while keeping pending reviews non-appendable.",

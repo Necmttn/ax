@@ -144,6 +144,10 @@ bun run classifiers:embedding-helper-review-batch -- --mode=sync --dry-run --rev
 bun run classifiers:embedding-helper-review-status -- --review=.ax/experiments/embedding-helper-review-current.json --brief=.ax/experiments/embedding-helper-review-current.md --out=.ax/experiments/embedding-helper-review-status-current.json --mode=sync
 bun run classifiers:embedding-helper-export -- --review=.ax/experiments/embedding-helper-review-current.json --status=.ax/experiments/embedding-helper-review-status-current.json --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --out=.ax/experiments/embedding-helper-fixture-append-current.jsonl --hints=.ax/experiments/embedding-helper-dedupe-hints-current.json --report=.ax/experiments/embedding-helper-export-current-report.json
 bun run classifiers:fixture-append -- --base packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --append .ax/experiments/embedding-helper-fixture-append-current.jsonl --out .ax/experiments/chunks-with-embedding-helper-fixtures-current.jsonl --report .ax/experiments/fixture-append-embedding-helper-current-report.json --json
+bun run classifiers:fixture-metadata -- --fixtures=.ax/experiments/chunks-with-embedding-helper-fixtures-current.jsonl --out=.ax/experiments/chunks-with-embedding-helper-fixture-metadata-current.jsonl
+bun run classifiers:split-audit -- --fixtures=.ax/experiments/chunks-with-embedding-helper-fixture-metadata-current.jsonl --group-field=pair_group --pair-field=pair_group --label-mode=coarse --seeds=7,13,42 --out=.ax/experiments/embedding-helper-fixture-split-audit-current.json --json
+bun run classifiers:setfit-robustness -- --fixtures=.ax/experiments/chunks-with-embedding-helper-fixture-metadata-current.jsonl --group-field=pair_group --label-mode=coarse --seeds=7,13,42 --epochs=1 --batch-size=8 --calibration-threshold=0.4 --out=.ax/experiments/setfit-robustness-embedding-helper-fixtures-current.json --json
+bun run classifiers:failure-analysis -- --robustness=.ax/experiments/setfit-robustness-embedding-helper-fixtures-current.json --fixtures=.ax/experiments/chunks-with-embedding-helper-fixture-metadata-current.jsonl --out=.ax/experiments/setfit-failure-analysis-embedding-helper-fixtures-current.json --json
 bun run classifiers:embedding-helper-export -- --allow-partial-preview --preview-exit-zero --review=.ax/experiments/embedding-helper-review-current.json --status=.ax/experiments/embedding-helper-review-status-current.json --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --out=.ax/experiments/embedding-helper-fixture-preview-current.jsonl --hints=.ax/experiments/embedding-helper-dedupe-preview-current.json --report=.ax/experiments/embedding-helper-export-preview-current-report.json
 bun run classifiers:embedding-helper-graph-projection -- --review=.ax/experiments/embedding-helper-review-current.json --out=.ax/experiments/embedding-helper-graph-projection-current.json --write-plan=.ax/experiments/embedding-helper-graph-write-plan-current.json
 bun run classifiers:relabel-audit -- --robustness=.ax/experiments/setfit-robustness-fixed-fold.json --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --out=.ax/experiments/setfit-relabel-audit.json
@@ -280,6 +284,22 @@ bun src/cli/index.ts classifiers package-operations --operation=workflow-candida
 bun src/cli/index.ts classifiers package-operations --operation=workflow-candidate-proposal-promote-drafts --json
 bun src/cli/index.ts classifiers package-operations --operation=workflow-candidate-proposal-ready-smoke --json
 ```
+
+Embedding-helper fixture operations expose the same reviewed-append to
+model-quality gate for helper-mined hard negatives:
+
+```sh
+bun src/cli/index.ts classifiers package-operations --operation=embedding-helper-fixture-append --json
+bun src/cli/index.ts classifiers package-operations --operation=embedding-helper-fixture-metadata --json
+bun src/cli/index.ts classifiers package-operations --operation=embedding-helper-fixture-split-audit --json
+bun src/cli/index.ts classifiers package-operations --operation=embedding-helper-fixture-setfit-robustness --json
+bun src/cli/index.ts classifiers package-operations --operation=embedding-helper-fixture-failure-analysis --json
+```
+
+Use this path after `embedding-helper-export` is appendable. It keeps canonical
+fixtures untouched while checking whether reviewed helper hard negatives remain
+split-safe and whether residual SetFit confusions require another targeted
+review batch before fixture promotion.
 
 The intended sequence is:
 
