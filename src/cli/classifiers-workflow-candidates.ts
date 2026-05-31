@@ -188,6 +188,8 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly new_candidate_count: number;
     readonly existing_candidate_count: number;
     readonly unknown_candidate_count: number;
+    readonly projected_reviewed_candidate_count: number;
+    readonly projected_unreviewed_candidate_count: number;
     readonly smoke_marker_count: number;
     readonly apply_guard:
         | "ready_to_apply"
@@ -1736,6 +1738,7 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             `coverage review fixtures: ${report.coverage_review.reviewed_fixture_count} reviewed, ${report.coverage_review.pending_fixture_count} pending`,
             `coverage review sync: synced=${report.coverage_review.synced_fixture_count} unknown=${report.coverage_review.unknown_fixture_count}`,
             `coverage review impact: pack_candidates=${report.coverage_review.pack_candidate_count} new=${report.coverage_review.new_candidate_count} existing=${report.coverage_review.existing_candidate_count} unknown=${report.coverage_review.unknown_candidate_count}`,
+            `coverage review projected coverage: reviewed=${report.coverage_review.projected_reviewed_candidate_count} unreviewed=${report.coverage_review.projected_unreviewed_candidate_count}`,
             `coverage review issues: invalid=${report.coverage_review.invalid_fixture_count} missing_rationale=${report.coverage_review.missing_rationale_count} smoke=${report.coverage_review.smoke_marker_count}`,
             `coverage review apply guard: ${report.coverage_review.apply_guard}`,
             `coverage review applied: ${report.coverage_review.applied ? "yes" : "no"}`,
@@ -2919,6 +2922,10 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
             newCandidateCount += 1;
         }
     }
+    const coverageRows = input.coverageRows ?? [];
+    const currentReviewedCandidateCount = coverageRows.filter((row) => row.review_fact_count > 0).length;
+    const projectedReviewedCandidateCount = currentReviewedCandidateCount + newCandidateCount;
+    const projectedUnreviewedCandidateCount = Math.max(0, coverageRows.length - projectedReviewedCandidateCount);
     const smokeMarkerCount = reviewedRows.filter(fixtureRowHasSmokeMarker).length +
         (input.sourcePath.toLowerCase().includes("smoke") ? 1 : 0);
     const applyGuard = invalidRows.length > 0
@@ -2944,6 +2951,8 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         new_candidate_count: newCandidateCount,
         existing_candidate_count: existingCandidateCount,
         unknown_candidate_count: unknownCandidateCount,
+        projected_reviewed_candidate_count: projectedReviewedCandidateCount,
+        projected_unreviewed_candidate_count: projectedUnreviewedCandidateCount,
         smoke_marker_count: smokeMarkerCount,
         apply_guard: applyGuard,
         projection_totals: input.projection.totals,

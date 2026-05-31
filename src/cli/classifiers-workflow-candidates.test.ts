@@ -1714,6 +1714,8 @@ describe("classifiers workflow-candidates", () => {
             new_candidate_count: 0,
             existing_candidate_count: 0,
             unknown_candidate_count: 0,
+            projected_reviewed_candidate_count: 0,
+            projected_unreviewed_candidate_count: 1,
             apply_guard: "invalid_review_pack",
         });
     });
@@ -1819,6 +1821,8 @@ describe("classifiers workflow-candidates", () => {
             new_candidate_count: 1,
             existing_candidate_count: 1,
             unknown_candidate_count: 1,
+            projected_reviewed_candidate_count: 2,
+            projected_unreviewed_candidate_count: 0,
             apply_guard: "ready_to_apply",
         });
     });
