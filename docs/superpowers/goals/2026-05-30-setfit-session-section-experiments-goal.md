@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E397 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-remediation-no-match-e397.json`
+- Index continuation: E398 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-argv-no-match-e398.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-remediation-match-e397.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-argv-match-e398.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,48 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E398 - Expose Suggested Query Repair Argv
+
+Question:
+- E397 gives repair-specific guidance, but can services execute only actual
+  graph-query repairs without interpreting the generic suggested argv?
+
+Implementation:
+- Added `repair_argv` to `query_suggestion`.
+- Lifecycle graph-query suggestions now include the repaired query argv only
+  when `repair_status=repair_available`; no-op suggestions expose an empty
+  repair argv.
+- Text graph-health output now renders `query suggestion repair argv`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-argv-no-match-e398.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-argv-match-e398.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-argv-no-match-e398.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_argv=["bun","src/cli/index.ts","classifiers","graph",
+  "--mode","lifecycle","--predicate",
+  "review_pipeline_recommended_action_execution_phase","--value","bind_inputs"]`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and `query_suggestion.repair_argv=[]`.
+- Text output renders the repaired argv command for the no-match query.
+
+Decision:
+- Services can now execute repair-only query commands directly while still
+  showing generic suggested argv for debug/no-op suggestions.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E398 no-match report includes the repaired query argv.
+- E398 match report has an empty repair argv.
+- E398 text output includes the repair argv line.
 
 ## E397 - Expose Suggested Query Repair Remediation
 
