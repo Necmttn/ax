@@ -1399,6 +1399,9 @@ describe("classifiers workflow-candidates", () => {
             candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
             candidate_label: "verification_or_recovery_signal",
             proposed_action: "add_verification_gate",
+            candidate_support_count: 1,
+            candidate_evidence_count: 1,
+            candidate_score: 1.1931,
             result_id: "classifier_result:verification",
             turn: "turn:verification",
             confidence: 0.83,
@@ -1635,6 +1638,7 @@ describe("classifiers workflow-candidates", () => {
 
         expect(brief).toContain("# Workflow Candidate Coverage Review");
         expect(brief).toContain("- Fixture id: `workflow-candidate-review-coverage/verification_or_recovery_signal/a`");
+        expect(brief).toContain("- Review impact: `new_candidate_review`");
         expect(brief).toContain("- Review status: `pending`");
         expect(synced[0]).toMatchObject({
             review_status: "accept",

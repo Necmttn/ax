@@ -224,6 +224,9 @@ export interface WorkflowCandidateTopicClassifierFixtureRow {
     readonly result_id?: string;
     readonly turn?: string;
     readonly confidence?: number;
+    readonly candidate_support_count?: number;
+    readonly candidate_evidence_count?: number;
+    readonly candidate_score?: number;
 }
 
 export interface WorkflowCandidateHarnessProposalSummary {
@@ -2688,6 +2691,12 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
             `- Candidate id: \`${row.candidate_id}\``,
             `- Candidate label: \`${row.candidate_label}\``,
             `- Proposed action: \`${row.proposed_action}\``,
+            ...(row.suite === "workflow-candidate-review-coverage"
+                ? [`- Review impact: \`new_candidate_review\``]
+                : []),
+            ...(row.candidate_support_count === undefined ? [] : [`- Candidate support: \`${row.candidate_support_count}\``]),
+            ...(row.candidate_evidence_count === undefined ? [] : [`- Candidate evidence: \`${row.candidate_evidence_count}\``]),
+            ...(row.candidate_score === undefined ? [] : [`- Candidate score: \`${row.candidate_score}\``]),
             `- Result: \`${row.result_id ?? "unknown-result"}\``,
             `- Turn: \`${row.turn ?? "unknown-turn"}\``,
             `- Confidence: \`${row.confidence ?? "n/a"}\``,
@@ -3172,6 +3181,9 @@ export function buildWorkflowCandidateTopicClassifierFixtureRows(
                 candidate_id: candidate.group_id,
                 candidate_label: candidate.label,
                 proposed_action: candidate.proposed_action,
+                candidate_support_count: candidate.support_count,
+                candidate_evidence_count: candidate.evidence_count,
+                candidate_score: candidate.score,
                 ...(resultId === undefined ? {} : { result_id: resultId }),
                 ...(turn === undefined ? {} : { turn }),
                 ...(confidence === undefined ? {} : { confidence }),
@@ -3236,6 +3248,9 @@ export function buildWorkflowCandidateReviewCoverageFixtureRows(
                 candidate_id: candidate.group_id,
                 candidate_label: candidate.label,
                 proposed_action: candidate.proposed_action,
+                candidate_support_count: candidate.support_count,
+                candidate_evidence_count: candidate.evidence_count,
+                candidate_score: candidate.score,
                 ...(resultId === undefined ? {} : { result_id: resultId }),
                 ...(turn === undefined ? {} : { turn }),
                 ...(confidence === undefined ? {} : { confidence }),
