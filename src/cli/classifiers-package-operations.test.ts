@@ -651,10 +651,14 @@ describe("classifiers package-operations format", () => {
                 remediation: "Use the selected reviewed threshold as an advisory routing policy.",
                 requested_min_positive_recall: 0.9,
                 requested_min_call_reduction: 0.25,
+                evaluated_policy_count: 1,
                 candidate_count: 1,
                 best_threshold_by_call_reduction: "none",
                 best_positive_recall: 0.9028,
                 best_call_reduction: 0.1778,
+                best_available_threshold_by_recall: "none",
+                best_available_positive_recall: 0.9028,
+                best_available_call_reduction: 0.1778,
             },
             evidence_paths: [".ax/experiments/embedding-helper-review-e210.json"],
             totals: {
@@ -699,9 +703,13 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("filter nearest fixture: session-section-chunks/approval-alright-go");
         expect(output).toContain("routing policy status: meets_requested_floors");
         expect(output).toContain("routing policy candidates: 1");
+        expect(output).toContain("routing policy evaluated: 1");
         expect(output).toContain("routing policy best threshold: none");
         expect(output).toContain("routing policy best positive recall: 0.9028");
         expect(output).toContain("routing policy best call reduction: 0.1778");
+        expect(output).toContain("routing policy best available threshold: none");
+        expect(output).toContain("routing policy best available positive recall: 0.9028");
+        expect(output).toContain("routing policy best available call reduction: 0.1778");
         expect(output).toContain("routing policy next action: choose_reviewed_routing_threshold");
         expect(output).toContain("routing policy remediation: Use the selected reviewed threshold as an advisory routing policy.");
         expect(output).toContain("embedding helper facts:");

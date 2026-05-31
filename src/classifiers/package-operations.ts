@@ -386,10 +386,14 @@ export interface ClassifierGraphRoutingPolicySummary {
     readonly remediation: string;
     readonly requested_min_positive_recall?: number;
     readonly requested_min_call_reduction?: number;
+    readonly evaluated_policy_count?: number;
     readonly candidate_count: number;
     readonly best_threshold_by_call_reduction?: string;
     readonly best_positive_recall?: number;
     readonly best_call_reduction?: number;
+    readonly best_available_threshold_by_recall?: string;
+    readonly best_available_positive_recall?: number;
+    readonly best_available_call_reduction?: number;
 }
 
 export type ClassifierGraphHealthMode = "summary" | "guarded" | "changed-artifacts" | "evidence" | "lifecycle" | "embedding-helper";
@@ -2070,6 +2074,27 @@ export function buildExecutionGraphHealthReport(input: {
             graphFactValueContains(fact.value, query.value_contains)
         )
         : [];
+    const routingPolicyAvailableFacts = query.mode === "embedding-helper" || query.mode === "evidence"
+        ? embeddingHelperFacts.filter((fact) =>
+            (!query.artifact_path ||
+                fact.evidence_paths.includes(query.artifact_path) ||
+                fact.source_fixture_id === query.artifact_path ||
+                fact.subject === query.artifact_path ||
+                fact.object === query.artifact_path) &&
+            (!query.source_kind || fact.source_kind === query.source_kind) &&
+            (!query.fact_kind || fact.kind === query.fact_kind) &&
+            (!query.status || fact.status === query.status) &&
+            (!query.source_fixture_id || fact.source_fixture_id === query.source_fixture_id) &&
+            (!query.proposed_label || fact.proposed_label === query.proposed_label) &&
+            (!query.threshold || fact.threshold === query.threshold) &&
+            (query.min_seed_count === undefined || (typeof fact.seed_count === "number" && fact.seed_count >= query.min_seed_count)) &&
+            (query.min_nearest_similarity === undefined || (fact.nearest_neighbors ?? []).some((neighbor) => typeof neighbor.similarity === "number" && neighbor.similarity >= query.min_nearest_similarity!)) &&
+            (!query.nearest_fixture_id || (fact.nearest_neighbors ?? []).some((neighbor) => neighbor.fixture_id === query.nearest_fixture_id)) &&
+            (!query.predicate || fact.predicate === query.predicate) &&
+            (!query.subject || fact.subject === query.subject) &&
+            graphFactValueContains(fact.value, query.value_contains)
+        )
+        : [];
     const resultEvidencePaths = Array.from(new Set([
         ...resultOperations.flatMap((operation) => operation.evidence_paths),
         ...resultChangedArtifacts.map((artifact) => artifact.evidence_path).filter(Boolean),
@@ -2083,11 +2108,24 @@ export function buildExecutionGraphHealthReport(input: {
             typeof fact.positive_recall_after_routing_mean === "number" &&
             typeof fact.setfit_call_reduction_rate_mean === "number"
         );
+    const routingPolicyAvailableCandidates = routingPolicyAvailableFacts
+        .filter((fact) => fact.kind === "embedding_helper_routing_candidate")
+        .filter((fact) =>
+            typeof fact.positive_recall_after_routing_mean === "number" &&
+            typeof fact.setfit_call_reduction_rate_mean === "number"
+        );
     const bestRoutingPolicy = routingPolicyCandidates
         .slice()
         .sort((a, b) =>
             (b.setfit_call_reduction_rate_mean! - a.setfit_call_reduction_rate_mean!) ||
             (b.positive_recall_after_routing_mean! - a.positive_recall_after_routing_mean!) ||
+            String(a.threshold ?? "").localeCompare(String(b.threshold ?? ""))
+        )[0];
+    const bestAvailableRoutingPolicy = routingPolicyAvailableCandidates
+        .slice()
+        .sort((a, b) =>
+            (b.positive_recall_after_routing_mean! - a.positive_recall_after_routing_mean!) ||
+            (b.setfit_call_reduction_rate_mean! - a.setfit_call_reduction_rate_mean!) ||
             String(a.threshold ?? "").localeCompare(String(b.threshold ?? ""))
         )[0];
     const routingPolicySummary: ClassifierGraphRoutingPolicySummary = {
@@ -2108,10 +2146,14 @@ export function buildExecutionGraphHealthReport(input: {
                 : "Lower the requested routing floors or review more routing candidates before enabling this policy.",
         ...(query.min_positive_recall === undefined ? {} : { requested_min_positive_recall: query.min_positive_recall }),
         ...(query.min_call_reduction === undefined ? {} : { requested_min_call_reduction: query.min_call_reduction }),
+        evaluated_policy_count: routingPolicyAvailableCandidates.length,
         candidate_count: routingPolicyCandidates.length,
         ...(bestRoutingPolicy?.threshold === undefined ? {} : { best_threshold_by_call_reduction: bestRoutingPolicy.threshold }),
         ...(bestRoutingPolicy?.positive_recall_after_routing_mean === undefined ? {} : { best_positive_recall: bestRoutingPolicy.positive_recall_after_routing_mean }),
         ...(bestRoutingPolicy?.setfit_call_reduction_rate_mean === undefined ? {} : { best_call_reduction: bestRoutingPolicy.setfit_call_reduction_rate_mean }),
+        ...(bestAvailableRoutingPolicy?.threshold === undefined ? {} : { best_available_threshold_by_recall: bestAvailableRoutingPolicy.threshold }),
+        ...(bestAvailableRoutingPolicy?.positive_recall_after_routing_mean === undefined ? {} : { best_available_positive_recall: bestAvailableRoutingPolicy.positive_recall_after_routing_mean }),
+        ...(bestAvailableRoutingPolicy?.setfit_call_reduction_rate_mean === undefined ? {} : { best_available_call_reduction: bestAvailableRoutingPolicy.setfit_call_reduction_rate_mean }),
     };
 
     return {

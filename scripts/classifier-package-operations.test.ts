@@ -1505,7 +1505,11 @@ describe("classifier package operations report", () => {
             remediation: "Lower the requested routing floors or review more routing candidates before enabling this policy.",
             requested_min_positive_recall: 0.95,
             requested_min_call_reduction: 0.2,
+            evaluated_policy_count: 1,
             candidate_count: 0,
+            best_available_threshold_by_recall: "none",
+            best_available_positive_recall: 0.9028,
+            best_available_call_reduction: 0.1778,
         });
     });
 
