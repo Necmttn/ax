@@ -388,6 +388,7 @@ export interface ClassifierGraphHealthQuery {
     readonly artifact_path?: string;
     readonly source_kind?: string;
     readonly fact_kind?: string;
+    readonly status?: string;
     readonly predicate?: string;
     readonly subject?: string;
     readonly value_contains?: string;
@@ -1802,6 +1803,7 @@ export function buildExecutionGraphHealthReport(input: {
         ...(input.query?.artifact_path ? { artifact_path: input.query.artifact_path } : {}),
         ...(input.query?.source_kind ? { source_kind: input.query.source_kind } : {}),
         ...(input.query?.fact_kind ? { fact_kind: input.query.fact_kind } : {}),
+        ...(input.query?.status ? { status: input.query.status } : {}),
         ...(input.query?.predicate ? { predicate: input.query.predicate } : {}),
         ...(input.query?.subject ? { subject: input.query.subject } : {}),
         ...(input.query?.value_contains ? { value_contains: input.query.value_contains } : {}),
@@ -2002,6 +2004,7 @@ export function buildExecutionGraphHealthReport(input: {
                 fact.evidence_paths.includes(query.artifact_path)) &&
             (!query.source_kind || fact.source_kind === query.source_kind) &&
             (!query.fact_kind || fact.kind === query.fact_kind) &&
+            !query.status &&
             (!query.predicate || fact.predicate === query.predicate) &&
             (!query.subject || fact.subject === query.subject) &&
             graphFactValueContains(fact.value, query.value_contains)
@@ -2016,6 +2019,7 @@ export function buildExecutionGraphHealthReport(input: {
                 fact.object === query.artifact_path) &&
             (!query.source_kind || fact.source_kind === query.source_kind) &&
             (!query.fact_kind || fact.kind === query.fact_kind) &&
+            (!query.status || fact.status === query.status) &&
             (!query.predicate || fact.predicate === query.predicate) &&
             (!query.subject || fact.subject === query.subject) &&
             graphFactValueContains(fact.value, query.value_contains)

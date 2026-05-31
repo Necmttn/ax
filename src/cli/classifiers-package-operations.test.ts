@@ -601,7 +601,7 @@ describe("classifiers package-operations format", () => {
         const report: ClassifierPackageExecutionGraphHealthReport = {
             schema: "ax.classifier_package_execution_graph_health_report.v1",
             tables: ["classifier_graph_node", "classifier_graph_edge", "classifier_graph_fact"],
-            query: { mode: "embedding-helper", fact_kind: "embedding_helper_hard_negative_candidate" },
+            query: { mode: "embedding-helper", fact_kind: "embedding_helper_hard_negative_candidate", status: "accepted" },
             operations: [],
             guarded_operations: [],
             changed_artifacts: [],
@@ -665,6 +665,7 @@ describe("classifiers package-operations format", () => {
 
         expect(output).toContain("mode: embedding-helper");
         expect(output).toContain("filter fact kind: embedding_helper_hard_negative_candidate");
+        expect(output).toContain("filter status: accepted");
         expect(output).toContain("embedding helper facts:");
         expect(output).toContain("- routing recommended_threshold: threshold=none positive_recall=0.9028 call_reduction=0.1778");
         expect(output).toContain("- hard-negative session-section-chunks/none-start-building: promoted_hard_negative_fixture status=accepted proposed=none seeds=2 nearest=0.8743 promoted=session-section-chunks/embedding-helper-hard-negative-none-start-building");

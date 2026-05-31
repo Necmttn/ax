@@ -1118,13 +1118,28 @@ describe("classifier package operations report", () => {
                     }),
                     source_kind: "embedding_helper_review_projection",
                 },
+                {
+                    graph_id: "fact:hard-negative-rejected",
+                    kind: "embedding_helper_hard_negative_candidate",
+                    subject: "embedding_helper_hard_negative:session-section-chunks/rejected-example",
+                    predicate: "rejected_hard_negative_candidate",
+                    value_json: "false",
+                    evidence_edges_json: JSON.stringify(["edge:hn"]),
+                    properties_json: JSON.stringify({
+                        source_fixture_id: "session-section-chunks/rejected-example",
+                        status: "rejected",
+                        proposed_label: "none",
+                    }),
+                    source_kind: "embedding_helper_review_projection",
+                },
             ],
-            query: { mode: "embedding-helper", fact_kind: "embedding_helper_hard_negative_candidate" },
+            query: { mode: "embedding-helper", fact_kind: "embedding_helper_hard_negative_candidate", status: "accepted" },
         });
 
         expect(report.query.mode).toBe("embedding-helper");
         expect(report.query.fact_kind).toBe("embedding_helper_hard_negative_candidate");
-        expect(report.totals.embedding_helper_fact_count).toBe(2);
+        expect(report.query.status).toBe("accepted");
+        expect(report.totals.embedding_helper_fact_count).toBe(3);
         expect(report.result_totals.embedding_helper_fact_count).toBe(1);
         expect(report.embedding_helper_facts.map((fact) => fact.predicate)).toEqual([
             "promoted_hard_negative_fixture",
