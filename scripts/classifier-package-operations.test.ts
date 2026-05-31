@@ -1291,6 +1291,8 @@ describe("classifier package operations report", () => {
             repair_command_kind: "classifier_graph_query_repair",
             repair_requires_inputs: false,
             repair_required_inputs: [],
+            repair_expected_query_match_status: "matched",
+            repair_expected_result_count: 1,
             repair_blockers: [],
             repair_blocker_details: [],
             repair_argv: [

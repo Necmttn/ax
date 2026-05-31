@@ -324,6 +324,8 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         ? "none"
         : String(report.query_suggestion.repair_requires_inputs);
     const querySuggestionRepairRequiredInputs = report.query_suggestion?.repair_required_inputs.join(", ") || "none";
+    const querySuggestionRepairExpectedQueryMatch = report.query_suggestion?.repair_expected_query_match_status ?? "none";
+    const querySuggestionRepairExpectedResultCount = report.query_suggestion?.repair_expected_result_count ?? "none";
     const querySuggestionRepairBlockers = report.query_suggestion?.repair_blockers.join(", ") || "none";
     const querySuggestionRepairBlockerDetails = report.query_suggestion?.repair_blocker_details
         .map((detail) => `${detail.blocker}: ${detail.remediation}`)
@@ -382,6 +384,8 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `query suggestion repair command kind: ${querySuggestionRepairCommandKind}`,
         `query suggestion repair requires inputs: ${querySuggestionRepairRequiresInputs}`,
         `query suggestion repair required inputs: ${querySuggestionRepairRequiredInputs}`,
+        `query suggestion repair expected query match: ${querySuggestionRepairExpectedQueryMatch}`,
+        `query suggestion repair expected result count: ${querySuggestionRepairExpectedResultCount}`,
         `query suggestion repair blockers: ${querySuggestionRepairBlockers}`,
         `query suggestion repair blocker details: ${querySuggestionRepairBlockerDetails}`,
         `query suggestion repair argv: ${querySuggestionRepairArgv}`,

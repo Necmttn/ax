@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E404 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-inputs-no-match-e404.json`
+- Index continuation: E405 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-no-match-e405.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-inputs-match-e404.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-match-e405.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,53 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E405 - Expose Suggested Query Repair Verification Expectations
+
+Question:
+- E404 exposes repair input requirements, but can services verify a completed
+  repair command without reinterpreting generic query suggestion fields?
+
+Implementation:
+- Added `repair_expected_query_match_status` and optional
+  `repair_expected_result_count` to `query_suggestion`.
+- Executable lifecycle graph-query repairs now report the expected post-repair
+  query match as `matched` with the expected result count.
+- No-op suggestions report `not_applicable` and omit expected result count.
+- Text graph-health output now renders repair verification expectations.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-no-match-e405.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-match-e405.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-no-match-e405.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match`,
+  `query_suggestion.repair_expected_query_match_status=matched`, and
+  `repair_expected_result_count=1`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched`,
+  `query_suggestion.repair_expected_query_match_status=not_applicable`, and
+  omits `repair_expected_result_count`.
+- Text output renders `query suggestion repair expected query match: matched`
+  and `query suggestion repair expected result count: 1`.
+
+Decision:
+- Services can now verify repaired graph-query execution against explicit
+  expected outcomes instead of comparing suggested-query fields client-side.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E405 no-match report has `repair_expected_query_match_status=matched`.
+- E405 no-match report has `repair_expected_result_count=1`.
+- E405 match report has `repair_expected_query_match_status=not_applicable`.
+- E405 match report omits `repair_expected_result_count`.
+- E405 text output includes repair verification expectation lines.
 
 ## E404 - Expose Suggested Query Repair Input Requirements
 
