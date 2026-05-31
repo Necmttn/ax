@@ -51,6 +51,7 @@ import {
     syncWorkflowCandidateReportFromBrief,
     syncWorkflowCandidateTopicReportFromBrief,
     topicAdjacentCandidates,
+    withWorkflowCandidateReviewCoverageApplySummaryLifecycle,
     withWorkflowCandidateReviewPipelineLifecycle,
     workflowCandidateTopicHarnessGateFailures,
     workflowCandidateScore,
@@ -3969,6 +3970,7 @@ describe("classifiers workflow-candidates", () => {
                 requireReviewHandoff: true,
                 sourceKind: "hybrid_window_classifier_projection",
                 limit: 10,
+                commandMode: "guidance_decision_batch",
                 outputPath: ".ax/experiments/pending-review-batch.json",
             }),
         });
@@ -4002,6 +4004,86 @@ describe("classifiers workflow-candidates", () => {
             production_can_apply: true,
         });
         expect(renderWorkflowCandidateTopicGuidanceDecisionBatchText(batch)).toContain("pending review handoff can apply: yes");
+    });
+
+    test("guidance decision batch handoff can carry review pipeline lifecycle", async () => {
+        const rows = parseWorkflowCandidateFixtureRowsJsonl(JSON.stringify({
+            id: "workflow-candidate-review-coverage/correction_or_rejection_signal/example",
+            suite: "workflow-candidate-review-coverage",
+            name: "coverage-gap-correction_or_rejection_signal-01",
+            label: "correction_or_rejection_signal",
+            target: "wrong_output",
+            text: "USER:\nthis is wrong\n\nPREVIOUS_ASSISTANT:\n",
+            source_group: "workflow-candidate",
+            review_status: "reject",
+            review_rationale: "Reviewer confirmed this is not enough support for a guidance change.",
+            review_reviewer: "reviewer@example.com",
+            review_reviewed_at: "2026-05-31T12:00:00.000Z",
+            topic: "review-coverage",
+            candidate_id: "classifier_candidate_group:hybrid-window/correction_or_rejection_signal",
+            candidate_label: "correction_or_rejection_signal",
+            proposed_action: "add_context_guardrail",
+        }));
+        const projection = buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures({
+            rows,
+            syncedFrom: ".ax/experiments/pending-review.jsonl",
+        });
+        const writePlan = buildWorkflowCandidateTopicReviewGraphWritePlan(projection);
+        const applySummary = await Effect.runPromise(withWorkflowCandidateReviewCoverageApplySummaryLifecycle(
+            buildWorkflowCandidateReviewCoverageApplySummary({
+                rows,
+                sourcePath: ".ax/experiments/pending-review.jsonl",
+                projection,
+                writePlan,
+                applyRequested: false,
+                applied: false,
+                reviewFactsPath: ".ax/experiments/pending-review-facts.json",
+                reviewWritePlanPath: ".ax/experiments/pending-review-write-plan.json",
+                reviewBriefPath: ".ax/experiments/pending-review-synced.md",
+                syncedReviewBriefPath: ".ax/experiments/pending-review.md",
+                requireReviewProvenance: true,
+                requireReviewHandoff: true,
+                sourceKind: "hybrid_window_classifier_projection",
+                limit: 10,
+                commandMode: "guidance_decision_batch",
+                outputPath: ".ax/experiments/pending-review-batch.json",
+            }),
+            {
+                verifier: {
+                    exists: () => Effect.succeed(false),
+                },
+            },
+        ));
+        const handoff = buildWorkflowCandidateGuidancePendingReviewHandoffSummary({
+            fixturePack: {
+                path: ".ax/experiments/pending-review.jsonl",
+                emitted_fixture_count: 1,
+                candidate_count: 1,
+                skipped_candidate_count: 0,
+                fixtures: rows,
+            },
+            applySummary,
+        });
+        const text = renderWorkflowCandidateTopicGuidanceDecisionBatchText(buildWorkflowCandidateTopicGuidanceDecisionBatchReport({
+            sourceKind: "hybrid_window_classifier_projection",
+            limit: 10,
+            decisions: [],
+            pendingReviewHandoff: handoff,
+        }));
+
+        expect(handoff.review_pipeline_lifecycle).toMatchObject({
+            schema: "ax.classifier_review_pipeline_lifecycle.v1",
+            status: "missing_required_outputs",
+            can_execute: true,
+            can_continue: false,
+            prepared: {
+                status: "ready_to_execute",
+                can_execute: true,
+            },
+        });
+        expect(handoff.review_pipeline_lifecycle?.prepared.argv).toContain("--guidance-decision-batch");
+        expect(text).toContain("pending review handoff lifecycle: missing_required_outputs");
+        expect(text).toContain("pending review handoff lifecycle can execute: yes");
     });
 
     test("topic harness gates fail with only persisted failed harness facts", () => {

@@ -33,13 +33,14 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E451 adds
-  `.ax/experiments/workflow-topic-guidance-decision-batch-e451.json`,
-  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e451.jsonl`,
-  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e451.md`,
-  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e451.json`,
+- Index continuation: E452 adds
+  `.ax/experiments/workflow-topic-guidance-decision-batch-e452.json`,
+  `.ax/experiments/workflow-topic-guidance-decision-batch-e452.txt`,
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e452.jsonl`,
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e452.md`,
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e452.json`,
   and
-  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e451.json`
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e452.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -57,10 +58,71 @@ Current recommendation:
   generated fixture pack, markdown review handoff, machine-readable handoff
   routing summary, and a batch-level sync/readiness path for edited review
   briefs. The generated brief now points reviewers back to the batch command
-  instead of the lower-level coverage command, and a smoke-marked review is
-  correctly blocked from apply, so the immediate bottleneck remains a real
-  human review decision for that pending candidate, not promoting synthetic or
-  harness-only evidence.
+  instead of the lower-level coverage command, the batch handoff carries the
+  same review-pipeline lifecycle report used by review services, and a
+  smoke-marked review is correctly blocked from apply, so the immediate
+  bottleneck remains a real human review decision for that pending candidate,
+  not promoting synthetic or harness-only evidence.
+
+## E452 - Attach Review Pipeline Lifecycle to Batch Handoffs
+
+Question:
+- Can services get the same review-pipeline lifecycle routing from the
+  batch-generated pending-review handoff that they already get from the
+  lower-level review-coverage report?
+
+Implementation:
+- Factored review-pipeline lifecycle attachment down to
+  `WorkflowCandidateReviewCoverageApplySummary`.
+- `pending_review_handoff` now carries optional
+  `review_pipeline_lifecycle`.
+- Batch pending-review paths now attach that lifecycle when
+  `--review-pipeline-lifecycle` is supplied.
+- Batch handoff text now shows lifecycle status and executable state.
+- Review apply summaries can now render their pipeline commands in either
+  review-coverage mode or guidance-decision-batch mode, so lifecycle prepared
+  argv stays on the batch surface for batch handoffs.
+- Added a regression proving a reviewed batch handoff can carry
+  `ax.classifier_review_pipeline_lifecycle.v1` and that the prepared argv uses
+  `--guidance-decision-batch`.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e452.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e452.txt`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e452.jsonl`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e452.md`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e452.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e452.json`
+
+Results:
+- Live batch handoff includes:
+  - `review_pipeline_lifecycle.schema=ax.classifier_review_pipeline_lifecycle.v1`
+  - `review_pipeline_lifecycle.status=blocked_before_execution`
+  - `review_pipeline_lifecycle.summary.stage=needs_review_decisions`
+  - `review_pipeline_lifecycle.prepared.status=missing_command`
+- Text output includes:
+  - `pending review handoff lifecycle: blocked_before_execution`
+  - `pending review handoff lifecycle can execute: no`
+- The live state is still correctly blocked because the pending
+  `correction_or_rejection_signal` fixture has no real review decision yet.
+
+Decision:
+- E452 makes the batch handoff service-complete for routing. A service can now
+  inspect one batch report and see the pending candidate, review artifact
+  paths, apply guards, pipeline stage, and lifecycle execution status without
+  reconstructing lifecycle state from lower-level reports.
+- This still does not close the pending queue; the next useful action is a real
+  review decision with provenance, then guarded apply and batch recheck.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 --coverage-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e452.jsonl --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e452.md --review-facts=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e452.json --review-write-plan=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e452.json --review-pipeline-lifecycle --review-pipeline-verify-outputs --out .ax/experiments/workflow-topic-guidance-decision-batch-e452.json --json
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 --coverage-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e452.jsonl --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e452.md --review-facts=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e452.json --review-write-plan=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e452.json --review-pipeline-lifecycle --review-pipeline-verify-outputs > .ax/experiments/workflow-topic-guidance-decision-batch-e452.txt
+python3 -m json.tool .ax/experiments/workflow-topic-guidance-decision-batch-e452.json >/dev/null
+bun -e 'const report=await Bun.file(".ax/experiments/workflow-topic-guidance-decision-batch-e452.json").json(); const h=report.pending_review_handoff; if (h?.review_pipeline_lifecycle?.schema !== "ax.classifier_review_pipeline_lifecycle.v1") throw new Error(JSON.stringify(h)); if (h.review_pipeline_lifecycle.status !== "blocked_before_execution") throw new Error(JSON.stringify(h.review_pipeline_lifecycle)); if (h.review_pipeline_lifecycle.summary.stage !== "needs_review_decisions") throw new Error(JSON.stringify(h.review_pipeline_lifecycle.summary));'
+rg -n "pending review handoff lifecycle: blocked_before_execution|pending review handoff lifecycle can execute: no|pending review handoff stage: needs_review_decisions" .ax/experiments/workflow-topic-guidance-decision-batch-e452.txt
+```
 
 ## E451 - Make Batch Review Briefs Self-Contained
 
