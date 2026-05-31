@@ -2533,7 +2533,7 @@ describe("classifier package operations report", () => {
             schema: "ax.classifier_lifecycle_route_execution_inspection.v1",
             source_schema: "ax.classifier_lifecycle_route_execution_report.v1",
             decision: "needs_review_handoff",
-            parsed_output_source: "stdout",
+            parsed_output_source: "output_file",
             inner_schema: "ax.workflow_candidate_review_coverage.v1",
             inner_decision: "workflow_candidate_review_coverage_ready",
             review_handoff_status: "incomplete_review_handoff",

@@ -33,19 +33,73 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E437 adds
-  `.ax/experiments/classifier-lifecycle-route-execution-inspection-e437.json`
+- Index continuation: E438 adds
+  `.ax/experiments/classifier-lifecycle-route-execution-inspection-e438.json`
   and
-  `.ax/experiments/classifier-lifecycle-route-execution-inspection-e437.txt`
+  `.ax/experiments/classifier-lifecycle-route-execution-inspection-e438.txt`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
   append-only fixtures, graph projection, and workflow/harness usefulness
   checks.
 - Direct review execution/routing is now possible behind an explicit
-  `--execute-route` gate, and route outputs can be inspected after execution.
-  The immediate bottleneck is now the missing review handoff artifacts required
-  before production apply.
+  `--execute-route` gate, route outputs can be inspected after execution, and
+  the current handoff artifacts are complete. The immediate bottleneck is now
+  the guarded production apply plus post-apply recheck.
+
+## E438 - Complete Route Review Handoff
+
+Question:
+- Can the executed lifecycle route progress past `needs_review_handoff` once
+  the review facts and write-plan handoff artifacts are exported?
+
+Implementation:
+- Ran the non-apply review handoff export with all required handoff paths:
+  review brief, synced review brief, review facts, review write plan, and
+  readiness output.
+- Updated lifecycle route inspection to prefer the current `--out` artifact
+  over captured stdout so re-inspection reflects post-execution handoff
+  updates.
+
+Artifacts:
+- `.ax/experiments/classifier-lifecycle-route-execution-inspection-e438.json`
+- `.ax/experiments/classifier-lifecycle-route-execution-inspection-e438.txt`
+- `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371-review-facts.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371-review-write-plan.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371.json`
+
+Results:
+- Re-inspecting the E436 route execution now reports
+  `decision=ready_for_apply`.
+- `parsed_output_source=output_file`, so the inspection uses the current
+  readiness artifact rather than stale captured stdout.
+- The handoff gate is complete:
+  `review_handoff_status=complete_review_handoff`,
+  `production_apply_guard=ready_to_apply`, and `production_can_apply=true`.
+- `missing_output_paths=[]`.
+- The route inspection reports `next_action=apply_review_facts`.
+- The inner review pipeline stage is `ready_for_production_apply`; its output
+  check status remains `pending_execution` because the guarded production apply
+  command has not been run yet.
+
+Decision:
+- E438 closes the review-handoff blocker exposed by E437. The next aligned
+  slice is to execute the guarded production apply command, verify output
+  artifacts, and run the post-apply recheck before treating the graph update as
+  useful.
+
+Verification:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371.md --review-facts=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371-review-facts.json --review-write-plan=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371-review-write-plan.json --out=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371.json --json
+bun src/cli/index.ts classifiers lifecycle --inspect-route-execution .ax/experiments/classifier-lifecycle-route-execution-e436.json --out .ax/experiments/classifier-lifecycle-route-execution-inspection-e438.json --json
+bun src/cli/index.ts classifiers lifecycle --inspect-route-execution .ax/experiments/classifier-lifecycle-route-execution-e436.json > .ax/experiments/classifier-lifecycle-route-execution-inspection-e438.txt
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-lifecycle-route-execution-inspection-e438.json").json(); if (saved.decision !== "ready_for_apply" || saved.next_action !== "apply_review_facts") throw new Error(`bad inspection ${JSON.stringify({decision:saved.decision,next_action:saved.next_action})}`); if (saved.parsed_output_source !== "output_file") throw new Error(`bad source ${saved.parsed_output_source}`); if (saved.review_handoff_status !== "complete_review_handoff" || saved.production_apply_guard !== "ready_to_apply" || saved.production_can_apply !== true) throw new Error("handoff not complete"); if (saved.missing_output_paths.length !== 0) throw new Error("missing outputs");'
+rg -n -- "decision: ready_for_apply|parsed output source: output_file|handoff: complete_review_handoff production=ready_to_apply can_apply=yes|pipeline: ready_for_production_apply outputs=pending_execution|missing outputs: none|next action: apply_review_facts" .ax/experiments/classifier-lifecycle-route-execution-inspection-e438.txt
+test -s .ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371-review-facts.json
+test -s .ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371-review-write-plan.json
+```
+
+Focused artifact assertions passed.
 
 ## E437 - Inspect Lifecycle Route Execution Outputs
 

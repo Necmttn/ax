@@ -3916,16 +3916,16 @@ function parseRouteExecutionInnerOutput(
     execution: ClassifierLifecycleRouteExecutionReport,
     outputArtifacts: readonly ClassifierLifecycleRouteExecutionOutputStatus[],
 ): { readonly source?: "stdout" | "output_file"; readonly value: Record<string, unknown> | null } {
-    const stdoutJson = safeJsonParse<Record<string, unknown>>(execution.stdout);
-    if (stdoutJson && typeof stdoutJson === "object" && !Array.isArray(stdoutJson)) {
-        return { source: "stdout", value: stdoutJson };
-    }
     const reportArtifact = outputArtifacts.find((artifact) => artifact.kind === "readiness_report" && artifact.exists);
     if (reportArtifact) {
         const fileJson = safeJsonParse<Record<string, unknown>>(readFileSync(reportArtifact.path, "utf8"));
         if (fileJson && typeof fileJson === "object" && !Array.isArray(fileJson)) {
             return { source: "output_file", value: fileJson };
         }
+    }
+    const stdoutJson = safeJsonParse<Record<string, unknown>>(execution.stdout);
+    if (stdoutJson && typeof stdoutJson === "object" && !Array.isArray(stdoutJson)) {
+        return { source: "stdout", value: stdoutJson };
     }
     return { value: null };
 }
