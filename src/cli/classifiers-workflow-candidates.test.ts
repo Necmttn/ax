@@ -1977,6 +1977,14 @@ describe("classifiers workflow-candidates", () => {
             can_apply: true,
             apply_blockers: [],
             apply_blocker_details: [],
+            strict_apply_guard: "missing_review_provenance",
+            strict_can_apply: false,
+            strict_apply_blockers: ["missing_review_provenance"],
+            strict_apply_blocker_details: [{
+                blocker: "missing_review_provenance",
+                count: 6,
+                remediation: "Add reviewer and valid reviewed-at metadata or rerun without strict provenance.",
+            }],
             next_action: "Run the apply command after confirming the review pack is intentional.",
             reviewed_fixture_ids: [
                 "workflow-candidate-review-coverage/new/a",
@@ -2074,12 +2082,20 @@ describe("classifiers workflow-candidates", () => {
             apply_result: "blocked",
             apply_guard: "missing_review_provenance",
             can_apply: false,
+            strict_apply_guard: "missing_review_provenance",
+            strict_can_apply: false,
             missing_reviewer_count: 1,
             missing_reviewed_at_count: 1,
             invalid_reviewed_at_count: 0,
             provenance_status: "missing_review_provenance",
             apply_blockers: ["missing_review_provenance"],
             apply_blocker_details: [{
+                blocker: "missing_review_provenance",
+                count: 2,
+                remediation: "Add reviewer and valid reviewed-at metadata or rerun without strict provenance.",
+            }],
+            strict_apply_blockers: ["missing_review_provenance"],
+            strict_apply_blocker_details: [{
                 blocker: "missing_review_provenance",
                 count: 2,
                 remediation: "Add reviewer and valid reviewed-at metadata or rerun without strict provenance.",
@@ -2104,8 +2120,12 @@ describe("classifiers workflow-candidates", () => {
         });
         expect(text).toContain("coverage review apply guard: missing_review_provenance");
         expect(text).toContain("coverage review can apply: no");
+        expect(text).toContain("coverage review strict apply guard: missing_review_provenance");
+        expect(text).toContain("coverage review strict can apply: no");
         expect(text).toContain("coverage review blockers: missing_review_provenance");
         expect(text).toContain("coverage review blocker remediations: missing_review_provenance: Add reviewer and valid reviewed-at metadata or rerun without strict provenance.");
+        expect(text).toContain("coverage review strict blockers: missing_review_provenance");
+        expect(text).toContain("coverage review strict blocker details: missing_review_provenance=2");
         expect(text).toContain("coverage review provenance issue rows: 2");
         expect(text).toContain("coverage review provenance issue: missing_reviewer fixture=workflow-candidate-review-coverage/verification_or_recovery_signal/a candidate=classifier_candidate_group:hybrid-window/verification_or_recovery_signal reviewed_at=none");
         expect(text).toContain("coverage review provenance issue: missing_reviewed_at fixture=workflow-candidate-review-coverage/verification_or_recovery_signal/a candidate=classifier_candidate_group:hybrid-window/verification_or_recovery_signal reviewed_at=none");
@@ -2159,12 +2179,20 @@ describe("classifiers workflow-candidates", () => {
             apply_result: "blocked",
             apply_guard: "missing_review_provenance",
             can_apply: false,
+            strict_apply_guard: "missing_review_provenance",
+            strict_can_apply: false,
             missing_reviewer_count: 0,
             missing_reviewed_at_count: 0,
             invalid_reviewed_at_count: 1,
             provenance_status: "missing_review_provenance",
             apply_blockers: ["missing_review_provenance"],
             apply_blocker_details: [{
+                blocker: "missing_review_provenance",
+                count: 1,
+                remediation: "Add reviewer and valid reviewed-at metadata or rerun without strict provenance.",
+            }],
+            strict_apply_blockers: ["missing_review_provenance"],
+            strict_apply_blocker_details: [{
                 blocker: "missing_review_provenance",
                 count: 1,
                 remediation: "Add reviewer and valid reviewed-at metadata or rerun without strict provenance.",

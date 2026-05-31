@@ -254,6 +254,10 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly can_apply: boolean;
     readonly apply_blockers: readonly WorkflowCandidateReviewCoverageApplyBlocker[];
     readonly apply_blocker_details: readonly WorkflowCandidateReviewCoverageApplyBlockerDetail[];
+    readonly strict_apply_guard: WorkflowCandidateReviewCoverageApplyGuard;
+    readonly strict_can_apply: boolean;
+    readonly strict_apply_blockers: readonly WorkflowCandidateReviewCoverageApplyBlocker[];
+    readonly strict_apply_blocker_details: readonly WorkflowCandidateReviewCoverageApplyBlockerDetail[];
     readonly next_action: string;
     readonly post_apply_recheck_command: string;
     readonly reviewed_fixture_ids: readonly string[];
@@ -1823,10 +1827,15 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             `coverage review provenance next action: ${report.coverage_review.provenance_next_action}`,
             `coverage review apply guard: ${report.coverage_review.apply_guard}`,
             `coverage review can apply: ${report.coverage_review.can_apply ? "yes" : "no"}`,
+            `coverage review strict apply guard: ${report.coverage_review.strict_apply_guard}`,
+            `coverage review strict can apply: ${report.coverage_review.strict_can_apply ? "yes" : "no"}`,
             `coverage review apply result: ${report.coverage_review.apply_result} statements=${report.coverage_review.applied_statement_count}`,
             `coverage review blockers: ${report.coverage_review.apply_blockers.length === 0 ? "none" : report.coverage_review.apply_blockers.join(", ")}`,
             `coverage review blocker details: ${report.coverage_review.apply_blocker_details.length === 0 ? "none" : report.coverage_review.apply_blocker_details.map((detail) => `${detail.blocker}=${detail.count}`).join(", ")}`,
             `coverage review blocker remediations: ${report.coverage_review.apply_blocker_details.length === 0 ? "none" : report.coverage_review.apply_blocker_details.map((detail) => `${detail.blocker}: ${detail.remediation}`).join(" | ")}`,
+            `coverage review strict blockers: ${report.coverage_review.strict_apply_blockers.length === 0 ? "none" : report.coverage_review.strict_apply_blockers.join(", ")}`,
+            `coverage review strict blocker details: ${report.coverage_review.strict_apply_blocker_details.length === 0 ? "none" : report.coverage_review.strict_apply_blocker_details.map((detail) => `${detail.blocker}=${detail.count}`).join(", ")}`,
+            `coverage review strict blocker remediations: ${report.coverage_review.strict_apply_blocker_details.length === 0 ? "none" : report.coverage_review.strict_apply_blocker_details.map((detail) => `${detail.blocker}: ${detail.remediation}`).join(" | ")}`,
             `coverage review provenance issue rows: ${report.coverage_review.provenance_issue_rows.length}`,
             ...report.coverage_review.provenance_issue_rows.map((row) =>
                 `coverage review provenance issue: ${row.issue} fixture=${row.fixture_id} candidate=${row.candidate_id} reviewed_at=${row.reviewed_at || "none"}`
@@ -3345,35 +3354,50 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     const projectedUnreviewedCandidateCount = Math.max(0, coverageRows.length - projectedReviewedCandidateCount);
     const smokeMarkerCount = reviewedRows.filter(fixtureRowHasSmokeMarker).length +
         (input.sourcePath.toLowerCase().includes("smoke") ? 1 : 0);
-    const applyGuard = invalidRows.length > 0
+    const baseApplyGuard = invalidRows.length > 0
         ? "invalid_review_pack"
         : reviewedRows.length === 0
         ? "no_reviewed_fixtures"
         : missingRationaleRows.length > 0
             ? "missing_review_rationale"
-        : input.requireReviewProvenance === true && provenanceStatus === "missing_review_provenance"
-            ? "missing_review_provenance"
         : smokeMarkerCount > 0
             ? "blocked_smoke_review"
             : "ready_to_apply";
+    const strictApplyGuard: WorkflowCandidateReviewCoverageApplyGuard =
+        baseApplyGuard === "ready_to_apply" && provenanceStatus === "missing_review_provenance"
+            ? "missing_review_provenance"
+            : baseApplyGuard;
+    const applyGuard = input.requireReviewProvenance === true ? strictApplyGuard : baseApplyGuard;
     const canApply = applyGuard === "ready_to_apply" && input.writePlan.statements.length > 0;
+    const strictCanApply = strictApplyGuard === "ready_to_apply" && input.writePlan.statements.length > 0;
     const applyResult = input.applied
         ? "applied"
         : input.applyRequested
             ? "blocked"
             : "not_requested";
-    const applyBlockers: WorkflowCandidateReviewCoverageApplyBlocker[] = [];
-    if (invalidRows.length > 0) applyBlockers.push("invalid_review_pack");
-    if (reviewedRows.length === 0) applyBlockers.push("no_reviewed_fixtures");
-    if (missingRationaleRows.length > 0) applyBlockers.push("missing_review_rationale");
-    if (input.requireReviewProvenance === true && provenanceStatus === "missing_review_provenance") {
-        applyBlockers.push("missing_review_provenance");
+    const baseApplyBlockers: WorkflowCandidateReviewCoverageApplyBlocker[] = [];
+    if (invalidRows.length > 0) baseApplyBlockers.push("invalid_review_pack");
+    if (reviewedRows.length === 0) baseApplyBlockers.push("no_reviewed_fixtures");
+    if (missingRationaleRows.length > 0) baseApplyBlockers.push("missing_review_rationale");
+    if (smokeMarkerCount > 0) baseApplyBlockers.push("blocked_smoke_review");
+    if (baseApplyGuard === "ready_to_apply" && input.writePlan.statements.length === 0) {
+        baseApplyBlockers.push("empty_write_plan");
     }
-    if (smokeMarkerCount > 0) applyBlockers.push("blocked_smoke_review");
-    if (applyGuard === "ready_to_apply" && input.writePlan.statements.length === 0) {
-        applyBlockers.push("empty_write_plan");
+    const strictApplyBlockers: WorkflowCandidateReviewCoverageApplyBlocker[] = [...baseApplyBlockers];
+    if (baseApplyGuard === "ready_to_apply" && provenanceStatus === "missing_review_provenance") {
+        strictApplyBlockers.push("missing_review_provenance");
     }
-    const applyBlockerDetails: WorkflowCandidateReviewCoverageApplyBlockerDetail[] = applyBlockers.map((blocker) => {
+    if (
+        strictApplyGuard === "ready_to_apply" &&
+        input.writePlan.statements.length === 0 &&
+        !strictApplyBlockers.includes("empty_write_plan")
+    ) {
+        strictApplyBlockers.push("empty_write_plan");
+    }
+    const applyBlockers = input.requireReviewProvenance === true ? strictApplyBlockers : baseApplyBlockers;
+    const buildApplyBlockerDetails = (
+        blockers: readonly WorkflowCandidateReviewCoverageApplyBlocker[],
+    ): WorkflowCandidateReviewCoverageApplyBlockerDetail[] => blockers.map((blocker) => {
         switch (blocker) {
             case "invalid_review_pack":
                 return { blocker, count: invalidRows.length, remediation: workflowCandidateReviewCoverageBlockerRemediation(blocker) };
@@ -3389,6 +3413,8 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
                 return { blocker, count: 1, remediation: workflowCandidateReviewCoverageBlockerRemediation(blocker) };
         }
     });
+    const applyBlockerDetails = buildApplyBlockerDetails(applyBlockers);
+    const strictApplyBlockerDetails = buildApplyBlockerDetails(strictApplyBlockers);
     const factIdByFixtureId = new Map<string, string>();
     for (const fact of input.projection.facts) {
         const fixtureId = fact.properties.fixture_id;
@@ -3438,6 +3464,10 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         can_apply: canApply,
         apply_blockers: applyBlockers,
         apply_blocker_details: applyBlockerDetails,
+        strict_apply_guard: strictApplyGuard,
+        strict_can_apply: strictCanApply,
+        strict_apply_blockers: strictApplyBlockers,
+        strict_apply_blocker_details: strictApplyBlockerDetails,
         next_action: workflowCandidateReviewCoverageGuardNextAction(applyGuard),
         post_apply_recheck_command: workflowCandidateReviewCoverageRecheckCommand({
             ...(input.sourceKind === undefined ? {} : { sourceKind: input.sourceKind }),
