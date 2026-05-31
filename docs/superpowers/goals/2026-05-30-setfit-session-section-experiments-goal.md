@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E382 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-result-count-no-match-e382.json`
+- Index continuation: E383 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-status-no-match-e383.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-result-count-match-e382.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-status-match-e383.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,52 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E383 - Expose Suggested Query Status
+
+Question:
+- E382 gives services the expected result count for a repaired lifecycle query,
+  but can they branch on the suggestion without comparing numeric counts?
+
+Implementation:
+- Added `query_suggested_status` to classifier graph health reports.
+- Lifecycle graph queries that have a ranked suggested value now emit
+  `expected_matches`.
+- Text graph-health output now renders `query suggested status`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-status-no-match-e383.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-status-match-e383.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-status-no-match-e383.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match`,
+  `query_suggested_value_equals=bind_inputs`,
+  `query_suggested_result_count=1`, and
+  `query_suggested_status=expected_matches`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggested_status=expected_matches`.
+- Text output renders `query suggested status: expected_matches`.
+
+Decision:
+- Services can now route suggested lifecycle graph-query repairs through a
+  status enum instead of re-implementing the result-count comparison.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E383 no-match report has `query_match_status=no_match`,
+  `query_suggested_value_equals=bind_inputs`,
+  `query_suggested_result_count=1`, and
+  `query_suggested_status=expected_matches`.
+- E383 match report has `query_match_status=matched` and
+  `query_suggested_status=expected_matches`.
+- E383 text output includes the suggested-status line.
 
 ## E382 - Expose Suggested Query Result Count
 

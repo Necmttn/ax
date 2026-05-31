@@ -491,6 +491,7 @@ export interface ClassifierPackageExecutionGraphHealthReport {
     readonly query_result_kind_counts?: readonly ClassifierGraphQueryResultKindCount[];
     readonly query_suggested_value_equals?: string;
     readonly query_suggested_result_count?: number;
+    readonly query_suggested_status?: "expected_matches";
     readonly query_suggested_query?: ClassifierGraphHealthQuery;
     readonly query_suggested_argv?: readonly string[];
     readonly totals: {
@@ -2452,6 +2453,7 @@ export function buildExecutionGraphHealthReport(input: {
         .sort((a, b) => (b.count - a.count) || `${a.predicate}/${a.value}`.localeCompare(`${b.predicate}/${b.value}`))[0];
     const querySuggestedValueEquals = querySuggestedValue?.value;
     const querySuggestedResultCount = querySuggestedValue?.count;
+    const querySuggestedStatus = querySuggestedValue === undefined ? undefined : "expected_matches" as const;
     const querySuggestedQuery: ClassifierGraphHealthQuery | undefined = querySuggestedValueEquals === undefined
         ? undefined
         : { ...query, value_equals: querySuggestedValueEquals };
@@ -2704,6 +2706,7 @@ export function buildExecutionGraphHealthReport(input: {
         query_result_kind_counts: queryResultKindCounts,
         ...(querySuggestedValueEquals === undefined ? {} : { query_suggested_value_equals: querySuggestedValueEquals }),
         ...(querySuggestedResultCount === undefined ? {} : { query_suggested_result_count: querySuggestedResultCount }),
+        ...(querySuggestedStatus === undefined ? {} : { query_suggested_status: querySuggestedStatus }),
         ...(querySuggestedQuery === undefined ? {} : { query_suggested_query: querySuggestedQuery }),
         ...(querySuggestedArgv === undefined ? {} : { query_suggested_argv: querySuggestedArgv }),
         totals: {

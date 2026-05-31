@@ -1272,6 +1272,7 @@ describe("classifier package operations report", () => {
             value_equals: "bind_inputs",
         });
         expect(report.query_suggested_result_count).toBe(1);
+        expect(report.query_suggested_status).toBe("expected_matches");
     });
 
     test("summarizes lifecycle graph fact values", () => {
