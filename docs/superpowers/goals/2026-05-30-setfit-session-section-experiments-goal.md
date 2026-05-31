@@ -29,7 +29,7 @@ artifact path as the evidence to inspect before trusting any summary row.
 | Blind/review workflow | E46-E65+ | `.ax/experiments/blind-workflow-status-e57.json` and related review artifacts | Human review is mandatory before fixtures or graph facts are promoted. | Pending where review rows are incomplete. | Earlier experiment log | Prefer review queues/workspaces over automatic label edits. |
 | Transcript graph projection | E155-E157 | `.ax/experiments/transcript-candidate-graph-projection-e155.json`, `.ax/experiments/workflow-candidate-report-e156.json`, `.ax/experiments/workflow-candidate-cli-e157.json` | Real persisted classifier facts can become graph-backed workflow candidates. | Passed for projection/query; still needs product review filters and proposal gates. | E155/E156/E157 commits in log | Use graph facts for evidence-backed workflow/harness discovery. |
 | Proposal lifecycle | E168-E208 | `.ax/experiments/workflow-candidate-proposal-list-e168.json`, `.ax/experiments/classifier-package-execution-write-plan-e208.json` | Classifier-derived workflow proposals are discoverable and lifecycle-tracked. | Passed for visibility/lifecycle plumbing; promotion remains review-gated. | Recent proposal lifecycle commits | Continue using review and ready-smoke gates before guidance/harness changes. |
-| Embedding/SVM helper layer | E209-E238 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e231-post-promotion.json`, `.ax/experiments/embedding-helper-canonical-promotion-split-audit-e231.json`, `.ax/experiments/embedding-helper-graph-projection-current.json`, `.ax/experiments/embedding-helper-graph-apply-e232.json`, `.ax/experiments/classifier-graph-health-embedding-helper-e232.json`, `.ax/experiments/embedding-helper-graph-usefulness-current.json`, `.ax/experiments/classifier-package-execution-embedding-helper-graph-usefulness-e234.json`, `.ax/experiments/classifier-graph-health-embedding-helper-none-maintenance-e235.json`, `.ax/experiments/workflow-topic-report-helper-review-sync-e238.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. Promoted helper facts are persisted, measurable, graph-explainable, attached to workflow topic evidence packs, shown as candidate-level review hints, and now round-trip through topic-review sync. | Passed: a reviewed SurrealML helper-hinted pack syncs back into the topic report with `reviewed_candidate_count=1`, verdict `reject`, and the helper-control rationale. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `65b0b3c`, `4c602d9`, `eeb517c`, `9a6811e`, `31a1b16`, `e41562c`, `0587b67`, `0e0a960`, `3f01787`, `7bea922`, `21f7163`, `24e4a4e`, `f97c8e3`, `722e3e8`, `8b27657`, `d700090`, `6237d89`, `2490fdf`, `9f4ee34`, `2530699`, `bca5938`, `65bc09a`, this commit | Next useful work is persisting synced topic review outcomes into graph facts or collecting broader controls; still no automatic ranking suppression. |
+| Embedding/SVM helper layer | E209-E239 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e231-post-promotion.json`, `.ax/experiments/embedding-helper-canonical-promotion-split-audit-e231.json`, `.ax/experiments/embedding-helper-graph-projection-current.json`, `.ax/experiments/embedding-helper-graph-apply-e232.json`, `.ax/experiments/classifier-graph-health-embedding-helper-e232.json`, `.ax/experiments/embedding-helper-graph-usefulness-current.json`, `.ax/experiments/classifier-package-execution-embedding-helper-graph-usefulness-e234.json`, `.ax/experiments/classifier-graph-health-embedding-helper-none-maintenance-e235.json`, `.ax/experiments/workflow-topic-review-graph-query-e239.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. Promoted helper facts now support the full graph loop: helper fact -> evidence pack hint -> synced review -> persisted topic review graph fact. | Passed: SurrealDB contains a `workflow_topic_candidate_review` fact with predicate `reject`, object `classifier_candidate_group:hybrid-window/environment_or_preference_signal`, and helper source fixture `session-section-chunks/none-maintenance-question`. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `65b0b3c`, `4c602d9`, `eeb517c`, `9a6811e`, `31a1b16`, `e41562c`, `0587b67`, `0e0a960`, `3f01787`, `7bea922`, `21f7163`, `24e4a4e`, `f97c8e3`, `722e3e8`, `8b27657`, `d700090`, `6237d89`, `2490fdf`, `9f4ee34`, `2530699`, `bca5938`, `65bc09a`, `6631d2d`, this commit | Next useful work is querying these review facts in candidate ranking/evidence reports as reviewer context, while keeping automatic ranking suppression off until broader controls exist. |
 
 Current recommendation:
 
@@ -12677,6 +12677,90 @@ with open(".ax/experiments/workflow-topic-report-helper-review-sync-e238.json") 
 assert data["candidates"]["review"]["reviewed_candidate_count"] == 1
 assert data["candidates"]["review"]["pending_candidate_count"] == 0
 assert data["candidates"]["candidates"][0]["review"]["verdict"] == "reject"
+PY
+```
+
+## E239 - Persist Synced Topic Reviews As Graph Facts
+
+Question:
+
+- Can synced topic review outcomes become graph facts, so later queries can
+  distinguish reviewed noise from merely hinted noise?
+
+Implementation:
+
+- Added `buildWorkflowCandidateTopicReviewGraphProjection(report)`.
+- Added `buildWorkflowCandidateTopicReviewGraphWritePlan(projection)`.
+- Added topic-report CLI outputs:
+  - `--review-facts=<path>`
+  - `--review-write-plan=<path>`
+  - `--apply-review-facts`
+- The projection writes:
+  - `workflow_topic` node
+  - `workflow_topic_candidate_review` node
+  - `topic_has_candidate_review` edge
+  - `candidate_review_reviews_candidate` edge
+  - `workflow_topic_candidate_review` fact with the human verdict,
+    rationale, evidence refs, helper fact IDs, and helper source fixture IDs
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --search=surrealml --source-kind=hybrid_window_classifier_projection --limit=10 --examples=100 --include-helper-facts --sync-brief <(awk '{ if ($0 == "- Verdict: `pending`") print "- Verdict: `reject`"; else if ($0 == "- Rationale: _pending_") print "- Rationale: Promoted helper control marks this as an information request, not a durable preference."; else print }' .ax/experiments/workflow-topic-evidence-pack-helper-review-hints-e237.md) --review-facts=.ax/experiments/workflow-topic-review-graph-projection-e239.json --review-write-plan=.ax/experiments/workflow-topic-review-graph-write-plan-e239.json --apply-review-facts --out=.ax/experiments/workflow-topic-report-helper-review-graph-apply-e239.json --json
+printf '%s\n' 'SELECT graph_id, kind, subject, predicate, object, properties_json FROM classifier_graph_fact WHERE source_kind = "workflow_topic_candidate_review" AND kind = "workflow_topic_candidate_review";' | surreal sql --endpoint http://127.0.0.1:8521 --username root --password root --namespace ax --database main --json --hide-welcome > .ax/experiments/workflow-topic-review-graph-query-e239.json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-topic-review-graph-projection-e239.json`
+- `.ax/experiments/workflow-topic-review-graph-write-plan-e239.json`
+- `.ax/experiments/workflow-topic-report-helper-review-graph-apply-e239.json`
+- `.ax/experiments/workflow-topic-review-graph-query-e239.json`
+
+Results:
+
+- Projection totals:
+  - reviewed candidates: `1`
+  - rejected: `1`
+  - nodes: `2`
+  - edges: `2`
+  - facts: `1`
+- Write-plan totals:
+  - statements: `5`
+  - node statements: `2`
+  - edge statements: `2`
+  - fact statements: `1`
+- Persisted graph fact:
+  - kind: `workflow_topic_candidate_review`
+  - predicate: `reject`
+  - object:
+    `classifier_candidate_group:hybrid-window/environment_or_preference_signal`
+  - helper source fixture:
+    `session-section-chunks/none-maintenance-question`
+
+Decision:
+
+- The helper layer now completes the graph loop for this case. A reviewed
+  helper hint becomes a durable graph fact with evidence and helper provenance.
+- Still no automatic ranking suppression. The next useful work is to query
+  these review facts from candidate reports/evidence packs so reviewed noise is
+  visible on future runs.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun run typecheck
+python3 -m json.tool .ax/experiments/workflow-topic-review-graph-projection-e239.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-topic-review-graph-write-plan-e239.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-topic-review-graph-query-e239.json >/dev/null
+python3 - <<'PY'
+import json
+with open(".ax/experiments/workflow-topic-review-graph-query-e239.json") as f:
+    rows = json.load(f)[0]
+assert rows[0]["predicate"] == "reject"
+props = json.loads(rows[0]["properties_json"])
+assert props["helper_source_fixture_ids"] == ["session-section-chunks/none-maintenance-question"]
 PY
 ```
 

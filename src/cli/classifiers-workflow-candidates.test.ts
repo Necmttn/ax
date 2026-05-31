@@ -13,6 +13,8 @@ import {
     buildWorkflowCandidateTopicHarnessChecks,
     buildWorkflowCandidateTopicHarnessEvidenceSummary,
     buildWorkflowCandidateTopicHelperExplanations,
+    buildWorkflowCandidateTopicReviewGraphProjection,
+    buildWorkflowCandidateTopicReviewGraphWritePlan,
     buildWorkflowCandidateTopicTaskDrafts,
     buildWorkflowCandidateTopicReport,
     buildWorkflowCandidateTaskDrafts,
@@ -988,6 +990,124 @@ describe("classifiers workflow-candidates", () => {
             pending_candidate_count: 0,
         });
         expect(synced.decision).toBe("workflow_topic_evidence_found");
+    });
+
+    test("projects synced topic reviews into classifier graph facts", () => {
+        const candidates = buildWorkflowCandidateReport({
+            groupRows: [{
+                graph_id: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+                label: "environment_or_preference_signal",
+                properties_json: properties({
+                    classifier_key: "hybrid-window",
+                    label: "environment_or_preference_signal",
+                    proposed_action: "record_guidance_or_environment_preference",
+                    support_count: 50,
+                }),
+            }],
+            evidenceRows: [{
+                graph_id: "fact:maintenance-question",
+                subject: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+                properties_json: properties({
+                    turn: "turn:maintenance-question",
+                    confidence: 0.71,
+                    text_excerpt: "USER: when was the last work around surrealML ? do they actively maintain it or stopped?",
+                }),
+            }],
+            sourceKind: "hybrid_window_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            search: "SurrealML",
+            taskLike: "include",
+        });
+        const baseReport = buildWorkflowCandidateTopicReport({
+            sourceKind: "hybrid_window_classifier_projection",
+            topic: "SurrealML",
+            proposals: buildWorkflowCandidateProposalListReport({
+                rows: [{
+                    proposal_id: "proposal:proposal-a",
+                    dedupe_sig: "guidance__workflow_candidate__abc",
+                    title: "Require applied classifier results for surrealml",
+                    form: "guidance",
+                    status: "accepted",
+                    confidence: "medium",
+                    frequency: 1,
+                    target: "AGENTS.md",
+                }],
+                limit: 10,
+                status: "accepted",
+                expandEvidence: true,
+                search: "SurrealML",
+            }),
+            candidates,
+        });
+        const synced = syncWorkflowCandidateTopicReportFromBrief(
+            {
+                ...baseReport,
+                helper_explanations: {
+                    schema: "ax.workflow_candidate_topic_helper_explanations.v1",
+                    min_token_overlap: 0.72,
+                    explanations: [{
+                        source_fixture_id: "session-section-chunks/none-maintenance-question",
+                        promoted_fixture_id: "session-section-chunks/embedding-helper-hard-negative-session-section-chunks-none-maintenance-question",
+                        fact_id: "fact:embedding-helper-maintenance",
+                        status: "accepted",
+                        proposed_label: "none",
+                        candidate_id: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+                        candidate_label: "environment_or_preference_signal",
+                        proposed_action: "record_guidance_or_environment_preference",
+                        turn: "turn:maintenance-question",
+                        match_score: 1,
+                        text_excerpt: "USER: when was the last work around surrealML ? do they actively maintain it or stopped?",
+                        nearest_neighbors: [],
+                        evidence_paths: [".ax/experiments/embedding-helper-review-current.json"],
+                    }],
+                    totals: {
+                        promoted_helper_fact_count: 1,
+                        fixture_text_count: 1,
+                        matched_example_count: 1,
+                        matched_candidate_count: 1,
+                    },
+                },
+            },
+            [
+                "- Candidate id: `classifier_candidate_group:hybrid-window/environment_or_preference_signal`",
+                "- Verdict: `reject`",
+                "- Rationale: Promoted helper control marks this as an information request, not a durable preference.",
+            ].join("\n"),
+            "topic-pack.md",
+        );
+
+        const projection = buildWorkflowCandidateTopicReviewGraphProjection(synced);
+        const writePlan = buildWorkflowCandidateTopicReviewGraphWritePlan(projection);
+
+        expect(projection.schema).toBe("ax.workflow_topic_review_graph_projection.v1");
+        expect(projection.totals).toMatchObject({
+            reviewed_candidate_count: 1,
+            rejected_count: 1,
+            node_count: 2,
+            edge_count: 2,
+            fact_count: 1,
+        });
+        expect(projection.facts[0]).toMatchObject({
+            kind: "workflow_topic_candidate_review",
+            predicate: "reject",
+            object: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+        });
+        expect(projection.facts[0].properties).toMatchObject({
+            verdict: "reject",
+            synced_from: "topic-pack.md",
+            helper_fact_ids: ["fact:embedding-helper-maintenance"],
+            helper_source_fixture_ids: ["session-section-chunks/none-maintenance-question"],
+        });
+        expect(writePlan.schema).toBe("ax.workflow_topic_review_graph_write_plan.v1");
+        expect(writePlan.totals).toEqual({
+            statement_count: 5,
+            node_statement_count: 2,
+            edge_statement_count: 2,
+            fact_statement_count: 1,
+        });
+        expect(writePlan.statements.join("\n")).toContain("workflow_topic_candidate_review");
+        expect(writePlan.statements.join("\n")).toContain("UPSERT classifier_graph_fact");
     });
 
     test("renders persisted harness facts inside topic evidence packs", () => {

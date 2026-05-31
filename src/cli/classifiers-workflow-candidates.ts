@@ -41,6 +41,9 @@ export interface WorkflowCandidateCommandInput {
     readonly harnessFacts?: string;
     readonly harnessWritePlan?: string;
     readonly applyHarnessFacts?: boolean;
+    readonly reviewFacts?: string;
+    readonly reviewWritePlan?: string;
+    readonly applyReviewFacts?: boolean;
     readonly out?: string;
     readonly brief?: string;
     readonly syncBrief?: string;
@@ -274,6 +277,39 @@ export interface WorkflowCandidateTopicHarnessGraphProjection {
 export interface WorkflowCandidateTopicHarnessGraphWritePlan {
     readonly schema: "ax.workflow_topic_harness_graph_write_plan.v1";
     readonly source_projection_schema: WorkflowCandidateTopicHarnessGraphProjection["schema"];
+    readonly topic: string;
+    readonly statements: readonly string[];
+    readonly tables: readonly string[];
+    readonly totals: {
+        readonly statement_count: number;
+        readonly node_statement_count: number;
+        readonly edge_statement_count: number;
+        readonly fact_statement_count: number;
+    };
+}
+
+export interface WorkflowCandidateTopicReviewGraphProjection {
+    readonly schema: "ax.workflow_topic_review_graph_projection.v1";
+    readonly source_report_schema: WorkflowCandidateTopicReport["schema"];
+    readonly topic: string;
+    readonly nodes: readonly WorkflowCandidateTopicHarnessGraphNode[];
+    readonly edges: readonly WorkflowCandidateTopicHarnessGraphEdge[];
+    readonly facts: readonly WorkflowCandidateTopicHarnessGraphFact[];
+    readonly totals: {
+        readonly reviewed_candidate_count: number;
+        readonly rejected_count: number;
+        readonly accepted_count: number;
+        readonly deferred_count: number;
+        readonly revised_count: number;
+        readonly node_count: number;
+        readonly edge_count: number;
+        readonly fact_count: number;
+    };
+}
+
+export interface WorkflowCandidateTopicReviewGraphWritePlan {
+    readonly schema: "ax.workflow_topic_review_graph_write_plan.v1";
+    readonly source_projection_schema: WorkflowCandidateTopicReviewGraphProjection["schema"];
     readonly topic: string;
     readonly statements: readonly string[];
     readonly tables: readonly string[];
@@ -2124,6 +2160,183 @@ export function buildWorkflowCandidateTopicHarnessGraphWritePlan(
     };
 }
 
+const topicReviewGraphId = (topic: string, candidateId: string): string =>
+    `workflow_topic_candidate_review:${safeKeyPart(topic.toLowerCase()) || "unknown_topic"}:${graphKeyWithHash(candidateId)}`;
+
+export function buildWorkflowCandidateTopicReviewGraphProjection(
+    report: WorkflowCandidateTopicReport,
+): WorkflowCandidateTopicReviewGraphProjection {
+    const reviewedCandidates = report.candidates.candidates.filter((candidate) => {
+        const verdict = candidate.review?.verdict ?? "pending";
+        return REVIEWED_VERDICTS.has(verdict);
+    });
+    const topicNode = topicHarnessGraphId(report.topic);
+    const nodes = new Map<string, WorkflowCandidateTopicHarnessGraphNode>();
+    const edges: WorkflowCandidateTopicHarnessGraphEdge[] = [];
+    const facts: WorkflowCandidateTopicHarnessGraphFact[] = [];
+
+    nodes.set(topicNode, {
+        id: topicNode,
+        kind: "workflow_topic",
+        label: report.topic || "unknown-topic",
+        properties: {
+            topic: report.topic,
+            source_kind: report.source_kind,
+            decision: report.decision,
+        },
+    });
+
+    for (const candidate of reviewedCandidates) {
+        const review = candidate.review;
+        if (!review) continue;
+        const reviewNode = topicReviewGraphId(report.topic, candidate.group_id);
+        const helperExplanations = (report.helper_explanations?.explanations ?? [])
+            .filter((explanation) => explanation.candidate_id === candidate.group_id);
+        const evidenceRefs = evidenceRefsForExamples(candidate.examples);
+        const helperFactIds = helperExplanations.map((explanation) => explanation.fact_id);
+        nodes.set(reviewNode, {
+            id: reviewNode,
+            kind: "workflow_topic_candidate_review",
+            label: candidate.label,
+            properties: {
+                topic: report.topic,
+                candidate_id: candidate.group_id,
+                candidate_label: candidate.label,
+                proposed_action: candidate.proposed_action,
+                verdict: review.verdict,
+                rationale: review.rationale,
+                synced_from: report.candidates.review?.synced_from ?? null,
+                helper_fact_ids: helperFactIds,
+                evidence_refs: evidenceRefs,
+            },
+        });
+        const topicEdge = `edge:${graphKeyWithHash(`${topicNode}:has_candidate_review:${reviewNode}`)}`;
+        edges.push({
+            id: topicEdge,
+            kind: "topic_has_candidate_review",
+            from: topicNode,
+            to: reviewNode,
+            evidence_path: report.candidates.review?.synced_from ?? report.topic,
+            properties: {
+                topic: report.topic,
+                verdict: review.verdict,
+            },
+        });
+        const candidateEdge = `edge:${graphKeyWithHash(`${reviewNode}:reviews_candidate:${candidate.group_id}`)}`;
+        edges.push({
+            id: candidateEdge,
+            kind: "candidate_review_reviews_candidate",
+            from: reviewNode,
+            to: candidate.group_id,
+            evidence_path: evidenceRefs.join(" "),
+            properties: {
+                topic: report.topic,
+                candidate_id: candidate.group_id,
+                evidence_refs: evidenceRefs,
+            },
+        });
+        facts.push({
+            id: `fact:${graphKeyWithHash(`${reviewNode}:verdict:${review.verdict}`)}`,
+            kind: "workflow_topic_candidate_review",
+            subject: reviewNode,
+            predicate: review.verdict,
+            object: candidate.group_id,
+            value: {
+                reviewed: true,
+                verdict: review.verdict,
+            },
+            evidence_edges: [topicEdge, candidateEdge],
+            properties: {
+                topic: report.topic,
+                candidate_id: candidate.group_id,
+                candidate_label: candidate.label,
+                proposed_action: candidate.proposed_action,
+                verdict: review.verdict,
+                rationale: review.rationale,
+                synced_from: report.candidates.review?.synced_from ?? null,
+                helper_fact_ids: helperFactIds,
+                helper_source_fixture_ids: helperExplanations.map((explanation) => explanation.source_fixture_id),
+                evidence_refs: evidenceRefs,
+            },
+        });
+    }
+
+    return {
+        schema: "ax.workflow_topic_review_graph_projection.v1",
+        source_report_schema: report.schema,
+        topic: report.topic,
+        nodes: [...nodes.values()],
+        edges,
+        facts,
+        totals: {
+            reviewed_candidate_count: reviewedCandidates.length,
+            rejected_count: reviewedCandidates.filter((candidate) => candidate.review?.verdict === "reject").length,
+            accepted_count: reviewedCandidates.filter((candidate) => candidate.review?.verdict === "accept").length,
+            deferred_count: reviewedCandidates.filter((candidate) => candidate.review?.verdict === "defer").length,
+            revised_count: reviewedCandidates.filter((candidate) => candidate.review?.verdict === "revise").length,
+            node_count: nodes.size,
+            edge_count: edges.length,
+            fact_count: facts.length,
+        },
+    };
+}
+
+export function buildWorkflowCandidateTopicReviewGraphWritePlan(
+    projection: WorkflowCandidateTopicReviewGraphProjection,
+): WorkflowCandidateTopicReviewGraphWritePlan {
+    const sourceKind = "workflow_topic_candidate_review";
+    const nodeStatements = projection.nodes.map((node) =>
+        `UPSERT ${recordRef("classifier_graph_node", node.id)} CONTENT ${surrealObject([
+            ["graph_id", surrealString(node.id)],
+            ["kind", surrealString(node.kind)],
+            ["label", surrealString(node.label)],
+            ["properties_json", surrealJson(node.properties)],
+            ["source_kind", surrealString(sourceKind)],
+            ["updated_at", "time::now()"],
+        ])};`
+    );
+    const edgeStatements = projection.edges.map((edge) =>
+        `UPSERT ${recordRef("classifier_graph_edge", edge.id)} CONTENT ${surrealObject([
+            ["graph_id", surrealString(edge.id)],
+            ["kind", surrealString(edge.kind)],
+            ["from_id", surrealString(edge.from)],
+            ["to_id", surrealString(edge.to)],
+            ["evidence_path", surrealString(edge.evidence_path)],
+            ["properties_json", surrealJson(edge.properties)],
+            ["source_kind", surrealString(sourceKind)],
+            ["updated_at", "time::now()"],
+        ])};`
+    );
+    const factStatements = projection.facts.map((fact) =>
+        `UPSERT ${recordRef("classifier_graph_fact", fact.id)} CONTENT ${surrealObject([
+            ["graph_id", surrealString(fact.id)],
+            ["kind", surrealString(fact.kind)],
+            ["subject", surrealString(fact.subject)],
+            ["predicate", surrealString(fact.predicate)],
+            ["object", surrealOptionString(fact.object)],
+            ["value_json", surrealJsonTextOption(fact.value)],
+            ["evidence_edges_json", surrealJsonText(fact.evidence_edges)],
+            ["properties_json", surrealJson(fact.properties)],
+            ["source_kind", surrealString(sourceKind)],
+            ["updated_at", "time::now()"],
+        ])};`
+    );
+    const statements = [...nodeStatements, ...edgeStatements, ...factStatements];
+    return {
+        schema: "ax.workflow_topic_review_graph_write_plan.v1",
+        source_projection_schema: projection.schema,
+        topic: projection.topic,
+        statements,
+        tables: ["classifier_graph_node", "classifier_graph_edge", "classifier_graph_fact"],
+        totals: {
+            statement_count: statements.length,
+            node_statement_count: nodeStatements.length,
+            edge_statement_count: edgeStatements.length,
+            fact_statement_count: factStatements.length,
+        },
+    };
+}
+
 export function buildWorkflowCandidateTopicHarnessGraphListReport(input: {
     readonly topic?: string;
     readonly facts: readonly WorkflowCandidateTopicHarnessGraphFactRow[];
@@ -2963,6 +3176,23 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
             if (input.evidencePack) {
                 mkdirSync(dirname(input.evidencePack), { recursive: true });
                 writeFileSync(input.evidencePack, renderWorkflowCandidateTopicEvidencePackMarkdown(topicReport), "utf8");
+            }
+            if (input.reviewFacts || input.reviewWritePlan || input.applyReviewFacts) {
+                const reviewProjection = buildWorkflowCandidateTopicReviewGraphProjection(topicReport);
+                const reviewWritePlan = buildWorkflowCandidateTopicReviewGraphWritePlan(reviewProjection);
+                if (input.reviewFacts) {
+                    mkdirSync(dirname(input.reviewFacts), { recursive: true });
+                    writeFileSync(input.reviewFacts, `${prettyPrint(reviewProjection)}\n`, "utf8");
+                }
+                if (input.reviewWritePlan) {
+                    mkdirSync(dirname(input.reviewWritePlan), { recursive: true });
+                    writeFileSync(input.reviewWritePlan, `${prettyPrint(reviewWritePlan)}\n`, "utf8");
+                }
+                if (input.applyReviewFacts && reviewWritePlan.statements.length > 0) {
+                    yield* db.query(reviewWritePlan.statements.join("\n")).pipe(
+                        catchDbErrorAndExit("axctl classifiers workflow-candidates"),
+                    );
+                }
             }
             if (input.harnessFacts || input.harnessWritePlan || input.applyHarnessFacts) {
                 const harnessProjection = buildWorkflowCandidateTopicHarnessGraphProjection(topicReport);
