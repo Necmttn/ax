@@ -842,7 +842,14 @@ describe("classifier package operations report", () => {
                     graph_id: "embedding_helper_hard_negative:session-section-chunks/none-start-building",
                     kind: "embedding_helper_hard_negative_candidate",
                     label: "session-section-chunks/none-start-building",
-                    properties_json: JSON.stringify({ status: "pending_human_acceptance" }),
+                    properties_json: JSON.stringify({ status: "accepted" }),
+                    source_kind: "embedding_helper_review_projection",
+                },
+                {
+                    graph_id: "classifier_promoted_fixture:session-section-chunks/embedding-helper-hard-negative-none-start-building",
+                    kind: "classifier_promoted_fixture",
+                    label: "session-section-chunks/embedding-helper-hard-negative-none-start-building",
+                    properties_json: JSON.stringify({ label: "none", target: "none" }),
                     source_kind: "embedding_helper_review_projection",
                 },
             ],
@@ -865,6 +872,15 @@ describe("classifier package operations report", () => {
                     properties_json: JSON.stringify({ similarity: 0.8565 }),
                     source_kind: "embedding_helper_review_projection",
                 },
+                {
+                    graph_id: "edge:promoted",
+                    kind: "promoted_as_fixture",
+                    from_id: "embedding_helper_hard_negative:session-section-chunks/none-start-building",
+                    to_id: "classifier_promoted_fixture:session-section-chunks/embedding-helper-hard-negative-none-start-building",
+                    evidence_path: ".ax/experiments/embedding-helper-review-e210.json",
+                    properties_json: JSON.stringify({ label: "none", target: "none" }),
+                    source_kind: "embedding_helper_review_projection",
+                },
             ],
             facts: [
                 {
@@ -885,14 +901,15 @@ describe("classifier package operations report", () => {
                     graph_id: "fact:hard-negative",
                     kind: "embedding_helper_hard_negative_candidate",
                     subject: "embedding_helper_hard_negative:session-section-chunks/none-start-building",
-                    predicate: "pending_human_acceptance",
-                    object: "classifier_evidence:session-section-chunks/none-start-building",
+                    predicate: "promoted_hard_negative_fixture",
+                    object: "classifier_promoted_fixture:session-section-chunks/embedding-helper-hard-negative-none-start-building",
                     value_json: "true",
-                    evidence_edges_json: JSON.stringify(["edge:hn"]),
+                    evidence_edges_json: JSON.stringify(["edge:promoted", "edge:hn"]),
                     properties_json: JSON.stringify({
                         source_fixture_id: "session-section-chunks/none-start-building",
-                        status: "pending_human_acceptance",
+                        status: "accepted",
                         proposed_label: "none",
+                        promoted_fixture_id: "session-section-chunks/embedding-helper-hard-negative-none-start-building",
                         seed_count: 2,
                         max_nearest_positive_similarity: 0.8743,
                     }),
@@ -906,15 +923,20 @@ describe("classifier package operations report", () => {
         expect(report.totals.embedding_helper_fact_count).toBe(2);
         expect(report.result_totals.embedding_helper_fact_count).toBe(2);
         expect(report.embedding_helper_facts.map((fact) => fact.predicate)).toEqual([
-            "pending_human_acceptance",
+            "promoted_hard_negative_fixture",
             "recommended_threshold",
         ]);
         expect(report.embedding_helper_facts[0]).toMatchObject({
             source_fixture_id: "session-section-chunks/none-start-building",
-            status: "pending_human_acceptance",
+            status: "accepted",
             proposed_label: "none",
+            promoted_fixture_id: "session-section-chunks/embedding-helper-hard-negative-none-start-building",
             seed_count: 2,
             max_nearest_positive_similarity: 0.8743,
+            nearest_neighbors: [{
+                fixture_id: "session-section-chunks/approval-alright-go",
+                similarity: 0.8565,
+            }],
             evidence_paths: [".ax/experiments/embedding-helper-review-e210.json"],
         });
     });

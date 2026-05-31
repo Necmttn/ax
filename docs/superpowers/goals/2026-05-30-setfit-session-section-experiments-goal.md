@@ -29,7 +29,7 @@ artifact path as the evidence to inspect before trusting any summary row.
 | Blind/review workflow | E46-E65+ | `.ax/experiments/blind-workflow-status-e57.json` and related review artifacts | Human review is mandatory before fixtures or graph facts are promoted. | Pending where review rows are incomplete. | Earlier experiment log | Prefer review queues/workspaces over automatic label edits. |
 | Transcript graph projection | E155-E157 | `.ax/experiments/transcript-candidate-graph-projection-e155.json`, `.ax/experiments/workflow-candidate-report-e156.json`, `.ax/experiments/workflow-candidate-cli-e157.json` | Real persisted classifier facts can become graph-backed workflow candidates. | Passed for projection/query; still needs product review filters and proposal gates. | E155/E156/E157 commits in log | Use graph facts for evidence-backed workflow/harness discovery. |
 | Proposal lifecycle | E168-E208 | `.ax/experiments/workflow-candidate-proposal-list-e168.json`, `.ax/experiments/classifier-package-execution-write-plan-e208.json` | Classifier-derived workflow proposals are discoverable and lifecycle-tracked. | Passed for visibility/lifecycle plumbing; promotion remains review-gated. | Recent proposal lifecycle commits | Continue using review and ready-smoke gates before guidance/harness changes. |
-| Embedding/SVM helper layer | E209-E234 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e231-post-promotion.json`, `.ax/experiments/embedding-helper-canonical-promotion-split-audit-e231.json`, `.ax/experiments/embedding-helper-graph-projection-current.json`, `.ax/experiments/embedding-helper-graph-apply-e232.json`, `.ax/experiments/classifier-graph-health-embedding-helper-e232.json`, `.ax/experiments/embedding-helper-graph-usefulness-current.json`, `.ax/experiments/classifier-package-execution-embedding-helper-graph-usefulness-e234.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. Promoted helper facts are persisted, queryable, and now measured over full workflow candidate evidence coverage. | Passed but effect remains small: full-evidence scan covered `342/342` candidate support examples across `15` transcript and `3` hybrid groups; it found `1` hybrid environment/preference example matching promoted `none-maintenance-question`; estimated suppressed support is `1` of `92` hybrid support and `0` of `250` transcript support. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `65b0b3c`, `4c602d9`, `eeb517c`, `9a6811e`, `31a1b16`, `e41562c`, `0587b67`, `0e0a960`, `3f01787`, `7bea922`, `21f7163`, `24e4a4e`, `f97c8e3`, `722e3e8`, `8b27657`, `d700090`, `6237d89`, `2490fdf`, this commit | Keep helper facts as debug/review explanations for now. Next useful work is broader control collection or nearest-neighbor explanation UI/query support, not ranking suppression. |
+| Embedding/SVM helper layer | E209-E235 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e231-post-promotion.json`, `.ax/experiments/embedding-helper-canonical-promotion-split-audit-e231.json`, `.ax/experiments/embedding-helper-graph-projection-current.json`, `.ax/experiments/embedding-helper-graph-apply-e232.json`, `.ax/experiments/classifier-graph-health-embedding-helper-e232.json`, `.ax/experiments/embedding-helper-graph-usefulness-current.json`, `.ax/experiments/classifier-package-execution-embedding-helper-graph-usefulness-e234.json`, `.ax/experiments/classifier-graph-health-embedding-helper-none-maintenance-e235.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. Promoted helper facts are persisted, measurable, and now explainable through graph queries. | Passed: `ax classifiers graph --mode=embedding-helper --artifact=session-section-chunks/none-maintenance-question` returns the promoted fixture ID, evidence path, and five nearest reviewed fixture neighbors with similarities. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `65b0b3c`, `4c602d9`, `eeb517c`, `9a6811e`, `31a1b16`, `e41562c`, `0587b67`, `0e0a960`, `3f01787`, `7bea922`, `21f7163`, `24e4a4e`, `f97c8e3`, `722e3e8`, `8b27657`, `d700090`, `6237d89`, `2490fdf`, `9f4ee34`, this commit | Keep helper facts as debug/review explanations. Next useful work is broader control collection or wiring these explanations into workflow-candidate evidence packs. |
 
 Current recommendation:
 
@@ -12478,6 +12478,72 @@ bun test src/classifiers/package-manifest.test.ts src/classifiers/package-servic
 bun run typecheck
 python3 -m json.tool packages/ax-classifier-session-sections/ax.classifier.json >/dev/null
 python3 -m json.tool .ax/experiments/embedding-helper-graph-usefulness-current.json >/dev/null
+```
+
+## E235 - Explain Promoted Helper Facts From Graph Queries
+
+Question:
+
+- If helper facts are not strong enough to suppress ranking yet, can they at
+  least explain why a candidate example is probably noise when a reviewer
+  drills into a promoted helper control?
+
+Implementation:
+
+- Extended `ClassifierGraphEmbeddingHelperFact` with:
+  - `promoted_fixture_id`
+  - `nearest_neighbors`
+- `buildExecutionGraphHealthReport` now derives nearest-neighbor explanation
+  rows from `nearest_reviewed_fixture` evidence edges and promoted fixture IDs
+  from fact properties or `classifier_promoted_fixture:*` objects.
+- `renderClassifierPackageExecutionGraphHealthText` now prints:
+  - predicate
+  - status
+  - promoted fixture ID
+  - nearest reviewed fixtures with similarity values
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --artifact=session-section-chunks/none-maintenance-question --out=.ax/experiments/classifier-graph-health-embedding-helper-none-maintenance-e235.json --json
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --artifact=session-section-chunks/none-maintenance-question
+```
+
+Artifacts:
+
+- `.ax/experiments/classifier-graph-health-embedding-helper-none-maintenance-e235.json`
+
+Results:
+
+- Query filter: `session-section-chunks/none-maintenance-question`
+- Result embedding-helper facts: `1`
+- Predicate: `promoted_hard_negative_fixture`
+- Status: `accepted`
+- Promoted fixture:
+  `session-section-chunks/embedding-helper-hard-negative-session-section-chunks-none-maintenance-question`
+- Evidence path: `.ax/experiments/embedding-helper-review-current.json`
+- Nearest reviewed fixture explanations:
+  - `session-section-chunks/tooling-local-surreal-port`, similarity `0.688`
+  - `session-section-chunks/tooling-surreal-version`, similarity `0.6175`
+  - `session-section-chunks/direction-docker-surreal`, similarity `0.5998`
+  - `session-section-chunks/none-go`, similarity `0.5803`
+  - `session-section-chunks/approval-go-after-plan`, similarity `0.5769`
+
+Decision:
+
+- Promoted helper facts are now directly explainable from graph queries. This
+  is the right current use: reviewer/debug evidence rather than ranking
+  suppression.
+- The next useful product slice is to attach these helper explanations to
+  workflow-candidate topic evidence packs when a candidate example matches a
+  promoted helper control.
+
+Verification:
+
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+python3 -m json.tool .ax/experiments/classifier-graph-health-embedding-helper-none-maintenance-e235.json >/dev/null
 ```
 
 ## E197 - Hybrid Graph Usefulness Gate

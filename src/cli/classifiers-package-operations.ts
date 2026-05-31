@@ -311,7 +311,10 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
             if (fact.kind === "embedding_helper_routing_candidate") {
                 lines.push(`- routing ${fact.predicate}: threshold=${fact.threshold ?? "unknown"} positive_recall=${fact.positive_recall_after_routing_mean ?? "unknown"} call_reduction=${fact.setfit_call_reduction_rate_mean ?? "unknown"}`);
             } else if (fact.kind === "embedding_helper_hard_negative_candidate") {
-                lines.push(`- hard-negative ${fact.source_fixture_id ?? fact.subject}: ${fact.status ?? "unknown"} proposed=${fact.proposed_label ?? "unknown"} seeds=${fact.seed_count ?? "unknown"} nearest=${fact.max_nearest_positive_similarity ?? "unknown"}`);
+                lines.push(`- hard-negative ${fact.source_fixture_id ?? fact.subject}: ${fact.predicate} status=${fact.status ?? "unknown"} proposed=${fact.proposed_label ?? "unknown"} seeds=${fact.seed_count ?? "unknown"} nearest=${fact.max_nearest_positive_similarity ?? "unknown"}${fact.promoted_fixture_id ? ` promoted=${fact.promoted_fixture_id}` : ""}`);
+                for (const neighbor of fact.nearest_neighbors ?? []) {
+                    lines.push(`  nearest: ${neighbor.fixture_id} sim=${neighbor.similarity ?? "unknown"}`);
+                }
             } else if (fact.kind === "embedding_helper_dedupe_cluster") {
                 lines.push(`- dedupe ${fact.subject}: ${fact.predicate}`);
             } else {

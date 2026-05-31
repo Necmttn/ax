@@ -610,13 +610,15 @@ describe("classifiers package-operations format", () => {
                 graph_id: "fact:hard-negative",
                 kind: "embedding_helper_hard_negative_candidate",
                 subject: "embedding_helper_hard_negative:session-section-chunks/none-start-building",
-                predicate: "pending_human_acceptance",
+                predicate: "promoted_hard_negative_fixture",
                 value: true,
-                status: "pending_human_acceptance",
+                status: "accepted",
                 source_fixture_id: "session-section-chunks/none-start-building",
+                promoted_fixture_id: "session-section-chunks/embedding-helper-hard-negative-none-start-building",
                 proposed_label: "none",
                 seed_count: 2,
                 max_nearest_positive_similarity: 0.8743,
+                nearest_neighbors: [{ fixture_id: "session-section-chunks/approval-alright-go", similarity: 0.8565 }],
                 evidence_edges: ["edge:hn"],
                 evidence_paths: [".ax/experiments/embedding-helper-review-e210.json"],
             }],
@@ -653,7 +655,8 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("mode: embedding-helper");
         expect(output).toContain("embedding helper facts:");
         expect(output).toContain("- routing recommended_threshold: threshold=none positive_recall=0.9028 call_reduction=0.1778");
-        expect(output).toContain("- hard-negative session-section-chunks/none-start-building: pending_human_acceptance proposed=none seeds=2 nearest=0.8743");
+        expect(output).toContain("- hard-negative session-section-chunks/none-start-building: promoted_hard_negative_fixture status=accepted proposed=none seeds=2 nearest=0.8743 promoted=session-section-chunks/embedding-helper-hard-negative-none-start-building");
+        expect(output).toContain("nearest: session-section-chunks/approval-alright-go sim=0.8565");
     });
 
     test("renders classifier lifecycle insight reports", () => {

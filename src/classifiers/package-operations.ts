@@ -362,12 +362,17 @@ export interface ClassifierGraphEmbeddingHelperFact {
     readonly value: unknown;
     readonly status?: string;
     readonly source_fixture_id?: string;
+    readonly promoted_fixture_id?: string;
     readonly threshold?: string;
     readonly proposed_label?: string;
     readonly seed_count?: number;
     readonly max_nearest_positive_similarity?: number;
     readonly setfit_call_reduction_rate_mean?: number;
     readonly positive_recall_after_routing_mean?: number;
+    readonly nearest_neighbors?: readonly {
+        readonly fixture_id: string;
+        readonly similarity?: number;
+    }[];
     readonly evidence_edges: readonly string[];
     readonly evidence_paths: readonly string[];
 }
@@ -1679,11 +1684,26 @@ export function buildExecutionGraphHealthReport(input: {
             const evidenceEdges = Array.isArray(evidenceEdgesValue)
                 ? evidenceEdgesValue.filter((entry): entry is string => typeof entry === "string")
                 : [];
+            const nearestNeighbors = evidenceEdges
+                .map((edgeId) => input.edges.find((edge) => edge.graph_id === edgeId))
+                .filter((edge): edge is ClassifierGraphEdgeRow => edge?.kind === "nearest_reviewed_fixture")
+                .map((edge) => {
+                    const edgeProperties = jsonRecord(edge.properties_json);
+                    const fixtureId = edge.to_id.startsWith("classifier_evidence:")
+                        ? edge.to_id.slice("classifier_evidence:".length)
+                        : edge.to_id;
+                    return {
+                        fixture_id: fixtureId,
+                        ...(jsonNumber(edgeProperties.similarity) === null ? {} : { similarity: jsonNumber(edgeProperties.similarity) as number }),
+                    };
+                });
             const evidencePaths = Array.from(new Set(evidenceEdges
                 .map((edgeId) => input.edges.find((edge) => edge.graph_id === edgeId)?.evidence_path)
                 .filter((path): path is string => Boolean(path))))
                 .sort();
             const value = fact.value_json === undefined ? null : safeJsonParse<unknown>(fact.value_json);
+            const promotedFixtureId = jsonString(properties.promoted_fixture_id) ??
+                (fact.object?.startsWith("classifier_promoted_fixture:") ? fact.object.slice("classifier_promoted_fixture:".length) : undefined);
             return {
                 graph_id: fact.graph_id,
                 kind: fact.kind,
@@ -1693,12 +1713,14 @@ export function buildExecutionGraphHealthReport(input: {
                 value,
                 ...(jsonString(properties.status) === null ? {} : { status: jsonString(properties.status) as string }),
                 ...(jsonString(properties.source_fixture_id) === null ? {} : { source_fixture_id: jsonString(properties.source_fixture_id) as string }),
+                ...(promotedFixtureId === undefined ? {} : { promoted_fixture_id: promotedFixtureId }),
                 ...(jsonString(properties.threshold) === null ? {} : { threshold: jsonString(properties.threshold) as string }),
                 ...(jsonString(properties.proposed_label) === null ? {} : { proposed_label: jsonString(properties.proposed_label) as string }),
                 ...(jsonNumber(properties.seed_count) === null ? {} : { seed_count: jsonNumber(properties.seed_count) as number }),
                 ...(jsonNumber(properties.max_nearest_positive_similarity) === null ? {} : { max_nearest_positive_similarity: jsonNumber(properties.max_nearest_positive_similarity) as number }),
                 ...(jsonNumber(properties.setfit_call_reduction_rate_mean) === null ? {} : { setfit_call_reduction_rate_mean: jsonNumber(properties.setfit_call_reduction_rate_mean) as number }),
                 ...(jsonNumber(properties.positive_recall_after_routing_mean) === null ? {} : { positive_recall_after_routing_mean: jsonNumber(properties.positive_recall_after_routing_mean) as number }),
+                ...(nearestNeighbors.length === 0 ? {} : { nearest_neighbors: nearestNeighbors }),
                 evidence_edges: evidenceEdges,
                 evidence_paths: evidencePaths,
             };
