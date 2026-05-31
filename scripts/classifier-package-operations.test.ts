@@ -1283,6 +1283,7 @@ describe("classifier package operations report", () => {
             has_changed_filters: true,
             changed_filters: ["value_equals"],
             unchanged_filters: [],
+            repair_status: "repair_available",
             status: "expected_matches",
             next_action: "run_suggested_query",
             remediation: "Run the suggested graph query to inspect the available classifier lifecycle facts.",

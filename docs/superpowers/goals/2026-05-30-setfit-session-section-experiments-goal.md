@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E394 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-name-lists-no-match-e394.json`
+- Index continuation: E395 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-status-no-match-e395.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-name-lists-match-e394.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-status-match-e395.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,48 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E395 - Expose Suggested Query Repair Status
+
+Question:
+- E394 names changed filters, but can services route a graph-query suggestion
+  as an actual repair versus a no-op/debug suggestion without combining counts,
+  booleans, and filter-name lists?
+
+Implementation:
+- Added `repair_status` to `query_suggestion`.
+- Lifecycle graph-query suggestions now report `repair_available` when a
+  suggested filter differs from the original query and `no_repair_needed` when
+  the suggested query already matches.
+- Text graph-health output now renders `query suggestion repair status`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-status-no-match-e395.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-status-match-e395.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-status-no-match-e395.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_status=repair_available`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.repair_status=no_repair_needed`.
+- Text output renders `query suggestion repair status: repair_available`.
+
+Decision:
+- Services can now branch on one status value for repair routing while still
+  retaining detailed counts, names, and before/after filter rows.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E395 no-match report has `repair_status=repair_available`.
+- E395 match report has `repair_status=no_repair_needed`.
+- E395 text output includes the repair-status line.
 
 ## E394 - Expose Suggested Query Filter Name Lists
 
