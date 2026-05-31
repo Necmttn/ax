@@ -18,6 +18,7 @@ import {
     executeOperationPlanReport,
     loadClassifierPackageExecutionReport,
     loadClassifierLifecycleReviewStatus,
+    summarizeClassifierGraphQuerySuggestionRouting,
     summarizeClassifierPackageOperations,
     writeExecutionHistoryReport,
     writeExecutionFactProjectionReport,
@@ -37,6 +38,7 @@ import {
     type ClassifierPackageExecutionSurrealWritePlanReport,
     type ClassifierPackageExecutionSurrealApplyReport,
     type ClassifierPackageExecutionGraphHealthReport,
+    type ClassifierGraphQuerySuggestionRoutingSummary,
     type ClassifierLifecycleInsightReport,
     type ClassifierGraphHealthQuery,
     type ClassifierGraphEdgeRow,
@@ -257,6 +259,9 @@ export interface ClassifierPackageServiceShape {
     readonly executionGraphHealthReport: (
         input?: ClassifierPackageExecutionGraphHealthInput,
     ) => Effect.Effect<ClassifierPackageExecutionGraphHealthReport, ClassifierPackageReportWriteError, SurrealClient>;
+    readonly executionGraphQuerySuggestionRoutingSummary: (
+        input?: ClassifierPackageExecutionGraphHealthInput,
+    ) => Effect.Effect<ClassifierGraphQuerySuggestionRoutingSummary, ClassifierPackageReportWriteError, SurrealClient>;
     readonly writeExecutionGraphHealthReport: (
         input: ClassifierPackageExecutionGraphHealthWriteInput,
     ) => Effect.Effect<ClassifierPackageExecutionGraphHealthReport, ClassifierPackageReportWriteError, SurrealClient>;
@@ -569,6 +574,13 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService>
             return report;
         });
 
+        const executionGraphQuerySuggestionRoutingSummary = Effect.fn("ClassifierPackageService.executionGraphQuerySuggestionRoutingSummary")(function* (
+            input?: ClassifierPackageExecutionGraphHealthInput,
+        ) {
+            const report = yield* executionGraphHealth(input);
+            return summarizeClassifierGraphQuerySuggestionRouting(report);
+        });
+
         const lifecycleInsight = Effect.fn("ClassifierPackageService.lifecycleInsightReport")(function* (
             input?: ClassifierLifecycleInsightInput,
         ) {
@@ -623,6 +635,7 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService>
             applyExecutionSurrealWritePlanReport: applyExecutionSurrealWritePlan,
             writeExecutionSurrealApplyReport: writeExecutionSurrealApply,
             executionGraphHealthReport: executionGraphHealth,
+            executionGraphQuerySuggestionRoutingSummary,
             writeExecutionGraphHealthReport: writeExecutionGraphHealth,
             lifecycleInsightReport: lifecycleInsight,
             writeLifecycleInsightReport: writeLifecycleInsight,

@@ -584,6 +584,128 @@ export interface ClassifierPackageExecutionGraphHealthReport {
     readonly decision: "healthy" | "empty_graph";
 }
 
+export interface ClassifierGraphQuerySuggestionRepairRoutingSummary {
+    readonly status: ClassifierGraphQuerySuggestion["repair_status"];
+    readonly execution_status: ClassifierGraphQuerySuggestion["repair_execution_status"];
+    readonly next_action: ClassifierGraphQuerySuggestion["repair_next_action"];
+    readonly command_kind: ClassifierGraphQuerySuggestion["repair_command_kind"];
+    readonly can_execute: boolean;
+    readonly requires_inputs: boolean;
+    readonly required_inputs: readonly [];
+    readonly blockers: ClassifierGraphQuerySuggestion["repair_blockers"];
+    readonly blocker_details: ClassifierGraphQuerySuggestion["repair_blocker_details"];
+    readonly argv: readonly string[];
+    readonly query?: ClassifierGraphHealthQuery;
+    readonly expected_query_match_status: ClassifierGraphQuerySuggestion["repair_expected_query_match_status"];
+    readonly expected_result_count?: number;
+    readonly remediation: string;
+}
+
+export interface ClassifierGraphQuerySuggestionVerificationRoutingSummary {
+    readonly status: ClassifierGraphQuerySuggestion["repair_verification_status"];
+    readonly execution_status: ClassifierGraphQuerySuggestion["repair_verification_execution_status"];
+    readonly next_action: ClassifierGraphQuerySuggestion["repair_verification_next_action"];
+    readonly command_kind: ClassifierGraphQuerySuggestion["repair_verification_command_kind"];
+    readonly can_execute: boolean;
+    readonly requires_inputs: boolean;
+    readonly required_inputs: readonly [];
+    readonly blockers: ClassifierGraphQuerySuggestion["repair_verification_blockers"];
+    readonly blocker_details: ClassifierGraphQuerySuggestion["repair_verification_blocker_details"];
+    readonly argv: readonly string[];
+    readonly query?: ClassifierGraphHealthQuery;
+    readonly expected_query_match_status: ClassifierGraphQuerySuggestion["repair_verification_expected_query_match_status"];
+    readonly expected_result_count?: number;
+    readonly remediation: string;
+}
+
+export interface ClassifierGraphQuerySuggestionRoutingSummary {
+    readonly has_suggestion: boolean;
+    readonly query_match_status?: ClassifierPackageExecutionGraphHealthReport["query_match_status"];
+    readonly query_next_action?: ClassifierPackageExecutionGraphHealthReport["query_next_action"];
+    readonly suggested_value_equals?: string;
+    readonly suggested_status?: ClassifierPackageExecutionGraphHealthReport["query_suggested_status"];
+    readonly suggested_next_action?: ClassifierPackageExecutionGraphHealthReport["query_suggested_next_action"];
+    readonly suggestion?: {
+        readonly value_equals: string;
+        readonly result_count: number;
+        readonly status: ClassifierGraphQuerySuggestion["status"];
+        readonly next_action: ClassifierGraphQuerySuggestion["next_action"];
+        readonly remediation: string;
+        readonly source: ClassifierGraphQuerySuggestion["source"];
+        readonly reason: ClassifierGraphQuerySuggestion["reason"];
+        readonly original_query: ClassifierGraphHealthQuery;
+        readonly query: ClassifierGraphHealthQuery;
+        readonly repair: ClassifierGraphQuerySuggestionRepairRoutingSummary;
+        readonly verification: ClassifierGraphQuerySuggestionVerificationRoutingSummary;
+    };
+}
+
+export function summarizeClassifierGraphQuerySuggestionRouting(
+    report: ClassifierPackageExecutionGraphHealthReport,
+): ClassifierGraphQuerySuggestionRoutingSummary {
+    const suggestion = report.query_suggestion;
+    const base = {
+        has_suggestion: suggestion !== undefined,
+        ...(report.query_match_status === undefined ? {} : { query_match_status: report.query_match_status }),
+        ...(report.query_next_action === undefined ? {} : { query_next_action: report.query_next_action }),
+        ...(report.query_suggested_value_equals === undefined ? {} : { suggested_value_equals: report.query_suggested_value_equals }),
+        ...(report.query_suggested_status === undefined ? {} : { suggested_status: report.query_suggested_status }),
+        ...(report.query_suggested_next_action === undefined ? {} : { suggested_next_action: report.query_suggested_next_action }),
+    };
+    if (suggestion === undefined) return base;
+
+    const repair = {
+        status: suggestion.repair_status,
+        execution_status: suggestion.repair_execution_status,
+        next_action: suggestion.repair_next_action,
+        command_kind: suggestion.repair_command_kind,
+        can_execute: suggestion.repair_can_execute,
+        requires_inputs: suggestion.repair_requires_inputs,
+        required_inputs: suggestion.repair_required_inputs,
+        blockers: suggestion.repair_blockers,
+        blocker_details: suggestion.repair_blocker_details,
+        argv: suggestion.repair_argv,
+        ...(suggestion.repair_query === undefined ? {} : { query: suggestion.repair_query }),
+        expected_query_match_status: suggestion.repair_expected_query_match_status,
+        ...(suggestion.repair_expected_result_count === undefined ? {} : { expected_result_count: suggestion.repair_expected_result_count }),
+        remediation: suggestion.repair_remediation,
+    } satisfies ClassifierGraphQuerySuggestionRepairRoutingSummary;
+
+    const verification = {
+        status: suggestion.repair_verification_status,
+        execution_status: suggestion.repair_verification_execution_status,
+        next_action: suggestion.repair_verification_next_action,
+        command_kind: suggestion.repair_verification_command_kind,
+        can_execute: suggestion.repair_verification_can_execute,
+        requires_inputs: suggestion.repair_verification_requires_inputs,
+        required_inputs: suggestion.repair_verification_required_inputs,
+        blockers: suggestion.repair_verification_blockers,
+        blocker_details: suggestion.repair_verification_blocker_details,
+        argv: suggestion.repair_verification_argv,
+        ...(suggestion.repair_verification_query === undefined ? {} : { query: suggestion.repair_verification_query }),
+        expected_query_match_status: suggestion.repair_verification_expected_query_match_status,
+        ...(suggestion.repair_verification_expected_result_count === undefined ? {} : { expected_result_count: suggestion.repair_verification_expected_result_count }),
+        remediation: suggestion.repair_verification_remediation,
+    } satisfies ClassifierGraphQuerySuggestionVerificationRoutingSummary;
+
+    return {
+        ...base,
+        suggestion: {
+            value_equals: suggestion.value_equals,
+            result_count: suggestion.result_count,
+            status: suggestion.status,
+            next_action: suggestion.next_action,
+            remediation: suggestion.remediation,
+            source: suggestion.source,
+            reason: suggestion.reason,
+            original_query: suggestion.original_query,
+            query: suggestion.query,
+            repair,
+            verification,
+        },
+    };
+}
+
 export interface ClassifierLifecycleReviewStatus {
     readonly path: string;
     readonly exists: boolean;

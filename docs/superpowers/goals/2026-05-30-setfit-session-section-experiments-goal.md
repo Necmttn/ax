@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E417 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-execution-status-no-match-e417.json`
+- Index continuation: E418 adds
+  `.ax/experiments/classifier-graph-query-suggestion-routing-summary-no-match-e418.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-execution-status-match-e417.json`
+  `.ax/experiments/classifier-graph-query-suggestion-routing-summary-match-e418.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,56 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E418 - Add Query Suggestion Routing Service Helper
+
+Question:
+- Can Effect services consume graph-query repair and verification routing
+  without scraping CLI text or walking the full graph-health report?
+
+Implementation:
+- Added `summarizeClassifierGraphQuerySuggestionRouting` as a pure projection
+  from graph-health reports into a compact service-facing summary.
+- Added `executionGraphQuerySuggestionRoutingSummary` to
+  `ClassifierPackageService`.
+- The summary preserves query match status, suggested value, repair command
+  routing, verification command routing, argv, expected outcomes, blockers,
+  and remediation.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-query-suggestion-routing-summary-no-match-e418.json`
+- `.ax/experiments/classifier-graph-query-suggestion-routing-summary-match-e418.json`
+
+Results:
+- No-match lifecycle query for
+  `review_pipeline_recommended_action_execution_phase=execute` reports
+  `has_suggestion=true`, suggested value `bind_inputs`,
+  `repair.execution_status=ready_to_execute`, and
+  `verification.execution_status=ready_to_execute`.
+- Matched lifecycle query for
+  `review_pipeline_recommended_action_execution_phase=bind_inputs` reports
+  no-op repair and verification execution statuses as `not_needed`.
+- Service tests verify callers can get the routing summary directly through the
+  Effect service layer.
+
+Decision:
+- E418 turns the dense graph-health `query_suggestion` payload into a stable
+  service/debug surface. FX services can now route repair execution and
+  verification execution without parsing the CLI or duplicating graph-health
+  field selection.
+
+Verification:
+```sh
+bun test src/classifiers/package-service.test.ts
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun test src/cli/classifiers-workflow-candidates.test.ts
+git diff --check
+bun run typecheck
+bun -e 'const noMatch=await Bun.file(".ax/experiments/classifier-graph-query-suggestion-routing-summary-no-match-e418.json").json(); const match=await Bun.file(".ax/experiments/classifier-graph-query-suggestion-routing-summary-match-e418.json").json(); if (!noMatch.has_suggestion) throw new Error("no-match missing suggestion"); if (noMatch.suggestion?.repair?.execution_status !== "ready_to_execute") throw new Error("repair status wrong"); if (noMatch.suggestion?.verification?.execution_status !== "ready_to_execute") throw new Error("verification status wrong"); if (match.suggestion?.repair?.execution_status !== "not_needed") throw new Error("match repair status wrong"); if (match.suggestion?.verification?.execution_status !== "not_needed") throw new Error("match verification status wrong");'
+```
+
+All passed. `bun run typecheck` still emits existing Effect advisories but exits
+`0`.
 
 ## E417 - Expose Suggested Query Repair Verification Execution Status
 
