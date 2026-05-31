@@ -13,6 +13,7 @@ import {
     renderClassifierPackageOperationExecutionText,
     renderClassifierPackageOperationExecutionPlanText,
     renderClassifierPackageOperationPreflightText,
+    renderClassifierGraphQuerySuggestionRoutingSummaryText,
     renderClassifierPackageOperationsText,
     renderClassifierPackagesOperationsText,
     runClassifiersPackageOperations,
@@ -34,6 +35,89 @@ import type {
 } from "../classifiers/package-operations.ts";
 
 describe("classifiers package-operations format", () => {
+    test("renders graph query suggestion routing summaries", () => {
+        const summary: ClassifierGraphQuerySuggestionRoutingSummary = {
+            has_suggestion: true,
+            query_match_status: "no_match",
+            query_next_action: "relax_filters_or_project_facts",
+            suggested_value_equals: "bind_inputs",
+            suggested_status: "expected_matches",
+            suggested_next_action: "run_suggested_query",
+            suggestion: {
+                value_equals: "bind_inputs",
+                result_count: 1,
+                status: "expected_matches",
+                next_action: "run_suggested_query",
+                remediation: "Run the suggested graph query.",
+                source: "lifecycle_available_value_counts",
+                reason: "available_value_after_relaxing_value_equals",
+                original_query: {
+                    mode: "lifecycle",
+                    predicate: "review_pipeline_recommended_action_execution_phase",
+                    value_equals: "execute",
+                },
+                query: {
+                    mode: "lifecycle",
+                    predicate: "review_pipeline_recommended_action_execution_phase",
+                    value_equals: "bind_inputs",
+                },
+                repair: {
+                    status: "repair_available",
+                    execution_status: "ready_to_execute",
+                    next_action: "run_repaired_query",
+                    command_kind: "classifier_graph_query_repair",
+                    can_execute: true,
+                    requires_inputs: false,
+                    required_inputs: [],
+                    blockers: [],
+                    blocker_details: [],
+                    argv: ["bun", "src/cli/index.ts", "classifiers", "graph", "--value", "bind_inputs"],
+                    query: {
+                        mode: "lifecycle",
+                        predicate: "review_pipeline_recommended_action_execution_phase",
+                        value_equals: "bind_inputs",
+                    },
+                    expected_query_match_status: "matched",
+                    expected_result_count: 1,
+                    remediation: "Run the repaired graph query.",
+                },
+                verification: {
+                    status: "ready_to_verify",
+                    execution_status: "ready_to_execute",
+                    next_action: "run_verification_query",
+                    command_kind: "classifier_graph_query_repair_verification",
+                    can_execute: true,
+                    requires_inputs: false,
+                    required_inputs: [],
+                    blockers: [],
+                    blocker_details: [],
+                    argv: ["bun", "src/cli/index.ts", "classifiers", "graph", "--value", "bind_inputs"],
+                    query: {
+                        mode: "lifecycle",
+                        predicate: "review_pipeline_recommended_action_execution_phase",
+                        value_equals: "bind_inputs",
+                    },
+                    expected_query_match_status: "matched",
+                    expected_result_count: 1,
+                    remediation: "Run the verification query.",
+                },
+            },
+        };
+
+        const output = renderClassifierGraphQuerySuggestionRoutingSummaryText(summary);
+
+        expect(output).toContain("classifier graph query suggestion routing");
+        expect(output).toContain("has suggestion: true");
+        expect(output).toContain("query match: no_match");
+        expect(output).toContain("suggested value equals: bind_inputs");
+        expect(output).toContain("repair execution status: ready_to_execute");
+        expect(output).toContain("repair command kind: classifier_graph_query_repair");
+        expect(output).toContain("repair argv: bun src/cli/index.ts classifiers graph --value bind_inputs");
+        expect(output).toContain("verification execution status: ready_to_execute");
+        expect(output).toContain("verification command kind: classifier_graph_query_repair_verification");
+        expect(output).toContain("verification expected result count: 1");
+    });
+
     test("routes graph query suggestion summaries to the compact writer", async () => {
         const summary: ClassifierGraphQuerySuggestionRoutingSummary = {
             has_suggestion: true,

@@ -11,6 +11,7 @@ import type {
     ClassifierPackageExecutionSurrealWritePlanReport,
     ClassifierPackageExecutionGraphHealthReport,
     ClassifierLifecycleInsightReport,
+    ClassifierGraphQuerySuggestionRoutingSummary,
     ClassifierGraphHealthMode,
     ClassifierPackageOperationDryRunReport,
     ClassifierPackageOperationExecutionReport,
@@ -265,6 +266,58 @@ export function renderClassifierPackageExecutionApplyText(report: ClassifierPack
         lines.push(`first failure: ${report.first_failure.index} ${report.first_failure.message}`);
         lines.push(report.first_failure.statement);
     }
+    return lines.join("\n");
+}
+
+const renderGraphQuery = (query: object | undefined): string =>
+    query === undefined
+        ? "none"
+        : Object.entries(query)
+            .map(([key, value]) => `${key}=${value}`)
+            .join(" ");
+
+export function renderClassifierGraphQuerySuggestionRoutingSummaryText(
+    report: ClassifierGraphQuerySuggestionRoutingSummary,
+): string {
+    const suggestion = report.suggestion;
+    const lines = [
+        "classifier graph query suggestion routing",
+        `has suggestion: ${report.has_suggestion}`,
+        `query match: ${report.query_match_status ?? "unknown"}`,
+        `query next action: ${report.query_next_action ?? "unknown"}`,
+        `suggested value equals: ${report.suggested_value_equals ?? "none"}`,
+        `suggested status: ${report.suggested_status ?? "none"}`,
+        `suggested next action: ${report.suggested_next_action ?? "none"}`,
+    ];
+    if (suggestion === undefined) return lines.join("\n");
+    lines.push(`suggestion: status=${suggestion.status} next_action=${suggestion.next_action} result_count=${suggestion.result_count} value_equals=${suggestion.value_equals}`);
+    lines.push(`suggestion provenance: source=${suggestion.source} reason=${suggestion.reason}`);
+    lines.push(`suggestion original query: ${renderGraphQuery(suggestion.original_query)}`);
+    lines.push(`suggestion query: ${renderGraphQuery(suggestion.query)}`);
+    lines.push(`repair status: ${suggestion.repair.status}`);
+    lines.push(`repair execution status: ${suggestion.repair.execution_status}`);
+    lines.push(`repair next action: ${suggestion.repair.next_action}`);
+    lines.push(`repair command kind: ${suggestion.repair.command_kind}`);
+    lines.push(`repair can execute: ${suggestion.repair.can_execute}`);
+    lines.push(`repair requires inputs: ${suggestion.repair.requires_inputs}`);
+    lines.push(`repair required inputs: ${suggestion.repair.required_inputs.join(", ") || "none"}`);
+    lines.push(`repair blockers: ${suggestion.repair.blockers.join(", ") || "none"}`);
+    lines.push(`repair argv: ${suggestion.repair.argv.join(" ") || "none"}`);
+    lines.push(`repair query: ${renderGraphQuery(suggestion.repair.query)}`);
+    lines.push(`repair expected query match: ${suggestion.repair.expected_query_match_status}`);
+    lines.push(`repair expected result count: ${suggestion.repair.expected_result_count ?? "none"}`);
+    lines.push(`verification status: ${suggestion.verification.status}`);
+    lines.push(`verification execution status: ${suggestion.verification.execution_status}`);
+    lines.push(`verification next action: ${suggestion.verification.next_action}`);
+    lines.push(`verification command kind: ${suggestion.verification.command_kind}`);
+    lines.push(`verification can execute: ${suggestion.verification.can_execute}`);
+    lines.push(`verification requires inputs: ${suggestion.verification.requires_inputs}`);
+    lines.push(`verification required inputs: ${suggestion.verification.required_inputs.join(", ") || "none"}`);
+    lines.push(`verification blockers: ${suggestion.verification.blockers.join(", ") || "none"}`);
+    lines.push(`verification argv: ${suggestion.verification.argv.join(" ") || "none"}`);
+    lines.push(`verification query: ${renderGraphQuery(suggestion.verification.query)}`);
+    lines.push(`verification expected query match: ${suggestion.verification.expected_query_match_status}`);
+    lines.push(`verification expected result count: ${suggestion.verification.expected_result_count ?? "none"}`);
     return lines.join("\n");
 }
 
@@ -850,7 +903,7 @@ export const runClassifiersPackageOperations = (
                 if (input.json) {
                     console.log(JSON.stringify(report, null, 2));
                 } else if (!input.out) {
-                    console.log(JSON.stringify(report, null, 2));
+                    console.log(renderClassifierGraphQuerySuggestionRoutingSummaryText(report));
                 }
                 return;
             }

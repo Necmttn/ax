@@ -33,8 +33,8 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E420 adds
-  `.ax/experiments/classifier-graph-query-suggestion-routing-cli-e420.json`
+- Index continuation: E421 adds
+  `.ax/experiments/classifier-graph-query-suggestion-routing-cli-text-e421.txt`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -42,6 +42,52 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E421 - Render Query Suggestion Routing Text
+
+Question:
+- Can humans inspect the compact query-suggestion repair/verification routing
+  from the CLI without reading raw JSON?
+
+Implementation:
+- Added `renderClassifierGraphQuerySuggestionRoutingSummaryText`.
+- `classifiers graph --query-suggestion-routing` now prints a compact text
+  summary when `--json` and `--out` are not used.
+- The text summary includes query match state, suggested value, repair routing,
+  verification routing, command kinds, argv, blockers, expected outcomes, and
+  query shapes.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-query-suggestion-routing-cli-text-e421.txt`
+
+Results:
+- Text output starts with `classifier graph query suggestion routing`.
+- Text output reports `has suggestion: true`.
+- Text output reports `repair execution status: ready_to_execute`.
+- Text output reports `repair command kind: classifier_graph_query_repair`.
+- Text output reports `verification execution status: ready_to_execute`.
+- Text output reports
+  `verification command kind: classifier_graph_query_repair_verification`.
+
+Decision:
+- E421 makes the routing summary useful in normal terminal workflows. Services
+  still get JSON, while operators can scan the same repair/verification route
+  without dumping the full graph-health report or parsing the compact JSON.
+
+Verification:
+```sh
+bun test src/cli/classifiers-package-operations.test.ts
+bun test src/classifiers/package-service.test.ts
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers graph --mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --query-suggestion-routing > .ax/experiments/classifier-graph-query-suggestion-routing-cli-text-e421.txt
+rg -n "classifier graph query suggestion routing|has suggestion: true|repair execution status: ready_to_execute|verification execution status: ready_to_execute|repair command kind: classifier_graph_query_repair|verification command kind: classifier_graph_query_repair_verification" .ax/experiments/classifier-graph-query-suggestion-routing-cli-text-e421.txt
+git diff --check
+bun run typecheck
+```
+
+All passed. `bun run typecheck` still emits existing Effect advisories but exits
+`0`.
 
 ## E420 - Expose Query Suggestion Routing In CLI
 
