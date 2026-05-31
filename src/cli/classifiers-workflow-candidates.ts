@@ -317,6 +317,8 @@ export interface WorkflowCandidateReviewCoveragePipelineCommandOutputArtifact {
     readonly kind: WorkflowCandidateReviewCoveragePipelineCommandOutputArtifactKind;
     readonly path: string;
     readonly argv_flag: string;
+    readonly argv_index: number;
+    readonly argv_value_prefix: string;
     readonly required_for_handoff: boolean;
 }
 
@@ -2063,7 +2065,7 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             ...(report.coverage_review.review_pipeline_command_kind === undefined ? [] : [
                 `coverage review pipeline command kind: ${report.coverage_review.review_pipeline_command_kind}`,
             ]),
-            `coverage review pipeline command output artifacts: ${report.coverage_review.review_pipeline_command_output_artifacts.length === 0 ? "none" : report.coverage_review.review_pipeline_command_output_artifacts.map((artifact) => `${artifact.kind}=${artifact.path}`).join(", ")}`,
+            `coverage review pipeline command output artifacts: ${report.coverage_review.review_pipeline_command_output_artifacts.length === 0 ? "none" : report.coverage_review.review_pipeline_command_output_artifacts.map((artifact) => `${artifact.kind}@${artifact.argv_index}=${artifact.path}`).join(", ")}`,
             `coverage review pipeline required inputs: ${report.coverage_review.review_pipeline_required_inputs.length === 0 ? "none" : report.coverage_review.review_pipeline_required_inputs.join(", ")}`,
             `coverage review pipeline input bindings: ${report.coverage_review.review_pipeline_input_bindings.length === 0 ? "none" : report.coverage_review.review_pipeline_input_bindings.map((binding) => `${binding.input}@${binding.argv_index}=${binding.argv_flag}:${binding.placeholder}:${binding.value_kind}`).join(", ")}`,
             ...(report.coverage_review.review_pipeline_command_argv === undefined ? [] : [
@@ -3430,7 +3432,7 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
         `- Pipeline command blocker details: ${reviewPipelineCommandBlockerDetails.length === 0 ? "`none`" : reviewPipelineCommandBlockerDetails.map((detail) => `\`${detail.blocker}=${detail.count}\``).join(", ")}`,
         ...(reviewPipelineCommand === undefined ? [] : [
             `- Pipeline command kind: \`${reviewPipelineCommandKind}\``,
-            `- Pipeline command output artifacts: ${reviewPipelineCommandOutputArtifacts.length === 0 ? "`none`" : reviewPipelineCommandOutputArtifacts.map((artifact) => `\`${artifact.kind}=${artifact.path}\``).join(", ")}`,
+            `- Pipeline command output artifacts: ${reviewPipelineCommandOutputArtifacts.length === 0 ? "`none`" : reviewPipelineCommandOutputArtifacts.map((artifact) => `\`${artifact.kind}@${artifact.argv_index}=${artifact.path}\``).join(", ")}`,
             `- Pipeline required inputs: ${reviewPipelineRequiredInputs.length === 0 ? "`none`" : reviewPipelineRequiredInputs.map((input) => `\`${input}\``).join(", ")}`,
             `- Pipeline input bindings: ${reviewPipelineInputBindings.length === 0 ? "`none`" : reviewPipelineInputBindings.map((binding) => `\`${binding.input}@${binding.argv_index}=${binding.argv_flag}:${binding.placeholder}:${binding.value_kind}\``).join(", ")}`,
             `- Pipeline command argv: ${reviewPipelineCommandArgv === undefined ? "`none`" : reviewPipelineCommandArgv.map((part) => `\`${part}\``).join(" ")}`,
@@ -4120,14 +4122,17 @@ const workflowCandidateReviewCoveragePipelineCommandOutputArtifacts = (
         requiredForHandoff: boolean,
     ): WorkflowCandidateReviewCoveragePipelineCommandOutputArtifact | undefined => {
         const valuePrefix = `${argvFlag}=`;
-        const arg = argv.find((part) => part.startsWith(valuePrefix));
-        if (arg === undefined) return undefined;
+        const argvIndex = argv.findIndex((part) => part.startsWith(valuePrefix));
+        if (argvIndex < 0) return undefined;
+        const arg = argv[argvIndex];
         const path = arg.slice(valuePrefix.length);
         if (path.length === 0) return undefined;
         return {
             kind,
             path,
             argv_flag: argvFlag,
+            argv_index: argvIndex,
+            argv_value_prefix: valuePrefix,
             required_for_handoff: requiredForHandoff,
         };
     };
