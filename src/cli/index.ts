@@ -1930,6 +1930,8 @@ const classifiersWorkflowCandidatesCommand = Command.make(
         classifierFixturePack: Flag.string("classifier-fixture-pack").pipe(Flag.optional),
         coverageFixturePack: Flag.string("coverage-fixture-pack").pipe(Flag.optional),
         coverageReviewPack: Flag.string("coverage-review-pack").pipe(Flag.optional),
+        coverageReviewBrief: Flag.string("coverage-review-brief").pipe(Flag.optional),
+        syncCoverageReviewBrief: Flag.string("sync-coverage-review-brief").pipe(Flag.optional),
         harnessFacts: Flag.string("harness-facts").pipe(Flag.optional),
         harnessWritePlan: Flag.string("harness-write-plan").pipe(Flag.optional),
         applyHarnessFacts: Flag.boolean("apply-harness-facts").pipe(Flag.withDefault(false)),
@@ -1953,7 +1955,7 @@ const classifiersWorkflowCandidatesCommand = Command.make(
         proposalSection: Flag.string("proposal-section").pipe(Flag.optional),
         json: jsonFlag,
     },
-    ({ sourceKind, action, classifier, search, taskLike, topicReport, listProposals, listHarnessFacts, reviewCoverage, includeHarnessFacts, includeHelperFacts, includeReviewFacts, proposalStatus, expandEvidence, evidencePack, classifierFixturePack, coverageFixturePack, coverageReviewPack, harnessFacts, harnessWritePlan, applyHarnessFacts, reviewFacts, reviewWritePlan, applyReviewFacts, limit, examples, out, brief, syncBrief, promoteTasks, emitAdjacentTasks, promoteHarnessProposals, requireHarnessChecks, promoteProposals, proposalDryRun, promotionMode, taskDir, proposalTarget, proposalSection, json }) => {
+    ({ sourceKind, action, classifier, search, taskLike, topicReport, listProposals, listHarnessFacts, reviewCoverage, includeHarnessFacts, includeHelperFacts, includeReviewFacts, proposalStatus, expandEvidence, evidencePack, classifierFixturePack, coverageFixturePack, coverageReviewPack, coverageReviewBrief, syncCoverageReviewBrief, harnessFacts, harnessWritePlan, applyHarnessFacts, reviewFacts, reviewWritePlan, applyReviewFacts, limit, examples, out, brief, syncBrief, promoteTasks, emitAdjacentTasks, promoteHarnessProposals, requireHarnessChecks, promoteProposals, proposalDryRun, promotionMode, taskDir, proposalTarget, proposalSection, json }) => {
         const actionValue = optionValue(action);
         const classifierValue = optionValue(classifier);
         const searchValue = optionValue(search);
@@ -1964,6 +1966,8 @@ const classifiersWorkflowCandidatesCommand = Command.make(
         const classifierFixturePackPath = optionValue(classifierFixturePack);
         const coverageFixturePackPath = optionValue(coverageFixturePack);
         const coverageReviewPackPath = optionValue(coverageReviewPack);
+        const coverageReviewBriefPath = optionValue(coverageReviewBrief);
+        const syncCoverageReviewBriefPath = optionValue(syncCoverageReviewBrief);
         const harnessFactsPath = optionValue(harnessFacts);
         const harnessWritePlanPath = optionValue(harnessWritePlan);
         const reviewFactsPath = optionValue(reviewFacts);
@@ -1992,6 +1996,8 @@ const classifiersWorkflowCandidatesCommand = Command.make(
             ...(classifierFixturePackPath === undefined ? {} : { classifierFixturePack: classifierFixturePackPath }),
             ...(coverageFixturePackPath === undefined ? {} : { coverageFixturePack: coverageFixturePackPath }),
             ...(coverageReviewPackPath === undefined ? {} : { coverageReviewPack: coverageReviewPackPath }),
+            ...(coverageReviewBriefPath === undefined ? {} : { coverageReviewBrief: coverageReviewBriefPath }),
+            ...(syncCoverageReviewBriefPath === undefined ? {} : { syncCoverageReviewBrief: syncCoverageReviewBriefPath }),
             ...(harnessFactsPath === undefined ? {} : { harnessFacts: harnessFactsPath }),
             ...(harnessWritePlanPath === undefined ? {} : { harnessWritePlan: harnessWritePlanPath }),
             applyHarnessFacts,

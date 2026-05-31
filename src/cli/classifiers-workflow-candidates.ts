@@ -42,6 +42,8 @@ export interface WorkflowCandidateCommandInput {
     readonly classifierFixturePack?: string;
     readonly coverageFixturePack?: string;
     readonly coverageReviewPack?: string;
+    readonly coverageReviewBrief?: string;
+    readonly syncCoverageReviewBrief?: string;
     readonly harnessFacts?: string;
     readonly harnessWritePlan?: string;
     readonly applyHarnessFacts?: boolean;
@@ -2650,6 +2652,87 @@ export function parseWorkflowCandidateFixtureRowsJsonl(
         .filter((row): row is WorkflowCandidateTopicClassifierFixtureRow => row !== null);
 }
 
+export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
+    rows: readonly WorkflowCandidateTopicClassifierFixtureRow[],
+): string {
+    const lines = [
+        "# Workflow Candidate Coverage Review",
+        "",
+        "Allowed review statuses: `accept`, `revise`, `reject`, `defer`, `pending`.",
+        "",
+        "Review each fixture and replace `pending` plus `_pending_` with a reviewed status and rationale when ready.",
+        "",
+    ];
+    for (const [index, row] of rows.entries()) {
+        lines.push(
+            `## Fixture ${index + 1}: ${row.candidate_label}`,
+            "",
+            `- Fixture id: \`${row.id}\``,
+            `- Candidate id: \`${row.candidate_id}\``,
+            `- Candidate label: \`${row.candidate_label}\``,
+            `- Proposed action: \`${row.proposed_action}\``,
+            `- Result: \`${row.result_id ?? "unknown-result"}\``,
+            `- Turn: \`${row.turn ?? "unknown-turn"}\``,
+            `- Confidence: \`${row.confidence ?? "n/a"}\``,
+            `- Review status: \`${row.review_status}\``,
+            `- Review rationale: ${row.review_rationale && row.review_rationale.length > 0 ? row.review_rationale : "_pending_"}`,
+            "",
+            "Fixture text:",
+            "",
+            "```text",
+            row.text.trimEnd(),
+            "```",
+            "",
+        );
+    }
+    return `${lines.join("\n").trimEnd()}\n`;
+}
+
+export function syncWorkflowCandidateFixtureRowsFromBrief(
+    rows: readonly WorkflowCandidateTopicClassifierFixtureRow[],
+    brief: string,
+): readonly WorkflowCandidateTopicClassifierFixtureRow[] {
+    const updates = new Map<string, { status?: string; rationale?: string }>();
+    let currentFixtureId: string | undefined;
+    for (const rawLine of brief.split(/\r?\n/)) {
+        const line = rawLine.trim();
+        const fixtureMatch = line.match(/^- Fixture id:\s*(.+)$/);
+        if (fixtureMatch) {
+            currentFixtureId = stripInlineCode(fixtureMatch[1]);
+            updates.set(currentFixtureId, updates.get(currentFixtureId) ?? {});
+            continue;
+        }
+        if (currentFixtureId === undefined) continue;
+        const statusMatch = line.match(/^- Review status:\s*(.+)$/);
+        if (statusMatch) {
+            updates.set(currentFixtureId, {
+                ...(updates.get(currentFixtureId) ?? {}),
+                status: stripInlineCode(statusMatch[1]).toLowerCase(),
+            });
+            continue;
+        }
+        const rationaleMatch = line.match(/^- Review rationale:\s*(.*)$/);
+        if (rationaleMatch) {
+            const rationale = rationaleMatch[1].trim();
+            updates.set(currentFixtureId, {
+                ...(updates.get(currentFixtureId) ?? {}),
+                rationale: rationale === "_pending_" ? "" : rationale,
+            });
+        }
+    }
+    return rows.map((row) => {
+        const update = updates.get(row.id);
+        if (update === undefined) return row;
+        return {
+            ...row,
+            ...(update.status === undefined ? {} : {
+                review_status: update.status as WorkflowCandidateTopicClassifierFixtureRow["review_status"],
+            }),
+            ...(update.rationale === undefined ? {} : { review_rationale: update.rationale }),
+        };
+    });
+}
+
 export function buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures(input: {
     readonly rows: readonly WorkflowCandidateTopicClassifierFixtureRow[];
     readonly syncedFrom: string;
@@ -2772,7 +2855,10 @@ const fixtureRowHasSmokeMarker = (row: WorkflowCandidateTopicClassifierFixtureRo
         row.name,
         row.review_rationale ?? "",
     ].join("\n").toLowerCase();
-    return text.includes("smoke review") || text.includes("-smoke-") || text.includes("smoke_");
+    return text.includes("smoke review") ||
+        text.includes("review smoke") ||
+        text.includes("-smoke-") ||
+        text.includes("smoke_");
 };
 
 export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
@@ -3633,12 +3719,27 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 const fixtureSummary = buildWorkflowCandidateReviewCoverageFixtureSummary(candidateReport, input.coverageFixturePack);
                 mkdirSync(dirname(input.coverageFixturePack), { recursive: true });
                 writeFileSync(input.coverageFixturePack, renderClassifierFixtureRowsJsonl(fixtureSummary.fixtures), "utf8");
+                if (input.coverageReviewBrief) {
+                    mkdirSync(dirname(input.coverageReviewBrief), { recursive: true });
+                    writeFileSync(input.coverageReviewBrief, renderWorkflowCandidateReviewCoverageBriefMarkdown(fixtureSummary.fixtures), "utf8");
+                }
                 report = { ...report, fixture_pack: fixtureSummary };
             }
             if (input.coverageReviewPack) {
-                const reviewedRows = parseWorkflowCandidateFixtureRowsJsonl(
+                let reviewedRows = parseWorkflowCandidateFixtureRowsJsonl(
                     readFileSync(input.coverageReviewPack, "utf8"),
                 );
+                if (input.syncCoverageReviewBrief) {
+                    reviewedRows = syncWorkflowCandidateFixtureRowsFromBrief(
+                        reviewedRows,
+                        readFileSync(input.syncCoverageReviewBrief, "utf8"),
+                    );
+                    writeFileSync(input.coverageReviewPack, renderClassifierFixtureRowsJsonl(reviewedRows), "utf8");
+                }
+                if (input.coverageReviewBrief) {
+                    mkdirSync(dirname(input.coverageReviewBrief), { recursive: true });
+                    writeFileSync(input.coverageReviewBrief, renderWorkflowCandidateReviewCoverageBriefMarkdown(reviewedRows), "utf8");
+                }
                 const reviewProjection = buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures({
                     rows: reviewedRows,
                     syncedFrom: input.coverageReviewPack,

@@ -29,6 +29,8 @@ import {
     parseWorkflowCandidateFixtureRowsJsonl,
     recommendWorkflowCandidatePromotionArtifact,
     renderWorkflowCandidateBriefMarkdown,
+    renderWorkflowCandidateReviewCoverageBriefMarkdown,
+    syncWorkflowCandidateFixtureRowsFromBrief,
     renderWorkflowCandidateTopicEvidencePackMarkdown,
     renderMergedWorkflowCandidateTaskMarkdown,
     renderWorkflowCandidateProposalListText,
@@ -1602,6 +1604,40 @@ describe("classifiers workflow-candidates", () => {
             invalid_fixture_count: 0,
             missing_rationale_count: 1,
             apply_guard: "missing_review_rationale",
+        });
+    });
+
+    test("renders and syncs coverage review briefs back into fixture rows", () => {
+        const rows = parseWorkflowCandidateFixtureRowsJsonl(JSON.stringify({
+            id: "workflow-candidate-review-coverage/verification_or_recovery_signal/a",
+            suite: "workflow-candidate-review-coverage",
+            name: "coverage-gap-verification_or_recovery_signal-01",
+            label: "verification_or_recovery_signal",
+            target: "unknown",
+            text: "USER:\ncontinue and make sure the tests prove this does not regress\n\nPREVIOUS_ASSISTANT:\n",
+            source_group: "workflow-candidate",
+            review_status: "pending",
+            topic: "review-coverage",
+            candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+            candidate_label: "verification_or_recovery_signal",
+            proposed_action: "add_verification_gate",
+            result_id: "classifier_result:verification",
+            turn: "turn:verification",
+            confidence: 0.83,
+        }));
+        const brief = renderWorkflowCandidateReviewCoverageBriefMarkdown(rows);
+        const reviewedBrief = brief
+            .replace("- Review status: `pending`", "- Review status: `accept`")
+            .replace("- Review rationale: _pending_", "- Review rationale: Useful recovery behavior worth preserving.");
+
+        const synced = syncWorkflowCandidateFixtureRowsFromBrief(rows, reviewedBrief);
+
+        expect(brief).toContain("# Workflow Candidate Coverage Review");
+        expect(brief).toContain("- Fixture id: `workflow-candidate-review-coverage/verification_or_recovery_signal/a`");
+        expect(brief).toContain("- Review status: `pending`");
+        expect(synced[0]).toMatchObject({
+            review_status: "accept",
+            review_rationale: "Useful recovery behavior worth preserving.",
         });
     });
 
