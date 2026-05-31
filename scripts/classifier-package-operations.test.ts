@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadClassifierPackageManifest } from "../src/classifiers/package-manifest.ts";
@@ -18,6 +18,7 @@ import {
     discoverClassifierPackageExecutionReportPaths,
     discoverClassifierPackageManifestPaths,
     executeOperationPlanReport,
+    loadClassifierLifecycleReviewStatus,
     summarizeClassifierPackageOperations,
     writeOperationPreflightReport,
     writeOperationDryRunReport,
@@ -494,6 +495,113 @@ describe("classifier package operations report", () => {
                 value: 2,
             }),
         ]));
+    });
+
+    test("projects review pipeline lifecycle artifacts into graph facts", () => {
+        const report = buildExecutionFactProjectionReport(".ax/experiments", [], {
+            path: ".ax/experiments/blind-workflow-status-current.json",
+            exists: true,
+            decision: "needs_human_review",
+            review_pipeline_lifecycle: {
+                report_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                lifecycle_status: "verified_after_execution",
+                command_kind: "stamp_review_provenance",
+                prepared_status: "ready_to_execute",
+                output_verification_status: "verified",
+                can_execute: true,
+                can_continue: true,
+                missing_required_artifact_count: 0,
+                checked_artifact_count: 2,
+                failures: [],
+            },
+            next_actions: [],
+        });
+
+        expect(report.totals.lifecycle_fact_count).toBe(8);
+        expect(report.nodes).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                id: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                kind: "classifier_lifecycle",
+            }),
+        ]));
+        expect(report.edges).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                kind: "has_evidence",
+                evidence_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+            }),
+        ]));
+        expect(report.facts).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                kind: "classifier_lifecycle_status",
+                subject: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                predicate: "review_pipeline_lifecycle_status",
+                value: "verified_after_execution",
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_command_kind",
+                value: "stamp_review_provenance",
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_output_verification_status",
+                value: "verified",
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_can_continue",
+                value: true,
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_checked_artifact_count",
+                value: 2,
+            }),
+        ]));
+    });
+
+    test("loads review pipeline lifecycle status beside workflow status", () => {
+        const dir = mkdtempSync(join(tmpdir(), "ax-review-pipeline-lifecycle-"));
+        const statusPath = join(dir, "blind-workflow-status-current.json");
+        const lifecyclePath = join(dir, "workflow-candidate-review-pipeline-lifecycle-current.json");
+        writeFileSync(statusPath, JSON.stringify({
+            schema: "ax.blind_workflow_status.v1",
+            decision: "needs_human_review",
+            next_actions: [],
+        }), "utf8");
+        writeFileSync(lifecyclePath, JSON.stringify({
+            schema: "ax.workflow_candidate_review_coverage.v1",
+            coverage_review: {
+                review_pipeline_command_kind: "stamp_review_provenance",
+                review_pipeline_lifecycle: {
+                    schema: "ax.classifier_review_pipeline_lifecycle.v1",
+                    status: "verified_after_execution",
+                    can_execute: true,
+                    can_continue: true,
+                    prepared: {
+                        status: "ready_to_execute",
+                    },
+                    output_verification: {
+                        status: "verified",
+                        checked_artifacts: [
+                            { path: "one.json" },
+                            { path: "two.md" },
+                        ],
+                        missing_required_artifacts: [],
+                    },
+                },
+            },
+        }), "utf8");
+
+        const status = loadClassifierLifecycleReviewStatus(statusPath);
+
+        expect(status.review_pipeline_lifecycle).toMatchObject({
+            report_path: lifecyclePath,
+            lifecycle_status: "verified_after_execution",
+            command_kind: "stamp_review_provenance",
+            prepared_status: "ready_to_execute",
+            output_verification_status: "verified",
+            can_execute: true,
+            can_continue: true,
+            missing_required_artifact_count: 0,
+            checked_artifact_count: 2,
+        });
     });
 
     test("writes execution fact projection reports", async () => {

@@ -461,6 +461,18 @@ export interface ClassifierLifecycleReviewStatus {
         readonly skipped_proposal_count?: number;
         readonly failures: readonly string[];
     };
+    readonly review_pipeline_lifecycle?: {
+        readonly report_path: string;
+        readonly lifecycle_status?: string;
+        readonly command_kind?: string;
+        readonly prepared_status?: string;
+        readonly output_verification_status?: string;
+        readonly can_execute?: boolean;
+        readonly can_continue?: boolean;
+        readonly missing_required_artifact_count?: number;
+        readonly checked_artifact_count?: number;
+        readonly failures: readonly string[];
+    };
     readonly focused_batch?: {
         readonly batch_path?: string;
         readonly batch_report_path?: string;
@@ -773,6 +785,40 @@ function loadProposalLifecycleStatus(baseDir: string): Pick<ClassifierLifecycleR
                 failures: jsonArrayOfStrings(smokePromotion.failures),
             },
         }),
+    };
+}
+
+function loadReviewPipelineLifecycleStatus(baseDir: string): Pick<ClassifierLifecycleReviewStatus, "review_pipeline_lifecycle"> {
+    const reportPath = join(baseDir, "workflow-candidate-review-pipeline-lifecycle-current.json");
+    if (!existsSync(reportPath)) return {};
+    const report = loadJsonRecord(reportPath);
+    const coverageReview = jsonRecordAt(report, "coverage_review");
+    const lifecycle = jsonRecordAt(coverageReview, "review_pipeline_lifecycle");
+    if (Object.keys(lifecycle).length === 0) return {};
+    const prepared = jsonRecordAt(lifecycle, "prepared");
+    const outputVerification = jsonRecordAt(lifecycle, "output_verification");
+    const checkedArtifacts = Array.isArray(outputVerification.checked_artifacts)
+        ? outputVerification.checked_artifacts
+        : [];
+    const missingRequiredArtifacts = jsonArrayOfStrings(outputVerification.missing_required_artifacts);
+    const failures = [
+        ...jsonArrayOfStrings(report.failures),
+        ...jsonArrayOfStrings(coverageReview.failures),
+        ...jsonArrayOfStrings(lifecycle.failures),
+    ];
+    return {
+        review_pipeline_lifecycle: {
+            report_path: reportPath,
+            ...(stringAt(lifecycle, "status") === undefined ? {} : { lifecycle_status: stringAt(lifecycle, "status") as string }),
+            ...(stringAt(coverageReview, "review_pipeline_command_kind") === undefined ? {} : { command_kind: stringAt(coverageReview, "review_pipeline_command_kind") as string }),
+            ...(stringAt(prepared, "status") === undefined ? {} : { prepared_status: stringAt(prepared, "status") as string }),
+            ...(stringAt(outputVerification, "status") === undefined ? {} : { output_verification_status: stringAt(outputVerification, "status") as string }),
+            ...(jsonBoolean(lifecycle.can_execute) === null ? {} : { can_execute: jsonBoolean(lifecycle.can_execute) as boolean }),
+            ...(jsonBoolean(lifecycle.can_continue) === null ? {} : { can_continue: jsonBoolean(lifecycle.can_continue) as boolean }),
+            missing_required_artifact_count: missingRequiredArtifacts.length,
+            checked_artifact_count: checkedArtifacts.length,
+            failures,
+        },
     };
 }
 
@@ -1313,9 +1359,9 @@ export function buildExecutionFactProjectionReport(
         }
     }
     if (workflowStatus) {
-        const lifecycleNode = "classifier_lifecycle:workflow_candidate_proposal";
+        const proposalLifecycleNode = "classifier_lifecycle:workflow_candidate_proposal";
         addNode({
-            id: lifecycleNode,
+            id: proposalLifecycleNode,
             kind: "classifier_lifecycle",
             label: "workflow candidate proposal lifecycle",
             properties: {
@@ -1325,14 +1371,17 @@ export function buildExecutionFactProjectionReport(
             },
         });
         const addLifecycleArtifactFacts = (input: {
+            readonly lifecycleNode: string;
             readonly key: string;
             readonly artifactPath: string;
             readonly decisionPredicate: string;
             readonly decision?: string;
             readonly numericFacts: Readonly<Record<string, number | undefined>>;
+            readonly booleanFacts?: Readonly<Record<string, boolean | undefined>>;
+            readonly stringFacts?: Readonly<Record<string, string | undefined>>;
         }): void => {
             const artifactNode = pathArtifactId(input.artifactPath);
-            const edgeId = `edge:${factId(`${lifecycleNode}->has_evidence->${artifactNode}:${input.key}`)}`;
+            const edgeId = `edge:${factId(`${input.lifecycleNode}->has_evidence->${artifactNode}:${input.key}`)}`;
             addNode({
                 id: artifactNode,
                 kind: "artifact",
@@ -1345,7 +1394,7 @@ export function buildExecutionFactProjectionReport(
             edges.push({
                 id: edgeId,
                 kind: "has_evidence",
-                from: lifecycleNode,
+                from: input.lifecycleNode,
                 to: artifactNode,
                 evidence_path: input.artifactPath,
                 properties: {
@@ -1354,9 +1403,9 @@ export function buildExecutionFactProjectionReport(
             });
             if (input.decision !== undefined) {
                 facts.push({
-                    id: `fact:${factId(`${lifecycleNode}:${input.decisionPredicate}`)}`,
+                    id: `fact:${factId(`${input.lifecycleNode}:${input.decisionPredicate}`)}`,
                     kind: "classifier_lifecycle_status",
-                    subject: lifecycleNode,
+                    subject: input.lifecycleNode,
                     predicate: input.decisionPredicate,
                     value: input.decision,
                     evidence_edges: [edgeId],
@@ -1369,9 +1418,39 @@ export function buildExecutionFactProjectionReport(
             for (const [predicate, value] of Object.entries(input.numericFacts)) {
                 if (value === undefined) continue;
                 facts.push({
-                    id: `fact:${factId(`${lifecycleNode}:${predicate}`)}`,
+                    id: `fact:${factId(`${input.lifecycleNode}:${predicate}`)}`,
                     kind: "classifier_lifecycle_status",
-                    subject: lifecycleNode,
+                    subject: input.lifecycleNode,
+                    predicate,
+                    value,
+                    evidence_edges: [edgeId],
+                    properties: {
+                        lifecycle_key: input.key,
+                        artifact_path: input.artifactPath,
+                    },
+                });
+            }
+            for (const [predicate, value] of Object.entries(input.booleanFacts ?? {})) {
+                if (value === undefined) continue;
+                facts.push({
+                    id: `fact:${factId(`${input.lifecycleNode}:${predicate}`)}`,
+                    kind: "classifier_lifecycle_status",
+                    subject: input.lifecycleNode,
+                    predicate,
+                    value,
+                    evidence_edges: [edgeId],
+                    properties: {
+                        lifecycle_key: input.key,
+                        artifact_path: input.artifactPath,
+                    },
+                });
+            }
+            for (const [predicate, value] of Object.entries(input.stringFacts ?? {})) {
+                if (value === undefined) continue;
+                facts.push({
+                    id: `fact:${factId(`${input.lifecycleNode}:${predicate}`)}`,
+                    kind: "classifier_lifecycle_status",
+                    subject: input.lifecycleNode,
                     predicate,
                     value,
                     evidence_edges: [edgeId],
@@ -1384,6 +1463,7 @@ export function buildExecutionFactProjectionReport(
         };
         if (workflowStatus.proposal_review) {
             addLifecycleArtifactFacts({
+                lifecycleNode: proposalLifecycleNode,
                 key: "proposal_review",
                 artifactPath: workflowStatus.proposal_review.report_path,
                 decisionPredicate: "proposal_review_decision",
@@ -1399,6 +1479,7 @@ export function buildExecutionFactProjectionReport(
         }
         if (workflowStatus.proposal_promotion) {
             addLifecycleArtifactFacts({
+                lifecycleNode: proposalLifecycleNode,
                 key: "proposal_promotion",
                 artifactPath: workflowStatus.proposal_promotion.report_path,
                 decisionPredicate: "proposal_promotion_decision",
@@ -1412,6 +1493,7 @@ export function buildExecutionFactProjectionReport(
         }
         if (workflowStatus.proposal_ready_smoke) {
             addLifecycleArtifactFacts({
+                lifecycleNode: proposalLifecycleNode,
                 key: "proposal_ready_smoke",
                 artifactPath: workflowStatus.proposal_ready_smoke.promotion_report_path,
                 decisionPredicate: "proposal_ready_smoke_promotion_decision",
@@ -1420,6 +1502,42 @@ export function buildExecutionFactProjectionReport(
                     proposal_ready_smoke_proposal_count: workflowStatus.proposal_ready_smoke.proposal_count,
                     proposal_ready_smoke_emitted_draft_count: workflowStatus.proposal_ready_smoke.emitted_draft_count,
                     proposal_ready_smoke_skipped_proposal_count: workflowStatus.proposal_ready_smoke.skipped_proposal_count,
+                },
+            });
+        }
+        if (workflowStatus.review_pipeline_lifecycle) {
+            const reviewPipelineLifecycleNode = "classifier_lifecycle:workflow_candidate_review_pipeline";
+            addNode({
+                id: reviewPipelineLifecycleNode,
+                kind: "classifier_lifecycle",
+                label: "workflow candidate review pipeline lifecycle",
+                properties: {
+                    workflow_status_path: workflowStatus.path,
+                    workflow_status_exists: workflowStatus.exists,
+                    report_path: workflowStatus.review_pipeline_lifecycle.report_path,
+                    lifecycle_status: workflowStatus.review_pipeline_lifecycle.lifecycle_status ?? null,
+                },
+            });
+            addLifecycleArtifactFacts({
+                lifecycleNode: reviewPipelineLifecycleNode,
+                key: "review_pipeline_lifecycle",
+                artifactPath: workflowStatus.review_pipeline_lifecycle.report_path,
+                decisionPredicate: "review_pipeline_lifecycle_status",
+                ...(workflowStatus.review_pipeline_lifecycle.lifecycle_status === undefined ? {} : {
+                    decision: workflowStatus.review_pipeline_lifecycle.lifecycle_status,
+                }),
+                numericFacts: {
+                    review_pipeline_missing_required_artifact_count: workflowStatus.review_pipeline_lifecycle.missing_required_artifact_count,
+                    review_pipeline_checked_artifact_count: workflowStatus.review_pipeline_lifecycle.checked_artifact_count,
+                },
+                booleanFacts: {
+                    review_pipeline_can_execute: workflowStatus.review_pipeline_lifecycle.can_execute,
+                    review_pipeline_can_continue: workflowStatus.review_pipeline_lifecycle.can_continue,
+                },
+                stringFacts: {
+                    review_pipeline_command_kind: workflowStatus.review_pipeline_lifecycle.command_kind,
+                    review_pipeline_prepared_status: workflowStatus.review_pipeline_lifecycle.prepared_status,
+                    review_pipeline_output_verification_status: workflowStatus.review_pipeline_lifecycle.output_verification_status,
                 },
             });
         }
@@ -1811,11 +1929,13 @@ export function buildExecutionGraphHealthReport(input: {
 
 export function loadClassifierLifecycleReviewStatus(path: string): ClassifierLifecycleReviewStatus {
     const proposalLifecycle = loadProposalLifecycleStatus(dirname(path));
+    const reviewPipelineLifecycle = loadReviewPipelineLifecycleStatus(dirname(path));
     if (!existsSync(path)) {
         return {
             path,
             exists: false,
             ...proposalLifecycle,
+            ...reviewPipelineLifecycle,
             next_actions: [],
         };
     }
@@ -2005,6 +2125,7 @@ export function loadClassifierLifecycleReviewStatus(path: string): ClassifierLif
         ...(invalidBlindLabelNoteCount === 0 ? {} : { invalid_blind_label_note_count: invalidBlindLabelNoteCount }),
         ...(invalidHardNegativeNoteCount === 0 ? {} : { invalid_hard_negative_note_count: invalidHardNegativeNoteCount }),
         ...proposalLifecycle,
+        ...reviewPipelineLifecycle,
         ...(focusedBatch === undefined ? {} : { focused_batch: focusedBatch }),
         next_actions: nextActions,
     };
