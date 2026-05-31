@@ -501,6 +501,11 @@ export interface ClassifierGraphQuerySuggestion {
     readonly repair_verification_remediation: string;
     readonly repair_verification_can_execute: boolean;
     readonly repair_verification_command_kind: "classifier_graph_query_repair_verification" | "none";
+    readonly repair_verification_blockers: readonly ["no_repair_needed"] | readonly [];
+    readonly repair_verification_blocker_details: readonly {
+        readonly blocker: "no_repair_needed";
+        readonly remediation: string;
+    }[];
     readonly repair_verification_expected_query_match_status: "matched" | "not_applicable";
     readonly repair_verification_expected_result_count?: number;
     readonly repair_verification_argv: readonly string[];
@@ -2589,6 +2594,13 @@ export function buildExecutionGraphHealthReport(input: {
                     : "Run the repair verification query and confirm it returns the expected matches.",
                 repair_verification_can_execute: query.value_equals !== querySuggestedValueEquals,
                 repair_verification_command_kind: query.value_equals === querySuggestedValueEquals ? "none" : "classifier_graph_query_repair_verification",
+                repair_verification_blockers: query.value_equals === querySuggestedValueEquals ? ["no_repair_needed"] : [],
+                repair_verification_blocker_details: query.value_equals === querySuggestedValueEquals
+                    ? [{
+                        blocker: "no_repair_needed",
+                        remediation: "Use the current graph query; verification execution is not required.",
+                    }]
+                    : [],
                 repair_verification_expected_query_match_status: query.value_equals === querySuggestedValueEquals ? "not_applicable" : "matched",
                 ...(query.value_equals === querySuggestedValueEquals ? {} : { repair_verification_expected_result_count: querySuggestedResultCount }),
                 repair_verification_argv: query.value_equals === querySuggestedValueEquals ? [] : querySuggestedArgv,

@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E414 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-can-execute-no-match-e414.json`
+- Index continuation: E415 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-blockers-no-match-e415.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-can-execute-match-e414.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-blockers-match-e415.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,55 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E415 - Expose Suggested Query Repair Verification Blockers
+
+Question:
+- E414 exposes verification executability, but can services explain why
+  verification is not executable without parsing remediation prose?
+
+Implementation:
+- Added `repair_verification_blockers` and
+  `repair_verification_blocker_details` to `query_suggestion`.
+- Executable lifecycle graph-query repairs expose empty blocker arrays.
+- No-op suggestions expose `no_repair_needed` with a verification-specific
+  remediation.
+- Text graph-health output now renders verification blockers and blocker
+  details.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-blockers-no-match-e415.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-blockers-match-e415.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-blockers-no-match-e415.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match`,
+  `repair_verification_blockers=[]`, and
+  `repair_verification_blocker_details=[]`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched`,
+  `repair_verification_blockers=[no_repair_needed]`, and a blocker detail
+  explaining that verification execution is not required.
+- Text output renders `query suggestion repair verification blockers: none`
+  for executable verification.
+
+Decision:
+- Verification routing now has the same structured explanation pattern as
+  repair execution: executability boolean plus blocker names and detailed
+  remediations.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E415 no-match report has empty `repair_verification_blockers`.
+- E415 no-match report has empty `repair_verification_blocker_details`.
+- E415 match report has `repair_verification_blockers=[no_repair_needed]`.
+- E415 match report has the expected verification blocker detail remediation.
+- E415 text output includes the repair verification blockers line.
 
 ## E414 - Expose Suggested Query Repair Verification Executability
 

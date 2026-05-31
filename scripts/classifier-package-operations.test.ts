@@ -1313,6 +1313,8 @@ describe("classifier package operations report", () => {
             repair_verification_remediation: "Run the repair verification query and confirm it returns the expected matches.",
             repair_verification_can_execute: true,
             repair_verification_command_kind: "classifier_graph_query_repair_verification",
+            repair_verification_blockers: [],
+            repair_verification_blocker_details: [],
             repair_verification_expected_query_match_status: "matched",
             repair_verification_expected_result_count: 1,
             repair_verification_argv: [

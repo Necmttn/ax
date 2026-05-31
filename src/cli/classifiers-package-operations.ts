@@ -341,6 +341,10 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         ? "none"
         : String(report.query_suggestion.repair_verification_can_execute);
     const querySuggestionRepairVerificationCommandKind = report.query_suggestion?.repair_verification_command_kind ?? "none";
+    const querySuggestionRepairVerificationBlockers = report.query_suggestion?.repair_verification_blockers.join(", ") || "none";
+    const querySuggestionRepairVerificationBlockerDetails = report.query_suggestion?.repair_verification_blocker_details
+        .map((detail) => `${detail.blocker}: ${detail.remediation}`)
+        .join(", ") || "none";
     const querySuggestionRepairVerificationExpectedQueryMatch = report.query_suggestion?.repair_verification_expected_query_match_status ?? "none";
     const querySuggestionRepairVerificationExpectedResultCount = report.query_suggestion?.repair_verification_expected_result_count ?? "none";
     const querySuggestionRepairVerificationArgv = report.query_suggestion?.repair_verification_argv.join(" ") || "none";
@@ -413,6 +417,8 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `query suggestion repair verification remediation: ${querySuggestionRepairVerificationRemediation}`,
         `query suggestion repair verification can execute: ${querySuggestionRepairVerificationCanExecute}`,
         `query suggestion repair verification command kind: ${querySuggestionRepairVerificationCommandKind}`,
+        `query suggestion repair verification blockers: ${querySuggestionRepairVerificationBlockers}`,
+        `query suggestion repair verification blocker details: ${querySuggestionRepairVerificationBlockerDetails}`,
         `query suggestion repair verification expected query match: ${querySuggestionRepairVerificationExpectedQueryMatch}`,
         `query suggestion repair verification expected result count: ${querySuggestionRepairVerificationExpectedResultCount}`,
         `query suggestion repair verification argv: ${querySuggestionRepairVerificationArgv}`,

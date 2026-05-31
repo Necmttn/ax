@@ -610,6 +610,11 @@ describe("classifiers package-operations format", () => {
                 repair_verification_remediation: "Verification is not needed because no repair execution is required.",
                 repair_verification_can_execute: false,
                 repair_verification_command_kind: "none",
+                repair_verification_blockers: ["no_repair_needed"],
+                repair_verification_blocker_details: [{
+                    blocker: "no_repair_needed",
+                    remediation: "Use the current graph query; verification execution is not required.",
+                }],
                 repair_verification_expected_query_match_status: "not_applicable",
                 repair_verification_argv: [],
                 status: "expected_matches",
@@ -754,6 +759,8 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("query suggestion repair verification remediation: Verification is not needed because no repair execution is required.");
         expect(output).toContain("query suggestion repair verification can execute: false");
         expect(output).toContain("query suggestion repair verification command kind: none");
+        expect(output).toContain("query suggestion repair verification blockers: no_repair_needed");
+        expect(output).toContain("query suggestion repair verification blocker details: no_repair_needed: Use the current graph query; verification execution is not required.");
         expect(output).toContain("query suggestion repair verification expected query match: not_applicable");
         expect(output).toContain("query suggestion repair verification expected result count: none");
         expect(output).toContain("query suggestion repair verification argv: none");
