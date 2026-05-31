@@ -478,6 +478,8 @@ export interface ClassifierPackageExecutionGraphHealthReport {
     readonly routing_policy_summary?: ClassifierGraphRoutingPolicySummary;
     readonly evidence_paths: readonly string[];
     readonly query_match_status?: "matched" | "no_match";
+    readonly query_next_action?: "use_query_results" | "relax_filters_or_project_facts";
+    readonly query_remediation?: string;
     readonly totals: {
         readonly node_count: number;
         readonly edge_count: number;
@@ -2605,6 +2607,7 @@ export function buildExecutionGraphHealthReport(input: {
         resultChangedArtifacts.length +
         resultLifecycleFacts.length +
         resultEmbeddingHelperFacts.length;
+    const queryMatchStatus = primaryResultCount > 0 ? "matched" : "no_match";
 
     return {
         schema: "ax.classifier_package_execution_graph_health_report.v1",
@@ -2618,7 +2621,11 @@ export function buildExecutionGraphHealthReport(input: {
         embedding_helper_facts: resultEmbeddingHelperFacts,
         routing_policy_summary: routingPolicySummary,
         evidence_paths: resultEvidencePaths,
-        query_match_status: primaryResultCount > 0 ? "matched" : "no_match",
+        query_match_status: queryMatchStatus,
+        query_next_action: queryMatchStatus === "matched" ? "use_query_results" : "relax_filters_or_project_facts",
+        query_remediation: queryMatchStatus === "matched"
+            ? "Use the returned graph rows for the requested classifier workflow."
+            : "Relax graph filters, inspect available value counts, or project/apply the missing classifier facts before routing from this query.",
         totals: {
             node_count: input.nodes.length,
             edge_count: input.edges.length,

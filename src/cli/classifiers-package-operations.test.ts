@@ -564,6 +564,8 @@ describe("classifiers package-operations format", () => {
             embedding_helper_facts: [],
             evidence_paths: [".ax/experiments/workflow-candidate-proposal-review-current.json"],
             query_match_status: "matched",
+            query_next_action: "use_query_results",
+            query_remediation: "Use the returned graph rows for the requested classifier workflow.",
             totals: {
                 node_count: 2,
                 edge_count: 1,
@@ -600,6 +602,8 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("filter value contains: src/cli/index.ts");
         expect(output).toContain("filter value equals: bind_inputs");
         expect(output).toContain("query match: matched");
+        expect(output).toContain("query next action: use_query_results");
+        expect(output).toContain("query remediation: Use the returned graph rows for the requested classifier workflow.");
         expect(output).toContain("execution/guard/artifact/lifecycle/helper facts: 0/0/0/1/0");
         expect(output).toContain("lifecycle facts:");
         expect(output).toContain("- review_pipeline_prepared_argv: [\"bun\",\"src/cli/index.ts\"]");

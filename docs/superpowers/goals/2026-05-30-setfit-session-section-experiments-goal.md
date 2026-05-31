@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E374 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-match-e374.json`
+- Index continuation: E375 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-action-e375.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-no-match-e374.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-action-no-match-e375.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,54 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E375 - Expose Graph Query Routing Guidance
+
+Question:
+- E374 lets services detect graph query no-matches, but can they route the next
+  step without re-encoding result-total rules?
+
+Implementation:
+- Added `query_next_action` to classifier graph health reports.
+- Added `query_remediation` text for service/debug output.
+- Matched queries return `query_next_action=use_query_results`.
+- No-match queries return
+  `query_next_action=relax_filters_or_project_facts`.
+- Text graph-health output now renders both query routing fields.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-action-e375.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-action-no-match-e375.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-action-no-match-e375.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=bind_inputs`
+  returns `query_match_status=matched`,
+  `query_next_action=use_query_results`, and one lifecycle fact.
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match`,
+  `query_next_action=relax_filters_or_project_facts`, and zero lifecycle
+  facts.
+- Text output renders
+  `query next action: relax_filters_or_project_facts` and remediation.
+
+Decision:
+- Services can now route matched graph queries into result consumption and
+  no-match graph queries into filter relaxation, value-count inspection, or
+  fact projection/apply work without comparing raw counts.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E375 positive report has `query_match_status=matched`,
+  `query_next_action=use_query_results`, and one lifecycle fact.
+- E375 negative report has `query_match_status=no_match`,
+  `query_next_action=relax_filters_or_project_facts`, remediation beginning
+  with `Relax graph filters`, and zero lifecycle facts.
+- E375 text output includes the no-match query next action and remediation.
 
 ## E374 - Expose Graph Query Match Status
 

@@ -1195,6 +1195,8 @@ describe("classifier package operations report", () => {
 
         expect(report.query.value_equals).toBe("bind_inputs");
         expect(report.query_match_status).toBe("matched");
+        expect(report.query_next_action).toBe("use_query_results");
+        expect(report.query_remediation).toBe("Use the returned graph rows for the requested classifier workflow.");
         expect(report.totals.lifecycle_fact_count).toBe(3);
         expect(report.result_totals.lifecycle_fact_count).toBe(1);
         expect(report.lifecycle_facts[0]).toMatchObject({
@@ -1234,6 +1236,8 @@ describe("classifier package operations report", () => {
         });
 
         expect(report.query_match_status).toBe("no_match");
+        expect(report.query_next_action).toBe("relax_filters_or_project_facts");
+        expect(report.query_remediation).toBe("Relax graph filters, inspect available value counts, or project/apply the missing classifier facts before routing from this query.");
         expect(report.result_totals.lifecycle_fact_count).toBe(0);
         expect(report.lifecycle_facts).toEqual([]);
         expect(report.lifecycle_value_counts).toEqual([]);
