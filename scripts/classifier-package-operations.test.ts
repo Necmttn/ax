@@ -516,6 +516,8 @@ describe("classifier package operations report", () => {
                 production_apply_argv: ["bun", "src/cli/index.ts", "--apply-review-facts"],
                 review_provenance_stamp_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
                 review_issue_repair_argv: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
+                recommended_action_kind: "stamp_review_provenance",
+                recommended_action_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
                 output_artifacts: [
                     { kind: "review_brief", path: ".ax/experiments/review.md", required_for_handoff: true },
                     { kind: "readiness_report", path: ".ax/experiments/readiness.json", required_for_handoff: false },
@@ -529,7 +531,7 @@ describe("classifier package operations report", () => {
             next_actions: [],
         });
 
-        expect(report.totals.lifecycle_fact_count).toBe(15);
+        expect(report.totals.lifecycle_fact_count).toBe(17);
         expect(report.nodes).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 id: "classifier_lifecycle:workflow_candidate_review_pipeline",
@@ -580,6 +582,14 @@ describe("classifier package operations report", () => {
             expect.objectContaining({
                 predicate: "review_pipeline_issue_repair_argv",
                 value: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_recommended_action_kind",
+                value: "stamp_review_provenance",
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_recommended_action_argv",
+                value: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
             }),
             expect.objectContaining({
                 predicate: "review_pipeline_output_artifact_paths",
@@ -653,6 +663,8 @@ describe("classifier package operations report", () => {
             production_apply_argv: ["bun", "src/cli/index.ts", "--apply-review-facts"],
             review_provenance_stamp_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
             review_issue_repair_argv: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
+            recommended_action_kind: "stamp_review_provenance",
+            recommended_action_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
             output_artifacts: [
                 { kind: "readiness_report", path: "one.json", required_for_handoff: false },
                 { kind: "review_brief", path: "two.md", required_for_handoff: true },
@@ -1808,6 +1820,10 @@ describe("classifier package operations report", () => {
                     missing_required_artifact_count: 2,
                     checked_artifact_count: 1,
                     prepared_argv: ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates"],
+                    review_provenance_stamp_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+                    recommended_action_kind: "repair_review_issues",
+                    recommended_action_argv: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
+                    review_issue_repair_argv: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
                     output_artifacts: [{
                         kind: "review_brief",
                         path: ".ax/experiments/review.md",
@@ -1835,6 +1851,9 @@ describe("classifier package operations report", () => {
             checked_artifact_count: 1,
             next_action: "repair_review_pipeline_outputs",
             prepared_argv: ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates"],
+            review_provenance_stamp_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+            recommended_action_kind: "repair_review_issues",
+            recommended_action_argv: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
             output_artifacts: [{
                 kind: "review_brief",
                 path: ".ax/experiments/review.md",

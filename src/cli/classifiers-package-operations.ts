@@ -472,6 +472,12 @@ export function renderClassifierLifecycleInsightText(report: ClassifierLifecycle
         if (pipeline.review_issue_repair_argv && pipeline.review_issue_repair_argv.length > 0) {
             lines.push(`  issue repair argv: ${pipeline.review_issue_repair_argv.join(" ")}`);
         }
+        if (pipeline.recommended_action_kind) {
+            lines.push(`  recommended action: ${pipeline.recommended_action_kind}`);
+        }
+        if (pipeline.recommended_action_argv && pipeline.recommended_action_argv.length > 0) {
+            lines.push(`  recommended action argv: ${pipeline.recommended_action_argv.join(" ")}`);
+        }
         lines.push(`  outputs: ${pipeline.output_verification_status ?? "unknown"} checked=${pipeline.checked_artifact_count} missing=${pipeline.missing_required_artifact_count}`);
         if (pipeline.output_artifacts.length > 0) {
             lines.push(`  output artifacts: ${pipeline.output_artifacts.map((artifact) => `${artifact.kind ?? "artifact"}=${artifact.path}`).join(", ")}`);

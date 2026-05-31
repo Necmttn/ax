@@ -33,17 +33,96 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E364 adds
-  `.ax/experiments/classifier-package-execution-facts-review-pipeline-direct-argv-e364.json`
+- Index continuation: E365 adds
+  `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-e365.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-production-apply-argv-e364.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-argv-e365.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
   append-only fixtures, graph projection, and workflow/harness usefulness
   checks.
-- The immediate bottleneck is review throughput, not another expensive model
-  run.
+- The immediate bottleneck is direct review execution/routing, not another
+  expensive model run.
+
+## E365 - Recommend Review Pipeline Direct Action
+
+Question:
+- After E364 makes all direct review argv arrays graph-visible, can services
+  ask for the single recommended direct action without inspecting every
+  pipeline predicate and re-implementing routing logic?
+
+Implementation:
+- Added review-pipeline recommendation fields to lifecycle status and insight:
+  `recommended_action_kind` and `recommended_action_argv`.
+- Recommendation logic routes missing required outputs/failures to
+  `repair_review_issues`, otherwise maps the current pipeline command kind to
+  its executable argv:
+  `repair_review_issues`, `stamp_review_provenance`, or `apply_review_facts`.
+- Projected the recommendation into lifecycle graph facts:
+  `review_pipeline_recommended_action_kind` and
+  `review_pipeline_recommended_action_argv`.
+- Lifecycle text now renders `recommended action` and
+  `recommended action argv`.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-e365.md --review-facts=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-e365-review-facts.json --review-write-plan=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-e365-review-write-plan.json --review-pipeline-lifecycle --out=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-e365.json --json > .ax/experiments/workflow-candidate-review-pipeline-recommended-action-e365.stdout
+cp .ax/experiments/workflow-candidate-review-pipeline-recommended-action-e365.json .ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json
+bun src/cli/index.ts classifiers package-operations --facts --workflow-status=.ax/experiments/blind-workflow-status-current.json --out=.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-e365.json --json
+bun src/cli/index.ts classifiers package-operations --write-plan --facts --workflow-status=.ax/experiments/blind-workflow-status-current.json --out=.ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-e365.json --json > .ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-e365.stdout
+bun src/cli/index.ts classifiers package-operations --apply-write-plan --facts --workflow-status=.ax/experiments/blind-workflow-status-current.json --out=.ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-e365.json --json > .ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-e365.stdout
+bun src/cli/index.ts classifiers package-operations --graph-health --graph-mode=lifecycle --predicate=review_pipeline_recommended_action_kind --out=.ax/experiments/classifier-graph-lifecycle-recommended-action-kind-e365.json --json > .ax/experiments/classifier-graph-lifecycle-recommended-action-kind-e365.stdout
+bun src/cli/index.ts classifiers package-operations --graph-health --graph-mode=lifecycle --predicate=review_pipeline_recommended_action_argv --out=.ax/experiments/classifier-graph-lifecycle-recommended-action-argv-e365.json --json > .ax/experiments/classifier-graph-lifecycle-recommended-action-argv-e365.stdout
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-e365.json --json > .ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-e365.stdout
+bun src/cli/index.ts classifiers lifecycle > .ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-e365.txt
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-e365.json`
+- `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-e365.json`
+- `.ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-e365.json`
+- `.ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-e365.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-kind-e365.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-argv-e365.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-e365.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-e365.txt`
+
+Results:
+- Fact projection emits `review_pipeline_recommended_action_kind` with
+  `stamp_review_provenance`.
+- Fact projection emits `review_pipeline_recommended_action_argv` with the
+  structured provenance-stamp argv containing reviewer and reviewed-at
+  placeholders.
+- Lifecycle graph queries by each new predicate return exactly one fact for
+  `classifier_lifecycle:workflow_candidate_review_pipeline`.
+- Lifecycle insight reports status `blocked_before_execution`, command kind
+  `stamp_review_provenance`, recommended kind `stamp_review_provenance`, and
+  the matching argv.
+- Lifecycle text renders both `recommended action: stamp_review_provenance`
+  and `recommended action argv: ...`.
+
+Decision:
+- E365 gives FX services and graph clients a direct routing fact: "what should
+  I run now?" They can still inspect raw action argv facts from E364, but the
+  common path no longer needs client-side branching over pipeline status,
+  command kind, and output verification.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-e365.json`
+  contains both recommendation predicates.
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-kind-e365.json`
+  has one lifecycle fact with value `stamp_review_provenance`.
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-argv-e365.json`
+  has one lifecycle fact whose argv begins with
+  `bun src/cli/index.ts classifiers workflow-candidates`.
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-e365.txt`
+  renders the recommended action and argv.
 
 ## E364 - Project Review Direct Action Argv Facts
 
