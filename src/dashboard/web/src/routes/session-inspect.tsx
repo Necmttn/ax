@@ -293,6 +293,7 @@ function AnnotatedRawText({
 }) {
     const blocks = visibleTextBlocks(content);
     const activeSeq = targetBlockSeq(activeTarget);
+    const [hoverSeq, setHoverSeq] = useState<number | null>(null);
 
     const rawParts: ReactNode[] = [];
     let cursor = 0;
@@ -304,21 +305,26 @@ function AnnotatedRawText({
         const slice = rawText.slice(start, end);
         const mismatch = block.text != null && slice !== block.text;
         const active = activeSeq === block.seq;
+        const hovered = hoverSeq === block.seq;
+        const emphasized = active || hovered || mismatch;
         const target: InspectTarget = { kind: "block", blockSeq: block.seq };
         rawParts.push(
             <span
                 key={`raw-${block.seq}`}
-                onMouseEnter={() => setActiveTarget(target)}
+                onMouseEnter={() => setHoverSeq(block.seq)}
+                onMouseLeave={() => setHoverSeq((seq) => seq === block.seq ? null : seq)}
                 onClick={() => setActiveTarget(target)}
                 title={blockHoverTitle(block, mismatch)}
                 style={{
-                    background: active ? "#fef08a" : family.bg,
-                    color: family.fg,
+                    background: active ? "#fef08a" : hovered ? family.bg : "transparent",
+                    color: emphasized ? family.fg : "inherit",
                     outline: active ? `1px solid ${family.bar}` : "none",
-                    outlineOffset: 2,
-                    borderBottom: mismatch ? "1px dotted #f97316" : `1px solid ${family.bar}`,
-                    borderRadius: 2,
+                    outlineOffset: 1,
+                    borderBottom: mismatch
+                        ? "1px dotted #f97316"
+                        : emphasized ? `1px solid ${family.bar}` : "1px solid transparent",
                     cursor: "pointer",
+                    transition: "background 0.12s, color 0.12s, border-color 0.12s",
                 }}
             >
                 {slice}
