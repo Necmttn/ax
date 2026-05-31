@@ -389,6 +389,7 @@ export interface ClassifierGraphHealthQuery {
     readonly source_kind?: string;
     readonly fact_kind?: string;
     readonly status?: string;
+    readonly nearest_fixture_id?: string;
     readonly predicate?: string;
     readonly subject?: string;
     readonly value_contains?: string;
@@ -1804,6 +1805,7 @@ export function buildExecutionGraphHealthReport(input: {
         ...(input.query?.source_kind ? { source_kind: input.query.source_kind } : {}),
         ...(input.query?.fact_kind ? { fact_kind: input.query.fact_kind } : {}),
         ...(input.query?.status ? { status: input.query.status } : {}),
+        ...(input.query?.nearest_fixture_id ? { nearest_fixture_id: input.query.nearest_fixture_id } : {}),
         ...(input.query?.predicate ? { predicate: input.query.predicate } : {}),
         ...(input.query?.subject ? { subject: input.query.subject } : {}),
         ...(input.query?.value_contains ? { value_contains: input.query.value_contains } : {}),
@@ -2005,6 +2007,7 @@ export function buildExecutionGraphHealthReport(input: {
             (!query.source_kind || fact.source_kind === query.source_kind) &&
             (!query.fact_kind || fact.kind === query.fact_kind) &&
             !query.status &&
+            !query.nearest_fixture_id &&
             (!query.predicate || fact.predicate === query.predicate) &&
             (!query.subject || fact.subject === query.subject) &&
             graphFactValueContains(fact.value, query.value_contains)
@@ -2020,6 +2023,7 @@ export function buildExecutionGraphHealthReport(input: {
             (!query.source_kind || fact.source_kind === query.source_kind) &&
             (!query.fact_kind || fact.kind === query.fact_kind) &&
             (!query.status || fact.status === query.status) &&
+            (!query.nearest_fixture_id || (fact.nearest_neighbors ?? []).some((neighbor) => neighbor.fixture_id === query.nearest_fixture_id)) &&
             (!query.predicate || fact.predicate === query.predicate) &&
             (!query.subject || fact.subject === query.subject) &&
             graphFactValueContains(fact.value, query.value_contains)

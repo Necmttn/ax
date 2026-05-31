@@ -1824,6 +1824,7 @@ const classifiersPackageOperationsCommand = Command.make(
         sourceKind: Flag.string("source-kind").pipe(Flag.optional),
         factKind: Flag.string("fact-kind").pipe(Flag.optional),
         status: Flag.string("status").pipe(Flag.optional),
+        nearestFixture: Flag.string("nearest-fixture").pipe(Flag.optional),
         predicate: Flag.string("predicate").pipe(Flag.optional),
         subject: Flag.string("subject").pipe(Flag.optional),
         valueContains: Flag.string("value-contains").pipe(Flag.optional),
@@ -1834,12 +1835,13 @@ const classifiersPackageOperationsCommand = Command.make(
         writePlan: Flag.boolean("write-plan").pipe(Flag.withDefault(false)),
         json: jsonFlag,
     },
-    ({ allowExpensive, applyWritePlan, all, dryRun, execute, facts, graphHealth, graphMode, history, manifest, operation, artifact, sourceKind, factKind, status, predicate, subject, valueContains, out, preflight, root, workflowStatus, writePlan, json }) => {
+    ({ allowExpensive, applyWritePlan, all, dryRun, execute, facts, graphHealth, graphMode, history, manifest, operation, artifact, sourceKind, factKind, status, nearestFixture, predicate, subject, valueContains, out, preflight, root, workflowStatus, writePlan, json }) => {
         const operationId = optionValue(operation);
         const artifactPath = optionValue(artifact);
         const sourceKindName = optionValue(sourceKind);
         const factKindName = optionValue(factKind);
         const statusName = optionValue(status);
+        const nearestFixtureId = optionValue(nearestFixture);
         const predicateName = optionValue(predicate);
         const subjectName = optionValue(subject);
         const valueContainsText = optionValue(valueContains);
@@ -1869,6 +1871,7 @@ const classifiersPackageOperationsCommand = Command.make(
             ...(sourceKindName === undefined ? {} : { sourceKind: sourceKindName }),
             ...(factKindName === undefined ? {} : { factKind: factKindName }),
             ...(statusName === undefined ? {} : { status: statusName }),
+            ...(nearestFixtureId === undefined ? {} : { nearestFixture: nearestFixtureId }),
             ...(predicateName === undefined ? {} : { predicate: predicateName }),
             ...(subjectName === undefined ? {} : { subject: subjectName }),
             ...(valueContainsText === undefined ? {} : { valueContains: valueContainsText }),
@@ -1890,18 +1893,20 @@ const classifiersGraphCommand = Command.make(
         sourceKind: Flag.string("source-kind").pipe(Flag.optional),
         factKind: Flag.string("fact-kind").pipe(Flag.optional),
         status: Flag.string("status").pipe(Flag.optional),
+        nearestFixture: Flag.string("nearest-fixture").pipe(Flag.optional),
         predicate: Flag.string("predicate").pipe(Flag.optional),
         subject: Flag.string("subject").pipe(Flag.optional),
         valueContains: Flag.string("value-contains").pipe(Flag.optional),
         out: Flag.string("out").pipe(Flag.optional),
         json: jsonFlag,
     },
-    ({ mode, operation, artifact, sourceKind, factKind, status, predicate, subject, valueContains, out, json }) => {
+    ({ mode, operation, artifact, sourceKind, factKind, status, nearestFixture, predicate, subject, valueContains, out, json }) => {
         const operationId = optionValue(operation);
         const artifactPath = optionValue(artifact);
         const sourceKindName = optionValue(sourceKind);
         const factKindName = optionValue(factKind);
         const statusName = optionValue(status);
+        const nearestFixtureId = optionValue(nearestFixture);
         const predicateName = optionValue(predicate);
         const subjectName = optionValue(subject);
         const valueContainsText = optionValue(valueContains);
@@ -1915,6 +1920,7 @@ const classifiersGraphCommand = Command.make(
             ...(sourceKindName === undefined ? {} : { sourceKind: sourceKindName }),
             ...(factKindName === undefined ? {} : { factKind: factKindName }),
             ...(statusName === undefined ? {} : { status: statusName }),
+            ...(nearestFixtureId === undefined ? {} : { nearestFixture: nearestFixtureId }),
             ...(predicateName === undefined ? {} : { predicate: predicateName }),
             ...(subjectName === undefined ? {} : { subject: subjectName }),
             ...(valueContainsText === undefined ? {} : { valueContains: valueContainsText }),
