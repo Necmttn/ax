@@ -606,6 +606,7 @@ describe("classifiers package-operations format", () => {
                 repair_argv: [],
                 repair_can_verify: false,
                 repair_verification_status: "not_needed",
+                repair_verification_next_action: "skip_verification",
                 repair_verification_argv: [],
                 status: "expected_matches",
                 next_action: "run_suggested_query",
@@ -745,6 +746,7 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("query suggestion repair argv: none");
         expect(output).toContain("query suggestion repair can verify: false");
         expect(output).toContain("query suggestion repair verification status: not_needed");
+        expect(output).toContain("query suggestion repair verification next action: skip_verification");
         expect(output).toContain("query suggestion repair verification argv: none");
         expect(output).toContain("query suggestion repair query: none");
         expect(output).toContain("query suggestion provenance: source=lifecycle_available_value_counts reason=available_value_after_relaxing_value_equals");

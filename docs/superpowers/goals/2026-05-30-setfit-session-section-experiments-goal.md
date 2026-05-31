@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E408 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-status-no-match-e408.json`
+- Index continuation: E409 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-next-action-no-match-e409.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-status-match-e408.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-next-action-match-e409.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,50 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E409 - Expose Suggested Query Repair Verification Next Action
+
+Question:
+- E408 exposes verification status, but can services get a direct next action
+  without branching on that status enum?
+
+Implementation:
+- Added `repair_verification_next_action` to `query_suggestion`.
+- Executable lifecycle graph-query repairs now report
+  `run_verification_query`.
+- No-op suggestions report `skip_verification`.
+- Text graph-health output now renders `query suggestion repair verification
+  next action`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-next-action-no-match-e409.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-next-action-match-e409.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-next-action-no-match-e409.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_verification_next_action=run_verification_query`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.repair_verification_next_action=skip_verification`.
+- Text output renders `query suggestion repair verification next action:
+  run_verification_query`.
+
+Decision:
+- Services can now choose post-repair verification behavior from a direct next
+  action while retaining status, boolean, argv, and expected outcomes.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E409 no-match report has
+  `repair_verification_next_action=run_verification_query`.
+- E409 match report has `repair_verification_next_action=skip_verification`.
+- E409 text output includes the repair verification next-action line.
 
 ## E408 - Expose Suggested Query Repair Verification Status
 
