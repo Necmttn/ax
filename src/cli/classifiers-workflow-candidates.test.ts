@@ -1973,18 +1973,24 @@ describe("classifiers workflow-candidates", () => {
                 candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
                 verdict: "accept",
                 projected_fact_id: summary.projected_fact_ids[0],
+                reviewer: "",
+                reviewed_at: "",
             },
             {
                 fixture_id: "workflow-candidate-review-coverage/existing/a",
                 candidate_id: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
                 verdict: "reject",
                 projected_fact_id: summary.projected_fact_ids[1],
+                reviewer: "",
+                reviewed_at: "",
             },
             {
                 fixture_id: "workflow-candidate-review-coverage/unknown/a",
                 candidate_id: "classifier_candidate_group:hybrid-window/unknown_signal",
                 verdict: "defer",
                 projected_fact_id: summary.projected_fact_ids[2],
+                reviewer: "",
+                reviewed_at: "",
             },
         ]);
     });
@@ -2000,6 +2006,8 @@ describe("classifiers workflow-candidates", () => {
             source_group: "workflow-candidate",
             review_status: "accept",
             review_rationale: "Useful verification behavior worth preserving.",
+            review_reviewer: "reviewer@example.test",
+            review_reviewed_at: "2026-05-31T10:00:00Z",
             topic: "review-coverage",
             candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
             candidate_label: "verification_or_recovery_signal",
@@ -2056,11 +2064,13 @@ describe("classifiers workflow-candidates", () => {
             candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
             verdict: "accept",
             projected_fact_id: summary.projected_fact_ids[0],
+            reviewer: "reviewer@example.test",
+            reviewed_at: "2026-05-31T10:00:00Z",
         }]);
         expect(text).toContain(`coverage review apply result: applied statements=${writePlan.totals.statement_count}`);
         expect(text).toContain("coverage review audit rows: 1");
         expect(text).toContain(
-            `coverage review audit row: accept fixture=workflow-candidate-review-coverage/verification_or_recovery_signal/a candidate=classifier_candidate_group:hybrid-window/verification_or_recovery_signal fact=${summary.projected_fact_ids[0]}`,
+            `coverage review audit row: accept fixture=workflow-candidate-review-coverage/verification_or_recovery_signal/a candidate=classifier_candidate_group:hybrid-window/verification_or_recovery_signal fact=${summary.projected_fact_ids[0]} reviewer=reviewer@example.test reviewed_at=2026-05-31T10:00:00Z`,
         );
     });
 
