@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E425 adds
-  `.ax/experiments/classifier-graph-query-suggestion-json-outcomes-e425.json`
+- Index continuation: E426 adds
+  `.ax/experiments/classifier-lifecycle-query-suggestion-routing-e426.json`
   and
-  `.ax/experiments/classifier-graph-query-suggestion-json-outcomes-e425.txt`
+  `.ax/experiments/classifier-lifecycle-query-suggestion-routing-e426.txt`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,60 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E426 - Carry Graph Query Suggestions Into Lifecycle Insight
+
+Question:
+- Can the high-level classifier lifecycle report expose graph query repair and
+  verification routing, so services can use one lifecycle surface instead of
+  separately calling graph-health routing?
+
+Implementation:
+- Added optional `graph_query_suggestion` to
+  `ClassifierLifecycleInsightReport`.
+- `buildClassifierLifecycleInsightReport` now accepts a separate query graph,
+  preserving package graph counts from the summary graph while carrying routing
+  suggestions from the filtered graph.
+- `ClassifierPackageService.lifecycleInsightReport` accepts optional
+  `graphQuery` and fetches the query graph separately.
+- `classifiers lifecycle` accepts `--graph-mode`, `--predicate`, `--subject`,
+  `--value-contains`, and `--value` filters.
+- Lifecycle text renders graph query suggestion, repair, and verification
+  routing.
+
+Artifacts:
+- `.ax/experiments/classifier-lifecycle-query-suggestion-routing-e426.json`
+- `.ax/experiments/classifier-lifecycle-query-suggestion-routing-e426.txt`
+
+Results:
+- JSON output reports
+  `graph_query_suggestion.suggestion.repair.outcome_status=expected_matches`.
+- JSON output reports
+  `graph_query_suggestion.suggestion.verification.outcome_status=expected_matches`.
+- Text output reports
+  `graph query suggestion: expected_matches value=bind_inputs count=1`.
+- Text output reports repair and verification command kinds as ready to
+  execute.
+
+Decision:
+- E426 makes lifecycle insight the service-facing routing view: summary graph
+  health still powers package counts, and optional graph query filters add
+  actionable repair/verification routing without losing package-health context.
+
+Verification:
+```sh
+bun test src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun src/cli/index.ts classifiers lifecycle --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --out .ax/experiments/classifier-lifecycle-query-suggestion-routing-e426.json --json
+bun src/cli/index.ts classifiers lifecycle --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute > .ax/experiments/classifier-lifecycle-query-suggestion-routing-e426.txt
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-lifecycle-query-suggestion-routing-e426.json").json(); if (saved.graph_query_suggestion?.suggestion?.repair?.outcome_status !== "expected_matches") throw new Error("wrong lifecycle repair outcome"); if (saved.graph_query_suggestion?.suggestion?.verification?.outcome_status !== "expected_matches") throw new Error("wrong lifecycle verification outcome");'
+rg -n "graph query suggestion: expected_matches value=bind_inputs count=1|graph query repair: expected_matches ready_to_execute classifier_graph_query_repair|graph query verification: expected_matches ready_to_execute classifier_graph_query_repair_verification" .ax/experiments/classifier-lifecycle-query-suggestion-routing-e426.txt
+bun test src/cli/classifiers-workflow-candidates.test.ts
+git diff --check
+```
+
+All passed. `bun run typecheck` still emits the existing Effect advisory
+messages, but exits `0`.
 
 ## E425 - Persist Query Suggestion Outcomes In Graph Health JSON
 

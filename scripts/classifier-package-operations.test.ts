@@ -2168,13 +2168,36 @@ describe("classifier package operations report", () => {
             packages: buildPackagesOperationsReport("packages", []),
             graph: buildExecutionGraphHealthReport({
                 nodes: [{
-                    graph_id: "classifier_operation:demo/review",
-                    kind: "classifier_operation",
-                    label: "review",
-                    properties_json: JSON.stringify({ package_key: "demo", operation_kind: "review", expensive: false }),
+                    graph_id: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                    kind: "classifier_lifecycle",
+                    label: "workflow candidate review pipeline lifecycle",
+                    properties_json: "{}",
                 }],
-                edges: [],
-                facts: [],
+                edges: [{
+                    graph_id: "edge:lifecycle",
+                    kind: "has_evidence",
+                    from_id: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                    to_id: "artifact:.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                    evidence_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                    properties_json: JSON.stringify({ lifecycle_key: "review_pipeline_lifecycle" }),
+                }],
+                facts: [{
+                    graph_id: "fact:phase",
+                    kind: "classifier_lifecycle_status",
+                    subject: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                    predicate: "review_pipeline_recommended_action_execution_phase",
+                    value_json: "\"bind_inputs\"",
+                    evidence_edges_json: JSON.stringify(["edge:lifecycle"]),
+                    properties_json: JSON.stringify({
+                        lifecycle_key: "review_pipeline_lifecycle",
+                        artifact_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                    }),
+                }],
+                query: {
+                    mode: "lifecycle",
+                    predicate: "review_pipeline_recommended_action_execution_phase",
+                    value_equals: "execute",
+                },
             }),
             workflowStatus: {
                 path: ".ax/experiments/blind-workflow-status-current.json",
@@ -2257,6 +2280,9 @@ describe("classifier package operations report", () => {
         expect(report.decision).toBe("needs_human_review");
         expect(report.blocking_items).toContain("review pipeline missing 2 required output artifact(s)");
         expect(report.blocking_items).toContain("review pipeline lifecycle cannot continue: needs_output_verification");
+        expect(report.graph_query_suggestion?.suggestion?.repair.outcome_status).toBe("expected_matches");
+        expect(report.graph_query_suggestion?.suggestion?.verification.outcome_status).toBe("expected_matches");
+        expect(report.graph_query_suggestion?.suggestion?.repair.command_kind).toBe("classifier_graph_query_repair");
     });
 
     test("writes lifecycle insight reports", () => {

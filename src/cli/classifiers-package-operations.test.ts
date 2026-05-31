@@ -1333,6 +1333,75 @@ describe("classifiers package-operations format", () => {
             }],
             changed_artifacts: [],
             blocking_items: ["40 blind labels pending"],
+            graph_query_suggestion: {
+                has_suggestion: true,
+                query_match_status: "no_match",
+                query_next_action: "relax_filters_or_project_facts",
+                suggested_value_equals: "bind_inputs",
+                suggested_status: "expected_matches",
+                suggested_next_action: "run_suggested_query",
+                suggestion: {
+                    value_equals: "bind_inputs",
+                    result_count: 1,
+                    status: "expected_matches",
+                    next_action: "run_suggested_query",
+                    remediation: "Run the suggested graph query to inspect the available classifier lifecycle facts.",
+                    source: "lifecycle_available_value_counts",
+                    reason: "available_value_after_relaxing_value_equals",
+                    original_query: {
+                        mode: "lifecycle",
+                        predicate: "review_pipeline_recommended_action_execution_phase",
+                        value_equals: "execute",
+                    },
+                    query: {
+                        mode: "lifecycle",
+                        predicate: "review_pipeline_recommended_action_execution_phase",
+                        value_equals: "bind_inputs",
+                    },
+                    repair: {
+                        status: "repair_available",
+                        outcome_status: "expected_matches",
+                        execution_status: "ready_to_execute",
+                        next_action: "run_repaired_query",
+                        command_kind: "classifier_graph_query_repair",
+                        can_execute: true,
+                        requires_inputs: false,
+                        required_inputs: [],
+                        blockers: [],
+                        blocker_details: [],
+                        argv: ["bun", "src/cli/index.ts", "classifiers", "graph", "--value", "bind_inputs"],
+                        query: {
+                            mode: "lifecycle",
+                            predicate: "review_pipeline_recommended_action_execution_phase",
+                            value_equals: "bind_inputs",
+                        },
+                        expected_query_match_status: "matched",
+                        expected_result_count: 1,
+                        remediation: "Run the repaired graph query to inspect matching classifier lifecycle facts.",
+                    },
+                    verification: {
+                        status: "ready_to_verify",
+                        outcome_status: "expected_matches",
+                        execution_status: "ready_to_execute",
+                        next_action: "run_verification_query",
+                        command_kind: "classifier_graph_query_repair_verification",
+                        can_execute: true,
+                        requires_inputs: false,
+                        required_inputs: [],
+                        blockers: [],
+                        blocker_details: [],
+                        argv: ["bun", "src/cli/index.ts", "classifiers", "graph", "--value", "bind_inputs"],
+                        query: {
+                            mode: "lifecycle",
+                            predicate: "review_pipeline_recommended_action_execution_phase",
+                            value_equals: "bind_inputs",
+                        },
+                        expected_query_match_status: "matched",
+                        expected_result_count: 1,
+                        remediation: "Run the repair verification query and confirm it returns the expected matches.",
+                    },
+                },
+            },
             review_pipeline: {
                 report_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
                 status: "verified_after_execution",
@@ -1425,6 +1494,10 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("remaining missing: review_notes=5, hard_negative_notes=3");
         expect(output).toContain("draft promotion: needs_human_notes (.ax/experiments/blind-review-batch-current-promotion-report.json)");
         expect(output).toContain("failures: draft batch review is incomplete");
+        expect(output).toContain("graph query suggestion: expected_matches value=bind_inputs count=1");
+        expect(output).toContain("graph query repair: expected_matches ready_to_execute classifier_graph_query_repair");
+        expect(output).toContain("graph query repair argv: bun src/cli/index.ts classifiers graph --value bind_inputs");
+        expect(output).toContain("graph query verification: expected_matches ready_to_execute classifier_graph_query_repair_verification");
         expect(output).toContain("review pipeline: verified_after_execution (.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json)");
         expect(output).toContain("command: stamp_review_provenance prepared=ready_to_execute");
         expect(output).toContain("argv: bun src/cli/index.ts classifiers workflow-candidates");

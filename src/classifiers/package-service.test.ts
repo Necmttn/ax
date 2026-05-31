@@ -720,6 +720,12 @@ describe("ClassifierPackageService", () => {
                         label: "blind-review-refresh",
                         properties_json: JSON.stringify({ package_key: "session-section-chunks", operation_kind: "review", expensive: false }),
                     },
+                    {
+                        graph_id: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                        kind: "classifier_lifecycle",
+                        label: "workflow candidate review pipeline lifecycle",
+                        properties_json: "{}",
+                    },
                 ],
                 [
                     {
@@ -730,14 +736,42 @@ describe("ClassifierPackageService", () => {
                         evidence_path: ".ax/experiments/run.json",
                         properties_json: "{}",
                     },
+                    {
+                        graph_id: "edge:lifecycle",
+                        kind: "has_evidence",
+                        from_id: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                        to_id: "artifact:.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                        evidence_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                        properties_json: JSON.stringify({ lifecycle_key: "review_pipeline_lifecycle" }),
+                    },
                 ],
-                [],
+                [
+                    {
+                        graph_id: "fact:phase",
+                        kind: "classifier_lifecycle_status",
+                        subject: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                        predicate: "review_pipeline_recommended_action_execution_phase",
+                        value_json: "\"bind_inputs\"",
+                        evidence_edges_json: JSON.stringify(["edge:lifecycle"]),
+                        properties_json: JSON.stringify({
+                            lifecycle_key: "review_pipeline_lifecycle",
+                            artifact_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                        }),
+                    },
+                ],
             ]),
         } as unknown as SurrealClientShape;
 
         const report = await runWithServiceAndDb(Effect.gen(function* () {
             const packages = yield* ClassifierPackageService;
-            return yield* packages.lifecycleInsightReport({ workflowStatusPath: statusPath });
+            return yield* packages.lifecycleInsightReport({
+                workflowStatusPath: statusPath,
+                graphQuery: {
+                    mode: "lifecycle",
+                    predicate: "review_pipeline_recommended_action_execution_phase",
+                    value_equals: "execute",
+                },
+            });
         }), db);
 
         expect(report.schema).toBe("ax.classifier_lifecycle_insight_report.v1");
@@ -768,5 +802,6 @@ describe("ClassifierPackageService", () => {
         expect(report.workflow_status.next_actions[0]).toContain("workflow-candidate-proposal-review-current.md");
         expect(report.blocking_items).toContain("workflow candidate proposal review pending 4 proposal(s)");
         expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.graph_operation_count).toBe(1);
+        expect(report.graph_query_suggestion?.suggestion?.repair.outcome_status).toBe("expected_matches");
     });
 });

@@ -186,6 +186,7 @@ export interface ClassifierGraphQuerySuggestionRoutingSummaryWriteInput extends 
 export interface ClassifierLifecycleInsightInput {
     readonly root?: string;
     readonly workflowStatusPath?: string;
+    readonly graphQuery?: Partial<ClassifierGraphHealthQuery>;
 }
 
 export interface ClassifierLifecycleInsightWriteInput extends ClassifierLifecycleInsightInput {
@@ -605,6 +606,9 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService>
         ) {
             const packages = yield* packagesOperationsReport({ root: input?.root ?? "packages" });
             const graph = yield* executionGraphHealth({ query: { mode: "summary" } });
+            const queryGraph = input?.graphQuery === undefined
+                ? undefined
+                : yield* executionGraphHealth({ query: input.graphQuery });
             const workflowStatusPath = input?.workflowStatusPath ?? ".ax/experiments/blind-workflow-status-current.json";
             const workflowStatus = yield* Effect.try({
                 try: () => loadClassifierLifecycleReviewStatus(workflowStatusPath),
@@ -613,7 +617,12 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService>
                     message: errorMessage(error),
                 }),
             });
-            return buildClassifierLifecycleInsightReport({ packages, graph, workflowStatus });
+            return buildClassifierLifecycleInsightReport({
+                packages,
+                graph,
+                ...(queryGraph === undefined ? {} : { queryGraph }),
+                workflowStatus,
+            });
         });
 
         const writeLifecycleInsight = Effect.fn("ClassifierPackageService.writeLifecycleInsightReport")(function* (

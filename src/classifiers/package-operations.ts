@@ -948,6 +948,7 @@ export interface ClassifierLifecycleInsightReport {
     readonly failed_operations: readonly ClassifierGraphOperationHealth[];
     readonly changed_artifacts: readonly ClassifierGraphChangedArtifact[];
     readonly blocking_items: readonly string[];
+    readonly graph_query_suggestion?: ClassifierGraphQuerySuggestionRoutingSummary;
     readonly review_pipeline?: ClassifierReviewPipelineLifecycleInsight;
     readonly totals: {
         readonly package_count: number;
@@ -3242,6 +3243,7 @@ export function loadClassifierLifecycleReviewStatus(path: string): ClassifierLif
 export function buildClassifierLifecycleInsightReport(input: {
     readonly packages: ClassifierPackagesOperationsReport;
     readonly graph: ClassifierPackageExecutionGraphHealthReport;
+    readonly queryGraph?: ClassifierPackageExecutionGraphHealthReport;
     readonly workflowStatus: ClassifierLifecycleReviewStatus;
 }): ClassifierLifecycleInsightReport {
     const failedOperations = input.graph.operations.filter((operation) => operation.failed_count > 0);
@@ -3406,6 +3408,9 @@ export function buildClassifierLifecycleInsightReport(input: {
         failed_operations: failedOperations,
         changed_artifacts: input.graph.changed_artifacts,
         blocking_items: blockingItems,
+        ...((input.queryGraph ?? input.graph).query_suggestion === undefined ? {} : {
+            graph_query_suggestion: summarizeClassifierGraphQuerySuggestionRouting(input.queryGraph ?? input.graph),
+        }),
         ...(reviewPipeline ? { review_pipeline: reviewPipeline } : {}),
         totals: {
             package_count: input.packages.totals.package_count,

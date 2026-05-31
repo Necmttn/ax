@@ -1987,16 +1987,31 @@ const classifiersLifecycleCommand = Command.make(
     {
         root: Flag.string("root").pipe(Flag.optional),
         workflowStatus: Flag.string("workflow-status").pipe(Flag.optional),
+        graphMode: Flag.choice("graph-mode", ["summary", "guarded", "changed-artifacts", "evidence", "lifecycle", "embedding-helper"] as const).pipe(Flag.optional),
+        predicate: Flag.string("predicate").pipe(Flag.optional),
+        subject: Flag.string("subject").pipe(Flag.optional),
+        valueContains: Flag.string("value-contains").pipe(Flag.optional),
+        valueEquals: Flag.string("value").pipe(Flag.optional),
         out: Flag.string("out").pipe(Flag.optional),
         json: jsonFlag,
     },
-    ({ root, workflowStatus, out, json }) => {
+    ({ root, workflowStatus, graphMode, predicate, subject, valueContains, valueEquals, out, json }) => {
         const rootPath = optionValue(root);
         const workflowStatusPath = optionValue(workflowStatus);
+        const graphModeName = optionValue(graphMode);
+        const predicateName = optionValue(predicate);
+        const subjectName = optionValue(subject);
+        const valueContainsText = optionValue(valueContains);
+        const valueEqualsText = optionValue(valueEquals);
         const outPath = optionValue(out);
         return runClassifiersLifecycle({
             ...(rootPath === undefined ? {} : { root: rootPath }),
             ...(workflowStatusPath === undefined ? {} : { workflowStatusPath }),
+            ...(graphModeName === undefined ? {} : { graphMode: graphModeName }),
+            ...(predicateName === undefined ? {} : { predicate: predicateName }),
+            ...(subjectName === undefined ? {} : { subject: subjectName }),
+            ...(valueContainsText === undefined ? {} : { valueContains: valueContainsText }),
+            ...(valueEqualsText === undefined ? {} : { valueEquals: valueEqualsText }),
             ...(outPath === undefined ? {} : { out: outPath }),
             json,
         }).pipe(Effect.provide(ClassifierPackageServiceLive));

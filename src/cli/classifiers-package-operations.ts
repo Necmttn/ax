@@ -13,6 +13,7 @@ import type {
     ClassifierLifecycleInsightReport,
     ClassifierGraphQuerySuggestionRoutingSummary,
     ClassifierGraphHealthMode,
+    ClassifierGraphHealthQuery,
     ClassifierPackageOperationDryRunReport,
     ClassifierPackageOperationExecutionReport,
     ClassifierPackageOperationExecutionPlanReport,
@@ -60,6 +61,32 @@ export interface ClassifierPackagesOperationsCommandInput {
     readonly out?: string;
     readonly json: boolean;
 }
+
+const buildLifecycleGraphQueryInput = (input: {
+    readonly graphMode?: ClassifierGraphHealthMode;
+    readonly predicate?: string;
+    readonly subject?: string;
+    readonly valueContains?: string;
+    readonly valueEquals?: string;
+}): Partial<ClassifierGraphHealthQuery> | undefined => {
+    if (
+        input.graphMode === undefined &&
+        input.predicate === undefined &&
+        input.subject === undefined &&
+        input.valueContains === undefined &&
+        input.valueEquals === undefined
+    ) {
+        return undefined;
+    }
+
+    return {
+        mode: input.graphMode ?? "summary",
+        ...(input.predicate === undefined ? {} : { predicate: input.predicate }),
+        ...(input.subject === undefined ? {} : { subject: input.subject }),
+        ...(input.valueContains === undefined ? {} : { value_contains: input.valueContains }),
+        ...(input.valueEquals === undefined ? {} : { value_equals: input.valueEquals }),
+    };
+};
 
 export function renderClassifierPackageOperationsText(report: ClassifierPackageOperationsReport): string {
     const lines = [
@@ -663,6 +690,20 @@ export function renderClassifierLifecycleInsightText(report: ClassifierLifecycle
         lines.push(`proposal ready smoke: ${smoke.promotion_decision ?? "unknown"} (${smoke.promotion_report_path})`);
         lines.push(`  drafts/skipped: ${smoke.emitted_draft_count ?? 0}/${smoke.skipped_proposal_count ?? 0}`);
     }
+    if (report.graph_query_suggestion?.suggestion) {
+        const suggestion = report.graph_query_suggestion.suggestion;
+        lines.push(`graph query suggestion: ${suggestion.status} value=${suggestion.value_equals} count=${suggestion.result_count}`);
+        lines.push(`  original query: ${renderGraphQuery(suggestion.original_query)}`);
+        lines.push(`  suggested query: ${renderGraphQuery(suggestion.query)}`);
+        lines.push(`graph query repair: ${suggestion.repair.outcome_status} ${suggestion.repair.execution_status} ${suggestion.repair.command_kind}`);
+        if (suggestion.repair.argv.length > 0) {
+            lines.push(`graph query repair argv: ${suggestion.repair.argv.join(" ")}`);
+        }
+        lines.push(`graph query verification: ${suggestion.verification.outcome_status} ${suggestion.verification.execution_status} ${suggestion.verification.command_kind}`);
+        if (suggestion.verification.argv.length > 0) {
+            lines.push(`graph query verification argv: ${suggestion.verification.argv.join(" ")}`);
+        }
+    }
     if (report.review_pipeline) {
         const pipeline = report.review_pipeline;
         lines.push(`review pipeline: ${pipeline.status ?? "unknown"} (${pipeline.report_path})`);
@@ -1083,21 +1124,29 @@ export const runClassifiersLifecycle = (
     input: {
         readonly root?: string;
         readonly workflowStatusPath?: string;
+        readonly graphMode?: ClassifierGraphHealthMode;
+        readonly predicate?: string;
+        readonly subject?: string;
+        readonly valueContains?: string;
+        readonly valueEquals?: string;
         readonly out?: string;
         readonly json: boolean;
     },
 ): Effect.Effect<void, never, ClassifierPackageService | SurrealClient> =>
     Effect.gen(function* () {
         const packages = yield* ClassifierPackageService;
+        const graphQuery = buildLifecycleGraphQueryInput(input);
         const report = input.out
             ? yield* packages.writeLifecycleInsightReport({
                 ...(input.root === undefined ? {} : { root: input.root }),
                 ...(input.workflowStatusPath === undefined ? {} : { workflowStatusPath: input.workflowStatusPath }),
+                ...(graphQuery === undefined ? {} : { graphQuery }),
                 out: input.out,
             })
             : yield* packages.lifecycleInsightReport({
                 ...(input.root === undefined ? {} : { root: input.root }),
                 ...(input.workflowStatusPath === undefined ? {} : { workflowStatusPath: input.workflowStatusPath }),
+                ...(graphQuery === undefined ? {} : { graphQuery }),
             });
 
         if (input.json) {
