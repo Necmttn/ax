@@ -1942,6 +1942,8 @@ describe("classifiers workflow-candidates", () => {
             applied: false,
             reviewFactsPath: ".ax/experiments/reviewed-coverage-facts.json",
             reviewWritePlanPath: ".ax/experiments/reviewed-coverage-write-plan.json",
+            reviewBriefPath: ".ax/experiments/reviewed-coverage.md",
+            syncedReviewBriefPath: ".ax/experiments/reviewed-coverage-edited.md",
             coverageRows: [
                 {
                     candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
@@ -2005,6 +2007,8 @@ describe("classifiers workflow-candidates", () => {
         });
         expect(summary.review_facts_path).toBe(".ax/experiments/reviewed-coverage-facts.json");
         expect(summary.review_write_plan_path).toBe(".ax/experiments/reviewed-coverage-write-plan.json");
+        expect(summary.review_brief_path).toBe(".ax/experiments/reviewed-coverage.md");
+        expect(summary.synced_review_brief_path).toBe(".ax/experiments/reviewed-coverage-edited.md");
         const text = renderWorkflowCandidateReviewCoverageText({
             schema: "ax.workflow_candidate_review_coverage.v1",
             source_kind: "hybrid_window_classifier_projection",
@@ -2027,6 +2031,8 @@ describe("classifiers workflow-candidates", () => {
         });
         expect(text).toContain("coverage review facts path: .ax/experiments/reviewed-coverage-facts.json");
         expect(text).toContain("coverage review write plan path: .ax/experiments/reviewed-coverage-write-plan.json");
+        expect(text).toContain("coverage review brief path: .ax/experiments/reviewed-coverage.md");
+        expect(text).toContain("coverage review synced brief path: .ax/experiments/reviewed-coverage-edited.md");
         expect(summary.projected_fact_ids).toHaveLength(3);
         expect(summary.apply_audit_rows).toEqual([
             {

@@ -254,6 +254,8 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly source_path: string;
     readonly review_facts_path?: string;
     readonly review_write_plan_path?: string;
+    readonly review_brief_path?: string;
+    readonly synced_review_brief_path?: string;
     readonly apply_requested: boolean;
     readonly applied: boolean;
     readonly apply_result: "not_requested" | "blocked" | "applied";
@@ -1857,6 +1859,12 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             ]),
             ...(report.coverage_review.review_write_plan_path === undefined ? [] : [
                 `coverage review write plan path: ${report.coverage_review.review_write_plan_path}`,
+            ]),
+            ...(report.coverage_review.review_brief_path === undefined ? [] : [
+                `coverage review brief path: ${report.coverage_review.review_brief_path}`,
+            ]),
+            ...(report.coverage_review.synced_review_brief_path === undefined ? [] : [
+                `coverage review synced brief path: ${report.coverage_review.synced_review_brief_path}`,
             ]),
             `coverage review fixtures: ${report.coverage_review.reviewed_fixture_count} reviewed, ${report.coverage_review.pending_fixture_count} pending`,
             `coverage review sync: synced=${report.coverage_review.synced_fixture_count} unknown=${report.coverage_review.unknown_fixture_count}`,
@@ -3485,6 +3493,8 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     readonly requireReviewProvenance?: boolean;
     readonly reviewFactsPath?: string;
     readonly reviewWritePlanPath?: string;
+    readonly reviewBriefPath?: string;
+    readonly syncedReviewBriefPath?: string;
     readonly sourceKind?: string;
     readonly limit?: number;
     readonly outputPath?: string;
@@ -3611,6 +3621,8 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         source_path: input.sourcePath,
         ...(input.reviewFactsPath === undefined ? {} : { review_facts_path: input.reviewFactsPath }),
         ...(input.reviewWritePlanPath === undefined ? {} : { review_write_plan_path: input.reviewWritePlanPath }),
+        ...(input.reviewBriefPath === undefined ? {} : { review_brief_path: input.reviewBriefPath }),
+        ...(input.syncedReviewBriefPath === undefined ? {} : { synced_review_brief_path: input.syncedReviewBriefPath }),
         apply_requested: input.applyRequested,
         applied: input.applied,
         apply_result: applyResult,
@@ -4561,6 +4573,8 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     stampedReviewedAtCount,
                     ...(input.reviewFacts === undefined ? {} : { reviewFactsPath: input.reviewFacts }),
                     ...(input.reviewWritePlan === undefined ? {} : { reviewWritePlanPath: input.reviewWritePlan }),
+                    ...(input.coverageReviewBrief === undefined ? {} : { reviewBriefPath: input.coverageReviewBrief }),
+                    ...(input.syncCoverageReviewBrief === undefined ? {} : { syncedReviewBriefPath: input.syncCoverageReviewBrief }),
                     coverageRows: report.candidates,
                     ...(input.requireReviewProvenance === undefined ? {} : { requireReviewProvenance: input.requireReviewProvenance }),
                     sourceKind: input.sourceKind,
@@ -4588,6 +4602,8 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                         stampedReviewedAtCount,
                         ...(input.reviewFacts === undefined ? {} : { reviewFactsPath: input.reviewFacts }),
                         ...(input.reviewWritePlan === undefined ? {} : { reviewWritePlanPath: input.reviewWritePlan }),
+                        ...(input.coverageReviewBrief === undefined ? {} : { reviewBriefPath: input.coverageReviewBrief }),
+                        ...(input.syncCoverageReviewBrief === undefined ? {} : { syncedReviewBriefPath: input.syncCoverageReviewBrief }),
                         coverageRows: report.candidates,
                         ...(input.requireReviewProvenance === undefined ? {} : { requireReviewProvenance: input.requireReviewProvenance }),
                         sourceKind: input.sourceKind,
