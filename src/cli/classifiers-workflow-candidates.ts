@@ -199,6 +199,7 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly projected_unreviewed_candidate_count: number;
     readonly smoke_marker_count: number;
     readonly apply_guard: WorkflowCandidateReviewCoverageApplyGuard;
+    readonly can_apply: boolean;
     readonly next_action: string;
     readonly projection_totals: WorkflowCandidateTopicReviewGraphProjection["totals"];
     readonly write_plan_totals: WorkflowCandidateTopicReviewGraphWritePlan["totals"];
@@ -1755,6 +1756,7 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             `coverage review projected coverage: reviewed=${report.coverage_review.projected_reviewed_candidate_count} unreviewed=${report.coverage_review.projected_unreviewed_candidate_count}`,
             `coverage review issues: invalid=${report.coverage_review.invalid_fixture_count} missing_rationale=${report.coverage_review.missing_rationale_count} smoke=${report.coverage_review.smoke_marker_count}`,
             `coverage review apply guard: ${report.coverage_review.apply_guard}`,
+            `coverage review can apply: ${report.coverage_review.can_apply ? "yes" : "no"}`,
             `coverage review next action: ${report.coverage_review.next_action}`,
             `coverage review applied: ${report.coverage_review.applied ? "yes" : "no"}`,
         ] : []),
@@ -3099,6 +3101,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         : smokeMarkerCount > 0
             ? "blocked_smoke_review"
             : "ready_to_apply";
+    const canApply = applyGuard === "ready_to_apply" && input.writePlan.statements.length > 0;
     return {
         source_path: input.sourcePath,
         apply_requested: input.applyRequested,
@@ -3117,6 +3120,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         projected_unreviewed_candidate_count: projectedUnreviewedCandidateCount,
         smoke_marker_count: smokeMarkerCount,
         apply_guard: applyGuard,
+        can_apply: canApply,
         next_action: workflowCandidateReviewCoverageGuardNextAction(applyGuard),
         projection_totals: input.projection.totals,
         write_plan_totals: input.writePlan.totals,
@@ -4010,14 +4014,12 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     unknownFixtureCount,
                     coverageRows: report.candidates,
                 });
-                const canApply = pendingApplySummary.apply_guard === "ready_to_apply" &&
-                    reviewWritePlan.statements.length > 0;
-                if (input.applyReviewFacts && canApply) {
+                if (input.applyReviewFacts && pendingApplySummary.can_apply) {
                     yield* db.query(reviewWritePlan.statements.join("\n")).pipe(
                         catchDbErrorAndExit("axctl classifiers workflow-candidates"),
                     );
                 }
-                const applied = Boolean(input.applyReviewFacts && canApply);
+                const applied = Boolean(input.applyReviewFacts && pendingApplySummary.can_apply);
                 report = {
                     ...report,
                     coverage_review: {
@@ -4025,7 +4027,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                         applied,
                     },
                 };
-                if (input.applyReviewFacts && !canApply) process.exitCode = 1;
+                if (input.applyReviewFacts && !pendingApplySummary.can_apply) process.exitCode = 1;
             }
             if (input.out) {
                 mkdirSync(dirname(input.out), { recursive: true });
