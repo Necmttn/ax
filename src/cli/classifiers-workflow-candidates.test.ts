@@ -1605,6 +1605,8 @@ describe("classifiers workflow-candidates", () => {
             pending_fixture_count: 1,
             invalid_fixture_count: 0,
             missing_rationale_count: 0,
+            missing_reviewer_count: 0,
+            missing_reviewed_at_count: 0,
             smoke_marker_count: 0,
             apply_guard: "no_reviewed_fixtures",
             can_apply: false,
@@ -1822,6 +1824,8 @@ describe("classifiers workflow-candidates", () => {
             invalid_fixture_count: 1,
             synced_fixture_count: 1,
             unknown_fixture_count: 1,
+            missing_reviewer_count: 0,
+            missing_reviewed_at_count: 0,
             pack_candidate_count: 0,
             new_candidate_count: 0,
             existing_candidate_count: 0,
@@ -1949,6 +1953,8 @@ describe("classifiers workflow-candidates", () => {
             apply_result: "not_requested",
             applied_statement_count: 0,
             reviewed_fixture_count: 3,
+            missing_reviewer_count: 3,
+            missing_reviewed_at_count: 3,
             pack_candidate_count: 3,
             new_candidate_count: 1,
             existing_candidate_count: 1,
@@ -2058,6 +2064,8 @@ describe("classifiers workflow-candidates", () => {
             applied_statement_count: writePlan.totals.statement_count,
             apply_guard: "ready_to_apply",
             can_apply: true,
+            missing_reviewer_count: 0,
+            missing_reviewed_at_count: 0,
         });
         expect(summary.apply_audit_rows).toEqual([{
             fixture_id: "workflow-candidate-review-coverage/verification_or_recovery_signal/a",
@@ -2068,6 +2076,7 @@ describe("classifiers workflow-candidates", () => {
             reviewed_at: "2026-05-31T10:00:00Z",
         }]);
         expect(text).toContain(`coverage review apply result: applied statements=${writePlan.totals.statement_count}`);
+        expect(text).toContain("coverage review provenance: missing_reviewer=0 missing_reviewed_at=0");
         expect(text).toContain("coverage review audit rows: 1");
         expect(text).toContain(
             `coverage review audit row: accept fixture=workflow-candidate-review-coverage/verification_or_recovery_signal/a candidate=classifier_candidate_group:hybrid-window/verification_or_recovery_signal fact=${summary.projected_fact_ids[0]} reviewer=reviewer@example.test reviewed_at=2026-05-31T10:00:00Z`,

@@ -216,6 +216,8 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly pending_fixture_count: number;
     readonly invalid_fixture_count: number;
     readonly missing_rationale_count: number;
+    readonly missing_reviewer_count: number;
+    readonly missing_reviewed_at_count: number;
     readonly synced_fixture_count: number;
     readonly unknown_fixture_count: number;
     readonly pack_candidate_count: number;
@@ -1790,6 +1792,7 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             `coverage review impact: pack_candidates=${report.coverage_review.pack_candidate_count} new=${report.coverage_review.new_candidate_count} existing=${report.coverage_review.existing_candidate_count} unknown=${report.coverage_review.unknown_candidate_count}`,
             `coverage review projected coverage: reviewed=${report.coverage_review.projected_reviewed_candidate_count} unreviewed=${report.coverage_review.projected_unreviewed_candidate_count}`,
             `coverage review issues: invalid=${report.coverage_review.invalid_fixture_count} missing_rationale=${report.coverage_review.missing_rationale_count} smoke=${report.coverage_review.smoke_marker_count}`,
+            `coverage review provenance: missing_reviewer=${report.coverage_review.missing_reviewer_count} missing_reviewed_at=${report.coverage_review.missing_reviewed_at_count}`,
             `coverage review apply guard: ${report.coverage_review.apply_guard}`,
             `coverage review can apply: ${report.coverage_review.can_apply ? "yes" : "no"}`,
             `coverage review apply result: ${report.coverage_review.apply_result} statements=${report.coverage_review.applied_statement_count}`,
@@ -3163,6 +3166,8 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     const reviewedRows = input.rows.filter((row) => fixtureReviewVerdict(row) !== undefined);
     const invalidRows = input.rows.filter((row) => !VALID_VERDICTS.has(row.review_status));
     const missingRationaleRows = reviewedRows.filter((row) => (row.review_rationale ?? "").trim().length === 0);
+    const missingReviewerRows = reviewedRows.filter((row) => (row.review_reviewer ?? "").trim().length === 0);
+    const missingReviewedAtRows = reviewedRows.filter((row) => (row.review_reviewed_at ?? "").trim().length === 0);
     const packCandidateIds = new Set(reviewedRows.map((row) => row.candidate_id));
     const knownCandidateIds = new Set((input.coverageRows ?? []).map((row) => row.candidate_id));
     const alreadyReviewedCandidateIds = new Set((input.coverageRows ?? [])
@@ -3253,6 +3258,8 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         pending_fixture_count: input.rows.length - reviewedRows.length,
         invalid_fixture_count: invalidRows.length,
         missing_rationale_count: missingRationaleRows.length,
+        missing_reviewer_count: missingReviewerRows.length,
+        missing_reviewed_at_count: missingReviewedAtRows.length,
         synced_fixture_count: input.syncedFixtureCount ?? 0,
         unknown_fixture_count: input.unknownFixtureCount ?? 0,
         pack_candidate_count: packCandidateIds.size,
