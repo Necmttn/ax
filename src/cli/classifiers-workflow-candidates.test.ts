@@ -1759,6 +1759,7 @@ describe("classifiers workflow-candidates", () => {
             review_pipeline_stage: "needs_review_repair",
             review_pipeline_next_action: "Fix review issue rows before applying reviewed coverage facts.",
             review_pipeline_command_status: "ready_to_execute",
+            review_pipeline_command_can_execute: true,
             review_pipeline_command_blockers: [],
             review_pipeline_command_blocker_details: [],
             review_pipeline_command_output_artifacts: [
@@ -1808,6 +1809,7 @@ describe("classifiers workflow-candidates", () => {
         expect(text).toContain("coverage review pipeline stage: needs_review_repair");
         expect(text).toContain("coverage review pipeline next action: Fix review issue rows before applying reviewed coverage facts.");
         expect(text).toContain("coverage review pipeline command status: ready_to_execute");
+        expect(text).toContain("coverage review pipeline command can execute: yes");
         expect(text).toContain("coverage review pipeline command blockers: none");
         expect(text).toContain("coverage review pipeline command blocker details: none");
         expect(text).toContain("coverage review pipeline command output artifacts: review_brief@8=.ax/experiments/reviewed-coverage-gaps.md, readiness_report@9=.ax/experiments/reviewed-coverage-gaps.json");
@@ -1831,6 +1833,7 @@ describe("classifiers workflow-candidates", () => {
         expect(brief).toContain("- Pipeline stage: `needs_review_repair`");
         expect(brief).toContain("- Pipeline next action: Fix review issue rows before applying reviewed coverage facts.");
         expect(brief).toContain("- Pipeline command status: `ready_to_execute`");
+        expect(brief).toContain("- Pipeline command can execute: `yes`");
         expect(brief).toContain("- Pipeline command blockers: `none`");
         expect(brief).toContain("- Pipeline command blocker details: `none`");
         expect(brief).toContain("- Pipeline command output artifacts: `review_brief@8=.ax/experiments/reviewed-coverage-gaps.md`, `readiness_report@9=.ax/experiments/reviewed-coverage-gaps.json`");
@@ -2185,6 +2188,7 @@ describe("classifiers workflow-candidates", () => {
             review_pipeline_stage: "needs_review_provenance",
             review_pipeline_next_action: "Add reviewer and reviewed-at metadata before applying if audit provenance is required.",
             review_pipeline_command_status: "requires_inputs",
+            review_pipeline_command_can_execute: false,
             review_pipeline_command_blockers: ["missing_pipeline_inputs"],
             review_pipeline_command_blocker_details: [{
                 blocker: "missing_pipeline_inputs",
@@ -2319,6 +2323,7 @@ describe("classifiers workflow-candidates", () => {
         expect(text).toContain("coverage review pipeline stage: needs_review_provenance");
         expect(text).toContain("coverage review pipeline next action: Add reviewer and reviewed-at metadata before applying if audit provenance is required.");
         expect(text).toContain("coverage review pipeline command status: requires_inputs");
+        expect(text).toContain("coverage review pipeline command can execute: no");
         expect(text).toContain("coverage review pipeline command blockers: missing_pipeline_inputs");
         expect(text).toContain("coverage review pipeline command blocker details: missing_pipeline_inputs=2");
         expect(text).toContain("coverage review pipeline command blocker remediations: missing_pipeline_inputs: Bind required pipeline inputs before executing the command.");
