@@ -11499,6 +11499,122 @@ Decision:
   graph projection so proposal review state is queryable from SurrealDB, not
   only filesystem lifecycle artifacts.
 
+## E207 - Proposal Lifecycle Graph Projection
+
+Question:
+
+- Can proposal review, promotion, and ready-smoke state become queryable graph
+  facts without adding new SurrealDB tables?
+
+Implementation:
+
+- Extended `buildExecutionFactProjectionReport` in
+  `src/classifiers/package-operations.ts` to accept the classifier lifecycle
+  status and project workflow-candidate proposal state into the existing
+  `classifier_graph_node`, `classifier_graph_edge`, and
+  `classifier_graph_fact` tables.
+- Added a `classifier_lifecycle` node for
+  `workflow_candidate_proposal`.
+- Added `has_evidence` edges from the lifecycle node to proposal review,
+  promotion, and ready-smoke artifacts.
+- Added `classifier_lifecycle_status` facts for:
+  - proposal review decision and counts
+  - proposal promotion decision and counts
+  - proposal ready-smoke promotion decision and counts
+- Wired `--workflow-status` through package fact/write-plan/apply-plan CLI
+  paths so tests and agents can project alternate lifecycle artifacts.
+- Kept the storage model on existing generic graph tables to avoid another
+  write-only schema surface.
+
+Commands:
+
+```sh
+bun test scripts/classifier-package-operations.test.ts src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts
+bun src/cli/index.ts classifiers package-operations --facts --out=.ax/experiments/classifier-package-execution-facts-e207.json
+bun src/cli/index.ts classifiers package-operations --write-plan --out=.ax/experiments/classifier-package-execution-write-plan-e207.json
+bun src/cli/index.ts classifiers package-operations --facts
+```
+
+Artifacts:
+
+- `.ax/experiments/classifier-package-execution-facts-e207.json`
+- `.ax/experiments/classifier-package-execution-write-plan-e207.json`
+
+Results:
+
+- Targeted tests: `71 pass`
+- Fact projection:
+  - source reports: `45`
+  - nodes/edges/facts: `112/147/132`
+  - execution/guard/artifact/lifecycle facts: `39/6/73/14`
+- Write plan:
+  - statements: `391`
+  - node/edge/fact statements: `112/147/132`
+- Lifecycle predicates now projected:
+  - `proposal_review_decision`
+  - `proposal_review_proposal_count`
+  - `proposal_review_ready_count`
+  - `proposal_review_pending_count`
+  - `proposal_review_invalid_count`
+  - `proposal_review_missing_field_count`
+  - `proposal_promotion_decision`
+  - `proposal_promotion_proposal_count`
+  - `proposal_promotion_emitted_draft_count`
+  - `proposal_promotion_skipped_proposal_count`
+  - `proposal_ready_smoke_promotion_decision`
+  - `proposal_ready_smoke_proposal_count`
+  - `proposal_ready_smoke_emitted_draft_count`
+  - `proposal_ready_smoke_skipped_proposal_count`
+
+Decision:
+
+- Proposal lifecycle state is now part of the classifier graph, not just local
+  JSON. Query surfaces can ask which proposal gate is blocking promotion and
+  cite the artifact that proved it.
+- The next implementation slice should apply this write plan to SurrealDB and
+  add a focused graph-health/list view for `classifier_lifecycle_status` facts.
+
+## Next Candidate - Embedding/SVM Helper Layer
+
+Hypothesis:
+
+- Frozen embeddings plus a small linear/SVM layer should sit before SetFit as
+  a cheap scorer, miner, deduper, and reviewer assistant rather than replacing
+  SetFit or deterministic classifiers.
+
+Useful roles:
+
+- Cheap first-pass routing: decide obvious `none` vs worth sending to SetFit.
+- Hard-negative mining: find near-positive examples currently labeled `none`.
+- Similarity search for review: batch nearby historical turns after one review
+  decision.
+- Evidence dedupe: cluster near-identical corrections/directions so graph
+  counts do not overstate repeated phrasing.
+- Low-data fallback: SVM on frozen embeddings for labels with too few SetFit
+  examples.
+- Explainability: show nearest reviewed examples behind a prediction.
+
+Architecture target:
+
+```text
+raw turn/window
+  -> deterministic filters / control-message guards
+  -> embedding/SVM cheap scorer + nearest-neighbor evidence
+  -> SetFit or stronger classifier for uncertain/useful windows
+  -> graph projection
+  -> review/promotion gates
+```
+
+First experiment:
+
+- Build an embedding cache and SVM scorer over the existing reviewed fixtures,
+  then report:
+  - routing precision/recall for `none` rejection
+  - hard-negative candidates discovered
+  - nearest-neighbor explanation quality on correction/direction/verification
+  - runtime and cache size
+  - whether SetFit calls would be reduced without losing reviewed positives
+
 ## E196 - First-Class Hybrid Robustness Gate
 
 Question:

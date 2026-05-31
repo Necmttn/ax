@@ -212,7 +212,7 @@ export function renderClassifierPackageExecutionFactsText(report: ClassifierPack
         `classifier package execution facts: ${report.root}`,
         `sources: ${report.totals.source_report_count}`,
         `nodes/edges/facts: ${report.totals.node_count}/${report.totals.edge_count}/${report.totals.fact_count}`,
-        `execution/guard/artifact facts: ${report.totals.execution_fact_count}/${report.totals.guard_fact_count}/${report.totals.artifact_fact_count}`,
+        `execution/guard/artifact/lifecycle facts: ${report.totals.execution_fact_count}/${report.totals.guard_fact_count}/${report.totals.artifact_fact_count}/${report.totals.lifecycle_fact_count}`,
     ];
     for (const fact of report.facts) {
         lines.push(`- ${fact.kind} ${fact.subject} ${fact.predicate}${fact.object ? ` ${fact.object}` : ""}`);
@@ -489,8 +489,15 @@ export const runClassifiersPackageOperations = (
         if (input.applyWritePlan) {
             const root = input.root ?? ".ax/experiments";
             const report = input.out
-                ? yield* packages.writeExecutionSurrealApplyReport({ root, out: input.out })
-                : yield* packages.applyExecutionSurrealWritePlanReport({ root });
+                ? yield* packages.writeExecutionSurrealApplyReport({
+                    root,
+                    ...(input.workflowStatusPath === undefined ? {} : { workflowStatusPath: input.workflowStatusPath }),
+                    out: input.out,
+                })
+                : yield* packages.applyExecutionSurrealWritePlanReport({
+                    root,
+                    ...(input.workflowStatusPath === undefined ? {} : { workflowStatusPath: input.workflowStatusPath }),
+                });
             if (input.json) {
                 console.log(JSON.stringify(report, null, 2));
             } else if (!input.out) {
@@ -523,8 +530,15 @@ export const runClassifiersPackageOperations = (
         if (input.writePlan) {
             const root = input.root ?? ".ax/experiments";
             const report = input.out
-                ? yield* packages.writeExecutionSurrealWritePlanReport({ root, out: input.out })
-                : yield* packages.executionSurrealWritePlanReport({ root });
+                ? yield* packages.writeExecutionSurrealWritePlanReport({
+                    root,
+                    ...(input.workflowStatusPath === undefined ? {} : { workflowStatusPath: input.workflowStatusPath }),
+                    out: input.out,
+                })
+                : yield* packages.executionSurrealWritePlanReport({
+                    root,
+                    ...(input.workflowStatusPath === undefined ? {} : { workflowStatusPath: input.workflowStatusPath }),
+                });
             if (input.json) {
                 console.log(JSON.stringify(report, null, 2));
             } else if (!input.out) {
@@ -535,8 +549,15 @@ export const runClassifiersPackageOperations = (
         if (input.facts) {
             const root = input.root ?? ".ax/experiments";
             const report = input.out
-                ? yield* packages.writeExecutionFactProjectionReport({ root, out: input.out })
-                : yield* packages.executionFactProjectionReport({ root });
+                ? yield* packages.writeExecutionFactProjectionReport({
+                    root,
+                    ...(input.workflowStatusPath === undefined ? {} : { workflowStatusPath: input.workflowStatusPath }),
+                    out: input.out,
+                })
+                : yield* packages.executionFactProjectionReport({
+                    root,
+                    ...(input.workflowStatusPath === undefined ? {} : { workflowStatusPath: input.workflowStatusPath }),
+                });
             if (input.json) {
                 console.log(JSON.stringify(report, null, 2));
             } else if (!input.out) {

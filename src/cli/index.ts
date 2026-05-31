@@ -1823,14 +1823,16 @@ const classifiersPackageOperationsCommand = Command.make(
         out: Flag.string("out").pipe(Flag.optional),
         preflight: Flag.boolean("preflight").pipe(Flag.withDefault(false)),
         root: Flag.string("root").pipe(Flag.optional),
+        workflowStatus: Flag.string("workflow-status").pipe(Flag.optional),
         writePlan: Flag.boolean("write-plan").pipe(Flag.withDefault(false)),
         json: jsonFlag,
     },
-    ({ allowExpensive, applyWritePlan, all, dryRun, execute, facts, graphHealth, graphMode, history, manifest, operation, artifact, out, preflight, root, writePlan, json }) => {
+    ({ allowExpensive, applyWritePlan, all, dryRun, execute, facts, graphHealth, graphMode, history, manifest, operation, artifact, out, preflight, root, workflowStatus, writePlan, json }) => {
         const operationId = optionValue(operation);
         const artifactPath = optionValue(artifact);
         const outPath = optionValue(out);
         const rootPath = optionValue(root);
+        const workflowStatusPath = optionValue(workflowStatus);
         if (all) {
             return runClassifiersPackagesOperations({
                 ...(rootPath === undefined ? {} : { root: rootPath }),
@@ -1853,6 +1855,7 @@ const classifiersPackageOperationsCommand = Command.make(
             ...(artifactPath === undefined ? {} : { artifact: artifactPath }),
             preflight,
             ...(rootPath === undefined ? {} : { root: rootPath }),
+            ...(workflowStatusPath === undefined ? {} : { workflowStatusPath }),
             writePlan,
             json,
         }).pipe(Effect.provide(ClassifierPackageServiceLive));

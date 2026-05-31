@@ -440,6 +440,62 @@ describe("classifier package operations report", () => {
         expect(report.facts.map((fact) => fact.kind)).toEqual(expect.arrayContaining(["classifier_operation_execution", "classifier_artifact_observation"]));
     });
 
+    test("projects proposal lifecycle review artifacts into graph facts", () => {
+        const report = buildExecutionFactProjectionReport(".ax/experiments", [], {
+            path: ".ax/experiments/blind-workflow-status-current.json",
+            exists: true,
+            decision: "needs_human_review",
+            proposal_review: {
+                report_path: ".ax/experiments/workflow-candidate-proposal-review-current.json",
+                summary_path: ".ax/experiments/workflow-candidate-proposal-review-current.md",
+                decision: "needs_workflow_candidate_proposal_review",
+                proposal_count: 4,
+                ready_count: 0,
+                pending_count: 4,
+                invalid_count: 0,
+                missing_field_count: 16,
+                failures: [],
+            },
+            proposal_promotion: {
+                report_path: ".ax/experiments/workflow-candidate-proposal-promotion-current.json",
+                decision: "needs_workflow_candidate_proposal_review",
+                proposal_count: 4,
+                emitted_draft_count: 0,
+                skipped_proposal_count: 4,
+                failures: [],
+            },
+            proposal_ready_smoke: {
+                promotion_report_path: ".ax/experiments/workflow-candidate-proposal-ready-smoke-promotion-current.json",
+                review_decision: "workflow_candidate_proposal_reviews_ready",
+                promotion_decision: "workflow_candidate_proposal_promotion_ready",
+                proposal_count: 3,
+                emitted_draft_count: 2,
+                skipped_proposal_count: 1,
+                failures: [],
+            },
+            next_actions: [],
+        });
+
+        expect(report.totals.lifecycle_fact_count).toBe(14);
+        expect(report.nodes.map((node) => node.kind)).toContain("classifier_lifecycle");
+        expect(report.edges.map((edge) => edge.kind)).toContain("has_evidence");
+        expect(report.facts).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                kind: "classifier_lifecycle_status",
+                predicate: "proposal_review_decision",
+                value: "needs_workflow_candidate_proposal_review",
+            }),
+            expect.objectContaining({
+                predicate: "proposal_review_missing_field_count",
+                value: 16,
+            }),
+            expect.objectContaining({
+                predicate: "proposal_ready_smoke_emitted_draft_count",
+                value: 2,
+            }),
+        ]));
+    });
+
     test("writes execution fact projection reports", async () => {
         const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
         const plan = buildOperationExecutionPlanReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "missing", {
@@ -510,6 +566,7 @@ describe("classifier package operations report", () => {
                 execution_fact_count: 0,
                 guard_fact_count: 0,
                 artifact_fact_count: 0,
+                lifecycle_fact_count: 0,
             },
         });
 
@@ -545,6 +602,7 @@ describe("classifier package operations report", () => {
                 execution_fact_count: 0,
                 guard_fact_count: 0,
                 artifact_fact_count: 0,
+                lifecycle_fact_count: 0,
             },
         });
 

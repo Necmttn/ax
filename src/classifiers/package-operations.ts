@@ -205,7 +205,7 @@ export interface ClassifierPackageExecutionHistoryReport {
 
 export interface ClassifierPackageExecutionFactNode {
     readonly id: string;
-    readonly kind: "classifier_package" | "classifier_operation" | "classifier_execution" | "artifact";
+    readonly kind: "classifier_package" | "classifier_operation" | "classifier_execution" | "artifact" | "classifier_lifecycle";
     readonly label: string;
     readonly properties: Readonly<Record<string, string | number | boolean | null>>;
 }
@@ -221,7 +221,7 @@ export interface ClassifierPackageExecutionFactEdge {
 
 export interface ClassifierPackageExecutionFact {
     readonly id: string;
-    readonly kind: "classifier_operation_execution" | "classifier_operation_guard" | "classifier_artifact_observation";
+    readonly kind: "classifier_operation_execution" | "classifier_operation_guard" | "classifier_artifact_observation" | "classifier_lifecycle_status";
     readonly subject: string;
     readonly predicate: string;
     readonly object?: string;
@@ -245,6 +245,7 @@ export interface ClassifierPackageExecutionFactProjectionReport {
         readonly execution_fact_count: number;
         readonly guard_fact_count: number;
         readonly artifact_fact_count: number;
+        readonly lifecycle_fact_count: number;
     };
 }
 
@@ -1143,6 +1144,7 @@ export function buildExecutionFactProjectionReport(
         readonly path: string;
         readonly report: ClassifierPackageOperationExecutionReport;
     }[],
+    workflowStatus?: ClassifierLifecycleReviewStatus,
 ): ClassifierPackageExecutionFactProjectionReport {
     const nodes = new Map<string, ClassifierPackageExecutionFactNode>();
     const edges: ClassifierPackageExecutionFactEdge[] = [];
@@ -1269,11 +1271,126 @@ export function buildExecutionFactProjectionReport(
             });
         }
     }
+    if (workflowStatus) {
+        const lifecycleNode = "classifier_lifecycle:workflow_candidate_proposal";
+        addNode({
+            id: lifecycleNode,
+            kind: "classifier_lifecycle",
+            label: "workflow candidate proposal lifecycle",
+            properties: {
+                workflow_status_path: workflowStatus.path,
+                workflow_status_exists: workflowStatus.exists,
+                decision: workflowStatus.decision ?? null,
+            },
+        });
+        const addLifecycleArtifactFacts = (input: {
+            readonly key: string;
+            readonly artifactPath: string;
+            readonly decisionPredicate: string;
+            readonly decision?: string;
+            readonly numericFacts: Readonly<Record<string, number | undefined>>;
+        }): void => {
+            const artifactNode = pathArtifactId(input.artifactPath);
+            const edgeId = `edge:${factId(`${lifecycleNode}->has_evidence->${artifactNode}:${input.key}`)}`;
+            addNode({
+                id: artifactNode,
+                kind: "artifact",
+                label: input.artifactPath,
+                properties: {
+                    path: input.artifactPath,
+                    exists: true,
+                },
+            });
+            edges.push({
+                id: edgeId,
+                kind: "has_evidence",
+                from: lifecycleNode,
+                to: artifactNode,
+                evidence_path: input.artifactPath,
+                properties: {
+                    lifecycle_key: input.key,
+                },
+            });
+            if (input.decision !== undefined) {
+                facts.push({
+                    id: `fact:${factId(`${lifecycleNode}:${input.decisionPredicate}`)}`,
+                    kind: "classifier_lifecycle_status",
+                    subject: lifecycleNode,
+                    predicate: input.decisionPredicate,
+                    value: input.decision,
+                    evidence_edges: [edgeId],
+                    properties: {
+                        lifecycle_key: input.key,
+                        artifact_path: input.artifactPath,
+                    },
+                });
+            }
+            for (const [predicate, value] of Object.entries(input.numericFacts)) {
+                if (value === undefined) continue;
+                facts.push({
+                    id: `fact:${factId(`${lifecycleNode}:${predicate}`)}`,
+                    kind: "classifier_lifecycle_status",
+                    subject: lifecycleNode,
+                    predicate,
+                    value,
+                    evidence_edges: [edgeId],
+                    properties: {
+                        lifecycle_key: input.key,
+                        artifact_path: input.artifactPath,
+                    },
+                });
+            }
+        };
+        if (workflowStatus.proposal_review) {
+            addLifecycleArtifactFacts({
+                key: "proposal_review",
+                artifactPath: workflowStatus.proposal_review.report_path,
+                decisionPredicate: "proposal_review_decision",
+                ...(workflowStatus.proposal_review.decision === undefined ? {} : { decision: workflowStatus.proposal_review.decision }),
+                numericFacts: {
+                    proposal_review_proposal_count: workflowStatus.proposal_review.proposal_count,
+                    proposal_review_ready_count: workflowStatus.proposal_review.ready_count,
+                    proposal_review_pending_count: workflowStatus.proposal_review.pending_count,
+                    proposal_review_invalid_count: workflowStatus.proposal_review.invalid_count,
+                    proposal_review_missing_field_count: workflowStatus.proposal_review.missing_field_count,
+                },
+            });
+        }
+        if (workflowStatus.proposal_promotion) {
+            addLifecycleArtifactFacts({
+                key: "proposal_promotion",
+                artifactPath: workflowStatus.proposal_promotion.report_path,
+                decisionPredicate: "proposal_promotion_decision",
+                ...(workflowStatus.proposal_promotion.decision === undefined ? {} : { decision: workflowStatus.proposal_promotion.decision }),
+                numericFacts: {
+                    proposal_promotion_proposal_count: workflowStatus.proposal_promotion.proposal_count,
+                    proposal_promotion_emitted_draft_count: workflowStatus.proposal_promotion.emitted_draft_count,
+                    proposal_promotion_skipped_proposal_count: workflowStatus.proposal_promotion.skipped_proposal_count,
+                },
+            });
+        }
+        if (workflowStatus.proposal_ready_smoke) {
+            addLifecycleArtifactFacts({
+                key: "proposal_ready_smoke",
+                artifactPath: workflowStatus.proposal_ready_smoke.promotion_report_path,
+                decisionPredicate: "proposal_ready_smoke_promotion_decision",
+                ...(workflowStatus.proposal_ready_smoke.promotion_decision === undefined ? {} : { decision: workflowStatus.proposal_ready_smoke.promotion_decision }),
+                numericFacts: {
+                    proposal_ready_smoke_proposal_count: workflowStatus.proposal_ready_smoke.proposal_count,
+                    proposal_ready_smoke_emitted_draft_count: workflowStatus.proposal_ready_smoke.emitted_draft_count,
+                    proposal_ready_smoke_skipped_proposal_count: workflowStatus.proposal_ready_smoke.skipped_proposal_count,
+                },
+            });
+        }
+    }
     const uniqueEdges = Array.from(new Map(edges.map((edge) => [edge.id, edge])).values());
     return {
         schema: "ax.classifier_package_execution_fact_projection.v1",
         root,
-        source_reports: entries.map((entry) => entry.path),
+        source_reports: [
+            ...entries.map((entry) => entry.path),
+            ...(workflowStatus ? [workflowStatus.path] : []),
+        ],
         nodes: [...nodes.values()],
         edges: uniqueEdges,
         facts,
@@ -1285,6 +1402,7 @@ export function buildExecutionFactProjectionReport(
             execution_fact_count: facts.filter((fact) => fact.kind === "classifier_operation_execution").length,
             guard_fact_count: facts.filter((fact) => fact.kind === "classifier_operation_guard").length,
             artifact_fact_count: facts.filter((fact) => fact.kind === "classifier_artifact_observation").length,
+            lifecycle_fact_count: facts.filter((fact) => fact.kind === "classifier_lifecycle_status").length,
         },
     };
 }

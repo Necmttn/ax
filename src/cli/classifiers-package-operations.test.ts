@@ -374,6 +374,7 @@ describe("classifiers package-operations format", () => {
                 execution_fact_count: 1,
                 guard_fact_count: 0,
                 artifact_fact_count: 0,
+                lifecycle_fact_count: 0,
             },
         };
 

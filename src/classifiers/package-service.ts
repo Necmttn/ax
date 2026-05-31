@@ -143,6 +143,7 @@ export interface ClassifierPackageExecutionHistoryWriteInput extends ClassifierP
 
 export interface ClassifierPackageExecutionFactProjectionInput {
     readonly root?: string;
+    readonly workflowStatusPath?: string;
 }
 
 export interface ClassifierPackageExecutionFactProjectionWriteInput extends ClassifierPackageExecutionFactProjectionInput {
@@ -151,6 +152,7 @@ export interface ClassifierPackageExecutionFactProjectionWriteInput extends Clas
 
 export interface ClassifierPackageExecutionSurrealWritePlanInput {
     readonly root?: string;
+    readonly workflowStatusPath?: string;
 }
 
 export interface ClassifierPackageExecutionSurrealWritePlanWriteInput extends ClassifierPackageExecutionSurrealWritePlanInput {
@@ -159,6 +161,7 @@ export interface ClassifierPackageExecutionSurrealWritePlanWriteInput extends Cl
 
 export interface ClassifierPackageExecutionSurrealApplyInput {
     readonly root?: string;
+    readonly workflowStatusPath?: string;
 }
 
 export interface ClassifierPackageExecutionSurrealApplyWriteInput extends ClassifierPackageExecutionSurrealApplyInput {
@@ -473,7 +476,12 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService>
                     try: () => ({ path, report: loadClassifierPackageExecutionReport(path) }),
                     catch: (error) => ClassifierPackageLoadError.make({ path, message: errorMessage(error) }),
                 }));
-            return buildExecutionFactProjectionReport(root, entries);
+            const workflowStatusPath = input?.workflowStatusPath ?? ".ax/experiments/blind-workflow-status-current.json";
+            const workflowStatus = yield* Effect.try({
+                try: () => loadClassifierLifecycleReviewStatus(workflowStatusPath),
+                catch: (error) => ClassifierPackageLoadError.make({ path: workflowStatusPath, message: errorMessage(error) }),
+            });
+            return buildExecutionFactProjectionReport(root, entries, workflowStatus);
         });
 
         const writeExecutionFactProjection = Effect.fn("ClassifierPackageService.writeExecutionFactProjectionReport")(function* (
