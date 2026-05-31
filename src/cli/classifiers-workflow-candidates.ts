@@ -2723,6 +2723,15 @@ const citedCandidateIdsForTopic = (report: WorkflowCandidateTopicReport): Readon
     return ids;
 };
 
+const acceptedHarnessProposalCandidateIdsForTopic = (report: WorkflowCandidateTopicReport): ReadonlySet<string> => {
+    const ids = new Set<string>();
+    for (const proposal of report.proposals.proposals) {
+        if (proposal.form !== "harness_check" || proposal.status !== "accepted") continue;
+        for (const evidence of proposal.evidence ?? []) ids.add(evidence.candidate_id);
+    }
+    return ids;
+};
+
 export function topicAdjacentCandidates(report: WorkflowCandidateTopicReport): readonly WorkflowCandidate[] {
     const citedCandidateIds = citedCandidateIdsForTopic(report);
     return report.candidates.candidates.filter((candidate) => !citedCandidateIds.has(candidate.group_id));
@@ -2756,9 +2765,39 @@ export function buildWorkflowCandidateTopicHarnessChecks(
     report: WorkflowCandidateTopicReport,
 ): WorkflowCandidateTopicHarnessCheckSummary {
     const checks: WorkflowCandidateTopicHarnessCheck[] = [];
-    for (const candidate of topicAdjacentCandidates(report)) {
+    const acceptedHarnessCandidateIds = acceptedHarnessProposalCandidateIdsForTopic(report);
+    const adjacentCandidateIds = new Set(topicAdjacentCandidates(report).map((candidate) => candidate.group_id));
+    const harnessCandidateIds = new Set([...acceptedHarnessCandidateIds, ...adjacentCandidateIds]);
+    for (const candidate of report.candidates.candidates.filter((entry) => harnessCandidateIds.has(entry.group_id))) {
         const recommendation = recommendWorkflowCandidatePromotionArtifact([candidate], report.candidates);
         if (recommendation.primary !== "harness_check") continue;
+
+        if (acceptedHarnessCandidateIds.has(candidate.group_id)) {
+            const acceptedReviewFacts = (candidate.persisted_review_facts ?? []).filter((fact) =>
+                fact.predicate === "accept"
+                    && typeof fact.rationale === "string"
+                    && fact.rationale.trim().length > 0
+            );
+            const turns = evidenceTurnsForCandidate(candidate);
+            const failures = [
+                ...(candidate.proposed_action === "add_verification_gate" ? [] : ["candidate is not an add_verification_gate action"]),
+                ...(acceptedReviewFacts.length > 0 ? [] : ["missing persisted accepted review fact with rationale"]),
+                ...(turns.length > 0 ? [] : ["missing source turn evidence"]),
+            ];
+            checks.push({
+                id: `${safeKeyPart(candidate.group_id)}__accepted_review_fact_evidence`,
+                candidate_id: candidate.group_id,
+                label: candidate.label,
+                status: failures.length === 0 ? "passed" : "failed",
+                expectation: "accepted harness-check proposals must include persisted accepted review evidence before guidance changes",
+                evidence_refs: [
+                    ...acceptedReviewFacts.map((fact) => fact.graph_id).filter((ref): ref is string => typeof ref === "string" && ref.length > 0),
+                    ...evidenceRefsForExamples(candidate.examples),
+                ].filter((ref, index, refs) => refs.indexOf(ref) === index).sort(),
+                failures,
+            });
+            continue;
+        }
 
         const matchingExamples = candidate.examples.filter((example) =>
             exampleHasAppliedClassifierResultEvidence(example, report.topic)
@@ -5030,7 +5069,7 @@ export function withWorkflowCandidateTopicPersistedReviewCandidates(
         ),
         ...candidateFailures,
     ];
-    return withWorkflowCandidateTopicHarnessEvidence({
+    const nextReport: WorkflowCandidateTopicReport = {
         ...report,
         candidates: candidateReport,
         totals: {
@@ -5041,7 +5080,13 @@ export function withWorkflowCandidateTopicPersistedReviewCandidates(
         },
         failures: nextFailures,
         decision: nextFailures.length === 0 ? "workflow_topic_evidence_found" : "needs_workflow_topic_evidence",
-    });
+    };
+    const harnessChecks = buildWorkflowCandidateTopicHarnessChecks(nextReport);
+    return withWorkflowCandidateTopicHarnessEvidence(
+        harnessChecks.checks.length > 0
+            ? { ...nextReport, harness_checks: harnessChecks }
+            : nextReport,
+    );
 }
 
 export function renderWorkflowCandidateTopicHarnessGraphListText(

@@ -34,11 +34,11 @@ artifact path as the evidence to inspect before trusting any summary row.
 Current recommendation:
 
 - Index continuation: E443 adds
-  `.ax/experiments/workflow-topic-review-coverage-harness-proposal-apply-e443.json`,
-  `.ax/experiments/workflow-topic-review-coverage-harness-proposal-list-e443.json`,
-  `.ax/experiments/workflow-topic-review-coverage-harness-proposal-list-e443.txt`,
+  `.ax/experiments/workflow-topic-review-coverage-harness-apply-e444.json`,
+  `.ax/experiments/workflow-topic-review-coverage-harness-post-apply-e444.json`,
+  `.ax/experiments/workflow-topic-review-coverage-harness-lint-e444.json`,
   and
-  `.ax/experiments/workflow-topic-review-coverage-harness-proposal-post-apply-e443.json`
+  `.ax/experiments/workflow-topic-review-coverage-harness-proposal-scaffolded-e444.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -47,11 +47,76 @@ Current recommendation:
 - Direct review execution/routing is now possible behind an explicit
   `--execute-route` gate, route outputs can be inspected after execution, the
   current handoff artifacts are complete, the guarded production apply has
-  closed the reviewed-coverage gap, and the successful loop is now persisted as
-  lifecycle graph facts. Lifecycle insight now turns the persisted `gap_closed`
-  fact into a concrete harness-proposal dry run. The immediate bottleneck is
-  reviewing/accepting that harness proposal and then producing a passing
-  executable check before guidance promotion.
+  closed the reviewed-coverage gap, the successful loop is now persisted as
+  lifecycle graph facts, and the accepted `review-coverage` harness proposal
+  now has a passing persisted harness fact. The immediate bottleneck is using
+  the harness-gated evidence to decide whether any guidance promotion is still
+  warranted.
+
+## E444 - Accept Review Coverage Harness and Persist Passing Check
+
+Question:
+- Can the accepted `review-coverage` harness proposal become an executable
+  check and persisted harness fact, rather than only a proposal row?
+
+Implementation:
+- Accepted `harness_check__workflow_candidate__df1d675ec48a9208` through the
+  improve lifecycle, emitting a manual harness task.
+- Added an accepted-harness proposal check path: candidates cited by accepted
+  `harness_check` proposals can now produce computed checks from persisted
+  accepted review facts and source-turn evidence.
+- Added regression coverage for the accepted proposal path.
+- Added the concrete harness marker artifact:
+  `tests/harness/harness_check__workflow_candidate__df1d675ec48a9208.md`.
+- Ran `improve lint` to reconcile the accepted task into a scaffolded
+  experiment.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-review-coverage-harness-gate-pre-e444.json`
+- `.ax/experiments/workflow-topic-review-coverage-harness-facts-e444.json`
+- `.ax/experiments/workflow-topic-review-coverage-harness-write-plan-e444.json`
+- `.ax/experiments/workflow-topic-review-coverage-harness-apply-e444.json`
+- `.ax/experiments/workflow-topic-review-coverage-harness-post-apply-e444.json`
+- `.ax/experiments/workflow-topic-review-coverage-harness-lint-e444.json`
+- `.ax/experiments/workflow-topic-review-coverage-harness-proposal-scaffolded-e444.json`
+
+Results:
+- Pre-check correctly failed with no passing topic harness facts.
+- After accepting the proposal, the computed harness check passed:
+  `classifier_candidate_group__hybrid_window_verification_or_recovery_signal__accepted_review_fact_evidence`.
+- Applying harness facts wrote one passed persisted harness fact for
+  `workflow_topic_harness_check`.
+- Post-apply topic report has `gate_satisfied=true`,
+  `gate_evidence_source=computed_and_persisted`, `computed_passed_count=1`,
+  and `persisted_passed_count=1`.
+- `improve lint` reconciled
+  `harness_check__workflow_candidate__df1d675ec48a9208` from `task_emitted` to
+  `scaffolded` with no warnings.
+- Proposal list now reports the accepted harness proposal as scaffolded with
+  artifact path
+  `tests/harness/harness_check__workflow_candidate__df1d675ec48a9208.md`.
+
+Decision:
+- E444 closes the review-coverage harness proposal loop: accepted review fact
+  -> durable proposal -> accepted harness task -> executable check -> persisted
+  passing harness fact -> scaffolded improve artifact.
+- Guidance promotion remains gated; the next aligned slice is to query the
+  harness-backed topic facts and decide whether they justify a guidance change
+  or only remain graph evidence.
+
+Verification:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --search=review-coverage --source-kind=hybrid_window_classifier_projection --include-review-facts --include-harness-facts --require-harness-checks --limit=10 --out .ax/experiments/workflow-topic-review-coverage-harness-gate-pre-e444.json --json
+bun src/cli/index.ts improve accept harness_check__workflow_candidate__df1d675ec48a9208
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --search=review-coverage --source-kind=hybrid_window_classifier_projection --include-review-facts --include-harness-facts --require-harness-checks --harness-facts=.ax/experiments/workflow-topic-review-coverage-harness-facts-e444.json --harness-write-plan=.ax/experiments/workflow-topic-review-coverage-harness-write-plan-e444.json --apply-harness-facts --limit=10 --out .ax/experiments/workflow-topic-review-coverage-harness-apply-e444.json --json
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --search=review-coverage --source-kind=hybrid_window_classifier_projection --include-review-facts --include-harness-facts --require-harness-checks --limit=10 --out .ax/experiments/workflow-topic-review-coverage-harness-post-apply-e444.json --json
+bun src/cli/index.ts improve lint --root=. --json > .ax/experiments/workflow-topic-review-coverage-harness-lint-e444.json
+bun src/cli/index.ts classifiers workflow-candidates --list-proposals --search=review-coverage --proposal-status=all --expand-evidence --limit=10 --out .ax/experiments/workflow-topic-review-coverage-harness-proposal-scaffolded-e444.json --json
+```
+
+DB-backed accept, harness apply, post-apply gate, and improve-lint checks
+passed.
 
 ## E443 - Apply and Rediscover Review Coverage Harness Proposal
 

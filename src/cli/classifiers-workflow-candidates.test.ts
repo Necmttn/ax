@@ -3448,6 +3448,85 @@ describe("classifiers workflow-candidates", () => {
         expect(workflowCandidateTopicHarnessGateFailures(report)).toEqual([]);
     });
 
+    test("accepted harness proposals compute checks from persisted review facts", () => {
+        const proposals = buildWorkflowCandidateProposalListReport({
+            rows: [{
+                dedupe_sig: "harness_check__workflow_candidate__review_coverage",
+                title: "Require workflow evidence for review-coverage",
+                form: "harness_check",
+                status: "accepted",
+                confidence: "medium",
+                frequency: 1,
+                experiment_id: "experiment:harness-review-coverage",
+                experiment_status: "task_emitted",
+                evidence: [{
+                    candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+                    candidate_label: "verification_or_recovery_signal",
+                    proposed_action: "add_verification_gate",
+                    examples: [],
+                }],
+            }],
+            limit: 10,
+            status: "accepted",
+            expandEvidence: true,
+            search: "review-coverage",
+        });
+        const candidates = buildWorkflowCandidateReport({
+            groupRows: [],
+            evidenceRows: [],
+            sourceKind: "hybrid_window_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            search: "review-coverage",
+            taskLike: "include",
+        });
+        const report = buildWorkflowCandidateTopicReport({
+            sourceKind: "hybrid_window_classifier_projection",
+            topic: "review-coverage",
+            proposals,
+            candidates: {
+                ...candidates,
+                candidates: [{
+                    group_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+                    label: "verification_or_recovery_signal",
+                    proposed_action: "add_verification_gate",
+                    raw_support_count: 1,
+                    support_count: 1,
+                    evidence_count: 1,
+                    turn_ref_count: 1,
+                    average_confidence: 1,
+                    wrapper_like_count: 0,
+                    task_like_count: 0,
+                    task_like_ratio: 0,
+                    score: 1,
+                    examples: [{
+                        result_id: "fact:workflow_topic_candidate_review__review_coverage",
+                        turn: "turn:review-coverage",
+                        confidence: 1,
+                        task_like: false,
+                        text_excerpt: "Persisted review fact accepted workflow candidate verification_or_recovery_signal.",
+                    }],
+                    persisted_review_facts: [{
+                        graph_id: "fact:workflow_topic_candidate_review__review_coverage",
+                        topic: "review-coverage",
+                        predicate: "accept",
+                        candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+                        rationale: "Useful verification behavior worth preserving.",
+                        helper_source_fixture_ids: [],
+                    }],
+                }],
+            },
+        });
+
+        expect(report.harness_checks?.checks[0]).toMatchObject({
+            id: "classifier_candidate_group__hybrid_window_verification_or_recovery_signal__accepted_review_fact_evidence",
+            status: "passed",
+        });
+        expect(report.harness_checks?.checks[0].evidence_refs).toContain("fact:workflow_topic_candidate_review__review_coverage");
+        expect(report.harness_checks?.checks[0].evidence_refs).toContain("turn:review-coverage");
+        expect(workflowCandidateTopicHarnessGateFailures(report)).toEqual([]);
+    });
+
     test("topic harness gates fail with only persisted failed harness facts", () => {
         const proposals = buildWorkflowCandidateProposalListReport({
             rows: [],
