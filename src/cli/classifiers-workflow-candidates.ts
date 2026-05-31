@@ -184,6 +184,10 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly missing_rationale_count: number;
     readonly synced_fixture_count: number;
     readonly unknown_fixture_count: number;
+    readonly pack_candidate_count: number;
+    readonly new_candidate_count: number;
+    readonly existing_candidate_count: number;
+    readonly unknown_candidate_count: number;
     readonly smoke_marker_count: number;
     readonly apply_guard:
         | "ready_to_apply"
@@ -1731,6 +1735,7 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             `coverage review source: ${report.coverage_review.source_path}`,
             `coverage review fixtures: ${report.coverage_review.reviewed_fixture_count} reviewed, ${report.coverage_review.pending_fixture_count} pending`,
             `coverage review sync: synced=${report.coverage_review.synced_fixture_count} unknown=${report.coverage_review.unknown_fixture_count}`,
+            `coverage review impact: pack_candidates=${report.coverage_review.pack_candidate_count} new=${report.coverage_review.new_candidate_count} existing=${report.coverage_review.existing_candidate_count} unknown=${report.coverage_review.unknown_candidate_count}`,
             `coverage review issues: invalid=${report.coverage_review.invalid_fixture_count} missing_rationale=${report.coverage_review.missing_rationale_count} smoke=${report.coverage_review.smoke_marker_count}`,
             `coverage review apply guard: ${report.coverage_review.apply_guard}`,
             `coverage review applied: ${report.coverage_review.applied ? "yes" : "no"}`,
@@ -2892,10 +2897,28 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     readonly applied: boolean;
     readonly syncedFixtureCount?: number;
     readonly unknownFixtureCount?: number;
+    readonly coverageRows?: readonly WorkflowCandidateReviewCoverageRow[];
 }): WorkflowCandidateReviewCoverageApplySummary {
     const reviewedRows = input.rows.filter((row) => fixtureReviewVerdict(row) !== undefined);
     const invalidRows = input.rows.filter((row) => !VALID_VERDICTS.has(row.review_status));
     const missingRationaleRows = reviewedRows.filter((row) => (row.review_rationale ?? "").trim().length === 0);
+    const packCandidateIds = new Set(reviewedRows.map((row) => row.candidate_id));
+    const knownCandidateIds = new Set((input.coverageRows ?? []).map((row) => row.candidate_id));
+    const alreadyReviewedCandidateIds = new Set((input.coverageRows ?? [])
+        .filter((row) => row.review_fact_count > 0)
+        .map((row) => row.candidate_id));
+    let newCandidateCount = 0;
+    let existingCandidateCount = 0;
+    let unknownCandidateCount = 0;
+    for (const candidateId of packCandidateIds) {
+        if (!knownCandidateIds.has(candidateId)) {
+            unknownCandidateCount += 1;
+        } else if (alreadyReviewedCandidateIds.has(candidateId)) {
+            existingCandidateCount += 1;
+        } else {
+            newCandidateCount += 1;
+        }
+    }
     const smokeMarkerCount = reviewedRows.filter(fixtureRowHasSmokeMarker).length +
         (input.sourcePath.toLowerCase().includes("smoke") ? 1 : 0);
     const applyGuard = invalidRows.length > 0
@@ -2917,6 +2940,10 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         missing_rationale_count: missingRationaleRows.length,
         synced_fixture_count: input.syncedFixtureCount ?? 0,
         unknown_fixture_count: input.unknownFixtureCount ?? 0,
+        pack_candidate_count: packCandidateIds.size,
+        new_candidate_count: newCandidateCount,
+        existing_candidate_count: existingCandidateCount,
+        unknown_candidate_count: unknownCandidateCount,
         smoke_marker_count: smokeMarkerCount,
         apply_guard: applyGuard,
         projection_totals: input.projection.totals,
@@ -3793,6 +3820,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     applied: false,
                     syncedFixtureCount,
                     unknownFixtureCount,
+                    coverageRows: report.candidates,
                 });
                 const canApply = pendingApplySummary.apply_guard === "ready_to_apply" &&
                     reviewWritePlan.statements.length > 0;

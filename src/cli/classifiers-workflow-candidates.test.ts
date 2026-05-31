@@ -1685,6 +1685,17 @@ describe("classifiers workflow-candidates", () => {
             applied: false,
             syncedFixtureCount: syncResult.synced_fixture_count,
             unknownFixtureCount: syncResult.unknown_fixture_count,
+            coverageRows: [{
+                candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+                label: "verification_or_recovery_signal",
+                proposed_action: "add_verification_gate",
+                support_count: 41,
+                evidence_count: 41,
+                review_fact_count: 0,
+                topics: [],
+                verdict_counts: { reject: 0, accept: 0, defer: 0, revise: 0, other: 0 },
+                helper_source_fixture_ids: [],
+            }],
         });
 
         expect(syncResult.synced_fixture_count).toBe(1);
@@ -1699,7 +1710,116 @@ describe("classifiers workflow-candidates", () => {
             invalid_fixture_count: 1,
             synced_fixture_count: 1,
             unknown_fixture_count: 1,
+            pack_candidate_count: 0,
+            new_candidate_count: 0,
+            existing_candidate_count: 0,
+            unknown_candidate_count: 0,
             apply_guard: "invalid_review_pack",
+        });
+    });
+
+    test("reports coverage review pack impact across new existing and unknown candidates", () => {
+        const rows = parseWorkflowCandidateFixtureRowsJsonl([
+            JSON.stringify({
+                id: "workflow-candidate-review-coverage/new/a",
+                suite: "workflow-candidate-review-coverage",
+                name: "coverage-gap-new-01",
+                label: "verification_or_recovery_signal",
+                target: "unknown",
+                text: "USER:\ncontinue and test it\n\nPREVIOUS_ASSISTANT:\n",
+                source_group: "workflow-candidate",
+                review_status: "accept",
+                review_rationale: "Useful verification behavior worth preserving.",
+                topic: "review-coverage",
+                candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+                candidate_label: "verification_or_recovery_signal",
+                proposed_action: "add_verification_gate",
+                result_id: "classifier_result:verification",
+                turn: "turn:verification",
+                confidence: 0.83,
+            }),
+            JSON.stringify({
+                id: "workflow-candidate-review-coverage/existing/a",
+                suite: "workflow-candidate-review-coverage",
+                name: "coverage-gap-existing-01",
+                label: "environment_or_preference_signal",
+                target: "unknown",
+                text: "USER:\nuse uv for this Python package work\n\nPREVIOUS_ASSISTANT:\n",
+                source_group: "workflow-candidate",
+                review_status: "reject",
+                review_rationale: "Already covered by the existing preference review.",
+                topic: "review-coverage",
+                candidate_id: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+                candidate_label: "environment_or_preference_signal",
+                proposed_action: "record_guidance_or_environment_preference",
+                result_id: "classifier_result:environment",
+                turn: "turn:environment",
+                confidence: 0.72,
+            }),
+            JSON.stringify({
+                id: "workflow-candidate-review-coverage/unknown/a",
+                suite: "workflow-candidate-review-coverage",
+                name: "coverage-gap-unknown-01",
+                label: "unknown_signal",
+                target: "unknown",
+                text: "USER:\nunknown candidate fixture\n\nPREVIOUS_ASSISTANT:\n",
+                source_group: "workflow-candidate",
+                review_status: "defer",
+                review_rationale: "Needs a broader candidate query.",
+                topic: "review-coverage",
+                candidate_id: "classifier_candidate_group:hybrid-window/unknown_signal",
+                candidate_label: "unknown_signal",
+                proposed_action: "review_section_pattern",
+                result_id: "classifier_result:unknown",
+                turn: "turn:unknown",
+                confidence: 0.61,
+            }),
+        ].join("\n"));
+        const projection = buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures({
+            rows,
+            syncedFrom: ".ax/experiments/reviewed-coverage-gaps.jsonl",
+        });
+        const writePlan = buildWorkflowCandidateTopicReviewGraphWritePlan(projection);
+        const summary = buildWorkflowCandidateReviewCoverageApplySummary({
+            rows,
+            sourcePath: ".ax/experiments/reviewed-coverage-gaps.jsonl",
+            projection,
+            writePlan,
+            applyRequested: false,
+            applied: false,
+            coverageRows: [
+                {
+                    candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+                    label: "verification_or_recovery_signal",
+                    proposed_action: "add_verification_gate",
+                    support_count: 41,
+                    evidence_count: 41,
+                    review_fact_count: 0,
+                    topics: [],
+                    verdict_counts: { reject: 0, accept: 0, defer: 0, revise: 0, other: 0 },
+                    helper_source_fixture_ids: [],
+                },
+                {
+                    candidate_id: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+                    label: "environment_or_preference_signal",
+                    proposed_action: "record_guidance_or_environment_preference",
+                    support_count: 50,
+                    evidence_count: 50,
+                    review_fact_count: 1,
+                    topics: ["surrealml"],
+                    verdict_counts: { reject: 1, accept: 0, defer: 0, revise: 0, other: 0 },
+                    helper_source_fixture_ids: ["session-section-chunks/none-maintenance-question"],
+                },
+            ],
+        });
+
+        expect(summary).toMatchObject({
+            reviewed_fixture_count: 3,
+            pack_candidate_count: 3,
+            new_candidate_count: 1,
+            existing_candidate_count: 1,
+            unknown_candidate_count: 1,
+            apply_guard: "ready_to_apply",
         });
     });
 
