@@ -337,6 +337,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
     const querySuggestionRepairVerificationStatus = report.query_suggestion?.repair_verification_status ?? "none";
     const querySuggestionRepairVerificationNextAction = report.query_suggestion?.repair_verification_next_action ?? "none";
     const querySuggestionRepairVerificationRemediation = report.query_suggestion?.repair_verification_remediation ?? "none";
+    const querySuggestionRepairVerificationCommandKind = report.query_suggestion?.repair_verification_command_kind ?? "none";
     const querySuggestionRepairVerificationArgv = report.query_suggestion?.repair_verification_argv.join(" ") || "none";
     const querySuggestionRepairQuery = report.query_suggestion?.repair_query === undefined
         ? "none"
@@ -400,6 +401,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `query suggestion repair verification status: ${querySuggestionRepairVerificationStatus}`,
         `query suggestion repair verification next action: ${querySuggestionRepairVerificationNextAction}`,
         `query suggestion repair verification remediation: ${querySuggestionRepairVerificationRemediation}`,
+        `query suggestion repair verification command kind: ${querySuggestionRepairVerificationCommandKind}`,
         `query suggestion repair verification argv: ${querySuggestionRepairVerificationArgv}`,
         `query suggestion repair query: ${querySuggestionRepairQuery}`,
         `query suggestion provenance: ${querySuggestionProvenance}`,

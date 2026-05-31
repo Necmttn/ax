@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E410 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-remediation-no-match-e410.json`
+- Index continuation: E411 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-command-kind-no-match-e411.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-remediation-match-e410.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-command-kind-match-e411.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,51 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E411 - Expose Suggested Query Repair Verification Command Kind
+
+Question:
+- E410 exposes verification remediation, but can services route post-repair
+  verification commands by kind without parsing argv or action strings?
+
+Implementation:
+- Added `repair_verification_command_kind` to `query_suggestion`.
+- Executable lifecycle graph-query repairs now report
+  `classifier_graph_query_repair_verification`.
+- No-op suggestions report `none`.
+- Text graph-health output now renders `query suggestion repair verification
+  command kind`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-command-kind-no-match-e411.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-command-kind-match-e411.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-command-kind-no-match-e411.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_verification_command_kind=classifier_graph_query_repair_verification`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.repair_verification_command_kind=none`.
+- Text output renders `query suggestion repair verification command kind:
+  classifier_graph_query_repair_verification`.
+
+Decision:
+- Services can now identify the verification command category directly from
+  graph-health output while retaining status, next action, remediation, argv,
+  and expected outcomes.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E411 no-match report has
+  `repair_verification_command_kind=classifier_graph_query_repair_verification`.
+- E411 match report has `repair_verification_command_kind=none`.
+- E411 text output includes the repair verification command-kind line.
 
 ## E410 - Expose Suggested Query Repair Verification Remediation
 
