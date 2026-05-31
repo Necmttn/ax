@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E395 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-status-no-match-e395.json`
+- Index continuation: E396 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-next-action-no-match-e396.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-status-match-e395.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-next-action-match-e396.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,48 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E396 - Expose Suggested Query Repair Next Action
+
+Question:
+- E395 exposes a repair status, but can services get a repair-specific next
+  action without mapping `repair_available` and `no_repair_needed` themselves?
+
+Implementation:
+- Added `repair_next_action` to `query_suggestion`.
+- Lifecycle graph-query suggestions now report `run_repaired_query` when a
+  suggested filter repair exists and `use_current_query` for no-op suggestions.
+- Text graph-health output now renders `query suggestion repair next action`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-next-action-no-match-e396.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-next-action-match-e396.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-next-action-no-match-e396.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_next_action=run_repaired_query`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.repair_next_action=use_current_query`.
+- Text output renders `query suggestion repair next action:
+  run_repaired_query`.
+
+Decision:
+- Services can now drive repair-specific UI or execution routing from a single
+  action field while retaining the more general `next_action` for graph query
+  execution.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E396 no-match report has `repair_next_action=run_repaired_query`.
+- E396 match report has `repair_next_action=use_current_query`.
+- E396 text output includes the repair-next-action line.
 
 ## E395 - Expose Suggested Query Repair Status
 

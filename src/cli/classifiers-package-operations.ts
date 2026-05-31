@@ -313,6 +313,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
     const querySuggestionChangedFilters = report.query_suggestion?.changed_filters.join(", ") || "none";
     const querySuggestionUnchangedFilters = report.query_suggestion?.unchanged_filters.join(", ") || "none";
     const querySuggestionRepairStatus = report.query_suggestion?.repair_status ?? "none";
+    const querySuggestionRepairNextAction = report.query_suggestion?.repair_next_action ?? "none";
     const querySuggestionProvenance = report.query_suggestion === undefined
         ? "none"
         : `source=${report.query_suggestion.source} reason=${report.query_suggestion.reason}`;
@@ -354,6 +355,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `query suggestion changed filters: ${querySuggestionChangedFilters}`,
         `query suggestion unchanged filters: ${querySuggestionUnchangedFilters}`,
         `query suggestion repair status: ${querySuggestionRepairStatus}`,
+        `query suggestion repair next action: ${querySuggestionRepairNextAction}`,
         `query suggestion provenance: ${querySuggestionProvenance}`,
         `query suggestion relaxed filters: ${querySuggestionRelaxedFilters}`,
         `query suggestion original query: ${querySuggestionOriginalQuery}`,
