@@ -298,6 +298,41 @@
       ]
     },
     {
+      "id": "embedding-helper-usefulness-transcript-report",
+      "kind": "status",
+      "description": "Build an expanded transcript workflow-candidate report for promoted helper fact noise analysis.",
+      "command": "bun run classifiers:workflow-candidates -- --limit=20 --examples=50 --out=.ax/experiments/workflow-candidate-report-helper-usefulness-transcript-current.json --json",
+      "inputs": [],
+      "outputs": [
+        ".ax/experiments/workflow-candidate-report-helper-usefulness-transcript-current.json"
+      ]
+    },
+    {
+      "id": "embedding-helper-usefulness-hybrid-report",
+      "kind": "status",
+      "description": "Build an expanded hybrid workflow-candidate report for promoted helper fact noise analysis.",
+      "command": "bun run classifiers:workflow-candidates -- --source-kind=hybrid_window_classifier_projection --limit=20 --examples=50 --out=.ax/experiments/workflow-candidate-report-helper-usefulness-hybrid-current.json --json",
+      "inputs": [],
+      "outputs": [
+        ".ax/experiments/workflow-candidate-report-helper-usefulness-hybrid-current.json"
+      ]
+    },
+    {
+      "id": "embedding-helper-graph-usefulness",
+      "kind": "status",
+      "description": "Compare persisted promoted helper none controls against workflow candidate examples to estimate ranking noise before changing ranking behavior.",
+      "command": "bun run classifiers:embedding-helper-graph-usefulness -- --graph-health=.ax/experiments/classifier-graph-health-embedding-helper-current.json --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --workflow-report=.ax/experiments/workflow-candidate-report-helper-usefulness-transcript-current.json --workflow-report=.ax/experiments/workflow-candidate-report-helper-usefulness-hybrid-current.json --out=.ax/experiments/embedding-helper-graph-usefulness-current.json --json",
+      "inputs": [
+        ".ax/experiments/classifier-graph-health-embedding-helper-current.json",
+        "packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl",
+        ".ax/experiments/workflow-candidate-report-helper-usefulness-transcript-current.json",
+        ".ax/experiments/workflow-candidate-report-helper-usefulness-hybrid-current.json"
+      ],
+      "outputs": [
+        ".ax/experiments/embedding-helper-graph-usefulness-current.json"
+      ]
+    },
+    {
       "id": "hybrid-gate-eval",
       "kind": "eval",
       "description": "Evaluate deterministic plus SetFit hybrid gating against exported model windows.",

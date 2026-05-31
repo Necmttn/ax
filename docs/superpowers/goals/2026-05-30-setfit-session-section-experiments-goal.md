@@ -29,7 +29,7 @@ artifact path as the evidence to inspect before trusting any summary row.
 | Blind/review workflow | E46-E65+ | `.ax/experiments/blind-workflow-status-e57.json` and related review artifacts | Human review is mandatory before fixtures or graph facts are promoted. | Pending where review rows are incomplete. | Earlier experiment log | Prefer review queues/workspaces over automatic label edits. |
 | Transcript graph projection | E155-E157 | `.ax/experiments/transcript-candidate-graph-projection-e155.json`, `.ax/experiments/workflow-candidate-report-e156.json`, `.ax/experiments/workflow-candidate-cli-e157.json` | Real persisted classifier facts can become graph-backed workflow candidates. | Passed for projection/query; still needs product review filters and proposal gates. | E155/E156/E157 commits in log | Use graph facts for evidence-backed workflow/harness discovery. |
 | Proposal lifecycle | E168-E208 | `.ax/experiments/workflow-candidate-proposal-list-e168.json`, `.ax/experiments/classifier-package-execution-write-plan-e208.json` | Classifier-derived workflow proposals are discoverable and lifecycle-tracked. | Passed for visibility/lifecycle plumbing; promotion remains review-gated. | Recent proposal lifecycle commits | Continue using review and ready-smoke gates before guidance/harness changes. |
-| Embedding/SVM helper layer | E209-E232 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/embedding-helper-review-batch-e216-report.json`, `.ax/experiments/embedding-helper-review-progress-e218.json`, `.ax/experiments/classifier-package-execution-embedding-helper-export-preview-e221.json`, `.ax/experiments/classifier-package-execution-embedding-helper-review-progress-e223.json`, `.ax/experiments/embedding-helper-export-e227-report.json`, `.ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e231-post-promotion.json`, `.ax/experiments/embedding-helper-canonical-promotion-split-audit-e231.json`, `.ax/experiments/embedding-helper-graph-projection-current.json`, `.ax/experiments/embedding-helper-graph-apply-e232.json`, `.ax/experiments/classifier-graph-health-embedding-helper-e232.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. Reviewed helper hard negatives now live in canonical fixtures and are projected as persisted graph facts. | Passed: graph projection emits `12` `promoted_hard_negative_fixture` facts, `3` rejected candidate facts, `1` routing fact, and `1` dedupe fact; graph apply wrote `241/241` statements; persisted embedding-helper graph health returns `17` facts with the same predicate counts. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `65b0b3c`, `4c602d9`, `eeb517c`, `9a6811e`, `31a1b16`, `e41562c`, `0587b67`, `0e0a960`, `3f01787`, `7bea922`, `21f7163`, `24e4a4e`, `f97c8e3`, `722e3e8`, `8b27657`, `d700090`, this commit | Use the persisted promoted helper facts to drive graph usefulness checks: compare candidate discovery before/after promoted helper facts and decide whether they should influence workflow/harness evidence ranking. |
+| Embedding/SVM helper layer | E209-E233 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e231-post-promotion.json`, `.ax/experiments/embedding-helper-canonical-promotion-split-audit-e231.json`, `.ax/experiments/embedding-helper-graph-projection-current.json`, `.ax/experiments/embedding-helper-graph-apply-e232.json`, `.ax/experiments/classifier-graph-health-embedding-helper-e232.json`, `.ax/experiments/embedding-helper-graph-usefulness-current.json`, `.ax/experiments/embedding-helper-graph-usefulness-expanded-e233.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. Promoted helper facts are now persisted and measurable against workflow candidate ranking. | Passed but effect is small: expanded scan over `15` transcript and `3` hybrid candidate groups found `1` hybrid environment/preference example matching promoted `none-maintenance-question`; estimated suppressed support is `1` of `92` hybrid support and `0` of `250` transcript support. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `65b0b3c`, `4c602d9`, `eeb517c`, `9a6811e`, `31a1b16`, `e41562c`, `0587b67`, `0e0a960`, `3f01787`, `7bea922`, `21f7163`, `24e4a4e`, `f97c8e3`, `722e3e8`, `8b27657`, `d700090`, `6237d89`, this commit | Do not change ranking weights yet from this weak signal. Use helper facts as review/debug explanations, and collect more promoted controls or run a broader candidate scan before making them a ranking gate. |
 
 Current recommendation:
 
@@ -12324,6 +12324,86 @@ python3 -m json.tool .ax/experiments/embedding-helper-graph-projection-current.j
 python3 -m json.tool .ax/experiments/embedding-helper-graph-write-plan-current.json >/dev/null
 python3 -m json.tool .ax/experiments/embedding-helper-graph-apply-e232.json >/dev/null
 python3 -m json.tool .ax/experiments/classifier-graph-health-embedding-helper-current.json >/dev/null
+```
+
+## E233 - Measure Promoted Helper Facts Against Workflow Ranking
+
+Question:
+
+- Do the persisted promoted helper facts produce a useful change in workflow or
+  harness candidate ranking, or are they mostly review/debug evidence for now?
+
+Implementation:
+
+- Added `packages/ax-classifier-session-sections/embedding_helper_graph_usefulness.py`.
+- Added `packages/ax-classifier-session-sections/embedding_helper_graph_usefulness_test.py`.
+- Added `bun run classifiers:embedding-helper-graph-usefulness`.
+- Added package operations:
+  - `embedding-helper-usefulness-transcript-report`
+  - `embedding-helper-usefulness-hybrid-report`
+  - `embedding-helper-graph-usefulness`
+- The usefulness report reads persisted embedding-helper graph health, joins
+  promoted helper facts back to canonical fixture text, scans workflow candidate
+  examples, and reports candidate examples that overlap promoted `none`
+  controls. It emits an estimated adjusted support count, but does not change
+  ranking behavior.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers package-operations --operation=embedding-helper-usefulness-transcript-report --execute --out=.ax/experiments/classifier-package-execution-embedding-helper-usefulness-transcript-report-e233.json
+bun src/cli/index.ts classifiers package-operations --operation=embedding-helper-usefulness-hybrid-report --execute --out=.ax/experiments/classifier-package-execution-embedding-helper-usefulness-hybrid-report-e233.json
+bun src/cli/index.ts classifiers package-operations --operation=embedding-helper-graph-usefulness --execute --out=.ax/experiments/classifier-package-execution-embedding-helper-graph-usefulness-e233.json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-report-helper-usefulness-transcript-current.json`
+- `.ax/experiments/workflow-candidate-report-helper-usefulness-hybrid-current.json`
+- `.ax/experiments/embedding-helper-graph-usefulness-current.json`
+- `.ax/experiments/embedding-helper-graph-usefulness-expanded-e233.json`
+- `.ax/experiments/classifier-package-execution-embedding-helper-usefulness-transcript-report-e233.json`
+- `.ax/experiments/classifier-package-execution-embedding-helper-usefulness-hybrid-report-e233.json`
+- `.ax/experiments/classifier-package-execution-embedding-helper-graph-usefulness-e233.json`
+
+Results:
+
+- Promoted helper facts considered: `12`
+- Workflow reports scanned: `2`
+- Expanded candidate groups:
+  - transcript: `15`
+  - hybrid: `3`
+- Matched candidate groups: `1`
+- Matched candidate examples: `1`
+- Estimated suppressed support:
+  - transcript: `0 / 250`
+  - hybrid: `1 / 92`
+- The single match:
+  - candidate group: `classifier_candidate_group:hybrid-window/environment_or_preference_signal`
+  - action: `record_guidance_or_environment_preference`
+  - support before/after helper adjustment: `50 / 49`
+  - promoted helper control: `session-section-chunks/none-maintenance-question`
+  - match score: `0.7333`
+  - example text: user asks when SurrealML was last worked on and whether it is
+    actively maintained.
+
+Decision:
+
+- The promoted helper facts are queryable and do catch one plausible noisy
+  hybrid candidate, but the effect is too small to justify changing workflow
+  ranking weights or adding a hard ranking gate today.
+- Use helper facts as review/debug explanations for now. The next useful work
+  is either to collect more promoted controls from broader review queues, or to
+  expand the usefulness scan from candidate examples to all candidate evidence
+  rows before making helper facts affect ranking.
+
+Verification:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/embedding_helper_graph_usefulness_test.py
+bun test src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts
+python3 -m json.tool packages/ax-classifier-session-sections/ax.classifier.json >/dev/null
+python3 -m json.tool .ax/experiments/embedding-helper-graph-usefulness-current.json >/dev/null
 ```
 
 ## E197 - Hybrid Graph Usefulness Gate
