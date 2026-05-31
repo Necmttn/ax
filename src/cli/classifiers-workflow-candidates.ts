@@ -307,6 +307,10 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly strict_can_apply: boolean;
     readonly strict_apply_blockers: readonly WorkflowCandidateReviewCoverageApplyBlocker[];
     readonly strict_apply_blocker_details: readonly WorkflowCandidateReviewCoverageApplyBlockerDetail[];
+    readonly production_apply_guard: WorkflowCandidateReviewCoverageApplyGuard;
+    readonly production_can_apply: boolean;
+    readonly production_apply_blockers: readonly WorkflowCandidateReviewCoverageApplyBlocker[];
+    readonly production_apply_blocker_details: readonly WorkflowCandidateReviewCoverageApplyBlockerDetail[];
     readonly next_action: string;
     readonly post_apply_recheck_command: string;
     readonly post_apply_recheck?: WorkflowCandidateReviewCoveragePostApplyRecheckSummary;
@@ -1902,6 +1906,8 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             `coverage review can apply: ${report.coverage_review.can_apply ? "yes" : "no"}`,
             `coverage review strict apply guard: ${report.coverage_review.strict_apply_guard}`,
             `coverage review strict can apply: ${report.coverage_review.strict_can_apply ? "yes" : "no"}`,
+            `coverage review production apply guard: ${report.coverage_review.production_apply_guard}`,
+            `coverage review production can apply: ${report.coverage_review.production_can_apply ? "yes" : "no"}`,
             `coverage review apply result: ${report.coverage_review.apply_result} statements=${report.coverage_review.applied_statement_count}`,
             `coverage review blockers: ${report.coverage_review.apply_blockers.length === 0 ? "none" : report.coverage_review.apply_blockers.join(", ")}`,
             `coverage review blocker details: ${report.coverage_review.apply_blocker_details.length === 0 ? "none" : report.coverage_review.apply_blocker_details.map((detail) => `${detail.blocker}=${detail.count}`).join(", ")}`,
@@ -1909,6 +1915,9 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             `coverage review strict blockers: ${report.coverage_review.strict_apply_blockers.length === 0 ? "none" : report.coverage_review.strict_apply_blockers.join(", ")}`,
             `coverage review strict blocker details: ${report.coverage_review.strict_apply_blocker_details.length === 0 ? "none" : report.coverage_review.strict_apply_blocker_details.map((detail) => `${detail.blocker}=${detail.count}`).join(", ")}`,
             `coverage review strict blocker remediations: ${report.coverage_review.strict_apply_blocker_details.length === 0 ? "none" : report.coverage_review.strict_apply_blocker_details.map((detail) => `${detail.blocker}: ${detail.remediation}`).join(" | ")}`,
+            `coverage review production blockers: ${report.coverage_review.production_apply_blockers.length === 0 ? "none" : report.coverage_review.production_apply_blockers.join(", ")}`,
+            `coverage review production blocker details: ${report.coverage_review.production_apply_blocker_details.length === 0 ? "none" : report.coverage_review.production_apply_blocker_details.map((detail) => `${detail.blocker}=${detail.count}`).join(", ")}`,
+            `coverage review production blocker remediations: ${report.coverage_review.production_apply_blocker_details.length === 0 ? "none" : report.coverage_review.production_apply_blocker_details.map((detail) => `${detail.blocker}: ${detail.remediation}`).join(" | ")}`,
             `coverage review provenance issue rows: ${report.coverage_review.provenance_issue_rows.length}`,
             ...report.coverage_review.provenance_issue_rows.map((row) =>
                 `coverage review provenance issue: ${row.issue} fixture=${row.fixture_id} candidate=${row.candidate_id} reviewed_at=${row.reviewed_at || "none"}`
@@ -3632,9 +3641,14 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         reviewHandoffMissingPaths.length > 0
             ? "missing_review_handoff"
             : provenanceApplyGuard;
+    const productionApplyGuard: WorkflowCandidateReviewCoverageApplyGuard =
+        strictApplyGuard === "ready_to_apply" && reviewHandoffMissingPaths.length > 0
+            ? "missing_review_handoff"
+            : strictApplyGuard;
     const canApply = applyGuard === "ready_to_apply" && input.writePlan.statements.length > 0;
     const strictCanApply = strictApplyGuard === "ready_to_apply" && input.writePlan.statements.length > 0;
     const handoffCanApply = handoffApplyGuard === "ready_to_apply" && input.writePlan.statements.length > 0;
+    const productionCanApply = productionApplyGuard === "ready_to_apply" && input.writePlan.statements.length > 0;
     const applyResult = input.applied
         ? "applied"
         : input.applyRequested
@@ -3662,6 +3676,10 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         !strictApplyBlockers.includes("empty_write_plan")
     ) {
         strictApplyBlockers.push("empty_write_plan");
+    }
+    const productionApplyBlockers: WorkflowCandidateReviewCoverageApplyBlocker[] = [...strictApplyBlockers];
+    if (baseApplyGuard === "ready_to_apply" && reviewHandoffMissingPaths.length > 0) {
+        productionApplyBlockers.push("missing_review_handoff");
     }
     const applyBlockers: WorkflowCandidateReviewCoverageApplyBlocker[] = [
         ...(input.requireReviewProvenance === true ? strictApplyBlockers : baseApplyBlockers),
@@ -3696,6 +3714,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     const applyBlockerDetails = buildApplyBlockerDetails(applyBlockers);
     const handoffApplyBlockerDetails = buildApplyBlockerDetails(handoffApplyBlockers);
     const strictApplyBlockerDetails = buildApplyBlockerDetails(strictApplyBlockers);
+    const productionApplyBlockerDetails = buildApplyBlockerDetails(productionApplyBlockers);
     const factIdByFixtureId = new Map<string, string>();
     for (const fact of input.projection.facts) {
         const fixtureId = fact.properties.fixture_id;
@@ -3763,6 +3782,10 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         strict_can_apply: strictCanApply,
         strict_apply_blockers: strictApplyBlockers,
         strict_apply_blocker_details: strictApplyBlockerDetails,
+        production_apply_guard: productionApplyGuard,
+        production_can_apply: productionCanApply,
+        production_apply_blockers: productionApplyBlockers,
+        production_apply_blocker_details: productionApplyBlockerDetails,
         next_action: workflowCandidateReviewCoverageGuardNextAction(applyGuard),
         post_apply_recheck_command: workflowCandidateReviewCoverageRecheckCommand({
             ...(input.sourceKind === undefined ? {} : { sourceKind: input.sourceKind }),

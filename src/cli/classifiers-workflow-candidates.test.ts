@@ -2004,6 +2004,14 @@ describe("classifiers workflow-candidates", () => {
                 count: 6,
                 remediation: "Add reviewer and valid reviewed-at metadata or rerun without strict provenance.",
             }],
+            production_apply_guard: "missing_review_provenance",
+            production_can_apply: false,
+            production_apply_blockers: ["missing_review_provenance"],
+            production_apply_blocker_details: [{
+                blocker: "missing_review_provenance",
+                count: 6,
+                remediation: "Add reviewer and valid reviewed-at metadata or rerun without strict provenance.",
+            }],
             next_action: "Run the apply command after confirming the review pack is intentional.",
             reviewed_fixture_ids: [
                 "workflow-candidate-review-coverage/new/a",
@@ -2050,6 +2058,8 @@ describe("classifiers workflow-candidates", () => {
         expect(text).toContain("coverage review handoff missing paths: none");
         expect(text).toContain("coverage review handoff apply guard: ready_to_apply");
         expect(text).toContain("coverage review handoff can apply: yes");
+        expect(text).toContain("coverage review production apply guard: missing_review_provenance");
+        expect(text).toContain("coverage review production can apply: no");
         const incompleteHandoff = buildWorkflowCandidateReviewCoverageApplySummary({
             rows,
             sourcePath: ".ax/experiments/reviewed-coverage-gaps.jsonl",
@@ -2073,6 +2083,12 @@ describe("classifiers workflow-candidates", () => {
             count: 4,
             remediation: "Run the review handoff command with review facts, write plan, rendered brief, and synced brief paths before applying.",
         }]);
+        expect(incompleteHandoff.production_apply_guard).toBe("missing_review_provenance");
+        expect(incompleteHandoff.production_can_apply).toBe(false);
+        expect(incompleteHandoff.production_apply_blockers).toEqual([
+            "missing_review_provenance",
+            "missing_review_handoff",
+        ]);
         const requiredIncompleteHandoff = buildWorkflowCandidateReviewCoverageApplySummary({
             rows,
             sourcePath: ".ax/experiments/reviewed-coverage-gaps.jsonl",
