@@ -2009,6 +2009,8 @@ describe("classifiers workflow-candidates", () => {
         expect(summary.review_write_plan_path).toBe(".ax/experiments/reviewed-coverage-write-plan.json");
         expect(summary.review_brief_path).toBe(".ax/experiments/reviewed-coverage.md");
         expect(summary.synced_review_brief_path).toBe(".ax/experiments/reviewed-coverage-edited.md");
+        expect(summary.review_handoff_status).toBe("complete_review_handoff");
+        expect(summary.review_handoff_missing_paths).toEqual([]);
         const text = renderWorkflowCandidateReviewCoverageText({
             schema: "ax.workflow_candidate_review_coverage.v1",
             source_kind: "hybrid_window_classifier_projection",
@@ -2033,6 +2035,23 @@ describe("classifiers workflow-candidates", () => {
         expect(text).toContain("coverage review write plan path: .ax/experiments/reviewed-coverage-write-plan.json");
         expect(text).toContain("coverage review brief path: .ax/experiments/reviewed-coverage.md");
         expect(text).toContain("coverage review synced brief path: .ax/experiments/reviewed-coverage-edited.md");
+        expect(text).toContain("coverage review handoff status: complete_review_handoff");
+        expect(text).toContain("coverage review handoff missing paths: none");
+        const incompleteHandoff = buildWorkflowCandidateReviewCoverageApplySummary({
+            rows,
+            sourcePath: ".ax/experiments/reviewed-coverage-gaps.jsonl",
+            projection,
+            writePlan,
+            applyRequested: false,
+            applied: false,
+        });
+        expect(incompleteHandoff.review_handoff_status).toBe("incomplete_review_handoff");
+        expect(incompleteHandoff.review_handoff_missing_paths).toEqual([
+            "review_facts_path",
+            "review_write_plan_path",
+            "review_brief_path",
+            "synced_review_brief_path",
+        ]);
         expect(summary.projected_fact_ids).toHaveLength(3);
         expect(summary.apply_audit_rows).toEqual([
             {

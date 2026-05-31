@@ -249,6 +249,16 @@ export interface WorkflowCandidateReviewCoveragePostApplyRecheckSummary {
     readonly command: string;
 }
 
+export type WorkflowCandidateReviewCoverageHandoffStatus =
+    | "complete_review_handoff"
+    | "incomplete_review_handoff";
+
+export type WorkflowCandidateReviewCoverageHandoffMissingPath =
+    | "review_brief_path"
+    | "review_facts_path"
+    | "review_write_plan_path"
+    | "synced_review_brief_path";
+
 export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly schema: "ax.workflow_candidate_review_readiness.v1";
     readonly source_path: string;
@@ -256,6 +266,8 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly review_write_plan_path?: string;
     readonly review_brief_path?: string;
     readonly synced_review_brief_path?: string;
+    readonly review_handoff_status: WorkflowCandidateReviewCoverageHandoffStatus;
+    readonly review_handoff_missing_paths: readonly WorkflowCandidateReviewCoverageHandoffMissingPath[];
     readonly apply_requested: boolean;
     readonly applied: boolean;
     readonly apply_result: "not_requested" | "blocked" | "applied";
@@ -1866,6 +1878,8 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             ...(report.coverage_review.synced_review_brief_path === undefined ? [] : [
                 `coverage review synced brief path: ${report.coverage_review.synced_review_brief_path}`,
             ]),
+            `coverage review handoff status: ${report.coverage_review.review_handoff_status}`,
+            `coverage review handoff missing paths: ${report.coverage_review.review_handoff_missing_paths.length === 0 ? "none" : report.coverage_review.review_handoff_missing_paths.join(", ")}`,
             `coverage review fixtures: ${report.coverage_review.reviewed_fixture_count} reviewed, ${report.coverage_review.pending_fixture_count} pending`,
             `coverage review sync: synced=${report.coverage_review.synced_fixture_count} unknown=${report.coverage_review.unknown_fixture_count}`,
             `coverage review provenance stamp: reviewer=${report.coverage_review.stamped_reviewer_count} reviewed_at=${report.coverage_review.stamped_reviewed_at_count}`,
@@ -3478,6 +3492,20 @@ const workflowCandidateReviewCoverageProvenanceIssueRows = (
     }));
 });
 
+const workflowCandidateReviewCoverageHandoffMissingPaths = (input: {
+    readonly reviewFactsPath?: string;
+    readonly reviewWritePlanPath?: string;
+    readonly reviewBriefPath?: string;
+    readonly syncedReviewBriefPath?: string;
+}): WorkflowCandidateReviewCoverageHandoffMissingPath[] => {
+    const missing: WorkflowCandidateReviewCoverageHandoffMissingPath[] = [];
+    if (input.reviewFactsPath === undefined) missing.push("review_facts_path");
+    if (input.reviewWritePlanPath === undefined) missing.push("review_write_plan_path");
+    if (input.reviewBriefPath === undefined) missing.push("review_brief_path");
+    if (input.syncedReviewBriefPath === undefined) missing.push("synced_review_brief_path");
+    return missing;
+};
+
 export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     readonly rows: readonly WorkflowCandidateTopicClassifierFixtureRow[];
     readonly sourcePath: string;
@@ -3616,6 +3644,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         }];
     });
     const provenanceIssueRows = workflowCandidateReviewCoverageProvenanceIssueRows(reviewedRows);
+    const reviewHandoffMissingPaths = workflowCandidateReviewCoverageHandoffMissingPaths(input);
     return {
         schema: "ax.workflow_candidate_review_readiness.v1",
         source_path: input.sourcePath,
@@ -3623,6 +3652,10 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         ...(input.reviewWritePlanPath === undefined ? {} : { review_write_plan_path: input.reviewWritePlanPath }),
         ...(input.reviewBriefPath === undefined ? {} : { review_brief_path: input.reviewBriefPath }),
         ...(input.syncedReviewBriefPath === undefined ? {} : { synced_review_brief_path: input.syncedReviewBriefPath }),
+        review_handoff_status: reviewHandoffMissingPaths.length === 0
+            ? "complete_review_handoff"
+            : "incomplete_review_handoff",
+        review_handoff_missing_paths: reviewHandoffMissingPaths,
         apply_requested: input.applyRequested,
         applied: input.applied,
         apply_result: applyResult,
