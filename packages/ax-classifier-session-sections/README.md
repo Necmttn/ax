@@ -84,6 +84,10 @@ Section outputs:
   reviewable routing, hard-negative, nearest-neighbor, and dedupe artifacts.
 - `embedding_helper_review_status.py` syncs and evaluates accepted/rejected
   embedding-helper hard-negative and dedupe review statuses from Markdown.
+- `embedding_helper_export.py` exports only accepted embedding-helper
+  hard-negatives as append-ready fixture rows and accepted dedupe clusters as
+  graph evidence aggregation hints; pending review writes an empty blocked
+  export report.
 - `embedding_helper_graph_projection.py` projects reviewed embedding helper
   routing, hard-negative, nearest-neighbor, and dedupe evidence into graph-ready
   facts plus a Surreal write plan.
@@ -131,6 +135,7 @@ bun run classifiers:setfit-robustness -- --fixtures=packages/ax-classifier-sessi
 bun run classifiers:frozen-embedding -- --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --model=sentence-transformers/all-MiniLM-L6-v2 --classifier=svm --label-mode=coarse --seeds=7,13,42 --calibration-threshold=0.4 --routing-thresholds=none,0.2,0.3,0.4 --nearest-neighbors=5 --dedupe-threshold=0.92 --hard-negative-limit=10 --out=.ax/experiments/frozen-embedding-helper-svm-current.json
 bun run classifiers:embedding-helper-review -- --report=.ax/experiments/frozen-embedding-helper-svm-current.json --out=.ax/experiments/embedding-helper-review-current.json --brief=.ax/experiments/embedding-helper-review-current.md --summary=.ax/experiments/embedding-helper-review-current-report.json --min-positive-recall=0.9
 bun run classifiers:embedding-helper-review-status -- --review=.ax/experiments/embedding-helper-review-current.json --brief=.ax/experiments/embedding-helper-review-current.md --out=.ax/experiments/embedding-helper-review-status-current.json --mode=sync
+bun run classifiers:embedding-helper-export -- --review=.ax/experiments/embedding-helper-review-current.json --status=.ax/experiments/embedding-helper-review-status-current.json --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --out=.ax/experiments/embedding-helper-fixture-append-current.jsonl --hints=.ax/experiments/embedding-helper-dedupe-hints-current.json --report=.ax/experiments/embedding-helper-export-current-report.json
 bun run classifiers:embedding-helper-graph-projection -- --review=.ax/experiments/embedding-helper-review-current.json --out=.ax/experiments/embedding-helper-graph-projection-current.json --write-plan=.ax/experiments/embedding-helper-graph-write-plan-current.json
 bun run classifiers:relabel-audit -- --robustness=.ax/experiments/setfit-robustness-fixed-fold.json --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --out=.ax/experiments/setfit-relabel-audit.json
 bun run classifiers:blind-label-review -- --fixtures=.ax/experiments/blind-session-section-fixtures-e46.jsonl --review=.ax/experiments/blind-session-section-label-review-e49.json --brief=.ax/experiments/blind-session-section-label-review-e49.md --labeled-out=.ax/experiments/blind-session-section-fixtures-e49-labeled.jsonl --out=.ax/experiments/blind-session-section-label-review-e49-report.json --mode=generate

@@ -10881,6 +10881,68 @@ Decision:
   negatives as append-ready fixture rows and accepted dedupe clusters as graph
   evidence aggregation hints, while doing nothing when review is still pending.
 
+## E215 - Embedding Helper Accepted Export Gate
+
+Question:
+
+- Can accepted embedding-helper review decisions become reusable fixture rows
+  and graph aggregation hints without leaking pending review into training data?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/embedding_helper_export.py`.
+- Added `packages/ax-classifier-session-sections/embedding_helper_export_test.py`.
+- Added `bun run classifiers:embedding-helper-export`.
+- Added package operation `embedding-helper-export`.
+- The exporter:
+  - reads the embedding-helper review artifact and review-status report
+  - blocks unless status decision is `ready_for_embedding_helper_export`
+  - joins accepted hard-negative candidates back to
+    `eval-fixtures/chunks.jsonl` so append rows contain the original fixture
+    text
+  - emits accepted hard negatives as `label: none`, `target: none`
+    append-ready rows with source fixture id, original label, review notes,
+    SVM confidence/margin, and nearest-neighbor evidence
+  - emits accepted dedupe clusters as `count_as_single_evidence_cluster` graph
+    aggregation hints
+  - writes empty fixture/hint artifacts when review is still pending
+
+Command:
+
+```sh
+bun run classifiers:embedding-helper-export -- --review=.ax/experiments/embedding-helper-review-e210.json --status=.ax/experiments/embedding-helper-review-status-e213.json --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --out=.ax/experiments/embedding-helper-fixture-append-e215.jsonl --hints=.ax/experiments/embedding-helper-dedupe-hints-e215.json --report=.ax/experiments/embedding-helper-export-e215-report.json --json
+```
+
+Artifacts:
+
+- `.ax/experiments/embedding-helper-fixture-append-e215.jsonl`
+- `.ax/experiments/embedding-helper-dedupe-hints-e215.json`
+- `.ax/experiments/embedding-helper-export-e215-report.json`
+
+Results:
+
+- Command exit status: `1`, expected while E213 review is pending.
+- Report schema: `ax.embedding_helper_export_report.v1`
+- Review decision: `ready_for_helper_review`
+- Status decision: `needs_embedding_helper_review`
+- Accepted hard negatives: `0`
+- Exported fixture rows: `0`
+- Accepted dedupe clusters: `0`
+- Exported dedupe hints: `0`
+- Fixture append file lines: `0`
+- Failure: `embedding helper review is not ready for export`
+- JSON validation passed for report and hints artifacts.
+
+Decision:
+
+- E215 closes the helper-review loop without weakening the review gate. The
+  package now has a concrete export path for future accepted hard negatives and
+  dedupe hints, but the current artifacts correctly produce no training rows
+  until a human accepts/rejects the 15 hard negatives and one dedupe cluster.
+- The next useful slice is a small checkpoint/index table for this long goal
+  doc, or a reviewer workflow that makes accepting/rejecting the E210 helper
+  candidates less tedious.
+
 ## E197 - Hybrid Graph Usefulness Gate
 
 Question:
