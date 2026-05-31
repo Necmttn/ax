@@ -29,7 +29,7 @@ artifact path as the evidence to inspect before trusting any summary row.
 | Blind/review workflow | E46-E65+ | `.ax/experiments/blind-workflow-status-e57.json` and related review artifacts | Human review is mandatory before fixtures or graph facts are promoted. | Pending where review rows are incomplete. | Earlier experiment log | Prefer review queues/workspaces over automatic label edits. |
 | Transcript graph projection | E155-E157 | `.ax/experiments/transcript-candidate-graph-projection-e155.json`, `.ax/experiments/workflow-candidate-report-e156.json`, `.ax/experiments/workflow-candidate-cli-e157.json` | Real persisted classifier facts can become graph-backed workflow candidates. | Passed for projection/query; still needs product review filters and proposal gates. | E155/E156/E157 commits in log | Use graph facts for evidence-backed workflow/harness discovery. |
 | Proposal lifecycle | E168-E208 | `.ax/experiments/workflow-candidate-proposal-list-e168.json`, `.ax/experiments/classifier-package-execution-write-plan-e208.json` | Classifier-derived workflow proposals are discoverable and lifecycle-tracked. | Passed for visibility/lifecycle plumbing; promotion remains review-gated. | Recent proposal lifecycle commits | Continue using review and ready-smoke gates before guidance/harness changes. |
-| Embedding/SVM helper layer | E209-E224 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/embedding-helper-review-batch-e216-report.json`, `.ax/experiments/embedding-helper-review-progress-e218.json`, `.ax/experiments/classifier-package-execution-embedding-helper-export-preview-e221.json`, `.ax/experiments/classifier-package-execution-embedding-helper-review-progress-e223.json`, `.ax/experiments/embedding-helper-review-copy-sync-e224-report.json`, `.ax/experiments/embedding-helper-export-preview-e224-report.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. | Blocked correctly by pending review: canonical review still has 15 hard negatives and 1 dedupe cluster pending; E224 reviewed-copy smoke reduces pending hard negatives to 10 only in a copy and remains non-appendable. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `65b0b3c`, `4c602d9`, `eeb517c`, `9a6811e`, `31a1b16`, `e41562c`, `0587b67`, `0e0a960`, `3f01787` | Review remaining hard negatives and the dedupe cluster, then sync accepted/rejected statuses to canonical review only after review decisions are acceptable. |
+| Embedding/SVM helper layer | E209-E225 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/embedding-helper-review-batch-e216-report.json`, `.ax/experiments/embedding-helper-review-progress-e218.json`, `.ax/experiments/classifier-package-execution-embedding-helper-export-preview-e221.json`, `.ax/experiments/classifier-package-execution-embedding-helper-review-progress-e223.json`, `.ax/experiments/embedding-helper-review-copy-sync-e224-report.json`, `.ax/experiments/embedding-helper-review-copy-sync-e225-report.json`, `.ax/experiments/embedding-helper-export-preview-e225-report.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. | Blocked correctly by pending review: canonical review still has 15 hard negatives and 1 dedupe cluster pending; reviewed-copy smoke has reduced pending hard negatives to 5 only in copies and remains non-appendable. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `65b0b3c`, `4c602d9`, `eeb517c`, `9a6811e`, `31a1b16`, `e41562c`, `0587b67`, `0e0a960`, `3f01787`, `7bea922` | Review remaining 5 hard negatives and the dedupe cluster, then sync accepted/rejected statuses to canonical review only after review decisions are acceptable. |
 
 Current recommendation:
 
@@ -11538,6 +11538,110 @@ Decision:
 - The next useful slice is a second focused review batch against the reviewed
   copy, so the remaining hard-negative queue can continue shrinking before
   any appendable export is attempted.
+
+## E225 - Second Embedding Helper Reviewed Copy Smoke
+
+Question:
+
+- Can a second focused review batch shrink the embedding-helper hard-negative
+  backlog further while keeping canonical E210 unchanged and export
+  non-appendable?
+
+Setup:
+
+- Generated `.ax/experiments/embedding-helper-review-batch-e225.md` from
+  `.ax/experiments/embedding-helper-review-e224-reviewed-copy.json`.
+- The generated batch selected `5` hard negatives from the `10` still pending
+  in the E224 reviewed copy:
+  - `none-commit-request`
+  - `none-next-step`
+  - `none-task-recall`
+  - `none-status-question`
+  - `none-what-embedding`
+
+Review proposal:
+
+- Created `.ax/experiments/embedding-helper-review-batch-e225-reviewed.md`
+  and marked all five selected hard negatives `accepted`.
+- Rationale:
+  - `none-commit-request`: git hygiene request before continuing; the contract
+    treats git hygiene requests as `none` unless they correct a false commit
+    claim.
+  - `none-next-step`: asks for the next item after a completed step; this is
+    conversational status/planning control, not approval or direction.
+  - `none-task-recall`: asks what task was previously given; this is context
+    recall.
+  - `none-status-question`: asks for a brief work status update; this is status
+    and control text.
+  - `none-what-embedding`: asks for an explanation of embeddings and usage; it
+    is explanatory context, not correction, verification, approval, recovery,
+    or environment preference.
+
+Commands:
+
+```sh
+bun run classifiers:embedding-helper-review-batch -- --review=.ax/experiments/embedding-helper-review-e224-reviewed-copy.json --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --batch=.ax/experiments/embedding-helper-review-batch-e225.md --out=.ax/experiments/embedding-helper-review-batch-e225-report.json --limit=5 --json
+bun run classifiers:embedding-helper-review-batch -- --mode=sync --dry-run --review=.ax/experiments/embedding-helper-review-e224-reviewed-copy.json --review-out=.ax/experiments/embedding-helper-review-e225-reviewed-copy.json --batch=.ax/experiments/embedding-helper-review-batch-e225-reviewed.md --out=.ax/experiments/embedding-helper-review-copy-sync-e225-report.json --json
+bun run classifiers:embedding-helper-review-status -- --review=.ax/experiments/embedding-helper-review-e225-reviewed-copy.json --out=.ax/experiments/embedding-helper-review-status-e225-reviewed-copy.json --mode=evaluate --json
+bun run classifiers:embedding-helper-export -- --allow-partial-preview --preview-exit-zero --review=.ax/experiments/embedding-helper-review-e225-reviewed-copy.json --status=.ax/experiments/embedding-helper-review-status-e225-reviewed-copy.json --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --out=.ax/experiments/embedding-helper-fixture-preview-e225.jsonl --hints=.ax/experiments/embedding-helper-dedupe-preview-e225.json --report=.ax/experiments/embedding-helper-export-preview-e225-report.json --json
+```
+
+Artifacts:
+
+- `.ax/experiments/embedding-helper-review-batch-e225.md`
+- `.ax/experiments/embedding-helper-review-batch-e225-reviewed.md`
+- `.ax/experiments/embedding-helper-review-batch-e225-report.json`
+- `.ax/experiments/embedding-helper-review-e225-reviewed-copy.json`
+- `.ax/experiments/embedding-helper-review-copy-sync-e225-report.json`
+- `.ax/experiments/embedding-helper-review-status-e225-reviewed-copy.json`
+- `.ax/experiments/embedding-helper-fixture-preview-e225.jsonl`
+- `.ax/experiments/embedding-helper-dedupe-preview-e225.json`
+- `.ax/experiments/embedding-helper-export-preview-e225-report.json`
+
+Results:
+
+- Batch generation:
+  - decision: `embedding_helper_review_batch_ready`
+  - selected hard negatives: `5`
+  - pending hard negatives before sync: `10`
+  - pending dedupe clusters before sync: `1`
+- Copy-sync report:
+  - mode: `sync`
+  - `dry_run`: `true`
+  - `would_write_review`: `false`
+  - `would_write_canonical_review`: `false`
+  - `wrote_review_out`: `true`
+  - decision: `needs_embedding_helper_review`
+  - hard negatives accepted/rejected/pending: `7/3/5`
+  - dedupe accepted/rejected/pending: `0/0/1`
+- Reviewed-copy status report:
+  - decision: `needs_embedding_helper_review`
+  - hard negatives accepted/rejected/pending: `7/3/5`
+  - dedupe accepted/rejected/pending: `0/0/1`
+- Partial preview export:
+  - decision: `partial_embedding_helper_export_preview`
+  - `partial_preview`: `true`
+  - `appendable`: `false`
+  - accepted hard negatives: `7`
+  - exported fixture rows: `7`
+  - accepted dedupe clusters: `0`
+  - exported dedupe hints: `0`
+- Review checksums:
+  - canonical E210: `5997295b73027794bae2c598a5207733eb75c8a9da95ae6f6fa2787c8423a541`
+  - E224 reviewed copy: `7b9921bfe07b153cd22ad98666926fc2c4a20aa4b0fd40942cb18accea58c731`
+  - E225 reviewed copy: `f41d3dc03ca8e9b2e982dd2a30709d4cd462d74c9164c0b9de5c64d965d152d3`
+
+Decision:
+
+- E225 continues the review-throughput path without weakening safety. The
+  reviewed-copy backlog is now down to `5` hard negatives plus `1` dedupe
+  cluster, while canonical E210 remains unchanged.
+- The preview export now shows the likely accepted fixture append rows at `7`
+  rows, but the report remains `appendable: false` because review is still
+  incomplete.
+- The next useful slice is the final hard-negative batch plus the dedupe
+  cluster. After that, a human can decide whether to apply the reviewed-copy
+  statuses back to canonical E210.
 
 ## E197 - Hybrid Graph Usefulness Gate
 
