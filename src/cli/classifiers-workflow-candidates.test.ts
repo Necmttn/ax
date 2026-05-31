@@ -2013,6 +2013,10 @@ describe("classifiers workflow-candidates", () => {
         expect(summary.synced_review_brief_path).toBe(".ax/experiments/reviewed-coverage-edited.md");
         expect(summary.review_handoff_status).toBe("complete_review_handoff");
         expect(summary.review_handoff_missing_paths).toEqual([]);
+        expect(summary.handoff_apply_guard).toBe("ready_to_apply");
+        expect(summary.handoff_can_apply).toBe(true);
+        expect(summary.handoff_apply_blockers).toEqual([]);
+        expect(summary.handoff_apply_blocker_details).toEqual([]);
         const text = renderWorkflowCandidateReviewCoverageText({
             schema: "ax.workflow_candidate_review_coverage.v1",
             source_kind: "hybrid_window_classifier_projection",
@@ -2039,6 +2043,8 @@ describe("classifiers workflow-candidates", () => {
         expect(text).toContain("coverage review synced brief path: .ax/experiments/reviewed-coverage-edited.md");
         expect(text).toContain("coverage review handoff status: complete_review_handoff");
         expect(text).toContain("coverage review handoff missing paths: none");
+        expect(text).toContain("coverage review handoff apply guard: ready_to_apply");
+        expect(text).toContain("coverage review handoff can apply: yes");
         const incompleteHandoff = buildWorkflowCandidateReviewCoverageApplySummary({
             rows,
             sourcePath: ".ax/experiments/reviewed-coverage-gaps.jsonl",
@@ -2054,6 +2060,14 @@ describe("classifiers workflow-candidates", () => {
             "review_brief_path",
             "synced_review_brief_path",
         ]);
+        expect(incompleteHandoff.handoff_apply_guard).toBe("missing_review_handoff");
+        expect(incompleteHandoff.handoff_can_apply).toBe(false);
+        expect(incompleteHandoff.handoff_apply_blockers).toEqual(["missing_review_handoff"]);
+        expect(incompleteHandoff.handoff_apply_blocker_details).toEqual([{
+            blocker: "missing_review_handoff",
+            count: 4,
+            remediation: "Run the review handoff command with review facts, write plan, rendered brief, and synced brief paths before applying.",
+        }]);
         const requiredIncompleteHandoff = buildWorkflowCandidateReviewCoverageApplySummary({
             rows,
             sourcePath: ".ax/experiments/reviewed-coverage-gaps.jsonl",

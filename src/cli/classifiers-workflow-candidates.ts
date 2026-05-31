@@ -271,6 +271,10 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly synced_review_brief_path?: string;
     readonly review_handoff_status: WorkflowCandidateReviewCoverageHandoffStatus;
     readonly review_handoff_missing_paths: readonly WorkflowCandidateReviewCoverageHandoffMissingPath[];
+    readonly handoff_apply_guard: WorkflowCandidateReviewCoverageApplyGuard;
+    readonly handoff_can_apply: boolean;
+    readonly handoff_apply_blockers: readonly WorkflowCandidateReviewCoverageApplyBlocker[];
+    readonly handoff_apply_blocker_details: readonly WorkflowCandidateReviewCoverageApplyBlockerDetail[];
     readonly apply_requested: boolean;
     readonly applied: boolean;
     readonly apply_result: "not_requested" | "blocked" | "applied";
@@ -1883,6 +1887,8 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             ]),
             `coverage review handoff status: ${report.coverage_review.review_handoff_status}`,
             `coverage review handoff missing paths: ${report.coverage_review.review_handoff_missing_paths.length === 0 ? "none" : report.coverage_review.review_handoff_missing_paths.join(", ")}`,
+            `coverage review handoff apply guard: ${report.coverage_review.handoff_apply_guard}`,
+            `coverage review handoff can apply: ${report.coverage_review.handoff_can_apply ? "yes" : "no"}`,
             `coverage review fixtures: ${report.coverage_review.reviewed_fixture_count} reviewed, ${report.coverage_review.pending_fixture_count} pending`,
             `coverage review sync: synced=${report.coverage_review.synced_fixture_count} unknown=${report.coverage_review.unknown_fixture_count}`,
             `coverage review provenance stamp: reviewer=${report.coverage_review.stamped_reviewer_count} reviewed_at=${report.coverage_review.stamped_reviewed_at_count}`,
@@ -3589,6 +3595,10 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         baseApplyGuard === "ready_to_apply" && provenanceStatus === "missing_review_provenance"
             ? "missing_review_provenance"
             : baseApplyGuard;
+    const handoffApplyGuard: WorkflowCandidateReviewCoverageApplyGuard =
+        baseApplyGuard === "ready_to_apply" && reviewHandoffMissingPaths.length > 0
+            ? "missing_review_handoff"
+            : baseApplyGuard;
     const provenanceApplyGuard = input.requireReviewProvenance === true ? strictApplyGuard : baseApplyGuard;
     const applyGuard: WorkflowCandidateReviewCoverageApplyGuard =
         provenanceApplyGuard === "ready_to_apply" &&
@@ -3598,6 +3608,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
             : provenanceApplyGuard;
     const canApply = applyGuard === "ready_to_apply" && input.writePlan.statements.length > 0;
     const strictCanApply = strictApplyGuard === "ready_to_apply" && input.writePlan.statements.length > 0;
+    const handoffCanApply = handoffApplyGuard === "ready_to_apply" && input.writePlan.statements.length > 0;
     const applyResult = input.applied
         ? "applied"
         : input.applyRequested
@@ -3610,6 +3621,10 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     if (smokeMarkerCount > 0) baseApplyBlockers.push("blocked_smoke_review");
     if (baseApplyGuard === "ready_to_apply" && input.writePlan.statements.length === 0) {
         baseApplyBlockers.push("empty_write_plan");
+    }
+    const handoffApplyBlockers: WorkflowCandidateReviewCoverageApplyBlocker[] = [...baseApplyBlockers];
+    if (baseApplyGuard === "ready_to_apply" && reviewHandoffMissingPaths.length > 0) {
+        handoffApplyBlockers.push("missing_review_handoff");
     }
     const strictApplyBlockers: WorkflowCandidateReviewCoverageApplyBlocker[] = [...baseApplyBlockers];
     if (baseApplyGuard === "ready_to_apply" && provenanceStatus === "missing_review_provenance") {
@@ -3653,6 +3668,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         }
     });
     const applyBlockerDetails = buildApplyBlockerDetails(applyBlockers);
+    const handoffApplyBlockerDetails = buildApplyBlockerDetails(handoffApplyBlockers);
     const strictApplyBlockerDetails = buildApplyBlockerDetails(strictApplyBlockers);
     const factIdByFixtureId = new Map<string, string>();
     for (const fact of input.projection.facts) {
@@ -3685,6 +3701,10 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
             ? "complete_review_handoff"
             : "incomplete_review_handoff",
         review_handoff_missing_paths: reviewHandoffMissingPaths,
+        handoff_apply_guard: handoffApplyGuard,
+        handoff_can_apply: handoffCanApply,
+        handoff_apply_blockers: handoffApplyBlockers,
+        handoff_apply_blocker_details: handoffApplyBlockerDetails,
         apply_requested: input.applyRequested,
         applied: input.applied,
         apply_result: applyResult,
