@@ -14,6 +14,14 @@ import {
     surrealOptionString,
     surrealString,
 } from "../lib/shared/surql.ts";
+import {
+    ClassifierReviewPipelineService,
+    ClassifierReviewPipelineServiceLive,
+    type ClassifierReviewPipelineInputValues,
+    type ClassifierReviewPipelineLifecycleReport,
+    type ClassifierReviewPipelineOutputVerifier,
+    nodeFileOutputVerifier,
+} from "../classifiers/review-pipeline-service.ts";
 import { catchDbErrorAndExit } from "./output.ts";
 
 export type WorkflowCandidateTaskLikeMode = "include" | "exclude" | "only";
@@ -54,6 +62,10 @@ export interface WorkflowCandidateCommandInput {
     readonly requireReviewHandoff?: boolean;
     readonly reviewProvenanceReviewer?: string;
     readonly reviewProvenanceReviewedAt?: string;
+    readonly reviewPipelineLifecycle?: boolean;
+    readonly reviewPipelineVerifyOutputs?: boolean;
+    readonly reviewPipelineReviewer?: string;
+    readonly reviewPipelineReviewedAt?: string;
     readonly out?: string;
     readonly brief?: string;
     readonly syncBrief?: string;
@@ -467,6 +479,7 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly review_pipeline_input_bindings: readonly WorkflowCandidateReviewCoveragePipelineInputBinding[];
     readonly review_pipeline_command_argv?: readonly string[];
     readonly review_pipeline_command?: string;
+    readonly review_pipeline_lifecycle?: ClassifierReviewPipelineLifecycleReport;
     readonly provenance_issue_rows: readonly WorkflowCandidateReviewCoverageProvenanceIssueRow[];
     readonly projection_totals: WorkflowCandidateTopicReviewGraphProjection["totals"];
     readonly write_plan_totals: WorkflowCandidateTopicReviewGraphWritePlan["totals"];
@@ -865,6 +878,11 @@ export interface WorkflowCandidateReviewCoverageReport {
     readonly fixture_pack?: WorkflowCandidateReviewCoverageFixtureSummary;
     readonly coverage_review?: WorkflowCandidateReviewCoverageApplySummary;
     readonly decision: "workflow_candidate_review_coverage_ready" | "needs_workflow_candidate_reviews";
+}
+
+export interface WorkflowCandidateReviewPipelineLifecycleOptions {
+    readonly values?: ClassifierReviewPipelineInputValues;
+    readonly verifier?: ClassifierReviewPipelineOutputVerifier;
 }
 
 export interface WorkflowCandidateReport {
@@ -2102,6 +2120,20 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             ]),
             ...(report.coverage_review.review_pipeline_command === undefined ? [] : [
                 `coverage review pipeline command: ${report.coverage_review.review_pipeline_command}`,
+            ]),
+            ...(report.coverage_review.review_pipeline_lifecycle === undefined ? [] : [
+                `coverage review pipeline lifecycle status: ${report.coverage_review.review_pipeline_lifecycle.status}`,
+                `coverage review pipeline lifecycle can execute: ${report.coverage_review.review_pipeline_lifecycle.can_execute ? "yes" : "no"}`,
+                `coverage review pipeline lifecycle can continue: ${report.coverage_review.review_pipeline_lifecycle.can_continue ? "yes" : "no"}`,
+                `coverage review pipeline lifecycle next action: ${report.coverage_review.review_pipeline_lifecycle.next_action}`,
+                `coverage review pipeline prepared status: ${report.coverage_review.review_pipeline_lifecycle.prepared.status}`,
+                ...(report.coverage_review.review_pipeline_lifecycle.prepared.argv === undefined ? [] : [
+                    `coverage review pipeline prepared argv: ${report.coverage_review.review_pipeline_lifecycle.prepared.argv.join(" | ")}`,
+                ]),
+                ...(report.coverage_review.review_pipeline_lifecycle.output_verification === undefined ? [] : [
+                    `coverage review pipeline output verification status: ${report.coverage_review.review_pipeline_lifecycle.output_verification.status}`,
+                    `coverage review pipeline missing required outputs: ${report.coverage_review.review_pipeline_lifecycle.output_verification.missing_required_artifacts.length === 0 ? "none" : report.coverage_review.review_pipeline_lifecycle.output_verification.missing_required_artifacts.join(", ")}`,
+                ]),
             ]),
             ...(report.coverage_review.review_issue_repair_command === undefined ? [] : [
                 `coverage review issue repair command: ${report.coverage_review.review_issue_repair_command}`,
@@ -3607,6 +3639,23 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
     }
     return `${lines.join("\n").trimEnd()}\n`;
 }
+
+export const withWorkflowCandidateReviewPipelineLifecycle = (
+    report: WorkflowCandidateReviewCoverageReport,
+    options: WorkflowCandidateReviewPipelineLifecycleOptions = {},
+): Effect.Effect<WorkflowCandidateReviewCoverageReport> =>
+    Effect.gen(function* () {
+        if (report.coverage_review === undefined) return report;
+        const pipeline = yield* ClassifierReviewPipelineService;
+        const lifecycle = yield* pipeline.commandLifecycle(report.coverage_review, options);
+        return {
+            ...report,
+            coverage_review: {
+                ...report.coverage_review,
+                review_pipeline_lifecycle: lifecycle,
+            },
+        };
+    }).pipe(Effect.provide(ClassifierReviewPipelineServiceLive));
 
 export function syncWorkflowCandidateFixtureRowsFromBrief(
     rows: readonly WorkflowCandidateTopicClassifierFixtureRow[],
@@ -5735,6 +5784,20 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     coverage_review: applySummary,
                 };
                 if (input.applyReviewFacts && !pendingApplySummary.can_apply) process.exitCode = 1;
+            }
+            if (input.reviewPipelineLifecycle) {
+                const values: ClassifierReviewPipelineInputValues = {
+                    ...(input.reviewPipelineReviewer === undefined
+                        ? input.reviewProvenanceReviewer === undefined ? {} : { reviewer: input.reviewProvenanceReviewer }
+                        : { reviewer: input.reviewPipelineReviewer }),
+                    ...(input.reviewPipelineReviewedAt === undefined
+                        ? input.reviewProvenanceReviewedAt === undefined ? {} : { reviewed_at: input.reviewProvenanceReviewedAt }
+                        : { reviewed_at: input.reviewPipelineReviewedAt }),
+                };
+                report = yield* withWorkflowCandidateReviewPipelineLifecycle(report, {
+                    values,
+                    ...(input.reviewPipelineVerifyOutputs ? { verifier: nodeFileOutputVerifier } : {}),
+                });
             }
             if (input.out) {
                 mkdirSync(dirname(input.out), { recursive: true });

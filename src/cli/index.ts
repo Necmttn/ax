@@ -1942,6 +1942,10 @@ const classifiersWorkflowCandidatesCommand = Command.make(
         requireReviewHandoff: Flag.boolean("require-review-handoff").pipe(Flag.withDefault(false)),
         reviewProvenanceReviewer: Flag.string("review-provenance-reviewer").pipe(Flag.optional),
         reviewProvenanceReviewedAt: Flag.string("review-provenance-reviewed-at").pipe(Flag.optional),
+        reviewPipelineLifecycle: Flag.boolean("review-pipeline-lifecycle").pipe(Flag.withDefault(false)),
+        reviewPipelineVerifyOutputs: Flag.boolean("review-pipeline-verify-outputs").pipe(Flag.withDefault(false)),
+        reviewPipelineReviewer: Flag.string("review-pipeline-reviewer").pipe(Flag.optional),
+        reviewPipelineReviewedAt: Flag.string("review-pipeline-reviewed-at").pipe(Flag.optional),
         limit: positiveLimit(10),
         examples: Flag.integer("examples").pipe(Flag.withDefault(3)),
         out: Flag.string("out").pipe(Flag.optional),
@@ -1959,7 +1963,7 @@ const classifiersWorkflowCandidatesCommand = Command.make(
         proposalSection: Flag.string("proposal-section").pipe(Flag.optional),
         json: jsonFlag,
     },
-    ({ sourceKind, action, classifier, search, taskLike, topicReport, listProposals, listHarnessFacts, reviewCoverage, includeHarnessFacts, includeHelperFacts, includeReviewFacts, proposalStatus, expandEvidence, evidencePack, classifierFixturePack, coverageFixturePack, coverageReviewPack, coverageReviewBrief, syncCoverageReviewBrief, harnessFacts, harnessWritePlan, applyHarnessFacts, reviewFacts, reviewWritePlan, applyReviewFacts, requireReviewProvenance, requireReviewHandoff, reviewProvenanceReviewer, reviewProvenanceReviewedAt, limit, examples, out, brief, syncBrief, promoteTasks, emitAdjacentTasks, promoteHarnessProposals, requireHarnessChecks, promoteProposals, proposalDryRun, promotionMode, taskDir, proposalTarget, proposalSection, json }) => {
+    ({ sourceKind, action, classifier, search, taskLike, topicReport, listProposals, listHarnessFacts, reviewCoverage, includeHarnessFacts, includeHelperFacts, includeReviewFacts, proposalStatus, expandEvidence, evidencePack, classifierFixturePack, coverageFixturePack, coverageReviewPack, coverageReviewBrief, syncCoverageReviewBrief, harnessFacts, harnessWritePlan, applyHarnessFacts, reviewFacts, reviewWritePlan, applyReviewFacts, requireReviewProvenance, requireReviewHandoff, reviewProvenanceReviewer, reviewProvenanceReviewedAt, reviewPipelineLifecycle, reviewPipelineVerifyOutputs, reviewPipelineReviewer, reviewPipelineReviewedAt, limit, examples, out, brief, syncBrief, promoteTasks, emitAdjacentTasks, promoteHarnessProposals, requireHarnessChecks, promoteProposals, proposalDryRun, promotionMode, taskDir, proposalTarget, proposalSection, json }) => {
         const actionValue = optionValue(action);
         const classifierValue = optionValue(classifier);
         const searchValue = optionValue(search);
@@ -1978,6 +1982,8 @@ const classifiersWorkflowCandidatesCommand = Command.make(
         const reviewWritePlanPath = optionValue(reviewWritePlan);
         const reviewProvenanceReviewerValue = optionValue(reviewProvenanceReviewer);
         const reviewProvenanceReviewedAtValue = optionValue(reviewProvenanceReviewedAt);
+        const reviewPipelineReviewerValue = optionValue(reviewPipelineReviewer);
+        const reviewPipelineReviewedAtValue = optionValue(reviewPipelineReviewedAt);
         const taskDirPath = optionValue(taskDir);
         const proposalTargetPath = optionValue(proposalTarget);
         const proposalSectionValue = optionValue(proposalSection);
@@ -2014,6 +2020,10 @@ const classifiersWorkflowCandidatesCommand = Command.make(
             requireReviewHandoff,
             ...(reviewProvenanceReviewerValue === undefined ? {} : { reviewProvenanceReviewer: reviewProvenanceReviewerValue }),
             ...(reviewProvenanceReviewedAtValue === undefined ? {} : { reviewProvenanceReviewedAt: reviewProvenanceReviewedAtValue }),
+            reviewPipelineLifecycle,
+            reviewPipelineVerifyOutputs,
+            ...(reviewPipelineReviewerValue === undefined ? {} : { reviewPipelineReviewer: reviewPipelineReviewerValue }),
+            ...(reviewPipelineReviewedAtValue === undefined ? {} : { reviewPipelineReviewedAt: reviewPipelineReviewedAtValue }),
             ...(outPath === undefined ? {} : { out: outPath }),
             ...(briefPath === undefined ? {} : { brief: briefPath }),
             ...(syncBriefPath === undefined ? {} : { syncBrief: syncBriefPath }),

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { Effect } from "effect";
 import {
     attachWorkflowCandidateProposalEvidence,
     buildWorkflowCandidateReport,
@@ -45,6 +46,7 @@ import {
     syncWorkflowCandidateReportFromBrief,
     syncWorkflowCandidateTopicReportFromBrief,
     topicAdjacentCandidates,
+    withWorkflowCandidateReviewPipelineLifecycle,
     workflowCandidateTopicHarnessGateFailures,
     workflowCandidateScore,
     type WorkflowCandidateEmbeddingHelperGraphEdgeRow,
@@ -2051,7 +2053,7 @@ describe("classifiers workflow-candidates", () => {
         });
     });
 
-    test("reports coverage review pack impact across new existing and unknown candidates", () => {
+    test("reports coverage review pack impact across new existing and unknown candidates", async () => {
         const rows = parseWorkflowCandidateFixtureRowsJsonl([
             JSON.stringify({
                 id: "workflow-candidate-review-coverage/new/a",
@@ -2341,6 +2343,47 @@ describe("classifiers workflow-candidates", () => {
         expect(text).toContain("coverage review pipeline input bindings: reviewer@8=--review-provenance-reviewer:<reviewer>:nonempty_string, reviewed_at@9=--review-provenance-reviewed-at:<reviewed-at-iso>:iso_datetime");
         expect(text).toContain("coverage review pipeline command argv: bun | src/cli/index.ts | classifiers | workflow-candidates | --review-coverage | --source-kind=hybrid_window_classifier_projection | --coverage-review-pack=.ax/experiments/reviewed-coverage-gaps.jsonl | --sync-coverage-review-brief=.ax/experiments/reviewed-coverage-edited.md | --review-provenance-reviewer=<reviewer> | --review-provenance-reviewed-at=<reviewed-at-iso> | --coverage-review-brief=.ax/experiments/reviewed-coverage.md | --out=.ax/experiments/workflow-candidate-review-coverage-post-apply.json | --json");
         expect(text).toContain("coverage review pipeline command: bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/reviewed-coverage-gaps.jsonl --sync-coverage-review-brief=.ax/experiments/reviewed-coverage-edited.md --review-provenance-reviewer=<reviewer> --review-provenance-reviewed-at=<reviewed-at-iso> --coverage-review-brief=.ax/experiments/reviewed-coverage.md --out=.ax/experiments/workflow-candidate-review-coverage-post-apply.json --json");
+        const reportWithLifecycle = await Effect.runPromise(withWorkflowCandidateReviewPipelineLifecycle({
+            schema: "ax.workflow_candidate_review_coverage.v1",
+            source_kind: "hybrid_window_classifier_projection",
+            query: { limit: 10 },
+            candidates: [],
+            totals: {
+                candidate_group_count: 0,
+                returned_candidate_count: 0,
+                reviewed_candidate_count: 0,
+                unreviewed_candidate_count: 0,
+                review_fact_count: 0,
+                rejected_fact_count: 0,
+                accepted_fact_count: 0,
+                deferred_fact_count: 0,
+                revised_fact_count: 0,
+                helper_source_fixture_count: 0,
+            },
+            coverage_review: summary,
+            decision: "needs_workflow_candidate_reviews",
+        }, {
+            values: {
+                reviewer: "necmett",
+                reviewed_at: "2026-05-31T12:34:56.000Z",
+            },
+            verifier: {
+                exists: () => Effect.succeed(false),
+            },
+        }));
+        expect(reportWithLifecycle.coverage_review?.review_pipeline_lifecycle?.status).toBe("missing_required_outputs");
+        expect(reportWithLifecycle.coverage_review?.review_pipeline_lifecycle?.prepared.argv).toContain("--review-provenance-reviewer=necmett");
+        expect(reportWithLifecycle.coverage_review?.review_pipeline_lifecycle?.prepared.argv).toContain("--review-provenance-reviewed-at=2026-05-31T12:34:56.000Z");
+        expect(reportWithLifecycle.coverage_review?.review_pipeline_lifecycle?.output_verification?.missing_required_artifacts).toEqual([
+            ".ax/experiments/reviewed-coverage.md",
+            ".ax/experiments/workflow-candidate-review-coverage-post-apply.json",
+        ]);
+        const lifecycleText = renderWorkflowCandidateReviewCoverageText(reportWithLifecycle);
+        expect(lifecycleText).toContain("coverage review pipeline lifecycle status: missing_required_outputs");
+        expect(lifecycleText).toContain("coverage review pipeline lifecycle can execute: yes");
+        expect(lifecycleText).toContain("coverage review pipeline lifecycle can continue: no");
+        expect(lifecycleText).toContain("coverage review pipeline prepared argv: bun | src/cli/index.ts | classifiers | workflow-candidates | --review-coverage | --source-kind=hybrid_window_classifier_projection | --coverage-review-pack=.ax/experiments/reviewed-coverage-gaps.jsonl | --sync-coverage-review-brief=.ax/experiments/reviewed-coverage-edited.md | --review-provenance-reviewer=necmett | --review-provenance-reviewed-at=2026-05-31T12:34:56.000Z | --coverage-review-brief=.ax/experiments/reviewed-coverage.md | --out=.ax/experiments/workflow-candidate-review-coverage-post-apply.json | --json");
+        expect(lifecycleText).toContain("coverage review pipeline missing required outputs: .ax/experiments/reviewed-coverage.md, .ax/experiments/workflow-candidate-review-coverage-post-apply.json");
         const incompleteHandoff = buildWorkflowCandidateReviewCoverageApplySummary({
             rows,
             sourcePath: ".ax/experiments/reviewed-coverage-gaps.jsonl",
