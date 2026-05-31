@@ -1733,11 +1733,13 @@ describe("classifiers workflow-candidates", () => {
                 { issue: "missing_reviewed_at", count: 1 },
             ],
             review_issue_fixture_count: 1,
+            review_issue_candidate_count: 1,
             review_issue_status: "needs_review_repair",
             review_issue_next_action: "Fix review issue rows before applying reviewed coverage facts.",
         });
         expect(text).toContain("coverage review issue rows: 3");
         expect(text).toContain("coverage review issue fixtures: 1");
+        expect(text).toContain("coverage review issue candidates: 1");
         expect(text).toContain("coverage review issue status: needs_review_repair");
         expect(text).toContain("coverage review issue next action: Fix review issue rows before applying reviewed coverage facts.");
         expect(text).toContain("coverage review issue counts: missing_review_rationale=1, missing_reviewer=1, missing_reviewed_at=1");
@@ -1746,6 +1748,7 @@ describe("classifiers workflow-candidates", () => {
         expect(text).toContain("coverage review issue: missing_reviewed_at fixture=workflow-candidate-review-coverage/verification_or_recovery_signal/a candidate=classifier_candidate_group:hybrid-window/verification_or_recovery_signal status=accept");
         expect(brief).toContain("## Review Issues");
         expect(brief).toContain("- Issue fixtures: `1`");
+        expect(brief).toContain("- Issue candidates: `1`");
         expect(brief).toContain("- Issue status: `needs_review_repair`");
         expect(brief).toContain("- Issue next action: Fix review issue rows before applying reviewed coverage facts.");
         expect(brief).toContain("- Issue counts: `missing_review_rationale=1`, `missing_reviewer=1`, `missing_reviewed_at=1`");
