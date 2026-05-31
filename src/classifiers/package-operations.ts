@@ -496,6 +496,7 @@ export interface ClassifierGraphQuerySuggestion {
     }[];
     readonly repair_argv: readonly string[];
     readonly repair_can_verify: boolean;
+    readonly repair_verification_status: "ready_to_verify" | "not_needed";
     readonly repair_verification_argv: readonly string[];
     readonly repair_query?: ClassifierGraphHealthQuery;
     readonly status: "expected_matches";
@@ -2574,6 +2575,7 @@ export function buildExecutionGraphHealthReport(input: {
                     : [],
                 repair_argv: query.value_equals === querySuggestedValueEquals ? [] : querySuggestedArgv,
                 repair_can_verify: query.value_equals !== querySuggestedValueEquals,
+                repair_verification_status: query.value_equals === querySuggestedValueEquals ? "not_needed" : "ready_to_verify",
                 repair_verification_argv: query.value_equals === querySuggestedValueEquals ? [] : querySuggestedArgv,
                 ...(query.value_equals === querySuggestedValueEquals ? {} : { repair_query: querySuggestedQuery }),
                 status: querySuggestedStatus,

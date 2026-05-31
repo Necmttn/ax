@@ -1308,6 +1308,7 @@ describe("classifier package operations report", () => {
                 "bind_inputs",
             ],
             repair_can_verify: true,
+            repair_verification_status: "ready_to_verify",
             repair_verification_argv: [
                 "bun",
                 "src/cli/index.ts",

@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E407 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-can-verify-no-match-e407.json`
+- Index continuation: E408 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-status-no-match-e408.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-can-verify-match-e407.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-status-match-e408.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,48 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E408 - Expose Suggested Query Repair Verification Status
+
+Question:
+- E407 exposes repair verifiability as a boolean, but can services route and
+  log verification with a stable enum instead of interpreting a boolean?
+
+Implementation:
+- Added `repair_verification_status` to `query_suggestion`.
+- Executable lifecycle graph-query repairs now report `ready_to_verify`.
+- No-op suggestions report `not_needed`.
+- Text graph-health output now renders `query suggestion repair verification
+  status`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-status-no-match-e408.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-status-match-e408.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-status-no-match-e408.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_verification_status=ready_to_verify`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.repair_verification_status=not_needed`.
+- Text output renders `query suggestion repair verification status:
+  ready_to_verify`.
+
+Decision:
+- Services can now route post-repair verification with a stable status enum
+  while retaining `repair_can_verify` as the compact boolean guard.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E408 no-match report has `repair_verification_status=ready_to_verify`.
+- E408 match report has `repair_verification_status=not_needed`.
+- E408 text output includes the repair verification status line.
 
 ## E407 - Expose Suggested Query Repair Verifiability
 
