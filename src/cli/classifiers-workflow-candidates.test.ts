@@ -1637,6 +1637,12 @@ describe("classifiers workflow-candidates", () => {
         const synced = syncWorkflowCandidateFixtureRowsFromBrief(rows, reviewedBrief);
 
         expect(brief).toContain("# Workflow Candidate Coverage Review");
+        expect(brief).toContain("## Review Queue Summary");
+        expect(brief).toContain("- Fixtures: `1`");
+        expect(brief).toContain("- Candidate groups: `1`");
+        expect(brief).toContain("- Pending fixtures: `1`");
+        expect(brief).toContain("## Candidate Queue");
+        expect(brief).toContain("verification_or_recovery_signal");
         expect(brief).toContain("- Fixture id: `workflow-candidate-review-coverage/verification_or_recovery_signal/a`");
         expect(brief).toContain("- Review impact: `new_candidate_review`");
         expect(brief).toContain("- Review status: `pending`");

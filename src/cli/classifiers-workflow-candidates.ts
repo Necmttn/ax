@@ -2675,12 +2675,62 @@ export function parseWorkflowCandidateFixtureRowsJsonl(
 export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
     rows: readonly WorkflowCandidateTopicClassifierFixtureRow[],
 ): string {
+    const candidateSummaries = new Map<string, {
+        readonly label: string;
+        readonly proposed_action: string;
+        readonly fixture_count: number;
+        readonly support_count: number | undefined;
+        readonly evidence_count: number | undefined;
+        readonly score: number | undefined;
+    }>();
+    for (const row of rows) {
+        const existing = candidateSummaries.get(row.candidate_id);
+        candidateSummaries.set(row.candidate_id, {
+            label: row.candidate_label,
+            proposed_action: row.proposed_action,
+            fixture_count: (existing?.fixture_count ?? 0) + 1,
+            support_count: row.candidate_support_count ?? existing?.support_count,
+            evidence_count: row.candidate_evidence_count ?? existing?.evidence_count,
+            score: row.candidate_score ?? existing?.score,
+        });
+    }
+    const sortedCandidateSummaries = [...candidateSummaries.entries()].sort(([, a], [, b]) =>
+        (b.score ?? 0) - (a.score ?? 0) ||
+        (b.support_count ?? 0) - (a.support_count ?? 0) ||
+        (b.evidence_count ?? 0) - (a.evidence_count ?? 0) ||
+        a.label.localeCompare(b.label)
+    );
+    const pendingCount = rows.filter((row) => row.review_status === "pending").length;
+    const reviewedCount = rows.length - pendingCount;
     const lines = [
         "# Workflow Candidate Coverage Review",
         "",
         "Allowed review statuses: `accept`, `revise`, `reject`, `defer`, `pending`.",
         "",
         "Review each fixture and replace `pending` plus `_pending_` with a reviewed status and rationale when ready.",
+        "",
+        "## Review Queue Summary",
+        "",
+        `- Fixtures: \`${rows.length}\``,
+        `- Candidate groups: \`${candidateSummaries.size}\``,
+        `- Pending fixtures: \`${pendingCount}\``,
+        `- Reviewed fixtures: \`${reviewedCount}\``,
+        "",
+        "## Candidate Queue",
+        "",
+        ...(sortedCandidateSummaries.length === 0
+            ? ["- _none_"]
+            : sortedCandidateSummaries.map(([candidateId, summary]) =>
+                [
+                    `- ${summary.label}`,
+                    `id=\`${candidateId}\``,
+                    `fixtures=\`${summary.fixture_count}\``,
+                    `action=\`${summary.proposed_action}\``,
+                    `support=\`${summary.support_count ?? "n/a"}\``,
+                    `evidence=\`${summary.evidence_count ?? "n/a"}\``,
+                    `score=\`${summary.score ?? "n/a"}\``,
+                ].join(" ")
+            )),
         "",
     ];
     for (const [index, row] of rows.entries()) {
