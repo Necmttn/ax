@@ -57,6 +57,7 @@ describe("ClassifierPackageService", () => {
         expect(operations.map((operation) => operation.id)).toEqual([
             "setfit-train-eval",
             "setfit-fixture-eval",
+            "frozen-embedding-helper-svm",
             "hybrid-gate-eval",
             "hybrid-window-candidate-projection",
             "hybrid-window-candidate-apply",
@@ -95,6 +96,7 @@ describe("ClassifierPackageService", () => {
         ]);
         expect(operations.map((operation) => operation.kind)).toEqual([
             "train",
+            "eval",
             "eval",
             "eval",
             "status",

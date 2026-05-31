@@ -11650,6 +11650,81 @@ Decision:
   recorded below, using the existing reviewed fixtures and hard-negative
   machinery.
 
+## E209 - Embedding/SVM Helper-Layer Experiment
+
+Question:
+
+- Can frozen embeddings plus a linear SVM improve the classifier stack as a
+  cheap router, hard-negative miner, nearest-neighbor explainer, and evidence
+  deduper without pretending to replace SetFit or deterministic guards?
+
+Implementation:
+
+- Extended `packages/ax-classifier-session-sections/frozen_embedding.py` with
+  `--classifier=svm`.
+- Added helper-layer report sections:
+  - routing metrics for `none` rejection vs send-to-stronger-classifier
+  - routing threshold sweep
+  - nearest-neighbor explanation support
+  - hard-negative candidate extraction for `none` rows near positive clusters
+  - embedding cache size estimate
+  - greedy near-duplicate evidence cluster summary
+- Added package operation `frozen-embedding-helper-svm`.
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/frozen_embedding_test.py
+bun run classifiers:frozen-embedding -- --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --model=sentence-transformers/all-MiniLM-L6-v2 --classifier=svm --label-mode=coarse --seeds=7,13,42 --calibration-threshold=0.4 --routing-thresholds=none,0.2,0.3,0.4 --nearest-neighbors=5 --dedupe-threshold=0.92 --hard-negative-limit=10 --out=.ax/experiments/frozen-embedding-helper-svm-e209.json
+```
+
+Artifacts:
+
+- `.ax/experiments/frozen-embedding-helper-svm-e209.json`
+
+Results:
+
+- Fixture rows: `124`
+- Embedding dimensions: `384`
+- Approximate float32 cache size: `190464` bytes
+- Encode runtime: `6.92s`
+- SVM train runtime across three seeds: `0.07s`
+- Raw SVM summary:
+  - macro F1 mean/min/max: `0.6116 / 0.5707 / 0.6321`
+  - accuracy mean: `0.6111`
+  - `none` false-positive mean/max: `0.5 / 0.6667`
+- Calibrating positive predictions at `0.4` reduces `none` false positives
+  but breaks recall:
+  - calibrated macro F1 mean/min/max: `0.3161 / 0.2673 / 0.3871`
+  - calibrated `none` false-positive mean/max: `0.1667 / 0.3333`
+- Routing threshold sweep averages:
+  - `none`: call reduction `0.1778`, positive recall `0.9028`
+  - `0.2`: call reduction `0.1778`, positive recall `0.9028`
+  - `0.3`: call reduction `0.3778`, positive recall `0.6806`
+  - `0.4`: call reduction `0.7889`, positive recall `0.2222`
+- Nearest-neighbor explanation support:
+  - top-1 actual-label match average: `0.4778`
+  - top-k predicted-label support average: `0.9556`
+- Hard-negative candidates: `6` per seed.
+- Dedupe: `1` near-duplicate cluster, `2` rows, max cluster size `2`.
+- The stale fixed-fold test-id artifact references missing fixture id
+  `session-section-chunks/none-evals-question`, so this run used stratified
+  seeds instead of mutating fixture metadata in this slice.
+
+Decision:
+
+- SVM-on-embeddings is useful as a helper, not as the promoted classifier.
+- Best current routing setting is no positive confidence abstention: it cuts
+  roughly `17.8%` of SetFit calls while keeping about `90.3%` positive recall.
+- Thresholds like `0.3` and `0.4` are too aggressive for routing because they
+  reject too many true positive windows.
+- The strongest value is reviewer/debug tooling: nearest neighbors explain
+  most predicted labels, hard-negative mining yields reviewable `none` rows,
+  and dedupe can prevent repeated evidence from inflating graph counts.
+- Next slice should wire these helper outputs into review artifacts and graph
+  facts, with routing treated as advisory until reviewed thresholds pass a
+  stricter positive-recall gate.
+
 ## Next Candidate - Embedding/SVM Helper Layer
 
 Hypothesis:

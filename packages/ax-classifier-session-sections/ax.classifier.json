@@ -70,6 +70,18 @@
       ]
     },
     {
+      "id": "frozen-embedding-helper-svm",
+      "kind": "eval",
+      "description": "Evaluate frozen embeddings plus linear SVM as a cheap router, hard-negative miner, nearest-neighbor explainer, and dedupe helper.",
+      "command": "bun run classifiers:frozen-embedding -- --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --model=sentence-transformers/all-MiniLM-L6-v2 --classifier=svm --label-mode=coarse --seeds=7,13,42 --calibration-threshold=0.4 --routing-thresholds=none,0.2,0.3,0.4 --nearest-neighbors=5 --dedupe-threshold=0.92 --hard-negative-limit=10 --out=.ax/experiments/frozen-embedding-helper-svm-current.json",
+      "inputs": [
+        "packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl"
+      ],
+      "outputs": [
+        ".ax/experiments/frozen-embedding-helper-svm-current.json"
+      ]
+    },
+    {
       "id": "hybrid-gate-eval",
       "kind": "eval",
       "description": "Evaluate deterministic plus SetFit hybrid gating against exported model windows.",

@@ -33,11 +33,15 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate frozen embedding classifiers for AX session-section chunks.")
     parser.add_argument("--fixtures", default="packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl")
     parser.add_argument("--model", default="sentence-transformers/all-MiniLM-L6-v2")
-    parser.add_argument("--classifier", choices=["logistic", "centroid"], default="logistic")
+    parser.add_argument("--classifier", choices=["logistic", "centroid", "svm"], default="logistic")
     parser.add_argument("--out", default=".ax/experiments/frozen-embedding-e24.json")
     parser.add_argument("--seeds", default="7,13,42")
     parser.add_argument("--label-mode", choices=["fine", "coarse"], default="coarse")
     parser.add_argument("--calibration-threshold", type=float, default=None)
+    parser.add_argument("--nearest-neighbors", type=int, default=5)
+    parser.add_argument("--dedupe-threshold", type=float, default=0.92)
+    parser.add_argument("--hard-negative-limit", type=int, default=10)
+    parser.add_argument("--routing-thresholds", default="none,0.2,0.3,0.4")
     parser.add_argument("--test-ids", default=None, help="Optional JSON or line-delimited file of fixed held-out fixture ids.")
     parser.add_argument("--json", action="store_true")
     return parser.parse_args()
@@ -48,6 +52,21 @@ def parse_seeds(value: str) -> list[int]:
     if not seeds:
         raise ValueError("--seeds must include at least one integer")
     return seeds
+
+
+def parse_thresholds(value: str) -> list[float | None]:
+    thresholds: list[float | None] = []
+    for part in value.split(","):
+        normalized = part.strip().lower()
+        if not normalized:
+            continue
+        if normalized in {"none", "null"}:
+            thresholds.append(None)
+        else:
+            thresholds.append(float(normalized))
+    if not thresholds:
+        raise ValueError("--routing-thresholds must include at least one value")
+    return thresholds
 
 
 def normalize_vector(vector: list[float]) -> list[float]:
@@ -131,6 +150,41 @@ def predict_logistic_labels(
     return predictions
 
 
+def predict_svm_labels(
+    train_vectors: list[list[float]],
+    train_labels: list[str],
+    test_vectors: list[list[float]],
+    seed: int,
+) -> list[dict[str, Any]]:
+    from sklearn.svm import LinearSVC
+
+    classifier = LinearSVC(
+        class_weight="balanced",
+        dual="auto",
+        max_iter=5000,
+        random_state=seed,
+    )
+    classifier.fit(train_vectors, train_labels)
+    raw_scores = classifier.decision_function(test_vectors)
+    labels = [str(label) for label in classifier.classes_]
+    rows = raw_scores.tolist()
+    if labels and not isinstance(rows[0], list):
+        rows = [[-float(score), float(score)] for score in rows]
+    predictions: list[dict[str, Any]] = []
+    for row in rows:
+        scores = [float(value) for value in row]
+        ranked = sorted(range(len(labels)), key=lambda index: scores[index], reverse=True)
+        best = ranked[0]
+        second_score = scores[ranked[1]] if len(ranked) > 1 else 0.0
+        probabilities = softmax(scores)
+        predictions.append({
+            "label": labels[best],
+            "confidence": round(probabilities[best], 4),
+            "margin": round(scores[best] - second_score, 4),
+        })
+    return predictions
+
+
 def apply_confidence_threshold(predictions: list[dict[str, Any]], threshold: float | None) -> list[str]:
     labels: list[str] = []
     for prediction in predictions:
@@ -143,6 +197,149 @@ def apply_confidence_threshold(predictions: list[dict[str, Any]], threshold: flo
     return labels
 
 
+def routing_metrics(labels: list[str], scored_predictions: list[dict[str, Any]], threshold: float | None) -> dict[str, Any]:
+    routed_predictions = apply_confidence_threshold(scored_predictions, threshold)
+    rejected = [predicted == "none" for predicted in routed_predictions]
+    actual_none = [label == "none" for label in labels]
+    actual_positive = [label != "none" for label in labels]
+    rejected_count = sum(1 for value in rejected if value)
+    actual_none_count = sum(1 for value in actual_none if value)
+    actual_positive_count = sum(1 for value in actual_positive if value)
+    correctly_rejected_none = sum(1 for reject, is_none in zip(rejected, actual_none, strict=True) if reject and is_none)
+    incorrectly_rejected_positive = sum(1 for reject, is_positive in zip(rejected, actual_positive, strict=True) if reject and is_positive)
+    routed_positive_count = len(labels) - rejected_count
+    routed_actual_positive = sum(1 for reject, is_positive in zip(rejected, actual_positive, strict=True) if not reject and is_positive)
+    return {
+        "threshold": threshold,
+        "total": len(labels),
+        "rejected_as_none": rejected_count,
+        "sent_to_stronger_classifier": routed_positive_count,
+        "setfit_call_reduction_rate": round(rejected_count / len(labels), 4) if labels else 0.0,
+        "none_rejection_precision": round(correctly_rejected_none / rejected_count, 4) if rejected_count else 0.0,
+        "none_rejection_recall": round(correctly_rejected_none / actual_none_count, 4) if actual_none_count else 0.0,
+        "positive_recall_after_routing": round(routed_actual_positive / actual_positive_count, 4) if actual_positive_count else 0.0,
+        "positive_false_rejections": incorrectly_rejected_positive,
+    }
+
+
+def nearest_neighbors(
+    train_rows: list[dict[str, Any]],
+    train_vectors: list[list[float]],
+    test_rows: list[dict[str, Any]],
+    test_vectors: list[list[float]],
+    limit: int,
+) -> list[list[dict[str, Any]]]:
+    if limit <= 0:
+        return [[] for _row in test_rows]
+    normalized_train = [normalize_vector(vector) for vector in train_vectors]
+    neighbors: list[list[dict[str, Any]]] = []
+    for test_vector in test_vectors:
+        normalized_test = normalize_vector(test_vector)
+        scored = [
+            (dot(normalized_test, train_vector), row)
+            for row, train_vector in zip(train_rows, normalized_train, strict=True)
+        ]
+        ranked = sorted(scored, key=lambda item: item[0], reverse=True)[:limit]
+        neighbors.append([
+            {
+                "id": row.get("id"),
+                "label": row.get("label"),
+                "similarity": round(score, 4),
+            }
+            for score, row in ranked
+        ])
+    return neighbors
+
+
+def nearest_neighbor_summary(
+    test_rows: list[dict[str, Any]],
+    scored_predictions: list[dict[str, Any]],
+    neighbor_rows: list[list[dict[str, Any]]],
+) -> dict[str, Any]:
+    if not test_rows:
+        return {
+            "top1_actual_label_match_rate": 0.0,
+            "topk_predicted_label_support_rate": 0.0,
+        }
+    top1_matches = 0
+    predicted_supported = 0
+    for row, scored, neighbors_for_row in zip(test_rows, scored_predictions, neighbor_rows, strict=True):
+        actual = str(row["label"])
+        predicted = str(scored["label"])
+        if neighbors_for_row and str(neighbors_for_row[0]["label"]) == actual:
+            top1_matches += 1
+        if any(str(neighbor["label"]) == predicted for neighbor in neighbors_for_row):
+            predicted_supported += 1
+    return {
+        "top1_actual_label_match_rate": round(top1_matches / len(test_rows), 4),
+        "topk_predicted_label_support_rate": round(predicted_supported / len(test_rows), 4),
+    }
+
+
+def hard_negative_candidates(
+    test_rows: list[dict[str, Any]],
+    scored_predictions: list[dict[str, Any]],
+    neighbor_rows: list[list[dict[str, Any]]],
+    limit: int,
+) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for row, scored, neighbors_for_row in zip(test_rows, scored_predictions, neighbor_rows, strict=True):
+        actual = str(row["label"])
+        predicted = str(scored["label"])
+        if actual != "none":
+            continue
+        positive_neighbor_similarity = max(
+            [float(neighbor["similarity"]) for neighbor in neighbors_for_row if str(neighbor["label"]) != "none"],
+            default=0.0,
+        )
+        if predicted == "none" and positive_neighbor_similarity < 0.5:
+            continue
+        candidates.append({
+            "id": row.get("id"),
+            "actual": actual,
+            "predicted": predicted,
+            "confidence": scored["confidence"],
+            "margin": scored["margin"],
+            "nearest_positive_similarity": round(positive_neighbor_similarity, 4),
+        })
+    return sorted(
+        candidates,
+        key=lambda item: (item["predicted"] != "none", item["confidence"], item["nearest_positive_similarity"]),
+        reverse=True,
+    )[:limit]
+
+
+def dedupe_summary(rows: list[dict[str, Any]], vectors: list[list[float]], threshold: float) -> dict[str, Any]:
+    normalized = [normalize_vector(vector) for vector in vectors]
+    seen: set[int] = set()
+    clusters: list[list[dict[str, Any]]] = []
+    for index, vector in enumerate(normalized):
+        if index in seen:
+            continue
+        cluster_indexes = [index]
+        for other_index in range(index + 1, len(normalized)):
+            if other_index in seen:
+                continue
+            if dot(vector, normalized[other_index]) >= threshold:
+                cluster_indexes.append(other_index)
+        if len(cluster_indexes) > 1:
+            seen.update(cluster_indexes)
+            clusters.append([
+                {
+                    "id": rows[cluster_index].get("id"),
+                    "label": rows[cluster_index].get("label"),
+                }
+                for cluster_index in cluster_indexes
+            ])
+    return {
+        "threshold": threshold,
+        "duplicate_cluster_count": len(clusters),
+        "duplicate_row_count": sum(len(cluster) for cluster in clusters),
+        "max_cluster_size": max([len(cluster) for cluster in clusters], default=0),
+        "examples": clusters[:5],
+    }
+
+
 def build_run_report(
     seed: int,
     train_rows: int,
@@ -150,9 +347,12 @@ def build_run_report(
     labels: list[str],
     predictions: list[str],
     scored_predictions: list[dict[str, Any]],
+    neighbor_rows: list[list[dict[str, Any]]],
     train_seconds: float,
     predict_seconds: float,
     calibration_threshold: float | None,
+    routing_thresholds: list[float | None],
+    hard_negative_limit: int,
 ) -> dict[str, Any]:
     raw = metrics_for_predictions(test_rows, labels, predictions, train_seconds, predict_seconds)
     report = {
@@ -167,9 +367,24 @@ def build_run_report(
                 "predicted": scored["label"],
                 "confidence": scored["confidence"],
                 "margin": scored["margin"],
+                "nearest_neighbors": neighbors,
             }
-            for row, actual, scored in zip(test_rows, labels, scored_predictions, strict=True)
+            for row, actual, scored, neighbors in zip(test_rows, labels, scored_predictions, neighbor_rows, strict=True)
         ],
+        "helper": {
+            "routing": routing_metrics(labels, scored_predictions, calibration_threshold),
+            "routing_sweep": [
+                routing_metrics(labels, scored_predictions, threshold)
+                for threshold in routing_thresholds
+            ],
+            "nearest_neighbors": nearest_neighbor_summary(test_rows, scored_predictions, neighbor_rows),
+            "hard_negative_candidates": hard_negative_candidates(
+                test_rows,
+                scored_predictions,
+                neighbor_rows,
+                hard_negative_limit,
+            ),
+        },
     }
     if calibration_threshold is not None:
         calibrated_predictions = apply_confidence_threshold(scored_predictions, calibration_threshold)
@@ -207,6 +422,9 @@ def eval_seed(
     classifier_name: str,
     test_ids: set[str] | None,
     calibration_threshold: float | None,
+    routing_thresholds: list[float | None],
+    nearest_neighbor_limit: int,
+    hard_negative_limit: int,
 ) -> dict[str, Any]:
     train_rows, test_rows = split_rows(rows, seed, test_ids)
     train_vectors = select_vectors(train_rows, row_vectors)
@@ -219,12 +437,15 @@ def eval_seed(
         scored_predictions = predict_centroid_labels(train_vectors, train_labels, test_vectors)
     elif classifier_name == "logistic":
         scored_predictions = predict_logistic_labels(train_vectors, train_labels, test_vectors, seed)
+    elif classifier_name == "svm":
+        scored_predictions = predict_svm_labels(train_vectors, train_labels, test_vectors, seed)
     else:
         raise ValueError(f"unknown classifier: {classifier_name}")
     train_seconds = time.perf_counter() - train_started
 
     predict_started = time.perf_counter()
     predictions = [str(prediction["label"]) for prediction in scored_predictions]
+    neighbor_rows = nearest_neighbors(train_rows, train_vectors, test_rows, test_vectors, nearest_neighbor_limit)
     predict_seconds = time.perf_counter() - predict_started
     return build_run_report(
         seed=seed,
@@ -233,9 +454,12 @@ def eval_seed(
         labels=labels,
         predictions=predictions,
         scored_predictions=scored_predictions,
+        neighbor_rows=neighbor_rows,
         train_seconds=train_seconds,
         predict_seconds=predict_seconds,
         calibration_threshold=calibration_threshold,
+        routing_thresholds=routing_thresholds,
+        hard_negative_limit=hard_negative_limit,
     )
 
 
@@ -246,12 +470,23 @@ def calibrated_runs(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def main() -> int:
     args = parse_args()
     seeds = parse_seeds(args.seeds)
+    routing_thresholds = parse_thresholds(args.routing_thresholds)
     rows = apply_label_mode(load_rows(args.fixtures), args.label_mode)
     test_ids = read_test_ids(args.test_ids) if args.test_ids else None
     vectors, encode_seconds = encode_rows(args.model, rows)
     row_vectors = {str(row["id"]): vector for row, vector in zip(rows, vectors, strict=True)}
     runs = [
-        eval_seed(rows, row_vectors, seed, args.classifier, test_ids, args.calibration_threshold)
+        eval_seed(
+            rows,
+            row_vectors,
+            seed,
+            args.classifier,
+            test_ids,
+            args.calibration_threshold,
+            routing_thresholds,
+            args.nearest_neighbors,
+            args.hard_negative_limit,
+        )
         for seed in seeds
     ]
     summary = summarize_runs(runs)
@@ -269,9 +504,19 @@ def main() -> int:
         "seeds": seeds,
         "test_ids": args.test_ids,
         "calibration_threshold": args.calibration_threshold,
+        "helper_config": {
+            "nearest_neighbors": args.nearest_neighbors,
+            "dedupe_threshold": args.dedupe_threshold,
+            "hard_negative_limit": args.hard_negative_limit,
+            "routing_thresholds": routing_thresholds,
+            "embedding_count": len(rows),
+            "embedding_dimensions": len(vectors[0]) if vectors else 0,
+            "embedding_cache_size_bytes_float32": (len(rows) * len(vectors[0]) * 4) if vectors else 0,
+        },
         "encode_seconds": round(encode_seconds, 2),
         "summary": summary,
         "calibrated_summary": calibrated_summary,
+        "dedupe": dedupe_summary(rows, vectors, args.dedupe_threshold),
         "runs": runs,
         "failures": failures,
         "decision": "robust_enough" if not failures else "needs_model_quality_work",
@@ -296,6 +541,14 @@ def main() -> int:
             print(f"calibrated macro f1 mean/min/max: {calibrated_summary['macro_f1_mean']} / {calibrated_summary['macro_f1_min']} / {calibrated_summary['macro_f1_max']}")
             print(f"calibrated none false-positive mean/max: {calibrated_summary['none_false_positive_rate_mean']} / {calibrated_summary['none_false_positive_rate_max']}")
         print(f"train seconds total: {summary['train_seconds_total']}")
+        first_helper = runs[0]["helper"] if runs else {}
+        if first_helper:
+            routing = first_helper["routing"]
+            neighbors = first_helper["nearest_neighbors"]
+            print(f"routing reduction / positive recall: {routing['setfit_call_reduction_rate']} / {routing['positive_recall_after_routing']}")
+            print(f"nearest-neighbor top1/support: {neighbors['top1_actual_label_match_rate']} / {neighbors['topk_predicted_label_support_rate']}")
+            print(f"hard negatives first run: {len(first_helper['hard_negative_candidates'])}")
+        print(f"dedupe duplicate clusters: {report['dedupe']['duplicate_cluster_count']}")
         print(f"decision: {report['decision']}")
         print(f"failures: {failures}")
         print(f"out: {out}")
