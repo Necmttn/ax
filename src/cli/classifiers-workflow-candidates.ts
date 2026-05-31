@@ -230,6 +230,7 @@ export interface WorkflowCandidateTopicGuidanceDecisionBatchReport {
     };
     readonly decisions: readonly WorkflowCandidateTopicGuidanceDecisionReport[];
     readonly pending_review_candidates: readonly WorkflowCandidateGuidancePendingReviewCandidate[];
+    readonly pending_review_fixture_pack?: WorkflowCandidateReviewCoverageFixtureSummary;
     readonly totals: {
         readonly topic_count: number;
         readonly candidate_count: number;
@@ -2922,6 +2923,7 @@ export function buildWorkflowCandidateTopicGuidanceDecisionBatchReport(input: {
     readonly search?: string;
     readonly decisions: readonly WorkflowCandidateTopicGuidanceDecisionReport[];
     readonly pendingCandidateReport?: WorkflowCandidateReport;
+    readonly pendingReviewFixturePack?: WorkflowCandidateReviewCoverageFixtureSummary;
 }): WorkflowCandidateTopicGuidanceDecisionBatchReport {
     const pendingCandidateReport = input.pendingCandidateReport;
     const pendingReviewCandidates: WorkflowCandidateGuidancePendingReviewCandidate[] = (pendingCandidateReport?.candidates ?? [])
@@ -3005,6 +3007,7 @@ export function buildWorkflowCandidateTopicGuidanceDecisionBatchReport(input: {
         },
         decisions: input.decisions,
         pending_review_candidates: pendingReviewCandidates,
+        ...(input.pendingReviewFixturePack === undefined ? {} : { pending_review_fixture_pack: input.pendingReviewFixturePack }),
         totals: totalsWithPending,
         next_action: nextAction,
     };
@@ -3021,6 +3024,10 @@ export function renderWorkflowCandidateTopicGuidanceDecisionBatchText(
         `candidates: ${report.totals.candidate_count}`,
         `decisions: ready=${report.totals.guidance_ready_count} not_warranted=${report.totals.guidance_not_warranted_count} needs_harness=${report.totals.needs_passing_harness_evidence_count} needs_review=${report.totals.needs_human_review_count}`,
         `pending review candidates: ${report.totals.pending_review_candidate_count} guidance=${report.totals.guidance_pending_review_count} harness=${report.totals.harness_pending_review_count} classifier_fixture=${report.totals.classifier_fixture_pending_review_count} review=${report.totals.review_pending_review_count}`,
+        ...(report.pending_review_fixture_pack === undefined ? [] : [
+            `pending review fixture pack: ${report.pending_review_fixture_pack.path}`,
+            `pending review fixtures: ${report.pending_review_fixture_pack.emitted_fixture_count}`,
+        ]),
         `evidence: accepted_harness=${report.totals.accepted_harness_proposal_count} scaffolded_harness=${report.totals.scaffolded_harness_experiment_count} passing_harness=${report.totals.passing_harness_evidence_count} guidance_proposals=${report.totals.guidance_proposal_count}`,
         `next action: ${report.next_action}`,
         "",
@@ -6383,6 +6390,23 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 ...(input.search === undefined ? {} : { search: input.search }),
                 taskLike: input.taskLike,
             }), reviewFactRows);
+            const coverageFixturePack = input.coverageFixturePack;
+            let pendingReviewFixturePack: WorkflowCandidateReviewCoverageFixtureSummary | undefined;
+            if (coverageFixturePack !== undefined) {
+                pendingReviewFixturePack = buildWorkflowCandidateReviewCoverageFixtureSummary(pendingCandidateReport, coverageFixturePack);
+                mkdirSync(dirname(coverageFixturePack), { recursive: true });
+                writeFileSync(coverageFixturePack, renderClassifierFixtureRowsJsonl(pendingReviewFixturePack.fixtures), "utf8");
+                if (input.coverageReviewBrief !== undefined) {
+                    mkdirSync(dirname(input.coverageReviewBrief), { recursive: true });
+                    writeFileSync(input.coverageReviewBrief, renderWorkflowCandidateReviewCoverageBriefMarkdown(pendingReviewFixturePack.fixtures, {
+                        sourceKind: input.sourceKind,
+                        limit: input.limit,
+                        coverageFixturePack,
+                        coverageReviewBrief: input.coverageReviewBrief,
+                        ...(input.out === undefined ? {} : { outputPath: input.out }),
+                    }), "utf8");
+                }
+            }
             const batch = buildWorkflowCandidateTopicGuidanceDecisionBatchReport({
                 sourceKind: input.sourceKind,
                 limit: input.limit,
@@ -6391,6 +6415,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     .map((report) => report.guidance_decision)
                     .filter((decision): decision is WorkflowCandidateTopicGuidanceDecisionReport => decision !== undefined),
                 pendingCandidateReport,
+                ...(pendingReviewFixturePack === undefined ? {} : { pendingReviewFixturePack }),
             });
             if (input.out) {
                 mkdirSync(dirname(input.out), { recursive: true });

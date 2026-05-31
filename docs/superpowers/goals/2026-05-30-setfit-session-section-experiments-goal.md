@@ -33,9 +33,11 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E447 adds
-  `.ax/experiments/workflow-topic-guidance-decision-batch-e447.json`,
-  `.ax/experiments/workflow-topic-guidance-decision-batch-e447.txt`,
+- Index continuation: E448 adds
+  `.ax/experiments/workflow-topic-guidance-decision-batch-e448.json`,
+  `.ax/experiments/workflow-topic-guidance-decision-batch-e448.txt`,
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e448.jsonl`,
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e448.md`,
   and
   the `ax.workflow_topic_guidance_decision_batch.v1` report surface
   as the latest hybrid classifier review-throughput evidence.
@@ -51,9 +53,75 @@ Current recommendation:
   now has a passing persisted harness fact. The batch guidance decision says
   reviewed `review-coverage` and `surrealml` candidates are both
   `guidance_promotion_not_warranted`, and it now also exposes one pending
-  `correction_or_rejection_signal` candidate blocked on human review. The
-  immediate bottleneck is reviewing that pending candidate, not promoting
-  rejected or harness-only evidence.
+  `correction_or_rejection_signal` candidate blocked on human review with a
+  generated fixture pack and markdown review handoff. The immediate bottleneck
+  is reviewing that pending candidate, not promoting rejected or harness-only
+  evidence.
+
+## E448 - Emit Review Handoff From Batch Pending Queue
+
+Question:
+- Can the batch guidance-decision surface generate the actual pending-review
+  artifacts a reviewer needs, instead of only reporting that a candidate needs
+  human review?
+
+Implementation:
+- Reused the existing review-coverage fixture and markdown brief format from
+  the `--review-coverage` path.
+- `--guidance-decision-batch` now honors:
+  - `--coverage-fixture-pack=<path>` to write a JSONL review fixture pack for
+    pending candidates.
+  - `--coverage-review-brief=<path>` to write an editable markdown review
+    brief with sync/apply/provenance commands.
+- The batch report now includes `pending_review_fixture_pack` when a fixture
+  pack is emitted, including path, fixture count, candidate count, skipped
+  count, and fixture rows.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e448.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e448.txt`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e448.jsonl`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e448.md`
+
+Results:
+- Reviewed topic decisions remain unchanged:
+  - `review-coverage`: `guidance_promotion_not_warranted`
+  - `surrealml`: `guidance_promotion_not_warranted`
+- Pending review fixture pack:
+  - emitted fixtures: `1`
+  - candidate groups: `1`
+  - skipped candidates: `2`
+  - fixture candidate: `correction_or_rejection_signal`
+  - review status: `pending`
+- Markdown review brief:
+  - length: `124` lines
+  - includes the pending fixture, rationale/reviewer/reviewed-at fields,
+    sync/apply commands, provenance stamping command, and post-apply coverage
+    recheck command.
+- Next action:
+  `Review pending workflow candidates before promoting them into guidance, harness checks, fixtures, or graph facts.`
+
+Decision:
+- E448 turns the batch queue into a concrete reviewer handoff. A service or
+  user can now discover pending review work and immediately get the JSONL plus
+  markdown files needed to review, sync, apply, and recheck the graph facts.
+- The pending candidate remains unreviewed; this slice intentionally does not
+  promote it. The next aligned slice is to run the generated brief through a
+  real review decision, apply the resulting review fact, and re-run the batch
+  to confirm the pending queue closes or moves to a warranted artifact.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 --coverage-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e448.jsonl --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e448.md --out .ax/experiments/workflow-topic-guidance-decision-batch-e448.json --json
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 --coverage-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e448.jsonl --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e448.md > .ax/experiments/workflow-topic-guidance-decision-batch-e448.txt
+rg -n "pending review fixture pack|pending review fixtures: 1|needs_human_review correction_or_rejection_signal|Review pending workflow candidates|guidance_promotion_not_warranted review-coverage|guidance_promotion_not_warranted surrealml" .ax/experiments/workflow-topic-guidance-decision-batch-e448.txt
+python3 -m json.tool .ax/experiments/workflow-topic-guidance-decision-batch-e448.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e448.jsonl >/dev/null
+bun -e 'const r=await Bun.file(".ax/experiments/workflow-topic-guidance-decision-batch-e448.json").json(); if (r.pending_review_fixture_pack?.emitted_fixture_count !== 1) throw new Error(JSON.stringify(r.pending_review_fixture_pack)); const fixture=JSON.parse((await Bun.file(".ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e448.jsonl").text()).trim()); if (fixture.review_status !== "pending" || fixture.candidate_label !== "correction_or_rejection_signal") throw new Error(JSON.stringify(fixture)); const brief=await Bun.file(".ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e448.md").text(); for (const s of ["# Workflow Candidate Coverage Review", "Pending fixtures: `1`", "correction_or_rejection_signal", "Review status: `pending`", "Review rationale: _pending_"]) if (!brief.includes(s)) throw new Error(s);'
+```
+
+DB-backed pending-review handoff checks passed.
 
 ## E447 - Add Pending Review Queue to Batch Guidance Decisions
 

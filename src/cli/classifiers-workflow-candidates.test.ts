@@ -3807,6 +3807,26 @@ describe("classifiers workflow-candidates", () => {
                 failures: [],
                 decision: "workflow_candidates_ranked",
             },
+            pendingReviewFixturePack: {
+                path: ".ax/experiments/pending-review.jsonl",
+                emitted_fixture_count: 1,
+                candidate_count: 1,
+                skipped_candidate_count: 0,
+                fixtures: [{
+                    id: "workflow-candidate-review-coverage/correction_or_rejection_signal/example",
+                    suite: "workflow-candidate-review-coverage",
+                    name: "coverage-gap-correction_or_rejection_signal-01",
+                    label: "correction_or_rejection_signal",
+                    target: "wrong_output",
+                    text: "USER:\nthis is wrong\n\nPREVIOUS_ASSISTANT:\n",
+                    source_group: "workflow-candidate",
+                    review_status: "pending",
+                    topic: "review-coverage",
+                    candidate_id: "classifier_candidate_group:hybrid-window/correction_or_rejection_signal",
+                    candidate_label: "correction_or_rejection_signal",
+                    proposed_action: "add_context_guardrail",
+                }],
+            },
         });
 
         expect(batch).toMatchObject({
@@ -3826,12 +3846,18 @@ describe("classifiers workflow-candidates", () => {
                 recommended_artifact: "guidance",
                 decision: "needs_human_review",
             }],
+            pending_review_fixture_pack: {
+                path: ".ax/experiments/pending-review.jsonl",
+                emitted_fixture_count: 1,
+            },
             next_action: "Review pending workflow candidates before promoting them into guidance, harness checks, fixtures, or graph facts.",
         });
         const text = renderWorkflowCandidateTopicGuidanceDecisionBatchText(batch);
         expect(text).toContain("workflow topic guidance decision batch");
         expect(text).toContain("decisions: ready=0 not_warranted=2 needs_harness=0 needs_review=0");
         expect(text).toContain("pending review candidates: 1 guidance=1 harness=0 classifier_fixture=0 review=0");
+        expect(text).toContain("pending review fixture pack: .ax/experiments/pending-review.jsonl");
+        expect(text).toContain("pending review fixtures: 1");
         expect(text).toContain("guidance_promotion_not_warranted review-coverage");
         expect(text).toContain("needs_human_review correction_or_rejection_signal");
     });
