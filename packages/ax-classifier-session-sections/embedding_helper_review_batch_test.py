@@ -101,9 +101,26 @@ class EmbeddingHelperReviewBatchTest(unittest.TestCase):
 
         self.assertEqual(synced["hard_negative_candidates"][0]["status"], "accepted")
         self.assertEqual(synced["dedupe_clusters"][0]["status"], "rejected")
+        self.assertEqual(report["dry_run"], False)
+        self.assertEqual(report["would_write_review"], True)
         self.assertEqual(report["decision"], "ready_for_embedding_helper_export")
         self.assertEqual(report["hard_negative_pending"], 0)
         self.assertEqual(report["dedupe_pending"], 0)
+
+    def test_sync_batch_dry_run_reports_without_changing_write_intent(self) -> None:
+        synced, report = module.sync_batch(
+            review(),
+            """
+- Candidate id: `embedding-hard-negative/session-section-chunks/none-a`
+- Status: `accepted`
+- Review notes: ordinary control request
+""",
+            dry_run=True,
+        )
+
+        self.assertEqual(synced["hard_negative_candidates"][0]["status"], "accepted")
+        self.assertEqual(report["dry_run"], True)
+        self.assertEqual(report["would_write_review"], False)
 
 
 if __name__ == "__main__":

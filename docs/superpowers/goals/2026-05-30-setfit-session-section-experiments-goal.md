@@ -29,7 +29,7 @@ artifact path as the evidence to inspect before trusting any summary row.
 | Blind/review workflow | E46-E65+ | `.ax/experiments/blind-workflow-status-e57.json` and related review artifacts | Human review is mandatory before fixtures or graph facts are promoted. | Pending where review rows are incomplete. | Earlier experiment log | Prefer review queues/workspaces over automatic label edits. |
 | Transcript graph projection | E155-E157 | `.ax/experiments/transcript-candidate-graph-projection-e155.json`, `.ax/experiments/workflow-candidate-report-e156.json`, `.ax/experiments/workflow-candidate-cli-e157.json` | Real persisted classifier facts can become graph-backed workflow candidates. | Passed for projection/query; still needs product review filters and proposal gates. | E155/E156/E157 commits in log | Use graph facts for evidence-backed workflow/harness discovery. |
 | Proposal lifecycle | E168-E208 | `.ax/experiments/workflow-candidate-proposal-list-e168.json`, `.ax/experiments/classifier-package-execution-write-plan-e208.json` | Classifier-derived workflow proposals are discoverable and lifecycle-tracked. | Passed for visibility/lifecycle plumbing; promotion remains review-gated. | Recent proposal lifecycle commits | Continue using review and ready-smoke gates before guidance/harness changes. |
-| Embedding/SVM helper layer | E209-E216 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/embedding-helper-review-batch-e216-report.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. | Blocked correctly by pending review: 15 hard negatives and 1 dedupe cluster remain unreviewed; focused review batches can now be generated. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `4c602d9`, `98312c1` | Review E216 batch, sync accepted/rejected statuses, then export accepted hard negatives/dedupe hints and rerun usefulness checks. |
+| Embedding/SVM helper layer | E209-E217 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/embedding-helper-review-batch-e216-report.json`, `.ax/experiments/embedding-helper-review-batch-dry-run-e217-report.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. | Blocked correctly by pending review: 15 hard negatives and 1 dedupe cluster remain unreviewed; focused review batches can now be generated and dry-run synced. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `4c602d9`, `98312c1`, `0faa935` | Review E216 batch, dry-run sync, then sync accepted/rejected statuses and export accepted hard negatives/dedupe hints. |
 
 Current recommendation:
 
@@ -11026,6 +11026,56 @@ Decision:
   sync/evaluate rules.
 - The next useful action is to review and sync this batch. Until reviewed,
   E215 correctly continues to export zero fixture rows and zero dedupe hints.
+
+## E217 - Embedding Helper Batch Dry-Run Sync
+
+Question:
+
+- Can a reviewer validate a filled embedding-helper batch without mutating the
+  source review JSON?
+
+Changes:
+
+- Added `--dry-run` to `embedding_helper_review_batch.py --mode=sync`.
+- Dry-run sync:
+  - parses the batch Markdown
+  - evaluates the would-be synced review with the same E213 status gate
+  - writes a sync report
+  - sets `dry_run: true` and `would_write_review: false`
+  - does not write back to the source review JSON
+- Added test coverage for dry-run sync report fields.
+
+Command:
+
+```sh
+bun run classifiers:embedding-helper-review-batch -- --mode=sync --dry-run --review=.ax/experiments/embedding-helper-review-e210.json --batch=.ax/experiments/embedding-helper-review-batch-e216.md --out=.ax/experiments/embedding-helper-review-batch-dry-run-e217-report.json --json
+```
+
+Artifact:
+
+- `.ax/experiments/embedding-helper-review-batch-dry-run-e217-report.json`
+
+Results:
+
+- Command exit status: `1`, expected because E216 is still unreviewed.
+- Report schema: `ax.embedding_helper_review_batch_report.v1`
+- Mode: `sync`
+- `dry_run`: `true`
+- `would_write_review`: `false`
+- Decision: `needs_embedding_helper_review`
+- Hard negatives accepted/rejected/pending: `0/0/15`
+- Dedupe accepted/rejected/pending: `0/0/1`
+- Failures:
+  - `embedding helper hard-negative review still has pending candidates`
+  - `embedding helper dedupe review still has pending clusters`
+
+Decision:
+
+- E217 makes the reviewer workflow safer. A reviewer can now edit the focused
+  Markdown batch, dry-run sync it to validate statuses/notes, then run real
+  sync only when the report is clean enough to write.
+- This still intentionally does not auto-review any candidate. The next useful
+  step remains human review of the E216 batch.
 
 ## E197 - Hybrid Graph Usefulness Gate
 

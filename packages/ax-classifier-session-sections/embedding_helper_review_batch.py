@@ -22,6 +22,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch", default=".ax/experiments/embedding-helper-review-batch-current.md")
     parser.add_argument("--out", default=".ax/experiments/embedding-helper-review-batch-current-report.json")
     parser.add_argument("--limit", type=int, default=5)
+    parser.add_argument("--dry-run", action="store_true", help="Validate sync output without writing back to the review JSON.")
     parser.add_argument("--json", action="store_true")
     return parser.parse_args()
 
@@ -180,12 +181,14 @@ def render_batch(review: dict[str, Any], fixtures: dict[str, dict[str, Any]], li
     return "\n".join(lines).rstrip() + "\n", report
 
 
-def sync_batch(review: dict[str, Any], batch: str) -> tuple[dict[str, Any], dict[str, Any]]:
+def sync_batch(review: dict[str, Any], batch: str, dry_run: bool = False) -> tuple[dict[str, Any], dict[str, Any]]:
     synced = sync_review_from_markdown(review, batch)
     status = evaluate_review(synced)
     report = {
         "schema": "ax.embedding_helper_review_batch_report.v1",
         "mode": "sync",
+        "dry_run": dry_run,
+        "would_write_review": not dry_run,
         "decision": status["decision"],
         "hard_negative_accepted": status["hard_negative_accepted"],
         "hard_negative_rejected": status["hard_negative_rejected"],
@@ -231,8 +234,9 @@ def main() -> int:
         batch_path.parent.mkdir(parents=True, exist_ok=True)
         batch_path.write_text(markdown)
     elif args.mode == "sync":
-        review, report = sync_batch(review, Path(args.batch).read_text())
-        write_json(args.review, review)
+        review, report = sync_batch(review, Path(args.batch).read_text(), dry_run=args.dry_run)
+        if not args.dry_run:
+            write_json(args.review, review)
     else:
         report = evaluate_batch(review)
     write_json(args.out, report)
