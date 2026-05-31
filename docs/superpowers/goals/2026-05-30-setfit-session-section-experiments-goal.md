@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E385 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-remediation-no-match-e385.json`
+- Index continuation: E386 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-no-match-e386.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-remediation-match-e385.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-match-e386.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,51 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E386 - Bundle Suggested Query Repair
+
+Question:
+- E385 exposes all suggested-query repair fields, but can services consume the
+  repair as one structured object instead of collecting sibling fields?
+
+Implementation:
+- Added `query_suggestion` to classifier graph health reports.
+- The bundle includes `value_equals`, `result_count`, `status`, `next_action`,
+  `remediation`, the structured repaired `query`, and executable `argv`.
+- Text graph-health output now renders a compact `query suggestion` summary.
+- Existing flat `query_suggested_*` fields remain for compatibility.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-no-match-e386.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-match-e386.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-no-match-e386.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and a `query_suggestion` object with
+  `value_equals=bind_inputs`, `result_count=1`,
+  `status=expected_matches`, `next_action=run_suggested_query`, plus repaired
+  query and argv.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and the same structured suggestion action.
+- Text output renders `query suggestion: status=expected_matches
+  next_action=run_suggested_query result_count=1 value_equals=bind_inputs`.
+
+Decision:
+- Services now have a single structured repair object for lifecycle graph
+  no-match handling while older clients can continue using the flat fields.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E386 no-match report has a `query_suggestion` with the expected value,
+  count, status, next action, repaired query, and argv.
+- E386 match report has `query_match_status=matched` and a suggestion whose
+  next action is `run_suggested_query`.
+- E386 text output includes the compact query-suggestion summary.
 
 ## E385 - Expose Suggested Query Remediation
 

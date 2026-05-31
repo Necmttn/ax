@@ -1275,6 +1275,30 @@ describe("classifier package operations report", () => {
         expect(report.query_suggested_status).toBe("expected_matches");
         expect(report.query_suggested_next_action).toBe("run_suggested_query");
         expect(report.query_suggested_remediation).toBe("Run the suggested graph query to inspect the available classifier lifecycle facts.");
+        expect(report.query_suggestion).toEqual({
+            value_equals: "bind_inputs",
+            result_count: 1,
+            status: "expected_matches",
+            next_action: "run_suggested_query",
+            remediation: "Run the suggested graph query to inspect the available classifier lifecycle facts.",
+            query: {
+                mode: "lifecycle",
+                predicate: "review_pipeline_recommended_action_execution_phase",
+                value_equals: "bind_inputs",
+            },
+            argv: [
+                "bun",
+                "src/cli/index.ts",
+                "classifiers",
+                "graph",
+                "--mode",
+                "lifecycle",
+                "--predicate",
+                "review_pipeline_recommended_action_execution_phase",
+                "--value",
+                "bind_inputs",
+            ],
+        });
     });
 
     test("summarizes lifecycle graph fact values", () => {

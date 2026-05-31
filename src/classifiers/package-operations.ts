@@ -471,6 +471,16 @@ export interface ClassifierGraphHealthQuery {
     readonly value_equals?: string;
 }
 
+export interface ClassifierGraphQuerySuggestion {
+    readonly value_equals: string;
+    readonly result_count: number;
+    readonly status: "expected_matches";
+    readonly next_action: "run_suggested_query";
+    readonly remediation: string;
+    readonly query: ClassifierGraphHealthQuery;
+    readonly argv: readonly string[];
+}
+
 export interface ClassifierPackageExecutionGraphHealthReport {
     readonly schema: "ax.classifier_package_execution_graph_health_report.v1";
     readonly tables: readonly string[];
@@ -496,6 +506,7 @@ export interface ClassifierPackageExecutionGraphHealthReport {
     readonly query_suggested_remediation?: string;
     readonly query_suggested_query?: ClassifierGraphHealthQuery;
     readonly query_suggested_argv?: readonly string[];
+    readonly query_suggestion?: ClassifierGraphQuerySuggestion;
     readonly totals: {
         readonly node_count: number;
         readonly edge_count: number;
@@ -2491,6 +2502,24 @@ export function buildExecutionGraphHealthReport(input: {
             pushArg("--value", querySuggestedValueEquals);
             return argv;
         })();
+    const querySuggestion: ClassifierGraphQuerySuggestion | undefined =
+        querySuggestedValueEquals === undefined ||
+        querySuggestedResultCount === undefined ||
+        querySuggestedStatus === undefined ||
+        querySuggestedNextAction === undefined ||
+        querySuggestedRemediation === undefined ||
+        querySuggestedQuery === undefined ||
+        querySuggestedArgv === undefined
+            ? undefined
+            : {
+                value_equals: querySuggestedValueEquals,
+                result_count: querySuggestedResultCount,
+                status: querySuggestedStatus,
+                next_action: querySuggestedNextAction,
+                remediation: querySuggestedRemediation,
+                query: querySuggestedQuery,
+                argv: querySuggestedArgv,
+            };
     const routingPolicyFloorsRequested = query.min_positive_recall !== undefined || query.min_call_reduction !== undefined;
     const routingPolicyCandidates = resultEmbeddingHelperFacts
         .filter((fact) => fact.kind === "embedding_helper_routing_candidate")
@@ -2717,6 +2746,7 @@ export function buildExecutionGraphHealthReport(input: {
         ...(querySuggestedRemediation === undefined ? {} : { query_suggested_remediation: querySuggestedRemediation }),
         ...(querySuggestedQuery === undefined ? {} : { query_suggested_query: querySuggestedQuery }),
         ...(querySuggestedArgv === undefined ? {} : { query_suggested_argv: querySuggestedArgv }),
+        ...(querySuggestion === undefined ? {} : { query_suggestion: querySuggestion }),
         totals: {
             node_count: input.nodes.length,
             edge_count: input.edges.length,
