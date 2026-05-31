@@ -398,6 +398,13 @@ export interface ClassifierGraphRoutingPolicySummary {
     readonly call_reduction_gap_to_request?: number;
     readonly blocking_floor_fields?: readonly ("positive_recall" | "call_reduction")[];
     readonly largest_gap_floor?: "positive_recall" | "call_reduction";
+    readonly recommended_floor_adjustments?: readonly {
+        readonly floor: "positive_recall" | "call_reduction";
+        readonly requested: number;
+        readonly recommended: number;
+        readonly gap: number;
+        readonly source_threshold?: string;
+    }[];
 }
 
 export type ClassifierGraphHealthMode = "summary" | "guarded" | "changed-artifacts" | "evidence" | "lifecycle" | "embedding-helper";
@@ -2142,6 +2149,32 @@ export function buildExecutionGraphHealthReport(input: {
         ...(positiveRecallGap === undefined || positiveRecallGap === 0 ? [] : ["positive_recall" as const]),
         ...(callReductionGap === undefined || callReductionGap === 0 ? [] : ["call_reduction" as const]),
     ];
+    const recommendedFloorAdjustments = [
+        ...(positiveRecallGap !== undefined &&
+        positiveRecallGap > 0 &&
+        query.min_positive_recall !== undefined &&
+        bestAvailableRoutingPolicy?.positive_recall_after_routing_mean !== undefined
+            ? [{
+                floor: "positive_recall" as const,
+                requested: query.min_positive_recall,
+                recommended: bestAvailableRoutingPolicy.positive_recall_after_routing_mean,
+                gap: positiveRecallGap,
+                ...(bestAvailableRoutingPolicy.threshold === undefined ? {} : { source_threshold: bestAvailableRoutingPolicy.threshold }),
+            }]
+            : []),
+        ...(callReductionGap !== undefined &&
+        callReductionGap > 0 &&
+        query.min_call_reduction !== undefined &&
+        bestAvailableRoutingPolicy?.setfit_call_reduction_rate_mean !== undefined
+            ? [{
+                floor: "call_reduction" as const,
+                requested: query.min_call_reduction,
+                recommended: bestAvailableRoutingPolicy.setfit_call_reduction_rate_mean,
+                gap: callReductionGap,
+                ...(bestAvailableRoutingPolicy.threshold === undefined ? {} : { source_threshold: bestAvailableRoutingPolicy.threshold }),
+            }]
+            : []),
+    ];
     const largestGapFloor = positiveRecallGap === undefined && callReductionGap === undefined
         ? undefined
         : (positiveRecallGap ?? 0) >= (callReductionGap ?? 0)
@@ -2177,6 +2210,7 @@ export function buildExecutionGraphHealthReport(input: {
         ...(callReductionGap === undefined ? {} : { call_reduction_gap_to_request: callReductionGap }),
         ...(blockingFloorFields.length === 0 ? {} : { blocking_floor_fields: blockingFloorFields }),
         ...(largestGapFloor === undefined ? {} : { largest_gap_floor: largestGapFloor }),
+        ...(recommendedFloorAdjustments.length === 0 ? {} : { recommended_floor_adjustments: recommendedFloorAdjustments }),
     };
 
     return {

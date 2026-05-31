@@ -663,6 +663,13 @@ describe("classifiers package-operations format", () => {
                 call_reduction_gap_to_request: 0.0722,
                 blocking_floor_fields: ["call_reduction"],
                 largest_gap_floor: "call_reduction",
+                recommended_floor_adjustments: [{
+                    floor: "call_reduction",
+                    requested: 0.25,
+                    recommended: 0.1778,
+                    gap: 0.0722,
+                    source_threshold: "none",
+                }],
             },
             evidence_paths: [".ax/experiments/embedding-helper-review-e210.json"],
             totals: {
@@ -718,6 +725,7 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("routing policy call reduction gap: 0.0722");
         expect(output).toContain("routing policy blocking floors: call_reduction");
         expect(output).toContain("routing policy largest gap: call_reduction");
+        expect(output).toContain("routing policy recommended floor adjustments: call_reduction<=0.1778 (requested 0.25, gap 0.0722, threshold none)");
         expect(output).toContain("routing policy next action: choose_reviewed_routing_threshold");
         expect(output).toContain("routing policy remediation: Use the selected reviewed threshold as an advisory routing policy.");
         expect(output).toContain("embedding helper facts:");

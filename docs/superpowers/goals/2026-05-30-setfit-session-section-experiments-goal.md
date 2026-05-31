@@ -33,6 +33,11 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
+- Index continuation: E355 adds
+  `.ax/experiments/classifier-graph-embedding-helper-routing-policy-floor-adjustments-e355.json`
+  and
+  `.ax/experiments/classifier-graph-embedding-helper-routing-policy-floor-adjustments-e355.txt`
+  as the latest Embedding/SVM helper evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
   append-only fixtures, graph projection, and workflow/harness usefulness
@@ -14498,6 +14503,47 @@ bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=emb
 bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 > .ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.txt || true
 python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.json >/dev/null
 rg -n 'routing policy blocking floors: positive_recall, call_reduction|routing policy largest gap: positive_recall|"blocking_floor_fields"|"largest_gap_floor"|"positive_recall_gap_to_request"|"call_reduction_gap_to_request"' .ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.txt .ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.json
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 84 passed.
+
+## E355 - Recommend Routing Floor Adjustments
+
+Question:
+
+- When requested routing floors are impossible, can services get concrete
+  recommended relaxed floor values from reviewed evidence instead of
+  recomputing them from best-available metrics?
+
+Change:
+
+- Added `recommended_floor_adjustments` to `routing_policy_summary`.
+- Each adjustment records the blocking floor, requested floor, recommended
+  reviewed value, gap, and source threshold.
+- Text graph output now renders the recommended floor adjustments.
+
+Evidence:
+
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-floor-adjustments-e355.json`
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-floor-adjustments-e355.txt`
+
+Result:
+
+- `classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2` returned 0 matching routing facts.
+- The report has two `routing_policy_summary.recommended_floor_adjustments` rows:
+  `positive_recall<=0.9028` and `call_reduction<=0.1778`.
+- Text output renders:
+  `routing policy recommended floor adjustments: positive_recall<=0.9028 (requested 0.95, gap 0.0472, threshold none); call_reduction<=0.1778 (requested 0.2, gap 0.0222, threshold none)`.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 --out=.ax/experiments/classifier-graph-embedding-helper-routing-policy-floor-adjustments-e355.json --json > .ax/experiments/classifier-graph-embedding-helper-routing-policy-floor-adjustments-e355.stdout
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 > .ax/experiments/classifier-graph-embedding-helper-routing-policy-floor-adjustments-e355.txt || true
+python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-routing-policy-floor-adjustments-e355.json >/dev/null
+rg -n 'routing policy recommended floor adjustments|"recommended_floor_adjustments"|"floor"|"recommended"|"gap"' .ax/experiments/classifier-graph-embedding-helper-routing-policy-floor-adjustments-e355.txt .ax/experiments/classifier-graph-embedding-helper-routing-policy-floor-adjustments-e355.json
 ```
 
 Verification:

@@ -274,6 +274,11 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         evaluated_policy_count: 0,
         candidate_count: 0,
     };
+    const routingPolicyRecommendedFloorAdjustments = (routingPolicySummary.recommended_floor_adjustments ?? [])
+        .map((adjustment) =>
+            `${adjustment.floor}<=${adjustment.recommended} (requested ${adjustment.requested}, gap ${adjustment.gap}, threshold ${adjustment.source_threshold ?? "none"})`
+        )
+        .join("; ") || "none";
     const lines = [
         "classifier package execution graph health",
         `decision: ${report.decision}`,
@@ -311,6 +316,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `routing policy call reduction gap: ${routingPolicySummary.call_reduction_gap_to_request ?? "none"}`,
         `routing policy blocking floors: ${(routingPolicySummary.blocking_floor_fields ?? []).join(", ") || "none"}`,
         `routing policy largest gap: ${routingPolicySummary.largest_gap_floor ?? "none"}`,
+        `routing policy recommended floor adjustments: ${routingPolicyRecommendedFloorAdjustments}`,
         `routing policy next action: ${routingPolicySummary.next_action}`,
         `routing policy remediation: ${routingPolicySummary.remediation}`,
     ];
