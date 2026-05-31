@@ -29,7 +29,7 @@ artifact path as the evidence to inspect before trusting any summary row.
 | Blind/review workflow | E46-E65+ | `.ax/experiments/blind-workflow-status-e57.json` and related review artifacts | Human review is mandatory before fixtures or graph facts are promoted. | Pending where review rows are incomplete. | Earlier experiment log | Prefer review queues/workspaces over automatic label edits. |
 | Transcript graph projection | E155-E157 | `.ax/experiments/transcript-candidate-graph-projection-e155.json`, `.ax/experiments/workflow-candidate-report-e156.json`, `.ax/experiments/workflow-candidate-cli-e157.json` | Real persisted classifier facts can become graph-backed workflow candidates. | Passed for projection/query; still needs product review filters and proposal gates. | E155/E156/E157 commits in log | Use graph facts for evidence-backed workflow/harness discovery. |
 | Proposal lifecycle | E168-E208 | `.ax/experiments/workflow-candidate-proposal-list-e168.json`, `.ax/experiments/classifier-package-execution-write-plan-e208.json` | Classifier-derived workflow proposals are discoverable and lifecycle-tracked. | Passed for visibility/lifecycle plumbing; promotion remains review-gated. | Recent proposal lifecycle commits | Continue using review and ready-smoke gates before guidance/harness changes. |
-| Embedding/SVM helper layer | E209-E215 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. | Blocked correctly by pending review: 15 hard negatives and 1 dedupe cluster remain unreviewed. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `4c602d9`, `98312c1` | Build/reuse a reviewer workflow for E210, then export accepted hard negatives/dedupe hints and rerun usefulness checks. |
+| Embedding/SVM helper layer | E209-E216 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/embedding-helper-review-batch-e216-report.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. | Blocked correctly by pending review: 15 hard negatives and 1 dedupe cluster remain unreviewed; focused review batches can now be generated. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `4c602d9`, `98312c1` | Review E216 batch, sync accepted/rejected statuses, then export accepted hard negatives/dedupe hints and rerun usefulness checks. |
 
 Current recommendation:
 
@@ -10966,6 +10966,66 @@ Decision:
 - The next useful slice is a small checkpoint/index table for this long goal
   doc, or a reviewer workflow that makes accepting/rejecting the E210 helper
   candidates less tedious.
+
+## E216 - Embedding Helper Focused Review Batch
+
+Question:
+
+- Can the E210 embedding-helper review be split into a small, context-rich
+  review batch so the pending hard negatives can be judged without reading the
+  whole review artifact?
+
+Changes:
+
+- Added `packages/ax-classifier-session-sections/embedding_helper_review_batch.py`.
+- Added `packages/ax-classifier-session-sections/embedding_helper_review_batch_test.py`.
+- Added `bun run classifiers:embedding-helper-review-batch`.
+- Added package operation `embedding-helper-review-batch`.
+- The batch command:
+  - selects pending hard negatives first, then pending dedupe clusters
+  - renders editable `Status` and `Review notes` fields
+  - includes source fixture label/target and full source fixture text
+  - includes SVM predicted-label counts, confidence/margin, nearest positive
+    similarity, and nearest-neighbor evidence
+  - syncs batch edits back into the existing embedding-helper review JSON using
+    the same status vocabulary and note-quality gate as E213
+
+Command:
+
+```sh
+bun run classifiers:embedding-helper-review-batch -- --review=.ax/experiments/embedding-helper-review-e210.json --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --batch=.ax/experiments/embedding-helper-review-batch-e216.md --out=.ax/experiments/embedding-helper-review-batch-e216-report.json --limit=5 --json
+```
+
+Artifacts:
+
+- `.ax/experiments/embedding-helper-review-batch-e216.md`
+- `.ax/experiments/embedding-helper-review-batch-e216-report.json`
+
+Results:
+
+- Report schema: `ax.embedding_helper_review_batch_report.v1`
+- Decision: `embedding_helper_review_batch_ready`
+- Requested limit: `5`
+- Selected hard negatives: `5`
+- Selected dedupe clusters: `0`
+- Pending hard negatives: `15`
+- Pending dedupe clusters: `1`
+- Selected ids:
+  - `embedding-hard-negative/session-section-chunks/none-start-building`
+  - `embedding-hard-negative/session-section-chunks/none-architecture-question`
+  - `embedding-hard-negative/session-section-chunks/none-model-size-question`
+  - `embedding-hard-negative/session-section-chunks/none-create-goal`
+  - `embedding-hard-negative/session-section-chunks/none-open-html`
+- Batch Markdown includes status vocabulary, candidate ids, source fixture
+  text, and nearest-neighbor evidence.
+
+Decision:
+
+- E216 reduces the review bottleneck without weakening the gate. It does not
+  auto-accept anything; it creates a smaller review surface and reuses the E213
+  sync/evaluate rules.
+- The next useful action is to review and sync this batch. Until reviewed,
+  E215 correctly continues to export zero fixture rows and zero dedupe hints.
 
 ## E197 - Hybrid Graph Usefulness Gate
 

@@ -96,6 +96,20 @@
       ]
     },
     {
+      "id": "embedding-helper-review-batch",
+      "kind": "review",
+      "description": "Generate or sync a focused embedding-helper review batch with source fixture text and nearest-neighbor evidence.",
+      "command": "bun run classifiers:embedding-helper-review-batch -- --review=.ax/experiments/embedding-helper-review-current.json --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --batch=.ax/experiments/embedding-helper-review-batch-current.md --out=.ax/experiments/embedding-helper-review-batch-current-report.json --limit=5",
+      "inputs": [
+        ".ax/experiments/embedding-helper-review-current.json",
+        "packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl"
+      ],
+      "outputs": [
+        ".ax/experiments/embedding-helper-review-batch-current.md",
+        ".ax/experiments/embedding-helper-review-batch-current-report.json"
+      ]
+    },
+    {
       "id": "embedding-helper-review-status",
       "kind": "review",
       "description": "Sync and evaluate reviewed embedding-helper hard-negative and dedupe statuses before export or promotion.",
