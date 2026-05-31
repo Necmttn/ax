@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E416 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-inputs-no-match-e416.json`
+- Index continuation: E417 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-execution-status-no-match-e417.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-inputs-match-e416.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-execution-status-match-e417.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,51 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E417 - Expose Suggested Query Repair Verification Execution Status
+
+Question:
+- E416 exposes verification input metadata, but can executors route
+  verification with the same `ready_to_execute`/`not_needed` vocabulary used by
+  repair execution?
+
+Implementation:
+- Added `repair_verification_execution_status` to `query_suggestion`.
+- Executable lifecycle graph-query verification now reports `ready_to_execute`.
+- No-op verification reports `not_needed`.
+- Text graph-health output now renders `query suggestion repair verification
+  execution status`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-execution-status-no-match-e417.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-execution-status-match-e417.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-execution-status-no-match-e417.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_verification_execution_status=ready_to_execute`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.repair_verification_execution_status=not_needed`.
+- Text output renders `query suggestion repair verification execution status:
+  ready_to_execute`.
+
+Decision:
+- Verification routing now has both verification-specific readiness and
+  command-execution status, so services can reuse the repair execution enum
+  without overloading `repair_verification_status`.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E417 no-match report has
+  `repair_verification_execution_status=ready_to_execute`.
+- E417 match report has `repair_verification_execution_status=not_needed`.
+- E417 text output includes the repair verification execution-status line.
 
 ## E416 - Expose Suggested Query Repair Verification Inputs
 

@@ -606,6 +606,7 @@ describe("classifiers package-operations format", () => {
                 repair_argv: [],
                 repair_can_verify: false,
                 repair_verification_status: "not_needed",
+                repair_verification_execution_status: "not_needed",
                 repair_verification_next_action: "skip_verification",
                 repair_verification_remediation: "Verification is not needed because no repair execution is required.",
                 repair_verification_can_execute: false,
@@ -757,6 +758,7 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("query suggestion repair argv: none");
         expect(output).toContain("query suggestion repair can verify: false");
         expect(output).toContain("query suggestion repair verification status: not_needed");
+        expect(output).toContain("query suggestion repair verification execution status: not_needed");
         expect(output).toContain("query suggestion repair verification next action: skip_verification");
         expect(output).toContain("query suggestion repair verification remediation: Verification is not needed because no repair execution is required.");
         expect(output).toContain("query suggestion repair verification can execute: false");

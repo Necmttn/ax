@@ -497,6 +497,7 @@ export interface ClassifierGraphQuerySuggestion {
     readonly repair_argv: readonly string[];
     readonly repair_can_verify: boolean;
     readonly repair_verification_status: "ready_to_verify" | "not_needed";
+    readonly repair_verification_execution_status: "ready_to_execute" | "not_needed";
     readonly repair_verification_next_action: "run_verification_query" | "skip_verification";
     readonly repair_verification_remediation: string;
     readonly repair_verification_can_execute: boolean;
@@ -2590,6 +2591,7 @@ export function buildExecutionGraphHealthReport(input: {
                 repair_argv: query.value_equals === querySuggestedValueEquals ? [] : querySuggestedArgv,
                 repair_can_verify: query.value_equals !== querySuggestedValueEquals,
                 repair_verification_status: query.value_equals === querySuggestedValueEquals ? "not_needed" : "ready_to_verify",
+                repair_verification_execution_status: query.value_equals === querySuggestedValueEquals ? "not_needed" : "ready_to_execute",
                 repair_verification_next_action: query.value_equals === querySuggestedValueEquals ? "skip_verification" : "run_verification_query",
                 repair_verification_remediation: query.value_equals === querySuggestedValueEquals
                     ? "Verification is not needed because no repair execution is required."

@@ -335,6 +335,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         ? "none"
         : String(report.query_suggestion.repair_can_verify);
     const querySuggestionRepairVerificationStatus = report.query_suggestion?.repair_verification_status ?? "none";
+    const querySuggestionRepairVerificationExecutionStatus = report.query_suggestion?.repair_verification_execution_status ?? "none";
     const querySuggestionRepairVerificationNextAction = report.query_suggestion?.repair_verification_next_action ?? "none";
     const querySuggestionRepairVerificationRemediation = report.query_suggestion?.repair_verification_remediation ?? "none";
     const querySuggestionRepairVerificationCanExecute = report.query_suggestion === undefined
@@ -417,6 +418,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `query suggestion repair argv: ${querySuggestionRepairArgv}`,
         `query suggestion repair can verify: ${querySuggestionRepairCanVerify}`,
         `query suggestion repair verification status: ${querySuggestionRepairVerificationStatus}`,
+        `query suggestion repair verification execution status: ${querySuggestionRepairVerificationExecutionStatus}`,
         `query suggestion repair verification next action: ${querySuggestionRepairVerificationNextAction}`,
         `query suggestion repair verification remediation: ${querySuggestionRepairVerificationRemediation}`,
         `query suggestion repair verification can execute: ${querySuggestionRepairVerificationCanExecute}`,

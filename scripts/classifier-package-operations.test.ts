@@ -1309,6 +1309,7 @@ describe("classifier package operations report", () => {
             ],
             repair_can_verify: true,
             repair_verification_status: "ready_to_verify",
+            repair_verification_execution_status: "ready_to_execute",
             repair_verification_next_action: "run_verification_query",
             repair_verification_remediation: "Run the repair verification query and confirm it returns the expected matches.",
             repair_verification_can_execute: true,
