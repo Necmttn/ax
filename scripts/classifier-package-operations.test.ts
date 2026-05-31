@@ -1280,6 +1280,7 @@ describe("classifier package operations report", () => {
             result_count: 1,
             changed_filter_count: 1,
             unchanged_filter_count: 0,
+            has_changed_filters: true,
             status: "expected_matches",
             next_action: "run_suggested_query",
             remediation: "Run the suggested graph query to inspect the available classifier lifecycle facts.",

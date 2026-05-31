@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E392 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-counts-no-match-e392.json`
+- Index continuation: E393 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-has-changed-filters-no-match-e393.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-counts-match-e392.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-has-changed-filters-match-e393.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,48 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E393 - Expose Suggested Query Actionable Filter Boolean
+
+Question:
+- E392 gives changed/unchanged filter counts, but can services branch on
+  whether a suggested graph query has actionable filter repairs without doing
+  client-side arithmetic?
+
+Implementation:
+- Added `has_changed_filters` to `query_suggestion`.
+- Lifecycle graph-query suggestions now expose a direct boolean that is `true`
+  when at least one suggested filter differs from the original query and
+  `false` for already-matching suggestions.
+- Text graph-health output now renders `query suggestion has changed filters`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-has-changed-filters-no-match-e393.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-has-changed-filters-match-e393.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-has-changed-filters-no-match-e393.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.has_changed_filters=true`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.has_changed_filters=false`.
+- Text output renders `query suggestion has changed filters: true`.
+
+Decision:
+- Services can now choose repair-routing versus no-op/debug display directly
+  from the suggestion object.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E393 no-match report has `has_changed_filters=true`.
+- E393 match report has `has_changed_filters=false`.
+- E393 text output includes the boolean line.
 
 ## E392 - Expose Suggested Query Filter Change Counts
 
