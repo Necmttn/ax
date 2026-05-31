@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E358 adds
-  `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-status-e358.json`
+- Index continuation: E359 adds
+  `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-best-e359.json`
   and
-  `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-status-e358.txt`
+  `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-best-e359.txt`
   as the latest Embedding/SVM helper evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -14503,6 +14503,52 @@ bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=emb
 bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 > .ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.txt || true
 python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.json >/dev/null
 rg -n 'routing policy blocking floors: positive_recall, call_reduction|routing policy largest gap: positive_recall|"blocking_floor_fields"|"largest_gap_floor"|"positive_recall_gap_to_request"|"call_reduction_gap_to_request"' .ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.txt .ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.json
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 84 passed.
+
+## E359 - Select Best Recommended Routing Policy
+
+Question:
+
+- Once the recommended relaxed-floor query is expected to match reviewed
+  routing policies, can services see which reviewed threshold to choose without
+  reranking the matched policy set client-side?
+
+Change:
+
+- Added `recommended_floor_best_threshold_by_call_reduction` to
+  `routing_policy_summary`.
+- Added `recommended_floor_best_positive_recall` and
+  `recommended_floor_best_call_reduction` to `routing_policy_summary`.
+- The best recommended policy is selected from the recommended relaxed-floor
+  candidate set by call reduction, then positive recall, then threshold.
+- Text graph output now renders the best recommended threshold and metrics.
+
+Evidence:
+
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-best-e359.json`
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-best-e359.txt`
+
+Result:
+
+- The impossible `min-positive-recall=0.95`, `min-call-reduction=0.2`
+  report still returns 0 matching routing facts.
+- The recommended relaxed-floor candidate set has one expected match.
+- The report selects `recommended_floor_best_threshold_by_call_reduction=none`.
+- The report shows `recommended_floor_best_positive_recall=0.9028` and
+  `recommended_floor_best_call_reduction=0.1778`.
+- Text output renders the same best threshold and metrics.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 --out=.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-best-e359.json --json > .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-best-e359.stdout
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 > .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-best-e359.txt || true
+python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-best-e359.json >/dev/null
+rg -n 'routing policy recommended floor best|"recommended_floor_best_threshold_by_call_reduction"|"recommended_floor_best_positive_recall"|"recommended_floor_best_call_reduction"' .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-best-e359.txt .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-best-e359.json
 ```
 
 Verification:

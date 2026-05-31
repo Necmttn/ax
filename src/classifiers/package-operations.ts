@@ -429,6 +429,9 @@ export interface ClassifierGraphRoutingPolicySummary {
     readonly recommended_floor_argv?: readonly string[];
     readonly recommended_floor_status?: "expected_matches" | "no_expected_match";
     readonly recommended_floor_candidate_count?: number;
+    readonly recommended_floor_best_threshold_by_call_reduction?: string;
+    readonly recommended_floor_best_positive_recall?: number;
+    readonly recommended_floor_best_call_reduction?: number;
 }
 
 export type ClassifierGraphHealthMode = "summary" | "guarded" | "changed-artifacts" | "evidence" | "lifecycle" | "embedding-helper";
@@ -2257,6 +2260,13 @@ export function buildExecutionGraphHealthReport(input: {
             (recommendedFloorQuery.min_call_reduction === undefined ||
                 fact.setfit_call_reduction_rate_mean! >= recommendedFloorQuery.min_call_reduction)
         );
+    const recommendedFloorBestPolicy = recommendedFloorCandidates
+        .slice()
+        .sort((a, b) =>
+            (b.setfit_call_reduction_rate_mean! - a.setfit_call_reduction_rate_mean!) ||
+            (b.positive_recall_after_routing_mean! - a.positive_recall_after_routing_mean!) ||
+            String(a.threshold ?? "").localeCompare(String(b.threshold ?? ""))
+        )[0];
     const largestGapFloor = positiveRecallGap === undefined && callReductionGap === undefined
         ? undefined
         : (positiveRecallGap ?? 0) >= (callReductionGap ?? 0)
@@ -2299,6 +2309,9 @@ export function buildExecutionGraphHealthReport(input: {
             recommended_floor_status: recommendedFloorCandidates.length > 0 ? "expected_matches" : "no_expected_match",
             recommended_floor_candidate_count: recommendedFloorCandidates.length,
         }),
+        ...(recommendedFloorBestPolicy?.threshold === undefined ? {} : { recommended_floor_best_threshold_by_call_reduction: recommendedFloorBestPolicy.threshold }),
+        ...(recommendedFloorBestPolicy?.positive_recall_after_routing_mean === undefined ? {} : { recommended_floor_best_positive_recall: recommendedFloorBestPolicy.positive_recall_after_routing_mean }),
+        ...(recommendedFloorBestPolicy?.setfit_call_reduction_rate_mean === undefined ? {} : { recommended_floor_best_call_reduction: recommendedFloorBestPolicy.setfit_call_reduction_rate_mean }),
     };
 
     return {
