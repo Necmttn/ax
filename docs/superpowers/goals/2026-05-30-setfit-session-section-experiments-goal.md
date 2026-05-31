@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E387 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-provenance-no-match-e387.json`
+- Index continuation: E388 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-relaxed-filters-no-match-e388.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-provenance-match-e387.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-relaxed-filters-match-e388.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,45 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E388 - Expose Suggested Query Relaxed Filters
+
+Question:
+- E387 explains that the suggestion came from relaxing an exact value filter,
+  but can services inspect the changed filter as structured data?
+
+Implementation:
+- Added `relaxed_filters` to `query_suggestion`.
+- Suggested lifecycle graph-query repairs now report
+  `relaxed_filters=["value_equals"]`.
+- Text graph-health output now renders `query suggestion relaxed filters`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-relaxed-filters-no-match-e388.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-relaxed-filters-match-e388.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-relaxed-filters-no-match-e388.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.relaxed_filters=["value_equals"]`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and the same relaxed-filter list.
+- Text output renders `query suggestion relaxed filters: value_equals`.
+
+Decision:
+- Services can now reason over the exact filter adjustment behind a suggested
+  lifecycle graph-query repair instead of parsing the provenance reason string.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E388 no-match and match reports both include
+  `query_suggestion.relaxed_filters=["value_equals"]`.
+- E388 text output includes the relaxed-filter line.
 
 ## E387 - Add Suggested Query Provenance
 

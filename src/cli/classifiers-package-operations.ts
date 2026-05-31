@@ -297,6 +297,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
     const querySuggestionProvenance = report.query_suggestion === undefined
         ? "none"
         : `source=${report.query_suggestion.source} reason=${report.query_suggestion.reason}`;
+    const querySuggestionRelaxedFilters = report.query_suggestion?.relaxed_filters.join(", ") ?? "none";
     const lines = [
         "classifier package execution graph health",
         `decision: ${report.decision}`,
@@ -330,6 +331,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `query suggested remediation: ${report.query_suggested_remediation ?? "none"}`,
         `query suggestion: ${querySuggestion}`,
         `query suggestion provenance: ${querySuggestionProvenance}`,
+        `query suggestion relaxed filters: ${querySuggestionRelaxedFilters}`,
         `query suggested argv: ${report.query_suggested_argv?.join(" ") ?? "none"}`,
         `query suggested query: ${querySuggestedQuery}`,
         `nodes/edges/facts: ${report.totals.node_count}/${report.totals.edge_count}/${report.totals.fact_count}`,

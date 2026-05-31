@@ -1283,6 +1283,7 @@ describe("classifier package operations report", () => {
             remediation: "Run the suggested graph query to inspect the available classifier lifecycle facts.",
             source: "lifecycle_available_value_counts",
             reason: "available_value_after_relaxing_value_equals",
+            relaxed_filters: ["value_equals"],
             query: {
                 mode: "lifecycle",
                 predicate: "review_pipeline_recommended_action_execution_phase",

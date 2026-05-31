@@ -479,6 +479,7 @@ export interface ClassifierGraphQuerySuggestion {
     readonly remediation: string;
     readonly source: "lifecycle_available_value_counts";
     readonly reason: "available_value_after_relaxing_value_equals";
+    readonly relaxed_filters: readonly ["value_equals"];
     readonly query: ClassifierGraphHealthQuery;
     readonly argv: readonly string[];
 }
@@ -2521,6 +2522,7 @@ export function buildExecutionGraphHealthReport(input: {
                 remediation: querySuggestedRemediation,
                 source: "lifecycle_available_value_counts",
                 reason: "available_value_after_relaxing_value_equals",
+                relaxed_filters: ["value_equals"],
                 query: querySuggestedQuery,
                 argv: querySuggestedArgv,
             };
