@@ -20,6 +20,7 @@ import { showExperiment, formatShow } from "../improve/show.ts";
 import { cmdRetroReflect } from "./retro-reflect.ts";
 import { cmdRetroMeta } from "./retro-meta.ts";
 import { cmdRetroPlan } from "./retro-plan.ts";
+import { cmdShare } from "./share.ts";
 import { cmdSkillsClassify } from "./skills-classify.ts";
 import { cmdSkillsTag } from "./skills-tag.ts";
 import { cmdSkillsLint } from "./skills-lint.ts";
@@ -1815,7 +1816,7 @@ const classifiersPackageOperationsCommand = Command.make(
         execute: Flag.boolean("execute").pipe(Flag.withDefault(false)),
         facts: Flag.boolean("facts").pipe(Flag.withDefault(false)),
         graphHealth: Flag.boolean("graph-health").pipe(Flag.withDefault(false)),
-        graphMode: Flag.choice("graph-mode", ["summary", "guarded", "changed-artifacts", "evidence", "lifecycle"] as const).pipe(Flag.withDefault("summary")),
+        graphMode: Flag.choice("graph-mode", ["summary", "guarded", "changed-artifacts", "evidence", "lifecycle", "embedding-helper"] as const).pipe(Flag.withDefault("summary")),
         history: Flag.boolean("history").pipe(Flag.withDefault(false)),
         manifest: Flag.string("manifest").pipe(Flag.withDefault("packages/ax-classifier-session-sections/ax.classifier.json")),
         operation: Flag.string("operation").pipe(Flag.optional),
@@ -1865,7 +1866,7 @@ const classifiersPackageOperationsCommand = Command.make(
 const classifiersGraphCommand = Command.make(
     "graph",
     {
-        mode: Flag.choice("mode", ["summary", "guarded", "changed-artifacts", "evidence", "lifecycle"] as const).pipe(Flag.withDefault("summary")),
+        mode: Flag.choice("mode", ["summary", "guarded", "changed-artifacts", "evidence", "lifecycle", "embedding-helper"] as const).pipe(Flag.withDefault("summary")),
         operation: Flag.string("operation").pipe(Flag.optional),
         artifact: Flag.string("artifact").pipe(Flag.optional),
         out: Flag.string("out").pipe(Flag.optional),
@@ -4123,6 +4124,29 @@ const rolesCommand = Command.make(
     ),
 );
 
+const shareCommand = Command.make(
+    "share",
+    {
+        args: Argument.string("arg").pipe(Argument.variadic({ min: 0 })),
+        dryRun: Flag.boolean("dry-run").pipe(Flag.withDefault(false)),
+        open: Flag.boolean("open").pipe(Flag.withDefault(false)),
+        public: Flag.boolean("public").pipe(Flag.withDefault(false)),
+        yes: Flag.boolean("yes").pipe(Flag.withDefault(false)),
+    },
+    ({ args, dryRun, open, public: publicGist, yes }) =>
+        Effect.promise(() =>
+            cmdShare([
+                ...args,
+                ...boolArg("dry-run", dryRun),
+                ...boolArg("open", open),
+                ...boolArg("public", publicGist),
+                ...boolArg("yes", yes),
+            ]),
+        ),
+).pipe(
+    Command.withDescription("Publish a redacted session share Gist"),
+);
+
 const projectContextCommand = Command.make(
     "context",
     { json: jsonFlag },
@@ -4554,6 +4578,7 @@ export const rootCommand = Command.make("axctl").pipe(
         costsGroupCommand,
         pricingCommand,
         recallCommand,
+        shareCommand,
         skillsCommand,
         rolesCommand,
         contextCommand,
@@ -4694,6 +4719,14 @@ async function main() {
     }
     if (args[0] === "classifiers" && (args[1] === "eval" || args[1] === "list" || args[1] === "package-operations")) {
         await Effect.runPromise(withoutDb(args));
+        return;
+    }
+    if (args[0] === "share") {
+        if (args[1] === "--help" || args[1] === "-h") {
+            await Effect.runPromise(withoutDb(args));
+            return;
+        }
+        await cmdShare(args.slice(1));
         return;
     }
     if (DB_COMMANDS.has(args[0] ?? "")) {

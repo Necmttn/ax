@@ -11860,6 +11860,78 @@ Decision:
   `embedding_helper_review_projection` so agents can ask "what helper evidence
   needs review?" without writing raw SurrealQL.
 
+## E212 - Embedding Helper Graph Query Mode
+
+Question:
+
+- Can agents query the persisted embedding-helper graph facts directly from
+  `ax classifiers graph` without writing raw SurrealQL?
+
+Implementation:
+
+- Added `embedding-helper` graph mode to:
+  - `src/classifiers/package-operations.ts`
+  - `src/cli/classifiers-package-operations.ts`
+  - `src/cli/index.ts`
+- Extended graph health reports with `embedding_helper_facts`.
+- `classifiers graph --mode=embedding-helper` now hides normal package
+  operations, guarded operations, changed artifacts, and lifecycle facts, then
+  lists only facts from `source_kind = "embedding_helper_review_projection"`.
+- Text output renders:
+  - advisory routing threshold and measured recall/reduction
+  - pending hard-negative candidates with proposed label, seed count, and
+    nearest-positive similarity
+  - pending dedupe-review clusters
+  - evidence artifact paths
+
+Commands:
+
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --out=.ax/experiments/classifier-graph-embedding-helper-e212.json
+bun src/cli/index.ts classifiers graph --mode=embedding-helper | tee .ax/experiments/classifier-graph-embedding-helper-e212.txt
+```
+
+Artifacts:
+
+- `.ax/experiments/classifier-graph-embedding-helper-e212.json`
+- `.ax/experiments/classifier-graph-embedding-helper-e212.txt`
+
+Results:
+
+- Graph query decision: `healthy`
+- Mode: `embedding-helper`
+- Whole graph totals:
+  - nodes/edges/facts: `1345/2234/558`
+  - execution/guard/artifact/lifecycle/helper facts: `39/6/73/14/17`
+- Result totals:
+  - operations: `0`
+  - guarded operations: `0`
+  - changed artifacts: `0`
+  - lifecycle facts: `0`
+  - embedding helper facts: `17`
+  - evidence paths: `1`
+- Listed helper facts:
+  - routing recommended threshold: `none`
+  - routing positive recall: `0.9028`
+  - routing SetFit call reduction: `0.1778`
+  - hard-negative candidates: `15`
+  - dedupe review clusters: `1`
+- Shared evidence path:
+  `.ax/experiments/embedding-helper-review-e210.json`
+
+Decision:
+
+- The embedding helper layer is now discoverable end to end:
+  experiment -> review artifact -> graph projection -> persisted graph facts
+  -> focused CLI query mode.
+- This still does not promote SVM routing into runtime behavior. It makes the
+  review queue and advisory threshold inspectable enough for future promotion
+  gates and dashboard/query surfaces.
+- Next useful slice: add a review-status query/export for the 15
+  `pending_human_acceptance` helper hard negatives so accepted/rejected
+  decisions can be synced back into fixture or dedupe workflows.
+
 ## Next Candidate - Embedding/SVM Helper Layer
 
 Hypothesis:

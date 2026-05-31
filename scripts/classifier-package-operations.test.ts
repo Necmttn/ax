@@ -828,6 +828,97 @@ describe("classifier package operations report", () => {
         expect(report.evidence_paths).toEqual([".ax/experiments/workflow-candidate-proposal-review-current.json"]);
     });
 
+    test("lists embedding helper graph facts in embedding-helper mode", () => {
+        const report = buildExecutionGraphHealthReport({
+            nodes: [
+                {
+                    graph_id: "embedding_helper_routing:session-section-chunks",
+                    kind: "embedding_helper_routing_candidate",
+                    label: "embedding helper routing",
+                    properties_json: JSON.stringify({ threshold: "none" }),
+                    source_kind: "embedding_helper_review_projection",
+                },
+                {
+                    graph_id: "embedding_helper_hard_negative:session-section-chunks/none-start-building",
+                    kind: "embedding_helper_hard_negative_candidate",
+                    label: "session-section-chunks/none-start-building",
+                    properties_json: JSON.stringify({ status: "pending_human_acceptance" }),
+                    source_kind: "embedding_helper_review_projection",
+                },
+            ],
+            edges: [
+                {
+                    graph_id: "edge:routing",
+                    kind: "emitted_routing_candidate",
+                    from_id: "artifact:.ax/experiments/embedding-helper-review-e210.json",
+                    to_id: "embedding_helper_routing:session-section-chunks",
+                    evidence_path: ".ax/experiments/embedding-helper-review-e210.json",
+                    properties_json: "{}",
+                    source_kind: "embedding_helper_review_projection",
+                },
+                {
+                    graph_id: "edge:hn",
+                    kind: "nearest_reviewed_fixture",
+                    from_id: "embedding_helper_hard_negative:session-section-chunks/none-start-building",
+                    to_id: "classifier_evidence:session-section-chunks/approval-alright-go",
+                    evidence_path: ".ax/experiments/embedding-helper-review-e210.json",
+                    properties_json: JSON.stringify({ similarity: 0.8565 }),
+                    source_kind: "embedding_helper_review_projection",
+                },
+            ],
+            facts: [
+                {
+                    graph_id: "fact:routing",
+                    kind: "embedding_helper_routing_candidate",
+                    subject: "embedding_helper_routing:session-section-chunks",
+                    predicate: "recommended_threshold",
+                    value_json: JSON.stringify({ threshold: "none", positive_recall_after_routing_mean: 0.9028 }),
+                    evidence_edges_json: JSON.stringify(["edge:routing"]),
+                    properties_json: JSON.stringify({
+                        threshold: "none",
+                        setfit_call_reduction_rate_mean: 0.1778,
+                        positive_recall_after_routing_mean: 0.9028,
+                    }),
+                    source_kind: "embedding_helper_review_projection",
+                },
+                {
+                    graph_id: "fact:hard-negative",
+                    kind: "embedding_helper_hard_negative_candidate",
+                    subject: "embedding_helper_hard_negative:session-section-chunks/none-start-building",
+                    predicate: "pending_human_acceptance",
+                    object: "classifier_evidence:session-section-chunks/none-start-building",
+                    value_json: "true",
+                    evidence_edges_json: JSON.stringify(["edge:hn"]),
+                    properties_json: JSON.stringify({
+                        source_fixture_id: "session-section-chunks/none-start-building",
+                        status: "pending_human_acceptance",
+                        proposed_label: "none",
+                        seed_count: 2,
+                        max_nearest_positive_similarity: 0.8743,
+                    }),
+                    source_kind: "embedding_helper_review_projection",
+                },
+            ],
+            query: { mode: "embedding-helper" },
+        });
+
+        expect(report.query.mode).toBe("embedding-helper");
+        expect(report.totals.embedding_helper_fact_count).toBe(2);
+        expect(report.result_totals.embedding_helper_fact_count).toBe(2);
+        expect(report.embedding_helper_facts.map((fact) => fact.predicate)).toEqual([
+            "pending_human_acceptance",
+            "recommended_threshold",
+        ]);
+        expect(report.embedding_helper_facts[0]).toMatchObject({
+            source_fixture_id: "session-section-chunks/none-start-building",
+            status: "pending_human_acceptance",
+            proposed_label: "none",
+            seed_count: 2,
+            max_nearest_positive_similarity: 0.8743,
+            evidence_paths: [".ax/experiments/embedding-helper-review-e210.json"],
+        });
+    });
+
     test("writes graph health reports", () => {
         const report = buildExecutionGraphHealthReport({ nodes: [], edges: [], facts: [] });
         const path = join(mkdtempSync(join(tmpdir(), "ax-graph-health-")), "health.json");

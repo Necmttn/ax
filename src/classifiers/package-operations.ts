@@ -353,7 +353,26 @@ export interface ClassifierGraphLifecycleFact {
     readonly evidence_paths: readonly string[];
 }
 
-export type ClassifierGraphHealthMode = "summary" | "guarded" | "changed-artifacts" | "evidence" | "lifecycle";
+export interface ClassifierGraphEmbeddingHelperFact {
+    readonly graph_id: string;
+    readonly kind: string;
+    readonly subject: string;
+    readonly predicate: string;
+    readonly object?: string;
+    readonly value: unknown;
+    readonly status?: string;
+    readonly source_fixture_id?: string;
+    readonly threshold?: string;
+    readonly proposed_label?: string;
+    readonly seed_count?: number;
+    readonly max_nearest_positive_similarity?: number;
+    readonly setfit_call_reduction_rate_mean?: number;
+    readonly positive_recall_after_routing_mean?: number;
+    readonly evidence_edges: readonly string[];
+    readonly evidence_paths: readonly string[];
+}
+
+export type ClassifierGraphHealthMode = "summary" | "guarded" | "changed-artifacts" | "evidence" | "lifecycle" | "embedding-helper";
 
 export interface ClassifierGraphHealthQuery {
     readonly mode: ClassifierGraphHealthMode;
@@ -369,6 +388,7 @@ export interface ClassifierPackageExecutionGraphHealthReport {
     readonly guarded_operations: readonly ClassifierGraphOperationHealth[];
     readonly changed_artifacts: readonly ClassifierGraphChangedArtifact[];
     readonly lifecycle_facts: readonly ClassifierGraphLifecycleFact[];
+    readonly embedding_helper_facts: readonly ClassifierGraphEmbeddingHelperFact[];
     readonly evidence_paths: readonly string[];
     readonly totals: {
         readonly node_count: number;
@@ -382,6 +402,7 @@ export interface ClassifierPackageExecutionGraphHealthReport {
         readonly guard_fact_count: number;
         readonly artifact_fact_count: number;
         readonly lifecycle_fact_count: number;
+        readonly embedding_helper_fact_count: number;
         readonly changed_artifact_count: number;
         readonly evidence_path_count: number;
     };
@@ -390,6 +411,7 @@ export interface ClassifierPackageExecutionGraphHealthReport {
         readonly guarded_operation_count: number;
         readonly changed_artifact_count: number;
         readonly lifecycle_fact_count: number;
+        readonly embedding_helper_fact_count: number;
         readonly evidence_path_count: number;
     };
     readonly decision: "healthy" | "empty_graph";
@@ -1649,6 +1671,39 @@ export function buildExecutionGraphHealthReport(input: {
             };
         })
         .sort((a, b) => a.predicate.localeCompare(b.predicate));
+    const embeddingHelperFacts = input.facts
+        .filter((fact) => fact.source_kind === "embedding_helper_review_projection")
+        .map((fact): ClassifierGraphEmbeddingHelperFact => {
+            const properties = jsonRecord(fact.properties_json);
+            const evidenceEdgesValue = safeJsonParse<unknown>(fact.evidence_edges_json);
+            const evidenceEdges = Array.isArray(evidenceEdgesValue)
+                ? evidenceEdgesValue.filter((entry): entry is string => typeof entry === "string")
+                : [];
+            const evidencePaths = Array.from(new Set(evidenceEdges
+                .map((edgeId) => input.edges.find((edge) => edge.graph_id === edgeId)?.evidence_path)
+                .filter((path): path is string => Boolean(path))))
+                .sort();
+            const value = fact.value_json === undefined ? null : safeJsonParse<unknown>(fact.value_json);
+            return {
+                graph_id: fact.graph_id,
+                kind: fact.kind,
+                subject: fact.subject,
+                predicate: fact.predicate,
+                ...(fact.object === undefined ? {} : { object: fact.object }),
+                value,
+                ...(jsonString(properties.status) === null ? {} : { status: jsonString(properties.status) as string }),
+                ...(jsonString(properties.source_fixture_id) === null ? {} : { source_fixture_id: jsonString(properties.source_fixture_id) as string }),
+                ...(jsonString(properties.threshold) === null ? {} : { threshold: jsonString(properties.threshold) as string }),
+                ...(jsonString(properties.proposed_label) === null ? {} : { proposed_label: jsonString(properties.proposed_label) as string }),
+                ...(jsonNumber(properties.seed_count) === null ? {} : { seed_count: jsonNumber(properties.seed_count) as number }),
+                ...(jsonNumber(properties.max_nearest_positive_similarity) === null ? {} : { max_nearest_positive_similarity: jsonNumber(properties.max_nearest_positive_similarity) as number }),
+                ...(jsonNumber(properties.setfit_call_reduction_rate_mean) === null ? {} : { setfit_call_reduction_rate_mean: jsonNumber(properties.setfit_call_reduction_rate_mean) as number }),
+                ...(jsonNumber(properties.positive_recall_after_routing_mean) === null ? {} : { positive_recall_after_routing_mean: jsonNumber(properties.positive_recall_after_routing_mean) as number }),
+                evidence_edges: evidenceEdges,
+                evidence_paths: evidencePaths,
+            };
+        })
+        .sort((a, b) => `${a.predicate}/${a.source_fixture_id ?? a.subject}`.localeCompare(`${b.predicate}/${b.source_fixture_id ?? b.subject}`));
     const operationMatches = (operation: ClassifierGraphOperationHealth): boolean =>
         !query.operation_id || operation.operation_id === query.operation_id || `${operation.package_key}/${operation.operation_id}` === query.operation_id;
     const artifactMatches = (artifact: ClassifierGraphChangedArtifact): boolean =>
@@ -1659,15 +1714,16 @@ export function buildExecutionGraphHealthReport(input: {
     const filteredOperations = operations.filter(operationMatches);
     const filteredGuardedOperations = operations.filter((operation) => operation.guarded_count > 0).filter(operationMatches);
     const filteredChangedArtifacts = changedArtifacts.filter(changedArtifactMatches);
-    const resultGuardedOperations = query.mode === "lifecycle" ? [] : filteredGuardedOperations;
-    const resultOperations = query.mode === "lifecycle"
+    const graphFactOnlyMode = query.mode === "lifecycle" || query.mode === "embedding-helper";
+    const resultGuardedOperations = graphFactOnlyMode ? [] : filteredGuardedOperations;
+    const resultOperations = graphFactOnlyMode
         ? []
         : query.mode === "guarded"
         ? resultGuardedOperations
         : query.mode === "changed-artifacts"
             ? filteredOperations.filter((operation) => operation.changed_artifact_count > 0)
             : filteredOperations;
-    const resultChangedArtifacts = query.mode === "guarded" || query.mode === "lifecycle"
+    const resultChangedArtifacts = query.mode === "guarded" || graphFactOnlyMode
         ? []
         : filteredChangedArtifacts;
     const resultLifecycleFacts = query.mode === "lifecycle" || query.mode === "evidence"
@@ -1677,10 +1733,20 @@ export function buildExecutionGraphHealthReport(input: {
             fact.evidence_paths.includes(query.artifact_path)
         )
         : [];
+    const resultEmbeddingHelperFacts = query.mode === "embedding-helper" || query.mode === "evidence"
+        ? embeddingHelperFacts.filter((fact) =>
+            !query.artifact_path ||
+            fact.evidence_paths.includes(query.artifact_path) ||
+            fact.source_fixture_id === query.artifact_path ||
+            fact.subject === query.artifact_path ||
+            fact.object === query.artifact_path
+        )
+        : [];
     const resultEvidencePaths = Array.from(new Set([
         ...resultOperations.flatMap((operation) => operation.evidence_paths),
         ...resultChangedArtifacts.map((artifact) => artifact.evidence_path).filter(Boolean),
         ...resultLifecycleFacts.flatMap((fact) => fact.evidence_paths),
+        ...resultEmbeddingHelperFacts.flatMap((fact) => fact.evidence_paths),
     ])).sort();
 
     return {
@@ -1691,6 +1757,7 @@ export function buildExecutionGraphHealthReport(input: {
         guarded_operations: resultGuardedOperations,
         changed_artifacts: resultChangedArtifacts,
         lifecycle_facts: resultLifecycleFacts,
+        embedding_helper_facts: resultEmbeddingHelperFacts,
         evidence_paths: resultEvidencePaths,
         totals: {
             node_count: input.nodes.length,
@@ -1704,6 +1771,7 @@ export function buildExecutionGraphHealthReport(input: {
             guard_fact_count: input.facts.filter((fact) => fact.kind === "classifier_operation_guard").length,
             artifact_fact_count: input.facts.filter((fact) => fact.kind === "classifier_artifact_observation").length,
             lifecycle_fact_count: lifecycleFacts.length,
+            embedding_helper_fact_count: embeddingHelperFacts.length,
             changed_artifact_count: changedArtifacts.length,
             evidence_path_count: evidencePaths.size,
         },
@@ -1712,6 +1780,7 @@ export function buildExecutionGraphHealthReport(input: {
             guarded_operation_count: resultGuardedOperations.length,
             changed_artifact_count: resultChangedArtifacts.length,
             lifecycle_fact_count: resultLifecycleFacts.length,
+            embedding_helper_fact_count: resultEmbeddingHelperFacts.length,
             evidence_path_count: resultEvidencePaths.length,
         },
         decision: input.nodes.length === 0 && input.edges.length === 0 && input.facts.length === 0 ? "empty_graph" : "healthy",

@@ -487,6 +487,7 @@ describe("classifiers package-operations format", () => {
                 evidence_path: ".ax/experiments/run.json",
             }],
             lifecycle_facts: [],
+            embedding_helper_facts: [],
             evidence_paths: [".ax/experiments/run.json"],
             totals: {
                 node_count: 3,
@@ -500,6 +501,7 @@ describe("classifiers package-operations format", () => {
                 guard_fact_count: 1,
                 artifact_fact_count: 1,
                 lifecycle_fact_count: 0,
+                embedding_helper_fact_count: 0,
                 changed_artifact_count: 1,
                 evidence_path_count: 1,
             },
@@ -508,6 +510,7 @@ describe("classifiers package-operations format", () => {
                 guarded_operation_count: 1,
                 changed_artifact_count: 1,
                 lifecycle_fact_count: 0,
+                embedding_helper_fact_count: 0,
                 evidence_path_count: 1,
             },
             decision: "healthy",
@@ -520,7 +523,7 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("mode: guarded");
         expect(output).toContain("filter operation: refresh");
         expect(output).toContain("nodes/edges/facts: 3/2/2");
-        expect(output).toContain("results operations/guarded/changed/lifecycle/evidence: 1/1/1/0/1");
+        expect(output).toContain("results operations/guarded/changed/lifecycle/helper/evidence: 1/1/1/0/0/1");
         expect(output).toContain("- demo/refresh");
         expect(output).toContain("runs executed/failed/guarded: 1/0/1");
         expect(output).toContain("changed artifacts:");
@@ -545,6 +548,7 @@ describe("classifiers package-operations format", () => {
                 evidence_edges: ["edge:lifecycle"],
                 evidence_paths: [".ax/experiments/workflow-candidate-proposal-review-current.json"],
             }],
+            embedding_helper_facts: [],
             evidence_paths: [".ax/experiments/workflow-candidate-proposal-review-current.json"],
             totals: {
                 node_count: 2,
@@ -558,6 +562,7 @@ describe("classifiers package-operations format", () => {
                 guard_fact_count: 0,
                 artifact_fact_count: 0,
                 lifecycle_fact_count: 1,
+                embedding_helper_fact_count: 0,
                 changed_artifact_count: 0,
                 evidence_path_count: 1,
             },
@@ -566,6 +571,7 @@ describe("classifiers package-operations format", () => {
                 guarded_operation_count: 0,
                 changed_artifact_count: 0,
                 lifecycle_fact_count: 1,
+                embedding_helper_fact_count: 0,
                 evidence_path_count: 1,
             },
             decision: "healthy",
@@ -574,10 +580,80 @@ describe("classifiers package-operations format", () => {
         const output = renderClassifierPackageExecutionGraphHealthText(report);
 
         expect(output).toContain("mode: lifecycle");
-        expect(output).toContain("execution/guard/artifact/lifecycle facts: 0/0/0/1");
+        expect(output).toContain("execution/guard/artifact/lifecycle/helper facts: 0/0/0/1/0");
         expect(output).toContain("lifecycle facts:");
         expect(output).toContain("- proposal_review_pending_count: 4");
         expect(output).toContain("source: proposal_review .ax/experiments/workflow-candidate-proposal-review-current.json");
+    });
+
+    test("renders embedding helper graph facts", () => {
+        const report: ClassifierPackageExecutionGraphHealthReport = {
+            schema: "ax.classifier_package_execution_graph_health_report.v1",
+            tables: ["classifier_graph_node", "classifier_graph_edge", "classifier_graph_fact"],
+            query: { mode: "embedding-helper" },
+            operations: [],
+            guarded_operations: [],
+            changed_artifacts: [],
+            lifecycle_facts: [],
+            embedding_helper_facts: [{
+                graph_id: "fact:routing",
+                kind: "embedding_helper_routing_candidate",
+                subject: "embedding_helper_routing:session-section-chunks",
+                predicate: "recommended_threshold",
+                value: { threshold: "none" },
+                threshold: "none",
+                setfit_call_reduction_rate_mean: 0.1778,
+                positive_recall_after_routing_mean: 0.9028,
+                evidence_edges: ["edge:routing"],
+                evidence_paths: [".ax/experiments/embedding-helper-review-e210.json"],
+            }, {
+                graph_id: "fact:hard-negative",
+                kind: "embedding_helper_hard_negative_candidate",
+                subject: "embedding_helper_hard_negative:session-section-chunks/none-start-building",
+                predicate: "pending_human_acceptance",
+                value: true,
+                status: "pending_human_acceptance",
+                source_fixture_id: "session-section-chunks/none-start-building",
+                proposed_label: "none",
+                seed_count: 2,
+                max_nearest_positive_similarity: 0.8743,
+                evidence_edges: ["edge:hn"],
+                evidence_paths: [".ax/experiments/embedding-helper-review-e210.json"],
+            }],
+            evidence_paths: [".ax/experiments/embedding-helper-review-e210.json"],
+            totals: {
+                node_count: 75,
+                edge_count: 110,
+                fact_count: 17,
+                package_count: 1,
+                operation_count: 0,
+                execution_count: 0,
+                artifact_count: 1,
+                execution_fact_count: 0,
+                guard_fact_count: 0,
+                artifact_fact_count: 0,
+                lifecycle_fact_count: 0,
+                embedding_helper_fact_count: 17,
+                changed_artifact_count: 0,
+                evidence_path_count: 1,
+            },
+            result_totals: {
+                operation_count: 0,
+                guarded_operation_count: 0,
+                changed_artifact_count: 0,
+                lifecycle_fact_count: 0,
+                embedding_helper_fact_count: 2,
+                evidence_path_count: 1,
+            },
+            decision: "healthy",
+        };
+
+        const output = renderClassifierPackageExecutionGraphHealthText(report);
+
+        expect(output).toContain("mode: embedding-helper");
+        expect(output).toContain("embedding helper facts:");
+        expect(output).toContain("- routing recommended_threshold: threshold=none positive_recall=0.9028 call_reduction=0.1778");
+        expect(output).toContain("- hard-negative session-section-chunks/none-start-building: pending_human_acceptance proposed=none seeds=2 nearest=0.8743");
     });
 
     test("renders classifier lifecycle insight reports", () => {

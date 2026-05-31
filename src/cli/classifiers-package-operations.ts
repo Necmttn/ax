@@ -261,8 +261,8 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `filter artifact: ${report.query.artifact_path ?? "all"}`,
         `nodes/edges/facts: ${report.totals.node_count}/${report.totals.edge_count}/${report.totals.fact_count}`,
         `packages/operations/executions/artifacts: ${report.totals.package_count}/${report.totals.operation_count}/${report.totals.execution_count}/${report.totals.artifact_count}`,
-        `execution/guard/artifact/lifecycle facts: ${report.totals.execution_fact_count}/${report.totals.guard_fact_count}/${report.totals.artifact_fact_count}/${report.totals.lifecycle_fact_count}`,
-        `results operations/guarded/changed/lifecycle/evidence: ${report.result_totals.operation_count}/${report.result_totals.guarded_operation_count}/${report.result_totals.changed_artifact_count}/${report.result_totals.lifecycle_fact_count}/${report.result_totals.evidence_path_count}`,
+        `execution/guard/artifact/lifecycle/helper facts: ${report.totals.execution_fact_count}/${report.totals.guard_fact_count}/${report.totals.artifact_fact_count}/${report.totals.lifecycle_fact_count}/${report.totals.embedding_helper_fact_count}`,
+        `results operations/guarded/changed/lifecycle/helper/evidence: ${report.result_totals.operation_count}/${report.result_totals.guarded_operation_count}/${report.result_totals.changed_artifact_count}/${report.result_totals.lifecycle_fact_count}/${report.result_totals.embedding_helper_fact_count}/${report.result_totals.evidence_path_count}`,
     ];
     for (const operation of report.operations) {
         lines.push(`- ${operation.package_key}/${operation.operation_id}`);
@@ -299,6 +299,23 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
             lines.push(`- ${fact.predicate}: ${value}`);
             if (fact.lifecycle_key || fact.artifact_path) {
                 lines.push(`  source: ${fact.lifecycle_key ?? "unknown"} ${fact.artifact_path ?? ""}`.trimEnd());
+            }
+            if (fact.evidence_paths.length > 0) {
+                lines.push(`  evidence: ${fact.evidence_paths.join(", ")}`);
+            }
+        }
+    }
+    if (report.embedding_helper_facts.length > 0) {
+        lines.push("embedding helper facts:");
+        for (const fact of report.embedding_helper_facts) {
+            if (fact.kind === "embedding_helper_routing_candidate") {
+                lines.push(`- routing ${fact.predicate}: threshold=${fact.threshold ?? "unknown"} positive_recall=${fact.positive_recall_after_routing_mean ?? "unknown"} call_reduction=${fact.setfit_call_reduction_rate_mean ?? "unknown"}`);
+            } else if (fact.kind === "embedding_helper_hard_negative_candidate") {
+                lines.push(`- hard-negative ${fact.source_fixture_id ?? fact.subject}: ${fact.status ?? "unknown"} proposed=${fact.proposed_label ?? "unknown"} seeds=${fact.seed_count ?? "unknown"} nearest=${fact.max_nearest_positive_similarity ?? "unknown"}`);
+            } else if (fact.kind === "embedding_helper_dedupe_cluster") {
+                lines.push(`- dedupe ${fact.subject}: ${fact.predicate}`);
+            } else {
+                lines.push(`- ${fact.kind} ${fact.predicate}: ${fact.subject}`);
             }
             if (fact.evidence_paths.length > 0) {
                 lines.push(`  evidence: ${fact.evidence_paths.join(", ")}`);
