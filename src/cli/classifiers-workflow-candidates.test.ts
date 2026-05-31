@@ -19,6 +19,7 @@ import {
     buildWorkflowCandidateTopicTaskDrafts,
     attachWorkflowCandidatePersistedReviewFacts,
     buildWorkflowCandidateReviewCoverageReport,
+    buildWorkflowCandidateReviewCoverageFixtureSummary,
     buildWorkflowCandidateTopicReport,
     buildWorkflowCandidateTaskDrafts,
     isTaskLikeWorkflowText,
@@ -1318,6 +1319,87 @@ describe("classifiers workflow-candidates", () => {
         expect(text).toContain("reviewed/unreviewed: 1/1");
         expect(text).toContain("review status: 1 rejected, 0 accepted, 0 deferred, 0 revised");
         expect(text).toContain("helper fixtures: session-section-chunks/none-maintenance-question");
+    });
+
+    test("emits review fixtures for review coverage gaps", () => {
+        const report = attachWorkflowCandidatePersistedReviewFacts(buildWorkflowCandidateReport({
+            groupRows: [
+                {
+                    graph_id: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+                    label: "environment_or_preference_signal",
+                    properties_json: properties({
+                        label: "environment_or_preference_signal",
+                        proposed_action: "record_guidance_or_environment_preference",
+                        support_count: 50,
+                    }),
+                },
+                {
+                    graph_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+                    label: "verification_or_recovery_signal",
+                    properties_json: properties({
+                        label: "verification_or_recovery_signal",
+                        proposed_action: "add_verification_gate",
+                        support_count: 41,
+                    }),
+                },
+            ],
+            evidenceRows: [
+                {
+                    graph_id: "fact:maintenance-question",
+                    subject: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+                    properties_json: properties({
+                        result_id: "classifier_result:maintenance-question",
+                        turn: "turn:maintenance-question",
+                        confidence: 0.71,
+                        text_excerpt: "USER: when was the last work around surrealML ? do they actively maintain it or stopped?",
+                    }),
+                },
+                {
+                    graph_id: "fact:verification",
+                    subject: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+                    properties_json: properties({
+                        result_id: "classifier_result:verification",
+                        turn: "turn:verification",
+                        confidence: 0.83,
+                        text_excerpt: "continue and make sure the tests prove this does not regress",
+                    }),
+                },
+            ],
+            sourceKind: "hybrid_window_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            taskLike: "include",
+        }), [{
+            graph_id: "fact:surrealml-review",
+            subject: "workflow_topic_candidate_review:surrealml:environment",
+            predicate: "reject",
+            object: "classifier_candidate_group:hybrid-window/environment_or_preference_signal",
+            properties_json: properties({ topic: "surrealml" }),
+        }]);
+
+        const summary = buildWorkflowCandidateReviewCoverageFixtureSummary(
+            report,
+            ".ax/experiments/workflow-candidate-review-coverage-gaps.jsonl",
+        );
+
+        expect(summary).toMatchObject({
+            emitted_fixture_count: 1,
+            candidate_count: 1,
+            skipped_candidate_count: 1,
+        });
+        expect(summary.fixtures[0]).toMatchObject({
+            suite: "workflow-candidate-review-coverage",
+            topic: "review-coverage",
+            candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+            candidate_label: "verification_or_recovery_signal",
+            proposed_action: "add_verification_gate",
+            result_id: "classifier_result:verification",
+            turn: "turn:verification",
+            confidence: 0.83,
+            review_status: "pending",
+        });
+        expect(summary.fixtures[0]?.id).toContain("workflow-candidate-review-coverage/verification_or_recovery_signal/");
+        expect(summary.fixtures[0]?.text).toBe("USER:\ncontinue and make sure the tests prove this does not regress\n\nPREVIOUS_ASSISTANT:\n");
     });
 
     test("renders persisted harness facts inside topic evidence packs", () => {

@@ -29,7 +29,7 @@ artifact path as the evidence to inspect before trusting any summary row.
 | Blind/review workflow | E46-E65+ | `.ax/experiments/blind-workflow-status-e57.json` and related review artifacts | Human review is mandatory before fixtures or graph facts are promoted. | Pending where review rows are incomplete. | Earlier experiment log | Prefer review queues/workspaces over automatic label edits. |
 | Transcript graph projection | E155-E157 | `.ax/experiments/transcript-candidate-graph-projection-e155.json`, `.ax/experiments/workflow-candidate-report-e156.json`, `.ax/experiments/workflow-candidate-cli-e157.json` | Real persisted classifier facts can become graph-backed workflow candidates. | Passed for projection/query; still needs product review filters and proposal gates. | E155/E156/E157 commits in log | Use graph facts for evidence-backed workflow/harness discovery. |
 | Proposal lifecycle | E168-E208 | `.ax/experiments/workflow-candidate-proposal-list-e168.json`, `.ax/experiments/classifier-package-execution-write-plan-e208.json` | Classifier-derived workflow proposals are discoverable and lifecycle-tracked. | Passed for visibility/lifecycle plumbing; promotion remains review-gated. | Recent proposal lifecycle commits | Continue using review and ready-smoke gates before guidance/harness changes. |
-| Embedding/SVM helper layer | E209-E242 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e231-post-promotion.json`, `.ax/experiments/embedding-helper-canonical-promotion-split-audit-e231.json`, `.ax/experiments/embedding-helper-graph-projection-current.json`, `.ax/experiments/embedding-helper-graph-apply-e232.json`, `.ax/experiments/classifier-graph-health-embedding-helper-e232.json`, `.ax/experiments/embedding-helper-graph-usefulness-current.json`, `.ax/experiments/classifier-package-execution-embedding-helper-graph-usefulness-e234.json`, `.ax/experiments/classifier-graph-health-embedding-helper-none-maintenance-e235.json`, `.ax/experiments/workflow-topic-review-graph-query-e239.json`, `.ax/experiments/workflow-topic-evidence-pack-persisted-review-context-e240.md`, `.ax/experiments/workflow-candidate-report-persisted-review-context-e241.json`, `.ax/experiments/workflow-candidate-review-coverage-e242.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. Promoted helper facts now support the full graph loop: helper fact -> evidence pack hint -> synced review -> persisted topic review graph fact -> future topic/candidate review context -> review coverage aggregation. | Passed: coverage report shows 3 hybrid-window candidate groups, 1 reviewed and 2 unreviewed, with the reviewed candidate carrying a rejected SurrealML fact and helper source fixture `session-section-chunks/none-maintenance-question`. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `65b0b3c`, `4c602d9`, `eeb517c`, `9a6811e`, `31a1b16`, `e41562c`, `0587b67`, `0e0a960`, `3f01787`, `7bea922`, `21f7163`, `24e4a4e`, `f97c8e3`, `722e3e8`, `8b27657`, `d700090`, `6237d89`, `2490fdf`, `9f4ee34`, `2530699`, `bca5938`, `65bc09a`, `6631d2d`, `85b4df8`, `c9f59e4`, this commit | Next useful work is using coverage gaps to choose the next review/eval fixtures, while keeping automatic ranking suppression off until broader controls exist. |
+| Embedding/SVM helper layer | E209-E243 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e231-post-promotion.json`, `.ax/experiments/embedding-helper-canonical-promotion-split-audit-e231.json`, `.ax/experiments/embedding-helper-graph-projection-current.json`, `.ax/experiments/embedding-helper-graph-apply-e232.json`, `.ax/experiments/classifier-graph-health-embedding-helper-e232.json`, `.ax/experiments/embedding-helper-graph-usefulness-current.json`, `.ax/experiments/classifier-package-execution-embedding-helper-graph-usefulness-e234.json`, `.ax/experiments/classifier-graph-health-embedding-helper-none-maintenance-e235.json`, `.ax/experiments/workflow-topic-review-graph-query-e239.json`, `.ax/experiments/workflow-topic-evidence-pack-persisted-review-context-e240.md`, `.ax/experiments/workflow-candidate-report-persisted-review-context-e241.json`, `.ax/experiments/workflow-candidate-review-coverage-e242.json`, `.ax/experiments/workflow-candidate-review-coverage-with-gaps-e243.json`, `.ax/experiments/workflow-candidate-review-coverage-gaps-e243.jsonl` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. Promoted helper facts now support the full graph loop: helper fact -> evidence pack hint -> synced review -> persisted topic review graph fact -> future topic/candidate review context -> review coverage aggregation -> pending gap fixtures. | Passed: coverage report emits 3 pending review fixtures for the 2 unreviewed hybrid-window groups while preserving the reviewed SurrealML rejection context. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `65b0b3c`, `4c602d9`, `eeb517c`, `9a6811e`, `31a1b16`, `e41562c`, `0587b67`, `0e0a960`, `3f01787`, `7bea922`, `21f7163`, `24e4a4e`, `f97c8e3`, `722e3e8`, `8b27657`, `d700090`, `6237d89`, `2490fdf`, `9f4ee34`, `2530699`, `bca5938`, `65bc09a`, `6631d2d`, `85b4df8`, `c9f59e4`, `451b524`, this commit | Next useful work is reviewing/promoting the coverage-gap fixtures into accepted/rejected topic review facts, still without automatic ranking suppression. |
 
 Current recommendation:
 
@@ -12971,6 +12971,81 @@ assert data["totals"]["reviewed_candidate_count"] == 1
 assert data["totals"]["unreviewed_candidate_count"] == 2
 assert data["totals"]["review_fact_count"] == 1
 assert data["totals"]["rejected_fact_count"] == 1
+PY
+```
+
+## E243 - Emit Review Fixtures For Coverage Gaps
+
+Question:
+
+- Can review coverage gaps produce concrete pending review/eval fixtures, so
+  the next work is not just another aggregate report?
+
+Implementation:
+
+- Added `--coverage-fixture-pack=<path>` for
+  `classifiers workflow-candidates --review-coverage`.
+- Added `buildWorkflowCandidateReviewCoverageFixtureSummary(...)`.
+- The fixture emitter:
+  - builds a ranked candidate report,
+  - attaches persisted review facts,
+  - skips already reviewed candidates,
+  - emits pending fixtures for unreviewed candidate examples.
+- The coverage report now includes a `fixture_pack` summary when fixtures are
+  emitted.
+
+Command:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --examples=2 --coverage-fixture-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-e243.jsonl --out=.ax/experiments/workflow-candidate-review-coverage-with-gaps-e243.json --json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-coverage-with-gaps-e243.json`
+- `.ax/experiments/workflow-candidate-review-coverage-gaps-e243.jsonl`
+
+Results:
+
+- Coverage candidate groups: `3`
+- Reviewed candidates skipped: `1`
+- Unreviewed candidates selected: `2`
+- Pending fixtures emitted: `3`
+- Fixture candidate labels:
+  - `verification_or_recovery_signal`
+  - `correction_or_rejection_signal`
+- All emitted rows have:
+  - `suite = "workflow-candidate-review-coverage"`
+  - `review_status = "pending"`
+  - `topic = "review-coverage"`
+
+Decision:
+
+- E243 turns coverage gaps into reviewable work. The system can now identify
+  thin review areas and emit pending fixtures without relying on LLM brute
+  force or automatic suppression.
+- Next useful work is a review/apply path for these coverage-gap fixtures:
+  reviewed rows should become persisted topic/candidate review facts, with the
+  same no-suppression default.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-with-gaps-e243.json >/dev/null
+wc -l .ax/experiments/workflow-candidate-review-coverage-gaps-e243.jsonl
+python3 - <<'PY'
+import json
+from pathlib import Path
+report = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-with-gaps-e243.json").read_text())
+assert report["fixture_pack"]["emitted_fixture_count"] == 3
+assert report["fixture_pack"]["candidate_count"] == 2
+assert report["fixture_pack"]["skipped_candidate_count"] == 1
+rows = [json.loads(line) for line in Path(".ax/experiments/workflow-candidate-review-coverage-gaps-e243.jsonl").read_text().splitlines() if line.strip()]
+assert len(rows) == 3
+assert {row["candidate_label"] for row in rows} == {"verification_or_recovery_signal", "correction_or_rejection_signal"}
+assert all(row["suite"] == "workflow-candidate-review-coverage" for row in rows)
+assert all(row["review_status"] == "pending" for row in rows)
 PY
 ```
 

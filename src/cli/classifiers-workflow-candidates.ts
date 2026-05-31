@@ -40,6 +40,7 @@ export interface WorkflowCandidateCommandInput {
     readonly expandEvidence?: boolean;
     readonly evidencePack?: string;
     readonly classifierFixturePack?: string;
+    readonly coverageFixturePack?: string;
     readonly harnessFacts?: string;
     readonly harnessWritePlan?: string;
     readonly applyHarnessFacts?: boolean;
@@ -162,9 +163,17 @@ export interface WorkflowCandidateTopicClassifierFixtureSummary {
     readonly fixtures: readonly WorkflowCandidateTopicClassifierFixtureRow[];
 }
 
+export interface WorkflowCandidateReviewCoverageFixtureSummary {
+    readonly path: string;
+    readonly emitted_fixture_count: number;
+    readonly candidate_count: number;
+    readonly skipped_candidate_count: number;
+    readonly fixtures: readonly WorkflowCandidateTopicClassifierFixtureRow[];
+}
+
 export interface WorkflowCandidateTopicClassifierFixtureRow {
     readonly id: string;
-    readonly suite: "workflow-candidate-topic";
+    readonly suite: "workflow-candidate-topic" | "workflow-candidate-review-coverage";
     readonly name: string;
     readonly label: string;
     readonly target: string;
@@ -525,6 +534,7 @@ export interface WorkflowCandidateReviewCoverageReport {
         readonly revised_fact_count: number;
         readonly helper_source_fixture_count: number;
     };
+    readonly fixture_pack?: WorkflowCandidateReviewCoverageFixtureSummary;
     readonly decision: "workflow_candidate_review_coverage_ready" | "needs_workflow_candidate_reviews";
 }
 
@@ -1685,6 +1695,11 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
         `review facts: ${report.totals.review_fact_count}`,
         `review status: ${report.totals.rejected_fact_count} rejected, ${report.totals.accepted_fact_count} accepted, ${report.totals.deferred_fact_count} deferred, ${report.totals.revised_fact_count} revised`,
         `helper source fixtures: ${report.totals.helper_source_fixture_count}`,
+        ...(report.fixture_pack ? [
+            `coverage fixture pack: ${report.fixture_pack.emitted_fixture_count} fixtures`,
+            `coverage fixture candidates: ${report.fixture_pack.candidate_count} emitted, ${report.fixture_pack.skipped_candidate_count} skipped`,
+            `coverage fixture path: ${report.fixture_pack.path}`,
+        ] : []),
     ];
     for (const row of report.candidates) {
         lines.push(
@@ -2835,6 +2850,65 @@ export function buildWorkflowCandidateTopicClassifierFixtureSummary(
     };
 }
 
+export function buildWorkflowCandidateReviewCoverageFixtureRows(
+    report: WorkflowCandidateReport,
+): readonly WorkflowCandidateTopicClassifierFixtureRow[] {
+    const rows: WorkflowCandidateTopicClassifierFixtureRow[] = [];
+    for (const candidate of report.candidates) {
+        if ((candidate.persisted_review_facts?.length ?? 0) > 0) continue;
+        candidate.examples.forEach((example, index) => {
+            const resultId = typeof example.result_id === "string" && example.result_id.length > 0
+                ? example.result_id
+                : undefined;
+            const turn = typeof example.turn === "string" && example.turn.length > 0 ? example.turn : undefined;
+            const confidence = typeof example.confidence === "number" ? example.confidence : undefined;
+            rows.push({
+                id: [
+                    "workflow-candidate-review-coverage",
+                    safeKeyPart(candidate.label).slice(0, 64) || "candidate",
+                    graphKeyWithHash(`${candidate.group_id}:${String(example.result_id ?? example.turn ?? index)}`),
+                ].join("/"),
+                suite: "workflow-candidate-review-coverage",
+                name: [
+                    "coverage-gap",
+                    safeKeyPart(candidate.label).slice(0, 48) || "candidate",
+                    String(index + 1).padStart(2, "0"),
+                ].join("-"),
+                label: String(candidate.classifier_label ?? candidate.label),
+                target: String(candidate.target ?? "unknown"),
+                text: classifierFixtureTextForExample(example),
+                source_group: "workflow-candidate",
+                review_status: "pending",
+                topic: "review-coverage",
+                candidate_id: candidate.group_id,
+                candidate_label: candidate.label,
+                proposed_action: candidate.proposed_action,
+                ...(resultId === undefined ? {} : { result_id: resultId }),
+                ...(turn === undefined ? {} : { turn }),
+                ...(confidence === undefined ? {} : { confidence }),
+            });
+        });
+    }
+    return rows;
+}
+
+export function buildWorkflowCandidateReviewCoverageFixtureSummary(
+    report: WorkflowCandidateReport,
+    path: string,
+): WorkflowCandidateReviewCoverageFixtureSummary {
+    const gapCandidates = report.candidates.filter((candidate) =>
+        (candidate.persisted_review_facts?.length ?? 0) === 0 && candidate.examples.length > 0
+    );
+    const rows = buildWorkflowCandidateReviewCoverageFixtureRows(report);
+    return {
+        path,
+        emitted_fixture_count: rows.length,
+        candidate_count: gapCandidates.length,
+        skipped_candidate_count: Math.max(0, report.candidates.length - gapCandidates.length),
+        fixtures: rows,
+    };
+}
+
 const renderClassifierFixtureRowsJsonl = (
     rows: readonly WorkflowCandidateTopicClassifierFixtureRow[],
 ): string => rows.map((row) => JSON.stringify(row)).join("\n") + (rows.length > 0 ? "\n" : "");
@@ -3332,14 +3406,30 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 ORDER BY updated_at DESC
                 LIMIT ${Math.max(1, input.limit * 50)};
             `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
-            const report = buildWorkflowCandidateReviewCoverageReport({
+            const reviewFacts = reviewRows?.[0] ?? [];
+            let report = buildWorkflowCandidateReviewCoverageReport({
                 groupRows: rows[0] ?? [],
                 evidenceRows: rows[1] ?? [],
-                reviewFactRows: reviewRows?.[0] ?? [],
+                reviewFactRows: reviewFacts,
                 sourceKind: input.sourceKind,
                 limit: input.limit,
                 ...(input.search === undefined ? {} : { search: input.search }),
             });
+            if (input.coverageFixturePack) {
+                const candidateReport = attachWorkflowCandidatePersistedReviewFacts(buildWorkflowCandidateReport({
+                    groupRows: rows[0] ?? [],
+                    evidenceRows: rows[1] ?? [],
+                    sourceKind: input.sourceKind,
+                    limit: input.limit,
+                    examplesPerGroup: input.examples,
+                    ...(input.search === undefined ? {} : { search: input.search }),
+                    taskLike: input.taskLike,
+                }), reviewFacts);
+                const fixtureSummary = buildWorkflowCandidateReviewCoverageFixtureSummary(candidateReport, input.coverageFixturePack);
+                mkdirSync(dirname(input.coverageFixturePack), { recursive: true });
+                writeFileSync(input.coverageFixturePack, renderClassifierFixtureRowsJsonl(fixtureSummary.fixtures), "utf8");
+                report = { ...report, fixture_pack: fixtureSummary };
+            }
             if (input.out) {
                 mkdirSync(dirname(input.out), { recursive: true });
                 writeFileSync(input.out, `${prettyPrint(report)}\n`, "utf8");

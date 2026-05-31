@@ -1928,6 +1928,7 @@ const classifiersWorkflowCandidatesCommand = Command.make(
         expandEvidence: Flag.boolean("expand-evidence").pipe(Flag.withDefault(false)),
         evidencePack: Flag.string("evidence-pack").pipe(Flag.optional),
         classifierFixturePack: Flag.string("classifier-fixture-pack").pipe(Flag.optional),
+        coverageFixturePack: Flag.string("coverage-fixture-pack").pipe(Flag.optional),
         harnessFacts: Flag.string("harness-facts").pipe(Flag.optional),
         harnessWritePlan: Flag.string("harness-write-plan").pipe(Flag.optional),
         applyHarnessFacts: Flag.boolean("apply-harness-facts").pipe(Flag.withDefault(false)),
@@ -1951,7 +1952,7 @@ const classifiersWorkflowCandidatesCommand = Command.make(
         proposalSection: Flag.string("proposal-section").pipe(Flag.optional),
         json: jsonFlag,
     },
-    ({ sourceKind, action, classifier, search, taskLike, topicReport, listProposals, listHarnessFacts, reviewCoverage, includeHarnessFacts, includeHelperFacts, includeReviewFacts, proposalStatus, expandEvidence, evidencePack, classifierFixturePack, harnessFacts, harnessWritePlan, applyHarnessFacts, reviewFacts, reviewWritePlan, applyReviewFacts, limit, examples, out, brief, syncBrief, promoteTasks, emitAdjacentTasks, promoteHarnessProposals, requireHarnessChecks, promoteProposals, proposalDryRun, promotionMode, taskDir, proposalTarget, proposalSection, json }) => {
+    ({ sourceKind, action, classifier, search, taskLike, topicReport, listProposals, listHarnessFacts, reviewCoverage, includeHarnessFacts, includeHelperFacts, includeReviewFacts, proposalStatus, expandEvidence, evidencePack, classifierFixturePack, coverageFixturePack, harnessFacts, harnessWritePlan, applyHarnessFacts, reviewFacts, reviewWritePlan, applyReviewFacts, limit, examples, out, brief, syncBrief, promoteTasks, emitAdjacentTasks, promoteHarnessProposals, requireHarnessChecks, promoteProposals, proposalDryRun, promotionMode, taskDir, proposalTarget, proposalSection, json }) => {
         const actionValue = optionValue(action);
         const classifierValue = optionValue(classifier);
         const searchValue = optionValue(search);
@@ -1960,6 +1961,7 @@ const classifiersWorkflowCandidatesCommand = Command.make(
         const syncBriefPath = optionValue(syncBrief);
         const evidencePackPath = optionValue(evidencePack);
         const classifierFixturePackPath = optionValue(classifierFixturePack);
+        const coverageFixturePackPath = optionValue(coverageFixturePack);
         const harnessFactsPath = optionValue(harnessFacts);
         const harnessWritePlanPath = optionValue(harnessWritePlan);
         const reviewFactsPath = optionValue(reviewFacts);
@@ -1986,6 +1988,7 @@ const classifiersWorkflowCandidatesCommand = Command.make(
             expandEvidence,
             ...(evidencePackPath === undefined ? {} : { evidencePack: evidencePackPath }),
             ...(classifierFixturePackPath === undefined ? {} : { classifierFixturePack: classifierFixturePackPath }),
+            ...(coverageFixturePackPath === undefined ? {} : { coverageFixturePack: coverageFixturePackPath }),
             ...(harnessFactsPath === undefined ? {} : { harnessFacts: harnessFactsPath }),
             ...(harnessWritePlanPath === undefined ? {} : { harnessWritePlan: harnessWritePlanPath }),
             applyHarnessFacts,
