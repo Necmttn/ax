@@ -1752,6 +1752,7 @@ describe("classifiers workflow-candidates", () => {
         expect(brief).toContain("To inspect the review graph write before applying, run:");
         expect(brief).toContain("--review-facts=.ax/experiments/review-coverage-review-facts.json");
         expect(brief).toContain("--review-write-plan=.ax/experiments/review-coverage-review-write-plan.json");
+        expect(brief).toContain("bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/review-coverage.jsonl --sync-coverage-review-brief=.ax/experiments/review-coverage.md --coverage-review-brief=.ax/experiments/review-coverage.md --review-facts=.ax/experiments/review-coverage-review-facts.json --review-write-plan=.ax/experiments/review-coverage-review-write-plan.json --apply-review-facts --require-review-provenance --require-review-handoff --out=.ax/experiments/review-coverage.json --json");
         expect(brief).toContain("To stamp provenance from a review service, run:");
         expect(brief).toContain("--review-provenance-reviewer=<reviewer>");
         expect(brief).toContain("--review-provenance-reviewed-at=<reviewed-at-iso>");
