@@ -501,6 +501,8 @@ export interface ClassifierGraphQuerySuggestion {
     readonly repair_verification_remediation: string;
     readonly repair_verification_can_execute: boolean;
     readonly repair_verification_command_kind: "classifier_graph_query_repair_verification" | "none";
+    readonly repair_verification_requires_inputs: boolean;
+    readonly repair_verification_required_inputs: readonly [];
     readonly repair_verification_blockers: readonly ["no_repair_needed"] | readonly [];
     readonly repair_verification_blocker_details: readonly {
         readonly blocker: "no_repair_needed";
@@ -2594,6 +2596,8 @@ export function buildExecutionGraphHealthReport(input: {
                     : "Run the repair verification query and confirm it returns the expected matches.",
                 repair_verification_can_execute: query.value_equals !== querySuggestedValueEquals,
                 repair_verification_command_kind: query.value_equals === querySuggestedValueEquals ? "none" : "classifier_graph_query_repair_verification",
+                repair_verification_requires_inputs: false,
+                repair_verification_required_inputs: [],
                 repair_verification_blockers: query.value_equals === querySuggestedValueEquals ? ["no_repair_needed"] : [],
                 repair_verification_blocker_details: query.value_equals === querySuggestedValueEquals
                     ? [{

@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E415 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-blockers-no-match-e415.json`
+- Index continuation: E416 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-inputs-no-match-e416.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-blockers-match-e415.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-inputs-match-e416.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,53 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E416 - Expose Suggested Query Repair Verification Inputs
+
+Question:
+- E415 exposes verification blockers, but can services know whether the
+  verification command still requires input binding without inspecting argv?
+
+Implementation:
+- Added `repair_verification_requires_inputs` and
+  `repair_verification_required_inputs` to `query_suggestion`.
+- Lifecycle graph-query verification suggestions now report
+  `repair_verification_requires_inputs=false`.
+- Required input lists are empty for both executable and no-op verification.
+- Text graph-health output now renders verification required-input metadata.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-inputs-no-match-e416.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-inputs-match-e416.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-inputs-no-match-e416.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match`,
+  `repair_verification_requires_inputs=false`, and empty
+  `repair_verification_required_inputs`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched`,
+  `repair_verification_requires_inputs=false`, and empty
+  `repair_verification_required_inputs`.
+- Text output renders `query suggestion repair verification requires inputs:
+  false` and `query suggestion repair verification required inputs: none`.
+
+Decision:
+- Verification command execution now declares both executability and input
+  binding state directly, matching the repair execution contract.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E416 no-match report has `repair_verification_requires_inputs=false`.
+- E416 no-match report has empty `repair_verification_required_inputs`.
+- E416 match report has `repair_verification_requires_inputs=false`.
+- E416 match report has empty `repair_verification_required_inputs`.
+- E416 text output includes both verification input metadata lines.
 
 ## E415 - Expose Suggested Query Repair Verification Blockers
 

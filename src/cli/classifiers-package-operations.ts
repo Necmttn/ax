@@ -341,6 +341,10 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         ? "none"
         : String(report.query_suggestion.repair_verification_can_execute);
     const querySuggestionRepairVerificationCommandKind = report.query_suggestion?.repair_verification_command_kind ?? "none";
+    const querySuggestionRepairVerificationRequiresInputs = report.query_suggestion === undefined
+        ? "none"
+        : String(report.query_suggestion.repair_verification_requires_inputs);
+    const querySuggestionRepairVerificationRequiredInputs = report.query_suggestion?.repair_verification_required_inputs.join(", ") || "none";
     const querySuggestionRepairVerificationBlockers = report.query_suggestion?.repair_verification_blockers.join(", ") || "none";
     const querySuggestionRepairVerificationBlockerDetails = report.query_suggestion?.repair_verification_blocker_details
         .map((detail) => `${detail.blocker}: ${detail.remediation}`)
@@ -417,6 +421,8 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `query suggestion repair verification remediation: ${querySuggestionRepairVerificationRemediation}`,
         `query suggestion repair verification can execute: ${querySuggestionRepairVerificationCanExecute}`,
         `query suggestion repair verification command kind: ${querySuggestionRepairVerificationCommandKind}`,
+        `query suggestion repair verification requires inputs: ${querySuggestionRepairVerificationRequiresInputs}`,
+        `query suggestion repair verification required inputs: ${querySuggestionRepairVerificationRequiredInputs}`,
         `query suggestion repair verification blockers: ${querySuggestionRepairVerificationBlockers}`,
         `query suggestion repair verification blocker details: ${querySuggestionRepairVerificationBlockerDetails}`,
         `query suggestion repair verification expected query match: ${querySuggestionRepairVerificationExpectedQueryMatch}`,
