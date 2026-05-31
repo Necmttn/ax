@@ -96,6 +96,20 @@
       ]
     },
     {
+      "id": "embedding-helper-review-status",
+      "kind": "review",
+      "description": "Sync and evaluate reviewed embedding-helper hard-negative and dedupe statuses before export or promotion.",
+      "command": "bun run classifiers:embedding-helper-review-status -- --review=.ax/experiments/embedding-helper-review-current.json --brief=.ax/experiments/embedding-helper-review-current.md --out=.ax/experiments/embedding-helper-review-status-current.json --mode=sync",
+      "inputs": [
+        ".ax/experiments/embedding-helper-review-current.json",
+        ".ax/experiments/embedding-helper-review-current.md"
+      ],
+      "outputs": [
+        ".ax/experiments/embedding-helper-review-current.json",
+        ".ax/experiments/embedding-helper-review-status-current.json"
+      ]
+    },
+    {
       "id": "embedding-helper-graph-projection",
       "kind": "status",
       "description": "Project reviewed embedding helper routing, hard-negative, nearest-neighbor, and dedupe evidence into graph-ready facts and a Surreal write plan.",

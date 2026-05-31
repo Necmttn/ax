@@ -11932,6 +11932,77 @@ Decision:
   `pending_human_acceptance` helper hard negatives so accepted/rejected
   decisions can be synced back into fixture or dedupe workflows.
 
+## E213 - Embedding Helper Review Status Gate
+
+Question:
+
+- Can the embedding-helper hard-negative and dedupe review queues have the same
+  explicit status gate as blind hard-negative review, so accepted/rejected
+  decisions become machine-readable before export or promotion?
+
+Implementation:
+
+- Added
+  `packages/ax-classifier-session-sections/embedding_helper_review_status.py`.
+- Added `bun run classifiers:embedding-helper-review-status`.
+- Added package operation `embedding-helper-review-status`.
+- The status command:
+  - parses the embedding-helper review Markdown
+  - syncs `Status` and `Review notes` by candidate/cluster id in `--mode=sync`
+  - supports non-mutating `--mode=evaluate`
+  - accepts hard-negative statuses:
+    `pending_human_acceptance`, `accepted`, `rejected`
+  - accepts dedupe statuses: `pending_review`, `accepted`, `rejected`
+  - requires substantive notes for accepted or rejected review items
+  - blocks export/promotion while any helper hard negatives or dedupe clusters
+    remain pending
+
+Commands:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/embedding_helper_review_status_test.py
+bun run classifiers:embedding-helper-review-status -- --review=.ax/experiments/embedding-helper-review-e210.json --brief=.ax/experiments/embedding-helper-review-e210.md --out=.ax/experiments/embedding-helper-review-status-e213.json --mode=evaluate --json
+```
+
+Artifacts:
+
+- `.ax/experiments/embedding-helper-review-status-e213.json`
+
+Results:
+
+- Unit tests: `5 pass`
+- Status report schema:
+  `ax.embedding_helper_review_status_report.v1`
+- Review decision: `ready_for_helper_review`
+- Hard-negative candidates: `15`
+- Hard-negative statuses:
+  - `pending_human_acceptance`: `15`
+  - `accepted`: `0`
+  - `rejected`: `0`
+- Dedupe clusters: `1`
+- Dedupe statuses:
+  - `pending_review`: `1`
+  - `accepted`: `0`
+  - `rejected`: `0`
+- Invalid statuses: `0`
+- Missing/invalid notes: `0` because no item is reviewed yet
+- Failures:
+  - `embedding helper hard-negative review still has pending candidates`
+  - `embedding helper dedupe review still has pending clusters`
+- Decision: `needs_embedding_helper_review`
+- The command intentionally exits nonzero for this artifact because the review
+  gate is blocking.
+
+Decision:
+
+- E213 adds the missing review-status gate for embedding-helper outputs.
+- The helper layer now has a full non-promotion path:
+  graph query -> Markdown review -> status sync/evaluate -> blocked until human
+  accepted/rejected decisions with notes.
+- Next useful slice: add an export path that emits accepted helper hard
+  negatives as append-ready fixture rows and accepted dedupe clusters as graph
+  evidence aggregation hints, while doing nothing when E213 is still pending.
+
 ## Next Candidate - Embedding/SVM Helper Layer
 
 Hypothesis:
