@@ -2202,6 +2202,24 @@ describe("classifiers workflow-candidates", () => {
                 remediation: "Add reviewer and valid reviewed-at metadata or rerun without strict provenance.",
             }],
             production_next_action: "Add reviewer and reviewed-at metadata, or rerun without strict provenance if legacy review packs are acceptable.",
+            production_apply_command_argv: [
+                "bun",
+                "src/cli/index.ts",
+                "classifiers",
+                "workflow-candidates",
+                "--review-coverage",
+                "--source-kind=hybrid_window_classifier_projection",
+                "--coverage-review-pack=.ax/experiments/reviewed-coverage-gaps.jsonl",
+                "--sync-coverage-review-brief=.ax/experiments/reviewed-coverage-edited.md",
+                "--coverage-review-brief=.ax/experiments/reviewed-coverage.md",
+                "--review-facts=.ax/experiments/reviewed-coverage-facts.json",
+                "--review-write-plan=.ax/experiments/reviewed-coverage-write-plan.json",
+                "--apply-review-facts",
+                "--require-review-provenance",
+                "--require-review-handoff",
+                "--out=.ax/experiments/workflow-candidate-review-coverage-post-apply.json",
+                "--json",
+            ],
             production_apply_command: "bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/reviewed-coverage-gaps.jsonl --sync-coverage-review-brief=.ax/experiments/reviewed-coverage-edited.md --coverage-review-brief=.ax/experiments/reviewed-coverage.md --review-facts=.ax/experiments/reviewed-coverage-facts.json --review-write-plan=.ax/experiments/reviewed-coverage-write-plan.json --apply-review-facts --require-review-provenance --require-review-handoff --out=.ax/experiments/workflow-candidate-review-coverage-post-apply.json --json",
             review_provenance_stamp_command: "bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/reviewed-coverage-gaps.jsonl --sync-coverage-review-brief=.ax/experiments/reviewed-coverage-edited.md --review-provenance-reviewer=<reviewer> --review-provenance-reviewed-at=<reviewed-at-iso> --coverage-review-brief=.ax/experiments/reviewed-coverage.md --out=.ax/experiments/workflow-candidate-review-coverage-post-apply.json --json",
             review_provenance_stamp_command_argv: [
@@ -2354,6 +2372,7 @@ describe("classifiers workflow-candidates", () => {
         expect(text).toContain("coverage review production can apply: no");
         expect(text).toContain("coverage review production next action: Add reviewer and reviewed-at metadata, or rerun without strict provenance if legacy review packs are acceptable.");
         expect(text).toContain("coverage review production apply command: bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/reviewed-coverage-gaps.jsonl --sync-coverage-review-brief=.ax/experiments/reviewed-coverage-edited.md --coverage-review-brief=.ax/experiments/reviewed-coverage.md --review-facts=.ax/experiments/reviewed-coverage-facts.json --review-write-plan=.ax/experiments/reviewed-coverage-write-plan.json --apply-review-facts --require-review-provenance --require-review-handoff --out=.ax/experiments/workflow-candidate-review-coverage-post-apply.json --json");
+        expect(text).toContain("coverage review production apply argv: bun | src/cli/index.ts | classifiers | workflow-candidates | --review-coverage | --source-kind=hybrid_window_classifier_projection | --coverage-review-pack=.ax/experiments/reviewed-coverage-gaps.jsonl | --sync-coverage-review-brief=.ax/experiments/reviewed-coverage-edited.md | --coverage-review-brief=.ax/experiments/reviewed-coverage.md | --review-facts=.ax/experiments/reviewed-coverage-facts.json | --review-write-plan=.ax/experiments/reviewed-coverage-write-plan.json | --apply-review-facts | --require-review-provenance | --require-review-handoff | --out=.ax/experiments/workflow-candidate-review-coverage-post-apply.json | --json");
         expect(text).toContain("coverage review provenance stamp command: bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/reviewed-coverage-gaps.jsonl --sync-coverage-review-brief=.ax/experiments/reviewed-coverage-edited.md --review-provenance-reviewer=<reviewer> --review-provenance-reviewed-at=<reviewed-at-iso> --coverage-review-brief=.ax/experiments/reviewed-coverage.md --out=.ax/experiments/workflow-candidate-review-coverage-post-apply.json --json");
         expect(text).toContain("coverage review provenance stamp argv: bun | src/cli/index.ts | classifiers | workflow-candidates | --review-coverage | --source-kind=hybrid_window_classifier_projection | --coverage-review-pack=.ax/experiments/reviewed-coverage-gaps.jsonl | --sync-coverage-review-brief=.ax/experiments/reviewed-coverage-edited.md | --review-provenance-reviewer=<reviewer> | --review-provenance-reviewed-at=<reviewed-at-iso> | --coverage-review-brief=.ax/experiments/reviewed-coverage.md | --out=.ax/experiments/workflow-candidate-review-coverage-post-apply.json | --json");
         expect(text).toContain("coverage review pipeline stage: needs_review_provenance");
@@ -2444,6 +2463,7 @@ describe("classifiers workflow-candidates", () => {
             "missing_review_handoff",
         ]);
         expect(incompleteHandoff.production_apply_command).toBeUndefined();
+        expect(incompleteHandoff.production_apply_command_argv).toBeUndefined();
         expect(incompleteHandoff.review_provenance_stamp_command).toBeUndefined();
         expect(incompleteHandoff.review_provenance_stamp_command_argv).toBeUndefined();
         const requiredIncompleteHandoff = buildWorkflowCandidateReviewCoverageApplySummary({

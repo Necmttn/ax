@@ -444,6 +444,7 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly production_apply_blockers: readonly WorkflowCandidateReviewCoverageApplyBlocker[];
     readonly production_apply_blocker_details: readonly WorkflowCandidateReviewCoverageApplyBlockerDetail[];
     readonly production_next_action: string;
+    readonly production_apply_command_argv?: readonly string[];
     readonly production_apply_command?: string;
     readonly review_provenance_stamp_command_argv?: readonly string[];
     readonly review_provenance_stamp_command?: string;
@@ -2081,6 +2082,9 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             `coverage review production next action: ${report.coverage_review.production_next_action}`,
             ...(report.coverage_review.production_apply_command === undefined ? [] : [
                 `coverage review production apply command: ${report.coverage_review.production_apply_command}`,
+            ]),
+            ...(report.coverage_review.production_apply_command_argv === undefined ? [] : [
+                `coverage review production apply argv: ${report.coverage_review.production_apply_command_argv.join(" | ")}`,
             ]),
             ...(report.coverage_review.review_provenance_stamp_command === undefined ? [] : [
                 `coverage review provenance stamp command: ${report.coverage_review.review_provenance_stamp_command}`,
@@ -4763,6 +4767,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         production_apply_blockers: productionApplyBlockers,
         production_apply_blocker_details: productionApplyBlockerDetails,
         production_next_action: workflowCandidateReviewCoverageGuardNextAction(productionApplyGuard),
+        ...(productionApplyCommandArgv === undefined ? {} : { production_apply_command_argv: productionApplyCommandArgv }),
         ...(productionApplyCommand === undefined ? {} : { production_apply_command: productionApplyCommand }),
         ...(reviewProvenanceStampCommandArgv === undefined ? {} : { review_provenance_stamp_command_argv: reviewProvenanceStampCommandArgv }),
         ...(reviewProvenanceStampCommand === undefined ? {} : { review_provenance_stamp_command: reviewProvenanceStampCommand }),

@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E362 adds
-  `.ax/experiments/workflow-candidate-review-coverage-stamp-argv-e362.json`
+- Index continuation: E363 adds
+  `.ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363.json`
   and
-  `.ax/experiments/workflow-candidate-review-coverage-stamp-argv-e362.txt`
+  `.ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363.txt`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,70 @@ Current recommendation:
   checks.
 - The immediate bottleneck is review throughput, not another expensive model
   run.
+
+## E363 - Expose Production Apply Argv
+
+Question:
+- Can services execute the production review apply path without parsing the
+  shell-style production apply command?
+
+Implementation:
+- Added `production_apply_command_argv` to the coverage review readiness
+  summary when a complete review handoff can produce a production apply command.
+- Text coverage review output now renders
+  `coverage review production apply argv: ...`.
+- Incomplete handoff summaries still omit both the production apply command and
+  argv.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363.md --review-facts=.ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363-review-facts.json --review-write-plan=.ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363-review-write-plan.json --out=.ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363.md --review-facts=.ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363-review-facts.json --review-write-plan=.ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363-review-write-plan.json --out=.ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363.json > .ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363.txt
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363.json`
+- `.ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363.txt`
+
+Results:
+- Complete-handoff readiness reports
+  `review_handoff_status=complete_review_handoff`.
+- JSON exposes `coverage_review.production_apply_command_argv` with
+  `--review-facts`, `--review-write-plan`, `--apply-review-facts`,
+  `--require-review-provenance`, and `--require-review-handoff`.
+- Text output renders `coverage review production apply argv: ...`.
+- In this artifact `production_apply_guard=missing_review_provenance`, so the
+  command remains available as the production path while the guard still tells
+  services to stamp provenance before executing it.
+
+Decision:
+- E363 completes the direct-action argv coverage for the review pipeline:
+  review issue repair, provenance stamping, and production apply are all
+  available as structured argv arrays. Services no longer need to parse any of
+  the direct action command strings to execute or inspect the next step.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+cr = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363.json").read_text())["coverage_review"]
+text = Path(".ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363.txt").read_text()
+argv = cr["production_apply_command_argv"]
+assert cr["review_handoff_status"] == "complete_review_handoff"
+assert cr["production_apply_guard"] == "missing_review_provenance"
+assert argv[:5] == ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates", "--review-coverage"]
+assert "--apply-review-facts" in argv
+assert "--require-review-provenance" in argv
+assert "--require-review-handoff" in argv
+assert "--review-facts=.ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363-review-facts.json" in argv
+assert "--review-write-plan=.ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363-review-write-plan.json" in argv
+assert "--out=.ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363.json" in argv
+assert "coverage review production apply argv: bun | src/cli/index.ts | classifiers | workflow-candidates | --review-coverage" in text
+PY
+```
 
 ## E362 - Expose Provenance Stamp Argv
 
