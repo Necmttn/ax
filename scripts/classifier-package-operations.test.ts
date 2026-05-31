@@ -1194,12 +1194,49 @@ describe("classifier package operations report", () => {
         });
 
         expect(report.query.value_equals).toBe("bind_inputs");
+        expect(report.query_match_status).toBe("matched");
         expect(report.totals.lifecycle_fact_count).toBe(3);
         expect(report.result_totals.lifecycle_fact_count).toBe(1);
         expect(report.lifecycle_facts[0]).toMatchObject({
             predicate: "review_pipeline_recommended_action_execution_phase",
             value: "bind_inputs",
         });
+    });
+
+    test("marks graph health reports with no matching query results", () => {
+        const report = buildExecutionGraphHealthReport({
+            nodes: [],
+            edges: [{
+                graph_id: "edge:lifecycle",
+                kind: "has_evidence",
+                from_id: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                to_id: "artifact:.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                evidence_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                properties_json: JSON.stringify({ lifecycle_key: "review_pipeline_lifecycle" }),
+            }],
+            facts: [{
+                graph_id: "fact:lifecycle:phase-bind",
+                kind: "classifier_lifecycle_status",
+                subject: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                predicate: "review_pipeline_recommended_action_execution_phase",
+                value_json: JSON.stringify("bind_inputs"),
+                evidence_edges_json: JSON.stringify(["edge:lifecycle"]),
+                properties_json: JSON.stringify({
+                    lifecycle_key: "review_pipeline_lifecycle",
+                    artifact_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                }),
+            }],
+            query: {
+                mode: "lifecycle",
+                predicate: "review_pipeline_recommended_action_execution_phase",
+                value_equals: "execute",
+            },
+        });
+
+        expect(report.query_match_status).toBe("no_match");
+        expect(report.result_totals.lifecycle_fact_count).toBe(0);
+        expect(report.lifecycle_facts).toEqual([]);
+        expect(report.lifecycle_value_counts).toEqual([]);
     });
 
     test("summarizes lifecycle graph fact values", () => {

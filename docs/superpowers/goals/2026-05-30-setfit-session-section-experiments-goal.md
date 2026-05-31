@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E373 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-counts-e373.json`
+- Index continuation: E374 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-match-e374.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-counts-e373-graph.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-no-match-e374.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,53 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E374 - Expose Graph Query Match Status
+
+Question:
+- E373 makes lifecycle phase queries countable, but can services distinguish a
+  real no-match query from an empty result without recomputing totals?
+
+Implementation:
+- Added `query_match_status` to classifier graph health reports.
+- The status is `matched` when any primary result set is non-empty:
+  operations, guarded operations, changed artifacts, lifecycle facts, or
+  embedding-helper facts.
+- The status is `no_match` when no primary result sets match the query.
+- Evidence paths are intentionally not counted as primary matches because they
+  are derived from matched rows.
+- Text graph-health output now renders `query match`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-match-e374.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-no-match-e374.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-no-match-e374.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=bind_inputs`
+  returns `query_match_status=matched` with one lifecycle fact.
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` with zero lifecycle facts and no
+  lifecycle value-count rows.
+- Text output renders `query match: no_match`.
+
+Decision:
+- Review services can now branch directly on graph query matches without
+  comparing several result-total fields or accidentally treating derived
+  evidence paths as a match.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E374 positive report has `query_match_status=matched` and
+  `result_totals.lifecycle_fact_count=1`.
+- E374 negative report has `query_match_status=no_match`,
+  `result_totals.lifecycle_fact_count=0`, and empty
+  `lifecycle_value_counts`.
+- E374 text output includes `query match: no_match`.
 
 ## E373 - Summarize Lifecycle Fact Values
 

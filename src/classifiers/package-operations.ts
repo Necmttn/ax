@@ -477,6 +477,7 @@ export interface ClassifierPackageExecutionGraphHealthReport {
     readonly embedding_helper_facts: readonly ClassifierGraphEmbeddingHelperFact[];
     readonly routing_policy_summary?: ClassifierGraphRoutingPolicySummary;
     readonly evidence_paths: readonly string[];
+    readonly query_match_status?: "matched" | "no_match";
     readonly totals: {
         readonly node_count: number;
         readonly edge_count: number;
@@ -2598,6 +2599,12 @@ export function buildExecutionGraphHealthReport(input: {
         ...(recommendedFloorBestPolicy?.positive_recall_after_routing_mean === undefined ? {} : { recommended_floor_best_positive_recall: recommendedFloorBestPolicy.positive_recall_after_routing_mean }),
         ...(recommendedFloorBestPolicy?.setfit_call_reduction_rate_mean === undefined ? {} : { recommended_floor_best_call_reduction: recommendedFloorBestPolicy.setfit_call_reduction_rate_mean }),
     };
+    const primaryResultCount =
+        resultOperations.length +
+        resultGuardedOperations.length +
+        resultChangedArtifacts.length +
+        resultLifecycleFacts.length +
+        resultEmbeddingHelperFacts.length;
 
     return {
         schema: "ax.classifier_package_execution_graph_health_report.v1",
@@ -2611,6 +2618,7 @@ export function buildExecutionGraphHealthReport(input: {
         embedding_helper_facts: resultEmbeddingHelperFacts,
         routing_policy_summary: routingPolicySummary,
         evidence_paths: resultEvidencePaths,
+        query_match_status: primaryResultCount > 0 ? "matched" : "no_match",
         totals: {
             node_count: input.nodes.length,
             edge_count: input.edges.length,
