@@ -110,6 +110,22 @@
       ]
     },
     {
+      "id": "embedding-helper-export",
+      "kind": "publish",
+      "description": "Export accepted embedding-helper hard negatives as append-ready fixture rows and accepted dedupe clusters as graph aggregation hints.",
+      "command": "bun run classifiers:embedding-helper-export -- --review=.ax/experiments/embedding-helper-review-current.json --status=.ax/experiments/embedding-helper-review-status-current.json --fixtures=packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --out=.ax/experiments/embedding-helper-fixture-append-current.jsonl --hints=.ax/experiments/embedding-helper-dedupe-hints-current.json --report=.ax/experiments/embedding-helper-export-current-report.json",
+      "inputs": [
+        ".ax/experiments/embedding-helper-review-current.json",
+        ".ax/experiments/embedding-helper-review-status-current.json",
+        "packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl"
+      ],
+      "outputs": [
+        ".ax/experiments/embedding-helper-fixture-append-current.jsonl",
+        ".ax/experiments/embedding-helper-dedupe-hints-current.json",
+        ".ax/experiments/embedding-helper-export-current-report.json"
+      ]
+    },
+    {
       "id": "embedding-helper-graph-projection",
       "kind": "status",
       "description": "Project reviewed embedding helper routing, hard-negative, nearest-neighbor, and dedupe evidence into graph-ready facts and a Surreal write plan.",
