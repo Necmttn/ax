@@ -1827,6 +1827,7 @@ const classifiersPackageOperationsCommand = Command.make(
         sourceFixture: Flag.string("source-fixture").pipe(Flag.optional),
         proposedLabel: Flag.string("proposed-label").pipe(Flag.optional),
         threshold: Flag.string("threshold").pipe(Flag.optional),
+        minSeedCount: Flag.integer("min-seed-count").pipe(Flag.optional),
         minNearestSimilarity: Flag.float("min-nearest-similarity").pipe(Flag.optional),
         nearestFixture: Flag.string("nearest-fixture").pipe(Flag.optional),
         predicate: Flag.string("predicate").pipe(Flag.optional),
@@ -1839,7 +1840,7 @@ const classifiersPackageOperationsCommand = Command.make(
         writePlan: Flag.boolean("write-plan").pipe(Flag.withDefault(false)),
         json: jsonFlag,
     },
-    ({ allowExpensive, applyWritePlan, all, dryRun, execute, facts, graphHealth, graphMode, history, manifest, operation, artifact, sourceKind, factKind, status, sourceFixture, proposedLabel, threshold, minNearestSimilarity, nearestFixture, predicate, subject, valueContains, out, preflight, root, workflowStatus, writePlan, json }) => {
+    ({ allowExpensive, applyWritePlan, all, dryRun, execute, facts, graphHealth, graphMode, history, manifest, operation, artifact, sourceKind, factKind, status, sourceFixture, proposedLabel, threshold, minSeedCount, minNearestSimilarity, nearestFixture, predicate, subject, valueContains, out, preflight, root, workflowStatus, writePlan, json }) => {
         const operationId = optionValue(operation);
         const artifactPath = optionValue(artifact);
         const sourceKindName = optionValue(sourceKind);
@@ -1848,6 +1849,7 @@ const classifiersPackageOperationsCommand = Command.make(
         const sourceFixtureId = optionValue(sourceFixture);
         const proposedLabelName = optionValue(proposedLabel);
         const thresholdName = optionValue(threshold);
+        const minSeedCountValue = optionValue(minSeedCount);
         const minNearestSimilarityValue = optionValue(minNearestSimilarity);
         const nearestFixtureId = optionValue(nearestFixture);
         const predicateName = optionValue(predicate);
@@ -1882,6 +1884,7 @@ const classifiersPackageOperationsCommand = Command.make(
             ...(sourceFixtureId === undefined ? {} : { sourceFixture: sourceFixtureId }),
             ...(proposedLabelName === undefined ? {} : { proposedLabel: proposedLabelName }),
             ...(thresholdName === undefined ? {} : { threshold: thresholdName }),
+            ...(minSeedCountValue === undefined ? {} : { minSeedCount: minSeedCountValue }),
             ...(minNearestSimilarityValue === undefined ? {} : { minNearestSimilarity: minNearestSimilarityValue }),
             ...(nearestFixtureId === undefined ? {} : { nearestFixture: nearestFixtureId }),
             ...(predicateName === undefined ? {} : { predicate: predicateName }),
@@ -1908,6 +1911,7 @@ const classifiersGraphCommand = Command.make(
         sourceFixture: Flag.string("source-fixture").pipe(Flag.optional),
         proposedLabel: Flag.string("proposed-label").pipe(Flag.optional),
         threshold: Flag.string("threshold").pipe(Flag.optional),
+        minSeedCount: Flag.integer("min-seed-count").pipe(Flag.optional),
         minNearestSimilarity: Flag.float("min-nearest-similarity").pipe(Flag.optional),
         nearestFixture: Flag.string("nearest-fixture").pipe(Flag.optional),
         predicate: Flag.string("predicate").pipe(Flag.optional),
@@ -1916,7 +1920,7 @@ const classifiersGraphCommand = Command.make(
         out: Flag.string("out").pipe(Flag.optional),
         json: jsonFlag,
     },
-    ({ mode, operation, artifact, sourceKind, factKind, status, sourceFixture, proposedLabel, threshold, minNearestSimilarity, nearestFixture, predicate, subject, valueContains, out, json }) => {
+    ({ mode, operation, artifact, sourceKind, factKind, status, sourceFixture, proposedLabel, threshold, minSeedCount, minNearestSimilarity, nearestFixture, predicate, subject, valueContains, out, json }) => {
         const operationId = optionValue(operation);
         const artifactPath = optionValue(artifact);
         const sourceKindName = optionValue(sourceKind);
@@ -1925,6 +1929,7 @@ const classifiersGraphCommand = Command.make(
         const sourceFixtureId = optionValue(sourceFixture);
         const proposedLabelName = optionValue(proposedLabel);
         const thresholdName = optionValue(threshold);
+        const minSeedCountValue = optionValue(minSeedCount);
         const minNearestSimilarityValue = optionValue(minNearestSimilarity);
         const nearestFixtureId = optionValue(nearestFixture);
         const predicateName = optionValue(predicate);
@@ -1943,6 +1948,7 @@ const classifiersGraphCommand = Command.make(
             ...(sourceFixtureId === undefined ? {} : { sourceFixture: sourceFixtureId }),
             ...(proposedLabelName === undefined ? {} : { proposedLabel: proposedLabelName }),
             ...(thresholdName === undefined ? {} : { threshold: thresholdName }),
+            ...(minSeedCountValue === undefined ? {} : { minSeedCount: minSeedCountValue }),
             ...(minNearestSimilarityValue === undefined ? {} : { minNearestSimilarity: minNearestSimilarityValue }),
             ...(nearestFixtureId === undefined ? {} : { nearestFixture: nearestFixtureId }),
             ...(predicateName === undefined ? {} : { predicate: predicateName }),

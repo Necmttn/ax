@@ -1270,6 +1270,75 @@ describe("classifier package operations report", () => {
         });
     });
 
+    test("filters embedding helper graph facts by minimum seed count", () => {
+        const report = buildExecutionGraphHealthReport({
+            nodes: [],
+            edges: [{
+                graph_id: "edge:seeded",
+                kind: "promoted_as_fixture",
+                from_id: "embedding_helper_hard_negative:session-section-chunks/none-seeded",
+                to_id: "classifier_promoted_fixture:session-section-chunks/none-seeded",
+                evidence_path: ".ax/experiments/embedding-helper-review-e210.json",
+                properties_json: "{}",
+                source_kind: "embedding_helper_review_projection",
+            }, {
+                graph_id: "edge:single-seed",
+                kind: "promoted_as_fixture",
+                from_id: "embedding_helper_hard_negative:session-section-chunks/none-single-seed",
+                to_id: "classifier_promoted_fixture:session-section-chunks/none-single-seed",
+                evidence_path: ".ax/experiments/embedding-helper-review-e210.json",
+                properties_json: "{}",
+                source_kind: "embedding_helper_review_projection",
+            }],
+            facts: [{
+                graph_id: "fact:seeded",
+                kind: "embedding_helper_hard_negative_candidate",
+                subject: "embedding_helper_hard_negative:session-section-chunks/none-seeded",
+                predicate: "promoted_hard_negative_fixture",
+                value_json: "true",
+                evidence_edges_json: JSON.stringify(["edge:seeded"]),
+                properties_json: JSON.stringify({
+                    source_fixture_id: "session-section-chunks/none-seeded",
+                    status: "accepted",
+                    proposed_label: "none",
+                    seed_count: 2,
+                }),
+                source_kind: "embedding_helper_review_projection",
+            }, {
+                graph_id: "fact:single-seed",
+                kind: "embedding_helper_hard_negative_candidate",
+                subject: "embedding_helper_hard_negative:session-section-chunks/none-single-seed",
+                predicate: "promoted_hard_negative_fixture",
+                value_json: "true",
+                evidence_edges_json: JSON.stringify(["edge:single-seed"]),
+                properties_json: JSON.stringify({
+                    source_fixture_id: "session-section-chunks/none-single-seed",
+                    status: "accepted",
+                    proposed_label: "none",
+                    seed_count: 1,
+                }),
+                source_kind: "embedding_helper_review_projection",
+            }],
+            query: {
+                mode: "embedding-helper",
+                fact_kind: "embedding_helper_hard_negative_candidate",
+                status: "accepted",
+                proposed_label: "none",
+                min_seed_count: 2,
+            },
+        });
+
+        expect(report.query.min_seed_count).toBe(2);
+        expect(report.totals.embedding_helper_fact_count).toBe(2);
+        expect(report.result_totals.embedding_helper_fact_count).toBe(1);
+        expect(report.embedding_helper_facts[0]).toMatchObject({
+            source_fixture_id: "session-section-chunks/none-seeded",
+            status: "accepted",
+            proposed_label: "none",
+            seed_count: 2,
+        });
+    });
+
     test("writes graph health reports", () => {
         const report = buildExecutionGraphHealthReport({ nodes: [], edges: [], facts: [] });
         const path = join(mkdtempSync(join(tmpdir(), "ax-graph-health-")), "health.json");

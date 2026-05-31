@@ -392,6 +392,7 @@ export interface ClassifierGraphHealthQuery {
     readonly source_fixture_id?: string;
     readonly proposed_label?: string;
     readonly threshold?: string;
+    readonly min_seed_count?: number;
     readonly min_nearest_similarity?: number;
     readonly nearest_fixture_id?: string;
     readonly predicate?: string;
@@ -1812,6 +1813,7 @@ export function buildExecutionGraphHealthReport(input: {
         ...(input.query?.source_fixture_id ? { source_fixture_id: input.query.source_fixture_id } : {}),
         ...(input.query?.proposed_label ? { proposed_label: input.query.proposed_label } : {}),
         ...(input.query?.threshold ? { threshold: input.query.threshold } : {}),
+        ...(input.query?.min_seed_count === undefined ? {} : { min_seed_count: input.query.min_seed_count }),
         ...(input.query?.min_nearest_similarity === undefined ? {} : { min_nearest_similarity: input.query.min_nearest_similarity }),
         ...(input.query?.nearest_fixture_id ? { nearest_fixture_id: input.query.nearest_fixture_id } : {}),
         ...(input.query?.predicate ? { predicate: input.query.predicate } : {}),
@@ -2018,6 +2020,7 @@ export function buildExecutionGraphHealthReport(input: {
             !query.source_fixture_id &&
             !query.proposed_label &&
             !query.threshold &&
+            query.min_seed_count === undefined &&
             query.min_nearest_similarity === undefined &&
             !query.nearest_fixture_id &&
             (!query.predicate || fact.predicate === query.predicate) &&
@@ -2038,6 +2041,7 @@ export function buildExecutionGraphHealthReport(input: {
             (!query.source_fixture_id || fact.source_fixture_id === query.source_fixture_id) &&
             (!query.proposed_label || fact.proposed_label === query.proposed_label) &&
             (!query.threshold || fact.threshold === query.threshold) &&
+            (query.min_seed_count === undefined || (typeof fact.seed_count === "number" && fact.seed_count >= query.min_seed_count)) &&
             (query.min_nearest_similarity === undefined || (fact.nearest_neighbors ?? []).some((neighbor) => typeof neighbor.similarity === "number" && neighbor.similarity >= query.min_nearest_similarity!)) &&
             (!query.nearest_fixture_id || (fact.nearest_neighbors ?? []).some((neighbor) => neighbor.fixture_id === query.nearest_fixture_id)) &&
             (!query.predicate || fact.predicate === query.predicate) &&

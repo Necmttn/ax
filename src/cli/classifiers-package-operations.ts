@@ -40,6 +40,7 @@ export interface ClassifierPackageOperationsCommandInput extends ClassifierPacka
     readonly sourceFixture?: string;
     readonly proposedLabel?: string;
     readonly threshold?: string;
+    readonly minSeedCount?: number;
     readonly minNearestSimilarity?: number;
     readonly nearestFixture?: string;
     readonly predicate?: string;
@@ -276,6 +277,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `filter source fixture: ${report.query.source_fixture_id ?? "all"}`,
         `filter proposed label: ${report.query.proposed_label ?? "all"}`,
         `filter threshold: ${report.query.threshold ?? "all"}`,
+        `filter min seed count: ${report.query.min_seed_count ?? "all"}`,
         `filter min nearest similarity: ${report.query.min_nearest_similarity ?? "all"}`,
         `filter nearest fixture: ${report.query.nearest_fixture_id ?? "all"}`,
         `filter predicate: ${report.query.predicate ?? "all"}`,
@@ -595,6 +597,7 @@ export const runClassifiersPackageOperations = (
                 ...(input.sourceFixture ? { source_fixture_id: input.sourceFixture } : {}),
                 ...(input.proposedLabel ? { proposed_label: input.proposedLabel } : {}),
                 ...(input.threshold ? { threshold: input.threshold } : {}),
+                ...(input.minSeedCount === undefined ? {} : { min_seed_count: input.minSeedCount }),
                 ...(input.minNearestSimilarity === undefined ? {} : { min_nearest_similarity: input.minNearestSimilarity }),
                 ...(input.nearestFixture ? { nearest_fixture_id: input.nearestFixture } : {}),
                 ...(input.predicate ? { predicate: input.predicate } : {}),
