@@ -288,6 +288,11 @@ export type WorkflowCandidateReviewCoveragePipelineRequiredInput =
     | "reviewer"
     | "reviewed_at";
 
+export type WorkflowCandidateReviewCoveragePipelineCommandStatus =
+    | "unavailable"
+    | "requires_inputs"
+    | "ready_to_execute";
+
 export interface WorkflowCandidateReviewCoveragePipelineInputBinding {
     readonly input: WorkflowCandidateReviewCoveragePipelineRequiredInput;
     readonly argv_flag: string;
@@ -399,6 +404,7 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly review_issue_repair_command?: string;
     readonly review_pipeline_stage: WorkflowCandidateReviewCoveragePipelineStage;
     readonly review_pipeline_next_action: string;
+    readonly review_pipeline_command_status: WorkflowCandidateReviewCoveragePipelineCommandStatus;
     readonly review_pipeline_command_kind?: WorkflowCandidateReviewCoveragePipelineCommandKind;
     readonly review_pipeline_required_inputs: readonly WorkflowCandidateReviewCoveragePipelineRequiredInput[];
     readonly review_pipeline_input_bindings: readonly WorkflowCandidateReviewCoveragePipelineInputBinding[];
@@ -2019,6 +2025,7 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             `coverage review issue next action: ${report.coverage_review.review_issue_next_action}`,
             `coverage review pipeline stage: ${report.coverage_review.review_pipeline_stage}`,
             `coverage review pipeline next action: ${report.coverage_review.review_pipeline_next_action}`,
+            `coverage review pipeline command status: ${report.coverage_review.review_pipeline_command_status}`,
             ...(report.coverage_review.review_pipeline_command_kind === undefined ? [] : [
                 `coverage review pipeline command kind: ${report.coverage_review.review_pipeline_command_kind}`,
             ]),
@@ -3328,6 +3335,10 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
     const reviewPipelineCommandKind = workflowCandidateReviewCoveragePipelineCommandKind(reviewPipelineStage, reviewPipelineCommand);
     const reviewPipelineRequiredInputs = workflowCandidateReviewCoveragePipelineRequiredInputs(reviewPipelineCommandKind);
     const reviewPipelineInputBindings = workflowCandidateReviewCoveragePipelineInputBindings(reviewPipelineCommandKind, reviewPipelineCommandArgv);
+    const reviewPipelineCommandStatus = workflowCandidateReviewCoveragePipelineCommandStatus({
+        command: reviewPipelineCommand,
+        requiredInputs: reviewPipelineRequiredInputs,
+    });
     const lines = [
         "# Workflow Candidate Coverage Review",
         "",
@@ -3371,6 +3382,7 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
         `- Next action: ${workflowCandidateReviewCoverageGuardNextAction(applyGuard)}`,
         `- Pipeline stage: \`${reviewPipelineStage}\``,
         `- Pipeline next action: ${reviewPipelineNextAction}`,
+        `- Pipeline command status: \`${reviewPipelineCommandStatus}\``,
         ...(reviewPipelineCommand === undefined ? [] : [
             `- Pipeline command kind: \`${reviewPipelineCommandKind}\``,
             `- Pipeline required inputs: ${reviewPipelineRequiredInputs.length === 0 ? "`none`" : reviewPipelineRequiredInputs.map((input) => `\`${input}\``).join(", ")}`,
@@ -4009,6 +4021,15 @@ const workflowCandidateReviewCoveragePipelineRequiredInputs = (
     }
 };
 
+const workflowCandidateReviewCoveragePipelineCommandStatus = (input: {
+    readonly command: string | undefined;
+    readonly requiredInputs: readonly WorkflowCandidateReviewCoveragePipelineRequiredInput[];
+}): WorkflowCandidateReviewCoveragePipelineCommandStatus => {
+    if (input.command === undefined) return "unavailable";
+    if (input.requiredInputs.length > 0) return "requires_inputs";
+    return "ready_to_execute";
+};
+
 const workflowCandidateReviewCoveragePipelineInputBindings = (
     commandKind: WorkflowCandidateReviewCoveragePipelineCommandKind | undefined,
     argv: readonly string[] | undefined,
@@ -4390,6 +4411,10 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     const reviewPipelineCommandKind = workflowCandidateReviewCoveragePipelineCommandKind(reviewPipelineStage, reviewPipelineCommand);
     const reviewPipelineRequiredInputs = workflowCandidateReviewCoveragePipelineRequiredInputs(reviewPipelineCommandKind);
     const reviewPipelineInputBindings = workflowCandidateReviewCoveragePipelineInputBindings(reviewPipelineCommandKind, reviewPipelineCommandArgv);
+    const reviewPipelineCommandStatus = workflowCandidateReviewCoveragePipelineCommandStatus({
+        command: reviewPipelineCommand,
+        requiredInputs: reviewPipelineRequiredInputs,
+    });
     return {
         schema: "ax.workflow_candidate_review_readiness.v1",
         source_path: input.sourcePath,
@@ -4466,6 +4491,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         ...(reviewIssueRepairCommand === undefined ? {} : { review_issue_repair_command: reviewIssueRepairCommand }),
         review_pipeline_stage: reviewPipelineStage,
         review_pipeline_next_action: reviewPipelineNextAction,
+        review_pipeline_command_status: reviewPipelineCommandStatus,
         ...(reviewPipelineCommandKind === undefined ? {} : { review_pipeline_command_kind: reviewPipelineCommandKind }),
         review_pipeline_required_inputs: reviewPipelineRequiredInputs,
         review_pipeline_input_bindings: reviewPipelineInputBindings,
