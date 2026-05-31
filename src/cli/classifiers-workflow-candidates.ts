@@ -238,11 +238,16 @@ export type WorkflowCandidateReviewCoverageReviewIssue =
     | "missing_reviewed_at"
     | "missing_reviewer";
 
+export type WorkflowCandidateReviewCoverageReviewIssueBlockingScope =
+    | "base_apply"
+    | "production_apply";
+
 export interface WorkflowCandidateReviewCoverageReviewIssueRow {
     readonly fixture_id: string;
     readonly candidate_id: string;
     readonly issue: WorkflowCandidateReviewCoverageReviewIssue;
     readonly review_status: string;
+    readonly blocking_scope: WorkflowCandidateReviewCoverageReviewIssueBlockingScope;
     readonly remediation: string;
 }
 
@@ -1970,7 +1975,7 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             ]),
             `coverage review issue counts: ${report.coverage_review.review_issue_counts.length === 0 ? "none" : report.coverage_review.review_issue_counts.map((item) => `${item.issue}=${item.count}`).join(", ")}`,
             ...report.coverage_review.review_issue_rows.map((row) =>
-                `coverage review issue: ${row.issue} fixture=${row.fixture_id} candidate=${row.candidate_id} status=${row.review_status}`
+                `coverage review issue: ${row.issue} fixture=${row.fixture_id} candidate=${row.candidate_id} status=${row.review_status} scope=${row.blocking_scope}`
             ),
             `coverage review provenance issue rows: ${report.coverage_review.provenance_issue_rows.length}`,
             ...report.coverage_review.provenance_issue_rows.map((row) =>
@@ -3270,7 +3275,7 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
                 ]),
                 `- Issue counts: ${reviewIssueCounts.map((item) => `\`${item.issue}=${item.count}\``).join(", ")}`,
                 ...reviewIssueRows.map((row) =>
-                    `- \`${row.issue}\` fixture=\`${row.fixture_id}\` candidate=\`${row.candidate_id}\` status=\`${row.review_status}\` remediation=\`${row.remediation}\``
+                    `- \`${row.issue}\` fixture=\`${row.fixture_id}\` candidate=\`${row.candidate_id}\` status=\`${row.review_status}\` scope=\`${row.blocking_scope}\` remediation=\`${row.remediation}\``
                 ),
             ]),
         "",
@@ -3656,6 +3661,21 @@ const workflowCandidateReviewCoverageReviewIssueRemediation = (
     }
 };
 
+const workflowCandidateReviewCoverageReviewIssueBlockingScope = (
+    issue: WorkflowCandidateReviewCoverageReviewIssue,
+): WorkflowCandidateReviewCoverageReviewIssueBlockingScope => {
+    switch (issue) {
+        case "blocked_smoke_review":
+        case "invalid_review_status":
+        case "missing_review_rationale":
+            return "base_apply";
+        case "invalid_reviewed_at":
+        case "missing_reviewed_at":
+        case "missing_reviewer":
+            return "production_apply";
+    }
+};
+
 const workflowCandidateReviewCoverageReviewIssueRows = (
     rows: readonly WorkflowCandidateTopicClassifierFixtureRow[],
 ): WorkflowCandidateReviewCoverageReviewIssueRow[] => rows.flatMap((row) => {
@@ -3672,6 +3692,7 @@ const workflowCandidateReviewCoverageReviewIssueRows = (
         candidate_id: row.candidate_id,
         issue,
         review_status: row.review_status,
+        blocking_scope: workflowCandidateReviewCoverageReviewIssueBlockingScope(issue),
         remediation: workflowCandidateReviewCoverageReviewIssueRemediation(issue),
     }));
 });
