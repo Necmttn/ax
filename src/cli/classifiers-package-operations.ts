@@ -490,6 +490,9 @@ export function renderClassifierLifecycleInsightText(report: ClassifierLifecycle
         if (pipeline.recommended_action_missing_inputs && pipeline.recommended_action_missing_inputs.length > 0) {
             lines.push(`  recommended action missing inputs: ${pipeline.recommended_action_missing_inputs.join(", ")}`);
         }
+        if (pipeline.recommended_action_input_bindings && pipeline.recommended_action_input_bindings.length > 0) {
+            lines.push(`  recommended action input bindings: ${pipeline.recommended_action_input_bindings.join("; ")}`);
+        }
         lines.push(`  outputs: ${pipeline.output_verification_status ?? "unknown"} checked=${pipeline.checked_artifact_count} missing=${pipeline.missing_required_artifact_count}`);
         if (pipeline.output_artifacts.length > 0) {
             lines.push(`  output artifacts: ${pipeline.output_artifacts.map((artifact) => `${artifact.kind ?? "artifact"}=${artifact.path}`).join(", ")}`);

@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E366 adds
-  `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-safety-e366.json`
+- Index continuation: E367 adds
+  `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-bindings-e367.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended_action_status-e366.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-input-bindings-e367.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,73 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E367 - Expose Recommended Action Input Bindings
+
+Question:
+- E366 tells services the recommended action is blocked on missing inputs, but
+  can they discover how to bind those inputs without reopening the workflow
+  readiness artifact and parsing `summary.input_bindings`?
+
+Implementation:
+- Added `recommended_action_input_bindings` to review-pipeline lifecycle status
+  and lifecycle insight.
+- Loaded binding summaries from lifecycle `summary.input_bindings`.
+- Rendered each binding as a compact service-readable string:
+  `input flag=<argv_flag> placeholder=<placeholder> value_kind=<value_kind>`.
+- Projected bindings into the lifecycle graph predicate
+  `review_pipeline_recommended_action_input_bindings`.
+- Lifecycle text now renders `recommended action input bindings`.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-bindings-e367.md --review-facts=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-bindings-e367-review-facts.json --review-write-plan=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-bindings-e367-review-write-plan.json --review-pipeline-lifecycle --out=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-bindings-e367.json --json > .ax/experiments/workflow-candidate-review-pipeline-recommended-action-bindings-e367.stdout
+cp .ax/experiments/workflow-candidate-review-pipeline-recommended-action-bindings-e367.json .ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json
+bun src/cli/index.ts classifiers package-operations --facts --workflow-status=.ax/experiments/blind-workflow-status-current.json --out=.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-bindings-e367.json --json > .ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-bindings-e367.stdout
+bun src/cli/index.ts classifiers package-operations --write-plan --facts --workflow-status=.ax/experiments/blind-workflow-status-current.json --out=.ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-bindings-e367.json --json > .ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-bindings-e367.stdout
+bun src/cli/index.ts classifiers package-operations --apply-write-plan --facts --workflow-status=.ax/experiments/blind-workflow-status-current.json --out=.ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-bindings-e367.json --json > .ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-bindings-e367.stdout
+bun src/cli/index.ts classifiers package-operations --graph-health --graph-mode=lifecycle --predicate=review_pipeline_recommended_action_input_bindings --out=.ax/experiments/classifier-graph-lifecycle-recommended-action-input-bindings-e367.json --json > .ax/experiments/classifier-graph-lifecycle-recommended-action-input-bindings-e367.stdout
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-bindings-e367.json --json > .ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-bindings-e367.stdout
+bun src/cli/index.ts classifiers lifecycle > .ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-bindings-e367.txt
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-bindings-e367.json`
+- `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-bindings-e367.json`
+- `.ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-bindings-e367.json`
+- `.ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-bindings-e367.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-input-bindings-e367.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-bindings-e367.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-bindings-e367.txt`
+
+Results:
+- Fact projection includes `review_pipeline_recommended_action_input_bindings`
+  with:
+  - `reviewer flag=--review-provenance-reviewer placeholder=<reviewer> value_kind=nonempty_string`
+  - `reviewed_at flag=--review-provenance-reviewed-at placeholder=<reviewed-at-iso> value_kind=iso_datetime`
+- Lifecycle graph query by that predicate returns exactly one lifecycle fact.
+- Lifecycle insight JSON exposes the same binding descriptors next to
+  `recommended_action_missing_inputs`.
+- Lifecycle text renders both missing inputs and binding descriptors.
+
+Decision:
+- E367 closes the handoff gap between "the action needs inputs" and "a service
+  knows how to collect/bind those inputs." Review services can now present the
+  required fields with expected value kinds and map them back to argv flags
+  without artifact-specific parsing.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-bindings-e367.json`
+  contains the new binding predicate plus the existing recommendation facts.
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-input-bindings-e367.json`
+  has one lifecycle fact for the review-pipeline lifecycle node.
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-bindings-e367.txt`
+  renders both binding descriptors.
 
 ## E366 - Add Recommended Action Safety Metadata
 

@@ -522,6 +522,7 @@ describe("classifier package operations report", () => {
                 recommended_action_can_execute: false,
                 recommended_action_next_action: "Bind required pipeline inputs before executing the command.",
                 recommended_action_missing_inputs: ["reviewer"],
+                recommended_action_input_bindings: ["reviewer flag=--review-provenance-reviewer placeholder=<reviewer> value_kind=nonempty_string"],
                 output_artifacts: [
                     { kind: "review_brief", path: ".ax/experiments/review.md", required_for_handoff: true },
                     { kind: "readiness_report", path: ".ax/experiments/readiness.json", required_for_handoff: false },
@@ -535,7 +536,7 @@ describe("classifier package operations report", () => {
             next_actions: [],
         });
 
-        expect(report.totals.lifecycle_fact_count).toBe(21);
+        expect(report.totals.lifecycle_fact_count).toBe(22);
         expect(report.nodes).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 id: "classifier_lifecycle:workflow_candidate_review_pipeline",
@@ -612,6 +613,10 @@ describe("classifier package operations report", () => {
                 value: ["reviewer"],
             }),
             expect.objectContaining({
+                predicate: "review_pipeline_recommended_action_input_bindings",
+                value: ["reviewer flag=--review-provenance-reviewer placeholder=<reviewer> value_kind=nonempty_string"],
+            }),
+            expect.objectContaining({
                 predicate: "review_pipeline_output_artifact_paths",
                 value: [".ax/experiments/review.md", ".ax/experiments/readiness.json"],
             }),
@@ -647,6 +652,16 @@ describe("classifier package operations report", () => {
                     status: "verified_after_execution",
                     can_execute: true,
                     can_continue: true,
+                    summary: {
+                        input_bindings: [
+                            {
+                                input: "reviewer",
+                                argv_flag: "--review-provenance-reviewer",
+                                placeholder: "<reviewer>",
+                                value_kind: "nonempty_string",
+                            },
+                        ],
+                    },
                     output_verification: {
                         status: "verified",
                         checked_artifacts: [
@@ -692,6 +707,7 @@ describe("classifier package operations report", () => {
             recommended_action_can_execute: true,
             recommended_action_next_action: "Execute the pipeline command.",
             recommended_action_missing_inputs: [],
+            recommended_action_input_bindings: ["reviewer flag=--review-provenance-reviewer placeholder=<reviewer> value_kind=nonempty_string"],
             output_artifacts: [
                 { kind: "readiness_report", path: "one.json", required_for_handoff: false },
                 { kind: "review_brief", path: "two.md", required_for_handoff: true },
@@ -1854,6 +1870,7 @@ describe("classifier package operations report", () => {
                     recommended_action_can_execute: false,
                     recommended_action_next_action: "Repair review pipeline outputs before continuing.",
                     recommended_action_missing_inputs: [],
+                    recommended_action_input_bindings: ["reviewer flag=--review-provenance-reviewer placeholder=<reviewer> value_kind=nonempty_string"],
                     review_issue_repair_argv: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
                     output_artifacts: [{
                         kind: "review_brief",
@@ -1889,6 +1906,7 @@ describe("classifier package operations report", () => {
             recommended_action_can_execute: false,
             recommended_action_next_action: "Repair review pipeline outputs before continuing.",
             recommended_action_missing_inputs: [],
+            recommended_action_input_bindings: ["reviewer flag=--review-provenance-reviewer placeholder=<reviewer> value_kind=nonempty_string"],
             output_artifacts: [{
                 kind: "review_brief",
                 path: ".ax/experiments/review.md",

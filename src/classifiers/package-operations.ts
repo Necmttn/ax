@@ -554,6 +554,7 @@ export interface ClassifierLifecycleReviewStatus {
         readonly recommended_action_can_execute?: boolean;
         readonly recommended_action_next_action?: string;
         readonly recommended_action_missing_inputs?: readonly string[];
+        readonly recommended_action_input_bindings?: readonly string[];
         readonly output_artifacts?: readonly ClassifierReviewPipelineArtifactSummary[];
         readonly checked_artifacts?: readonly ClassifierReviewPipelineArtifactSummary[];
         readonly failures: readonly string[];
@@ -687,6 +688,7 @@ export interface ClassifierReviewPipelineLifecycleInsight {
     readonly recommended_action_can_execute?: boolean;
     readonly recommended_action_next_action?: string;
     readonly recommended_action_missing_inputs?: readonly string[];
+    readonly recommended_action_input_bindings?: readonly string[];
     readonly output_artifacts: readonly ClassifierReviewPipelineArtifactSummary[];
     readonly checked_artifacts: readonly ClassifierReviewPipelineArtifactSummary[];
     readonly failures: readonly string[];
@@ -744,6 +746,7 @@ function reviewPipelineRecommendedAction(
         readonly can_execute?: boolean;
         readonly next_action?: string;
         readonly missing_inputs?: readonly string[];
+        readonly input_bindings?: readonly string[];
     },
 ): Pick<NonNullable<ClassifierLifecycleReviewStatus["review_pipeline_lifecycle"]>,
     | "recommended_action_kind"
@@ -752,6 +755,7 @@ function reviewPipelineRecommendedAction(
     | "recommended_action_can_execute"
     | "recommended_action_next_action"
     | "recommended_action_missing_inputs"
+    | "recommended_action_input_bindings"
 > {
     const missingOutputs = (lifecycle.missing_required_artifact_count ?? 0) > 0 ||
         lifecycle.output_verification_status === "missing_required_outputs" ||
@@ -764,6 +768,7 @@ function reviewPipelineRecommendedAction(
             recommended_action_can_execute: false,
             recommended_action_next_action: "Repair review pipeline outputs before continuing.",
             recommended_action_missing_inputs: [],
+            ...(prepared?.input_bindings === undefined || prepared.input_bindings.length === 0 ? {} : { recommended_action_input_bindings: prepared.input_bindings }),
         };
     }
     const canExecute = prepared?.can_execute ?? lifecycle.can_execute;
@@ -772,6 +777,7 @@ function reviewPipelineRecommendedAction(
         ...(canExecute === undefined ? {} : { recommended_action_can_execute: canExecute }),
         ...(prepared?.next_action === undefined ? {} : { recommended_action_next_action: prepared.next_action }),
         recommended_action_missing_inputs: prepared?.missing_inputs ?? [],
+        ...(prepared?.input_bindings === undefined || prepared.input_bindings.length === 0 ? {} : { recommended_action_input_bindings: prepared.input_bindings }),
     };
     if (lifecycle.command_kind === "repair_review_issues" && lifecycle.review_issue_repair_argv && lifecycle.review_issue_repair_argv.length > 0) {
         return {
@@ -917,6 +923,22 @@ function reviewPipelineArtifactSummaries(value: unknown): readonly ClassifierRev
         .filter((entry): entry is ClassifierReviewPipelineArtifactSummary => entry !== undefined);
 }
 
+function reviewPipelineInputBindingSummaries(value: unknown): readonly string[] {
+    return jsonArrayOfRecords(value)
+        .map((entry) => {
+            const input = stringAt(entry, "input");
+            if (!input) return undefined;
+            const parts = [
+                input,
+                ...(stringAt(entry, "argv_flag") === undefined ? [] : [`flag=${stringAt(entry, "argv_flag")}`]),
+                ...(stringAt(entry, "placeholder") === undefined ? [] : [`placeholder=${stringAt(entry, "placeholder")}`]),
+                ...(stringAt(entry, "value_kind") === undefined ? [] : [`value_kind=${stringAt(entry, "value_kind")}`]),
+            ];
+            return parts.join(" ");
+        })
+        .filter((entry): entry is string => entry !== undefined);
+}
+
 function jsonRecordAt(record: Record<string, unknown>, key: string): Record<string, unknown> {
     const value = record[key];
     return value && typeof value === "object" && !Array.isArray(value)
@@ -1029,6 +1051,7 @@ function loadReviewPipelineLifecycleStatus(baseDir: string): Pick<ClassifierLife
     const lifecycle = jsonRecordAt(coverageReview, "review_pipeline_lifecycle");
     if (Object.keys(lifecycle).length === 0) return {};
     const prepared = jsonRecordAt(lifecycle, "prepared");
+    const summary = jsonRecordAt(lifecycle, "summary");
     const outputVerification = jsonRecordAt(lifecycle, "output_verification");
     const checkedArtifacts = Array.isArray(outputVerification.checked_artifacts)
         ? outputVerification.checked_artifacts
@@ -1037,6 +1060,7 @@ function loadReviewPipelineLifecycleStatus(baseDir: string): Pick<ClassifierLife
     const preparedCanExecute = jsonBoolean(prepared.can_execute);
     const preparedNextAction = stringAt(prepared, "next_action");
     const preparedMissingInputs = jsonArrayOfStrings(prepared.missing_inputs);
+    const inputBindings = reviewPipelineInputBindingSummaries(summary.input_bindings);
     const outputArtifacts = reviewPipelineArtifactSummaries(prepared.output_artifacts);
     const checkedArtifactSummaries = reviewPipelineArtifactSummaries(outputVerification.checked_artifacts);
     const missingRequiredArtifacts = jsonArrayOfStrings(outputVerification.missing_required_artifacts);
@@ -1073,6 +1097,7 @@ function loadReviewPipelineLifecycleStatus(baseDir: string): Pick<ClassifierLife
                 ...(preparedCanExecute === null ? {} : { can_execute: preparedCanExecute }),
                 ...(preparedNextAction === undefined ? {} : { next_action: preparedNextAction }),
                 missing_inputs: preparedMissingInputs,
+                input_bindings: inputBindings,
             }),
         },
     };
@@ -1822,6 +1847,7 @@ export function buildExecutionFactProjectionReport(
                     review_pipeline_issue_repair_argv: workflowStatus.review_pipeline_lifecycle.review_issue_repair_argv,
                     review_pipeline_recommended_action_argv: workflowStatus.review_pipeline_lifecycle.recommended_action_argv,
                     review_pipeline_recommended_action_missing_inputs: workflowStatus.review_pipeline_lifecycle.recommended_action_missing_inputs,
+                    review_pipeline_recommended_action_input_bindings: workflowStatus.review_pipeline_lifecycle.recommended_action_input_bindings,
                     review_pipeline_output_artifact_paths: workflowStatus.review_pipeline_lifecycle.output_artifacts?.map((artifact) => artifact.path),
                     review_pipeline_checked_artifact_paths: workflowStatus.review_pipeline_lifecycle.checked_artifacts?.map((artifact) => artifact.path),
                     review_pipeline_checked_artifact_states: workflowStatus.review_pipeline_lifecycle.checked_artifacts?.map((artifact) =>
@@ -2748,6 +2774,9 @@ export function buildClassifierLifecycleInsightReport(input: {
                 }),
                 ...((input.workflowStatus.review_pipeline_lifecycle.recommended_action_missing_inputs ?? recommendation.recommended_action_missing_inputs) === undefined ? {} : {
                     recommended_action_missing_inputs: input.workflowStatus.review_pipeline_lifecycle.recommended_action_missing_inputs ?? recommendation.recommended_action_missing_inputs,
+                }),
+                ...((input.workflowStatus.review_pipeline_lifecycle.recommended_action_input_bindings ?? recommendation.recommended_action_input_bindings) === undefined ? {} : {
+                    recommended_action_input_bindings: input.workflowStatus.review_pipeline_lifecycle.recommended_action_input_bindings ?? recommendation.recommended_action_input_bindings,
                 }),
                 output_artifacts: input.workflowStatus.review_pipeline_lifecycle.output_artifacts ?? [],
                 checked_artifacts: input.workflowStatus.review_pipeline_lifecycle.checked_artifacts ?? [],
