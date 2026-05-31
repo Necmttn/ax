@@ -2716,6 +2716,9 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
     const rejectedCount = rows.filter((row) => row.review_status === "reject").length;
     const deferredCount = rows.filter((row) => row.review_status === "defer").length;
     const invalidCount = rows.filter((row) => !VALID_VERDICTS.has(row.review_status)).length;
+    const reviewedRows = rows.filter((row) => fixtureReviewVerdict(row) !== undefined);
+    const missingRationaleCount = reviewedRows.filter((row) => (row.review_rationale ?? "").trim().length === 0).length;
+    const completeRationaleCount = reviewedRows.length - missingRationaleCount;
     const reviewPackPath = context.coverageReviewPack ?? context.coverageFixturePack;
     const sourceKind = context.sourceKind ?? "hybrid_window_classifier_projection";
     const readinessOutputPath = context.outputPath ?? ".ax/experiments/workflow-candidate-review-coverage-reviewed.json";
@@ -2762,6 +2765,8 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
         `- Rejected fixtures: \`${rejectedCount}\``,
         `- Deferred fixtures: \`${deferredCount}\``,
         `- Invalid fixtures: \`${invalidCount}\``,
+        `- Complete rationales: \`${completeRationaleCount}\``,
+        `- Missing rationales: \`${missingRationaleCount}\``,
         "",
         ...(nextCommand === undefined ? [] : [
             "## Review Commands",
