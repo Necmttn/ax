@@ -480,6 +480,7 @@ export interface ClassifierPackageExecutionGraphHealthReport {
     readonly changed_artifacts: readonly ClassifierGraphChangedArtifact[];
     readonly lifecycle_facts: readonly ClassifierGraphLifecycleFact[];
     readonly lifecycle_value_counts?: readonly ClassifierGraphLifecycleValueCount[];
+    readonly lifecycle_available_value_counts?: readonly ClassifierGraphLifecycleValueCount[];
     readonly embedding_helper_facts: readonly ClassifierGraphEmbeddingHelperFact[];
     readonly routing_policy_summary?: ClassifierGraphRoutingPolicySummary;
     readonly evidence_paths: readonly string[];
@@ -2345,27 +2346,33 @@ export function buildExecutionGraphHealthReport(input: {
     const resultChangedArtifacts = query.mode === "guarded" || graphFactOnlyMode
         ? []
         : filteredChangedArtifacts;
+    const lifecycleFactMatchesQuery = (
+        fact: ClassifierGraphLifecycleFact,
+        input: { readonly ignoreValueEquals?: boolean } = {},
+    ): boolean =>
+        (!query.artifact_path ||
+            fact.artifact_path === query.artifact_path ||
+            fact.evidence_paths.includes(query.artifact_path)) &&
+        (!query.source_kind || fact.source_kind === query.source_kind) &&
+        (!query.fact_kind || fact.kind === query.fact_kind) &&
+        !query.status &&
+        !query.source_fixture_id &&
+        !query.proposed_label &&
+        !query.threshold &&
+        query.min_seed_count === undefined &&
+        query.min_positive_recall === undefined &&
+        query.min_call_reduction === undefined &&
+        query.min_nearest_similarity === undefined &&
+        !query.nearest_fixture_id &&
+        (!query.predicate || fact.predicate === query.predicate) &&
+        (!query.subject || fact.subject === query.subject) &&
+        graphFactValueContains(fact.value, query.value_contains) &&
+        (input.ignoreValueEquals === true || graphFactValueEquals(fact.value, query.value_equals));
     const resultLifecycleFacts = query.mode === "lifecycle" || query.mode === "evidence"
-        ? lifecycleFacts.filter((fact) =>
-            (!query.artifact_path ||
-                fact.artifact_path === query.artifact_path ||
-                fact.evidence_paths.includes(query.artifact_path)) &&
-            (!query.source_kind || fact.source_kind === query.source_kind) &&
-            (!query.fact_kind || fact.kind === query.fact_kind) &&
-            !query.status &&
-            !query.source_fixture_id &&
-            !query.proposed_label &&
-            !query.threshold &&
-            query.min_seed_count === undefined &&
-            query.min_positive_recall === undefined &&
-            query.min_call_reduction === undefined &&
-            query.min_nearest_similarity === undefined &&
-            !query.nearest_fixture_id &&
-            (!query.predicate || fact.predicate === query.predicate) &&
-            (!query.subject || fact.subject === query.subject) &&
-            graphFactValueContains(fact.value, query.value_contains) &&
-            graphFactValueEquals(fact.value, query.value_equals)
-        )
+        ? lifecycleFacts.filter((fact) => lifecycleFactMatchesQuery(fact))
+        : [];
+    const availableLifecycleFacts = query.mode === "lifecycle" || query.mode === "evidence"
+        ? lifecycleFacts.filter((fact) => lifecycleFactMatchesQuery(fact, { ignoreValueEquals: true }))
         : [];
     const resultEmbeddingHelperFacts = query.mode === "embedding-helper" || query.mode === "evidence"
         ? embeddingHelperFacts.filter((fact) =>
@@ -2419,19 +2426,23 @@ export function buildExecutionGraphHealthReport(input: {
         ...resultLifecycleFacts.flatMap((fact) => fact.evidence_paths),
         ...resultEmbeddingHelperFacts.flatMap((fact) => fact.evidence_paths),
     ])).sort();
-    const lifecycleValueCountByKey = new Map<string, ClassifierGraphLifecycleValueCount>();
-    for (const fact of resultLifecycleFacts) {
-        const value = graphFactValueKey(fact.value);
-        const key = `${fact.predicate}\u0000${value}`;
-        const existing = lifecycleValueCountByKey.get(key);
-        lifecycleValueCountByKey.set(key, {
-            predicate: fact.predicate,
-            value,
-            count: (existing?.count ?? 0) + 1,
-        });
-    }
-    const lifecycleValueCounts = Array.from(lifecycleValueCountByKey.values())
-        .sort((a, b) => `${a.predicate}/${a.value}`.localeCompare(`${b.predicate}/${b.value}`));
+    const lifecycleValueCountsFor = (facts: readonly ClassifierGraphLifecycleFact[]): readonly ClassifierGraphLifecycleValueCount[] => {
+        const lifecycleValueCountByKey = new Map<string, ClassifierGraphLifecycleValueCount>();
+        for (const fact of facts) {
+            const value = graphFactValueKey(fact.value);
+            const key = `${fact.predicate}\u0000${value}`;
+            const existing = lifecycleValueCountByKey.get(key);
+            lifecycleValueCountByKey.set(key, {
+                predicate: fact.predicate,
+                value,
+                count: (existing?.count ?? 0) + 1,
+            });
+        }
+        return Array.from(lifecycleValueCountByKey.values())
+            .sort((a, b) => `${a.predicate}/${a.value}`.localeCompare(`${b.predicate}/${b.value}`));
+    };
+    const lifecycleValueCounts = lifecycleValueCountsFor(resultLifecycleFacts);
+    const lifecycleAvailableValueCounts = lifecycleValueCountsFor(availableLifecycleFacts);
     const routingPolicyFloorsRequested = query.min_positive_recall !== undefined || query.min_call_reduction !== undefined;
     const routingPolicyCandidates = resultEmbeddingHelperFacts
         .filter((fact) => fact.kind === "embedding_helper_routing_candidate")
@@ -2640,6 +2651,7 @@ export function buildExecutionGraphHealthReport(input: {
         changed_artifacts: resultChangedArtifacts,
         lifecycle_facts: resultLifecycleFacts,
         lifecycle_value_counts: lifecycleValueCounts,
+        lifecycle_available_value_counts: lifecycleAvailableValueCounts,
         embedding_helper_facts: resultEmbeddingHelperFacts,
         routing_policy_summary: routingPolicySummary,
         evidence_paths: resultEvidencePaths,

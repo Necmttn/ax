@@ -1248,6 +1248,11 @@ describe("classifier package operations report", () => {
         expect(report.result_totals.lifecycle_fact_count).toBe(0);
         expect(report.lifecycle_facts).toEqual([]);
         expect(report.lifecycle_value_counts).toEqual([]);
+        expect(report.lifecycle_available_value_counts).toEqual([{
+            predicate: "review_pipeline_recommended_action_execution_phase",
+            value: "bind_inputs",
+            count: 1,
+        }]);
     });
 
     test("summarizes lifecycle graph fact values", () => {

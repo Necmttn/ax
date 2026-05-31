@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E377 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-result-kind-counts-e377.json`
+- Index continuation: E378 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-available-values-no-match-e378.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-result-kind-counts-no-match-e377.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-available-values-match-e378.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,52 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E378 - Expose Available Lifecycle Values For No-Match Queries
+
+Question:
+- E375 tells no-match graph queries to inspect available value counts, but can
+  the report provide those counts when an exact lifecycle value is missing?
+
+Implementation:
+- Added `lifecycle_available_value_counts` to classifier graph health reports.
+- Available counts use the lifecycle query filters while ignoring only the
+  exact `value_equals` filter.
+- Existing `lifecycle_value_counts` still describes the matched rows only.
+- Text graph-health output now renders a separate
+  `lifecycle available value counts` section.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-available-values-no-match-e378.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-available-values-match-e378.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-available-values-no-match-e378.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match`, empty `lifecycle_value_counts`, and
+  `lifecycle_available_value_counts=[{predicate:
+  review_pipeline_recommended_action_execution_phase, value: bind_inputs,
+  count: 1}]`.
+- The matching `--value=bind_inputs` query returns the same available value
+  count while still returning the matched lifecycle fact.
+- Text output renders
+  `review_pipeline_recommended_action_execution_phase=bind_inputs count=1`
+  under `lifecycle available value counts`.
+
+Decision:
+- Services can now remediate exact-value no-matches by showing or selecting
+  available lifecycle values without running a second broad query.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E378 no-match report has `query_match_status=no_match`, empty matched
+  lifecycle value counts, and available `bind_inputs` count 1.
+- E378 match report has available `bind_inputs` count 1.
+- E378 text output includes the available value-count section.
 
 ## E377 - Expose Graph Query Result Kind Counts
 

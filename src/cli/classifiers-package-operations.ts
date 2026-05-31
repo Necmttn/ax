@@ -389,6 +389,13 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
             lines.push(`- ${entry.predicate}=${entry.value} count=${entry.count}`);
         }
     }
+    const lifecycleAvailableValueCounts = report.lifecycle_available_value_counts ?? [];
+    if (lifecycleAvailableValueCounts.length > 0) {
+        lines.push("lifecycle available value counts:");
+        for (const entry of lifecycleAvailableValueCounts) {
+            lines.push(`- ${entry.predicate}=${entry.value} count=${entry.count}`);
+        }
+    }
     if (report.embedding_helper_facts.length > 0) {
         lines.push("embedding helper facts:");
         for (const fact of report.embedding_helper_facts) {
