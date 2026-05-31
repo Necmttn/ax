@@ -178,8 +178,15 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly applied: boolean;
     readonly reviewed_fixture_count: number;
     readonly pending_fixture_count: number;
+    readonly invalid_fixture_count: number;
+    readonly missing_rationale_count: number;
     readonly smoke_marker_count: number;
-    readonly apply_guard: "ready_to_apply" | "blocked_smoke_review" | "no_reviewed_fixtures";
+    readonly apply_guard:
+        | "ready_to_apply"
+        | "blocked_smoke_review"
+        | "invalid_review_pack"
+        | "missing_review_rationale"
+        | "no_reviewed_fixtures";
     readonly projection_totals: WorkflowCandidateTopicReviewGraphProjection["totals"];
     readonly write_plan_totals: WorkflowCandidateTopicReviewGraphWritePlan["totals"];
 }
@@ -1713,6 +1720,7 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
         ...(report.coverage_review ? [
             `coverage review source: ${report.coverage_review.source_path}`,
             `coverage review fixtures: ${report.coverage_review.reviewed_fixture_count} reviewed, ${report.coverage_review.pending_fixture_count} pending`,
+            `coverage review issues: invalid=${report.coverage_review.invalid_fixture_count} missing_rationale=${report.coverage_review.missing_rationale_count} smoke=${report.coverage_review.smoke_marker_count}`,
             `coverage review apply guard: ${report.coverage_review.apply_guard}`,
             `coverage review applied: ${report.coverage_review.applied ? "yes" : "no"}`,
         ] : []),
@@ -2776,10 +2784,16 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     readonly applied: boolean;
 }): WorkflowCandidateReviewCoverageApplySummary {
     const reviewedRows = input.rows.filter((row) => fixtureReviewVerdict(row) !== undefined);
+    const invalidRows = input.rows.filter((row) => !VALID_VERDICTS.has(row.review_status));
+    const missingRationaleRows = reviewedRows.filter((row) => (row.review_rationale ?? "").trim().length === 0);
     const smokeMarkerCount = reviewedRows.filter(fixtureRowHasSmokeMarker).length +
         (input.sourcePath.toLowerCase().includes("smoke") ? 1 : 0);
-    const applyGuard = reviewedRows.length === 0
+    const applyGuard = invalidRows.length > 0
+        ? "invalid_review_pack"
+        : reviewedRows.length === 0
         ? "no_reviewed_fixtures"
+        : missingRationaleRows.length > 0
+            ? "missing_review_rationale"
         : smokeMarkerCount > 0
             ? "blocked_smoke_review"
             : "ready_to_apply";
@@ -2789,6 +2803,8 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         applied: input.applied,
         reviewed_fixture_count: reviewedRows.length,
         pending_fixture_count: input.rows.length - reviewedRows.length,
+        invalid_fixture_count: invalidRows.length,
+        missing_rationale_count: missingRationaleRows.length,
         smoke_marker_count: smokeMarkerCount,
         apply_guard: applyGuard,
         projection_totals: input.projection.totals,
@@ -3619,7 +3635,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 writeFileSync(input.coverageFixturePack, renderClassifierFixtureRowsJsonl(fixtureSummary.fixtures), "utf8");
                 report = { ...report, fixture_pack: fixtureSummary };
             }
-            if (input.coverageReviewPack && (input.reviewFacts || input.reviewWritePlan || input.applyReviewFacts)) {
+            if (input.coverageReviewPack) {
                 const reviewedRows = parseWorkflowCandidateFixtureRowsJsonl(
                     readFileSync(input.coverageReviewPack, "utf8"),
                 );

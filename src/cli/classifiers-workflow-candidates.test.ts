@@ -1511,11 +1511,98 @@ describe("classifiers workflow-candidates", () => {
             applied: false,
             reviewed_fixture_count: 1,
             pending_fixture_count: 0,
+            invalid_fixture_count: 0,
+            missing_rationale_count: 0,
             smoke_marker_count: 2,
             apply_guard: "blocked_smoke_review",
         });
         expect(summary.projection_totals.fact_count).toBe(1);
         expect(summary.write_plan_totals.fact_statement_count).toBe(1);
+    });
+
+    test("reports pending coverage review packs as not ready to apply", () => {
+        const rows = parseWorkflowCandidateFixtureRowsJsonl(JSON.stringify({
+            id: "workflow-candidate-review-coverage/verification_or_recovery_signal/a",
+            suite: "workflow-candidate-review-coverage",
+            name: "coverage-gap-verification_or_recovery_signal-01",
+            label: "verification_or_recovery_signal",
+            target: "unknown",
+            text: "USER:\ncontinue and make sure the tests prove this does not regress\n\nPREVIOUS_ASSISTANT:\n",
+            source_group: "workflow-candidate",
+            review_status: "pending",
+            topic: "review-coverage",
+            candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+            candidate_label: "verification_or_recovery_signal",
+            proposed_action: "add_verification_gate",
+            turn: "turn:verification",
+        }));
+        const projection = buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures({
+            rows,
+            syncedFrom: ".ax/experiments/pending-coverage-gaps.jsonl",
+        });
+        const writePlan = buildWorkflowCandidateTopicReviewGraphWritePlan(projection);
+
+        const summary = buildWorkflowCandidateReviewCoverageApplySummary({
+            rows,
+            sourcePath: ".ax/experiments/pending-coverage-gaps.jsonl",
+            projection,
+            writePlan,
+            applyRequested: false,
+            applied: false,
+        });
+
+        expect(summary).toMatchObject({
+            apply_requested: false,
+            applied: false,
+            reviewed_fixture_count: 0,
+            pending_fixture_count: 1,
+            invalid_fixture_count: 0,
+            missing_rationale_count: 0,
+            smoke_marker_count: 0,
+            apply_guard: "no_reviewed_fixtures",
+        });
+        expect(summary.projection_totals.fact_count).toBe(0);
+        expect(summary.write_plan_totals.statement_count).toBe(1);
+    });
+
+    test("reports reviewed coverage rows without rationale as not ready to apply", () => {
+        const rows = parseWorkflowCandidateFixtureRowsJsonl(JSON.stringify({
+            id: "workflow-candidate-review-coverage/verification_or_recovery_signal/a",
+            suite: "workflow-candidate-review-coverage",
+            name: "coverage-gap-verification_or_recovery_signal-01",
+            label: "verification_or_recovery_signal",
+            target: "unknown",
+            text: "USER:\ncontinue and make sure the tests prove this does not regress\n\nPREVIOUS_ASSISTANT:\n",
+            source_group: "workflow-candidate",
+            review_status: "accept",
+            topic: "review-coverage",
+            candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+            candidate_label: "verification_or_recovery_signal",
+            proposed_action: "add_verification_gate",
+            turn: "turn:verification",
+        }));
+        const projection = buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures({
+            rows,
+            syncedFrom: ".ax/experiments/reviewed-coverage-gaps.jsonl",
+        });
+        const writePlan = buildWorkflowCandidateTopicReviewGraphWritePlan(projection);
+
+        const summary = buildWorkflowCandidateReviewCoverageApplySummary({
+            rows,
+            sourcePath: ".ax/experiments/reviewed-coverage-gaps.jsonl",
+            projection,
+            writePlan,
+            applyRequested: true,
+            applied: false,
+        });
+
+        expect(summary).toMatchObject({
+            reviewed_fixture_count: 1,
+            pending_fixture_count: 0,
+            invalid_fixture_count: 0,
+            missing_rationale_count: 1,
+            apply_guard: "missing_review_rationale",
+        });
     });
 
     test("renders persisted harness facts inside topic evidence packs", () => {
