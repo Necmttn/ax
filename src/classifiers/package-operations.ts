@@ -483,6 +483,7 @@ export interface ClassifierGraphQuerySuggestion {
     readonly repair_next_action: "run_repaired_query" | "use_current_query";
     readonly repair_remediation: string;
     readonly repair_argv: readonly string[];
+    readonly repair_query?: ClassifierGraphHealthQuery;
     readonly status: "expected_matches";
     readonly next_action: "run_suggested_query";
     readonly remediation: string;
@@ -2544,6 +2545,7 @@ export function buildExecutionGraphHealthReport(input: {
                     ? "Use the current graph query; no filter repair is needed."
                     : "Run the repaired graph query to inspect matching classifier lifecycle facts.",
                 repair_argv: query.value_equals === querySuggestedValueEquals ? [] : querySuggestedArgv,
+                ...(query.value_equals === querySuggestedValueEquals ? {} : { repair_query: querySuggestedQuery }),
                 status: querySuggestedStatus,
                 next_action: querySuggestedNextAction,
                 remediation: querySuggestedRemediation,

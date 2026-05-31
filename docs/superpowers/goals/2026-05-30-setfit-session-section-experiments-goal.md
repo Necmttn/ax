@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E398 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-argv-no-match-e398.json`
+- Index continuation: E399 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-query-no-match-e399.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-argv-match-e398.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-query-match-e399.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,49 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E399 - Expose Suggested Query Repair Query
+
+Question:
+- E398 exposes repair-only argv, but can services inspect or execute the
+  structured repaired query without parsing command-line arguments?
+
+Implementation:
+- Added optional `repair_query` to `query_suggestion`.
+- Lifecycle graph-query suggestions now include the repaired structured query
+  only when `repair_status=repair_available`; no-op suggestions omit it.
+- Text graph-health output now renders `query suggestion repair query`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-query-no-match-e399.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-query-match-e399.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-query-no-match-e399.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_query={mode: lifecycle, predicate:
+  review_pipeline_recommended_action_execution_phase, value_equals:
+  bind_inputs}`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and no `query_suggestion.repair_query`.
+- Text output renders `query suggestion repair query: mode=lifecycle
+  predicate=review_pipeline_recommended_action_execution_phase
+  value_equals=bind_inputs`.
+
+Decision:
+- Services can now use a structured repair target directly and reserve
+  `repair_argv` for command execution surfaces.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E399 no-match report includes the repaired structured query.
+- E399 match report omits `repair_query`.
+- E399 text output includes the repaired query line.
 
 ## E398 - Expose Suggested Query Repair Argv
 

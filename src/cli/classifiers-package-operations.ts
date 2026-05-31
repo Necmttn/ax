@@ -316,6 +316,11 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
     const querySuggestionRepairNextAction = report.query_suggestion?.repair_next_action ?? "none";
     const querySuggestionRepairRemediation = report.query_suggestion?.repair_remediation ?? "none";
     const querySuggestionRepairArgv = report.query_suggestion?.repair_argv.join(" ") || "none";
+    const querySuggestionRepairQuery = report.query_suggestion?.repair_query === undefined
+        ? "none"
+        : Object.entries(report.query_suggestion.repair_query)
+            .map(([key, value]) => `${key}=${value}`)
+            .join(" ");
     const querySuggestionProvenance = report.query_suggestion === undefined
         ? "none"
         : `source=${report.query_suggestion.source} reason=${report.query_suggestion.reason}`;
@@ -360,6 +365,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `query suggestion repair next action: ${querySuggestionRepairNextAction}`,
         `query suggestion repair remediation: ${querySuggestionRepairRemediation}`,
         `query suggestion repair argv: ${querySuggestionRepairArgv}`,
+        `query suggestion repair query: ${querySuggestionRepairQuery}`,
         `query suggestion provenance: ${querySuggestionProvenance}`,
         `query suggestion relaxed filters: ${querySuggestionRelaxedFilters}`,
         `query suggestion original query: ${querySuggestionOriginalQuery}`,

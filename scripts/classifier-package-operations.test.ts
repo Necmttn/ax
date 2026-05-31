@@ -1298,6 +1298,11 @@ describe("classifier package operations report", () => {
                 "--value",
                 "bind_inputs",
             ],
+            repair_query: {
+                mode: "lifecycle",
+                predicate: "review_pipeline_recommended_action_execution_phase",
+                value_equals: "bind_inputs",
+            },
             status: "expected_matches",
             next_action: "run_suggested_query",
             remediation: "Run the suggested graph query to inspect the available classifier lifecycle facts.",
