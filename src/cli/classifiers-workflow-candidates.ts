@@ -230,6 +230,22 @@ export interface WorkflowCandidateReviewCoverageProvenanceIssueRow {
     readonly reviewed_at: string;
 }
 
+export type WorkflowCandidateReviewCoverageReviewIssue =
+    | "blocked_smoke_review"
+    | "invalid_review_status"
+    | "invalid_reviewed_at"
+    | "missing_review_rationale"
+    | "missing_reviewed_at"
+    | "missing_reviewer";
+
+export interface WorkflowCandidateReviewCoverageReviewIssueRow {
+    readonly fixture_id: string;
+    readonly candidate_id: string;
+    readonly issue: WorkflowCandidateReviewCoverageReviewIssue;
+    readonly review_status: string;
+    readonly remediation: string;
+}
+
 export type WorkflowCandidateReviewCoverageRecheckStatus =
     | "gap_closed"
     | "gap_reduced"
@@ -320,6 +336,7 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly reviewed_fixture_ids: readonly string[];
     readonly projected_fact_ids: readonly string[];
     readonly apply_audit_rows: readonly WorkflowCandidateReviewCoverageApplyAuditRow[];
+    readonly review_issue_rows: readonly WorkflowCandidateReviewCoverageReviewIssueRow[];
     readonly provenance_issue_rows: readonly WorkflowCandidateReviewCoverageProvenanceIssueRow[];
     readonly projection_totals: WorkflowCandidateTopicReviewGraphProjection["totals"];
     readonly write_plan_totals: WorkflowCandidateTopicReviewGraphWritePlan["totals"];
@@ -1928,6 +1945,10 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             `coverage review production blockers: ${report.coverage_review.production_apply_blockers.length === 0 ? "none" : report.coverage_review.production_apply_blockers.join(", ")}`,
             `coverage review production blocker details: ${report.coverage_review.production_apply_blocker_details.length === 0 ? "none" : report.coverage_review.production_apply_blocker_details.map((detail) => `${detail.blocker}=${detail.count}`).join(", ")}`,
             `coverage review production blocker remediations: ${report.coverage_review.production_apply_blocker_details.length === 0 ? "none" : report.coverage_review.production_apply_blocker_details.map((detail) => `${detail.blocker}: ${detail.remediation}`).join(" | ")}`,
+            `coverage review issue rows: ${report.coverage_review.review_issue_rows.length}`,
+            ...report.coverage_review.review_issue_rows.map((row) =>
+                `coverage review issue: ${row.issue} fixture=${row.fixture_id} candidate=${row.candidate_id} status=${row.review_status}`
+            ),
             `coverage review provenance issue rows: ${report.coverage_review.provenance_issue_rows.length}`,
             ...report.coverage_review.provenance_issue_rows.map((row) =>
                 `coverage review provenance issue: ${row.issue} fixture=${row.fixture_id} candidate=${row.candidate_id} reviewed_at=${row.reviewed_at || "none"}`
@@ -3568,6 +3589,45 @@ const workflowCandidateReviewCoverageProvenanceIssueRows = (
     }));
 });
 
+const workflowCandidateReviewCoverageReviewIssueRemediation = (
+    issue: WorkflowCandidateReviewCoverageReviewIssue,
+): string => {
+    switch (issue) {
+        case "blocked_smoke_review":
+            return "Replace smoke or example review markers with a real review decision.";
+        case "invalid_review_status":
+            return "Use accept, revise, reject, defer, or pending as the review status.";
+        case "invalid_reviewed_at":
+            return "Use an ISO reviewed-at timestamp.";
+        case "missing_review_rationale":
+            return "Add rationale text to this reviewed fixture.";
+        case "missing_reviewed_at":
+            return "Add reviewed-at metadata to this reviewed fixture.";
+        case "missing_reviewer":
+            return "Add reviewer metadata to this reviewed fixture.";
+    }
+};
+
+const workflowCandidateReviewCoverageReviewIssueRows = (
+    rows: readonly WorkflowCandidateTopicClassifierFixtureRow[],
+): WorkflowCandidateReviewCoverageReviewIssueRow[] => rows.flatMap((row) => {
+    const issues: WorkflowCandidateReviewCoverageReviewIssue[] = [];
+    const isReviewed = fixtureReviewVerdict(row) !== undefined;
+    if (!VALID_VERDICTS.has(row.review_status)) issues.push("invalid_review_status");
+    if (isReviewed && (row.review_rationale ?? "").trim().length === 0) issues.push("missing_review_rationale");
+    if (isReviewed && (row.review_reviewer ?? "").trim().length === 0) issues.push("missing_reviewer");
+    if (isReviewed && (row.review_reviewed_at ?? "").trim().length === 0) issues.push("missing_reviewed_at");
+    else if (isReviewed && hasInvalidReviewedAt(row)) issues.push("invalid_reviewed_at");
+    if (isReviewed && fixtureRowHasSmokeMarker(row)) issues.push("blocked_smoke_review");
+    return issues.map((issue) => ({
+        fixture_id: row.id,
+        candidate_id: row.candidate_id,
+        issue,
+        review_status: row.review_status,
+        remediation: workflowCandidateReviewCoverageReviewIssueRemediation(issue),
+    }));
+});
+
 const workflowCandidateReviewCoverageHandoffMissingPaths = (input: {
     readonly reviewFactsPath?: string;
     readonly reviewWritePlanPath?: string;
@@ -3829,6 +3889,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         }];
     });
     const provenanceIssueRows = workflowCandidateReviewCoverageProvenanceIssueRows(reviewedRows);
+    const reviewIssueRows = workflowCandidateReviewCoverageReviewIssueRows(input.rows);
     return {
         schema: "ax.workflow_candidate_review_readiness.v1",
         source_path: input.sourcePath,
@@ -3892,6 +3953,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         reviewed_fixture_ids: reviewedRows.map((row) => row.id),
         projected_fact_ids: input.projection.facts.map((fact) => fact.id),
         apply_audit_rows: applyAuditRows,
+        review_issue_rows: reviewIssueRows,
         provenance_issue_rows: provenanceIssueRows,
         projection_totals: input.projection.totals,
         write_plan_totals: input.writePlan.totals,

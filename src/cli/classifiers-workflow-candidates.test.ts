@@ -1663,6 +1663,26 @@ describe("classifiers workflow-candidates", () => {
             applyRequested: true,
             applied: false,
         });
+        const text = renderWorkflowCandidateReviewCoverageText({
+            schema: "ax.workflow_candidate_review_coverage.v1",
+            source_kind: "hybrid_window_classifier_projection",
+            query: { limit: 10 },
+            candidates: [],
+            totals: {
+                candidate_group_count: 0,
+                returned_candidate_count: 0,
+                reviewed_candidate_count: 0,
+                unreviewed_candidate_count: 0,
+                review_fact_count: 0,
+                rejected_fact_count: 0,
+                accepted_fact_count: 0,
+                deferred_fact_count: 0,
+                revised_fact_count: 0,
+                helper_source_fixture_count: 0,
+            },
+            coverage_review: summary,
+            decision: "needs_workflow_candidate_reviews",
+        });
 
         expect(summary).toMatchObject({
             schema: "ax.workflow_candidate_review_readiness.v1",
@@ -1682,7 +1702,30 @@ describe("classifiers workflow-candidates", () => {
             }],
             next_action: "Add rationale text for every reviewed fixture.",
             reviewed_fixture_ids: ["workflow-candidate-review-coverage/verification_or_recovery_signal/a"],
+            review_issue_rows: [{
+                fixture_id: "workflow-candidate-review-coverage/verification_or_recovery_signal/a",
+                candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+                issue: "missing_review_rationale",
+                review_status: "accept",
+                remediation: "Add rationale text to this reviewed fixture.",
+            }, {
+                fixture_id: "workflow-candidate-review-coverage/verification_or_recovery_signal/a",
+                candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+                issue: "missing_reviewer",
+                review_status: "accept",
+                remediation: "Add reviewer metadata to this reviewed fixture.",
+            }, {
+                fixture_id: "workflow-candidate-review-coverage/verification_or_recovery_signal/a",
+                candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+                issue: "missing_reviewed_at",
+                review_status: "accept",
+                remediation: "Add reviewed-at metadata to this reviewed fixture.",
+            }],
         });
+        expect(text).toContain("coverage review issue rows: 3");
+        expect(text).toContain("coverage review issue: missing_review_rationale fixture=workflow-candidate-review-coverage/verification_or_recovery_signal/a candidate=classifier_candidate_group:hybrid-window/verification_or_recovery_signal status=accept");
+        expect(text).toContain("coverage review issue: missing_reviewer fixture=workflow-candidate-review-coverage/verification_or_recovery_signal/a candidate=classifier_candidate_group:hybrid-window/verification_or_recovery_signal status=accept");
+        expect(text).toContain("coverage review issue: missing_reviewed_at fixture=workflow-candidate-review-coverage/verification_or_recovery_signal/a candidate=classifier_candidate_group:hybrid-window/verification_or_recovery_signal status=accept");
         expect(summary.projected_fact_ids).toHaveLength(1);
     });
 
