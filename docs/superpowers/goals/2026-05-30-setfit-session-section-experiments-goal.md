@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E367 adds
-  `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-bindings-e367.json`
+- Index continuation: E368 adds
+  `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-binding-indexes-e368.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-input-bindings-e367.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-binding-indexes-e368.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,65 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E368 - Preserve Recommended Action Binding Indexes
+
+Question:
+- E367 exposes recommended action input bindings, but can an executor replace
+  the correct argv slot without re-opening the workflow readiness artifact?
+
+Implementation:
+- Extended recommended action binding summaries to preserve
+  `argv_index` and `argv_value_prefix` from lifecycle `summary.input_bindings`.
+- The binding descriptor shape is now:
+  `input flag=<argv_flag> index=<argv_index> prefix=<argv_value_prefix> placeholder=<placeholder> value_kind=<value_kind>`.
+- Existing lifecycle graph and insight fields keep the same predicate/name:
+  `review_pipeline_recommended_action_input_bindings`, but the value is now
+  more executable.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-binding-indexes-e368.md --review-facts=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-binding-indexes-e368-review-facts.json --review-write-plan=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-binding-indexes-e368-review-write-plan.json --review-pipeline-lifecycle --out=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-binding-indexes-e368.json --json > .ax/experiments/workflow-candidate-review-pipeline-recommended-action-binding-indexes-e368.stdout
+cp .ax/experiments/workflow-candidate-review-pipeline-recommended-action-binding-indexes-e368.json .ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json
+bun src/cli/index.ts classifiers package-operations --facts --workflow-status=.ax/experiments/blind-workflow-status-current.json --out=.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-binding-indexes-e368.json --json > .ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-binding-indexes-e368.stdout
+bun src/cli/index.ts classifiers package-operations --write-plan --facts --workflow-status=.ax/experiments/blind-workflow-status-current.json --out=.ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-binding-indexes-e368.json --json > .ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-binding-indexes-e368.stdout
+bun src/cli/index.ts classifiers package-operations --apply-write-plan --facts --workflow-status=.ax/experiments/blind-workflow-status-current.json --out=.ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-binding-indexes-e368.json --json > .ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-binding-indexes-e368.stdout
+bun src/cli/index.ts classifiers package-operations --graph-health --graph-mode=lifecycle --predicate=review_pipeline_recommended_action_input_bindings --out=.ax/experiments/classifier-graph-lifecycle-recommended-action-binding-indexes-e368.json --json > .ax/experiments/classifier-graph-lifecycle-recommended-action-binding-indexes-e368.stdout
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-binding-indexes-e368.json --json > .ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-binding-indexes-e368.stdout
+bun src/cli/index.ts classifiers lifecycle > .ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-binding-indexes-e368.txt
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-binding-indexes-e368.json`
+- `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-binding-indexes-e368.json`
+- `.ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-binding-indexes-e368.json`
+- `.ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-binding-indexes-e368.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-binding-indexes-e368.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-binding-indexes-e368.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-binding-indexes-e368.txt`
+
+Results:
+- Fact projection and lifecycle graph query now expose:
+  - `reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string`
+  - `reviewed_at flag=--review-provenance-reviewed-at index=9 prefix=--review-provenance-reviewed-at= placeholder=<reviewed-at-iso> value_kind=iso_datetime`
+- Lifecycle graph query by `review_pipeline_recommended_action_input_bindings`
+  returns exactly one lifecycle fact.
+- Lifecycle insight JSON/text render the same indexed binding descriptors.
+
+Decision:
+- E368 makes the recommended-action binding handoff executable enough for a
+  service to replace argv values by index or by value prefix without scraping
+  the source readiness artifact.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E368 fact projection and lifecycle graph query include both `index=` and
+  `prefix=` for reviewer and reviewed-at bindings.
+- E368 lifecycle insight JSON/text render the indexed binding descriptors.
 
 ## E367 - Expose Recommended Action Input Bindings
 

@@ -931,6 +931,8 @@ function reviewPipelineInputBindingSummaries(value: unknown): readonly string[] 
             const parts = [
                 input,
                 ...(stringAt(entry, "argv_flag") === undefined ? [] : [`flag=${stringAt(entry, "argv_flag")}`]),
+                ...(numberAt(entry, "argv_index") === undefined ? [] : [`index=${numberAt(entry, "argv_index")}`]),
+                ...(stringAt(entry, "argv_value_prefix") === undefined ? [] : [`prefix=${stringAt(entry, "argv_value_prefix")}`]),
                 ...(stringAt(entry, "placeholder") === undefined ? [] : [`placeholder=${stringAt(entry, "placeholder")}`]),
                 ...(stringAt(entry, "value_kind") === undefined ? [] : [`value_kind=${stringAt(entry, "value_kind")}`]),
             ];
