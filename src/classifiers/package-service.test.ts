@@ -806,6 +806,8 @@ describe("ClassifierPackageService", () => {
             kind: "graph_query_repair",
             blocks_decision: false,
             status: "ready_to_execute",
+            execution_status: "ready_to_execute",
+            can_execute: true,
             command_kind: "classifier_graph_query_repair",
             predicate: "review_pipeline_recommended_action_execution_phase",
             from_value: "execute",

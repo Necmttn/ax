@@ -707,12 +707,13 @@ export function renderClassifierLifecycleInsightText(report: ClassifierLifecycle
     if (report.routing_items.length > 0) {
         lines.push("routing items:");
         for (const item of report.routing_items) {
-            lines.push(`- ${item.kind}: ${item.status} ${item.command_kind} next=${item.next_action} blocks_decision=${item.blocks_decision ? "yes" : "no"}`);
+            const canExecute = item.can_execute === true ? "yes" : item.can_execute === false ? "no" : "unknown";
+            lines.push(`- ${item.kind}: ${item.status} ${item.command_kind} next=${item.next_action} blocks_decision=${item.blocks_decision ? "yes" : "no"} execution=${item.execution_status} can_execute=${canExecute}`);
             if (item.kind === "graph_query_repair") {
                 lines.push(`  value repair: ${item.predicate ?? "any_predicate"} ${item.from_value ?? "any"} -> ${item.to_value}`);
             } else {
                 lines.push(`  action next: ${item.action_next_action ?? "unknown"}`);
-                lines.push(`  can execute: ${item.can_execute === true ? "yes" : item.can_execute === false ? "no" : "unknown"}`);
+                lines.push(`  can execute: ${canExecute}`);
                 if (item.execution_phase) {
                     lines.push(`  execution phase: ${item.execution_phase}`);
                 }

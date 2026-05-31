@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E430 adds
-  `.ax/experiments/classifier-lifecycle-routing-priority-e430.json`
+- Index continuation: E431 adds
+  `.ax/experiments/classifier-lifecycle-route-execution-e431.json`
   and
-  `.ax/experiments/classifier-lifecycle-routing-priority-e430.txt`
+  `.ax/experiments/classifier-lifecycle-route-execution-e431.txt`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,51 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E431 - Normalize Lifecycle Route Execution Status
+
+Question:
+- Can lifecycle `routing_items` expose a shared execution shape, so FX services
+  can tell whether a route is directly executable without understanding each
+  route kind's nested fields?
+
+Implementation:
+- Added normalized `execution_status` and `can_execute` fields to
+  `graph_query_repair` routing items.
+- Added normalized `execution_status` to `review_pipeline_action` routing
+  items, derived as `ready_to_execute`, `missing_inputs`, or `blocked`.
+- Lifecycle text now renders `execution=<status>` and
+  `can_execute=yes/no/unknown` on each routing item line.
+
+Artifacts:
+- `.ax/experiments/classifier-lifecycle-route-execution-e431.json`
+- `.ax/experiments/classifier-lifecycle-route-execution-e431.txt`
+
+Results:
+- Current real JSON reports the first routing item as
+  `review_pipeline_action` with `execution_status=missing_inputs` and
+  `can_execute=false`.
+- Current real JSON reports the second routing item as `graph_query_repair`
+  with `execution_status=ready_to_execute` and `can_execute=true`.
+- Text output renders both normalized fields inline for each routing item.
+
+Decision:
+- E431 makes lifecycle routing directly consumable by services: process
+  routing items in priority order, execute only `can_execute=true`, and bind or
+  repair inputs for `execution_status=missing_inputs` before retrying.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts
+bun src/cli/index.ts classifiers lifecycle --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --out .ax/experiments/classifier-lifecycle-route-execution-e431.json --json
+bun src/cli/index.ts classifiers lifecycle --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute > .ax/experiments/classifier-lifecycle-route-execution-e431.txt
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-lifecycle-route-execution-e431.json").json(); const [first, second]=saved.routing_items ?? []; if (first?.kind !== "review_pipeline_action" || first.execution_status !== "missing_inputs" || first.can_execute !== false) throw new Error(`bad first route ${JSON.stringify(first)}`); if (second?.kind !== "graph_query_repair" || second.execution_status !== "ready_to_execute" || second.can_execute !== true) throw new Error(`bad second route ${JSON.stringify(second)}`);'
+rg -n -- "- review_pipeline_action: missing_inputs stamp_review_provenance next=inspect_review_pipeline_lifecycle blocks_decision=yes execution=missing_inputs can_execute=no|- graph_query_repair: ready_to_execute classifier_graph_query_repair next=run_repaired_query blocks_decision=no execution=ready_to_execute can_execute=yes" .ax/experiments/classifier-lifecycle-route-execution-e431.txt
+```
+
+Focused tests and artifact assertions passed. The plain text lifecycle command
+still exits non-zero when the report decision is `needs_human_review`, but it
+writes the expected text artifact before exiting.
 
 ## E430 - Mark Decision-Blocking Lifecycle Routes
 

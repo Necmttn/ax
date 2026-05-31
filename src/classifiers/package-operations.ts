@@ -942,6 +942,8 @@ export type ClassifierLifecycleRoutingItem = {
     readonly kind: "graph_query_repair";
     readonly blocks_decision: boolean;
     readonly status: ClassifierGraphQuerySuggestionRepairRoutingSummary["execution_status"];
+    readonly execution_status: ClassifierGraphQuerySuggestionRepairRoutingSummary["execution_status"];
+    readonly can_execute: boolean;
     readonly command_kind: ClassifierGraphQuerySuggestionRepairRoutingSummary["command_kind"];
     readonly predicate?: string;
     readonly from_value?: string;
@@ -953,6 +955,7 @@ export type ClassifierLifecycleRoutingItem = {
     readonly kind: "review_pipeline_action";
     readonly blocks_decision: boolean;
     readonly status?: string;
+    readonly execution_status: "ready_to_execute" | "missing_inputs" | "blocked";
     readonly command_kind: string;
     readonly next_action: ClassifierReviewPipelineLifecycleInsight["next_action"];
     readonly action_next_action?: string;
@@ -1008,6 +1011,24 @@ function reviewPipelineLifecycleNextAction(
         return "continue_review_pipeline";
     }
     return "inspect_review_pipeline_lifecycle";
+}
+
+function reviewPipelineRouteExecutionStatus(
+    reviewPipeline: ClassifierReviewPipelineLifecycleInsight,
+): Extract<ClassifierLifecycleRoutingItem, { readonly kind: "review_pipeline_action" }>["execution_status"] {
+    if (reviewPipeline.recommended_action_can_execute === true) {
+        return "ready_to_execute";
+    }
+    if ((reviewPipeline.recommended_action_missing_inputs ?? []).length > 0) {
+        return "missing_inputs";
+    }
+    if (
+        reviewPipeline.recommended_action_status === "missing_inputs" ||
+        reviewPipeline.recommended_action_status === "requires_inputs"
+    ) {
+        return "missing_inputs";
+    }
+    return "blocked";
 }
 
 function reviewPipelineRecommendedAction(
@@ -3401,6 +3422,8 @@ export function buildClassifierLifecycleInsightReport(input: {
             kind: "graph_query_repair",
             blocks_decision: queryRepairBlocksDecision,
             status: queryRepairSuggestion.repair.execution_status,
+            execution_status: queryRepairSuggestion.repair.execution_status,
+            can_execute: queryRepairSuggestion.repair.can_execute,
             command_kind: queryRepairSuggestion.repair.command_kind,
             ...(queryRepairSuggestion.original_query.predicate === undefined ? {} : { predicate: queryRepairSuggestion.original_query.predicate }),
             ...(queryRepairSuggestion.original_query.value_equals === undefined ? {} : { from_value: queryRepairSuggestion.original_query.value_equals }),
@@ -3415,6 +3438,7 @@ export function buildClassifierLifecycleInsightReport(input: {
             kind: "review_pipeline_action",
             blocks_decision: reviewPipelineBlocked,
             ...(reviewPipeline.recommended_action_status === undefined ? {} : { status: reviewPipeline.recommended_action_status }),
+            execution_status: reviewPipelineRouteExecutionStatus(reviewPipeline),
             command_kind: reviewPipeline.recommended_action_kind,
             next_action: reviewPipeline.next_action,
             ...(reviewPipeline.recommended_action_next_action === undefined ? {} : { action_next_action: reviewPipeline.recommended_action_next_action }),
