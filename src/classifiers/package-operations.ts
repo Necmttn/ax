@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { exec } from "node:child_process";
+import { exec, execFile } from "node:child_process";
 import { safeJsonParse } from "../lib/shared/safe-json.ts";
 import {
     recordRef,
@@ -1052,6 +1052,26 @@ export interface ClassifierLifecycleRouteExecutionPlanReport {
     readonly failures: readonly string[];
     readonly next_action: "execute_bound_route" | "request_execute_route" | "repair_binding_preview";
     readonly remediation: string;
+}
+
+export interface ClassifierLifecycleRouteExecutionReport {
+    readonly schema: "ax.classifier_lifecycle_route_execution_report.v1";
+    readonly source_schema: ClassifierLifecycleRouteExecutionPlanReport["schema"];
+    readonly decision: "executed" | "failed" | "not_executed";
+    readonly active_route_kind?: ClassifierLifecycleRoutingItem["kind"];
+    readonly active_route_command_kind?: string;
+    readonly command_argv: readonly string[];
+    readonly plan: ClassifierLifecycleRouteExecutionPlanReport;
+    readonly executed: boolean;
+    readonly started_at: string;
+    readonly finished_at: string;
+    readonly duration_ms: number;
+    readonly exit_code: number | null;
+    readonly signal: string | null;
+    readonly stdout: string;
+    readonly stderr: string;
+    readonly failures: readonly string[];
+    readonly next_action: "inspect_route_outputs" | "repair_route_execution" | "request_execute_route";
 }
 
 function reviewPipelineLifecycleNextAction(
@@ -3741,6 +3761,92 @@ export function buildClassifierLifecycleRouteExecutionPlan(
     };
 }
 
+export async function executeClassifierLifecycleRouteExecutionPlan(
+    plan: ClassifierLifecycleRouteExecutionPlanReport,
+): Promise<ClassifierLifecycleRouteExecutionReport> {
+    const started = new Date();
+    const notExecuted = (failures: readonly string[]): ClassifierLifecycleRouteExecutionReport => {
+        const finished = new Date();
+        return {
+            schema: "ax.classifier_lifecycle_route_execution_report.v1",
+            source_schema: plan.schema,
+            decision: "not_executed",
+            ...(plan.active_route_kind === undefined ? {} : { active_route_kind: plan.active_route_kind }),
+            ...(plan.active_route_command_kind === undefined ? {} : { active_route_command_kind: plan.active_route_command_kind }),
+            command_argv: plan.command_argv,
+            plan,
+            executed: false,
+            started_at: started.toISOString(),
+            finished_at: finished.toISOString(),
+            duration_ms: finished.getTime() - started.getTime(),
+            exit_code: null,
+            signal: null,
+            stdout: "",
+            stderr: "",
+            failures,
+            next_action: plan.decision === "denied_requires_execute" ? "request_execute_route" : "repair_route_execution",
+        };
+    };
+    if (plan.decision !== "ready_to_execute") {
+        return notExecuted(plan.failures.length > 0 ? plan.failures : [`route execution plan decision was ${plan.decision}`]);
+    }
+    const [file, ...args] = plan.command_argv;
+    if (!file) {
+        return notExecuted(["route execution command argv was empty"]);
+    }
+    const result = await new Promise<{
+        readonly exitCode: number | null;
+        readonly signal: NodeJS.Signals | null;
+        readonly stdout: string;
+        readonly stderr: string;
+    }>((resolve) => {
+        execFile(file, args, {
+            cwd: process.cwd(),
+            encoding: "utf8",
+            env: process.env,
+            maxBuffer: 10 * 1024 * 1024,
+            shell: false,
+        }, (error, stdout, stderr) => {
+            const processError = error as (Error & {
+                readonly code?: number | string | null;
+                readonly signal?: NodeJS.Signals | null;
+            }) | null;
+            const exitCode = processError
+                ? typeof processError.code === "number" ? processError.code : 1
+                : 0;
+            resolve({
+                exitCode,
+                signal: processError?.signal ?? null,
+                stdout,
+                stderr,
+            });
+        });
+    });
+    const finished = new Date();
+    const failures = result.exitCode === 0
+        ? []
+        : [`route exited with code ${result.exitCode ?? "null"}${result.signal ? ` signal ${result.signal}` : ""}`];
+    return {
+        schema: "ax.classifier_lifecycle_route_execution_report.v1",
+        source_schema: plan.schema,
+        decision: result.exitCode === 0 ? "executed" : "failed",
+        ...(plan.active_route_kind === undefined ? {} : { active_route_kind: plan.active_route_kind }),
+        ...(plan.active_route_command_kind === undefined ? {} : { active_route_command_kind: plan.active_route_command_kind }),
+        command_argv: plan.command_argv,
+        plan,
+        executed: true,
+        started_at: started.toISOString(),
+        finished_at: finished.toISOString(),
+        duration_ms: finished.getTime() - started.getTime(),
+        exit_code: result.exitCode,
+        signal: result.signal,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        failures,
+        next_action: result.exitCode === 0 ? "inspect_route_outputs" : "repair_route_execution",
+    };
+}
+
 export function writeOperationsReport(path: string, report: ClassifierPackageOperationsReport): void {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
@@ -3820,6 +3926,11 @@ export function writeClassifierLifecycleRouteBindingPreviewReport(path: string, 
 }
 
 export function writeClassifierLifecycleRouteExecutionPlanReport(path: string, report: ClassifierLifecycleRouteExecutionPlanReport): void {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+}
+
+export function writeClassifierLifecycleRouteExecutionReport(path: string, report: ClassifierLifecycleRouteExecutionReport): void {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
 }

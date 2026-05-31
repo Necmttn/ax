@@ -20,6 +20,7 @@ import {
     executeOperationPlanReport,
     buildClassifierLifecycleRouteBindingPreview,
     buildClassifierLifecycleRouteExecutionPlan,
+    executeClassifierLifecycleRouteExecutionPlan,
     loadClassifierLifecycleReviewStatus,
     summarizeClassifierLifecycleRouting,
     summarizeClassifierPackageOperations,
@@ -2404,6 +2405,66 @@ describe("classifier package operations report", () => {
             command_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=necmett"],
             failures: [],
         });
+    });
+
+    test("does not execute lifecycle route plans without explicit allowance", async () => {
+        const preview = {
+            schema: "ax.classifier_lifecycle_route_binding_preview.v1" as const,
+            source_schema: "ax.classifier_lifecycle_routing_summary.v1" as const,
+            decision: "ready_to_execute" as const,
+            active_route_kind: "review_pipeline_action" as const,
+            active_route_command_kind: "stamp_review_provenance",
+            provided_inputs: ["reviewer"],
+            missing_values: [],
+            input_bindings: [],
+            original_argv: ["bun", "-e", "console.log('route ok')"],
+            bound_argv: ["bun", "-e", "console.log('route ok')"],
+            next_action: "execute_bound_active_route" as const,
+            remediation: "Execute the bound active route command.",
+        };
+        const plan = buildClassifierLifecycleRouteExecutionPlan(preview, { allowExecute: false });
+
+        const report = await executeClassifierLifecycleRouteExecutionPlan(plan);
+
+        expect(report).toMatchObject({
+            schema: "ax.classifier_lifecycle_route_execution_report.v1",
+            source_schema: "ax.classifier_lifecycle_route_execution_plan.v1",
+            decision: "not_executed",
+            executed: false,
+            exit_code: null,
+            stdout: "",
+            failures: ["route execution requires --execute-route"],
+        });
+    });
+
+    test("executes ready lifecycle route plans and captures output", async () => {
+        const preview = {
+            schema: "ax.classifier_lifecycle_route_binding_preview.v1" as const,
+            source_schema: "ax.classifier_lifecycle_routing_summary.v1" as const,
+            decision: "ready_to_execute" as const,
+            active_route_kind: "review_pipeline_action" as const,
+            active_route_command_kind: "stamp_review_provenance",
+            provided_inputs: ["reviewer"],
+            missing_values: [],
+            input_bindings: [],
+            original_argv: ["bun", "-e", "console.log('route ok')"],
+            bound_argv: ["bun", "-e", "console.log('route ok')"],
+            next_action: "execute_bound_active_route" as const,
+            remediation: "Execute the bound active route command.",
+        };
+        const plan = buildClassifierLifecycleRouteExecutionPlan(preview, { allowExecute: true });
+
+        const report = await executeClassifierLifecycleRouteExecutionPlan(plan);
+
+        expect(report).toMatchObject({
+            decision: "executed",
+            executed: true,
+            exit_code: 0,
+            signal: null,
+            failures: [],
+            command_argv: ["bun", "-e", "console.log('route ok')"],
+        });
+        expect(report.stdout.trim()).toBe("route ok");
     });
 
     test("routes lifecycle insight reports to graph query repair when the filtered graph has a suggestion", () => {

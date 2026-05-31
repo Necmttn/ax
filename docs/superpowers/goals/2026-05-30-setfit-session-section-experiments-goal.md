@@ -33,17 +33,64 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E435 adds
-  `.ax/experiments/classifier-lifecycle-route-execution-plan-denied-e435.json`
-  and
-  `.ax/experiments/classifier-lifecycle-route-execution-plan-allowed-e435.json`
-  as the latest hybrid classifier review-throughput evidence.
+- Index continuation: E436 adds
+  `.ax/experiments/classifier-lifecycle-route-execution-e436.json` and
+  `.ax/experiments/classifier-lifecycle-route-execution-e436.txt` as the latest
+  hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
   append-only fixtures, graph projection, and workflow/harness usefulness
   checks.
-- The immediate bottleneck is direct review execution/routing, not another
-  expensive model run.
+- Direct review execution/routing is now possible behind an explicit
+  `--execute-route` gate. The immediate bottleneck has moved to review handoff
+  artifacts and post-execution output verification.
+
+## E436 - Execute Bound Lifecycle Routes
+
+Question:
+- Can the lifecycle route helper move from safe planning into explicit,
+  auditable execution while preserving a report artifact for services and
+  debugging?
+
+Implementation:
+- Added `executeClassifierLifecycleRouteExecutionPlan` and the
+  `ax.classifier_lifecycle_route_execution_report.v1` report shape.
+- Added compact route execution text rendering.
+- Wired `ax classifiers lifecycle --execute-route` so route execution happens
+  only when route inputs are bound and the caller explicitly requests execution.
+- Kept `--route-execution-plan` as a non-mutating plan surface.
+
+Artifacts:
+- `.ax/experiments/classifier-lifecycle-route-execution-e436.json`
+- `.ax/experiments/classifier-lifecycle-route-execution-e436.txt`
+- `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371.json`
+
+Results:
+- The real bound review-pipeline route executed with exit code `0`.
+- The outer execution report captured the exact bound argv, stdout, stderr,
+  timestamps, duration, and `next_action=inspect_route_outputs`.
+- The inner workflow-candidate command produced review coverage output with
+  `decision=workflow_candidate_review_coverage_ready`.
+- The route did not apply graph writes; the inner report still shows the next
+  pipeline stage as `needs_review_handoff`.
+
+Decision:
+- E436 closes the service helper loop from graph-derived route discovery to
+  explicit route execution. Route output still needs a separate verification
+  and handoff gate before promotion/apply.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun src/cli/index.ts classifiers lifecycle --route-inputs reviewer=necmett,reviewed_at=2026-05-31T12:34:56.000Z --execute-route --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --out .ax/experiments/classifier-lifecycle-route-execution-e436.json --json
+bun src/cli/index.ts classifiers lifecycle --route-inputs reviewer=necmett,reviewed_at=2026-05-31T12:34:56.000Z --execute-route --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute > .ax/experiments/classifier-lifecycle-route-execution-e436.txt
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-lifecycle-route-execution-e436.json").json(); if (saved.schema !== "ax.classifier_lifecycle_route_execution_report.v1") throw new Error("bad schema"); if (saved.decision !== "executed" || saved.executed !== true || saved.exit_code !== 0) throw new Error(`bad execution ${JSON.stringify({decision:saved.decision,executed:saved.executed,exit_code:saved.exit_code})}`); if (!saved.command_argv.includes("--review-provenance-reviewer=necmett")) throw new Error("missing bound reviewer"); if (!saved.stdout.includes("workflow_candidate_review_coverage_ready")) throw new Error("missing inner coverage output");'
+rg -n -- "classifier lifecycle route execution|decision: executed|executed: yes|exit code: 0|next action: inspect_route_outputs" .ax/experiments/classifier-lifecycle-route-execution-e436.txt
+test -s .ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371.json
+```
+
+Focused tests, typecheck, real execution, and artifact assertions passed.
 
 ## E435 - Gate Bound Route Execution Plans
 

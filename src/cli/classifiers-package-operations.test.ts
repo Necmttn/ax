@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
 import { ClassifierPackageService } from "../classifiers/package-service.ts";
 import {
+    renderClassifierLifecycleRouteExecutionText,
     renderClassifierLifecycleRouteExecutionPlanText,
     renderClassifierLifecycleRouteBindingPreviewText,
     renderClassifierLifecycleInsightText,
@@ -22,6 +23,7 @@ import {
     runClassifiersPackageOperations,
 } from "./classifiers-package-operations.ts";
 import type {
+    ClassifierLifecycleRouteExecutionReport,
     ClassifierLifecycleRouteExecutionPlanReport,
     ClassifierLifecycleRouteBindingPreviewReport,
     ClassifierLifecycleInsightReport,
@@ -1696,6 +1698,65 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("would execute: no");
         expect(output).toContain("command argv: bun src/cli/index.ts --review-provenance-reviewer=necmett");
         expect(output).toContain("failure: route execution requires --execute-route");
+    });
+
+    test("renders classifier lifecycle route execution reports", () => {
+        const plan: ClassifierLifecycleRouteExecutionPlanReport = {
+            schema: "ax.classifier_lifecycle_route_execution_plan.v1",
+            source_schema: "ax.classifier_lifecycle_route_binding_preview.v1",
+            decision: "ready_to_execute",
+            active_route_kind: "review_pipeline_action",
+            active_route_command_kind: "stamp_review_provenance",
+            requested_execute: true,
+            would_execute: true,
+            command_argv: ["bun", "-e", "console.log('route ok')"],
+            preview: {
+                schema: "ax.classifier_lifecycle_route_binding_preview.v1",
+                source_schema: "ax.classifier_lifecycle_routing_summary.v1",
+                decision: "ready_to_execute",
+                active_route_kind: "review_pipeline_action",
+                active_route_command_kind: "stamp_review_provenance",
+                provided_inputs: ["reviewer"],
+                missing_values: [],
+                input_bindings: [],
+                original_argv: ["bun", "-e", "console.log('route ok')"],
+                bound_argv: ["bun", "-e", "console.log('route ok')"],
+                next_action: "execute_bound_active_route",
+                remediation: "Execute the bound active route command.",
+            },
+            failures: [],
+            next_action: "execute_bound_route",
+            remediation: "Execute the bound active route command.",
+        };
+        const report: ClassifierLifecycleRouteExecutionReport = {
+            schema: "ax.classifier_lifecycle_route_execution_report.v1",
+            source_schema: "ax.classifier_lifecycle_route_execution_plan.v1",
+            decision: "executed",
+            active_route_kind: "review_pipeline_action",
+            active_route_command_kind: "stamp_review_provenance",
+            command_argv: ["bun", "-e", "console.log('route ok')"],
+            plan,
+            executed: true,
+            started_at: "2026-05-31T12:34:56.000Z",
+            finished_at: "2026-05-31T12:34:57.000Z",
+            duration_ms: 1000,
+            exit_code: 0,
+            signal: null,
+            stdout: "route ok\n",
+            stderr: "",
+            failures: [],
+            next_action: "inspect_route_outputs",
+        };
+
+        const output = renderClassifierLifecycleRouteExecutionText(report);
+
+        expect(output).toContain("classifier lifecycle route execution");
+        expect(output).toContain("decision: executed");
+        expect(output).toContain("executed: yes");
+        expect(output).toContain("exit code: 0");
+        expect(output).toContain("command argv: bun -e console.log('route ok')");
+        expect(output).toContain("stdout: route ok");
+        expect(output).toContain("next action: inspect_route_outputs");
     });
 
     test("renders multi-package summaries", () => {

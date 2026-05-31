@@ -7,7 +7,9 @@ import {
 import {
     buildClassifierLifecycleRouteBindingPreview,
     buildClassifierLifecycleRouteExecutionPlan,
+    executeClassifierLifecycleRouteExecutionPlan,
     writeClassifierLifecycleRouteBindingPreviewReport,
+    writeClassifierLifecycleRouteExecutionReport,
     writeClassifierLifecycleRouteExecutionPlanReport,
 } from "../classifiers/package-operations.ts";
 import type {
@@ -16,6 +18,7 @@ import type {
     ClassifierPackageExecutionSurrealApplyReport,
     ClassifierPackageExecutionSurrealWritePlanReport,
     ClassifierPackageExecutionGraphHealthReport,
+    ClassifierLifecycleRouteExecutionReport,
     ClassifierLifecycleRouteExecutionPlanReport,
     ClassifierLifecycleRouteBindingPreviewReport,
     ClassifierLifecycleInsightReport,
@@ -979,6 +982,30 @@ export function renderClassifierLifecycleRouteExecutionPlanText(report: Classifi
     return lines.join("\n");
 }
 
+export function renderClassifierLifecycleRouteExecutionText(report: ClassifierLifecycleRouteExecutionReport): string {
+    const lines = [
+        "classifier lifecycle route execution",
+        `decision: ${report.decision}`,
+        `active: ${report.active_route_kind ?? "none"} ${report.active_route_command_kind ?? "none"}`,
+        `executed: ${report.executed ? "yes" : "no"}`,
+        `exit code: ${report.exit_code ?? "none"}`,
+        `signal: ${report.signal ?? "none"}`,
+        `duration ms: ${report.duration_ms}`,
+        `command argv: ${report.command_argv.join(" ") || "none"}`,
+        `next action: ${report.next_action}`,
+    ];
+    if (report.stdout.trim().length > 0) {
+        lines.push(`stdout: ${report.stdout.trim()}`);
+    }
+    if (report.stderr.trim().length > 0) {
+        lines.push(`stderr: ${report.stderr.trim()}`);
+    }
+    for (const failure of report.failures) {
+        lines.push(`failure: ${failure}`);
+    }
+    return lines.join("\n");
+}
+
 const serviceErrorText = (error: unknown): string => {
     if (error && typeof error === "object" && "_tag" in error) {
         if ("message" in error && typeof error.message === "string") {
@@ -1245,8 +1272,16 @@ export const runClassifiersLifecycle = (
         const routePreview = routeInputValues === undefined || routingSummary === undefined
             ? undefined
             : buildClassifierLifecycleRouteBindingPreview(routingSummary, routeInputValues);
-        const report = routePreview !== undefined && input.routeExecutionPlan === true
+        const routeExecutionPlan = routePreview !== undefined && (input.routeExecutionPlan === true || input.executeRoute === true)
             ? buildClassifierLifecycleRouteExecutionPlan(routePreview, { allowExecute: input.executeRoute === true })
+            : undefined;
+        const routeExecution = routeExecutionPlan !== undefined && input.executeRoute === true && input.routeExecutionPlan !== true
+            ? yield* Effect.promise(() => executeClassifierLifecycleRouteExecutionPlan(routeExecutionPlan))
+            : undefined;
+        const report = routeExecution !== undefined
+            ? routeExecution
+            : routeExecutionPlan !== undefined
+            ? routeExecutionPlan
             : routePreview !== undefined
             ? routePreview
             : input.routingSummary === true
@@ -1278,7 +1313,9 @@ export const runClassifiersLifecycle = (
         if (input.json) {
             console.log(JSON.stringify(report, null, 2));
         } else if (!input.out) {
-            console.log(routePreview !== undefined && input.routeExecutionPlan === true
+            console.log(routeExecution !== undefined
+                ? renderClassifierLifecycleRouteExecutionText(report as ClassifierLifecycleRouteExecutionReport)
+                : routeExecutionPlan !== undefined
                 ? renderClassifierLifecycleRouteExecutionPlanText(report as ClassifierLifecycleRouteExecutionPlanReport)
                 : routePreview !== undefined
                 ? renderClassifierLifecycleRouteBindingPreviewText(report as ClassifierLifecycleRouteBindingPreviewReport)
@@ -1286,10 +1323,19 @@ export const runClassifiersLifecycle = (
                 ? renderClassifierLifecycleRoutingSummaryText(report as ClassifierLifecycleRoutingSummaryReport)
                 : renderClassifierLifecycleInsightText(report as ClassifierLifecycleInsightReport));
         }
-        if (routePreview !== undefined && input.routeExecutionPlan === true && input.out !== undefined) {
+        if (routeExecution !== undefined && input.out !== undefined) {
+            writeClassifierLifecycleRouteExecutionReport(input.out, report as ClassifierLifecycleRouteExecutionReport);
+        } else if (routeExecutionPlan !== undefined && input.out !== undefined) {
             writeClassifierLifecycleRouteExecutionPlanReport(input.out, report as ClassifierLifecycleRouteExecutionPlanReport);
         } else if (routePreview !== undefined && input.out !== undefined) {
             writeClassifierLifecycleRouteBindingPreviewReport(input.out, report as ClassifierLifecycleRouteBindingPreviewReport);
+        }
+        if (routeExecution !== undefined && report.decision !== "executed") {
+            process.exitCode = 1;
+            return;
+        }
+        if (routeExecution !== undefined) {
+            return;
         }
         if (!input.out && report.decision !== "healthy") {
             process.exitCode = 1;
