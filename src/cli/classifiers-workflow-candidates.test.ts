@@ -16,6 +16,7 @@ import {
     buildWorkflowCandidateTopicReviewGraphProjection,
     buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures,
     buildWorkflowCandidateReviewCoverageApplySummary,
+    buildWorkflowCandidateReviewCoveragePostApplyRecheckSummary,
     buildWorkflowCandidateTopicReviewGraphListReport,
     buildWorkflowCandidateTopicReviewGraphWritePlan,
     buildWorkflowCandidateTopicTaskDrafts,
@@ -2294,6 +2295,38 @@ describe("classifiers workflow-candidates", () => {
         });
         expect(text).toContain("coverage review provenance stamp: reviewer=1 reviewed_at=1");
         expect(text).toContain("coverage review strict can apply: yes");
+    });
+
+    test("summarizes post-apply coverage recheck deltas", () => {
+        const summary = buildWorkflowCandidateReviewCoveragePostApplyRecheckSummary({
+            before: {
+                reviewedCandidateCount: 1,
+                unreviewedCandidateCount: 2,
+                projectedReviewedCandidateCount: 2,
+                projectedUnreviewedCandidateCount: 1,
+            },
+            after: {
+                reviewedCandidateCount: 2,
+                unreviewedCandidateCount: 1,
+            },
+            command: "bun src/cli/index.ts classifiers workflow-candidates --review-coverage --out=.ax/experiments/post.json --json",
+        });
+
+        expect(summary).toEqual({
+            schema: "ax.workflow_candidate_review_coverage_recheck.v1",
+            status: "gap_closed",
+            before_reviewed_candidate_count: 1,
+            before_unreviewed_candidate_count: 2,
+            projected_reviewed_candidate_count: 2,
+            projected_unreviewed_candidate_count: 1,
+            after_reviewed_candidate_count: 2,
+            after_unreviewed_candidate_count: 1,
+            reviewed_candidate_delta: 1,
+            unreviewed_candidate_delta: -1,
+            projected_reviewed_delta: 0,
+            projected_unreviewed_delta: 0,
+            command: "bun src/cli/index.ts classifiers workflow-candidates --review-coverage --out=.ax/experiments/post.json --json",
+        });
     });
 
     test("reports applied coverage review statement counts", () => {

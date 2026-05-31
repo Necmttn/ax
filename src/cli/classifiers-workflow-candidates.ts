@@ -227,6 +227,28 @@ export interface WorkflowCandidateReviewCoverageProvenanceIssueRow {
     readonly reviewed_at: string;
 }
 
+export type WorkflowCandidateReviewCoverageRecheckStatus =
+    | "gap_closed"
+    | "gap_reduced"
+    | "gap_regressed"
+    | "gap_unchanged";
+
+export interface WorkflowCandidateReviewCoveragePostApplyRecheckSummary {
+    readonly schema: "ax.workflow_candidate_review_coverage_recheck.v1";
+    readonly status: WorkflowCandidateReviewCoverageRecheckStatus;
+    readonly before_reviewed_candidate_count: number;
+    readonly before_unreviewed_candidate_count: number;
+    readonly projected_reviewed_candidate_count: number;
+    readonly projected_unreviewed_candidate_count: number;
+    readonly after_reviewed_candidate_count: number;
+    readonly after_unreviewed_candidate_count: number;
+    readonly reviewed_candidate_delta: number;
+    readonly unreviewed_candidate_delta: number;
+    readonly projected_reviewed_delta: number;
+    readonly projected_unreviewed_delta: number;
+    readonly command: string;
+}
+
 export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly schema: "ax.workflow_candidate_review_readiness.v1";
     readonly source_path: string;
@@ -264,6 +286,7 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly strict_apply_blocker_details: readonly WorkflowCandidateReviewCoverageApplyBlockerDetail[];
     readonly next_action: string;
     readonly post_apply_recheck_command: string;
+    readonly post_apply_recheck?: WorkflowCandidateReviewCoveragePostApplyRecheckSummary;
     readonly reviewed_fixture_ids: readonly string[];
     readonly projected_fact_ids: readonly string[];
     readonly apply_audit_rows: readonly WorkflowCandidateReviewCoverageApplyAuditRow[];
@@ -1852,6 +1875,11 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
                 `coverage review provenance issue: ${row.issue} fixture=${row.fixture_id} candidate=${row.candidate_id} reviewed_at=${row.reviewed_at || "none"}`
             ),
             `coverage review post-apply recheck: ${report.coverage_review.post_apply_recheck_command}`,
+            ...(report.coverage_review.post_apply_recheck === undefined ? [] : [
+                `coverage review post-apply status: ${report.coverage_review.post_apply_recheck.status}`,
+                `coverage review post-apply reviewed delta: ${report.coverage_review.post_apply_recheck.reviewed_candidate_delta} projected_delta=${report.coverage_review.post_apply_recheck.projected_reviewed_delta}`,
+                `coverage review post-apply unreviewed delta: ${report.coverage_review.post_apply_recheck.unreviewed_candidate_delta} projected_delta=${report.coverage_review.post_apply_recheck.projected_unreviewed_delta}`,
+            ]),
             `coverage review audit ids: fixtures=${report.coverage_review.reviewed_fixture_ids.length} facts=${report.coverage_review.projected_fact_ids.length}`,
             `coverage review audit rows: ${report.coverage_review.apply_audit_rows.length}`,
             ...report.coverage_review.apply_audit_rows.map((row) =>
@@ -2830,6 +2858,48 @@ const workflowCandidateReviewCoverageRecheckCommand = (input: {
     `--out=${postApplyOutputPath(input.outputPath ?? ".ax/experiments/workflow-candidate-review-coverage.json")}`,
     "--json",
 ].join(" ");
+
+export function buildWorkflowCandidateReviewCoveragePostApplyRecheckSummary(input: {
+    readonly before: {
+        readonly reviewedCandidateCount: number;
+        readonly unreviewedCandidateCount: number;
+        readonly projectedReviewedCandidateCount: number;
+        readonly projectedUnreviewedCandidateCount: number;
+    };
+    readonly after: {
+        readonly reviewedCandidateCount: number;
+        readonly unreviewedCandidateCount: number;
+    };
+    readonly command: string;
+}): WorkflowCandidateReviewCoveragePostApplyRecheckSummary {
+    const reviewedCandidateDelta = input.after.reviewedCandidateCount - input.before.reviewedCandidateCount;
+    const unreviewedCandidateDelta = input.after.unreviewedCandidateCount - input.before.unreviewedCandidateCount;
+    const projectedReviewedDelta = input.after.reviewedCandidateCount - input.before.projectedReviewedCandidateCount;
+    const projectedUnreviewedDelta = input.after.unreviewedCandidateCount - input.before.projectedUnreviewedCandidateCount;
+    const status: WorkflowCandidateReviewCoverageRecheckStatus =
+        projectedReviewedDelta >= 0 && projectedUnreviewedDelta <= 0
+            ? "gap_closed"
+            : reviewedCandidateDelta > 0 || unreviewedCandidateDelta < 0
+                ? "gap_reduced"
+            : reviewedCandidateDelta < 0 || unreviewedCandidateDelta > 0
+                ? "gap_regressed"
+                : "gap_unchanged";
+    return {
+        schema: "ax.workflow_candidate_review_coverage_recheck.v1",
+        status,
+        before_reviewed_candidate_count: input.before.reviewedCandidateCount,
+        before_unreviewed_candidate_count: input.before.unreviewedCandidateCount,
+        projected_reviewed_candidate_count: input.before.projectedReviewedCandidateCount,
+        projected_unreviewed_candidate_count: input.before.projectedUnreviewedCandidateCount,
+        after_reviewed_candidate_count: input.after.reviewedCandidateCount,
+        after_unreviewed_candidate_count: input.after.unreviewedCandidateCount,
+        reviewed_candidate_delta: reviewedCandidateDelta,
+        unreviewed_candidate_delta: unreviewedCandidateDelta,
+        projected_reviewed_delta: projectedReviewedDelta,
+        projected_unreviewed_delta: projectedUnreviewedDelta,
+        command: input.command,
+    };
+}
 
 export function parseWorkflowCandidateFixtureRowsJsonl(
     content: string,
@@ -4443,8 +4513,9 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     );
                 }
                 const applied = Boolean(input.applyReviewFacts && pendingApplySummary.can_apply);
-                const applySummary = applied
-                    ? buildWorkflowCandidateReviewCoverageApplySummary({
+                let applySummary = pendingApplySummary;
+                if (applied) {
+                    const appliedSummary = buildWorkflowCandidateReviewCoverageApplySummary({
                         rows: reviewedRows,
                         sourcePath: input.coverageReviewPack,
                         projection: reviewProjection,
@@ -4460,8 +4531,45 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                         sourceKind: input.sourceKind,
                         limit: input.limit,
                         ...(input.out === undefined ? {} : { outputPath: input.out }),
-                    })
-                    : pendingApplySummary;
+                    });
+                    const postRows = yield* db.query<[WorkflowCandidateGroupRow[], WorkflowCandidateEvidenceRow[]]>(
+                        workflowCandidateSql,
+                        { sourceKind: input.sourceKind },
+                    ).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+                    const postReviewRows = yield* db.query<[WorkflowCandidateTopicHarnessGraphFactRow[]]>(`
+                        SELECT graph_id, subject, predicate, object, value_json, properties_json, type::string(updated_at) AS updated_at
+                        FROM classifier_graph_fact
+                        WHERE kind = "workflow_topic_candidate_review"
+                          AND source_kind = "workflow_topic_candidate_review"
+                        ORDER BY updated_at DESC
+                        LIMIT ${Math.max(1, input.limit * 50)};
+                    `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+                    const postReport = buildWorkflowCandidateReviewCoverageReport({
+                        groupRows: postRows[0] ?? [],
+                        evidenceRows: postRows[1] ?? [],
+                        reviewFactRows: postReviewRows?.[0] ?? [],
+                        sourceKind: input.sourceKind,
+                        limit: input.limit,
+                        ...(input.search === undefined ? {} : { search: input.search }),
+                    });
+                    applySummary = {
+                        ...appliedSummary,
+                        post_apply_recheck: buildWorkflowCandidateReviewCoveragePostApplyRecheckSummary({
+                            before: {
+                                reviewedCandidateCount: report.totals.reviewed_candidate_count,
+                                unreviewedCandidateCount: report.totals.unreviewed_candidate_count,
+                                projectedReviewedCandidateCount: pendingApplySummary.projected_reviewed_candidate_count,
+                                projectedUnreviewedCandidateCount: pendingApplySummary.projected_unreviewed_candidate_count,
+                            },
+                            after: {
+                                reviewedCandidateCount: postReport.totals.reviewed_candidate_count,
+                                unreviewedCandidateCount: postReport.totals.unreviewed_candidate_count,
+                            },
+                            command: appliedSummary.post_apply_recheck_command,
+                        }),
+                    };
+                    report = postReport;
+                }
                 report = {
                     ...report,
                     coverage_review: applySummary,
