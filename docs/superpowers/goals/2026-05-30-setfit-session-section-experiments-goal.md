@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E383 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-status-no-match-e383.json`
+- Index continuation: E384 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-next-action-no-match-e384.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-status-match-e383.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-next-action-match-e384.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,54 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E384 - Expose Suggested Query Next Action
+
+Question:
+- E383 tells services that a repaired lifecycle query is expected to match, but
+  can they route the next step without inventing their own action label?
+
+Implementation:
+- Added `query_suggested_next_action` to classifier graph health reports.
+- Lifecycle graph queries with a ranked suggested value now emit
+  `run_suggested_query`.
+- Text graph-health output now renders `query suggested next action`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-next-action-no-match-e384.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-next-action-match-e384.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-next-action-no-match-e384.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match`,
+  `query_suggested_value_equals=bind_inputs`,
+  `query_suggested_result_count=1`,
+  `query_suggested_status=expected_matches`, and
+  `query_suggested_next_action=run_suggested_query`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggested_next_action=run_suggested_query`.
+- Text output renders `query suggested next action: run_suggested_query`.
+
+Decision:
+- Services can now route lifecycle graph-query repairs through the report's
+  suggested next action instead of mapping status/count pairs locally.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E384 no-match report has `query_match_status=no_match`,
+  `query_suggested_value_equals=bind_inputs`,
+  `query_suggested_result_count=1`,
+  `query_suggested_status=expected_matches`, and
+  `query_suggested_next_action=run_suggested_query`.
+- E384 match report has `query_match_status=matched` and
+  `query_suggested_next_action=run_suggested_query`.
+- E384 text output includes the suggested-next-action line.
 
 ## E383 - Expose Suggested Query Status
 
