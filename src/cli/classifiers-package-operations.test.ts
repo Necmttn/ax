@@ -607,6 +607,7 @@ describe("classifiers package-operations format", () => {
                 status: "accepted",
                 source_fixture_id: "session-section-chunks/none-start-building",
                 proposed_label: "none",
+                threshold: "none",
                 min_nearest_similarity: 0.85,
                 nearest_fixture_id: "session-section-chunks/approval-alright-go",
             },
@@ -676,6 +677,7 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("filter status: accepted");
         expect(output).toContain("filter source fixture: session-section-chunks/none-start-building");
         expect(output).toContain("filter proposed label: none");
+        expect(output).toContain("filter threshold: none");
         expect(output).toContain("filter min nearest similarity: 0.85");
         expect(output).toContain("filter nearest fixture: session-section-chunks/approval-alright-go");
         expect(output).toContain("embedding helper facts:");
