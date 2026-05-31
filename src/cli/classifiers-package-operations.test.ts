@@ -606,6 +606,11 @@ describe("classifiers package-operations format", () => {
                     value_contains: "src/cli/index.ts",
                     value_equals: "bind_inputs",
                 },
+                filter_changes: [{
+                    filter: "value_equals",
+                    from: "bind_inputs",
+                    to: "bind_inputs",
+                }],
                 argv: [
                     "bun",
                     "src/cli/index.ts",
@@ -700,6 +705,7 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("query suggestion provenance: source=lifecycle_available_value_counts reason=available_value_after_relaxing_value_equals");
         expect(output).toContain("query suggestion relaxed filters: value_equals");
         expect(output).toContain("query suggestion original query: mode=lifecycle predicate=review_pipeline_prepared_argv subject=classifier_lifecycle:workflow_candidate_proposal source_kind=classifier_package_execution value_contains=src/cli/index.ts value_equals=bind_inputs");
+        expect(output).toContain("query suggestion filter changes: value_equals:bind_inputs->bind_inputs");
         expect(output).toContain("query suggested argv: bun src/cli/index.ts classifiers graph --mode lifecycle --predicate review_pipeline_prepared_argv --subject classifier_lifecycle:workflow_candidate_proposal --source-kind classifier_package_execution --value-contains src/cli/index.ts --value bind_inputs");
         expect(output).toContain("query suggested query: mode=lifecycle predicate=review_pipeline_prepared_argv subject=classifier_lifecycle:workflow_candidate_proposal source_kind=classifier_package_execution value_contains=src/cli/index.ts value_equals=bind_inputs");
         expect(output).toContain("execution/guard/artifact/lifecycle/helper facts: 0/0/0/1/0");

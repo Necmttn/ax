@@ -1294,6 +1294,11 @@ describe("classifier package operations report", () => {
                 predicate: "review_pipeline_recommended_action_execution_phase",
                 value_equals: "bind_inputs",
             },
+            filter_changes: [{
+                filter: "value_equals",
+                from: "execute",
+                to: "bind_inputs",
+            }],
             argv: [
                 "bun",
                 "src/cli/index.ts",

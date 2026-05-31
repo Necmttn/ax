@@ -482,6 +482,11 @@ export interface ClassifierGraphQuerySuggestion {
     readonly relaxed_filters: readonly ["value_equals"];
     readonly original_query: ClassifierGraphHealthQuery;
     readonly query: ClassifierGraphHealthQuery;
+    readonly filter_changes: readonly {
+        readonly filter: "value_equals";
+        readonly from?: string;
+        readonly to: string;
+    }[];
     readonly argv: readonly string[];
 }
 
@@ -2526,6 +2531,11 @@ export function buildExecutionGraphHealthReport(input: {
                 relaxed_filters: ["value_equals"],
                 original_query: query,
                 query: querySuggestedQuery,
+                filter_changes: [{
+                    filter: "value_equals",
+                    ...(query.value_equals === undefined ? {} : { from: query.value_equals }),
+                    to: querySuggestedValueEquals,
+                }],
                 argv: querySuggestedArgv,
             };
     const routingPolicyFloorsRequested = query.min_positive_recall !== undefined || query.min_call_reduction !== undefined;

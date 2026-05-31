@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E389 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-original-query-no-match-e389.json`
+- Index continuation: E390 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-changes-no-match-e390.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-original-query-match-e389.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-changes-match-e390.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,51 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E390 - Expose Suggested Query Filter Changes
+
+Question:
+- E389 carries original and repaired queries, but can services read the exact
+  before/after filter changes without diffing the two query objects?
+
+Implementation:
+- Added `filter_changes` to `query_suggestion`.
+- Suggested lifecycle graph-query repairs now include a row for
+  `value_equals`, with the original value and suggested value.
+- Text graph-health output now renders `query suggestion filter changes`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-changes-no-match-e390.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-changes-match-e390.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-changes-no-match-e390.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.filter_changes=[{filter: value_equals, from: execute,
+  to: bind_inputs}]`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.filter_changes=[{filter: value_equals, from:
+  bind_inputs, to: bind_inputs}]`.
+- Text output renders `query suggestion filter changes:
+  value_equals:execute->bind_inputs`.
+
+Decision:
+- Services can now display and route graph-query repairs from a direct
+  before/after filter-change list rather than diffing query objects.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E390 no-match report includes the expected `value_equals` change from
+  `execute` to `bind_inputs`.
+- E390 match report includes the expected `value_equals` change from
+  `bind_inputs` to `bind_inputs`.
+- E390 text output includes the filter-change summary.
 
 ## E389 - Include Original Query In Suggestion
 
