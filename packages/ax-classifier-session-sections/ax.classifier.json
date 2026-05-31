@@ -153,6 +153,20 @@
       ]
     },
     {
+      "id": "embedding-helper-fixture-append",
+      "kind": "publish",
+      "description": "Validate and combine accepted embedding-helper hard-negative fixture rows with the package chunk fixtures.",
+      "command": "bun run classifiers:fixture-append -- --base packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl --append .ax/experiments/embedding-helper-fixture-append-current.jsonl --out .ax/experiments/chunks-with-embedding-helper-fixtures-current.jsonl --report .ax/experiments/fixture-append-embedding-helper-current-report.json --json",
+      "inputs": [
+        "packages/ax-classifier-session-sections/eval-fixtures/chunks.jsonl",
+        ".ax/experiments/embedding-helper-fixture-append-current.jsonl"
+      ],
+      "outputs": [
+        ".ax/experiments/chunks-with-embedding-helper-fixtures-current.jsonl",
+        ".ax/experiments/fixture-append-embedding-helper-current-report.json"
+      ]
+    },
+    {
       "id": "embedding-helper-export-preview",
       "kind": "review",
       "description": "Preview accepted embedding-helper hard negatives and dedupe hints while keeping pending reviews non-appendable.",

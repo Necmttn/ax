@@ -29,7 +29,10 @@ class FixtureAppendTest(unittest.TestCase):
     def test_validate_append_rows_blocks_non_none_labels(self) -> None:
         failures = module.validate_append_rows(base_rows=[], append_rows=[{"id": "b", "label": "direction"}])
 
-        self.assertIn("append rows must come from blind-hard-negative or workflow-candidate sources", failures)
+        self.assertIn(
+            "append rows must come from blind-hard-negative, embedding-helper-hard-negative, or workflow-candidate sources",
+            failures,
+        )
 
     def test_validate_append_rows_blocks_non_none_hard_negative_labels(self) -> None:
         failures = module.validate_append_rows(
@@ -38,6 +41,35 @@ class FixtureAppendTest(unittest.TestCase):
         )
 
         self.assertIn("blind hard-negative append rows must keep label none", failures)
+
+    def test_validate_append_rows_accepts_embedding_helper_hard_negatives(self) -> None:
+        failures = module.validate_append_rows(
+            base_rows=[],
+            append_rows=[{
+                "id": "session-section-chunks/embedding-helper-hard-negative-none-a",
+                "label": "none",
+                "target": "none",
+                "source_group": "embedding-helper-hard-negative",
+                "source_candidate_id": "embedding-hard-negative/session-section-chunks/none-a",
+                "source_fixture_id": "session-section-chunks/none-a",
+                "review_notes": "Reviewed as a none hard negative.",
+            }],
+        )
+
+        self.assertEqual(failures, [])
+
+    def test_validate_append_rows_blocks_incomplete_embedding_helper_rows(self) -> None:
+        failures = module.validate_append_rows(
+            base_rows=[],
+            append_rows=[{
+                "id": "session-section-chunks/embedding-helper-hard-negative-none-a",
+                "label": "none",
+                "source_group": "embedding-helper-hard-negative",
+                "review_notes": "",
+            }],
+        )
+
+        self.assertIn("embedding-helper hard-negative append rows must be accepted reviewed none fixtures", failures)
 
     def test_validate_append_rows_accepts_reviewed_workflow_fixtures(self) -> None:
         failures = module.validate_append_rows(

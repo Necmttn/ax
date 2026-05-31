@@ -53,6 +53,7 @@ def validate_append_rows(base_rows: list[dict[str, Any]], append_rows: list[dict
     if duplicate_append:
         failures.append(f"append rows contain duplicate ids: {', '.join(duplicate_append[:5])}")
     invalid_hard_negatives = []
+    invalid_embedding_helper = []
     invalid_workflow = []
     invalid_sources = []
     for row in append_rows:
@@ -61,6 +62,15 @@ def validate_append_rows(base_rows: list[dict[str, Any]], append_rows: list[dict
         if source_group == "blind-hard-negative":
             if label != "none":
                 invalid_hard_negatives.append(str(row.get("id")))
+            continue
+        if source_group == "embedding-helper-hard-negative":
+            if (
+                label != "none"
+                or not str(row.get("review_notes") or "").strip()
+                or not str(row.get("source_candidate_id") or "").strip()
+                or not str(row.get("source_fixture_id") or "").strip()
+            ):
+                invalid_embedding_helper.append(str(row.get("id")))
             continue
         if source_group == "workflow-candidate":
             if (
@@ -73,10 +83,12 @@ def validate_append_rows(base_rows: list[dict[str, Any]], append_rows: list[dict
         invalid_sources.append(str(row.get("id")))
     if invalid_hard_negatives:
         failures.append("blind hard-negative append rows must keep label none")
+    if invalid_embedding_helper:
+        failures.append("embedding-helper hard-negative append rows must be accepted reviewed none fixtures")
     if invalid_workflow:
         failures.append("workflow-candidate append rows must be accepted reviewed classifier fixtures")
     if invalid_sources:
-        failures.append("append rows must come from blind-hard-negative or workflow-candidate sources")
+        failures.append("append rows must come from blind-hard-negative, embedding-helper-hard-negative, or workflow-candidate sources")
     return failures
 
 
