@@ -390,6 +390,7 @@ export interface ClassifierGraphHealthQuery {
     readonly fact_kind?: string;
     readonly status?: string;
     readonly source_fixture_id?: string;
+    readonly proposed_label?: string;
     readonly nearest_fixture_id?: string;
     readonly predicate?: string;
     readonly subject?: string;
@@ -1807,6 +1808,7 @@ export function buildExecutionGraphHealthReport(input: {
         ...(input.query?.fact_kind ? { fact_kind: input.query.fact_kind } : {}),
         ...(input.query?.status ? { status: input.query.status } : {}),
         ...(input.query?.source_fixture_id ? { source_fixture_id: input.query.source_fixture_id } : {}),
+        ...(input.query?.proposed_label ? { proposed_label: input.query.proposed_label } : {}),
         ...(input.query?.nearest_fixture_id ? { nearest_fixture_id: input.query.nearest_fixture_id } : {}),
         ...(input.query?.predicate ? { predicate: input.query.predicate } : {}),
         ...(input.query?.subject ? { subject: input.query.subject } : {}),
@@ -2010,6 +2012,7 @@ export function buildExecutionGraphHealthReport(input: {
             (!query.fact_kind || fact.kind === query.fact_kind) &&
             !query.status &&
             !query.source_fixture_id &&
+            !query.proposed_label &&
             !query.nearest_fixture_id &&
             (!query.predicate || fact.predicate === query.predicate) &&
             (!query.subject || fact.subject === query.subject) &&
@@ -2027,6 +2030,7 @@ export function buildExecutionGraphHealthReport(input: {
             (!query.fact_kind || fact.kind === query.fact_kind) &&
             (!query.status || fact.status === query.status) &&
             (!query.source_fixture_id || fact.source_fixture_id === query.source_fixture_id) &&
+            (!query.proposed_label || fact.proposed_label === query.proposed_label) &&
             (!query.nearest_fixture_id || (fact.nearest_neighbors ?? []).some((neighbor) => neighbor.fixture_id === query.nearest_fixture_id)) &&
             (!query.predicate || fact.predicate === query.predicate) &&
             (!query.subject || fact.subject === query.subject) &&

@@ -38,6 +38,7 @@ export interface ClassifierPackageOperationsCommandInput extends ClassifierPacka
     readonly factKind?: string;
     readonly status?: string;
     readonly sourceFixture?: string;
+    readonly proposedLabel?: string;
     readonly nearestFixture?: string;
     readonly predicate?: string;
     readonly subject?: string;
@@ -271,6 +272,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `filter fact kind: ${report.query.fact_kind ?? "all"}`,
         `filter status: ${report.query.status ?? "all"}`,
         `filter source fixture: ${report.query.source_fixture_id ?? "all"}`,
+        `filter proposed label: ${report.query.proposed_label ?? "all"}`,
         `filter nearest fixture: ${report.query.nearest_fixture_id ?? "all"}`,
         `filter predicate: ${report.query.predicate ?? "all"}`,
         `filter subject: ${report.query.subject ?? "all"}`,
@@ -587,6 +589,7 @@ export const runClassifiersPackageOperations = (
                 ...(input.factKind ? { fact_kind: input.factKind } : {}),
                 ...(input.status ? { status: input.status } : {}),
                 ...(input.sourceFixture ? { source_fixture_id: input.sourceFixture } : {}),
+                ...(input.proposedLabel ? { proposed_label: input.proposedLabel } : {}),
                 ...(input.nearestFixture ? { nearest_fixture_id: input.nearestFixture } : {}),
                 ...(input.predicate ? { predicate: input.predicate } : {}),
                 ...(input.subject ? { subject: input.subject } : {}),

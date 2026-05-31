@@ -1142,6 +1142,20 @@ describe("classifier package operations report", () => {
                     source_kind: "embedding_helper_review_projection",
                 },
                 {
+                    graph_id: "fact:hard-negative-wrong-label",
+                    kind: "embedding_helper_hard_negative_candidate",
+                    subject: "embedding_helper_hard_negative:session-section-chunks/direction-example",
+                    predicate: "promoted_hard_negative_fixture",
+                    value_json: "true",
+                    evidence_edges_json: JSON.stringify(["edge:hn"]),
+                    properties_json: JSON.stringify({
+                        source_fixture_id: "session-section-chunks/direction-example",
+                        status: "accepted",
+                        proposed_label: "direction",
+                    }),
+                    source_kind: "embedding_helper_review_projection",
+                },
+                {
                     graph_id: "fact:hard-negative-rejected",
                     kind: "embedding_helper_hard_negative_candidate",
                     subject: "embedding_helper_hard_negative:session-section-chunks/rejected-example",
@@ -1161,6 +1175,7 @@ describe("classifier package operations report", () => {
                 fact_kind: "embedding_helper_hard_negative_candidate",
                 status: "accepted",
                 source_fixture_id: "session-section-chunks/none-start-building",
+                proposed_label: "none",
                 nearest_fixture_id: "session-section-chunks/approval-alright-go",
             },
         });
@@ -1169,8 +1184,9 @@ describe("classifier package operations report", () => {
         expect(report.query.fact_kind).toBe("embedding_helper_hard_negative_candidate");
         expect(report.query.status).toBe("accepted");
         expect(report.query.source_fixture_id).toBe("session-section-chunks/none-start-building");
+        expect(report.query.proposed_label).toBe("none");
         expect(report.query.nearest_fixture_id).toBe("session-section-chunks/approval-alright-go");
-        expect(report.totals.embedding_helper_fact_count).toBe(4);
+        expect(report.totals.embedding_helper_fact_count).toBe(5);
         expect(report.result_totals.embedding_helper_fact_count).toBe(1);
         expect(report.embedding_helper_facts.map((fact) => fact.predicate)).toEqual([
             "promoted_hard_negative_fixture",
