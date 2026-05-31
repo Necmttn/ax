@@ -1288,6 +1288,7 @@ describe("classifier package operations report", () => {
             repair_remediation: "Run the repaired graph query to inspect matching classifier lifecycle facts.",
             repair_can_execute: true,
             repair_execution_status: "ready_to_execute",
+            repair_command_kind: "classifier_graph_query_repair",
             repair_blockers: [],
             repair_blocker_details: [],
             repair_argv: [

@@ -319,6 +319,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         ? "none"
         : String(report.query_suggestion.repair_can_execute);
     const querySuggestionRepairExecutionStatus = report.query_suggestion?.repair_execution_status ?? "none";
+    const querySuggestionRepairCommandKind = report.query_suggestion?.repair_command_kind ?? "none";
     const querySuggestionRepairBlockers = report.query_suggestion?.repair_blockers.join(", ") || "none";
     const querySuggestionRepairBlockerDetails = report.query_suggestion?.repair_blocker_details
         .map((detail) => `${detail.blocker}: ${detail.remediation}`)
@@ -374,6 +375,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `query suggestion repair remediation: ${querySuggestionRepairRemediation}`,
         `query suggestion repair can execute: ${querySuggestionRepairCanExecute}`,
         `query suggestion repair execution status: ${querySuggestionRepairExecutionStatus}`,
+        `query suggestion repair command kind: ${querySuggestionRepairCommandKind}`,
         `query suggestion repair blockers: ${querySuggestionRepairBlockers}`,
         `query suggestion repair blocker details: ${querySuggestionRepairBlockerDetails}`,
         `query suggestion repair argv: ${querySuggestionRepairArgv}`,

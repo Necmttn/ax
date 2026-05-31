@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E402 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-blockers-no-match-e402.json`
+- Index continuation: E403 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-command-kind-no-match-e403.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-blockers-match-e402.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-command-kind-match-e403.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,49 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E403 - Expose Suggested Query Repair Command Kind
+
+Question:
+- E402 exposes repair blockers, but can services route an executable repair
+  argv to the right executor family without parsing the command line?
+
+Implementation:
+- Added `repair_command_kind` to `query_suggestion`.
+- Lifecycle graph-query suggestions now report
+  `classifier_graph_query_repair` for executable repair suggestions and `none`
+  for no-op suggestions.
+- Text graph-health output now renders `query suggestion repair command kind`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-command-kind-no-match-e403.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-command-kind-match-e403.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-command-kind-no-match-e403.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_command_kind=classifier_graph_query_repair`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.repair_command_kind=none`.
+- Text output renders `query suggestion repair command kind:
+  classifier_graph_query_repair`.
+
+Decision:
+- Services can now dispatch repair commands by a stable kind while retaining
+  argv, query, status, blockers, and remediation for execution/debug surfaces.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E403 no-match report has
+  `repair_command_kind=classifier_graph_query_repair`.
+- E403 match report has `repair_command_kind=none`.
+- E403 text output includes the repair command-kind line.
 
 ## E402 - Expose Suggested Query Repair Blockers
 
