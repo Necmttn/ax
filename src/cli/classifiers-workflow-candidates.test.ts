@@ -2085,11 +2085,30 @@ describe("classifiers workflow-candidates", () => {
                 remediation: "Add reviewer and valid reviewed-at metadata or rerun without strict provenance.",
             }],
             next_action: "Add reviewer and reviewed-at metadata, or rerun without strict provenance if legacy review packs are acceptable.",
+            provenance_issue_rows: [
+                {
+                    fixture_id: "workflow-candidate-review-coverage/verification_or_recovery_signal/a",
+                    candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+                    issue: "missing_reviewer",
+                    reviewer: "",
+                    reviewed_at: "",
+                },
+                {
+                    fixture_id: "workflow-candidate-review-coverage/verification_or_recovery_signal/a",
+                    candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+                    issue: "missing_reviewed_at",
+                    reviewer: "",
+                    reviewed_at: "",
+                },
+            ],
         });
         expect(text).toContain("coverage review apply guard: missing_review_provenance");
         expect(text).toContain("coverage review can apply: no");
         expect(text).toContain("coverage review blockers: missing_review_provenance");
         expect(text).toContain("coverage review blocker remediations: missing_review_provenance: Add reviewer and valid reviewed-at metadata or rerun without strict provenance.");
+        expect(text).toContain("coverage review provenance issue rows: 2");
+        expect(text).toContain("coverage review provenance issue: missing_reviewer fixture=workflow-candidate-review-coverage/verification_or_recovery_signal/a candidate=classifier_candidate_group:hybrid-window/verification_or_recovery_signal reviewed_at=none");
+        expect(text).toContain("coverage review provenance issue: missing_reviewed_at fixture=workflow-candidate-review-coverage/verification_or_recovery_signal/a candidate=classifier_candidate_group:hybrid-window/verification_or_recovery_signal reviewed_at=none");
         expect(text).toContain("coverage review post-apply recheck: bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=10 --out=.ax/experiments/workflow-candidate-review-coverage-post-apply.json --json");
     });
 
@@ -2143,6 +2162,13 @@ describe("classifiers workflow-candidates", () => {
                 blocker: "missing_review_provenance",
                 count: 1,
                 remediation: "Add reviewer and valid reviewed-at metadata or rerun without strict provenance.",
+            }],
+            provenance_issue_rows: [{
+                fixture_id: "workflow-candidate-review-coverage/verification_or_recovery_signal/a",
+                candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+                issue: "invalid_reviewed_at",
+                reviewer: "reviewer@example.test",
+                reviewed_at: "not-a-date",
             }],
         });
     });
