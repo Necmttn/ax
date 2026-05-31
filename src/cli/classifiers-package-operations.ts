@@ -318,6 +318,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
     const querySuggestionRepairCanExecute = report.query_suggestion === undefined
         ? "none"
         : String(report.query_suggestion.repair_can_execute);
+    const querySuggestionRepairExecutionStatus = report.query_suggestion?.repair_execution_status ?? "none";
     const querySuggestionRepairArgv = report.query_suggestion?.repair_argv.join(" ") || "none";
     const querySuggestionRepairQuery = report.query_suggestion?.repair_query === undefined
         ? "none"
@@ -368,6 +369,7 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `query suggestion repair next action: ${querySuggestionRepairNextAction}`,
         `query suggestion repair remediation: ${querySuggestionRepairRemediation}`,
         `query suggestion repair can execute: ${querySuggestionRepairCanExecute}`,
+        `query suggestion repair execution status: ${querySuggestionRepairExecutionStatus}`,
         `query suggestion repair argv: ${querySuggestionRepairArgv}`,
         `query suggestion repair query: ${querySuggestionRepairQuery}`,
         `query suggestion provenance: ${querySuggestionProvenance}`,

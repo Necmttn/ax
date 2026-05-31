@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E400 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-can-execute-no-match-e400.json`
+- Index continuation: E401 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-execution-status-no-match-e401.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-can-execute-match-e400.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-execution-status-match-e401.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,48 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E401 - Expose Suggested Query Repair Execution Status
+
+Question:
+- E400 exposes a repair execution boolean, but can services route and log
+  repair execution with a stable enum instead of interpreting a boolean?
+
+Implementation:
+- Added `repair_execution_status` to `query_suggestion`.
+- Lifecycle graph-query suggestions now report `ready_to_execute` for real
+  repair suggestions and `not_needed` for no-op suggestions.
+- Text graph-health output now renders `query suggestion repair execution
+  status`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-execution-status-no-match-e401.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-execution-status-match-e401.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-execution-status-no-match-e401.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_execution_status=ready_to_execute`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.repair_execution_status=not_needed`.
+- Text output renders `query suggestion repair execution status:
+  ready_to_execute`.
+
+Decision:
+- Services can now route repair execution through an explicit enum while
+  keeping `repair_can_execute` as the compact boolean guard.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E401 no-match report has `repair_execution_status=ready_to_execute`.
+- E401 match report has `repair_execution_status=not_needed`.
+- E401 text output includes the repair execution status line.
 
 ## E400 - Expose Suggested Query Repair Executability
 
