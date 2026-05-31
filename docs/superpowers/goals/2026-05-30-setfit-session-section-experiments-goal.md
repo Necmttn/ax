@@ -29,7 +29,7 @@ artifact path as the evidence to inspect before trusting any summary row.
 | Blind/review workflow | E46-E65+ | `.ax/experiments/blind-workflow-status-e57.json` and related review artifacts | Human review is mandatory before fixtures or graph facts are promoted. | Pending where review rows are incomplete. | Earlier experiment log | Prefer review queues/workspaces over automatic label edits. |
 | Transcript graph projection | E155-E157 | `.ax/experiments/transcript-candidate-graph-projection-e155.json`, `.ax/experiments/workflow-candidate-report-e156.json`, `.ax/experiments/workflow-candidate-cli-e157.json` | Real persisted classifier facts can become graph-backed workflow candidates. | Passed for projection/query; still needs product review filters and proposal gates. | E155/E156/E157 commits in log | Use graph facts for evidence-backed workflow/harness discovery. |
 | Proposal lifecycle | E168-E208 | `.ax/experiments/workflow-candidate-proposal-list-e168.json`, `.ax/experiments/classifier-package-execution-write-plan-e208.json` | Classifier-derived workflow proposals are discoverable and lifecycle-tracked. | Passed for visibility/lifecycle plumbing; promotion remains review-gated. | Recent proposal lifecycle commits | Continue using review and ready-smoke gates before guidance/harness changes. |
-| Embedding/SVM helper layer | E209-E221 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/embedding-helper-review-batch-e216-report.json`, `.ax/experiments/embedding-helper-review-batch-dry-run-e217-report.json`, `.ax/experiments/embedding-helper-review-progress-e218.json`, `.ax/experiments/embedding-helper-review-partial-sync-e219-report.json`, `.ax/experiments/embedding-helper-export-preview-e220-report.json`, `.ax/experiments/classifier-package-execution-embedding-helper-export-preview-e221.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. | Blocked correctly by pending review: canonical review still has 15 hard negatives and 1 dedupe cluster pending; package tooling can now run non-appendable preview exports cleanly. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `65b0b3c`, `4c602d9`, `eeb517c`, `9a6811e`, `31a1b16`, `e41562c`, `0587b67`, `0e0a960` | Do real review of E216 batch, dry-run copy-sync, inspect preview rows, then sync accepted/rejected statuses and run appendable export only when gate is ready. |
+| Embedding/SVM helper layer | E209-E223 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/embedding-helper-review-batch-e216-report.json`, `.ax/experiments/embedding-helper-review-batch-dry-run-e217-report.json`, `.ax/experiments/embedding-helper-review-progress-e218.json`, `.ax/experiments/embedding-helper-review-partial-sync-e219-report.json`, `.ax/experiments/embedding-helper-export-preview-e220-report.json`, `.ax/experiments/classifier-package-execution-embedding-helper-export-preview-e221.json`, `.ax/experiments/classifier-package-execution-embedding-helper-review-progress-e223.json` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. | Blocked correctly by pending review: canonical review still has 15 hard negatives and 1 dedupe cluster pending; package tooling can now run non-appendable preview exports and review-progress status cleanly. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `65b0b3c`, `4c602d9`, `eeb517c`, `9a6811e`, `31a1b16`, `e41562c`, `0587b67`, `0e0a960` | Do real review of E216 batch, dry-run copy-sync, inspect preview rows, then sync accepted/rejected statuses and run appendable export only when gate is ready. |
 
 Current recommendation:
 
@@ -11391,6 +11391,70 @@ Decision:
   it is either real review of the E216 batch or making the E218 progress report
   a first-class package status operation so agents can ask what blocks export
   without hand-running the helper script.
+
+## E223 - Embedding Helper Review Progress Package Operation
+
+Question:
+
+- Can package tooling answer what still blocks embedding-helper export without
+  hand-running `embedding_helper_review_batch.py --mode=evaluate`?
+
+Changes:
+
+- Added package operation `embedding-helper-review-progress`.
+- Operation kind: `status`.
+- The operation reads:
+  - `.ax/experiments/embedding-helper-review-current.json`
+  - `.ax/experiments/embedding-helper-review-batch-current.md`
+- The operation writes:
+  - `.ax/experiments/embedding-helper-review-progress-current.json`
+- Added `--status-exit-zero` to `embedding_helper_review_batch.py` for
+  `--mode=evaluate`. This keeps the status report decision unchanged while
+  allowing package status operations to execute successfully when the expected
+  state is still blocked.
+- Added test coverage that verifies `--status-exit-zero` returns exit code `0`
+  while the report still says `needs_embedding_helper_review`.
+
+Commands:
+
+```sh
+cp .ax/experiments/embedding-helper-review-e210.json .ax/experiments/embedding-helper-review-current.json
+cp .ax/experiments/embedding-helper-review-batch-e216.md .ax/experiments/embedding-helper-review-batch-current.md
+bun src/cli/index.ts classifiers package-operations --operation=embedding-helper-review-progress --preflight --out=.ax/experiments/classifier-package-operation-embedding-helper-review-progress-preflight-e223.json --json
+bun src/cli/index.ts classifiers package-operations --operation=embedding-helper-review-progress --execute --out=.ax/experiments/classifier-package-execution-embedding-helper-review-progress-e223.json --json
+```
+
+Artifacts:
+
+- `.ax/experiments/classifier-package-operation-embedding-helper-review-progress-preflight-e223.json`
+- `.ax/experiments/classifier-package-execution-embedding-helper-review-progress-e223.json`
+- `.ax/experiments/embedding-helper-review-progress-current.json`
+
+Results:
+
+- Preflight decision: `ready`
+- Package execution decision: `executed`
+- Package execution exit code: `0`
+- Package execution failures: `[]`
+- Underlying progress report:
+  - schema: `ax.embedding_helper_review_batch_report.v1`
+  - mode: `evaluate`
+  - decision: `needs_embedding_helper_review`
+  - hard negatives accepted/rejected/pending: `0/0/15`
+  - dedupe accepted/rejected/pending: `0/0/1`
+  - selected batch items: `5`
+  - next action: `review pending embedding-helper hard negatives`
+
+Decision:
+
+- E223 closes a discoverability gap. The package operation layer can now run
+  the review-progress status hook successfully while preserving the blocking
+  status in the produced artifact.
+- This does not weaken promotion safety. Export remains blocked until the
+  canonical review state has accepted/rejected decisions and notes for all
+  hard-negative and dedupe review items.
+- The next useful step remains real review of the E216 batch, followed by
+  dry-run sync and appendable export only when the review gate is ready.
 
 ## E197 - Hybrid Graph Usefulness Gate
 

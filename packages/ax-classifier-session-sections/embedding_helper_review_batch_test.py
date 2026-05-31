@@ -1,5 +1,6 @@
 import importlib.util
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -142,6 +143,38 @@ class EmbeddingHelperReviewBatchTest(unittest.TestCase):
         self.assertEqual(report["selected_batch_items"], 1)
         self.assertEqual(report["selected_batch_ids"], ["embedding-hard-negative/session-section-chunks/none-a"])
         self.assertEqual(report["next_action"], "review pending embedding-helper hard negatives")
+
+    def test_status_exit_zero_keeps_pending_decision_for_package_status_operations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            review_path = root / "review.json"
+            batch_path = root / "batch.md"
+            out_path = root / "progress.json"
+            review_path.write_text(f"{module.json.dumps(review())}\n")
+            batch_path.write_text("""
+- Candidate id: `embedding-hard-negative/session-section-chunks/none-a`
+- Status: `pending_human_acceptance`
+- Review notes: _pending_
+""")
+
+            previous_argv = sys.argv
+            try:
+                sys.argv = [
+                    "embedding_helper_review_batch.py",
+                    "--mode=evaluate",
+                    "--status-exit-zero",
+                    f"--review={review_path}",
+                    f"--batch={batch_path}",
+                    f"--out={out_path}",
+                ]
+                exit_code = module.main()
+            finally:
+                sys.argv = previous_argv
+
+            report = module.load_json(str(out_path))
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(report["decision"], "needs_embedding_helper_review")
+            self.assertEqual(report["hard_negative_pending"], 1)
 
 
 if __name__ == "__main__":

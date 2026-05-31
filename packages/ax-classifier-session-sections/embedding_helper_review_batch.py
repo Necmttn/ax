@@ -24,6 +24,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out", default=".ax/experiments/embedding-helper-review-batch-current-report.json")
     parser.add_argument("--limit", type=int, default=5)
     parser.add_argument("--dry-run", action="store_true", help="Validate sync output without writing back to the review JSON.")
+    parser.add_argument(
+        "--status-exit-zero",
+        action="store_true",
+        help="Exit zero for evaluate mode after writing the status report, even when review remains pending.",
+    )
     parser.add_argument("--json", action="store_true")
     return parser.parse_args()
 
@@ -275,6 +280,8 @@ def main() -> int:
         print(json.dumps(report, indent=2))
     else:
         print_report(report, args.batch)
+    if args.mode == "evaluate" and args.status_exit_zero:
+        return 0
     return 0 if report["decision"] in {"embedding_helper_review_batch_ready", "ready_for_embedding_helper_export"} else 1
 
 

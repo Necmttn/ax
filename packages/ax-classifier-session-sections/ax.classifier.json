@@ -110,6 +110,19 @@
       ]
     },
     {
+      "id": "embedding-helper-review-progress",
+      "kind": "status",
+      "description": "Report accepted, rejected, and pending embedding-helper review counts for the active focused batch.",
+      "command": "bun run classifiers:embedding-helper-review-batch -- --mode=evaluate --status-exit-zero --review=.ax/experiments/embedding-helper-review-current.json --batch=.ax/experiments/embedding-helper-review-batch-current.md --out=.ax/experiments/embedding-helper-review-progress-current.json",
+      "inputs": [
+        ".ax/experiments/embedding-helper-review-current.json",
+        ".ax/experiments/embedding-helper-review-batch-current.md"
+      ],
+      "outputs": [
+        ".ax/experiments/embedding-helper-review-progress-current.json"
+      ]
+    },
+    {
       "id": "embedding-helper-review-status",
       "kind": "review",
       "description": "Sync and evaluate reviewed embedding-helper hard-negative and dedupe statuses before export or promotion.",
