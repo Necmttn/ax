@@ -10798,6 +10798,89 @@ bun scripts/check-table-coverage.ts
 All passed. `bun run typecheck` still emits existing Effect lint
 messages/warnings but exits `0`.
 
+## E214 - Progress Retro And No-Fluke Audit
+
+Question:
+
+- Is this experiment still making evidence-backed progress, or has the long
+  log become progress theater?
+
+Audit scope:
+
+- Goal doc line count: `15875`.
+- Recent committed goal slices inspected:
+  - `e008bbb` embedding/SVM helper eval
+  - `7dcd25b` embedding helper review artifacts
+  - `08a0648` embedding helper graph projection
+  - `74c39c7` embedding helper graph query mode
+  - `bffba8f` embedding helper review status gate
+- Recent artifacts inspected:
+  - `.ax/experiments/frozen-embedding-helper-svm-e209.json`
+  - `.ax/experiments/embedding-helper-review-e210.json`
+  - `.ax/experiments/embedding-helper-graph-projection-e211.json`
+  - `.ax/experiments/classifier-graph-embedding-helper-e212.json`
+  - `.ax/experiments/embedding-helper-review-status-e213.json`
+
+Evidence:
+
+- E209 is not over-claimed as a model win:
+  - schema: `ax.frozen_embedding_robustness_report.v1`
+  - decision: `needs_model_quality_work`
+  - classifier: `svm`
+  - run count: `3`
+- E210 turns the weak model into a helper/review surface, not a promoted
+  classifier:
+  - decision: `ready_for_helper_review`
+  - routing decision: `routing_candidate_ready_for_review`
+  - recommended threshold: `none`
+  - mean SetFit call reduction: `0.1778`
+  - mean positive recall after routing: `0.9028`
+  - hard-negative candidates: `15`
+  - dedupe clusters: `1`
+- E211 projected the helper review into graph-shaped evidence:
+  - decision: `embedding_helper_graph_projection_ready`
+  - nodes: `75`
+  - edges: `110`
+  - facts: `17`
+  - nearest-neighbor edges: `75`
+- E212 made that graph evidence queryable:
+  - graph health decision: `healthy`
+  - whole graph: `1345` nodes, `2234` edges, `558` facts
+  - embedding helper facts: `17`
+  - result evidence paths: `1`
+- E213 correctly blocks export/promotion while human review is pending:
+  - decision: `needs_embedding_helper_review`
+  - hard negatives pending: `15`
+  - dedupe clusters pending: `1`
+  - failures explicitly name pending hard-negative and dedupe review.
+
+Retro findings:
+
+- Progress is real because the experiment has repeatedly produced executable
+  artifacts, graph writes, query modes, review gates, and tests rather than only
+  prose.
+- The current direction is healthy: raw model quality remains weak, so recent
+  work routes model output into helper/review/evidence surfaces instead of
+  pretending it is promotion-quality.
+- The graph-usefulness path is now more important than another blind model
+  run. The useful question is whether reviewed helper candidates become better
+  fixtures, dedupe hints, and workflow/harness evidence.
+- The main risk is documentation shape. The file is long, and some later
+  sections are not ordered cleanly in file order, for example E168 appears
+  before E157/E156/E155 near the tail. That does not contradict the artifact
+  evidence, but it makes future audits harder.
+- The next doc hygiene improvement should be an index/checkpoint table with:
+  experiment id, artifact path, decision, gate status, commit, and next action.
+
+Decision:
+
+- Not a fluke. The work is progressing, but the plan should stay conservative:
+  do not claim SetFit/SVM adoption until review/export and graph-usefulness
+  gates produce accepted evidence.
+- Continue with the E213 next step: export accepted embedding-helper hard
+  negatives as append-ready fixture rows and accepted dedupe clusters as graph
+  evidence aggregation hints, while doing nothing when review is still pending.
+
 ## E197 - Hybrid Graph Usefulness Gate
 
 Question:
