@@ -33,10 +33,11 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E441 adds
-  `.ax/experiments/classifier-lifecycle-insight-graph-recommendations-e441.json`
+- Index continuation: E442 adds
+  `.ax/experiments/classifier-lifecycle-insight-graph-recommendations-e442.json`,
+  `.ax/experiments/workflow-topic-review-coverage-harness-proposal-e442.json`
   and
-  `.ax/experiments/classifier-lifecycle-insight-graph-recommendations-e441.txt`
+  `.ax/experiments/workflow-topic-review-coverage-harness-proposal-e442.txt`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -47,9 +48,65 @@ Current recommendation:
   current handoff artifacts are complete, the guarded production apply has
   closed the reviewed-coverage gap, and the successful loop is now persisted as
   lifecycle graph facts. Lifecycle insight now turns the persisted `gap_closed`
-  fact into a candidate inspection recommendation. The immediate bottleneck is
-  executing that recommendation and deciding which reviewed classifier
-  candidates should become harness or guidance proposals.
+  fact into a concrete harness-proposal dry run. The immediate bottleneck is
+  applying or reviewing that harness proposal and then producing a passing
+  executable check before guidance promotion.
+
+## E442 - Promote Accepted Review Fact to Harness Proposal Dry Run
+
+Question:
+- Can the accepted `verification_or_recovery_signal -> add_verification_gate`
+  review fact become a concrete harness proposal candidate without relying on
+  transcript-text topic search to rediscover the same row?
+
+Implementation:
+- Added `withWorkflowCandidateTopicPersistedReviewCandidates`, which
+  synthesizes topic candidates from persisted `workflow_topic_candidate_review`
+  facts when the topic report has review facts but no matching transcript
+  candidate rows.
+- The synthesized candidate preserves the persisted review verdict, rationale,
+  candidate id, proposed action, evidence refs, and review fact provenance.
+- Updated the lifecycle graph recommendation to point at a more concrete dry-run
+  command:
+  `classifiers workflow-candidates --topic-report --search=review-coverage
+  --source-kind=hybrid_window_classifier_projection --include-review-facts
+  --promote-harness-proposals --proposal-dry-run --limit=10`.
+
+Artifacts:
+- `.ax/experiments/classifier-lifecycle-insight-graph-recommendations-e442.json`
+- `.ax/experiments/workflow-topic-review-coverage-harness-proposal-e442.json`
+- `.ax/experiments/workflow-topic-review-coverage-harness-proposal-e442.txt`
+
+Results:
+- The DB-backed topic report now contains a synthesized
+  `verification_or_recovery_signal` candidate sourced from the accepted
+  persisted review fact.
+- The harness proposal dry-run emits one `harness_check` proposal for
+  `classifier_candidate_group:hybrid-window/verification_or_recovery_signal`.
+- The dry-run contains 3 Surreal statements: create/update proposal,
+  delete stale evidence edge, and relate the proposal to the classifier
+  candidate node.
+- The report still has `decision=needs_workflow_topic_evidence` because no
+  existing workflow proposal matched the topic; that does not block the dry-run
+  plan artifact.
+
+Decision:
+- E442 closes the gap between graph-stored review success and a concrete
+  harness proposal plan. The next aligned slice is to review/apply the harness
+  proposal and produce a passing executable harness check before any guidance
+  promotion.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers lifecycle --out .ax/experiments/classifier-lifecycle-insight-graph-recommendations-e442.json --json
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --search=review-coverage --source-kind=hybrid_window_classifier_projection --include-review-facts --promote-harness-proposals --proposal-dry-run --limit=10 --out .ax/experiments/workflow-topic-review-coverage-harness-proposal-e442.json --json
+bun -e 'const r=await Bun.file(".ax/experiments/workflow-topic-review-coverage-harness-proposal-e442.json").json(); const p=r.harness_proposals?.proposals?.[0]; if (!p || p.recommended_artifact?.primary !== "harness_check" || p.candidate_id !== "classifier_candidate_group:hybrid-window/verification_or_recovery_signal") throw new Error(JSON.stringify(r.harness_proposals)); if (r.candidates?.totals?.persisted_review_fact_count !== 1) throw new Error(JSON.stringify(r.candidates?.totals));'
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --search=review-coverage --source-kind=hybrid_window_classifier_projection --include-review-facts --promote-harness-proposals --proposal-dry-run --limit=10 > .ax/experiments/workflow-topic-review-coverage-harness-proposal-e442.txt || true
+rg -n "harness proposals: 1 emitted|harness proposal writes: dry-run \\(3 statements\\)|verification_or_recovery_signal|persisted review facts: 1" .ax/experiments/workflow-topic-review-coverage-harness-proposal-e442.txt
+```
+
+Focused tests and DB-backed dry-run artifact checks passed.
 
 ## E441 - Route Graph Success Facts to Candidate Recommendations
 

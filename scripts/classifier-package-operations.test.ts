@@ -2296,7 +2296,11 @@ describe("classifier package operations report", () => {
                 value_equals: "gap_closed",
             },
         });
-        expect(report.graph_recommendations[0]?.candidate_query_argv).toContain("--review-coverage");
+        expect(report.graph_recommendations[0]?.candidate_query_argv).toContain("--topic-report");
+        expect(report.graph_recommendations[0]?.candidate_query_argv).toContain("--search=review-coverage");
+        expect(report.graph_recommendations[0]?.candidate_query_argv).toContain("--include-review-facts");
+        expect(report.graph_recommendations[0]?.candidate_query_argv).toContain("--promote-harness-proposals");
+        expect(report.graph_recommendations[0]?.candidate_query_argv).toContain("--proposal-dry-run");
         expect(report.graph_recommendations[0]?.candidate_query_argv).toContain("--source-kind=hybrid_window_classifier_projection");
     });
 

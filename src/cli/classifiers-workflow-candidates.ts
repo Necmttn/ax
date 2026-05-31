@@ -4910,6 +4910,136 @@ export function buildWorkflowCandidateTopicReviewGraphListReport(input: {
     };
 }
 
+const candidateFromPersistedTopicReviewFact = (
+    fact: WorkflowCandidateTopicHarnessGraphFactRow,
+): WorkflowCandidate | undefined => {
+    const props = parseProperties(fact.properties_json);
+    const candidateId = typeof fact.object === "string" && fact.object.length > 0
+        ? fact.object
+        : typeof props.candidate_id === "string" && props.candidate_id.length > 0
+            ? props.candidate_id
+            : undefined;
+    if (candidateId === undefined) return undefined;
+
+    const label = typeof props.candidate_label === "string" && props.candidate_label.length > 0
+        ? props.candidate_label
+        : candidateId;
+    const proposedAction = typeof props.proposed_action === "string" && props.proposed_action.length > 0
+        ? props.proposed_action
+        : "review_section_pattern";
+    const evidenceRefs = Array.isArray(props.evidence_refs)
+        ? props.evidence_refs.filter((entry): entry is string => typeof entry === "string")
+        : [];
+    const rationale = typeof props.rationale === "string" ? props.rationale : "";
+    const review: WorkflowCandidateReview | undefined = typeof fact.predicate === "string" && REVIEWED_VERDICTS.has(fact.predicate)
+        ? { verdict: fact.predicate, rationale }
+        : undefined;
+    const persistedReviewFact: WorkflowCandidatePersistedReviewFact = {
+        ...(fact.graph_id === undefined ? {} : { graph_id: fact.graph_id }),
+        ...(typeof props.topic === "string" ? { topic: props.topic } : {}),
+        ...(fact.subject === undefined ? {} : { subject: fact.subject }),
+        ...(fact.predicate === undefined ? {} : { predicate: fact.predicate }),
+        ...(typeof fact.object === "string" ? { object: fact.object } : {}),
+        candidate_id: candidateId,
+        ...(rationale.length === 0 ? {} : { rationale }),
+        helper_source_fixture_ids: Array.isArray(props.helper_source_fixture_ids)
+            ? props.helper_source_fixture_ids.filter((entry): entry is string => typeof entry === "string")
+            : [],
+        ...(typeof fact.updated_at === "string" ? { updated_at: fact.updated_at } : {}),
+        ...(typeof fact.value_json === "string" ? { value_json: fact.value_json } : {}),
+    };
+    const exampleText = [
+        `Persisted review fact accepted workflow candidate ${label}.`,
+        proposedAction,
+        rationale,
+        evidenceRefs.join(" "),
+    ].filter((part) => part.length > 0).join(" ");
+    return {
+        group_id: candidateId,
+        label,
+        proposed_action: proposedAction,
+        raw_support_count: 1,
+        support_count: 1,
+        evidence_count: Math.max(1, evidenceRefs.length),
+        turn_ref_count: evidenceRefs.length,
+        average_confidence: 1,
+        wrapper_like_count: 0,
+        task_like_count: 0,
+        task_like_ratio: 0,
+        score: workflowCandidateScore(1, Math.max(1, evidenceRefs.length), 1, proposedAction, 0),
+        examples: [{
+            result_id: fact.graph_id,
+            turn: evidenceRefs[0],
+            confidence: 1,
+            task_like: false,
+            text_excerpt: compactText(exampleText),
+        }],
+        ...(review === undefined ? {} : { review }),
+        persisted_review_facts: [persistedReviewFact],
+    };
+};
+
+export function withWorkflowCandidateTopicPersistedReviewCandidates(
+    report: WorkflowCandidateTopicReport,
+): WorkflowCandidateTopicReport {
+    const persistedFacts = report.persisted_review_facts?.facts ?? [];
+    if (persistedFacts.length === 0) return report;
+
+    const existingCandidateIds = new Set(report.candidates.candidates.map((candidate) => candidate.group_id));
+    const additions = persistedFacts
+        .map(candidateFromPersistedTopicReviewFact)
+        .filter((candidate): candidate is WorkflowCandidate => candidate !== undefined)
+        .filter((candidate) => !existingCandidateIds.has(candidate.group_id));
+    if (additions.length === 0) return report;
+
+    const candidates = [...report.candidates.candidates, ...additions]
+        .sort((a, b) => b.score - a.score || a.label.localeCompare(b.label))
+        .slice(0, Math.max(1, report.candidates.query.limit));
+    const allCandidateLabels = [...new Set([
+        ...report.candidates.all_candidate_labels,
+        ...additions.map((candidate) => candidate.label),
+    ])].sort();
+    const candidateFailures = report.candidates.failures.filter((failure) =>
+        failure !== "no transcript-backed workflow candidates"
+    );
+    const candidateReport: WorkflowCandidateReport = {
+        ...report.candidates,
+        candidates,
+        all_candidate_labels: allCandidateLabels,
+        totals: {
+            ...report.candidates.totals,
+            candidate_group_count: report.candidates.totals.candidate_group_count + additions.length,
+            returned_candidate_count: candidates.length,
+            candidate_with_evidence_count: report.candidates.totals.candidate_with_evidence_count + additions.length,
+            persisted_review_fact_count: report.candidates.totals.persisted_review_fact_count + additions.reduce(
+                (sum, candidate) => sum + (candidate.persisted_review_facts?.length ?? 0),
+                0,
+            ),
+        },
+        failures: candidateFailures,
+        decision: candidateFailures.length === 0 ? "workflow_candidates_ranked" : "needs_workflow_candidate_review",
+    };
+    const nextFailures = [
+        ...report.failures.filter((failure) =>
+            failure !== "no classifier candidates matched topic" &&
+            failure !== "no transcript-backed workflow candidates"
+        ),
+        ...candidateFailures,
+    ];
+    return withWorkflowCandidateTopicHarnessEvidence({
+        ...report,
+        candidates: candidateReport,
+        totals: {
+            ...report.totals,
+            ranked_candidate_count: candidateReport.totals.returned_candidate_count,
+            candidate_evidence_fact_count: candidateReport.totals.considered_evidence_fact_count,
+            source_turn_count: Math.max(report.totals.source_turn_count, additions.reduce((sum, candidate) => sum + candidate.turn_ref_count, 0)),
+        },
+        failures: nextFailures,
+        decision: nextFailures.length === 0 ? "workflow_topic_evidence_found" : "needs_workflow_topic_evidence",
+    });
+}
+
 export function renderWorkflowCandidateTopicHarnessGraphListText(
     report: WorkflowCandidateTopicHarnessGraphListReport,
 ): string {
@@ -5997,6 +6127,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                         edges: persistedReviewRows?.[1] ?? [],
                     }),
                 };
+                topicReport = withWorkflowCandidateTopicPersistedReviewCandidates(topicReport);
             }
             if (input.includeHelperFacts) {
                 const helperRows = yield* db.query<[

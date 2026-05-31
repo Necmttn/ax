@@ -1392,7 +1392,7 @@ describe("classifiers package-operations format", () => {
                     value_equals: "gap_closed",
                 },
                 query_argv: ["bun", "src/cli/index.ts", "classifiers", "package-operations", "--graph-health", "--graph-mode=lifecycle", "--subject=classifier_lifecycle:workflow_candidate_review_pipeline", "--predicate=review_pipeline_post_apply_recheck_status", "--value=gap_closed"],
-                candidate_query_argv: ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates", "--review-coverage", "--source-kind=hybrid_window_classifier_projection", "--limit=10"],
+                candidate_query_argv: ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates", "--topic-report", "--search=review-coverage", "--source-kind=hybrid_window_classifier_projection", "--include-review-facts", "--promote-harness-proposals", "--proposal-dry-run", "--limit=10"],
                 evidence_paths: [".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json"],
             }],
             graph_query_suggestion: {
@@ -1573,7 +1573,7 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("graph recommendations:");
         expect(output).toContain("- review_pipeline_success_to_candidate_promotion: ready next=prioritize_reviewed_candidates_for_harness_or_guidance");
         expect(output).toContain("source: persisted_lifecycle_fact review_pipeline_post_apply_recheck_status=gap_closed");
-        expect(output).toContain("candidate argv: bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=10");
+        expect(output).toContain("candidate argv: bun src/cli/index.ts classifiers workflow-candidates --topic-report --search=review-coverage --source-kind=hybrid_window_classifier_projection --include-review-facts --promote-harness-proposals --proposal-dry-run --limit=10");
         expect(output).toContain("review pipeline: verified_after_execution (.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json)");
         expect(output).toContain("command: stamp_review_provenance prepared=ready_to_execute");
         expect(output).toContain("argv: bun src/cli/index.ts classifiers workflow-candidates");

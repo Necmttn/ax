@@ -26,6 +26,7 @@ import {
     buildWorkflowCandidateReviewCoverageFixtureSummary,
     buildWorkflowCandidateTopicReport,
     buildWorkflowCandidateTaskDrafts,
+    withWorkflowCandidateTopicPersistedReviewCandidates,
     isTaskLikeWorkflowText,
     parseWorkflowCandidateBriefReview,
     parseWorkflowCandidateFixtureRowsJsonl,
@@ -3158,6 +3159,79 @@ describe("classifiers workflow-candidates", () => {
         expect(plan.statements.join("\n")).toContain("harness_check");
         expect(plan.statements.join("\n")).toContain("->cites_evidence:");
         expect(plan.summary.statements).toEqual(plan.statements);
+    });
+
+    test("turns persisted accepted review facts into harness proposal candidates", () => {
+        const proposals = buildWorkflowCandidateProposalListReport({
+            rows: [],
+            limit: 10,
+            status: "all",
+            expandEvidence: true,
+            search: "review-coverage",
+        });
+        const candidates = buildWorkflowCandidateReport({
+            groupRows: [],
+            evidenceRows: [],
+            sourceKind: "hybrid_window_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            search: "review-coverage",
+            taskLike: "include",
+        });
+        const baseReport = buildWorkflowCandidateTopicReport({
+            sourceKind: "hybrid_window_classifier_projection",
+            topic: "review-coverage",
+            proposals,
+            candidates,
+        });
+        const report = withWorkflowCandidateTopicPersistedReviewCandidates({
+            ...baseReport,
+            persisted_review_facts: buildWorkflowCandidateTopicReviewGraphListReport({
+                topic: "review-coverage",
+                facts: [{
+                    graph_id: "fact:review-coverage-accept",
+                    subject: "workflow_topic_candidate_review:review_coverage:verification",
+                    predicate: "accept",
+                    object: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+                    value_json: properties({ reviewed: true, verdict: "accept" }),
+                    properties_json: properties({
+                        topic: "review-coverage",
+                        candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+                        candidate_label: "verification_or_recovery_signal",
+                        proposed_action: "add_verification_gate",
+                        verdict: "accept",
+                        rationale: "Useful verification behavior worth preserving.",
+                        evidence_refs: ["turn:accepted-verification"],
+                    }),
+                }],
+                edges: [],
+            }),
+        });
+
+        const plan = buildWorkflowCandidateHarnessProposalPlan(report, new Set(), {
+            dryRun: true,
+            includeStatements: true,
+        });
+
+        expect(report.candidates.totals.returned_candidate_count).toBe(1);
+        expect(report.candidates.totals.persisted_review_fact_count).toBe(1);
+        expect(topicAdjacentCandidates(report)[0]).toMatchObject({
+            group_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+            label: "verification_or_recovery_signal",
+            proposed_action: "add_verification_gate",
+            review: {
+                verdict: "accept",
+                rationale: "Useful verification behavior worth preserving.",
+            },
+        });
+        expect(plan.summary.emitted_proposal_count).toBe(1);
+        expect(plan.summary.proposals[0]).toMatchObject({
+            candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+            recommended_artifact: { primary: "harness_check" },
+            status: "created_or_refreshed",
+        });
+        expect(plan.statements.join("\n")).toContain("harness_check");
+        expect(plan.statements.join("\n")).toContain("classifier_candidate_group:hybrid-window/verification_or_recovery_signal");
     });
 
     test("passes topic harness checks only with applied classifier result evidence", () => {
