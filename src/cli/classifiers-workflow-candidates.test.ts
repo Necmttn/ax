@@ -1747,6 +1747,10 @@ describe("classifiers workflow-candidates", () => {
                 { blocking_scope: "base_apply", count: 1 },
                 { blocking_scope: "production_apply", count: 1 },
             ],
+            review_issue_scope_summaries: [
+                { blocking_scope: "base_apply", issue_count: 1, fixture_count: 1, candidate_count: 1 },
+                { blocking_scope: "production_apply", issue_count: 2, fixture_count: 1, candidate_count: 1 },
+            ],
             review_issue_fixture_count: 1,
             review_issue_candidate_count: 1,
             review_issue_status: "needs_review_repair",
@@ -1763,6 +1767,7 @@ describe("classifiers workflow-candidates", () => {
         expect(text).toContain("coverage review issue scope counts: base_apply=1, production_apply=2");
         expect(text).toContain("coverage review issue scope fixtures: base_apply=1, production_apply=1");
         expect(text).toContain("coverage review issue scope candidates: base_apply=1, production_apply=1");
+        expect(text).toContain("coverage review issue scope summaries: base_apply issues=1 fixtures=1 candidates=1; production_apply issues=2 fixtures=1 candidates=1");
         expect(text).toContain("coverage review issue: missing_review_rationale fixture=workflow-candidate-review-coverage/verification_or_recovery_signal/a candidate=classifier_candidate_group:hybrid-window/verification_or_recovery_signal status=accept scope=base_apply");
         expect(text).toContain("coverage review issue: missing_reviewer fixture=workflow-candidate-review-coverage/verification_or_recovery_signal/a candidate=classifier_candidate_group:hybrid-window/verification_or_recovery_signal status=accept scope=production_apply");
         expect(text).toContain("coverage review issue: missing_reviewed_at fixture=workflow-candidate-review-coverage/verification_or_recovery_signal/a candidate=classifier_candidate_group:hybrid-window/verification_or_recovery_signal status=accept scope=production_apply");
@@ -1776,6 +1781,7 @@ describe("classifiers workflow-candidates", () => {
         expect(brief).toContain("- Issue scope counts: `base_apply=1`, `production_apply=2`");
         expect(brief).toContain("- Issue scope fixtures: `base_apply=1`, `production_apply=1`");
         expect(brief).toContain("- Issue scope candidates: `base_apply=1`, `production_apply=1`");
+        expect(brief).toContain("- Issue scope summaries: `base_apply issues=1 fixtures=1 candidates=1`, `production_apply issues=2 fixtures=1 candidates=1`");
         expect(brief).toContain("- `missing_review_rationale` fixture=`workflow-candidate-review-coverage/verification_or_recovery_signal/a` candidate=`classifier_candidate_group:hybrid-window/verification_or_recovery_signal` status=`accept` scope=`base_apply` remediation=`Add rationale text to this reviewed fixture.`");
         expect(brief).toContain("- `missing_reviewer` fixture=`workflow-candidate-review-coverage/verification_or_recovery_signal/a` candidate=`classifier_candidate_group:hybrid-window/verification_or_recovery_signal` status=`accept` scope=`production_apply` remediation=`Add reviewer metadata to this reviewed fixture.`");
         expect(brief).toContain("- `missing_reviewed_at` fixture=`workflow-candidate-review-coverage/verification_or_recovery_signal/a` candidate=`classifier_candidate_group:hybrid-window/verification_or_recovery_signal` status=`accept` scope=`production_apply` remediation=`Add reviewed-at metadata to this reviewed fixture.`");
