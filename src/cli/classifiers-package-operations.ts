@@ -1,5 +1,7 @@
 import { Effect } from "effect";
+import { readFileSync } from "node:fs";
 import type { SurrealClient } from "../lib/db.ts";
+import { safeJsonParse } from "../lib/shared/safe-json.ts";
 import {
     ClassifierPackageService,
     type ClassifierPackageOperationReportInput,
@@ -8,8 +10,10 @@ import {
     buildClassifierLifecycleRouteBindingPreview,
     buildClassifierLifecycleRouteExecutionPlan,
     executeClassifierLifecycleRouteExecutionPlan,
+    inspectClassifierLifecycleRouteExecution,
     writeClassifierLifecycleRouteBindingPreviewReport,
     writeClassifierLifecycleRouteExecutionReport,
+    writeClassifierLifecycleRouteExecutionInspectionReport,
     writeClassifierLifecycleRouteExecutionPlanReport,
 } from "../classifiers/package-operations.ts";
 import type {
@@ -18,6 +22,7 @@ import type {
     ClassifierPackageExecutionSurrealApplyReport,
     ClassifierPackageExecutionSurrealWritePlanReport,
     ClassifierPackageExecutionGraphHealthReport,
+    ClassifierLifecycleRouteExecutionInspectionReport,
     ClassifierLifecycleRouteExecutionReport,
     ClassifierLifecycleRouteExecutionPlanReport,
     ClassifierLifecycleRouteBindingPreviewReport,
@@ -1006,6 +1011,31 @@ export function renderClassifierLifecycleRouteExecutionText(report: ClassifierLi
     return lines.join("\n");
 }
 
+export function renderClassifierLifecycleRouteExecutionInspectionText(report: ClassifierLifecycleRouteExecutionInspectionReport): string {
+    const lines = [
+        "classifier lifecycle route execution inspection",
+        `decision: ${report.decision}`,
+        `active: ${report.active_route_kind ?? "none"} ${report.active_route_command_kind ?? "none"}`,
+        `parsed output source: ${report.parsed_output_source ?? "none"}`,
+        `inner: ${report.inner_schema ?? "unknown"} ${report.inner_decision ?? "unknown"}`,
+        `handoff: ${report.review_handoff_status ?? "unknown"} production=${report.production_apply_guard ?? "unknown"} can_apply=${report.production_can_apply === true ? "yes" : report.production_can_apply === false ? "no" : "unknown"}`,
+        `pipeline: ${report.review_pipeline_stage ?? "unknown"} outputs=${report.review_pipeline_command_output_check_status ?? "unknown"}`,
+        `missing outputs: ${report.missing_output_paths.join(", ") || "none"}`,
+        `next action: ${report.next_action}`,
+        `remediation: ${report.remediation}`,
+    ];
+    if (report.output_artifacts.length > 0) {
+        lines.push("output artifacts:");
+        for (const artifact of report.output_artifacts) {
+            lines.push(`- ${artifact.kind} ${artifact.flag} ${artifact.path} exists=${artifact.exists ? "yes" : "no"}`);
+        }
+    }
+    for (const failure of report.failures) {
+        lines.push(`failure: ${failure}`);
+    }
+    return lines.join("\n");
+}
+
 const serviceErrorText = (error: unknown): string => {
     if (error && typeof error === "object" && "_tag" in error) {
         if ("message" in error && typeof error.message === "string") {
@@ -1249,6 +1279,7 @@ export const runClassifiersLifecycle = (
         readonly routeInputValues?: Readonly<Record<string, string>>;
         readonly routeExecutionPlan?: boolean;
         readonly executeRoute?: boolean;
+        readonly inspectRouteExecutionPath?: string;
         readonly graphMode?: ClassifierGraphHealthMode;
         readonly predicate?: string;
         readonly subject?: string;
@@ -1260,6 +1291,28 @@ export const runClassifiersLifecycle = (
 ): Effect.Effect<void, never, ClassifierPackageService | SurrealClient> =>
     Effect.gen(function* () {
         const packages = yield* ClassifierPackageService;
+        if (input.inspectRouteExecutionPath !== undefined) {
+            const raw = readFileSync(input.inspectRouteExecutionPath, "utf8");
+            const execution = safeJsonParse<ClassifierLifecycleRouteExecutionReport>(raw);
+            if (execution?.schema !== "ax.classifier_lifecycle_route_execution_report.v1") {
+                console.error("axctl classifiers lifecycle: --inspect-route-execution must point at ax.classifier_lifecycle_route_execution_report.v1 JSON");
+                process.exitCode = 2;
+                return;
+            }
+            const report = inspectClassifierLifecycleRouteExecution(execution);
+            if (input.out !== undefined) {
+                writeClassifierLifecycleRouteExecutionInspectionReport(input.out, report);
+            }
+            if (input.json) {
+                console.log(JSON.stringify(report, null, 2));
+            } else if (input.out === undefined) {
+                console.log(renderClassifierLifecycleRouteExecutionInspectionText(report));
+            }
+            if (report.decision === "failed_execution" || report.decision === "needs_output_verification" || report.decision === "uninspectable_output") {
+                process.exitCode = 1;
+            }
+            return;
+        }
         const graphQuery = buildLifecycleGraphQueryInput(input);
         const routeInputValues = input.routeInputValues;
         const routingSummary = routeInputValues === undefined

@@ -2009,6 +2009,7 @@ const classifiersLifecycleCommand = Command.make(
         routeInputs: Flag.string("route-inputs").pipe(Flag.optional),
         routeExecutionPlan: Flag.boolean("route-execution-plan").pipe(Flag.withDefault(false)),
         executeRoute: Flag.boolean("execute-route").pipe(Flag.withDefault(false)),
+        inspectRouteExecution: Flag.string("inspect-route-execution").pipe(Flag.optional),
         graphMode: Flag.choice("graph-mode", ["summary", "guarded", "changed-artifacts", "evidence", "lifecycle", "embedding-helper"] as const).pipe(Flag.optional),
         predicate: Flag.string("predicate").pipe(Flag.optional),
         subject: Flag.string("subject").pipe(Flag.optional),
@@ -2017,10 +2018,11 @@ const classifiersLifecycleCommand = Command.make(
         out: Flag.string("out").pipe(Flag.optional),
         json: jsonFlag,
     },
-    ({ root, workflowStatus, routingSummary, routeInputs, routeExecutionPlan, executeRoute, graphMode, predicate, subject, valueContains, valueEquals, out, json }) => {
+    ({ root, workflowStatus, routingSummary, routeInputs, routeExecutionPlan, executeRoute, inspectRouteExecution, graphMode, predicate, subject, valueContains, valueEquals, out, json }) => {
         const rootPath = optionValue(root);
         const workflowStatusPath = optionValue(workflowStatus);
         const routeInputValues = parseRouteInputValues(routeInputs);
+        const inspectRouteExecutionPath = optionValue(inspectRouteExecution);
         const graphModeName = optionValue(graphMode);
         const predicateName = optionValue(predicate);
         const subjectName = optionValue(subject);
@@ -2034,6 +2036,7 @@ const classifiersLifecycleCommand = Command.make(
             ...(routeInputValues === undefined ? {} : { routeInputValues }),
             routeExecutionPlan,
             executeRoute,
+            ...(inspectRouteExecutionPath === undefined ? {} : { inspectRouteExecutionPath }),
             ...(graphModeName === undefined ? {} : { graphMode: graphModeName }),
             ...(predicateName === undefined ? {} : { predicate: predicateName }),
             ...(subjectName === undefined ? {} : { subject: subjectName }),

@@ -4,6 +4,7 @@ import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
 import { ClassifierPackageService } from "../classifiers/package-service.ts";
 import {
     renderClassifierLifecycleRouteExecutionText,
+    renderClassifierLifecycleRouteExecutionInspectionText,
     renderClassifierLifecycleRouteExecutionPlanText,
     renderClassifierLifecycleRouteBindingPreviewText,
     renderClassifierLifecycleInsightText,
@@ -23,6 +24,7 @@ import {
     runClassifiersPackageOperations,
 } from "./classifiers-package-operations.ts";
 import type {
+    ClassifierLifecycleRouteExecutionInspectionReport,
     ClassifierLifecycleRouteExecutionReport,
     ClassifierLifecycleRouteExecutionPlanReport,
     ClassifierLifecycleRouteBindingPreviewReport,
@@ -1757,6 +1759,94 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("command argv: bun -e console.log('route ok')");
         expect(output).toContain("stdout: route ok");
         expect(output).toContain("next action: inspect_route_outputs");
+    });
+
+    test("renders classifier lifecycle route execution inspections", () => {
+        const executionPlan: ClassifierLifecycleRouteExecutionPlanReport = {
+            schema: "ax.classifier_lifecycle_route_execution_plan.v1",
+            source_schema: "ax.classifier_lifecycle_route_binding_preview.v1",
+            decision: "ready_to_execute",
+            active_route_kind: "review_pipeline_action",
+            active_route_command_kind: "stamp_review_provenance",
+            requested_execute: true,
+            would_execute: true,
+            command_argv: ["bun", "src/cli/index.ts", "--out=.ax/experiments/review.json"],
+            preview: {
+                schema: "ax.classifier_lifecycle_route_binding_preview.v1",
+                source_schema: "ax.classifier_lifecycle_routing_summary.v1",
+                decision: "ready_to_execute",
+                active_route_kind: "review_pipeline_action",
+                active_route_command_kind: "stamp_review_provenance",
+                provided_inputs: [],
+                missing_values: [],
+                input_bindings: [],
+                original_argv: [],
+                bound_argv: ["bun", "src/cli/index.ts", "--out=.ax/experiments/review.json"],
+                next_action: "execute_bound_active_route",
+                remediation: "Execute the bound active route command.",
+            },
+            failures: [],
+            next_action: "execute_bound_route",
+            remediation: "Execute the bound active route command.",
+        };
+        const report: ClassifierLifecycleRouteExecutionInspectionReport = {
+            schema: "ax.classifier_lifecycle_route_execution_inspection.v1",
+            source_schema: "ax.classifier_lifecycle_route_execution_report.v1",
+            decision: "needs_review_handoff",
+            active_route_kind: "review_pipeline_action",
+            active_route_command_kind: "stamp_review_provenance",
+            command_argv: ["bun", "src/cli/index.ts", "--out=.ax/experiments/review.json"],
+            execution: {
+                schema: "ax.classifier_lifecycle_route_execution_report.v1",
+                source_schema: "ax.classifier_lifecycle_route_execution_plan.v1",
+                decision: "executed",
+                active_route_kind: "review_pipeline_action",
+                active_route_command_kind: "stamp_review_provenance",
+                command_argv: ["bun", "src/cli/index.ts", "--out=.ax/experiments/review.json"],
+                plan: executionPlan,
+                executed: true,
+                started_at: "2026-05-31T12:34:56.000Z",
+                finished_at: "2026-05-31T12:34:57.000Z",
+                duration_ms: 1000,
+                exit_code: 0,
+                signal: null,
+                stdout: "{}",
+                stderr: "",
+                failures: [],
+                next_action: "inspect_route_outputs",
+            },
+            output_artifacts: [{
+                kind: "readiness_report",
+                flag: "--out",
+                path: ".ax/experiments/review.json",
+                exists: true,
+            }],
+            missing_output_paths: [],
+            parsed_output_source: "stdout",
+            inner_schema: "ax.workflow_candidate_review_coverage.v1",
+            inner_decision: "workflow_candidate_review_coverage_ready",
+            review_handoff_status: "incomplete_review_handoff",
+            production_apply_guard: "missing_review_handoff",
+            production_can_apply: false,
+            review_pipeline_stage: "needs_review_handoff",
+            review_pipeline_next_action: "Complete the review handoff artifacts before applying.",
+            review_pipeline_command_output_check_status: "no_output_artifacts",
+            review_pipeline_command_output_check_next_action: "No pipeline output artifacts need verification.",
+            failures: [],
+            next_action: "complete_review_handoff",
+            remediation: "Complete the review handoff artifacts before applying.",
+        };
+
+        const output = renderClassifierLifecycleRouteExecutionInspectionText(report);
+
+        expect(output).toContain("classifier lifecycle route execution inspection");
+        expect(output).toContain("decision: needs_review_handoff");
+        expect(output).toContain("parsed output source: stdout");
+        expect(output).toContain("inner: ax.workflow_candidate_review_coverage.v1 workflow_candidate_review_coverage_ready");
+        expect(output).toContain("handoff: incomplete_review_handoff production=missing_review_handoff can_apply=no");
+        expect(output).toContain("pipeline: needs_review_handoff outputs=no_output_artifacts");
+        expect(output).toContain("- readiness_report --out .ax/experiments/review.json exists=yes");
+        expect(output).toContain("next action: complete_review_handoff");
     });
 
     test("renders multi-package summaries", () => {

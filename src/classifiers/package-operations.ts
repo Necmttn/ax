@@ -1074,6 +1074,40 @@ export interface ClassifierLifecycleRouteExecutionReport {
     readonly next_action: "inspect_route_outputs" | "repair_route_execution" | "request_execute_route";
 }
 
+export interface ClassifierLifecycleRouteExecutionOutputStatus {
+    readonly kind: "readiness_report" | "review_brief" | "review_facts" | "review_write_plan";
+    readonly flag: string;
+    readonly path: string;
+    readonly exists: boolean;
+    readonly size_bytes?: number;
+    readonly modified_at?: string;
+}
+
+export interface ClassifierLifecycleRouteExecutionInspectionReport {
+    readonly schema: "ax.classifier_lifecycle_route_execution_inspection.v1";
+    readonly source_schema: ClassifierLifecycleRouteExecutionReport["schema"];
+    readonly decision: "ready_for_apply" | "needs_review_handoff" | "needs_output_verification" | "failed_execution" | "uninspectable_output";
+    readonly active_route_kind?: ClassifierLifecycleRoutingItem["kind"];
+    readonly active_route_command_kind?: string;
+    readonly command_argv: readonly string[];
+    readonly execution: ClassifierLifecycleRouteExecutionReport;
+    readonly output_artifacts: readonly ClassifierLifecycleRouteExecutionOutputStatus[];
+    readonly missing_output_paths: readonly string[];
+    readonly parsed_output_source?: "stdout" | "output_file";
+    readonly inner_schema?: string;
+    readonly inner_decision?: string;
+    readonly review_handoff_status?: string;
+    readonly production_apply_guard?: string;
+    readonly production_can_apply?: boolean;
+    readonly review_pipeline_stage?: string;
+    readonly review_pipeline_next_action?: string;
+    readonly review_pipeline_command_output_check_status?: string;
+    readonly review_pipeline_command_output_check_next_action?: string;
+    readonly failures: readonly string[];
+    readonly next_action: "run_route_execution" | "repair_route_outputs" | "complete_review_handoff" | "apply_review_facts" | "inspect_inner_output";
+    readonly remediation: string;
+}
+
 function reviewPipelineLifecycleNextAction(
     lifecycle: NonNullable<ClassifierLifecycleReviewStatus["review_pipeline_lifecycle"]>,
 ): ClassifierReviewPipelineLifecycleInsight["next_action"] {
@@ -3847,6 +3881,133 @@ export async function executeClassifierLifecycleRouteExecutionPlan(
     };
 }
 
+const ROUTE_OUTPUT_FLAGS: Readonly<Record<string, ClassifierLifecycleRouteExecutionOutputStatus["kind"]>> = {
+    "--out": "readiness_report",
+    "--coverage-review-brief": "review_brief",
+    "--review-facts": "review_facts",
+    "--review-write-plan": "review_write_plan",
+};
+
+function routeExecutionOutputStatuses(argv: readonly string[]): readonly ClassifierLifecycleRouteExecutionOutputStatus[] {
+    const statuses: ClassifierLifecycleRouteExecutionOutputStatus[] = [];
+    for (let index = 0; index < argv.length; index++) {
+        const arg = argv[index] ?? "";
+        for (const [flag, kind] of Object.entries(ROUTE_OUTPUT_FLAGS)) {
+            const prefix = `${flag}=`;
+            const path = arg === flag ? argv[index + 1] : arg.startsWith(prefix) ? arg.slice(prefix.length) : undefined;
+            if (path === undefined || path.length === 0) {
+                continue;
+            }
+            const status = artifactStatus(path);
+            statuses.push({
+                kind,
+                flag,
+                path,
+                exists: status.exists,
+                ...(status.size_bytes === undefined ? {} : { size_bytes: status.size_bytes }),
+                ...(status.modified_at === undefined ? {} : { modified_at: status.modified_at }),
+            });
+        }
+    }
+    return statuses;
+}
+
+function parseRouteExecutionInnerOutput(
+    execution: ClassifierLifecycleRouteExecutionReport,
+    outputArtifacts: readonly ClassifierLifecycleRouteExecutionOutputStatus[],
+): { readonly source?: "stdout" | "output_file"; readonly value: Record<string, unknown> | null } {
+    const stdoutJson = safeJsonParse<Record<string, unknown>>(execution.stdout);
+    if (stdoutJson && typeof stdoutJson === "object" && !Array.isArray(stdoutJson)) {
+        return { source: "stdout", value: stdoutJson };
+    }
+    const reportArtifact = outputArtifacts.find((artifact) => artifact.kind === "readiness_report" && artifact.exists);
+    if (reportArtifact) {
+        const fileJson = safeJsonParse<Record<string, unknown>>(readFileSync(reportArtifact.path, "utf8"));
+        if (fileJson && typeof fileJson === "object" && !Array.isArray(fileJson)) {
+            return { source: "output_file", value: fileJson };
+        }
+    }
+    return { value: null };
+}
+
+export function inspectClassifierLifecycleRouteExecution(
+    execution: ClassifierLifecycleRouteExecutionReport,
+): ClassifierLifecycleRouteExecutionInspectionReport {
+    const outputArtifacts = routeExecutionOutputStatuses(execution.command_argv);
+    const missingOutputPaths = outputArtifacts.filter((artifact) => !artifact.exists).map((artifact) => artifact.path);
+    const parsed = parseRouteExecutionInnerOutput(execution, outputArtifacts);
+    const inner = parsed.value ?? {};
+    const coverageReview = jsonRecordAt(inner, "coverage_review");
+    const productionCanApply = typeof coverageReview.production_can_apply === "boolean"
+        ? coverageReview.production_can_apply
+        : undefined;
+    const outputCheckStatus = stringAt(coverageReview, "review_pipeline_command_output_check_status");
+    const failures: string[] = [];
+    let decision: ClassifierLifecycleRouteExecutionInspectionReport["decision"];
+    if (execution.decision !== "executed" || !execution.executed || execution.exit_code !== 0) {
+        decision = "failed_execution";
+        failures.push(...(execution.failures.length > 0 ? execution.failures : [`route execution decision was ${execution.decision}`]));
+    } else if (missingOutputPaths.length > 0 || outputCheckStatus === "missing_required_outputs") {
+        decision = "needs_output_verification";
+        failures.push(...missingOutputPaths.map((path) => `missing route output: ${path}`));
+        if (outputCheckStatus === "missing_required_outputs") {
+            failures.push("inner review pipeline reports missing required outputs");
+        }
+    } else if (parsed.value === null) {
+        decision = "uninspectable_output";
+        failures.push("route execution stdout and output file did not contain parseable JSON");
+    } else if (
+        stringAt(coverageReview, "review_handoff_status") !== undefined &&
+        (stringAt(coverageReview, "review_handoff_status") !== "complete_review_handoff" ||
+            stringAt(coverageReview, "production_apply_guard") !== "ready_to_apply" ||
+            productionCanApply !== true)
+    ) {
+        decision = "needs_review_handoff";
+    } else {
+        decision = "ready_for_apply";
+    }
+    return {
+        schema: "ax.classifier_lifecycle_route_execution_inspection.v1",
+        source_schema: execution.schema,
+        decision,
+        ...(execution.active_route_kind === undefined ? {} : { active_route_kind: execution.active_route_kind }),
+        ...(execution.active_route_command_kind === undefined ? {} : { active_route_command_kind: execution.active_route_command_kind }),
+        command_argv: execution.command_argv,
+        execution,
+        output_artifacts: outputArtifacts,
+        missing_output_paths: missingOutputPaths,
+        ...(parsed.source === undefined ? {} : { parsed_output_source: parsed.source }),
+        ...(stringAt(inner, "schema") === undefined ? {} : { inner_schema: stringAt(inner, "schema") as string }),
+        ...(stringAt(inner, "decision") === undefined ? {} : { inner_decision: stringAt(inner, "decision") as string }),
+        ...(stringAt(coverageReview, "review_handoff_status") === undefined ? {} : { review_handoff_status: stringAt(coverageReview, "review_handoff_status") as string }),
+        ...(stringAt(coverageReview, "production_apply_guard") === undefined ? {} : { production_apply_guard: stringAt(coverageReview, "production_apply_guard") as string }),
+        ...(productionCanApply === undefined ? {} : { production_can_apply: productionCanApply }),
+        ...(stringAt(coverageReview, "review_pipeline_stage") === undefined ? {} : { review_pipeline_stage: stringAt(coverageReview, "review_pipeline_stage") as string }),
+        ...(stringAt(coverageReview, "review_pipeline_next_action") === undefined ? {} : { review_pipeline_next_action: stringAt(coverageReview, "review_pipeline_next_action") as string }),
+        ...(outputCheckStatus === undefined ? {} : { review_pipeline_command_output_check_status: outputCheckStatus }),
+        ...(stringAt(coverageReview, "review_pipeline_command_output_check_next_action") === undefined ? {} : { review_pipeline_command_output_check_next_action: stringAt(coverageReview, "review_pipeline_command_output_check_next_action") as string }),
+        failures,
+        next_action: decision === "ready_for_apply"
+            ? "apply_review_facts"
+            : decision === "needs_review_handoff"
+            ? "complete_review_handoff"
+            : decision === "failed_execution"
+            ? "run_route_execution"
+            : decision === "needs_output_verification"
+            ? "repair_route_outputs"
+            : "inspect_inner_output",
+        remediation: decision === "ready_for_apply"
+            ? "Apply the reviewed facts through the production apply command."
+            : decision === "needs_review_handoff"
+            ? "Complete the review handoff artifacts before applying."
+            : decision === "failed_execution"
+            ? "Repair and re-run the lifecycle route execution."
+            : decision === "needs_output_verification"
+            ? "Repair missing route output artifacts or inner output checks before continuing."
+            : "Inspect the route execution stdout and output file manually.",
+    };
+}
+
 export function writeOperationsReport(path: string, report: ClassifierPackageOperationsReport): void {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
@@ -3931,6 +4092,11 @@ export function writeClassifierLifecycleRouteExecutionPlanReport(path: string, r
 }
 
 export function writeClassifierLifecycleRouteExecutionReport(path: string, report: ClassifierLifecycleRouteExecutionReport): void {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+}
+
+export function writeClassifierLifecycleRouteExecutionInspectionReport(path: string, report: ClassifierLifecycleRouteExecutionInspectionReport): void {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
 }

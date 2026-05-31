@@ -33,17 +33,76 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E436 adds
-  `.ax/experiments/classifier-lifecycle-route-execution-e436.json` and
-  `.ax/experiments/classifier-lifecycle-route-execution-e436.txt` as the latest
-  hybrid classifier review-throughput evidence.
+- Index continuation: E437 adds
+  `.ax/experiments/classifier-lifecycle-route-execution-inspection-e437.json`
+  and
+  `.ax/experiments/classifier-lifecycle-route-execution-inspection-e437.txt`
+  as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
   append-only fixtures, graph projection, and workflow/harness usefulness
   checks.
 - Direct review execution/routing is now possible behind an explicit
-  `--execute-route` gate. The immediate bottleneck has moved to review handoff
-  artifacts and post-execution output verification.
+  `--execute-route` gate, and route outputs can be inspected after execution.
+  The immediate bottleneck is now the missing review handoff artifacts required
+  before production apply.
+
+## E437 - Inspect Lifecycle Route Execution Outputs
+
+Question:
+- After a bound lifecycle route executes, can services tell whether execution
+  failed, route outputs are missing, the inner review report is parseable, and
+  which handoff/apply gate blocks promotion?
+
+Implementation:
+- Added `inspectClassifierLifecycleRouteExecution` and the
+  `ax.classifier_lifecycle_route_execution_inspection.v1` report shape.
+- The inspection detects route output artifacts from argv flags including
+  `--out`, `--coverage-review-brief`, `--review-facts`, and
+  `--review-write-plan`.
+- The inspection parses the inner JSON from stdout or the `--out` artifact and
+  surfaces review handoff, production apply, pipeline stage, and output-check
+  status.
+- Added `ax classifiers lifecycle --inspect-route-execution <path>` for CLI
+  debugging and service handoff.
+
+Artifacts:
+- `.ax/experiments/classifier-lifecycle-route-execution-inspection-e437.json`
+- `.ax/experiments/classifier-lifecycle-route-execution-inspection-e437.txt`
+
+Results:
+- The real E436 route execution inspection reports
+  `decision=needs_review_handoff`.
+- Both route output artifacts exist:
+  `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371.md`
+  and
+  `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371.json`.
+- `missing_output_paths=[]`.
+- The inner report is parsed from stdout as
+  `ax.workflow_candidate_review_coverage.v1` with
+  `decision=workflow_candidate_review_coverage_ready`.
+- The blocking gate is explicit:
+  `review_handoff_status=incomplete_review_handoff`,
+  `production_apply_guard=missing_review_handoff`,
+  `production_can_apply=false`, and `next_action=complete_review_handoff`.
+
+Decision:
+- E437 proves the post-execution failure is not a route execution or output
+  artifact problem. The next aligned work is to complete/export the review
+  handoff artifacts, then re-inspect until the lifecycle route reports
+  `ready_for_apply`.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun src/cli/index.ts classifiers lifecycle --inspect-route-execution .ax/experiments/classifier-lifecycle-route-execution-e436.json --out .ax/experiments/classifier-lifecycle-route-execution-inspection-e437.json --json
+bun src/cli/index.ts classifiers lifecycle --inspect-route-execution .ax/experiments/classifier-lifecycle-route-execution-e436.json > .ax/experiments/classifier-lifecycle-route-execution-inspection-e437.txt
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-lifecycle-route-execution-inspection-e437.json").json(); if (saved.schema !== "ax.classifier_lifecycle_route_execution_inspection.v1") throw new Error("bad schema"); if (saved.decision !== "needs_review_handoff" || saved.next_action !== "complete_review_handoff") throw new Error(`bad route inspection ${JSON.stringify({decision:saved.decision,next_action:saved.next_action})}`); if (saved.missing_output_paths.length !== 0) throw new Error(`missing outputs ${JSON.stringify(saved.missing_output_paths)}`); if (saved.review_handoff_status !== "incomplete_review_handoff" || saved.production_apply_guard !== "missing_review_handoff" || saved.production_can_apply !== false) throw new Error("bad handoff fields"); if (!saved.output_artifacts.some((x)=>x.kind === "readiness_report" && x.exists) || !saved.output_artifacts.some((x)=>x.kind === "review_brief" && x.exists)) throw new Error("missing artifact status");'
+rg -n -- "decision: needs_review_handoff|handoff: incomplete_review_handoff production=missing_review_handoff can_apply=no|pipeline: needs_review_handoff outputs=no_output_artifacts|missing outputs: none|next action: complete_review_handoff|readiness_report --out .*exists=yes|review_brief --coverage-review-brief .*exists=yes" .ax/experiments/classifier-lifecycle-route-execution-inspection-e437.txt
+```
+
+Focused tests, typecheck, real inspection, and artifact assertions passed.
 
 ## E436 - Execute Bound Lifecycle Routes
 

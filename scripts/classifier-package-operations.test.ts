@@ -21,6 +21,7 @@ import {
     buildClassifierLifecycleRouteBindingPreview,
     buildClassifierLifecycleRouteExecutionPlan,
     executeClassifierLifecycleRouteExecutionPlan,
+    inspectClassifierLifecycleRouteExecution,
     loadClassifierLifecycleReviewStatus,
     summarizeClassifierLifecycleRouting,
     summarizeClassifierPackageOperations,
@@ -2465,6 +2466,88 @@ describe("classifier package operations report", () => {
             command_argv: ["bun", "-e", "console.log('route ok')"],
         });
         expect(report.stdout.trim()).toBe("route ok");
+    });
+
+    test("inspects lifecycle route execution outputs and surfaces handoff blockers", () => {
+        const dir = mkdtempSync(join(tmpdir(), "ax-route-execution-inspection-"));
+        const reportPath = join(dir, "review-coverage.json");
+        const briefPath = join(dir, "review-coverage.md");
+        writeFileSync(reportPath, JSON.stringify({
+            schema: "ax.workflow_candidate_review_coverage.v1",
+            decision: "workflow_candidate_review_coverage_ready",
+            coverage_review: {
+                review_handoff_status: "incomplete_review_handoff",
+                production_apply_guard: "missing_review_handoff",
+                production_can_apply: false,
+                review_pipeline_stage: "needs_review_handoff",
+                review_pipeline_next_action: "Complete the review handoff artifacts before applying.",
+                review_pipeline_command_output_check_status: "no_output_artifacts",
+                review_pipeline_command_output_check_next_action: "No pipeline output artifacts need verification.",
+            },
+        }), "utf8");
+        writeFileSync(briefPath, "# Review\n", "utf8");
+        const execution = {
+            schema: "ax.classifier_lifecycle_route_execution_report.v1" as const,
+            source_schema: "ax.classifier_lifecycle_route_execution_plan.v1" as const,
+            decision: "executed" as const,
+            active_route_kind: "review_pipeline_action" as const,
+            active_route_command_kind: "stamp_review_provenance",
+            command_argv: [
+                "bun",
+                "src/cli/index.ts",
+                "classifiers",
+                "workflow-candidates",
+                `--coverage-review-brief=${briefPath}`,
+                `--out=${reportPath}`,
+                "--json",
+            ],
+            plan: buildClassifierLifecycleRouteExecutionPlan({
+                schema: "ax.classifier_lifecycle_route_binding_preview.v1",
+                source_schema: "ax.classifier_lifecycle_routing_summary.v1",
+                decision: "ready_to_execute",
+                active_route_kind: "review_pipeline_action",
+                active_route_command_kind: "stamp_review_provenance",
+                provided_inputs: [],
+                missing_values: [],
+                input_bindings: [],
+                original_argv: [],
+                bound_argv: ["bun", "src/cli/index.ts"],
+                next_action: "execute_bound_active_route",
+                remediation: "Execute the bound active route command.",
+            }, { allowExecute: true }),
+            executed: true,
+            started_at: "2026-05-31T12:34:56.000Z",
+            finished_at: "2026-05-31T12:34:57.000Z",
+            duration_ms: 1000,
+            exit_code: 0,
+            signal: null,
+            stdout: readFileSync(reportPath, "utf8"),
+            stderr: "",
+            failures: [],
+            next_action: "inspect_route_outputs" as const,
+        };
+
+        const inspection = inspectClassifierLifecycleRouteExecution(execution);
+
+        expect(inspection).toMatchObject({
+            schema: "ax.classifier_lifecycle_route_execution_inspection.v1",
+            source_schema: "ax.classifier_lifecycle_route_execution_report.v1",
+            decision: "needs_review_handoff",
+            parsed_output_source: "stdout",
+            inner_schema: "ax.workflow_candidate_review_coverage.v1",
+            inner_decision: "workflow_candidate_review_coverage_ready",
+            review_handoff_status: "incomplete_review_handoff",
+            production_apply_guard: "missing_review_handoff",
+            production_can_apply: false,
+            review_pipeline_stage: "needs_review_handoff",
+            review_pipeline_command_output_check_status: "no_output_artifacts",
+            next_action: "complete_review_handoff",
+            failures: [],
+        });
+        expect(inspection.output_artifacts).toEqual(expect.arrayContaining([
+            expect.objectContaining({ kind: "review_brief", path: briefPath, exists: true }),
+            expect.objectContaining({ kind: "readiness_report", path: reportPath, exists: true }),
+        ]));
     });
 
     test("routes lifecycle insight reports to graph query repair when the filtered graph has a suggestion", () => {
