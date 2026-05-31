@@ -1732,13 +1732,16 @@ describe("classifiers workflow-candidates", () => {
                 { issue: "missing_reviewer", count: 1 },
                 { issue: "missing_reviewed_at", count: 1 },
             ],
+            review_issue_fixture_count: 1,
         });
         expect(text).toContain("coverage review issue rows: 3");
+        expect(text).toContain("coverage review issue fixtures: 1");
         expect(text).toContain("coverage review issue counts: missing_review_rationale=1, missing_reviewer=1, missing_reviewed_at=1");
         expect(text).toContain("coverage review issue: missing_review_rationale fixture=workflow-candidate-review-coverage/verification_or_recovery_signal/a candidate=classifier_candidate_group:hybrid-window/verification_or_recovery_signal status=accept");
         expect(text).toContain("coverage review issue: missing_reviewer fixture=workflow-candidate-review-coverage/verification_or_recovery_signal/a candidate=classifier_candidate_group:hybrid-window/verification_or_recovery_signal status=accept");
         expect(text).toContain("coverage review issue: missing_reviewed_at fixture=workflow-candidate-review-coverage/verification_or_recovery_signal/a candidate=classifier_candidate_group:hybrid-window/verification_or_recovery_signal status=accept");
         expect(brief).toContain("## Review Issues");
+        expect(brief).toContain("- Issue fixtures: `1`");
         expect(brief).toContain("- Issue counts: `missing_review_rationale=1`, `missing_reviewer=1`, `missing_reviewed_at=1`");
         expect(brief).toContain("- `missing_review_rationale` fixture=`workflow-candidate-review-coverage/verification_or_recovery_signal/a` candidate=`classifier_candidate_group:hybrid-window/verification_or_recovery_signal` status=`accept` remediation=`Add rationale text to this reviewed fixture.`");
         expect(brief).toContain("- `missing_reviewer` fixture=`workflow-candidate-review-coverage/verification_or_recovery_signal/a` candidate=`classifier_candidate_group:hybrid-window/verification_or_recovery_signal` status=`accept` remediation=`Add reviewer metadata to this reviewed fixture.`");
