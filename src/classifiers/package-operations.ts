@@ -384,6 +384,7 @@ export interface ClassifierGraphHealthQuery {
     readonly operation_id?: string;
     readonly artifact_path?: string;
     readonly predicate?: string;
+    readonly subject?: string;
 }
 
 export interface ClassifierPackageExecutionGraphHealthReport {
@@ -1781,6 +1782,7 @@ export function buildExecutionGraphHealthReport(input: {
         ...(input.query?.operation_id ? { operation_id: input.query.operation_id } : {}),
         ...(input.query?.artifact_path ? { artifact_path: input.query.artifact_path } : {}),
         ...(input.query?.predicate ? { predicate: input.query.predicate } : {}),
+        ...(input.query?.subject ? { subject: input.query.subject } : {}),
     };
     const nodesById = new Map(input.nodes.map((node) => [node.graph_id, node]));
     const operationByExecution = new Map<string, string>();
@@ -1973,7 +1975,8 @@ export function buildExecutionGraphHealthReport(input: {
             (!query.artifact_path ||
                 fact.artifact_path === query.artifact_path ||
                 fact.evidence_paths.includes(query.artifact_path)) &&
-            (!query.predicate || fact.predicate === query.predicate)
+            (!query.predicate || fact.predicate === query.predicate) &&
+            (!query.subject || fact.subject === query.subject)
         )
         : [];
     const resultEmbeddingHelperFacts = query.mode === "embedding-helper" || query.mode === "evidence"
@@ -1983,7 +1986,8 @@ export function buildExecutionGraphHealthReport(input: {
                 fact.source_fixture_id === query.artifact_path ||
                 fact.subject === query.artifact_path ||
                 fact.object === query.artifact_path) &&
-            (!query.predicate || fact.predicate === query.predicate)
+            (!query.predicate || fact.predicate === query.predicate) &&
+            (!query.subject || fact.subject === query.subject)
         )
         : [];
     const resultEvidencePaths = Array.from(new Set([

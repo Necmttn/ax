@@ -959,6 +959,17 @@ describe("classifier package operations report", () => {
                     artifact_path: ".ax/experiments/workflow-candidate-proposal-review-current.json",
                 }),
             }, {
+                graph_id: "fact:lifecycle:other-subject",
+                kind: "classifier_lifecycle_status",
+                subject: "classifier_lifecycle:other_pipeline",
+                predicate: "review_pipeline_prepared_argv",
+                value_json: JSON.stringify(["other"]),
+                evidence_edges_json: JSON.stringify(["edge:lifecycle"]),
+                properties_json: JSON.stringify({
+                    lifecycle_key: "review_pipeline_lifecycle",
+                    artifact_path: ".ax/experiments/workflow-candidate-proposal-review-current.json",
+                }),
+            }, {
                 graph_id: "fact:lifecycle:argv",
                 kind: "classifier_lifecycle_status",
                 subject: "classifier_lifecycle:workflow_candidate_proposal",
@@ -970,12 +981,17 @@ describe("classifier package operations report", () => {
                     artifact_path: ".ax/experiments/workflow-candidate-proposal-review-current.json",
                 }),
             }],
-            query: { mode: "lifecycle", predicate: "review_pipeline_prepared_argv" },
+            query: {
+                mode: "lifecycle",
+                predicate: "review_pipeline_prepared_argv",
+                subject: "classifier_lifecycle:workflow_candidate_proposal",
+            },
         });
 
         expect(report.query.mode).toBe("lifecycle");
         expect(report.query.predicate).toBe("review_pipeline_prepared_argv");
-        expect(report.totals.lifecycle_fact_count).toBe(2);
+        expect(report.query.subject).toBe("classifier_lifecycle:workflow_candidate_proposal");
+        expect(report.totals.lifecycle_fact_count).toBe(3);
         expect(report.result_totals.lifecycle_fact_count).toBe(1);
         expect(report.lifecycle_facts[0]).toMatchObject({
             predicate: "review_pipeline_prepared_argv",

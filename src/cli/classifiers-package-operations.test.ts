@@ -534,7 +534,11 @@ describe("classifiers package-operations format", () => {
         const report: ClassifierPackageExecutionGraphHealthReport = {
             schema: "ax.classifier_package_execution_graph_health_report.v1",
             tables: ["classifier_graph_node", "classifier_graph_edge", "classifier_graph_fact"],
-            query: { mode: "lifecycle", predicate: "review_pipeline_prepared_argv" },
+            query: {
+                mode: "lifecycle",
+                predicate: "review_pipeline_prepared_argv",
+                subject: "classifier_lifecycle:workflow_candidate_proposal",
+            },
             operations: [],
             guarded_operations: [],
             changed_artifacts: [],
@@ -580,6 +584,7 @@ describe("classifiers package-operations format", () => {
         const output = renderClassifierPackageExecutionGraphHealthText(report);
 
         expect(output).toContain("mode: lifecycle");
+        expect(output).toContain("filter subject: classifier_lifecycle:workflow_candidate_proposal");
         expect(output).toContain("filter predicate: review_pipeline_prepared_argv");
         expect(output).toContain("execution/guard/artifact/lifecycle/helper facts: 0/0/0/1/0");
         expect(output).toContain("lifecycle facts:");
