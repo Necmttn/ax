@@ -1512,6 +1512,8 @@ describe("classifier package operations report", () => {
             best_available_call_reduction: 0.1778,
             positive_recall_gap_to_request: 0.0472,
             call_reduction_gap_to_request: 0.0222,
+            blocking_floor_fields: ["positive_recall", "call_reduction"],
+            largest_gap_floor: "positive_recall",
         });
     });
 

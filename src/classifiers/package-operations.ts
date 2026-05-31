@@ -396,6 +396,8 @@ export interface ClassifierGraphRoutingPolicySummary {
     readonly best_available_call_reduction?: number;
     readonly positive_recall_gap_to_request?: number;
     readonly call_reduction_gap_to_request?: number;
+    readonly blocking_floor_fields?: readonly ("positive_recall" | "call_reduction")[];
+    readonly largest_gap_floor?: "positive_recall" | "call_reduction";
 }
 
 export type ClassifierGraphHealthMode = "summary" | "guarded" | "changed-artifacts" | "evidence" | "lifecycle" | "embedding-helper";
@@ -2134,6 +2136,17 @@ export function buildExecutionGraphHealthReport(input: {
         requested === undefined || actual === undefined
             ? undefined
             : Math.round(Math.max(0, requested - actual) * 10000) / 10000;
+    const positiveRecallGap = routingPolicyGap(query.min_positive_recall, bestAvailableRoutingPolicy?.positive_recall_after_routing_mean);
+    const callReductionGap = routingPolicyGap(query.min_call_reduction, bestAvailableRoutingPolicy?.setfit_call_reduction_rate_mean);
+    const blockingFloorFields = [
+        ...(positiveRecallGap === undefined || positiveRecallGap === 0 ? [] : ["positive_recall" as const]),
+        ...(callReductionGap === undefined || callReductionGap === 0 ? [] : ["call_reduction" as const]),
+    ];
+    const largestGapFloor = positiveRecallGap === undefined && callReductionGap === undefined
+        ? undefined
+        : (positiveRecallGap ?? 0) >= (callReductionGap ?? 0)
+            ? "positive_recall" as const
+            : "call_reduction" as const;
     const routingPolicySummary: ClassifierGraphRoutingPolicySummary = {
         status: !routingPolicyFloorsRequested
             ? "not_requested"
@@ -2160,8 +2173,10 @@ export function buildExecutionGraphHealthReport(input: {
         ...(bestAvailableRoutingPolicy?.threshold === undefined ? {} : { best_available_threshold_by_recall: bestAvailableRoutingPolicy.threshold }),
         ...(bestAvailableRoutingPolicy?.positive_recall_after_routing_mean === undefined ? {} : { best_available_positive_recall: bestAvailableRoutingPolicy.positive_recall_after_routing_mean }),
         ...(bestAvailableRoutingPolicy?.setfit_call_reduction_rate_mean === undefined ? {} : { best_available_call_reduction: bestAvailableRoutingPolicy.setfit_call_reduction_rate_mean }),
-        ...(routingPolicyGap(query.min_positive_recall, bestAvailableRoutingPolicy?.positive_recall_after_routing_mean) === undefined ? {} : { positive_recall_gap_to_request: routingPolicyGap(query.min_positive_recall, bestAvailableRoutingPolicy?.positive_recall_after_routing_mean) as number }),
-        ...(routingPolicyGap(query.min_call_reduction, bestAvailableRoutingPolicy?.setfit_call_reduction_rate_mean) === undefined ? {} : { call_reduction_gap_to_request: routingPolicyGap(query.min_call_reduction, bestAvailableRoutingPolicy?.setfit_call_reduction_rate_mean) as number }),
+        ...(positiveRecallGap === undefined ? {} : { positive_recall_gap_to_request: positiveRecallGap }),
+        ...(callReductionGap === undefined ? {} : { call_reduction_gap_to_request: callReductionGap }),
+        ...(blockingFloorFields.length === 0 ? {} : { blocking_floor_fields: blockingFloorFields }),
+        ...(largestGapFloor === undefined ? {} : { largest_gap_floor: largestGapFloor }),
     };
 
     return {
