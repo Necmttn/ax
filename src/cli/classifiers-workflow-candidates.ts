@@ -44,6 +44,7 @@ export interface WorkflowCandidateCommandInput {
     readonly includeHarnessFacts?: boolean;
     readonly includeHelperFacts?: boolean;
     readonly includeReviewFacts?: boolean;
+    readonly guidanceDecision?: boolean;
     readonly proposalStatus?: WorkflowCandidateProposalStatusFilter;
     readonly expandEvidence?: boolean;
     readonly evidencePack?: string;
@@ -165,7 +166,45 @@ export interface WorkflowCandidateTopicReport {
     readonly harness_checks?: WorkflowCandidateTopicHarnessCheckSummary;
     readonly persisted_harness_facts?: WorkflowCandidateTopicHarnessGraphListReport;
     readonly persisted_review_facts?: WorkflowCandidateTopicReviewGraphListReport;
+    readonly guidance_decision?: WorkflowCandidateTopicGuidanceDecisionReport;
     readonly helper_explanations?: WorkflowCandidateTopicHelperExplanationReport;
+}
+
+export type WorkflowCandidateTopicGuidanceDecision =
+    | "guidance_promotion_ready"
+    | "guidance_promotion_not_warranted"
+    | "needs_passing_harness_evidence"
+    | "needs_human_review";
+
+export interface WorkflowCandidateTopicGuidanceCandidateDecision {
+    readonly candidate_id: string;
+    readonly label: string;
+    readonly recommended_artifact: WorkflowCandidatePromotionArtifact;
+    readonly has_review_acceptance: boolean;
+    readonly has_accepted_harness_proposal: boolean;
+    readonly has_passing_harness_evidence: boolean;
+    readonly has_guidance_proposal: boolean;
+    readonly decision: WorkflowCandidateTopicGuidanceDecision;
+    readonly rationale: string;
+}
+
+export interface WorkflowCandidateTopicGuidanceDecisionReport {
+    readonly schema: "ax.workflow_topic_guidance_decision.v1";
+    readonly topic: string;
+    readonly decision: WorkflowCandidateTopicGuidanceDecision;
+    readonly next_action: string;
+    readonly candidates: readonly WorkflowCandidateTopicGuidanceCandidateDecision[];
+    readonly totals: {
+        readonly candidate_count: number;
+        readonly guidance_ready_count: number;
+        readonly guidance_not_warranted_count: number;
+        readonly needs_passing_harness_evidence_count: number;
+        readonly needs_human_review_count: number;
+        readonly accepted_harness_proposal_count: number;
+        readonly scaffolded_harness_experiment_count: number;
+        readonly passing_harness_evidence_count: number;
+        readonly guidance_proposal_count: number;
+    };
 }
 
 export interface WorkflowCandidateTopicTaskSummary {
@@ -2486,6 +2525,12 @@ export function renderWorkflowCandidateTopicReportText(report: WorkflowCandidate
             `persisted review facts: ${report.persisted_review_facts.totals.fact_count}`,
             `persisted review status: ${report.persisted_review_facts.totals.rejected_count} rejected, ${report.persisted_review_facts.totals.accepted_count} accepted, ${report.persisted_review_facts.totals.deferred_count} deferred, ${report.persisted_review_facts.totals.revised_count} revised`,
         ] : []),
+        ...(report.guidance_decision ? [
+            `guidance decision: ${report.guidance_decision.decision}`,
+            `guidance next action: ${report.guidance_decision.next_action}`,
+            `guidance decision counts: ready=${report.guidance_decision.totals.guidance_ready_count} not_warranted=${report.guidance_decision.totals.guidance_not_warranted_count} needs_harness=${report.guidance_decision.totals.needs_passing_harness_evidence_count} needs_review=${report.guidance_decision.totals.needs_human_review_count}`,
+            `guidance evidence counts: accepted_harness=${report.guidance_decision.totals.accepted_harness_proposal_count} scaffolded_harness=${report.guidance_decision.totals.scaffolded_harness_experiment_count} passing_harness=${report.guidance_decision.totals.passing_harness_evidence_count} guidance_proposals=${report.guidance_decision.totals.guidance_proposal_count}`,
+        ] : []),
         ...(report.helper_explanations ? [
             `helper explanations: ${report.helper_explanations.totals.matched_example_count}`,
             `helper matched candidates: ${report.helper_explanations.totals.matched_candidate_count}`,
@@ -2555,6 +2600,18 @@ export function renderWorkflowCandidateTopicReportText(report: WorkflowCandidate
             );
         }
     }
+    if (report.guidance_decision && report.guidance_decision.candidates.length > 0) {
+        lines.push("", "guidance decisions:");
+        for (const decision of report.guidance_decision.candidates) {
+            lines.push(
+                `  - ${decision.decision} ${decision.label}`,
+                `    candidate: ${decision.candidate_id}`,
+                `    recommended: ${decision.recommended_artifact}`,
+                `    review=${decision.has_review_acceptance ? "yes" : "no"} accepted_harness=${decision.has_accepted_harness_proposal ? "yes" : "no"} passing_harness=${decision.has_passing_harness_evidence ? "yes" : "no"} guidance_proposal=${decision.has_guidance_proposal ? "yes" : "no"}`,
+                `    rationale: ${decision.rationale}`,
+            );
+        }
+    }
     if (report.helper_explanations && report.helper_explanations.explanations.length > 0) {
         lines.push("", "promoted helper controls:");
         for (const explanation of report.helper_explanations.explanations) {
@@ -2609,6 +2666,180 @@ const withWorkflowCandidateTopicHarnessEvidence = (
 ): WorkflowCandidateTopicReport => ({
     ...report,
     harness_evidence: buildWorkflowCandidateTopicHarnessEvidenceSummary(report),
+});
+
+const proposalEvidenceCandidateIds = (
+    report: WorkflowCandidateTopicReport,
+    predicate: (proposal: WorkflowCandidateProposalListRow) => boolean,
+): ReadonlySet<string> => {
+    const ids = new Set<string>();
+    for (const proposal of report.proposals.proposals) {
+        if (!predicate(proposal)) continue;
+        for (const evidence of proposal.evidence ?? []) ids.add(evidence.candidate_id);
+    }
+    return ids;
+};
+
+const passingHarnessCandidateIds = (report: WorkflowCandidateTopicReport): ReadonlySet<string> => {
+    const ids = new Set<string>();
+    for (const check of report.harness_checks?.checks ?? []) {
+        if (check.status === "passed") ids.add(check.candidate_id);
+    }
+    for (const fact of report.persisted_harness_facts?.facts ?? []) {
+        if (!persistedHarnessFactPassed(fact)) continue;
+        if (typeof fact.object === "string" && fact.object.length > 0) ids.add(fact.object);
+        const props = parseProperties(fact.properties_json);
+        if (typeof props.candidate_id === "string" && props.candidate_id.length > 0) ids.add(props.candidate_id);
+    }
+    return ids;
+};
+
+const acceptedReviewCandidateIds = (report: WorkflowCandidateTopicReport): ReadonlySet<string> => {
+    const ids = new Set<string>();
+    for (const candidate of report.candidates.candidates) {
+        if (candidate.review?.verdict === "accept" || candidate.review?.verdict === "revise") ids.add(candidate.group_id);
+        if ((candidate.persisted_review_facts ?? []).some((fact) => fact.predicate === "accept" || fact.predicate === "revise")) {
+            ids.add(candidate.group_id);
+        }
+    }
+    for (const fact of report.persisted_review_facts?.facts ?? []) {
+        if (fact.predicate !== "accept" && fact.predicate !== "revise") continue;
+        if (typeof fact.object === "string" && fact.object.length > 0) ids.add(fact.object);
+        const props = parseProperties(fact.properties_json);
+        if (typeof props.candidate_id === "string" && props.candidate_id.length > 0) ids.add(props.candidate_id);
+    }
+    return ids;
+};
+
+export function buildWorkflowCandidateTopicGuidanceDecisionReport(
+    report: WorkflowCandidateTopicReport,
+): WorkflowCandidateTopicGuidanceDecisionReport {
+    const acceptedHarnessCandidateIds = proposalEvidenceCandidateIds(report, (proposal) =>
+        proposal.form === "harness_check" && proposal.status === "accepted"
+    );
+    const scaffoldedHarnessCandidateIds = proposalEvidenceCandidateIds(report, (proposal) =>
+        proposal.form === "harness_check" && proposal.experiment_status === "scaffolded"
+    );
+    const guidanceCandidateIds = proposalEvidenceCandidateIds(report, (proposal) => proposal.form === "guidance");
+    const acceptedReviewIds = acceptedReviewCandidateIds(report);
+    const passingHarnessIds = passingHarnessCandidateIds(report);
+
+    const candidates = report.candidates.candidates.map((candidate): WorkflowCandidateTopicGuidanceCandidateDecision => {
+        const recommendation = recommendWorkflowCandidatePromotionArtifact([candidate], report.candidates);
+        const hasReviewAcceptance = acceptedReviewIds.has(candidate.group_id);
+        const hasAcceptedHarnessProposal = acceptedHarnessCandidateIds.has(candidate.group_id);
+        const hasPassingHarnessEvidence = passingHarnessIds.has(candidate.group_id);
+        const hasGuidanceProposal = guidanceCandidateIds.has(candidate.group_id);
+
+        if (!hasReviewAcceptance) {
+            return {
+                candidate_id: candidate.group_id,
+                label: candidate.label,
+                recommended_artifact: recommendation.primary,
+                has_review_acceptance: false,
+                has_accepted_harness_proposal: hasAcceptedHarnessProposal,
+                has_passing_harness_evidence: hasPassingHarnessEvidence,
+                has_guidance_proposal: hasGuidanceProposal,
+                decision: "needs_human_review",
+                rationale: "Guidance promotion needs an accepted or revised human review fact first.",
+            };
+        }
+        if (recommendation.primary === "guidance") {
+            return {
+                candidate_id: candidate.group_id,
+                label: candidate.label,
+                recommended_artifact: recommendation.primary,
+                has_review_acceptance: true,
+                has_accepted_harness_proposal: hasAcceptedHarnessProposal,
+                has_passing_harness_evidence: hasPassingHarnessEvidence,
+                has_guidance_proposal: hasGuidanceProposal,
+                decision: "guidance_promotion_ready",
+                rationale: "The reviewed candidate's primary recommendation is guidance.",
+            };
+        }
+        if (recommendation.primary === "harness_check" && hasPassingHarnessEvidence) {
+            return {
+                candidate_id: candidate.group_id,
+                label: candidate.label,
+                recommended_artifact: recommendation.primary,
+                has_review_acceptance: true,
+                has_accepted_harness_proposal: hasAcceptedHarnessProposal,
+                has_passing_harness_evidence: true,
+                has_guidance_proposal: hasGuidanceProposal,
+                decision: "guidance_promotion_not_warranted",
+                rationale: "The reviewed candidate asked for a verification gate, and the harness evidence already passes; keep this as graph/harness evidence before changing guidance.",
+            };
+        }
+        if (recommendation.primary === "harness_check") {
+            return {
+                candidate_id: candidate.group_id,
+                label: candidate.label,
+                recommended_artifact: recommendation.primary,
+                has_review_acceptance: true,
+                has_accepted_harness_proposal: hasAcceptedHarnessProposal,
+                has_passing_harness_evidence: false,
+                has_guidance_proposal: hasGuidanceProposal,
+                decision: "needs_passing_harness_evidence",
+                rationale: "The reviewed candidate asks for a verification gate, so passing harness evidence is required before considering guidance.",
+            };
+        }
+        return {
+            candidate_id: candidate.group_id,
+            label: candidate.label,
+            recommended_artifact: recommendation.primary,
+            has_review_acceptance: true,
+            has_accepted_harness_proposal: hasAcceptedHarnessProposal,
+            has_passing_harness_evidence: hasPassingHarnessEvidence,
+            has_guidance_proposal: hasGuidanceProposal,
+            decision: "guidance_promotion_not_warranted",
+            rationale: `The reviewed candidate's primary recommendation is ${recommendation.primary}, not guidance.`,
+        };
+    });
+
+    const guidanceReadyCount = candidates.filter((candidate) => candidate.decision === "guidance_promotion_ready").length;
+    const guidanceNotWarrantedCount = candidates.filter((candidate) => candidate.decision === "guidance_promotion_not_warranted").length;
+    const needsPassingHarnessEvidenceCount = candidates.filter((candidate) => candidate.decision === "needs_passing_harness_evidence").length;
+    const needsHumanReviewCount = candidates.filter((candidate) => candidate.decision === "needs_human_review").length;
+    const decision: WorkflowCandidateTopicGuidanceDecision = candidates.length === 0 || needsHumanReviewCount > 0
+        ? "needs_human_review"
+        : guidanceReadyCount > 0
+            ? "guidance_promotion_ready"
+            : needsPassingHarnessEvidenceCount > 0
+                ? "needs_passing_harness_evidence"
+                : "guidance_promotion_not_warranted";
+    const nextAction = decision === "guidance_promotion_ready"
+        ? "Create or refresh guidance proposals for candidates whose primary recommendation is guidance."
+        : decision === "needs_passing_harness_evidence"
+            ? "Accept or run the harness-check proposal and persist a passing harness fact before changing guidance."
+            : decision === "needs_human_review"
+                ? "Review the topic candidate before promoting guidance."
+                : "Do not promote guidance for this topic yet; use the persisted harness fact as graph evidence.";
+
+    return {
+        schema: "ax.workflow_topic_guidance_decision.v1",
+        topic: report.topic,
+        decision,
+        next_action: nextAction,
+        candidates,
+        totals: {
+            candidate_count: candidates.length,
+            guidance_ready_count: guidanceReadyCount,
+            guidance_not_warranted_count: guidanceNotWarrantedCount,
+            needs_passing_harness_evidence_count: needsPassingHarnessEvidenceCount,
+            needs_human_review_count: needsHumanReviewCount,
+            accepted_harness_proposal_count: acceptedHarnessCandidateIds.size,
+            scaffolded_harness_experiment_count: scaffoldedHarnessCandidateIds.size,
+            passing_harness_evidence_count: passingHarnessIds.size,
+            guidance_proposal_count: guidanceCandidateIds.size,
+        },
+    };
+}
+
+const withWorkflowCandidateTopicGuidanceDecision = (
+    report: WorkflowCandidateTopicReport,
+): WorkflowCandidateTopicReport => ({
+    ...report,
+    guidance_decision: buildWorkflowCandidateTopicGuidanceDecisionReport(report),
 });
 
 export function readWorkflowCandidateHelperFixtures(path: string): readonly WorkflowCandidateHelperFixtureRow[] {
@@ -6255,6 +6486,9 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     ...topicReport,
                     harness_proposals: plan.summary,
                 };
+            }
+            if (input.guidanceDecision) {
+                topicReport = withWorkflowCandidateTopicGuidanceDecision(topicReport);
             }
             if (input.out) {
                 mkdirSync(dirname(input.out), { recursive: true });

@@ -13,6 +13,7 @@ import {
     buildWorkflowCandidateTopicHarnessGraphWritePlan,
     buildWorkflowCandidateTopicHarnessChecks,
     buildWorkflowCandidateTopicHarnessEvidenceSummary,
+    buildWorkflowCandidateTopicGuidanceDecisionReport,
     buildWorkflowCandidateTopicHelperExplanations,
     buildWorkflowCandidateTopicReviewGraphProjection,
     buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures,
@@ -3525,6 +3526,124 @@ describe("classifiers workflow-candidates", () => {
         expect(report.harness_checks?.checks[0].evidence_refs).toContain("fact:workflow_topic_candidate_review__review_coverage");
         expect(report.harness_checks?.checks[0].evidence_refs).toContain("turn:review-coverage");
         expect(workflowCandidateTopicHarnessGateFailures(report)).toEqual([]);
+    });
+
+    test("guidance decision keeps harness-backed verification candidates out of guidance promotion", () => {
+        const proposals = buildWorkflowCandidateProposalListReport({
+            rows: [{
+                dedupe_sig: "harness_check__workflow_candidate__review_coverage",
+                title: "Require workflow evidence for review-coverage",
+                form: "harness_check",
+                status: "accepted",
+                confidence: "medium",
+                frequency: 1,
+                experiment_id: "experiment:harness-review-coverage",
+                experiment_status: "scaffolded",
+                evidence: [{
+                    candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+                    candidate_label: "verification_or_recovery_signal",
+                    proposed_action: "add_verification_gate",
+                    examples: [],
+                }],
+            }],
+            limit: 10,
+            status: "accepted",
+            expandEvidence: true,
+            search: "review-coverage",
+        });
+        const candidates = buildWorkflowCandidateReport({
+            groupRows: [],
+            evidenceRows: [],
+            sourceKind: "hybrid_window_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            search: "review-coverage",
+            taskLike: "include",
+        });
+        const report = {
+            ...buildWorkflowCandidateTopicReport({
+                sourceKind: "hybrid_window_classifier_projection",
+                topic: "review-coverage",
+                proposals,
+                candidates: {
+                    ...candidates,
+                    candidates: [{
+                        group_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+                        label: "verification_or_recovery_signal",
+                        proposed_action: "add_verification_gate",
+                        raw_support_count: 1,
+                        support_count: 1,
+                        evidence_count: 1,
+                        turn_ref_count: 1,
+                        average_confidence: 1,
+                        wrapper_like_count: 0,
+                        task_like_count: 0,
+                        task_like_ratio: 0,
+                        score: 1,
+                        examples: [{
+                            result_id: "fact:workflow_topic_candidate_review__review_coverage",
+                            turn: "turn:review-coverage",
+                            confidence: 1,
+                            task_like: false,
+                            text_excerpt: "Persisted review fact accepted workflow candidate verification_or_recovery_signal.",
+                        }],
+                        review: {
+                            verdict: "accept",
+                            rationale: "Useful verification behavior worth preserving.",
+                        },
+                        persisted_review_facts: [{
+                            graph_id: "fact:workflow_topic_candidate_review__review_coverage",
+                            topic: "review-coverage",
+                            predicate: "accept",
+                            candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+                            rationale: "Useful verification behavior worth preserving.",
+                            helper_source_fixture_ids: [],
+                        }],
+                    }],
+                },
+            }),
+            persisted_harness_facts: buildWorkflowCandidateTopicHarnessGraphListReport({
+                topic: "review-coverage",
+                facts: [{
+                    graph_id: "fact:workflow_topic_harness_check__review_coverage",
+                    subject: "workflow_topic_harness_check:review_coverage:verification",
+                    predicate: "passed",
+                    object: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+                    value_json: properties({ passed: true }),
+                    properties_json: properties({
+                        topic: "review-coverage",
+                        candidate_id: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
+                    }),
+                }],
+                edges: [],
+            }),
+        };
+
+        const decision = buildWorkflowCandidateTopicGuidanceDecisionReport(report);
+
+        expect(decision).toMatchObject({
+            decision: "guidance_promotion_not_warranted",
+            next_action: "Do not promote guidance for this topic yet; use the persisted harness fact as graph evidence.",
+            totals: {
+                candidate_count: 1,
+                guidance_not_warranted_count: 1,
+                accepted_harness_proposal_count: 1,
+                scaffolded_harness_experiment_count: 1,
+                passing_harness_evidence_count: 1,
+                guidance_proposal_count: 0,
+            },
+        });
+        expect(decision.candidates[0]).toMatchObject({
+            recommended_artifact: "harness_check",
+            has_review_acceptance: true,
+            has_accepted_harness_proposal: true,
+            has_passing_harness_evidence: true,
+            has_guidance_proposal: false,
+            decision: "guidance_promotion_not_warranted",
+        });
+        expect(renderWorkflowCandidateTopicReportText({ ...report, guidance_decision: decision })).toContain(
+            "guidance decision: guidance_promotion_not_warranted",
+        );
     });
 
     test("topic harness gates fail with only persisted failed harness facts", () => {

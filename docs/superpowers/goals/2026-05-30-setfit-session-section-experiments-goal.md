@@ -33,12 +33,11 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E443 adds
-  `.ax/experiments/workflow-topic-review-coverage-harness-apply-e444.json`,
-  `.ax/experiments/workflow-topic-review-coverage-harness-post-apply-e444.json`,
-  `.ax/experiments/workflow-topic-review-coverage-harness-lint-e444.json`,
+- Index continuation: E445 adds
+  `.ax/experiments/workflow-topic-review-coverage-guidance-decision-e445.json`,
+  `.ax/experiments/workflow-topic-review-coverage-guidance-decision-e445.txt`,
   and
-  `.ax/experiments/workflow-topic-review-coverage-harness-proposal-scaffolded-e444.json`
+  the `ax.workflow_topic_guidance_decision.v1` report surface
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -49,9 +48,69 @@ Current recommendation:
   current handoff artifacts are complete, the guarded production apply has
   closed the reviewed-coverage gap, the successful loop is now persisted as
   lifecycle graph facts, and the accepted `review-coverage` harness proposal
-  now has a passing persisted harness fact. The immediate bottleneck is using
-  the harness-gated evidence to decide whether any guidance promotion is still
-  warranted.
+  now has a passing persisted harness fact. The guidance decision report says
+  `guidance_promotion_not_warranted` for `review-coverage`, so the immediate
+  bottleneck is using this decision surface on other reviewed topics or broader
+  session-section candidates.
+
+## E445 - Guidance Decision From Harness-Backed Topic Evidence
+
+Question:
+- Once a topic has accepted review evidence, an accepted/scaffolded harness
+  proposal, and a persisted passing harness fact, should it promote guidance or
+  remain graph/harness evidence?
+
+Implementation:
+- Added `ax.workflow_topic_guidance_decision.v1`.
+- Added `--guidance-decision` to topic reports.
+- The decision report joins:
+  - accepted/revised review facts,
+  - accepted `harness_check` proposals,
+  - scaffolded harness experiments,
+  - computed and persisted passing harness facts,
+  - existing guidance proposals.
+- Added a regression proving harness-backed verification candidates do not
+  automatically become guidance proposals.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-review-coverage-guidance-decision-e445.json`
+- `.ax/experiments/workflow-topic-review-coverage-guidance-decision-e445.txt`
+
+Results:
+- Live `review-coverage` guidance decision:
+  `guidance_promotion_not_warranted`.
+- Next action:
+  `Do not promote guidance for this topic yet; use the persisted harness fact as graph evidence.`
+- Counts:
+  - `candidate_count=1`
+  - `guidance_ready_count=0`
+  - `guidance_not_warranted_count=1`
+  - `accepted_harness_proposal_count=1`
+  - `scaffolded_harness_experiment_count=1`
+  - `passing_harness_evidence_count=1`
+  - `guidance_proposal_count=0`
+- Harness evidence remains satisfied:
+  `gate_evidence_source=computed_and_persisted`,
+  `computed_passed_count=1`, `persisted_passed_count=1`.
+
+Decision:
+- Do not promote guidance for `review-coverage` yet. The reviewed candidate's
+  primary artifact is `harness_check`, and the harness fact now passes. That is
+  useful graph evidence without needing an agent-file change.
+- The next aligned slice is to run this decision surface across additional
+  reviewed topics/candidates and look for true `guidance_promotion_ready`
+  cases.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --search=review-coverage --source-kind=hybrid_window_classifier_projection --include-review-facts --include-harness-facts --guidance-decision --require-harness-checks --limit=10 --out .ax/experiments/workflow-topic-review-coverage-guidance-decision-e445.json --json
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --search=review-coverage --source-kind=hybrid_window_classifier_projection --include-review-facts --include-harness-facts --guidance-decision --require-harness-checks --limit=10 > .ax/experiments/workflow-topic-review-coverage-guidance-decision-e445.txt
+bun -e 'const r=await Bun.file(".ax/experiments/workflow-topic-review-coverage-guidance-decision-e445.json").json(); const d=r.guidance_decision; if (d?.decision !== "guidance_promotion_not_warranted") throw new Error(JSON.stringify(d)); if (d.totals.guidance_not_warranted_count !== 1 || d.totals.passing_harness_evidence_count !== 1 || d.totals.guidance_proposal_count !== 0) throw new Error(JSON.stringify(d.totals)); if (r.harness_evidence?.gate_evidence_source !== "computed_and_persisted") throw new Error(JSON.stringify(r.harness_evidence));'
+rg -n "guidance decision: guidance_promotion_not_warranted|guidance next action: Do not promote guidance|guidance evidence counts: accepted_harness=1 scaffolded_harness=1 passing_harness=1 guidance_proposals=0|guidance_promotion_not_warranted verification_or_recovery_signal|recommended: harness_check|passing_harness=yes" .ax/experiments/workflow-topic-review-coverage-guidance-decision-e445.txt
+```
+
+DB-backed guidance decision checks passed.
 
 ## E444 - Accept Review Coverage Harness and Persist Passing Check
 
