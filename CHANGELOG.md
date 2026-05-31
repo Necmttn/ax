@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.6.0](https://github.com/Necmttn/ax/compare/v0.5.0...v0.6.0) (2026-05-31)
+
+
+### Features
+
+* **classifiers:** add boundary miss review gate ([74684f8](https://github.com/Necmttn/ax/commit/74684f8d8e58217cbb9454458c8ae0eb516183d6))
+* **classifiers:** add helper fixture failure gate ([889c51b](https://github.com/Necmttn/ax/commit/889c51bd04a1779b59bc6e28344f5217ed3111fc))
+* **classifiers:** attach helper fact explanations ([bca5938](https://github.com/Necmttn/ax/commit/bca59383612acff84fbffba984d92b869ecbe078))
+* **classifiers:** explain helper graph facts ([2530699](https://github.com/Necmttn/ax/commit/2530699798ccead17c1c68e19629951b1915726e))
+* **classifiers:** measure helper graph usefulness ([5624063](https://github.com/Necmttn/ax/commit/562406317ff82c973cdf75de2048919a2fa68137))
+* **classifiers:** measure helper usefulness coverage ([66e8cce](https://github.com/Necmttn/ax/commit/66e8cce0d3c87cbbea97e76d7dc891b2e3557542))
+* **classifiers:** persist helper graph facts ([c1fc3cb](https://github.com/Necmttn/ax/commit/c1fc3cb5df8823f7145da4e32e2ae72cb49a8733))
+* **classifiers:** promote helper fixtures ([65fa1c4](https://github.com/Necmttn/ax/commit/65fa1c438cead6487a5d272395e22aa261cbfa39))
+* **classifiers:** surface helper review hints ([65bc09a](https://github.com/Necmttn/ax/commit/65bc09aa25def5c483a57216cfa2eb27cdf669c6))
+* **site:** add landing proof sequence ([23e5103](https://github.com/Necmttn/ax/commit/23e5103927f2023a34d7c86e78a3972f0e4fbdb1))
+
+
+### Bug Fixes
+
+* **studio:** reduce selected block highlighting ([803a164](https://github.com/Necmttn/ax/commit/803a164144dde3507e963abd416eca4ece66d147))
+* **studio:** route deep links to app shell ([4328e1d](https://github.com/Necmttn/ax/commit/4328e1d042c6e45b67695c8162186f9a739fd4d0))
+* **studio:** serve app shell for deep links ([0724c33](https://github.com/Necmttn/ax/commit/0724c33cb8c53b6db111bee43c800a6fd308768e))
+* **studio:** soften content block annotations ([1bd4976](https://github.com/Necmttn/ax/commit/1bd4976dd315ff01953d62813a5fbed0b81b7ab9))
+
 ## [0.5.0](https://github.com/Necmttn/ax/compare/v0.4.0...v0.5.0) (2026-05-31)
 
 

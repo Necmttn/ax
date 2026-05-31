@@ -1,6 +1,6 @@
 {
   "name": "axctl",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "ax is local memory and telemetry for coding agents. axctl ingests transcripts, skills, and git history into SurrealDB; surfaces what skills are worth keeping and what the user actually does on demand.",
   "type": "module",
   "workspaces": [
