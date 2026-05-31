@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E409 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-next-action-no-match-e409.json`
+- Index continuation: E410 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-remediation-no-match-e410.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-next-action-match-e409.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-remediation-match-e410.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,52 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E410 - Expose Suggested Query Repair Verification Remediation
+
+Question:
+- E409 exposes the verification next action, but can services display operator
+  guidance for verification without synthesizing copy from status/action fields?
+
+Implementation:
+- Added `repair_verification_remediation` to `query_suggestion`.
+- Executable lifecycle graph-query repairs now explain that the verification
+  query should be run and checked for expected matches.
+- No-op suggestions explain that verification is unnecessary because repair
+  execution is not required.
+- Text graph-health output now renders `query suggestion repair verification
+  remediation`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-remediation-no-match-e410.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-remediation-match-e410.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-remediation-no-match-e410.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_verification_remediation=Run the repair verification
+  query and confirm it returns the expected matches.`
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.repair_verification_remediation=Verification is not needed
+  because no repair execution is required.`
+- Text output renders `query suggestion repair verification remediation`.
+
+Decision:
+- Services can now display post-repair verification guidance directly from the
+  graph-health report while retaining status, next action, argv, and expected
+  outcomes for routing.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E410 no-match report has the executable verification remediation.
+- E410 match report has the no-op verification remediation.
+- E410 text output includes the repair verification remediation line.
 
 ## E409 - Expose Suggested Query Repair Verification Next Action
 
