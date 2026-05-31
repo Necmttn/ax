@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E399 adds
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-query-no-match-e399.json`
+- Index continuation: E400 adds
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-can-execute-no-match-e400.json`
   and
-  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-query-match-e399.json`
+  `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-can-execute-match-e400.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -44,6 +44,47 @@ Current recommendation:
   checks.
 - The immediate bottleneck is direct review execution/routing, not another
   expensive model run.
+
+## E400 - Expose Suggested Query Repair Executability
+
+Question:
+- E399 exposes repair query and argv, but can services decide whether a repair
+  command is executable without checking `repair_argv.length` or
+  `repair_query` presence?
+
+Implementation:
+- Added `repair_can_execute` to `query_suggestion`.
+- Lifecycle graph-query suggestions now report `true` for real repair
+  suggestions and `false` for no-op suggestions.
+- Text graph-health output now renders `query suggestion repair can execute`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-can-execute-no-match-e400.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-can-execute-match-e400.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-can-execute-no-match-e400.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_can_execute=true`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.repair_can_execute=false`.
+- Text output renders `query suggestion repair can execute: true`.
+
+Decision:
+- Services can now gate repair execution directly on a boolean while retaining
+  structured repair query and argv details for execution/debug surfaces.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E400 no-match report has `repair_can_execute=true`.
+- E400 match report has `repair_can_execute=false`.
+- E400 text output includes the repair-executability line.
 
 ## E399 - Expose Suggested Query Repair Query
 

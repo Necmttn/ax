@@ -592,6 +592,7 @@ describe("classifiers package-operations format", () => {
                 repair_status: "no_repair_needed",
                 repair_next_action: "use_current_query",
                 repair_remediation: "Use the current graph query; no filter repair is needed.",
+                repair_can_execute: false,
                 repair_argv: [],
                 status: "expected_matches",
                 next_action: "run_suggested_query",
@@ -719,6 +720,7 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("query suggestion repair status: no_repair_needed");
         expect(output).toContain("query suggestion repair next action: use_current_query");
         expect(output).toContain("query suggestion repair remediation: Use the current graph query; no filter repair is needed.");
+        expect(output).toContain("query suggestion repair can execute: false");
         expect(output).toContain("query suggestion repair argv: none");
         expect(output).toContain("query suggestion repair query: none");
         expect(output).toContain("query suggestion provenance: source=lifecycle_available_value_counts reason=available_value_after_relaxing_value_equals");

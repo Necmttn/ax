@@ -1286,6 +1286,7 @@ describe("classifier package operations report", () => {
             repair_status: "repair_available",
             repair_next_action: "run_repaired_query",
             repair_remediation: "Run the repaired graph query to inspect matching classifier lifecycle facts.",
+            repair_can_execute: true,
             repair_argv: [
                 "bun",
                 "src/cli/index.ts",
