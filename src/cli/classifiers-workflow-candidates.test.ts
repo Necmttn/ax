@@ -1761,6 +1761,20 @@ describe("classifiers workflow-candidates", () => {
             review_pipeline_command_status: "ready_to_execute",
             review_pipeline_command_blockers: [],
             review_pipeline_command_blocker_details: [],
+            review_pipeline_command_output_artifacts: [
+                {
+                    kind: "review_brief",
+                    path: ".ax/experiments/reviewed-coverage-gaps.md",
+                    argv_flag: "--coverage-review-brief",
+                    required_for_handoff: true,
+                },
+                {
+                    kind: "readiness_report",
+                    path: ".ax/experiments/reviewed-coverage-gaps.json",
+                    argv_flag: "--out",
+                    required_for_handoff: false,
+                },
+            ],
         });
         expect(text).toContain("coverage review issue rows: 3");
         expect(text).toContain("coverage review issue fixtures: 1");
@@ -1772,6 +1786,7 @@ describe("classifiers workflow-candidates", () => {
         expect(text).toContain("coverage review pipeline command status: ready_to_execute");
         expect(text).toContain("coverage review pipeline command blockers: none");
         expect(text).toContain("coverage review pipeline command blocker details: none");
+        expect(text).toContain("coverage review pipeline command output artifacts: review_brief=.ax/experiments/reviewed-coverage-gaps.md, readiness_report=.ax/experiments/reviewed-coverage-gaps.json");
         expect(text).toContain("coverage review issue repair command: bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/reviewed-coverage-gaps.jsonl --sync-coverage-review-brief=.ax/experiments/reviewed-coverage-gaps.md --coverage-review-brief=.ax/experiments/reviewed-coverage-gaps.md --out=.ax/experiments/reviewed-coverage-gaps.json --json");
         expect(text).toContain("coverage review issue counts: missing_review_rationale=1, missing_reviewer=1, missing_reviewed_at=1");
         expect(text).toContain("coverage review issue scope counts: base_apply=1, production_apply=2");
@@ -1791,6 +1806,7 @@ describe("classifiers workflow-candidates", () => {
         expect(brief).toContain("- Pipeline command status: `ready_to_execute`");
         expect(brief).toContain("- Pipeline command blockers: `none`");
         expect(brief).toContain("- Pipeline command blocker details: `none`");
+        expect(brief).toContain("- Pipeline command output artifacts: `review_brief=.ax/experiments/reviewed-coverage-gaps.md`, `readiness_report=.ax/experiments/reviewed-coverage-gaps.json`");
         expect(brief).toContain("- Issue repair command: `bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/reviewed-coverage-gaps.jsonl --sync-coverage-review-brief=.ax/experiments/reviewed-coverage-gaps.md --coverage-review-brief=.ax/experiments/reviewed-coverage-gaps.md --out=.ax/experiments/reviewed-coverage-gaps.json --json`");
         expect(brief).toContain("- Issue counts: `missing_review_rationale=1`, `missing_reviewer=1`, `missing_reviewed_at=1`");
         expect(brief).toContain("- Issue scope counts: `base_apply=1`, `production_apply=2`");
@@ -2146,6 +2162,20 @@ describe("classifiers workflow-candidates", () => {
                 remediation: "Bind required pipeline inputs before executing the command.",
             }],
             review_pipeline_command_kind: "stamp_review_provenance",
+            review_pipeline_command_output_artifacts: [
+                {
+                    kind: "review_brief",
+                    path: ".ax/experiments/reviewed-coverage.md",
+                    argv_flag: "--coverage-review-brief",
+                    required_for_handoff: true,
+                },
+                {
+                    kind: "readiness_report",
+                    path: ".ax/experiments/workflow-candidate-review-coverage-post-apply.json",
+                    argv_flag: "--out",
+                    required_for_handoff: false,
+                },
+            ],
             review_pipeline_required_inputs: ["reviewer", "reviewed_at"],
             review_pipeline_input_bindings: [
                 {
@@ -2239,6 +2269,7 @@ describe("classifiers workflow-candidates", () => {
         expect(text).toContain("coverage review pipeline command blocker details: missing_pipeline_inputs=2");
         expect(text).toContain("coverage review pipeline command blocker remediations: missing_pipeline_inputs: Bind required pipeline inputs before executing the command.");
         expect(text).toContain("coverage review pipeline command kind: stamp_review_provenance");
+        expect(text).toContain("coverage review pipeline command output artifacts: review_brief=.ax/experiments/reviewed-coverage.md, readiness_report=.ax/experiments/workflow-candidate-review-coverage-post-apply.json");
         expect(text).toContain("coverage review pipeline required inputs: reviewer, reviewed_at");
         expect(text).toContain("coverage review pipeline input bindings: reviewer@8=--review-provenance-reviewer:<reviewer>:nonempty_string, reviewed_at@9=--review-provenance-reviewed-at:<reviewed-at-iso>:iso_datetime");
         expect(text).toContain("coverage review pipeline command argv: bun | src/cli/index.ts | classifiers | workflow-candidates | --review-coverage | --source-kind=hybrid_window_classifier_projection | --coverage-review-pack=.ax/experiments/reviewed-coverage-gaps.jsonl | --sync-coverage-review-brief=.ax/experiments/reviewed-coverage-edited.md | --review-provenance-reviewer=<reviewer> | --review-provenance-reviewed-at=<reviewed-at-iso> | --coverage-review-brief=.ax/experiments/reviewed-coverage.md | --out=.ax/experiments/workflow-candidate-review-coverage-post-apply.json | --json");

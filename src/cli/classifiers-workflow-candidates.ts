@@ -307,6 +307,19 @@ export interface WorkflowCandidateReviewCoveragePipelineCommandBlockerDetail {
     readonly remediation: string;
 }
 
+export type WorkflowCandidateReviewCoveragePipelineCommandOutputArtifactKind =
+    | "readiness_report"
+    | "review_brief"
+    | "review_facts"
+    | "review_write_plan";
+
+export interface WorkflowCandidateReviewCoveragePipelineCommandOutputArtifact {
+    readonly kind: WorkflowCandidateReviewCoveragePipelineCommandOutputArtifactKind;
+    readonly path: string;
+    readonly argv_flag: string;
+    readonly required_for_handoff: boolean;
+}
+
 export interface WorkflowCandidateReviewCoveragePipelineInputBinding {
     readonly input: WorkflowCandidateReviewCoveragePipelineRequiredInput;
     readonly argv_flag: string;
@@ -423,6 +436,7 @@ export interface WorkflowCandidateReviewCoverageApplySummary {
     readonly review_pipeline_command_blockers: readonly WorkflowCandidateReviewCoveragePipelineCommandBlocker[];
     readonly review_pipeline_command_blocker_details: readonly WorkflowCandidateReviewCoveragePipelineCommandBlockerDetail[];
     readonly review_pipeline_command_kind?: WorkflowCandidateReviewCoveragePipelineCommandKind;
+    readonly review_pipeline_command_output_artifacts: readonly WorkflowCandidateReviewCoveragePipelineCommandOutputArtifact[];
     readonly review_pipeline_required_inputs: readonly WorkflowCandidateReviewCoveragePipelineRequiredInput[];
     readonly review_pipeline_input_bindings: readonly WorkflowCandidateReviewCoveragePipelineInputBinding[];
     readonly review_pipeline_command_argv?: readonly string[];
@@ -2049,6 +2063,7 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             ...(report.coverage_review.review_pipeline_command_kind === undefined ? [] : [
                 `coverage review pipeline command kind: ${report.coverage_review.review_pipeline_command_kind}`,
             ]),
+            `coverage review pipeline command output artifacts: ${report.coverage_review.review_pipeline_command_output_artifacts.length === 0 ? "none" : report.coverage_review.review_pipeline_command_output_artifacts.map((artifact) => `${artifact.kind}=${artifact.path}`).join(", ")}`,
             `coverage review pipeline required inputs: ${report.coverage_review.review_pipeline_required_inputs.length === 0 ? "none" : report.coverage_review.review_pipeline_required_inputs.join(", ")}`,
             `coverage review pipeline input bindings: ${report.coverage_review.review_pipeline_input_bindings.length === 0 ? "none" : report.coverage_review.review_pipeline_input_bindings.map((binding) => `${binding.input}@${binding.argv_index}=${binding.argv_flag}:${binding.placeholder}:${binding.value_kind}`).join(", ")}`,
             ...(report.coverage_review.review_pipeline_command_argv === undefined ? [] : [
@@ -3364,6 +3379,9 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
         blockers: reviewPipelineCommandBlockers,
         requiredInputs: reviewPipelineRequiredInputs,
     });
+    const reviewPipelineCommandOutputArtifacts = workflowCandidateReviewCoveragePipelineCommandOutputArtifacts(
+        reviewPipelineCommandArgv,
+    );
     const lines = [
         "# Workflow Candidate Coverage Review",
         "",
@@ -3412,6 +3430,7 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
         `- Pipeline command blocker details: ${reviewPipelineCommandBlockerDetails.length === 0 ? "`none`" : reviewPipelineCommandBlockerDetails.map((detail) => `\`${detail.blocker}=${detail.count}\``).join(", ")}`,
         ...(reviewPipelineCommand === undefined ? [] : [
             `- Pipeline command kind: \`${reviewPipelineCommandKind}\``,
+            `- Pipeline command output artifacts: ${reviewPipelineCommandOutputArtifacts.length === 0 ? "`none`" : reviewPipelineCommandOutputArtifacts.map((artifact) => `\`${artifact.kind}=${artifact.path}\``).join(", ")}`,
             `- Pipeline required inputs: ${reviewPipelineRequiredInputs.length === 0 ? "`none`" : reviewPipelineRequiredInputs.map((input) => `\`${input}\``).join(", ")}`,
             `- Pipeline input bindings: ${reviewPipelineInputBindings.length === 0 ? "`none`" : reviewPipelineInputBindings.map((binding) => `\`${binding.input}@${binding.argv_index}=${binding.argv_flag}:${binding.placeholder}:${binding.value_kind}\``).join(", ")}`,
             `- Pipeline command argv: ${reviewPipelineCommandArgv === undefined ? "`none`" : reviewPipelineCommandArgv.map((part) => `\`${part}\``).join(" ")}`,
@@ -4091,6 +4110,37 @@ const workflowCandidateReviewCoveragePipelineCommandBlockerDetails = (input: {
         }
     });
 
+const workflowCandidateReviewCoveragePipelineCommandOutputArtifacts = (
+    argv: readonly string[] | undefined,
+): WorkflowCandidateReviewCoveragePipelineCommandOutputArtifact[] => {
+    if (argv === undefined) return [];
+    const outputFor = (
+        kind: WorkflowCandidateReviewCoveragePipelineCommandOutputArtifactKind,
+        argvFlag: string,
+        requiredForHandoff: boolean,
+    ): WorkflowCandidateReviewCoveragePipelineCommandOutputArtifact | undefined => {
+        const valuePrefix = `${argvFlag}=`;
+        const arg = argv.find((part) => part.startsWith(valuePrefix));
+        if (arg === undefined) return undefined;
+        const path = arg.slice(valuePrefix.length);
+        if (path.length === 0) return undefined;
+        return {
+            kind,
+            path,
+            argv_flag: argvFlag,
+            required_for_handoff: requiredForHandoff,
+        };
+    };
+    return [
+        outputFor("review_brief", "--coverage-review-brief", true),
+        outputFor("review_facts", "--review-facts", true),
+        outputFor("review_write_plan", "--review-write-plan", true),
+        outputFor("readiness_report", "--out", false),
+    ].filter((artifact): artifact is WorkflowCandidateReviewCoveragePipelineCommandOutputArtifact =>
+        artifact !== undefined
+    );
+};
+
 const workflowCandidateReviewCoveragePipelineInputBindings = (
     commandKind: WorkflowCandidateReviewCoveragePipelineCommandKind | undefined,
     argv: readonly string[] | undefined,
@@ -4487,6 +4537,9 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         blockers: reviewPipelineCommandBlockers,
         requiredInputs: reviewPipelineRequiredInputs,
     });
+    const reviewPipelineCommandOutputArtifacts = workflowCandidateReviewCoveragePipelineCommandOutputArtifacts(
+        reviewPipelineCommandArgv,
+    );
     return {
         schema: "ax.workflow_candidate_review_readiness.v1",
         source_path: input.sourcePath,
@@ -4567,6 +4620,7 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
         review_pipeline_command_blockers: reviewPipelineCommandBlockers,
         review_pipeline_command_blocker_details: reviewPipelineCommandBlockerDetails,
         ...(reviewPipelineCommandKind === undefined ? {} : { review_pipeline_command_kind: reviewPipelineCommandKind }),
+        review_pipeline_command_output_artifacts: reviewPipelineCommandOutputArtifacts,
         review_pipeline_required_inputs: reviewPipelineRequiredInputs,
         review_pipeline_input_bindings: reviewPipelineInputBindings,
         ...(reviewPipelineCommandArgv === undefined ? {} : { review_pipeline_command_argv: reviewPipelineCommandArgv }),
