@@ -14,6 +14,7 @@
 }:
 {
   "@ax-classifier/direction-event" = copyPathToStore ./packages/ax-classifier-direction-event;
+  "@ax-classifier/session-sections" = copyPathToStore ./packages/ax-classifier-session-sections;
   "@ax-classifier/verification-event" = copyPathToStore ./packages/ax-classifier-verification-event;
   "@babel/code-frame@7.29.0" = fetchurl {
     url = "https://registry.npmjs.org/@babel/code-frame/-/code-frame-7.29.0.tgz";

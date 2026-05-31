@@ -35,6 +35,10 @@
       "name": "@ax-classifier/direction-event",
       "version": "0.1.0",
     },
+    "packages/ax-classifier-session-sections": {
+      "name": "@ax-classifier/session-sections",
+      "version": "0.1.0",
+    },
     "packages/ax-classifier-verification-event": {
       "name": "@ax-classifier/verification-event",
       "version": "0.1.0",
@@ -42,6 +46,8 @@
   },
   "packages": {
     "@ax-classifier/direction-event": ["@ax-classifier/direction-event@workspace:packages/ax-classifier-direction-event"],
+
+    "@ax-classifier/session-sections": ["@ax-classifier/session-sections@workspace:packages/ax-classifier-session-sections"],
 
     "@ax-classifier/verification-event": ["@ax-classifier/verification-event@workspace:packages/ax-classifier-verification-event"],
 
