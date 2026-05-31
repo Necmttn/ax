@@ -191,6 +191,7 @@ export type WorkflowCandidateReviewCoverageApplyBlocker =
 export interface WorkflowCandidateReviewCoverageApplyBlockerDetail {
     readonly blocker: WorkflowCandidateReviewCoverageApplyBlocker;
     readonly count: number;
+    readonly remediation: string;
 }
 
 export interface WorkflowCandidateReviewCoverageApplySummary {
@@ -1773,6 +1774,7 @@ export function renderWorkflowCandidateReviewCoverageText(report: WorkflowCandid
             `coverage review can apply: ${report.coverage_review.can_apply ? "yes" : "no"}`,
             `coverage review blockers: ${report.coverage_review.apply_blockers.length === 0 ? "none" : report.coverage_review.apply_blockers.join(", ")}`,
             `coverage review blocker details: ${report.coverage_review.apply_blocker_details.length === 0 ? "none" : report.coverage_review.apply_blocker_details.map((detail) => `${detail.blocker}=${detail.count}`).join(", ")}`,
+            `coverage review blocker remediations: ${report.coverage_review.apply_blocker_details.length === 0 ? "none" : report.coverage_review.apply_blocker_details.map((detail) => `${detail.blocker}: ${detail.remediation}`).join(" | ")}`,
             `coverage review next action: ${report.coverage_review.next_action}`,
             `coverage review applied: ${report.coverage_review.applied ? "yes" : "no"}`,
         ] : []),
@@ -2708,6 +2710,23 @@ const workflowCandidateReviewCoverageGuardNextAction = (
     }
 };
 
+const workflowCandidateReviewCoverageBlockerRemediation = (
+    blocker: WorkflowCandidateReviewCoverageApplyBlocker,
+): string => {
+    switch (blocker) {
+        case "invalid_review_pack":
+            return "Replace invalid review statuses with accept, revise, reject, defer, or pending.";
+        case "no_reviewed_fixtures":
+            return "Review at least one fixture and add a rationale before applying.";
+        case "missing_review_rationale":
+            return "Add rationale text to each reviewed fixture.";
+        case "blocked_smoke_review":
+            return "Replace smoke or example review markers with real review decisions.";
+        case "empty_write_plan":
+            return "Regenerate the review write plan or keep the pack as a no-op.";
+    }
+};
+
 export function parseWorkflowCandidateFixtureRowsJsonl(
     content: string,
 ): readonly WorkflowCandidateTopicClassifierFixtureRow[] {
@@ -3129,15 +3148,15 @@ export function buildWorkflowCandidateReviewCoverageApplySummary(input: {
     const applyBlockerDetails: WorkflowCandidateReviewCoverageApplyBlockerDetail[] = applyBlockers.map((blocker) => {
         switch (blocker) {
             case "invalid_review_pack":
-                return { blocker, count: invalidRows.length };
+                return { blocker, count: invalidRows.length, remediation: workflowCandidateReviewCoverageBlockerRemediation(blocker) };
             case "no_reviewed_fixtures":
-                return { blocker, count: input.rows.length };
+                return { blocker, count: input.rows.length, remediation: workflowCandidateReviewCoverageBlockerRemediation(blocker) };
             case "missing_review_rationale":
-                return { blocker, count: missingRationaleRows.length };
+                return { blocker, count: missingRationaleRows.length, remediation: workflowCandidateReviewCoverageBlockerRemediation(blocker) };
             case "blocked_smoke_review":
-                return { blocker, count: smokeMarkerCount };
+                return { blocker, count: smokeMarkerCount, remediation: workflowCandidateReviewCoverageBlockerRemediation(blocker) };
             case "empty_write_plan":
-                return { blocker, count: 1 };
+                return { blocker, count: 1, remediation: workflowCandidateReviewCoverageBlockerRemediation(blocker) };
         }
     });
     return {

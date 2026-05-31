@@ -1523,7 +1523,11 @@ describe("classifiers workflow-candidates", () => {
             apply_guard: "blocked_smoke_review",
             can_apply: false,
             apply_blockers: ["blocked_smoke_review"],
-            apply_blocker_details: [{ blocker: "blocked_smoke_review", count: 2 }],
+            apply_blocker_details: [{
+                blocker: "blocked_smoke_review",
+                count: 2,
+                remediation: "Replace smoke or example review markers with real review decisions.",
+            }],
             next_action: "Replace smoke or example review markers with real review decisions before applying.",
         });
         expect(summary.projection_totals.fact_count).toBe(1);
@@ -1592,12 +1596,17 @@ describe("classifiers workflow-candidates", () => {
             apply_guard: "no_reviewed_fixtures",
             can_apply: false,
             apply_blockers: ["no_reviewed_fixtures"],
-            apply_blocker_details: [{ blocker: "no_reviewed_fixtures", count: 1 }],
+            apply_blocker_details: [{
+                blocker: "no_reviewed_fixtures",
+                count: 1,
+                remediation: "Review at least one fixture and add a rationale before applying.",
+            }],
             next_action: "Set at least one fixture to accept, revise, reject, or defer and add a rationale.",
         });
         expect(text).toContain("coverage review can apply: no");
         expect(text).toContain("coverage review blockers: no_reviewed_fixtures");
         expect(text).toContain("coverage review blocker details: no_reviewed_fixtures=1");
+        expect(text).toContain("coverage review blocker remediations: no_reviewed_fixtures: Review at least one fixture and add a rationale before applying.");
         expect(text).toContain("coverage review next action: Set at least one fixture to accept, revise, reject, or defer and add a rationale.");
         expect(summary.projection_totals.fact_count).toBe(0);
         expect(summary.write_plan_totals.statement_count).toBe(1);
@@ -1642,7 +1651,11 @@ describe("classifiers workflow-candidates", () => {
             apply_guard: "missing_review_rationale",
             can_apply: false,
             apply_blockers: ["missing_review_rationale"],
-            apply_blocker_details: [{ blocker: "missing_review_rationale", count: 1 }],
+            apply_blocker_details: [{
+                blocker: "missing_review_rationale",
+                count: 1,
+                remediation: "Add rationale text to each reviewed fixture.",
+            }],
             next_action: "Add rationale text for every reviewed fixture.",
         });
     });
@@ -1786,8 +1799,16 @@ describe("classifiers workflow-candidates", () => {
             can_apply: false,
             apply_blockers: ["invalid_review_pack", "no_reviewed_fixtures"],
             apply_blocker_details: [
-                { blocker: "invalid_review_pack", count: 1 },
-                { blocker: "no_reviewed_fixtures", count: 1 },
+                {
+                    blocker: "invalid_review_pack",
+                    count: 1,
+                    remediation: "Replace invalid review statuses with accept, revise, reject, defer, or pending.",
+                },
+                {
+                    blocker: "no_reviewed_fixtures",
+                    count: 1,
+                    remediation: "Review at least one fixture and add a rationale before applying.",
+                },
             ],
             next_action: "Fix invalid review statuses before syncing or applying.",
         });
