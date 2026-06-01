@@ -4,6 +4,7 @@ import type { SurrealClient } from "../lib/db.ts";
 import { safeJsonParse } from "../lib/shared/safe-json.ts";
 import {
     ClassifierPackageService,
+    type ClassifierQualityStatusReport,
     type ClassifierPackageOperationReportInput,
 } from "../classifiers/package-service.ts";
 import {
@@ -52,6 +53,8 @@ export interface ClassifierPackageOperationsCommandInput extends ClassifierPacka
     readonly applyWritePlan?: boolean;
     readonly graphHealth?: boolean;
     readonly querySuggestionRouting?: boolean;
+    readonly qualityStatus?: boolean;
+    readonly sourceReportPath?: string;
     readonly graphMode?: ClassifierGraphHealthMode;
     readonly artifact?: string;
     readonly sourceKind?: string;
@@ -228,6 +231,28 @@ export function renderClassifierPackageOperationExecutionText(report: Classifier
 
 function executionFailed(decision: ClassifierPackageOperationExecutionReport["decision"]): boolean {
     return decision !== "executed";
+}
+
+export function renderClassifierQualityStatusText(report: ClassifierQualityStatusReport): string {
+    const lines = [
+        "classifier quality status",
+        `source: ${report.source_report_path}`,
+        `source decision: ${report.source_decision ?? "unknown"}`,
+        `quality gate passed: ${report.quality_gate_passed ? "yes" : "no"}`,
+        `promotion quality: ${report.promotion_quality ? "yes" : "no"}`,
+        `recommended use: ${report.recommended_use}`,
+        `repeated misses: ${report.metrics.repeated_miss_count}`,
+        `unique none false positives: ${report.metrics.unique_none_false_positive_count}`,
+        `next action: ${report.next_action}`,
+    ];
+    if (report.metrics.macro_f1_min !== undefined) lines.push(`macro f1 min: ${report.metrics.macro_f1_min}`);
+    if (report.metrics.none_false_positive_rate_max !== undefined) {
+        lines.push(`none false positive max: ${report.metrics.none_false_positive_rate_max}`);
+    }
+    for (const blocker of report.blockers) {
+        lines.push(`blocker: ${blocker}`);
+    }
+    return lines.join("\n");
 }
 
 export function renderClassifierPackagesOperationsText(report: ClassifierPackagesOperationsReport): string {
@@ -1082,6 +1107,21 @@ export const runClassifiersPackageOperations = (
                 console.log(renderClassifierPackageExecutionApplyText(report));
             }
             if (report.decision !== "applied") {
+                process.exitCode = 1;
+            }
+            return;
+        }
+        if (input.qualityStatus) {
+            const sourceReportPath = input.sourceReportPath ?? input.artifact ?? ".ax/experiments/setfit-failure-analysis-workflow-fixtures-current.json";
+            const report = input.out
+                ? yield* packages.writeClassifierQualityStatusReport({ sourceReportPath, out: input.out })
+                : yield* packages.classifierQualityStatusReport({ sourceReportPath });
+            if (input.json) {
+                console.log(JSON.stringify(report, null, 2));
+            } else if (!input.out) {
+                console.log(renderClassifierQualityStatusText(report));
+            }
+            if (!report.quality_gate_passed) {
                 process.exitCode = 1;
             }
             return;

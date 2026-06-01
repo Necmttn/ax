@@ -1847,9 +1847,11 @@ const classifiersPackageOperationsCommand = Command.make(
         workflowStatus: Flag.string("workflow-status").pipe(Flag.optional),
         writePlan: Flag.boolean("write-plan").pipe(Flag.withDefault(false)),
         querySuggestionRouting: Flag.boolean("query-suggestion-routing").pipe(Flag.withDefault(false)),
+        qualityStatus: Flag.boolean("quality-status").pipe(Flag.withDefault(false)),
+        sourceReport: Flag.string("source-report").pipe(Flag.optional),
         json: jsonFlag,
     },
-    ({ allowExpensive, applyWritePlan, all, dryRun, execute, facts, graphHealth, graphMode, history, manifest, operation, artifact, sourceKind, factKind, status, sourceFixture, proposedLabel, threshold, minSeedCount, minPositiveRecall, minCallReduction, minNearestSimilarity, nearestFixture, predicate, subject, valueContains, valueEquals, out, preflight, root, workflowStatus, writePlan, querySuggestionRouting, json }) => {
+    ({ allowExpensive, applyWritePlan, all, dryRun, execute, facts, graphHealth, graphMode, history, manifest, operation, artifact, sourceKind, factKind, status, sourceFixture, proposedLabel, threshold, minSeedCount, minPositiveRecall, minCallReduction, minNearestSimilarity, nearestFixture, predicate, subject, valueContains, valueEquals, out, preflight, root, workflowStatus, writePlan, querySuggestionRouting, qualityStatus, sourceReport, json }) => {
         const operationId = optionValue(operation);
         const artifactPath = optionValue(artifact);
         const sourceKindName = optionValue(sourceKind);
@@ -1870,6 +1872,7 @@ const classifiersPackageOperationsCommand = Command.make(
         const outPath = optionValue(out);
         const rootPath = optionValue(root);
         const workflowStatusPath = optionValue(workflowStatus);
+        const sourceReportPath = optionValue(sourceReport);
         if (all) {
             return runClassifiersPackagesOperations({
                 ...(rootPath === undefined ? {} : { root: rootPath }),
@@ -1889,6 +1892,8 @@ const classifiersPackageOperationsCommand = Command.make(
             graphHealth,
             graphMode,
             querySuggestionRouting,
+            qualityStatus,
+            ...(sourceReportPath === undefined ? {} : { sourceReportPath }),
             history,
             ...(artifactPath === undefined ? {} : { artifact: artifactPath }),
             ...(sourceKindName === undefined ? {} : { sourceKind: sourceKindName }),

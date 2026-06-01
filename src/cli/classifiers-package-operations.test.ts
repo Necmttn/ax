@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
-import { ClassifierPackageService } from "../classifiers/package-service.ts";
+import { ClassifierPackageService, type ClassifierQualityStatusReport } from "../classifiers/package-service.ts";
 import {
     renderClassifierLifecycleRouteExecutionText,
     renderClassifierLifecycleRouteExecutionInspectionText,
@@ -19,6 +19,7 @@ import {
     renderClassifierPackageOperationExecutionPlanText,
     renderClassifierPackageOperationPreflightText,
     renderClassifierGraphQuerySuggestionRoutingSummaryText,
+    renderClassifierQualityStatusText,
     renderClassifierPackageOperationsText,
     renderClassifierPackagesOperationsText,
     runClassifiersPackageOperations,
@@ -130,6 +131,91 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("verification outcome status: expected_matches");
         expect(output).toContain("verification command kind: classifier_graph_query_repair_verification");
         expect(output).toContain("verification expected result count: 1");
+    });
+
+    test("renders classifier quality status summaries", () => {
+        const report: ClassifierQualityStatusReport = {
+            schema: "ax.classifier_quality_status.v1",
+            source_report_path: ".ax/experiments/setfit-failure-analysis-workflow-fixtures-current.json",
+            source_schema: "ax.setfit_robustness_failure_analysis.v1",
+            source_decision: "needs_none_safety_review",
+            quality_gate_passed: false,
+            promotion_quality: false,
+            recommended_use: "model_quality_work",
+            metrics: {
+                macro_f1_min: 0.7364,
+                none_false_positive_rate_max: 0.0769,
+                repeated_miss_count: 7,
+                unique_none_false_positive_count: 1,
+            },
+            blockers: [
+                "model_quality_gate_not_passed",
+                "residual_repeated_misses",
+                "residual_none_false_positives",
+                "missing_human_promotion_review",
+            ],
+            next_action: "Keep this classifier in model-quality work until robustness gates pass.",
+        };
+
+        const output = renderClassifierQualityStatusText(report);
+
+        expect(output).toContain("classifier quality status");
+        expect(output).toContain("source decision: needs_none_safety_review");
+        expect(output).toContain("quality gate passed: no");
+        expect(output).toContain("promotion quality: no");
+        expect(output).toContain("recommended use: model_quality_work");
+        expect(output).toContain("repeated misses: 7");
+        expect(output).toContain("unique none false positives: 1");
+        expect(output).toContain("macro f1 min: 0.7364");
+        expect(output).toContain("none false positive max: 0.0769");
+        expect(output).toContain("blocker: model_quality_gate_not_passed");
+    });
+
+    test("routes classifier quality status reports to the package service", async () => {
+        const report: ClassifierQualityStatusReport = {
+            schema: "ax.classifier_quality_status.v1",
+            source_report_path: ".ax/experiments/setfit-failure-analysis-workflow-fixtures-current.json",
+            source_decision: "needs_none_safety_review",
+            quality_gate_passed: false,
+            promotion_quality: false,
+            recommended_use: "model_quality_work",
+            metrics: {
+                repeated_miss_count: 7,
+                unique_none_false_positive_count: 1,
+            },
+            blockers: ["model_quality_gate_not_passed"],
+            next_action: "Keep this classifier in model-quality work until robustness gates pass.",
+        };
+        let calledWith: unknown;
+        const previousExitCode = process.exitCode;
+        const service = ClassifierPackageService.of({
+            writeClassifierQualityStatusReport: (input: unknown) => Effect.sync(() => {
+                calledWith = input;
+                return report;
+            }),
+        } as never);
+
+        try {
+            await Effect.runPromise(
+                runClassifiersPackageOperations({
+                    manifestPath: "packages/ax-classifier-session-sections/ax.classifier.json",
+                    qualityStatus: true,
+                    sourceReportPath: ".ax/experiments/setfit-failure-analysis-workflow-fixtures-current.json",
+                    out: ".ax/experiments/classifier-quality-status-workflow-fixtures.json",
+                    json: false,
+                } as never).pipe(
+                    Effect.provideService(ClassifierPackageService, service),
+                    Effect.provideService(SurrealClient, {} as SurrealClientShape),
+                ),
+            );
+        } finally {
+            process.exitCode = previousExitCode ?? 0;
+        }
+
+        expect(calledWith).toEqual({
+            sourceReportPath: ".ax/experiments/setfit-failure-analysis-workflow-fixtures-current.json",
+            out: ".ax/experiments/classifier-quality-status-workflow-fixtures.json",
+        });
     });
 
     test("routes graph query suggestion summaries to the compact writer", async () => {
