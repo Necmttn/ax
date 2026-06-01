@@ -1,3 +1,5 @@
+import { Link } from "@tanstack/react-router";
+
 export function WhySection() {
   return (
     <section id="why">
@@ -14,8 +16,8 @@ export function WhySection() {
         software. Open reference, MIT, runs on your laptop.
       </p>
       <div className="cta">
-        {/* /origin + /studio routes land in later tasks; plain <a> for now */}
-        <a className="btn" href="/origin">Read the origin &nbsp;→</a>
+        {/* /studio is the separate dashboard SPA (not a router route) - stays <a> */}
+        <Link className="btn" to="/origin">Read the origin &nbsp;→</Link>
         <a className="btn-secondary" href="https://github.com/Necmttn/ax" target="_blank" rel="noopener noreferrer">View on GitHub</a>
       </div>
       <p style={{ marginTop: "28px" }}>

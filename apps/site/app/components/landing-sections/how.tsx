@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef } from "react";
+import { Link } from "@tanstack/react-router";
 
 export function HowSection() {
   return (
@@ -24,10 +25,9 @@ export function HowSection() {
       </div>
 
       <p>
-        {/* /origin route lands in Task 5; plain <a> for now */}
-        <a className="fig-link" href="/origin#pipeline">
+        <Link className="fig-link" to="/origin" hash="pipeline">
           read: retro is only the first step <span className="arr">→</span>
-        </a>
+        </Link>
       </p>
     </section>
   );

@@ -1,3 +1,5 @@
+import { Link } from "@tanstack/react-router";
+
 export function HeroSection() {
   return (
     <section className="hero">
@@ -84,8 +86,7 @@ export function HeroSection() {
       </div>
 
       <div className="cta">
-        {/* /origin route lands in Task 5; plain <a> until then so tsc stays clean */}
-        <a className="btn" href="/origin">Read the origin &nbsp;→</a>
+        <Link className="btn" to="/origin">Read the origin &nbsp;→</Link>
         <a className="btn-secondary" href="https://github.com/Necmttn/ax" target="_blank" rel="noopener noreferrer">View on GitHub</a>
       </div>
     </section>

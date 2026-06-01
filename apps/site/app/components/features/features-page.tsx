@@ -1,3 +1,5 @@
+import { Link } from "@tanstack/react-router";
+
 export function FeaturesPage() {
   return (
     <main className="features-page">
@@ -648,34 +650,34 @@ export function FeaturesPage() {
       {/* ============= footer cards ============= */}
       <section className="cards">
         <div className="cards-grid">
-          <a className="card" href="/how-it-works">
+          <Link className="card" to="/how-it-works">
             <span className="card-title">How it works</span>
             <span className="card-foot">
               <span>read</span>
               <span className="arrow">→</span>
             </span>
-          </a>
-          <a className="card" href="/showcases">
+          </Link>
+          <Link className="card" to="/showcases">
             <span className="card-title">Showcases</span>
             <span className="card-foot">
               <span>browse</span>
               <span className="arrow">→</span>
             </span>
-          </a>
-          <a className="card" href="/origin">
+          </Link>
+          <Link className="card" to="/origin">
             <span className="card-title">Origin</span>
             <span className="card-foot">
               <span>story</span>
               <span className="arrow">→</span>
             </span>
-          </a>
-          <a className="card" href="/docs">
+          </Link>
+          <Link className="card" to="/docs">
             <span className="card-title">Docs</span>
             <span className="card-foot">
               <span>reference</span>
               <span className="arrow">→</span>
             </span>
-          </a>
+          </Link>
         </div>
       </section>
     </main>

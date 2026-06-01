@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef } from "react";
+import { Link } from "@tanstack/react-router";
 
 type SrcKey = "claude" | "codex" | "git";
 
@@ -564,7 +565,7 @@ export function LineageFlow() {
         <p className="lineage-foot">
           every event &rarr; typed graph &rarr; ranked interventions. local
           SurrealDB at <code>127.0.0.1</code>.{" "}
-          <a href="/features">see /features for the schema &rarr;</a>
+          <Link to="/features">see /features for the schema &rarr;</Link>
           <span className="forms">
             six forms: <b>skill</b> &middot; <b>guidance</b> &middot;{" "}
             <b>subagent</b> &middot; <b>hook</b> &middot; <b>automation</b>{" "}

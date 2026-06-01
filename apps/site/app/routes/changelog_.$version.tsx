@@ -1,4 +1,4 @@
-import { createFileRoute, notFound } from "@tanstack/react-router";
+import { createFileRoute, notFound, Link } from "@tanstack/react-router";
 import { allChangelogs, allReleaseAnnouncements } from "content-collections";
 import { SiteFooter } from "~/components/landing-sections/site-footer";
 import { SiteHeader } from "~/components/landing-sections/site-header";
@@ -46,7 +46,7 @@ function ReleasePage() {
             {itemCount > 0 ? <span>{itemCount} referenced changes</span> : null}
           </div>
           <div className="release-actions">
-            <a href="/changelog">All releases</a>
+            <Link to="/changelog">All releases</Link>
             <a href="#referenced">Referenced changes</a>
             <a href="#generated">Generated changelog</a>
           </div>

@@ -1,3 +1,5 @@
+import { Link } from "@tanstack/react-router";
+
 type IconProps = { className?: string };
 
 function LicenseIcon({ className }: IconProps) {
@@ -165,10 +167,10 @@ export function OpenSourceSection() {
           <ForkIcon className="oss-action-glyph" />
           Fork the repo <span className="oss-action-arrow" aria-hidden="true">&rarr;</span>
         </a>
-        <a className="oss-action" href="/docs">
+        <Link className="oss-action" to="/docs">
           <DocsIcon className="oss-action-glyph" />
           Read the docs <span className="oss-action-arrow" aria-hidden="true">&rarr;</span>
-        </a>
+        </Link>
       </div>
     </section>
   );

@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef } from "react";
+import { Link } from "@tanstack/react-router";
 
 const SKILLS = [
   /* row 1 */
@@ -55,10 +56,9 @@ export function DemoSection() {
       </div>
 
       <p>
-        {/* /origin route lands in Task 5; plain <a> for now */}
-        <a className="fig-link" href="/origin">
+        <Link className="fig-link" to="/origin">
           read: the origin behind the layer <span className="arr">→</span>
-        </a>
+        </Link>
       </p>
     </section>
   );
