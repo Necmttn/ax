@@ -29,16 +29,7395 @@ artifact path as the evidence to inspect before trusting any summary row.
 | Blind/review workflow | E46-E65+ | `.ax/experiments/blind-workflow-status-e57.json` and related review artifacts | Human review is mandatory before fixtures or graph facts are promoted. | Pending where review rows are incomplete. | Earlier experiment log | Prefer review queues/workspaces over automatic label edits. |
 | Transcript graph projection | E155-E157 | `.ax/experiments/transcript-candidate-graph-projection-e155.json`, `.ax/experiments/workflow-candidate-report-e156.json`, `.ax/experiments/workflow-candidate-cli-e157.json` | Real persisted classifier facts can become graph-backed workflow candidates. | Passed for projection/query; still needs product review filters and proposal gates. | E155/E156/E157 commits in log | Use graph facts for evidence-backed workflow/harness discovery. |
 | Proposal lifecycle | E168-E208 | `.ax/experiments/workflow-candidate-proposal-list-e168.json`, `.ax/experiments/classifier-package-execution-write-plan-e208.json` | Classifier-derived workflow proposals are discoverable and lifecycle-tracked. | Passed for visibility/lifecycle plumbing; promotion remains review-gated. | Recent proposal lifecycle commits | Continue using review and ready-smoke gates before guidance/harness changes. |
-| Embedding/SVM helper layer | E209-E237 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e231-post-promotion.json`, `.ax/experiments/embedding-helper-canonical-promotion-split-audit-e231.json`, `.ax/experiments/embedding-helper-graph-projection-current.json`, `.ax/experiments/embedding-helper-graph-apply-e232.json`, `.ax/experiments/classifier-graph-health-embedding-helper-e232.json`, `.ax/experiments/embedding-helper-graph-usefulness-current.json`, `.ax/experiments/classifier-package-execution-embedding-helper-graph-usefulness-e234.json`, `.ax/experiments/classifier-graph-health-embedding-helper-none-maintenance-e235.json`, `.ax/experiments/workflow-topic-evidence-pack-helper-review-hints-e237.md` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. Promoted helper facts are persisted, measurable, graph-explainable, attached to workflow topic evidence packs, and now shown as candidate-level review hints. | Passed: the SurrealML pack attaches `none-maintenance-question` to the noisy hybrid environment/preference candidate and renders `review-as-noise`, matched controls `1`, and suggested reviewer verdict `reject`. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `65b0b3c`, `4c602d9`, `eeb517c`, `9a6811e`, `31a1b16`, `e41562c`, `0587b67`, `0e0a960`, `3f01787`, `7bea922`, `21f7163`, `24e4a4e`, `f97c8e3`, `722e3e8`, `8b27657`, `d700090`, `6237d89`, `2490fdf`, `9f4ee34`, `2530699`, `bca5938`, this commit | Use helper hints for human review decisions. Next useful work is to persist accepted/rejected reviewer decisions from these packs, or collect broader controls; still no automatic ranking suppression. |
+| Workflow quality conclusion | E489-E498 | `.ax/experiments/classifier-quality-status-workflow-fixtures-e489.json`, `.ax/experiments/hybrid-robustness-workflow-fixtures-current.json`, `.ax/experiments/boundary-review-deterministic-replay-workflow-candidate-current.json`, `.ax/experiments/boundary-replay-graph-query-e497.json`, `.ax/experiments/workflow-classifier-quality-conclusion-e497.json` | Continue hybrid/deterministic/review/graph path; do not promote raw SetFit output. | Raw SetFit failed: min macro F1 `0.7364 < 0.75`; hybrid passed none-safety; deterministic replay covered the repeated workflow miss; graph query matched replay evidence. | `5b4d688`, `b50cf71`, `cb72284`, `71549bb`, `91c3ce0`, `370ea6d`, `26d684b`, `a94807d`, `3d56600`, this commit | Build product/service usage on graph-queryable reviewed facts; use model output for mining and review prioritization until promotion gates pass. |
+| Embedding/SVM helper layer | E209-E354 | `.ax/experiments/frozen-embedding-helper-svm-e209.json`, `.ax/experiments/embedding-helper-review-e210.json`, `.ax/experiments/classifier-graph-embedding-helper-e212.json`, `.ax/experiments/embedding-helper-export-e215-report.json`, `.ax/experiments/classifier-package-execution-embedding-helper-fixture-append-e231-post-promotion.json`, `.ax/experiments/embedding-helper-canonical-promotion-split-audit-e231.json`, `.ax/experiments/embedding-helper-graph-projection-current.json`, `.ax/experiments/embedding-helper-graph-apply-e232.json`, `.ax/experiments/classifier-graph-health-embedding-helper-e232.json`, `.ax/experiments/embedding-helper-graph-usefulness-current.json`, `.ax/experiments/classifier-package-execution-embedding-helper-graph-usefulness-e234.json`, `.ax/experiments/classifier-graph-health-embedding-helper-none-maintenance-e235.json`, `.ax/experiments/workflow-topic-review-graph-query-e239.json`, `.ax/experiments/workflow-topic-evidence-pack-persisted-review-context-e240.md`, `.ax/experiments/workflow-candidate-report-persisted-review-context-e241.json`, `.ax/experiments/workflow-candidate-review-coverage-e242.json`, `.ax/experiments/workflow-candidate-review-coverage-with-gaps-e243.json`, `.ax/experiments/workflow-candidate-review-coverage-gaps-e243.jsonl`, `.ax/experiments/workflow-candidate-review-coverage-review-projection-e244.json`, `.ax/experiments/workflow-candidate-review-coverage-apply-guard-e245.json`, `.ax/experiments/workflow-candidate-review-coverage-readiness-e246.json`, `.ax/experiments/workflow-candidate-review-coverage-brief-e247.md`, `.ax/experiments/workflow-candidate-review-coverage-invalid-sync-e248.json`, `.ax/experiments/workflow-candidate-review-coverage-impact-e249.json`, `.ax/experiments/workflow-candidate-review-coverage-projected-e250.json`, `.ax/experiments/workflow-candidate-review-coverage-brief-e251.md`, `.ax/experiments/workflow-candidate-review-coverage-brief-e252.md`, `.ax/experiments/workflow-candidate-review-coverage-brief-e253.md`, `.ax/experiments/workflow-candidate-review-coverage-brief-synced-e254.md`, `.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-synced-e255.md`, `.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-e255.md`, `.ax/experiments/workflow-candidate-review-coverage-brief-smoke-guard-e256.md`, `.ax/experiments/workflow-candidate-review-coverage-brief-e257.md`, `.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e257.md`, `.ax/experiments/workflow-candidate-review-coverage-brief-smoke-guard-e257.md`, `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e258.json`, `.ax/experiments/workflow-candidate-review-coverage-smoke-guard-e258.json`, `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e258.txt`, `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e259.json`, `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e259.json`, `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e259.txt`, `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e260.json`, `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e260.json`, `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e260.txt`, `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e261.json`, `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e261.json`, `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e261.txt`, `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e262.json`, `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e262.json`, `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e262.txt`, `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e263.json`, `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e263.txt`, `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e263.json`, `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e263.txt`, `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e264.json`, `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e264.txt`, `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e264.json`, `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e264.txt`, `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e265.json`, `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e265.txt`, `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e265.json`, `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e265.txt`, `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-apply-blocked-e265.json`, `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-apply-blocked-e265.txt`, `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e266.json`, `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e266.txt`, `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e266.json`, `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e266.txt`, `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e267.json`, `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e267.txt`, `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e267.json`, `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e267.txt`, `.ax/experiments/workflow-candidate-review-coverage-brief-pending-e268.md`, `.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e268.md`, `.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md`, `.ax/experiments/workflow-candidate-review-coverage-brief-pending-e269.md`, `.ax/experiments/workflow-candidate-review-coverage-brief-provenance-synced-e269.md`, `.ax/experiments/workflow-candidate-review-coverage-provenance-synced-e269.json`, `.ax/experiments/workflow-candidate-review-coverage-audit-provenance-e270.json`, `.ax/experiments/workflow-candidate-review-coverage-audit-provenance-e270.txt`, `.ax/experiments/workflow-candidate-review-coverage-provenance-counts-complete-e271.json`, `.ax/experiments/workflow-candidate-review-coverage-provenance-counts-missing-e271.json`, `.ax/experiments/workflow-candidate-review-coverage-provenance-status-complete-e272.json`, `.ax/experiments/workflow-candidate-review-coverage-provenance-status-missing-e272.json`, `.ax/experiments/workflow-candidate-review-coverage-strict-provenance-blocked-e273.json`, `.ax/experiments/workflow-candidate-review-coverage-strict-provenance-ready-e273.json`, `.ax/experiments/workflow-candidate-review-coverage-strict-provenance-cleanup-e273.json`, `.ax/experiments/workflow-candidate-review-coverage-strict-brief-e274.md`, `.ax/experiments/workflow-candidate-review-coverage-strict-brief-reviewed-e274.md`, `.ax/experiments/workflow-candidate-review-coverage-post-apply-recheck-e275.json`, `.ax/experiments/workflow-candidate-review-coverage-post-apply-recheck-e275.md`, `.ax/experiments/workflow-candidate-review-coverage-post-apply-recheck-e275.txt`, `.ax/experiments/workflow-candidate-review-coverage-invalid-reviewed-at-e276.json`, `.ax/experiments/workflow-candidate-review-coverage-invalid-reviewed-at-e276.md`, `.ax/experiments/workflow-candidate-review-coverage-provenance-issue-rows-e277.json`, `.ax/experiments/workflow-candidate-review-coverage-provenance-issue-rows-e277.txt`, `.ax/experiments/workflow-candidate-review-coverage-provenance-issues-brief-e278.json`, `.ax/experiments/workflow-candidate-review-coverage-provenance-issues-brief-e278.md`, `.ax/experiments/workflow-candidate-review-coverage-strict-readiness-e279.json`, `.ax/experiments/workflow-candidate-review-coverage-strict-readiness-e279.txt`, `.ax/experiments/workflow-candidate-review-coverage-provenance-stamped-e280.jsonl`, `.ax/experiments/workflow-candidate-review-coverage-provenance-stamped-e280.json`, `.ax/experiments/workflow-candidate-review-coverage-provenance-stamped-e280.txt`, `.ax/experiments/workflow-candidate-review-coverage-recheck-summary-e281.json`, `.ax/experiments/workflow-candidate-review-coverage-recheck-summary-e281.txt`, `.ax/experiments/workflow-candidate-review-coverage-stamp-command-e282.json`, `.ax/experiments/workflow-candidate-review-coverage-stamp-command-e282.md`, `.ax/experiments/workflow-candidate-review-coverage-write-plan-command-e283.json`, `.ax/experiments/workflow-candidate-review-coverage-write-plan-command-e283.md`, `.ax/experiments/workflow-candidate-review-coverage-output-paths-e284.json`, `.ax/experiments/workflow-candidate-review-coverage-output-paths-e284-review-facts.json`, `.ax/experiments/workflow-candidate-review-coverage-output-paths-e284-review-write-plan.json`, `.ax/experiments/workflow-candidate-review-coverage-brief-paths-e285.json`, `.ax/experiments/workflow-candidate-review-coverage-brief-paths-e285.md`, `.ax/experiments/workflow-candidate-review-coverage-handoff-status-e286.json`, `.ax/experiments/workflow-candidate-review-coverage-handoff-status-e286.md`, `.ax/experiments/workflow-candidate-review-coverage-require-handoff-e287.json`, `.ax/experiments/workflow-candidate-review-coverage-require-handoff-e287.stdout`, `.ax/experiments/workflow-candidate-review-coverage-complete-handoff-command-e288.json`, `.ax/experiments/workflow-candidate-review-coverage-complete-handoff-command-e288.md`, `.ax/experiments/workflow-candidate-review-coverage-handoff-guard-e289.json`, `.ax/experiments/workflow-candidate-review-coverage-handoff-guard-complete-e289.json`, `.ax/experiments/workflow-candidate-review-coverage-brief-handoff-summary-e290.md`, `.ax/experiments/workflow-candidate-review-coverage-production-guard-e291.json`, `.ax/experiments/workflow-candidate-review-coverage-brief-production-summary-e292.md`, `.ax/experiments/workflow-candidate-review-coverage-production-next-action-e293.json`, `.ax/experiments/workflow-candidate-review-coverage-production-next-action-e293.md`, `.ax/experiments/workflow-candidate-review-coverage-production-command-e294.json`, `.ax/experiments/workflow-candidate-review-coverage-stamp-command-readiness-e295.json`, `.ax/experiments/workflow-candidate-review-issue-rows-e296.json`, `.ax/experiments/workflow-candidate-review-issue-counts-e297.json`, `.ax/experiments/workflow-candidate-review-issues-brief-e298.md`, `.ax/experiments/workflow-candidate-review-issue-fixtures-e299.json`, `.ax/experiments/workflow-candidate-review-repair-status-e300.json`, `.ax/experiments/workflow-candidate-review-issue-candidates-e301.json`, `.ax/experiments/workflow-candidate-review-issue-repair-command-e302.json`, `.ax/experiments/workflow-candidate-review-no-issue-command-e303.json`, `.ax/experiments/workflow-candidate-review-issue-scope-e304.json`, `.ax/experiments/workflow-candidate-review-issue-scope-counts-e305.json`, `.ax/experiments/workflow-candidate-review-issue-scope-workload-e306.json`, `.ax/experiments/workflow-candidate-review-issue-scope-summaries-e307.json`, `.ax/experiments/workflow-candidate-review-pipeline-stage-e308.json`, `.ax/experiments/workflow-candidate-review-provenance-pipeline-stage-e309.json`, `.ax/experiments/workflow-candidate-review-pipeline-command-e310.json`, `.ax/experiments/workflow-candidate-review-pipeline-command-kind-e311.json`, `.ax/experiments/workflow-candidate-review-pipeline-inputs-e312.json`, `.ax/experiments/workflow-candidate-review-pipeline-argv-e313.json`, `.ax/experiments/workflow-candidate-review-pipeline-bindings-e314.json`, `.ax/experiments/workflow-candidate-review-pipeline-binding-indexes-e315.json`, `.ax/experiments/workflow-candidate-review-pipeline-status-e316.json`, `.ax/experiments/workflow-candidate-review-pipeline-status-repair-e316.json`, `.ax/experiments/workflow-candidate-review-pipeline-value-kinds-e317.json`, `.ax/experiments/workflow-candidate-review-pipeline-blockers-e318.json`, `.ax/experiments/workflow-candidate-review-pipeline-blockers-e318.md`, `.ax/experiments/workflow-candidate-review-pipeline-blockers-repair-e318.json`, `.ax/experiments/workflow-candidate-review-pipeline-blockers-repair-e318.md`, `.ax/experiments/workflow-candidate-review-pipeline-outputs-e319.json`, `.ax/experiments/workflow-candidate-review-pipeline-outputs-e319.md`, `.ax/experiments/workflow-candidate-review-pipeline-outputs-repair-e319.json`, `.ax/experiments/workflow-candidate-review-pipeline-outputs-repair-e319.md`, `.ax/experiments/workflow-candidate-review-pipeline-output-indexes-e320.json`, `.ax/experiments/workflow-candidate-review-pipeline-output-indexes-e320.md`, `.ax/experiments/workflow-candidate-review-pipeline-output-indexes-repair-e320.json`, `.ax/experiments/workflow-candidate-review-pipeline-output-indexes-repair-e320.md`, `.ax/experiments/workflow-candidate-review-pipeline-output-checks-e321.json`, `.ax/experiments/workflow-candidate-review-pipeline-output-checks-e321.md`, `.ax/experiments/workflow-candidate-review-pipeline-output-checks-repair-e321.json`, `.ax/experiments/workflow-candidate-review-pipeline-output-checks-repair-e321.md`, `.ax/experiments/workflow-candidate-review-pipeline-output-status-e322.json`, `.ax/experiments/workflow-candidate-review-pipeline-output-status-e322.md`, `.ax/experiments/workflow-candidate-review-pipeline-output-status-repair-e322.json`, `.ax/experiments/workflow-candidate-review-pipeline-output-status-repair-e322.md`, `.ax/experiments/workflow-candidate-review-pipeline-output-next-action-e323.json`, `.ax/experiments/workflow-candidate-review-pipeline-output-next-action-e323.md`, `.ax/experiments/workflow-candidate-review-pipeline-output-next-action-repair-e323.json`, `.ax/experiments/workflow-candidate-review-pipeline-output-next-action-repair-e323.md`, `.ax/experiments/workflow-candidate-review-pipeline-command-can-execute-e324.json`, `.ax/experiments/workflow-candidate-review-pipeline-command-can-execute-e324.md`, `.ax/experiments/workflow-candidate-review-pipeline-command-can-execute-repair-e324.json`, `.ax/experiments/workflow-candidate-review-pipeline-command-can-execute-repair-e324.md`, `.ax/experiments/workflow-candidate-review-pipeline-command-next-action-e325.json`, `.ax/experiments/workflow-candidate-review-pipeline-command-next-action-e325.md`, `.ax/experiments/workflow-candidate-review-pipeline-command-next-action-repair-e325.json`, `.ax/experiments/workflow-candidate-review-pipeline-command-next-action-repair-e325.md`, `.ax/experiments/workflow-candidate-review-pipeline-service-helper-e326.json`, `.ax/experiments/workflow-candidate-review-pipeline-prepare-command-e327.json`, `.ax/experiments/workflow-candidate-review-pipeline-output-verification-e328.json`, `.ax/experiments/workflow-candidate-review-pipeline-lifecycle-e329.json`, `.ax/experiments/workflow-candidate-review-pipeline-node-file-verifier-e330.json`, `.ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.json`, `.ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.txt`, `.ax/experiments/classifier-package-execution-facts-review-pipeline-lifecycle-e332.json`, `.ax/experiments/classifier-package-execution-write-plan-review-pipeline-lifecycle-e332.json`, `.ax/experiments/classifier-package-execution-write-plan-review-pipeline-lifecycle-e332.txt`, `.ax/experiments/classifier-lifecycle-insight-review-pipeline-e333.json`, `.ax/experiments/classifier-lifecycle-insight-review-pipeline-e333.txt`, `.ax/experiments/classifier-lifecycle-insight-review-pipeline-artifacts-e334.json`, `.ax/experiments/classifier-lifecycle-insight-review-pipeline-artifacts-e334.txt`, `.ax/experiments/classifier-package-execution-facts-review-pipeline-artifacts-e335.json`, `.ax/experiments/classifier-package-execution-write-plan-review-pipeline-artifacts-e335.json`, `.ax/experiments/classifier-package-execution-write-plan-review-pipeline-artifacts-e335.txt`, `.ax/experiments/classifier-package-execution-apply-review-pipeline-predicate-e336.json`, `.ax/experiments/classifier-graph-lifecycle-predicate-review-pipeline-e336.json`, `.ax/experiments/classifier-graph-lifecycle-predicate-review-pipeline-e336.txt`, `.ax/experiments/classifier-graph-lifecycle-subject-predicate-review-pipeline-e337.json`, `.ax/experiments/classifier-graph-lifecycle-subject-predicate-review-pipeline-e337.txt`, `.ax/experiments/classifier-graph-lifecycle-value-filter-review-pipeline-e338.json`, `.ax/experiments/classifier-graph-lifecycle-value-filter-review-pipeline-e338.txt`, `.ax/experiments/classifier-graph-lifecycle-source-kind-review-pipeline-e339.json`, `.ax/experiments/classifier-graph-lifecycle-source-kind-review-pipeline-e339.txt`, `.ax/experiments/classifier-graph-embedding-helper-fact-kind-e340.json`, `.ax/experiments/classifier-graph-embedding-helper-fact-kind-e340.txt`, `.ax/experiments/classifier-graph-embedding-helper-status-accepted-e341.json`, `.ax/experiments/classifier-graph-embedding-helper-status-accepted-e341.txt`, `.ax/experiments/classifier-graph-embedding-helper-nearest-fixture-e342.json`, `.ax/experiments/classifier-graph-embedding-helper-nearest-fixture-e342.txt`, `.ax/experiments/classifier-graph-embedding-helper-source-fixture-e343.json`, `.ax/experiments/classifier-graph-embedding-helper-source-fixture-e343.txt`, `.ax/experiments/classifier-graph-embedding-helper-proposed-label-none-e344.json`, `.ax/experiments/classifier-graph-embedding-helper-proposed-label-none-e344.txt`, `.ax/experiments/classifier-graph-embedding-helper-min-nearest-similarity-e345.json`, `.ax/experiments/classifier-graph-embedding-helper-min-nearest-similarity-e345.txt`, `.ax/experiments/classifier-graph-embedding-helper-threshold-none-e346.json`, `.ax/experiments/classifier-graph-embedding-helper-threshold-none-e346.txt`, `.ax/experiments/classifier-graph-embedding-helper-min-seed-count-e347.json`, `.ax/experiments/classifier-graph-embedding-helper-min-seed-count-e347.txt`, `.ax/experiments/classifier-graph-embedding-helper-min-positive-recall-e348.json`, `.ax/experiments/classifier-graph-embedding-helper-min-positive-recall-e348.txt`, `.ax/experiments/classifier-graph-embedding-helper-min-call-reduction-e349.json`, `.ax/experiments/classifier-graph-embedding-helper-min-call-reduction-e349.txt`, `.ax/experiments/classifier-graph-embedding-helper-routing-policy-summary-e350.json`, `.ax/experiments/classifier-graph-embedding-helper-routing-policy-summary-e350.txt`, `.ax/experiments/classifier-graph-embedding-helper-routing-policy-no-match-e351.json`, `.ax/experiments/classifier-graph-embedding-helper-routing-policy-no-match-e351.txt`, `.ax/experiments/classifier-graph-embedding-helper-routing-policy-best-available-e352.json`, `.ax/experiments/classifier-graph-embedding-helper-routing-policy-best-available-e352.txt`, `.ax/experiments/classifier-graph-embedding-helper-routing-policy-gap-e353.json`, `.ax/experiments/classifier-graph-embedding-helper-routing-policy-gap-e353.txt`, `.ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.json`, `.ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.txt` | SVM is useful as router/miner/deduper/review helper, not as a replacement classifier. Promoted helper facts now support a human-editable coverage review loop: gap fixtures -> markdown brief -> synced JSONL -> readiness/projection, with explicit guards and no automatic ranking suppression. Unknown fixture ids and invalid statuses in synced markdown are now explicit diagnostics, review packs report whether their reviewed candidates are new, existing, or out of scope for the current coverage query, projected reviewed/unreviewed totals show the payoff before apply, and briefs/readiness outputs now include a summary/candidate queue, per-fixture support/evidence/score context, copy-pasteable sync/readiness/apply commands, verdict/rationale counts, smoke counts, the derived apply guard, explicit `can_apply`, structured `apply_blockers`, counted `apply_blocker_details` with remediations, and a guard-specific next action plus a versioned readiness schema marker and exact reviewed-fixture/projected-fact audit IDs and machine-readable apply result metadata and per-fixture apply audit rows visible in JSON and text, markdown blocker remediations, and optional reviewer/reviewed-at provenance that syncs into projected review graph facts, appears in readiness apply audit rows, is counted for completeness, has a provenance status/next action, and can now be enforced with an optional strict apply gate, and reviewer briefs surface provenance gap counts plus a strict provenance apply command, and readiness/brief outputs now carry a post-apply coverage recheck command, and strict provenance now validates reviewed-at timestamps, and readiness outputs identify exact provenance issue rows, reviewer briefs render those fixture-level provenance issues, and normal readiness now exposes strict provenance guard/blocker/can-apply fields without requiring strict apply mode, and review services can explicitly stamp reviewer/reviewed-at provenance during sync without editing the markdown by hand, and successful applies can now carry a post-apply coverage recheck summary comparing before/projected/after coverage counts, and review briefs now include the provenance-stamping command template for review services, and reviewer handoffs include a pre-apply review-facts/write-plan export command, and readiness outputs record exported review artifact paths when requested, including rendered and synced review brief paths, and expose a complete/incomplete handoff status for automation gates, and can block apply when the complete handoff is required, and reviewer briefs now render a production apply command that supplies all complete-handoff paths, and normal readiness now exposes handoff apply guard/blocker/can-apply fields without requiring apply mode, and reviewer briefs now show the handoff status, missing paths, guard, blockers, and remediations directly, and readiness now exposes a combined production apply guard/blocker/can-apply preview for the shared graph path, and reviewer briefs now surface that production guard and remediation next to the base, handoff, and strict provenance guards, and readiness/brief outputs now include a production-specific next action so services do not follow the non-production apply advice, and readiness now includes a machine-readable production apply command only when the complete handoff paths are present, and readiness now also exposes a machine-readable provenance stamp command when rendered and synced brief paths are present, and readiness now exposes fixture-level review repair issue rows for automation queues, and readiness now summarizes those repair issues as counts for reporting, and markdown review briefs now render the same repair queue for reviewers, and readiness/text/brief outputs now report the distinct fixture count with repair issues, and readiness/text/brief outputs now expose an explicit review repair status and next action, and readiness/text/brief outputs now report the distinct candidate-group count with repair issues, and readiness/text/brief outputs now expose a repair rerun command for review issue queues, and provenance-complete review packs now have a regression artifact proving no repair command is emitted when the issue queue is empty, and review issue rows now carry a blocking scope so services can route base-apply versus production-apply repairs directly, and readiness/text/brief outputs now summarize issue counts by blocking scope, and scoped fixture/candidate workload counts now distinguish duplicate issues on the same fixture from distinct repair work, and review issue scope summaries now package issue/fixture/candidate counts per blocking scope for services, and review pipeline stages now give services one routing field for decisions, repairs, provenance stamping, handoff, or production apply, and stage-specific pipeline commands point services at the next executable step, and command kinds identify the executable category without parsing shell strings, and required-input lists expose command placeholders as structured fields, and pipeline command argv arrays expose executable arguments without shell parsing, and input bindings map required values to argv flags and placeholders, and binding indexes/prefixes identify the exact argv element to replace, and command status distinguishes commands that need input binding from commands ready to execute, and value-kind metadata lets services validate pipeline input values before binding, and explicit pipeline command blockers tell services why a command cannot execute yet, and output artifact metadata tells services which files to verify after command execution, with argv indexes and value prefixes for precise output-path handling, pending output artifact checks give services a post-execution verification checklist, and aggregate output-check status lets services route pending verification without scanning row checks, and the output-check next action tells executors exactly what to do after command execution, and the command can-execute boolean lets services branch without re-encoding status rules, and the command next action tells executors whether to bind inputs or execute immediately, and the service helper exposes the same routing state without scraping CLI text, and the workflow-candidates CLI can now attach that lifecycle report, bind debug-only pipeline inputs, and verify real output artifacts without mutating review provenance. | Passed: coverage gap brief emits 3 pending fixtures with `no_reviewed_fixtures`; synced missing-rationale JSON/text reports `missing_review_rationale`, `can_apply=false`, `apply_blockers=[missing_review_rationale]`, `apply_blocker_details=[{blocker: missing_review_rationale, count: 1, remediation: Add rationale text to each reviewed fixture.}]`, `next_action`, and schema=`ax.workflow_candidate_review_readiness.v1`; clean complete-rationale JSON/text reports `ready_to_apply`, `can_apply=true`, empty blockers/details with no remediations, and a non-applied write plan with the same readiness schema and audit IDs showing one reviewed fixture maps to one projected fact, while apply result metadata distinguishes `not_requested` from guarded `blocked` applies, and `apply_audit_rows` map each reviewed fixture to its projected graph fact in JSON, text output, and markdown reviewer briefs; malformed sync reported `unknown_fixture_count=1`, `invalid_fixture_count=1`, and `apply_guard=invalid_review_pack`; E269 pending/synced briefs show reviewer and reviewed-at fields for audit provenance; E270 JSON and text readiness artifacts show reviewer and reviewed-at on apply audit rows; E271 readiness artifacts count missing reviewer and reviewed-at fields; E272 readiness artifacts classify complete vs missing review provenance with next actions; E273 strict mode blocks missing provenance with `missing_review_provenance`, while a provenance-complete pack reports `ready_to_apply` and `not_requested` when run without apply; E274 briefs show provenance counts and include a `--require-review-provenance` apply path, with reviewed missing-provenance rows showing `strict provenance apply guard=missing_review_provenance`; E275 JSON, text, and brief artifacts expose a post-apply recheck command so reviewers can verify coverage gaps close after applying real review facts; E276 blocks strict apply when reviewed-at is non-parseable and exposes `invalid_reviewed_at_count` plus brief remediation; E277 adds structured `provenance_issue_rows` and text issue lines so services can point reviewers at the exact fixture to fix; E278 renders those issue rows directly in the markdown review brief; E279 normal readiness reports `apply_guard=ready_to_apply` and `can_apply=true` while also reporting `strict_apply_guard=missing_review_provenance`, `strict_can_apply=false`, and strict blocker details; E280 explicit provenance stamping records `stamped_reviewer_count=1`, `stamped_reviewed_at_count=1`, clears missing provenance counts, and reaches strict `ready_to_apply`; E281 adds a recheck summary schema that reports `gap_closed` when post-apply coverage reaches the projected reviewed/unreviewed counts; E282 review briefs include a `--review-provenance-reviewer` and `--review-provenance-reviewed-at` command template so provenance stamping is discoverable; E283 briefs include a `--review-facts` and `--review-write-plan` export command so graph writes can be inspected before apply; E284 JSON and text readiness outputs include the saved review facts and write-plan paths; E285 readiness outputs also include the rendered review brief path and synced source brief path; E286 adds `review_handoff_status` and `review_handoff_missing_paths` so services can gate on handoff completeness; E287 adds `--require-review-handoff` so apply is blocked when the handoff is incomplete; E288 fixes the production review-brief command so it includes the handoff paths required by that gate; E289 normal readiness reports `handoff_apply_guard=missing_review_handoff` when handoff paths are incomplete and `handoff_apply_guard=ready_to_apply` when all handoff paths are present; E290 markdown review briefs render handoff status, missing paths, guard, blockers, and remediations; E291 readiness outputs expose `production_apply_guard`, `production_can_apply`, and production blockers for the combined strict-provenance plus handoff gate; E292 markdown review briefs render production apply guard, blockers, and remediations; E293 readiness and brief outputs add `production_next_action` for the combined production gate; E294 readiness outputs include `production_apply_command` only when complete handoff paths are available; E295 readiness outputs include `review_provenance_stamp_command` only when rendered and synced review brief paths are available; E296 readiness outputs include fixture-level `review_issue_rows` and text issue lines for missing rationale and provenance repairs; E297 readiness outputs include `review_issue_counts` and compact text counts for service reporting; E298 markdown briefs render `Review Issues` with counts, fixture rows, and remediations; E299 readiness, text, and briefs report the distinct fixture count with review repair issues; E300 readiness, text, and briefs expose `review_issue_status` and `review_issue_next_action` as an explicit repair gate; E301 readiness, text, and briefs report the distinct candidate count with review repair issues; E302 readiness, text, and briefs expose `review_issue_repair_command` for review services; E303 verifies provenance-complete packs report `review_repair_complete` without emitting a repair command; E304 review issue rows expose `blocking_scope` in JSON, text, and briefs; E305 summarizes review issues by blocking scope for service routing; E306 adds scoped fixture and candidate workload counts; E307 adds consolidated scope summaries with issue, fixture, and candidate counts; E308 adds review pipeline stage and next-action fields; E309 splits provenance stamping into its own pipeline stage; E310 adds a stage-specific pipeline command; E311 adds a machine-readable pipeline command kind; E312 adds required input names for stage-specific commands; E313 adds structured argv arrays for stage-specific commands; E314 adds explicit input bindings for service-side placeholder replacement; E315 adds argv indexes and value prefixes to those bindings; E316 adds pipeline command status for requires-inputs versus ready-to-execute routing; E317 adds value-kind metadata for pipeline input bindings; E318 adds explicit pipeline command blockers and blocker details for command execution routing; E319 adds pipeline command output artifacts for post-execution verification; E320 adds argv indexes and value prefixes to pipeline output artifacts; E321 adds pending output artifact checks for post-execution verification; E322 adds aggregate pipeline output check status for verification routing; E323 adds an explicit output-check next action for executor routing; E324 adds an explicit pipeline command can-execute boolean; E325 adds an explicit command-execution next action; E326 adds an Effect service helper for command routing summaries; E327 lets that service validate and bind pipeline inputs into executable argv; E328 lets it verify required output artifacts after execution; E329 packages summary, preparation, and optional verification into one lifecycle report; E330 adds a filesystem-backed verifier adapter for real output artifact checks; E331 exposes lifecycle debug output through the workflow-candidates CLI with separate non-mutating pipeline input flags and verified filesystem artifacts; E332 projects those lifecycle reports into classifier lifecycle graph facts and Surreal write plans; E333 exposes the review-pipeline lifecycle as a lifecycle insight routing summary; E334 carries the prepared argv and output artifact checks into that insight surface; E335 projects those argv and artifact arrays into graph facts and Surreal write plans; E336 adds predicate-filtered lifecycle graph queries for those facts; E337 adds subject-filtered graph queries so services can target one lifecycle node and predicate; E338 adds value-contains filtering for array-valued lifecycle facts; E339 adds source-kind filtering so services can isolate one graph projection in shared graph tables; E340 adds fact-kind filtering so services can isolate one graph fact family such as embedding helper hard negatives; E341 adds status filtering so services can query only accepted or rejected helper facts; E342 adds nearest-fixture filtering so services can find helper facts explained by a specific reviewed fixture; E343 adds source-fixture filtering so services can inspect one helper candidate without knowing internal graph ids; E344 adds proposed-label filtering so services can group helper facts by reviewed target label; E345 adds minimum nearest-neighbor similarity filtering so services can isolate boundary-near helper facts; E346 adds threshold filtering so services can target advisory routing policy facts; E347 adds minimum seed-count filtering so services can prioritize better-supported helper facts; E348 adds minimum positive-recall filtering so services can query routing policies that meet recall floors; E349 adds minimum call-reduction filtering so services can query routing policies that meet cost-saving floors; E350 adds a routing policy summary so services can choose reviewed thresholds that meet recall and cost-saving floors without re-ranking facts client-side; E351 adds no-match remediation so services can route impossible routing floors to review or floor adjustment; E352 adds best-available routing policy metrics so services can lower floors with concrete reviewed evidence; E353 adds explicit routing floor gap metrics so services can make no-match remediation directly actionable; E354 adds blocking floor names and largest-gap routing so services can prioritize floor adjustment without comparing metrics client-side. | `e008bbb`, `7dcd25b`, `08a0648`, `74c39c7`, `bffba8f`, `65b0b3c`, `4c602d9`, `9a6811e`, `31a1b16`, `e41562c`, `0587b67`, `0e0a960`, `3f01787`, `7bea922`, `21f7163`, `24e4a4e`, `f97c8e3`, `722e3e8`, `8b27657`, `d700090`, `6237d89`, `2490fdf`, `9f4ee34`, `2530699`, `bca5938`, `65bc09a`, `6631d2d`, `85b4df8`, `c9f59e4`, `451b524`, `59adacf`, `83ebdb0`, `fc48156`, `bce421d`, `68e19dd`, `91edc29`, `37a7ef8`, `10529fb`, `3f71886`, `95a908b`, `692ac34`, `3be078f`, `54df4ed`, `ecb0404`, `7c3f847`, `63f872e`, `01d56c1`, `a826ba2`, `a511c8c`, `f324090`, `770546a`, `8bc8f43`, `7504924`, `4d98a32`, `acdec6a`, `d68e268`, `5c69e1a`, `3401b54`, `3505420`, `96439f4`, `d8a37df`, `7d86e2b`, `f2011e7`, `0e2989d`, `9e84e94`, `0e577eb`, `32cc22b`, `6ef5287`, `996623a`, `65c8540`, `6216815`, `32cfa10`, `93eeaab`, `ce4baba`, `825f248`, `632a312`, `5c9c067`, `06ca8c2`, `5eb2894`, `787ec8d`, `81f0d5c`, `f2554c8`, `04effe7`, `ea42841`, `f3510e0`, `35d773b`, `582cd91`, `beca3b6`, `8634e1d`, `f7fcbee`, `a84b37a`, `4448a27`, `887e39e`, `fcf7619`, `dc5e7d2`, `7b2aa7a`, `3ffc202`, `1cdcd93`, `e8a382c`, `b08f382`, `1319edd`, `df30770`, `a0519aa`, `4ada725`, `a4bf3d8`, `afaad16`, `eb958c1`, `15f5a37`, `d027fd9`, `7f99f7c`, `b22959e`, `6887c15`, `64f9925`, `c0cbf98`, `5a1a103`, `d794f95`, `189a813`, `b4ac14a`, `f112df9`, `69809e1`, `8d6cccc`, `c7a30f1`, `2965586`, `7a67d4e`, `90e09b9`, `d32714a`, `f3231cd`, `d2f3d98`, `2d6f897`, `cc73a65`, `228c4a9`, `a42f4c3`, `9e13f95`, `c861a55`, `7c477ab`, `4b4e2b4`, `3140d03`, `5624793`, `08433f8`, `5e085aa`, `ae25d34`, this commit | Next useful work is to complete the coverage brief with real review decisions/rationales, apply those review facts, and re-run coverage to confirm the gap closes. |
+
+## E489 - Workflow Fixture SetFit Quality Status
+
+Question: after appending the accepted workflow fixture candidate, does the
+expensive SetFit robustness path show enough quality to treat model output as
+promotion-quality evidence?
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers package-operations \
+  --operation=workflow-fixture-setfit-robustness \
+  --execute --allow-expensive \
+  --out=.ax/experiments/classifier-package-execution-workflow-fixture-setfit-robustness-e489.json \
+  --json
+
+bun src/cli/index.ts classifiers package-operations \
+  --operation=workflow-fixture-failure-analysis \
+  --execute \
+  --out=.ax/experiments/classifier-package-execution-workflow-fixture-failure-analysis-e489.json \
+  --json
+
+bun src/cli/index.ts classifiers package-operations \
+  --quality-status \
+  --source-report=.ax/experiments/setfit-failure-analysis-workflow-fixtures-current.json \
+  --out=.ax/experiments/classifier-quality-status-workflow-fixtures-e489.json \
+  --json
+```
+
+Artifacts:
+
+- `.ax/experiments/classifier-package-execution-workflow-fixture-setfit-robustness-e489.json`
+- `.ax/experiments/setfit-robustness-workflow-fixtures-current.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-failure-analysis-e489.json`
+- `.ax/experiments/setfit-failure-analysis-workflow-fixtures-current.json`
+- `.ax/experiments/classifier-quality-status-workflow-fixtures-e489.json`
+
+SetFit robustness:
+
+- Fixtures: `137`
+- Labels: `approval=20`, `correction_or_rejection_signal=26`,
+  `environment_or_preference_signal=24`, `none=37`,
+  `verification_or_recovery_signal=30`
+- Seeds: `7`, `13`, `42`
+- Mean accuracy: `0.8049`
+- Mean macro F1: `0.7926`
+- Minimum macro F1: `0.7364`
+- Maximum none false-positive rate: `0.0769`
+- Total train seconds: `312.55`
+
+Failure analysis:
+
+- Decision: `needs_none_safety_review`
+- Gate passed: `false`
+- Failed check: `macro_f1_min_at_or_above_threshold=false`
+  because `0.7364 < 0.75`
+- Passed check: none false-positive max stayed below `0.1`
+- Repeated misses: `7`
+- Unique none false positives: `1`
+- The newly appended workflow candidate
+  `workflow-candidate-topic/review_coverage/correction_or_rejection_signal/lhseid`
+  is still missed as `none` in all three seeds.
+
+CLI/service addition:
+
+- `classifiers package-operations --quality-status` now converts the saved
+  failure-analysis report into `ax.classifier_quality_status.v1`.
+- The status artifact reports:
+  `quality_gate_passed=false`, `promotion_quality=false`,
+  `recommended_use=model_quality_work`, and blockers
+  `model_quality_gate_not_passed`, `residual_repeated_misses`,
+  `residual_none_false_positives`, `missing_human_promotion_review`.
+
+Decision:
+
+- Continue, but do not treat raw SetFit output as promotion-quality graph
+  evidence.
+- The appended fixture is useful as a hard/boundary example, not as proof of
+  model improvement.
+- The next useful slice is to turn the repeated workflow-candidate miss into a
+  focused review/hard-negative set, add more paired correction workflow-state
+  examples, and compare whether deterministic/hybrid gates catch the same case
+  before another expensive SetFit run.
+
+## E490 - Workflow Boundary Miss Review Operations
+
+Question: can the E489 residual SetFit misses be turned into package-level
+review work without treating the failed model output as useful graph evidence?
+
+Changes:
+
+- Added `workflow-fixture-boundary-miss-review` to the classifier package
+  manifest. It generates a review JSON, markdown brief, and report for all
+  repeated residual misses from
+  `.ax/experiments/setfit-failure-analysis-workflow-fixtures-current.json`.
+- Added `workflow-fixture-boundary-miss-review-workflow-candidate` for a
+  focused review of only workflow-candidate sourced misses.
+- Added `--pending-exit-zero` to `boundary_miss_review.py` so generate-mode
+  package operations can succeed when the only failure is expected pending
+  review work. Invalid rows and other failures still exit nonzero.
+- Added regression coverage for empty `source_group` including all groups and
+  for the stricter pending-only exit behavior.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers package-operations \
+  --operation=workflow-fixture-boundary-miss-review \
+  --execute \
+  --out=.ax/experiments/classifier-package-execution-workflow-fixture-boundary-miss-review-e490.json \
+  --json
+
+bun src/cli/index.ts classifiers package-operations \
+  --operation=workflow-fixture-boundary-miss-review-workflow-candidate \
+  --execute \
+  --out=.ax/experiments/classifier-package-execution-workflow-fixture-boundary-miss-review-workflow-candidate-e490.json \
+  --json
+```
+
+Artifacts:
+
+- `.ax/experiments/boundary-miss-review-workflow-fixtures-current.json`
+- `.ax/experiments/boundary-miss-review-workflow-fixtures-current.md`
+- `.ax/experiments/boundary-miss-review-workflow-fixtures-current-report.json`
+- `.ax/experiments/boundary-miss-review-workflow-candidate-current.json`
+- `.ax/experiments/boundary-miss-review-workflow-candidate-current.md`
+- `.ax/experiments/boundary-miss-review-workflow-candidate-current-report.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-boundary-miss-review-e490.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-boundary-miss-review-workflow-candidate-e490.json`
+
+Results:
+
+- Broad review operation: `decision=needs_boundary_miss_review`,
+  `items=7`, `pending=7`, families
+  `approval_boundary=1`, `label_boundary=4`, `missed_signal=3`, actual labels
+  `approval=1`, `correction_or_rejection_signal=5`,
+  `verification_or_recovery_signal=1`.
+- Workflow-candidate focused operation: `decision=needs_boundary_miss_review`,
+  `items=1`, `pending=1`, family `missed_signal=1`, actual label
+  `correction_or_rejection_signal=1`.
+- The focused item is still
+  `workflow-candidate-topic/review_coverage/correction_or_rejection_signal/lhseid`,
+  predicted as `none` in seeds `7`, `13`, and `42`.
+
+Decision:
+
+- Continue, but route the model failure into boundary review and fixture
+  contract work.
+- The review operations give the next ten-round loop a concrete work queue:
+  decide which repeated misses are valid labels, which need fixture text/target
+  changes, and which imply deterministic/hybrid gates.
+
+## E491 - Workflow Hybrid Gate Check
+
+Question: does the existing deterministic none-safety/hybrid layer fix the
+same workflow-candidate miss that raw SetFit keeps predicting as `none`?
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers package-operations \
+  --operation=workflow-fixture-none-safety-pregate \
+  --execute \
+  --out=.ax/experiments/classifier-package-execution-workflow-fixture-none-safety-pregate-e491.json \
+  --json
+
+bun src/cli/index.ts classifiers package-operations \
+  --operation=workflow-fixture-hybrid-robustness \
+  --execute --allow-expensive \
+  --out=.ax/experiments/classifier-package-execution-workflow-fixture-hybrid-robustness-e491.json \
+  --json
+```
+
+Artifacts:
+
+- `.ax/experiments/none-safety-pregate-workflow-fixtures-current.json`
+- `.ax/experiments/hybrid-robustness-workflow-fixtures-current.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-none-safety-pregate-e491.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-hybrid-robustness-e491.json`
+
+Results:
+
+- None-safety pregate:
+  `decision=candidate_none_safety_pregate`, before macro F1 mean/min
+  `0.7933/0.7364`, after macro F1 mean/min `0.801/0.7364`, before none
+  false-positive max `0.0769`, after none false-positive max `0.0`,
+  `fixed_none_false_positive_count_total=1`, harmful overrides `0`.
+- Hybrid robustness:
+  `decision=hybrid_robust_enough`, failures `[]`, macro F1 mean/min
+  `0.801/0.7364`, accuracy mean `0.813`, none false-positive max `0.0`,
+  override count `1`, harmful overrides `0`.
+- The repeated workflow-candidate miss
+  `workflow-candidate-topic/review_coverage/correction_or_rejection_signal/lhseid`
+  remains predicted as `none` in seeds `7`, `13`, and `42`.
+- No none-safety override fired for that workflow-candidate row.
+
+Decision:
+
+- Keep the hybrid layer because it improves aggregate none safety without
+  harmful overrides in this run.
+- Do not claim the hybrid layer solves workflow-candidate correction recall.
+  The persistent miss points to a missing correction/workflow-state signal, not
+  to a generic none-safety problem.
+- Next useful slice: inspect whether deterministic correction gates can detect
+  the workflow-candidate row from its context, then encode the result as a
+  focused gate/eval rather than another broad SetFit run.
+
+## E492 - Deterministic Workflow Correction Catch
+
+Question: can a cheap deterministic classifier catch the exact
+workflow-candidate correction row that SetFit and the current hybrid layer keep
+missing as `none`?
+
+Change:
+
+- Extended `correction-event` with a narrow `workflow_state` target for reviewed
+  workflow-candidate correction facts containing `accepted workflow candidate`
+  or `persisted review fact` plus `correction_or_rejection_signal`,
+  `workflow-state correction`, `workflow_state`, or `add_context_guardrail`.
+- Added unit and golden fixture coverage for the E489/E491 missed row shape.
+
+Verification:
+
+```sh
+bun test src/classifiers/correction-event/index.test.ts src/classifiers/eval.test.ts src/classifiers/list.test.ts
+bun src/cli/index.ts classifiers eval --path=src/classifiers/eval-fixtures/correction-event.json --json
+```
+
+Results:
+
+- Unit/eval/list tests passed: `10 pass`.
+- Correction-event golden eval: `8/8` passed.
+- The new fixture
+  `reviewed-workflow-candidate-correction` is classified as
+  `correction-event:correction/workflow_state` with repo durability.
+
+Decision:
+
+- This is a narrow deterministic routing fix, not evidence that SetFit has
+  improved.
+- It supports the hybrid architecture: reviewed graph/workflow-candidate
+  artifacts can be routed cheaply before model classification.
+- Next useful slice: project or query this deterministic result path against
+  the same workflow-candidate evidence so the graph can prefer deterministic
+  reviewed correction facts over raw model `none` predictions.
+
+## E493 - Boundary Review Deterministic Replay
+
+Question: can the deterministic correction classifier be replayed against the
+actual workflow-candidate boundary review artifact, producing a machine-readable
+coverage report instead of relying on unit tests?
+
+Changes:
+
+- Added `scripts/classifier-boundary-review-replay.ts`.
+- Added package operation
+  `workflow-fixture-boundary-deterministic-replay`.
+- Added tests for deterministic coverage and uncovered-gap reporting.
+
+Command:
+
+```sh
+bun src/cli/index.ts classifiers package-operations \
+  --operation=workflow-fixture-boundary-deterministic-replay \
+  --execute \
+  --out=.ax/experiments/classifier-package-execution-workflow-fixture-boundary-deterministic-replay-e493.json \
+  --json
+```
+
+Artifacts:
+
+- `.ax/experiments/boundary-review-deterministic-replay-workflow-candidate-current.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-boundary-deterministic-replay-e493.json`
+
+Results:
+
+- Replay schema: `ax.boundary_review_deterministic_replay.v1`
+- Items: `1`
+- Covered by deterministic: `1`
+- Uncovered: `0`
+- Coverage rate: `1`
+- Decision: `deterministic_boundary_replay_complete`
+- The previously repeated SetFit miss
+  `workflow-candidate-topic/review_coverage/correction_or_rejection_signal/lhseid`
+  now receives deterministic result
+  `correction-event:correction/workflow_state` at confidence `0.84` with
+  signals `correction:workflow_state` and
+  `source:reviewed_workflow_candidate`.
+
+Verification:
+
+```sh
+bun test scripts/classifier-boundary-review-replay.test.ts src/classifiers/correction-event/index.test.ts src/classifiers/package-service.test.ts
+```
+
+Passed: `31` tests.
+
+Decision:
+
+- This is the strongest evidence in this loop for the hybrid architecture:
+  the model still misses the row, but a cheap reviewed-artifact deterministic
+  classifier covers it.
+- Next useful slice: make graph/query surfaces aware of this replay coverage
+  so candidate promotion can prefer deterministic reviewed correction evidence
+  and demote raw model `none` predictions on the same row.
+
+## E494 - Boundary Replay Graph Projection
+
+Question: can deterministic replay coverage become graph-shaped facts that the
+query layer can consume without reading the replay JSON directly?
+
+Changes:
+
+- Added `boundary_replay_graph_projection.py`.
+- Added package operation
+  `workflow-fixture-boundary-deterministic-graph-projection`.
+- Added projection tests for covered replay facts and write-plan generation.
+
+Command:
+
+```sh
+bun src/cli/index.ts classifiers package-operations \
+  --operation=workflow-fixture-boundary-deterministic-graph-projection \
+  --execute \
+  --out=.ax/experiments/classifier-package-execution-workflow-fixture-boundary-deterministic-graph-projection-e494.json \
+  --json
+```
+
+Artifacts:
+
+- `.ax/experiments/boundary-replay-graph-projection-workflow-candidate-current.json`
+- `.ax/experiments/boundary-replay-graph-write-plan-workflow-candidate-current.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-boundary-deterministic-graph-projection-e494.json`
+
+Results:
+
+- Projection decision: `boundary_replay_graph_projection_ready`
+- Nodes: `3`
+- Edges: `2`
+- Facts: `2`
+- Covered facts: `1`
+- Deterministic label facts: `1`
+- Write plan decision: `ready_to_apply`
+- Source kind:
+  `boundary_replay_deterministic_projection`
+
+Graph facts produced:
+
+- `covered_by_deterministic=true` for
+  `classifier_boundary_miss:workflow-candidate-topic/review_coverage/correction_or_rejection_signal/lhseid`
+- `deterministic_label={label: correction, target: workflow_state}` linked to
+  the deterministic `correction-event` result.
+
+Verification:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/boundary_replay_graph_projection_test.py
+bun test src/classifiers/package-service.test.ts
+```
+
+Passed: `2` Python tests and `25` Bun tests.
+
+Decision:
+
+- Continue the graph-first path. This is now queryable evidence that the model
+  miss has a deterministic reviewed correction alternative.
+- Next useful slice: apply the boundary replay write plan to local SurrealDB
+  and add/query graph-health filters for `boundary_replay_deterministic_projection`.
+
+## E495 - Boundary Replay Graph Apply
+
+Question: after projection, can the deterministic boundary replay facts be
+applied to local SurrealDB and queried back from the shared graph tables?
+
+Commands:
+
+```sh
+python3 packages/ax-classifier-session-sections/graph_write_plan_apply.py \
+  --write-plan=.ax/experiments/boundary-replay-graph-write-plan-workflow-candidate-current.json \
+  --out=.ax/experiments/boundary-replay-graph-apply-workflow-candidate-e495.json \
+  --json
+
+printf '%s\n' \
+  'SELECT graph_id, kind, subject, predicate, value_json, source_kind FROM classifier_graph_fact WHERE source_kind = "boundary_replay_deterministic_projection";' \
+  | surreal sql --hide-welcome --json --endpoint http://127.0.0.1:8521 --user root --pass root --ns ax --db main
+```
+
+Artifacts:
+
+- `.ax/experiments/boundary-replay-graph-apply-workflow-candidate-e495.json`
+
+Results:
+
+- Apply decision: `applied`
+- Statements attempted/applied: `7/7`
+- Failed statements: `0`
+- Tables: `classifier_graph_node`, `classifier_graph_edge`,
+  `classifier_graph_fact`
+- Direct Surreal query returned two facts for
+  `source_kind=boundary_replay_deterministic_projection`:
+  `covered_by_deterministic=true` and
+  `deterministic_label={"label":"correction","target":"workflow_state"}`.
+
+Important observation:
+
+- `classifiers graph --mode=lifecycle --source-kind=boundary_replay_deterministic_projection --fact-kind=classifier_boundary_replay`
+  currently reports `query_match_status=no_match`, even though the facts are in
+  SurrealDB. The graph CLI only surfaces selected fact families today.
+
+Decision:
+
+- The graph storage path works.
+- The remaining gap is query ergonomics: add a graph CLI mode or fact-family
+  branch for `classifier_boundary_replay` so services do not need raw SurrealQL
+  to consume deterministic replay evidence.
+
+## E496 - Boundary Replay Graph Query Mode
+
+Question: can services discover deterministic boundary replay facts through
+`ax classifiers graph` instead of raw SurrealQL?
+
+Changes:
+
+- Added graph mode `boundary-replay`.
+- Added `boundary_replay_facts` to graph health reports.
+- Added boundary replay totals and result-kind counts.
+- Added text rendering for boundary replay facts.
+
+Command:
+
+```sh
+bun src/cli/index.ts classifiers graph \
+  --mode=boundary-replay \
+  --source-kind=boundary_replay_deterministic_projection \
+  --fact-kind=classifier_boundary_replay \
+  --predicate=covered_by_deterministic \
+  --value=true \
+  --json
+```
+
+Results:
+
+- `query_match_status=matched`
+- `query_result_kinds=["boundary_replay_facts"]`
+- `query_result_kind_counts=[{kind: "boundary_replay_facts", count: 1}]`
+- Total boundary replay facts in graph: `2`
+- Result boundary replay facts: `1`
+- Returned fact:
+  `covered_by_deterministic=true` for
+  `classifier_boundary_miss:workflow-candidate-topic/review_coverage/correction_or_rejection_signal/lhseid`
+  with classifier key `correction-event`, actual
+  `correction_or_rejection_signal`, target `workflow_state`, and evidence path
+  `.ax/experiments/boundary-review-deterministic-replay-workflow-candidate-current.json`.
+
+Verification:
+
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+```
+
+Passed: `82` Bun tests. Typecheck exited `0` with the existing Effect lint
+messages.
+
+Decision:
+
+- The deterministic replay coverage is now part of the graph query surface.
+- This makes the useful path concrete: model failures can be converted into
+  reviewed boundary misses, deterministic coverage can be projected as graph
+  facts, and services can query those facts without SurrealQL.
+- Next useful slice: add an automated quality/conclusion report that compares
+  SetFit quality, hybrid quality, boundary replay coverage, and graph
+  availability into a single decision artifact.
+
+## E497 - Workflow Classifier Quality Conclusion
+
+Question: after ten more focused rounds, what does the current evidence say:
+continue, bail, or narrow the classifier path?
+
+Changes:
+
+- Added `scripts/classifier-workflow-quality-conclusion.ts`.
+- Added package operation `workflow-fixture-quality-conclusion`.
+- Added `bun run classifiers:workflow-quality-conclusion`.
+- Added tests for the decision contract when raw SetFit fails but hybrid,
+  deterministic replay, and graph evidence are available.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph \
+  --mode=boundary-replay \
+  --source-kind=boundary_replay_deterministic_projection \
+  --fact-kind=classifier_boundary_replay \
+  --predicate=covered_by_deterministic \
+  --value=true \
+  --out=.ax/experiments/boundary-replay-graph-query-e497.json \
+  --json
+
+bun src/cli/index.ts classifiers package-operations \
+  --operation=workflow-fixture-quality-conclusion \
+  --execute \
+  --out=.ax/experiments/classifier-package-execution-workflow-fixture-quality-conclusion-e497.json \
+  --json
+```
+
+Artifacts:
+
+- `.ax/experiments/boundary-replay-graph-query-e497.json`
+- `.ax/experiments/workflow-classifier-quality-conclusion-current.json`
+- `.ax/experiments/workflow-classifier-quality-conclusion-e497.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-quality-conclusion-e497.json`
+
+Results:
+
+- Conclusion: `continue_hybrid_not_raw_setfit`
+- Production posture: `deterministic_and_reviewed_graph_facts_only`
+- Raw SetFit:
+  - quality gate passed: `false`
+  - promotion quality: `false`
+  - recommended use: `model_quality_work`
+  - macro F1 minimum: `0.7364`
+  - repeated misses: `7`
+  - blockers:
+    `model_quality_gate_not_passed`, `residual_repeated_misses`,
+    `residual_none_false_positives`, `missing_human_promotion_review`
+- Hybrid:
+  - decision: `hybrid_robust_enough`
+  - macro F1 minimum: `0.7364`
+  - none false-positive max: `0`
+  - harmful override count: `0`
+  - fixed none false-positive count: `1`
+- Deterministic boundary replay:
+  - decision: `deterministic_boundary_replay_complete`
+  - coverage rate: `1`
+  - covered by deterministic: `1`
+  - uncovered: `0`
+- Graph:
+  - query match status: `matched`
+  - total boundary replay facts: `2`
+  - matched boundary replay facts: `1`
+
+Decision:
+
+- Do not promote raw SetFit output as graph facts.
+- Do continue the classifier program through the hybrid path:
+  deterministic guards, reviewed boundary fixtures, model/helper mining,
+  explicit replay checks, and graph-queryable evidence.
+- The useful result is not "the model labels correctly now." The useful
+  result is that a model failure can be converted into a reviewed boundary
+  artifact, covered by a cheap deterministic rule, projected into the graph,
+  and queried by services.
+
+Verification:
+
+```sh
+bun test scripts/classifier-workflow-quality-conclusion.test.ts src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts
+python3 -m json.tool packages/ax-classifier-session-sections/ax.classifier.json >/dev/null
+```
+
+Passed: `36` Bun tests and manifest JSON validation.
+
+## E498 - Ten-Round Working Conclusion
+
+Question: after the requested ten additional rounds, what is the working
+conclusion and what should the next agent optimize for?
+
+Evidence chain:
+
+1. Raw SetFit is still not promotion quality. E489 fails the model gate because
+   min macro F1 is `0.7364`, below the `0.75` threshold, and the accepted
+   workflow-candidate correction row is still predicted as `none` in all three
+   seeds.
+2. Hybrid gating is worth keeping. E491/E497 show
+   `decision=hybrid_robust_enough`, none false-positive max `0`, harmful
+   overrides `0`, and one fixed none false positive.
+3. The remaining miss is not solved by broad model training yet. It is a
+   workflow-state correction/context problem.
+4. A narrow deterministic reviewed-artifact rule catches that miss. E492/E493
+   classify the reviewed workflow-candidate row as
+   `correction-event:correction/workflow_state`, and focused replay reports
+   `coverage_rate=1`.
+5. The useful output is now graph-queryable. E494/E495 project/apply replay
+   facts, E496 exposes `--mode=boundary-replay`, and E497 confirms
+   `query_match_status=matched`.
+
+Working conclusion:
+
+- Continue the classifier effort.
+- Bail on raw SetFit as a direct promotion-quality fact source for now.
+- Treat heavier models as candidate miners, hard-negative finders, and review
+  prioritizers until the quality gates pass on held-out/replayed fixtures.
+- Promote only deterministic or human-reviewed graph facts in the current
+  product path.
+
+What went right:
+
+- The loop found a real failure, did not hand-wave it away, and turned it into
+  a reviewed boundary artifact.
+- The deterministic/review/graph path made the failure useful without another
+  expensive training run.
+- Package operations now make the conclusion reproducible from declared inputs.
+
+What went wrong:
+
+- Raw SetFit improvement was weaker than expected for fine workflow-state
+  boundaries.
+- The expensive model runs alone did not answer the product question; graph
+  usefulness and review gates were the real deciding evidence.
+- Several earlier artifacts were too verbose for quick operational decisions,
+  which is why E497 now compresses the evidence into one decision report.
+
+Next target:
+
+- Build service/product behavior on graph-queryable reviewed facts:
+  `classifier_graph_fact` rows with evidence paths, source kinds, predicates,
+  and review provenance.
+- Keep SetFit/SVM/embedding layers behind routing and review workflows:
+  candidate discovery, nearest-neighbor explanation, hard-negative mining, and
+  dedupe.
+- The next benchmark should not ask only "did the model label correctly?" It
+  should ask whether new reviewed facts improve workflow/harness discovery
+  without increasing false promotion risk.
+
+Verification:
+
+```sh
+jq '{conclusion,production_posture,setfit,hybrid,boundary_replay,graph}' \
+  .ax/experiments/workflow-classifier-quality-conclusion-current.json
+```
+
+Returned `conclusion=continue_hybrid_not_raw_setfit` and
+`production_posture=deterministic_and_reviewed_graph_facts_only`.
+
+## E499 - Boundary Replay Service Summary
+
+Question: can services consume the reviewed deterministic replay posture
+directly from graph query results, without reinterpreting individual graph
+facts?
+
+Changes:
+
+- Added `boundary_replay_summary` to classifier graph health reports.
+- The summary is emitted for `boundary-replay` and `evidence` graph modes.
+- Text rendering now exposes the summary status, production posture, next
+  action, remediation, covered subject count, deterministic-label count,
+  evidence count, classifiers, targets, subjects, and recommended query argv
+  when filters need relaxing.
+
+Command:
+
+```sh
+bun src/cli/index.ts classifiers graph \
+  --mode=boundary-replay \
+  --source-kind=boundary_replay_deterministic_projection \
+  --fact-kind=classifier_boundary_replay \
+  --predicate=covered_by_deterministic \
+  --value=true \
+  --out=.ax/experiments/boundary-replay-summary-e499.json \
+  --json
+```
+
+Artifact:
+
+- `.ax/experiments/boundary-replay-summary-e499.json`
+
+Result:
+
+- `query_match_status=matched`
+- `boundary_replay_summary.status=reviewed_deterministic_facts_available`
+- `boundary_replay_summary.production_posture=deterministic_and_reviewed_graph_facts_only`
+- `boundary_replay_summary.next_action=use_reviewed_deterministic_graph_facts`
+- `covered_subject_count=1`
+- `deterministic_label_subject_count=1`
+- `evidence_path_count=1`
+- classifier key: `correction-event`
+- target: `workflow_state`
+
+Decision:
+
+- Continue building product/service behavior on this summary shape.
+- Services can now branch on a compact posture field instead of inferring
+  promotion safety from raw graph rows.
+- Raw model output still remains review/mining input only.
+
+Verification:
+
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+```
+
+Passed: `82` Bun tests. Typecheck exited `0` with the existing Effect lint
+messages.
+
+## E500 - Boundary Replay Service Helper
+
+Question: can Effect callers retrieve the promotion-safe boundary replay
+posture without knowing the exact graph query filters?
+
+Changes:
+
+- Added `ClassifierPackageService.boundaryReplaySummaryReport`.
+- Added `ClassifierPackageService.writeBoundaryReplaySummaryReport`.
+- The service helper applies the default boundary replay graph query:
+  `mode=boundary-replay`, `source_kind=boundary_replay_deterministic_projection`,
+  `fact_kind=classifier_boundary_replay`,
+  `predicate=covered_by_deterministic`, `value=true`.
+- Callers can still override query fields when they need a narrower debug view.
+- Added service-layer fake-DB tests for read and write paths.
+
+Result:
+
+- The service returns the compact graph posture:
+  `reviewed_deterministic_facts_available`.
+- The returned production posture remains:
+  `deterministic_and_reviewed_graph_facts_only`.
+- The helper reports classifier key `correction-event`, target
+  `workflow_state`, one covered subject, one deterministic-label subject, and
+  one evidence path from the reviewed replay fixture in the test graph.
+
+Verification:
+
+```sh
+bun test src/classifiers/package-service.test.ts
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts
+bun run typecheck
+```
+
+Passed: `27` focused service tests, then `109` combined classifier package
+tests. Typecheck exited `0` with the existing Effect lint messages/warnings.
+
+## E501 - Boundary Replay Package CLI Summary
+
+Question: can agents call the reviewed deterministic replay posture through a
+single package-operations CLI flag, without recreating the graph query or using
+the lower-level graph command?
+
+Changes:
+
+- Added `classifiers package-operations --boundary-replay-summary`.
+- The flag routes through `ClassifierPackageService.boundaryReplaySummaryReport`
+  and `writeBoundaryReplaySummaryReport`.
+- Text output renders the compact promotion posture, subject counts,
+  classifiers, targets, subjects, and recommended argv.
+- The CLI keeps optional graph filters for debug narrowing while the service
+  owns the default boundary replay query.
+- Fixed the top-level CLI DB routing so this DB-backed package-operations flag
+  gets `AppLayer` instead of the no-DB sentinel.
+
+Command:
+
+```sh
+bun src/cli/index.ts classifiers package-operations \
+  --boundary-replay-summary \
+  --out=.ax/experiments/boundary-replay-package-summary-e501.json \
+  --json
+```
+
+Artifact:
+
+- `.ax/experiments/boundary-replay-package-summary-e501.json`
+
+Result:
+
+- `status=reviewed_deterministic_facts_available`
+- `production_posture=deterministic_and_reviewed_graph_facts_only`
+- `next_action=use_reviewed_deterministic_graph_facts`
+- `covered_subject_count=1`
+- `deterministic_label_subject_count=1`
+- `evidence_path_count=1`
+- classifier key: `correction-event`
+- target: `workflow_state`
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-package-operations.test.ts
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts
+bun run typecheck
+bun src/cli/index.ts classifiers package-operations --boundary-replay-summary --out=.ax/experiments/boundary-replay-package-summary-e501.json --json
+```
+
+Focused CLI tests passed (`26`). Combined classifier package tests passed
+(`111`). Typecheck exited `0` with existing Effect lint messages/warnings. The
+live CLI command reached local SurrealDB and wrote the E501 artifact.
+
+## E502 - Boundary Replay CLI Routing Guard
+
+Question: can the DB-backed package-operations flags be regression-tested so
+future compact graph summary flags do not accidentally run through the no-DB
+CLI path?
+
+Changes:
+
+- Extracted `classifiersPackageOperationsNeedsDb(args)` from the inline CLI
+  routing condition.
+- Added coverage for the DB-backed package-operations flags:
+  `--apply-write-plan`, `--graph-health`, and `--boundary-replay-summary`.
+- Added a negative check that `--quality-status` remains no-DB because it reads
+  a local report file and does not need SurrealDB.
+
+Decision:
+
+- Keep DB routing explicit for package-operations flags that query or mutate the
+  classifier graph.
+- This directly guards the E501 bug where `--boundary-replay-summary` initially
+  reached `SurrealClient.query` through the no-DB sentinel.
+
+Verification:
+
+```sh
+bun test src/cli/effect-cli.test.ts src/cli/classifiers-package-operations.test.ts
+bun test scripts/classifier-package-operations.test.ts src/cli/effect-cli.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts
+bun run typecheck
+```
+
+Focused CLI tests passed (`53`). Combined classifier package and CLI tests
+passed (`138`). Typecheck exited `0` with existing Effect lint
+messages/warnings.
 
 Current recommendation:
 
+- Index continuation: E488 turns the accepted classifier-fixture follow-up into
+  an append-ready workflow fixture row and proves the existing package append,
+  metadata, and split-audit gates accept it. The reviewed
+  `correction_or_rejection_signal` candidate is still not guidance; it now
+  appends as package label `correction` with candidate label
+  `correction_or_rejection_signal`, target `workflow_state`, accepted review
+  status, and human review notes.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
   append-only fixtures, graph projection, and workflow/harness usefulness
   checks.
-- The immediate bottleneck is review throughput, not another expensive model
-  run.
+- Direct review execution/routing is now possible behind an explicit
+  `--execute-route` gate, route outputs can be inspected after execution, the
+  current handoff artifacts are complete, the guarded production apply has
+  closed the reviewed-coverage gap, the successful loop is now persisted as
+  lifecycle graph facts, and the accepted `review-coverage` harness proposal
+  now has a passing persisted harness fact. The batch guidance decision says
+  reviewed `review-coverage` and `surrealml` candidates are both
+  `guidance_promotion_not_warranted`, and it now also exposes one pending
+  `correction_or_rejection_signal` candidate blocked on human review with a
+  generated fixture pack, markdown review handoff, machine-readable handoff
+  routing summary, and a batch-level sync/readiness path for edited review
+  briefs. The generated brief now points reviewers back to the batch command
+  instead of the lower-level coverage command, the batch handoff carries the
+  same review-pipeline lifecycle report used by review services, the pending
+  review can now be emitted as a `.ax/tasks` handoff with a parseable
+  `ax.workflow_candidate_pending_review_task.v1` marker, and the CLI can list
+  those tasks, verify their fixture/brief artifacts, and dry-run the linked
+  review brief to report whether human decisions are present before review. A
+  smoke-marked review is correctly blocked from apply, and each pending task
+  now carries structured sync/inspect commands plus explicit command guards for
+  the next review step. The task-list report also exposes aggregate executable
+  command counts and service-side filters for path, task status, review
+  decision status, and command status so services can route specific task
+  subsets without scanning every task. The report now also exposes a
+  recommended pending task pointer with its review-decision state, command
+  state, candidate ids, and next action, so services can pick the next item
+  without re-encoding the routing priority. That pointer now also carries the
+  recommended sync/inspect argv arrays and can-execute flags, so a review
+  service can plan the exact next command while still honoring the blocked
+  state. The pointer now also includes a machine-readable route kind and a
+  command-execution boolean, so services can branch without parsing prose
+  `next_action` strings. The report now includes aggregate route counts so a
+  scheduler can see review queue workload by route before choosing a task. The
+  task list can now also be filtered directly by route so schedulers can ask
+  for only collectible reviews or only executable commands. The recommended
+  task header now also carries the fixture pack and review brief paths, so a
+  service can open the review artifacts directly without scanning the task
+  rows. It now also carries those artifacts' presence statuses, so services can
+  route the recommended task to open-review versus artifact repair from the
+  header alone. It now also carries the recommended task's fixture/review
+  progress counts so services can display or route review workload without
+  scanning row details. It now also carries a normalized review progress
+  status so services can branch on unreadable, needs-review, partial,
+  complete, or repair states without re-deriving them from counts. Task-list
+  queries can now filter directly by that progress status, so services can ask
+  only for needs-review, complete, repair, partial, or unreadable queues. The
+  report now also exposes aggregate progress-status counts, so schedulers can
+  see the queue split across unreadable, needs-review, partial, complete, and
+  repair buckets before selecting a filter. Each task row now carries the same
+  normalized review progress status, so services can render, debug, or route
+  individual rows without re-deriving status from fixture counters. The report
+  now also exposes a machine-readable queue status, so services can distinguish
+  artifact repair, review repair, executable commands, human-review wait, schema
+  repair, and empty queues without parsing prose. Each task row now also carries
+  its normalized route, so services can render or debug individual rows without
+  re-running routing rules. The same pending-review task-list report is now
+  exposed through `ClassifierPackageService`, so Effect/service callers can test
+  and debug the review queue without shelling out to the CLI. That service can
+  now also persist the queue report as a JSON artifact, so scheduler/debugger
+  callers can save reproducible queue snapshots without duplicating CLI write
+  logic. The classifier-quality status report now says the current SetFit
+  analysis passes the candidate-layer quality gate but remains
+  `promotion_quality=false` because residual repeated misses, residual `none`
+  false positives, and missing human promotion review still block autonomous
+  fact promotion. The immediate bottleneck is now running the expensive SetFit
+  robustness/failure-analysis path on the 137-row workflow-augmented fixture set
+  to see whether the accepted fixture improves classifier quality or only the
+  review graph.
+
+## E488 - Append Accepted Fixture Into Package Experiment Set
+
+Question:
+- Can the accepted classifier fixture become a package-appendable row and pass
+  the existing workflow fixture append/metadata/split-audit gates?
+
+Implementation:
+- Changed accepted classifier fixture export to emit package-ready workflow
+  rows:
+  - maps graph label `correction_or_rejection_signal` to package fixture label
+    `correction`
+  - keeps the graph label in `candidate_label`
+  - emits `review_status="accepted"` for the existing append gate
+  - carries human rationale as `review_notes`
+- Kept target propagation from E487, so the append row keeps
+  `target="workflow_state"`.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e488-accepted-append-ready.json`
+- `.ax/experiments/workflow-fixtures-accepted-current.jsonl`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-append-e488.json`
+- `.ax/experiments/fixture-append-workflow-current-report.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-metadata-e488.json`
+- `.ax/experiments/classifier-package-dry-run-workflow-fixture-setfit-robustness-e488.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-split-audit-e488.json`
+- `.ax/experiments/workflow-fixture-split-audit-current.json`
+
+Live results:
+- Accepted append-ready row:
+  - label: `correction`
+  - target: `workflow_state`
+  - source group: `workflow-candidate`
+  - review status: `accepted`
+  - candidate label: `correction_or_rejection_signal`
+  - topic: `review-coverage`
+- Workflow fixture append:
+  - decision: `ready_to_write_combined_fixtures`
+  - base rows: `136`
+  - append rows: `1`
+  - new append rows: `1`
+  - combined rows: `137`
+  - append label counts: `{ "correction": 1 }`
+  - failures: `[]`
+- Metadata enrichment:
+  - execution decision: `executed`
+  - enriched rows: `137`
+- Split audit:
+  - execution decision: `executed`
+  - fixtures: `137`
+  - labels:
+    `{ approval: 20, correction_or_rejection_signal: 26, environment_or_preference_signal: 24, none: 37, verification_or_recovery_signal: 30 }`
+  - seeds `7`, `13`, and `42` all reported `viable_split`
+  - overlap groups: `0`
+  - overlap pair groups: `0`
+- SetFit robustness operation dry-run:
+  - decision: `ready_to_run`
+  - preflight: `ready`
+  - command:
+    `bun run classifiers:setfit-robustness -- --fixtures=.ax/experiments/chunks-with-workflow-fixture-metadata-current.jsonl --group-field=pair_group --label-mode=coarse --seeds=7,13,42 --epochs=1 --batch-size=8 --calibration-threshold=0.4 --out=.ax/experiments/setfit-robustness-workflow-fixtures-current.json --json`
+
+Decision:
+- Continue. The graph-reviewed fixture now reaches the package experiment set
+  through the same append-only gates as earlier workflow fixtures.
+- Next useful slice: run the SetFit robustness and failure-analysis operations
+  for the current workflow fixture set, then compare quality status against the
+  prior candidate-layer quality report.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "accepted classifier fixture follow-ups materialize"
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "accepted classifier fixtures preserve target"
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=transcript_classifier_projection --include-review-facts --classifier-fixture-pack=.ax/experiments/workflow-fixtures-accepted-current.jsonl --out=.ax/experiments/workflow-topic-guidance-decision-batch-e488-accepted-append-ready.json --json
+head -n 1 .ax/experiments/workflow-fixtures-accepted-current.jsonl | jq '{id,label,target,source_group,review_status,review_notes,candidate_label,topic}'
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-append --execute --out=.ax/experiments/classifier-package-execution-workflow-fixture-append-e488.json --json
+jq '{decision,base_rows,append_rows,new_append_rows,combined_rows,append_label_counts,failures}' .ax/experiments/fixture-append-workflow-current-report.json
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-metadata --execute --out=.ax/experiments/classifier-package-execution-workflow-fixture-metadata-e488.json --json
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-setfit-robustness --dry-run --out=.ax/experiments/classifier-package-dry-run-workflow-fixture-setfit-robustness-e488.json --json
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-split-audit --execute --allow-expensive --out=.ax/experiments/classifier-package-execution-workflow-fixture-split-audit-e488.json --json
+jq '{fixtures, labels, runs: [.runs[] | {seed, decision, overlap_groups: (.overlap_groups|length), overlap_pair_groups: (.overlap_pair_groups|length)}]}' .ax/experiments/workflow-fixture-split-audit-current.json
+```
+
+## E487 - Preserve Accepted Fixture Target Provenance
+
+Question:
+- Can the accepted classifier-fixture path preserve the human-reviewed
+  `workflow_state` target from fixture review through graph facts and back into
+  generated accepted fixture rows?
+
+Implementation:
+- Added target propagation to topic review graph node/fact projection.
+- Added target rehydration when persisted review facts are converted back into
+  synthetic workflow candidates.
+- Added regression coverage for review-coverage graph projection and accepted
+  classifier fixture materialization.
+- Re-applied the existing reviewed pack so the local persisted graph fact now
+  carries `target="workflow_state"`.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e487-target-preserved-review-facts.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e487-target-preserved-review-write-plan.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e487-accepted-classifier-fixtures-target-post-apply.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e487-accepted-classifier-fixtures-target-post-apply.jsonl`
+
+Live results:
+- Projected/applied review fact properties now include:
+  - candidate:
+    `classifier_candidate_group:hybrid-window/correction_or_rejection_signal`
+  - target: `workflow_state`
+  - predicate: `accept`
+  - reviewer: `ax-e484-apply`
+  - reviewed-at: `2026-06-01T00:00:00.000Z`
+- Post-apply accepted fixture export:
+  - emitted fixtures: `1`
+  - accepted fixture candidates: `1`
+  - label: `correction_or_rejection_signal`
+  - target: `workflow_state`
+  - review status: `accept`
+  - topic: `review-coverage`
+  - result id:
+    `fact:workflow_topic_candidate_review__review_coverage__classifier_candidate_g__a67b2fdd040f`
+
+Decision:
+- Continue. The fixture follow-up now carries enough reviewed target provenance
+  to be appended to a real classifier package without losing the reason the
+  row exists.
+- Next useful slice: append/package this accepted fixture and rerun package
+  quality status to decide whether it improves classifier quality or only the
+  review graph.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "projects reviewed coverage-gap fixtures"
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "accepted classifier fixtures preserve target"
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=transcript_classifier_projection --coverage-review-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed.jsonl --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e487-target-preserved.md --review-facts=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e487-target-preserved-review-facts.json --review-write-plan=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e487-target-preserved-review-write-plan.json --apply-review-facts --require-review-provenance --out=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e487-target-preserved-readiness.json --json
+jq '.facts[0] | {id,predicate,object,properties}' .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e487-target-preserved-review-facts.json
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=transcript_classifier_projection --include-review-facts --classifier-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-e487-accepted-classifier-fixtures-target-post-apply.jsonl --out=.ax/experiments/workflow-topic-guidance-decision-batch-e487-accepted-classifier-fixtures-target-post-apply.json --json
+jq '{target: .accepted_classifier_fixture_pack.fixtures[0].target, emitted: .accepted_classifier_fixture_pack.emitted_fixture_count, total: .totals.accepted_classifier_fixture_candidate_count}' .ax/experiments/workflow-topic-guidance-decision-batch-e487-accepted-classifier-fixtures-target-post-apply.json
+head -n 1 .ax/experiments/workflow-topic-guidance-decision-batch-e487-accepted-classifier-fixtures-target-post-apply.jsonl | jq '{id,label,target,review_status,topic,candidate_id,turn,result_id}'
+```
+
+## E486 - Materialize Accepted Classifier Fixture Follow-up
+
+Question:
+- Can the accepted `classifier_fixture` follow-up from E485 become an actual
+  fixture-pack artifact instead of only a routing/count signal?
+
+Implementation:
+- Added `buildWorkflowCandidateAcceptedClassifierFixtureSummary`.
+- In guidance-decision batch mode, `--classifier-fixture-pack=<path>` now writes
+  accepted classifier fixture follow-ups into a JSONL pack and attaches the
+  summary as `accepted_classifier_fixture_pack`.
+- Added text output for the accepted fixture pack path and emitted fixture
+  count.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e486-accepted-classifier-fixtures.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e486-accepted-classifier-fixtures.jsonl`
+
+Live results:
+- `accepted_classifier_fixture_candidate_count=1`
+- `accepted_classifier_fixture_pack.emitted_fixture_count=1`
+- Emitted fixture:
+  - suite: `workflow-candidate-topic`
+  - label: `correction_or_rejection_signal`
+  - review status: `accept`
+  - topic: `review-coverage`
+  - candidate:
+    `classifier_candidate_group:hybrid-window/correction_or_rejection_signal`
+  - proposed action: `add_context_guardrail`
+  - result id:
+    `fact:workflow_topic_candidate_review__review_coverage__classifier_candidate_g__a67b2fdd040f`
+  - turn:
+    `turn:11fb5aad_2d45_45ef_9f94_7738ce250327__ab7c9d8b15cbcb04__seq_000707`
+  - target: `unknown`
+
+Decision:
+- Continue. The service now produces a concrete fixture-pack/update artifact
+  from an accepted reviewed graph fact.
+- Next useful slice: preserve the reviewed target/provenance
+  (`workflow_state`) in accepted fixture rows, or append this generated row to
+  the actual classifier package and rerun package quality status.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "accepted classifier fixture follow-ups materialize"
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=transcript_classifier_projection --include-review-facts --classifier-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-e486-accepted-classifier-fixtures.jsonl --out=.ax/experiments/workflow-topic-guidance-decision-batch-e486-accepted-classifier-fixtures.json --json
+jq '{accepted_pack: .accepted_classifier_fixture_pack, total: .totals.accepted_classifier_fixture_candidate_count}' .ax/experiments/workflow-topic-guidance-decision-batch-e486-accepted-classifier-fixtures.json
+head -n 1 .ax/experiments/workflow-topic-guidance-decision-batch-e486-accepted-classifier-fixtures.jsonl | jq '{id,suite,label,target,review_status,topic,candidate_id,candidate_label,proposed_action,turn,result_id,confidence,text}'
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=transcript_classifier_projection --include-review-facts --classifier-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-e486-accepted-classifier-fixtures.txt.jsonl | rg -n "accepted classifier fixture pack|accepted classifier fixtures|classifier fixture follow-ups|correction_or_rejection_signal"
+```
+
+## E485 - Surface Accepted Classifier Fixture Follow-ups
+
+Question:
+- After E484 applies the accepted review fact, can services see that the
+  accepted candidate should feed classifier fixture/package work instead of
+  being buried inside `guidance_promotion_not_warranted` rationale text?
+
+Implementation:
+- Added `accepted_classifier_fixture_candidates` to
+  `ax.workflow_topic_guidance_decision.v1` reports.
+- Added `accepted_classifier_fixture_candidate_count` to topic and batch
+  totals.
+- Added a `classifier fixture follow-ups` section to batch text output.
+- Kept batch-level `next_action` priority on unresolved human-review backlog;
+  fixture follow-ups are exposed as a parallel queue.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e485-classifier-fixture-followup.json`
+
+Live results:
+- Batch total accepted classifier fixtures: `1`
+- `review-coverage` follow-up candidate:
+  - candidate: `classifier_candidate_group:hybrid-window/correction_or_rejection_signal`
+  - label: `correction_or_rejection_signal`
+  - recommended artifact: `classifier_fixture`
+  - decision: `guidance_promotion_not_warranted`
+  - next action:
+    `Append this reviewed candidate to a classifier fixture pack or package update candidate.`
+- Human-readable batch output now includes:
+  - `accepted classifier fixtures: 1`
+  - `classifier fixture follow-ups`
+  - the candidate id for `correction_or_rejection_signal`
+
+Decision:
+- Continue. The service now has a structured handoff from reviewed graph fact
+  to classifier-package work.
+- Next useful slice: materialize this follow-up into an actual fixture-pack
+  append/update candidate, then run package quality status to verify whether it
+  improves classifier quality gates.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "guidance decision routes accepted classifier fixtures"
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=transcript_classifier_projection --include-review-facts --out=.ax/experiments/workflow-topic-guidance-decision-batch-e485-classifier-fixture-followup.json --json
+jq '{total: .totals.accepted_classifier_fixture_candidate_count, next_action, review_coverage: (.decisions[] | select(.topic=="review-coverage") | {accepted_classifier_fixture_candidates, totals})}' .ax/experiments/workflow-topic-guidance-decision-batch-e485-classifier-fixture-followup.json
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=transcript_classifier_projection --include-review-facts | rg -n "accepted classifier fixtures|classifier fixture follow-ups|correction_or_rejection_signal|next action"
+```
+
+## E484 - Apply Target-resolved Review Fact
+
+Question:
+- Once E483 marks the target-resolved review packet production-ready, does
+  applying the review fact to SurrealDB make the accepted candidate visible in
+  downstream topic guidance routing?
+
+Implementation:
+- Reused the production-gated review apply command for the E483 reviewed pack.
+- First apply attempt correctly refused to mutate when syncing from the older
+  review brief stripped reviewer metadata from the pack; the gate fell back to
+  `missing_review_provenance`.
+- Reran the apply with explicit provenance stamping:
+  - reviewer `ax-e484-apply`
+  - reviewed-at `2026-06-01T00:00:00.000Z`
+- Re-ran the guidance decision batch with persisted review facts included.
+
+Artifacts:
+- Apply readiness:
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e484-applied-readiness.json`
+- Applied review facts/write plan:
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e484-applied-review-facts.json`
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e484-applied-review-write-plan.json`
+- Post-apply batch:
+  `.ax/experiments/workflow-topic-guidance-decision-batch-e484-post-apply.json`
+- Focused coverage check:
+  `.ax/experiments/workflow-candidate-review-coverage-e484-post-apply.json`
+
+Live results:
+- The apply command exited successfully after provenance stamping.
+- The projected/applied review fact is:
+  - predicate: `accept`
+  - object: `classifier_candidate_group:hybrid-window/correction_or_rejection_signal`
+  - reviewer: `ax-e484-apply`
+  - reviewed-at: `2026-06-01T00:00:00.000Z`
+- Post-apply `review-coverage` batch now includes
+  `classifier_candidate_group:hybrid-window/correction_or_rejection_signal`:
+  - recommended artifact: `classifier_fixture`
+  - `has_review_acceptance=true`
+  - decision: `guidance_promotion_not_warranted`
+  - rationale: primary recommendation is `classifier_fixture`, not guidance
+- Post-apply batch totals changed to:
+  - `candidate_count=7`
+  - `guidance_not_warranted_count=3`
+  - `needs_human_review_count=4`
+
+Decision:
+- Continue. The full repair -> review -> provenance -> graph apply loop worked.
+  The accepted result should not become guidance; it should feed classifier
+  fixture/package improvement.
+- Next useful slice: expose a route for accepted `classifier_fixture`
+  recommendations so the service can turn this graph fact into a fixture-pack
+  append or package update candidate, then re-run quality status.
+
+Verification:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=transcript_classifier_projection --coverage-review-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed.md --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e484-applied-synced.md --review-facts=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e484-applied-review-facts.json --review-write-plan=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e484-applied-review-write-plan.json --review-provenance-reviewer=ax-e484-apply --review-provenance-reviewed-at=2026-06-01T00:00:00.000Z --apply-review-facts --require-review-provenance --require-review-handoff --out=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e484-applied-readiness.json --json
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=transcript_classifier_projection --include-review-facts --out=.ax/experiments/workflow-topic-guidance-decision-batch-e484-post-apply.json --json
+jq '.decisions[] | select(.topic=="review-coverage") | {decision, totals, candidates: [.candidates[] | {candidate_id,label,recommended_artifact,has_review_acceptance,decision,rationale}]}' .ax/experiments/workflow-topic-guidance-decision-batch-e484-post-apply.json
+jq '.totals' .ax/experiments/workflow-topic-guidance-decision-batch-e484-post-apply.json
+```
+
+## E483 - Exercise Target-resolved Review Readiness
+
+Question:
+- After E482 resolves the fixture target, does the same pending-review packet
+  behave correctly in the existing review sync/readiness lifecycle?
+
+Implementation:
+- Reused the existing coverage review pack and brief sync path; no production
+  code change was needed.
+- Created a separate reviewed artifact copy so the E482 target-resolved packet
+  stays available as a pending baseline.
+- Simulated an accepted review with rationale for the current
+  `correction_or_rejection_signal` candidate.
+- Ran the production-gated readiness command with and without review
+  provenance, without applying facts to SurrealDB.
+
+Artifacts:
+- Pending readiness:
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-pending-readiness.json`
+- Reviewed, missing provenance:
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed-readiness.json`
+- Reviewed and provenance-stamped:
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed-provenance-readiness.json`
+- Reviewed fixture pack:
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed.jsonl`
+- Provenance-stamped review facts/write plan:
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed-provenance-review-facts.json`
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed-provenance-review-write-plan.json`
+
+Live results:
+- Pending target-resolved pack:
+  - `reviewed_fixture_count=0`
+  - `pending_fixture_count=1`
+  - `production_apply_guard=no_reviewed_fixtures`
+  - `review_pipeline_stage=needs_review_decisions`
+- Reviewed with rationale, no provenance:
+  - `reviewed_fixture_count=1`
+  - `handoff_apply_guard=ready_to_apply`
+  - `production_apply_guard=missing_review_provenance`
+  - `production_can_apply=false`
+  - `review_pipeline_stage=needs_review_repair`
+- Reviewed with rationale and provenance:
+  - `reviewed_fixture_count=1`
+  - `review_handoff_status=complete_review_handoff`
+  - `production_apply_guard=ready_to_apply`
+  - `production_can_apply=true`
+  - `review_pipeline_stage=ready_for_production_apply`
+  - `review_pipeline_command_kind=apply_review_facts`
+- The provenance-stamped review fact projection contains one `accept` fact with
+  reviewer `ax-e483-review`, reviewed-at `2026-06-01T00:00:00.000Z`, and the
+  source turn evidence ref.
+
+Decision:
+- Continue. The candidate can now safely reach a production apply command, but
+  E483 intentionally stopped short of mutating SurrealDB.
+- Next useful slice: either apply this provenance-complete review fact and
+  re-run the batch to prove the review gap closes, or add a pre-apply review
+  confirmation surface so services can show the exact graph write plan before
+  running the `apply_review_facts` command.
+
+Verification:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --coverage-review-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e482-target-resolved.jsonl --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-pending-readiness.md --review-facts=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-pending-review-facts.json --review-write-plan=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-pending-review-write-plan.json --out=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-pending-readiness.json --json
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --coverage-review-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed.md --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed-synced.md --review-facts=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed-review-facts.json --review-write-plan=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed-review-write-plan.json --apply-review-facts --require-review-provenance --require-review-handoff --out=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed-readiness.json --json
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --coverage-review-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed.md --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed-provenance-synced.md --review-facts=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed-provenance-review-facts.json --review-write-plan=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed-provenance-review-write-plan.json --review-provenance-reviewer=ax-e483-review --review-provenance-reviewed-at=2026-06-01T00:00:00.000Z --require-review-provenance --require-review-handoff --out=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed-provenance-readiness.json --json
+jq '.pending_review_handoff | {reviewed_fixture_count,pending_fixture_count,review_handoff_status,handoff_apply_guard,handoff_can_apply,production_apply_guard,production_can_apply,review_issue_status,review_pipeline_stage,review_pipeline_command_kind,next_action}' .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-pending-readiness.json .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed-readiness.json .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed-provenance-readiness.json
+jq '{fact_count: .totals.fact_count, reviewer: .facts[0].properties.reviewer, reviewed_at: .facts[0].properties.reviewed_at, predicate: .facts[0].predicate, evidence_refs: .facts[0].properties.evidence_refs}' .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed-provenance-review-facts.json
+```
+
+## E482 - Resolve Pending Review Target Override
+
+Question:
+- Once target-resolution work is visible in E481, can a service or reviewer
+  provide a concrete target during context repair so the pending fixture moves
+  from repair-blocked to normal human verdict collection?
+
+Implementation:
+- Added `--repair-target=<target>` to
+  `axctl classifiers workflow-candidates --repair-pending-review-context`.
+- Threaded the same explicit target into
+  `buildWorkflowCandidateGuidancePendingReviewContextRepairReport`.
+- The repair only applies to rows that already have `unknown_target`; it does
+  not rewrite concrete targets.
+- Context-derived targets still take precedence when available. The explicit
+  CLI target is a fallback for unresolved repair packets.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-context-target-resolved-e482.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e482-target-resolved.jsonl`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e482-target-resolved.md`
+
+Live results:
+- Fixture count: `1`
+- Repaired fixtures: `1`
+- Fully repaired fixtures: `1`
+- Remaining context issues: `0`
+- Target-resolution required count: `0`
+- Repaired target: `workflow_state`
+- Next action:
+  `Review the regenerated fixture brief and record a human verdict with rationale.`
+
+Decision:
+- Continue. The current candidate has crossed the context/target repair gate,
+  but it is still not promotion-quality until a human review decision and
+  rationale are recorded.
+- Next useful slice: use the target-resolved fixture pack as the input to the
+  review-brief sync/readiness path, record or simulate a real reviewed verdict
+  with rationale, and verify the graph write plan remains gated until review
+  provenance/handoff requirements are satisfied.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "pending review context repair applies explicit target override"
+bun src/cli/index.ts classifiers workflow-candidates --repair-pending-review-context --task-dir=.ax/tasks --repair-target=workflow_state --out=.ax/experiments/workflow-candidate-pending-review-context-target-resolved-e482.json --repaired-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e482-target-resolved.jsonl --repaired-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e482-target-resolved.md --json
+jq '{fixture_count,repaired_fixture_count,fully_repaired_fixture_count,remaining_issue_count,target_resolution_required_count,target_resolution_rows,target: .rows[0].repaired_fixture.target,next_action}' .ax/experiments/workflow-candidate-pending-review-context-target-resolved-e482.json
+rg -n "Target Resolution|_none_|workflow_state|unknown_target" .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e482-target-resolved.md .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e482-target-resolved.jsonl .ax/experiments/workflow-candidate-pending-review-context-target-resolved-e482.json
+```
+
+## E481 - Add Target Resolution Guidance
+
+Question:
+- After E480 rehydrates the pending-review packet, can the remaining
+  `unknown_target` issue be represented as explicit reviewer/service work
+  instead of a vague context-repair residue?
+
+Implementation:
+- Extended `ax.workflow_candidate_pending_review_context_repair.v1` with:
+  - `target_resolution_required_count`
+  - `target_resolution_rows`
+  - `target_resolution_next_action`
+- Added target-resolution rows with:
+  - fixture id
+  - candidate id
+  - candidate label
+  - proposed action
+  - current target
+  - suggested review action: `set_target_or_defer`
+- Regenerated review briefs now include `## Target Resolution` before
+  provenance issues.
+- Text repair reports now render target-resolution workload and next action.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-context-repair-e481.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e481-repaired.jsonl`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e481-repaired.md`
+
+Live results:
+- Fixture count: `1`
+- Repaired fixtures: `1`
+- Remaining context issues: `1`
+- Target-resolution required count: `1`
+- Target-resolution row:
+  - candidate: `classifier_candidate_group:hybrid-window/correction_or_rejection_signal`
+  - label: `correction_or_rejection_signal`
+  - action: `add_context_guardrail`
+  - current target: `unknown`
+  - suggested review action: `set_target_or_defer`
+- Target-resolution next action:
+  `Set a concrete target or mark the fixture defer/reject before human verdict
+  collection.`
+
+Decision:
+- This is the right next gate. The packet is no longer silently broken, but it
+  is still blocked from normal verdict collection until target resolution is
+  performed.
+- Next useful slice: add a small sync/apply affordance for target-resolution
+  edits so a reviewer can set a concrete target in the repaired fixture pack,
+  rerun pending-review listing, and see the task move from context repair to
+  normal review collection.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "pending review context repair emits target resolution"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/classifiers/package-service.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --repair-pending-review-context --task-dir=.ax/tasks --out=.ax/experiments/workflow-candidate-pending-review-context-repair-e481.json --repaired-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e481-repaired.jsonl --repaired-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e481-repaired.md --json
+rg -n "Target Resolution|target_resolution|required|set_target_or_defer" .ax/experiments/workflow-candidate-pending-review-context-repair-e481.json .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e481-repaired.md
+```
+
+## E480 - Regenerate Pending Review Context
+
+Question:
+- Once E479 detects an incomplete pending-review packet, can AX rehydrate the
+  fixture text from stored turn context and regenerate review artifacts without
+  inventing a better label or target?
+
+Implementation:
+- Added `ax.workflow_candidate_pending_review_context_repair.v1`.
+- Added pure repair/report helpers that:
+  - read pending review fixture rows,
+  - compare before/after context issues,
+  - replace truncated `USER` text from the stored turn,
+  - replace empty `PREVIOUS_ASSISTANT` text from the previous assistant turn,
+  - keep `target=unknown` unless a concrete target source is available,
+  - emit repaired JSONL and regenerated review-brief markdown.
+- Added CLI:
+  - `--repair-pending-review-context`
+  - `--repaired-fixture-pack=<path>`
+  - `--repaired-review-brief=<path>`
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-context-repair-e480.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e480-repaired.jsonl`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e480-repaired.md`
+
+Live results:
+- Fixture count: `1`
+- Repaired fixtures: `1`
+- Fully repaired fixtures: `0`
+- Partially repaired fixtures: `1`
+- Before context issues: `3`
+- Repaired issues: `2`
+  - `truncated_user_text`
+  - `missing_previous_assistant_context`
+- Remaining issues: `1`
+  - `unknown_target`
+- Next action:
+  `Review repaired context, then resolve remaining target issues before asking
+  for a human verdict.`
+
+Decision:
+- The repair path is useful and should continue.
+- It correctly avoids fabricating a target. The candidate is still not
+  promotion-quality because `target=unknown` remains unresolved and there is no
+  real human verdict/rationale.
+- Next useful slice: add a target-resolution/review affordance for repaired
+  context packets, then rerun the pending-review task list against the repaired
+  fixture pack before syncing/applying review facts.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "pending review context repair rehydrates"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/classifiers/package-service.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --repair-pending-review-context --task-dir=.ax/tasks --out=.ax/experiments/workflow-candidate-pending-review-context-repair-e480.json --repaired-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e480-repaired.jsonl --repaired-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e480-repaired.md --json
+```
+
+## E479 - Route Incomplete Pending Review Context to Repair
+
+Question:
+- Can the pending-review queue detect incomplete fixture context before asking
+  for a human verdict, so low-quality review packets do not masquerade as
+  normal `needs_review` work?
+
+Implementation:
+- Added review-context status fields to
+  `ax.workflow_candidate_pending_review_task_list.v1` task rows and
+  recommended-task headers:
+  - `review_context_status`
+  - `review_context_issue_count`
+  - `review_context_issues`
+- Context issue vocabulary:
+  - `truncated_user_text`
+  - `missing_previous_assistant_context`
+  - `unknown_target`
+- Pending review tasks with context issues now route as:
+  - `status=review_decisions_need_repair`
+  - `route=repair_review_decisions`
+  - `queue_status=needs_review_repair`
+  - `next_action=Repair fixture context before asking for review decisions.`
+- Text output renders review-context status and issue rows for debugging.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-context-repair-e479.json`
+
+Live results:
+- The only pending review task now reports:
+  - `queue_status=needs_review_repair`
+  - `recommended_task_status=review_decisions_need_repair`
+  - `recommended_task_route=repair_review_decisions`
+  - `recommended_task_review_context_status=needs_repair`
+  - `recommended_task_review_context_issue_count=3`
+  - `recommended_task_review_context_issues=[
+    truncated_user_text,
+    missing_previous_assistant_context,
+    unknown_target
+    ]`
+
+Decision:
+- This confirms the current pending candidate should not be reviewed or
+  promoted as-is.
+- The next useful implementation slice is a fixture-context repair/regeneration
+  path that can rehydrate the full turn and previous-assistant context before
+  producing a new review brief.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "pending review task list routes incomplete fixture context"
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-context-repair-e479.json --json
+```
+
+## E478 - Audit Pending Review Candidate Evidence
+
+Question:
+- Is the only live pending `correction_or_rejection_signal` candidate ready for
+  review/promotion, or does the review packet itself need repair before it can
+  improve the classifier and graph?
+
+Evidence inspected:
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e457.md`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e457.jsonl`
+- `.ax/experiments/workflow-candidate-pending-review-tasks-service-write-e476.json`
+
+Findings:
+- Live queue state remains:
+  - `task_count=1`
+  - `queue_status=waiting_for_review_decisions`
+  - `recommended_task_review_progress_status=needs_review`
+  - `recommended_task_review_decision_status=needs_review_decisions`
+  - `recommended_task_can_execute_command=false`
+- The pending candidate is:
+  - `classifier_candidate_group:hybrid-window/correction_or_rejection_signal`
+  - proposed action: `add_context_guardrail`
+  - support count: `1`
+  - evidence count: `1`
+  - confidence: `0.6036`
+- The fixture text is incomplete for a strong correction/rejection verdict:
+  - user text is truncated after "trying to create workflow bas..."
+  - `PREVIOUS_ASSISTANT` is empty
+  - target is `unknown`
+- The visible user text reads more like a direction/expansion request than a
+  correction or rejection:
+  - "this is not bad"
+  - asks for "another scenarios"
+  - mentions retro-reflect/self-apply/workflow examples
+- Earlier smoke artifacts contain a rejected row for the same fixture, but that
+  was explicitly marked as smoke review and lacks real reviewer provenance, so
+  it must not be reused as promotion evidence.
+
+Decision:
+- Do not promote this candidate automatically.
+- The classifier path still looks worth continuing, but this candidate should
+  be treated as a boundary/data-quality case:
+  - likely human verdict: `reject` or `defer`
+  - better system action: repair/regenerate the fixture with fuller turn
+    context before using it for model-quality improvement
+
+Next action:
+- Add a fixture-context repair path for pending review rows whose review text is
+  truncated, has empty previous-assistant context, or has `target=unknown`.
+- After repair, ask for a real human verdict/rationale before syncing review
+  facts or applying graph writes.
+
+Verification:
+```sh
+jq '{task_count, queue_status, recommended_task_path, recommended_task_candidate_ids, recommended_task_review_brief_path, recommended_task_fixture_pack_path, recommended_task_review_progress_status, recommended_task_review_decision_status, recommended_task_can_execute_command, next_action}' .ax/experiments/workflow-candidate-pending-review-tasks-service-write-e476.json
+wc -l .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e457.jsonl
+jq -R 'fromjson? | {id, label, target, review_status, candidate_id, candidate_label, proposed_action, confidence, text, turn}' .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e457.jsonl
+```
+
+## E477 - Add Classifier Quality Status Service Report
+
+Question:
+- Can services answer "does this classifier label correctly?" from the saved
+  robustness/failure-analysis artifact without reimplementing jq summaries or
+  confusing candidate-layer quality with promotion-quality facts?
+
+Implementation:
+- Added `ClassifierPackageService.classifierQualityStatusReport({
+  sourceReportPath })`.
+- Added `ClassifierPackageService.writeClassifierQualityStatusReport({
+  sourceReportPath, out })`.
+- Added `ax.classifier_quality_status.v1` with:
+  - source report path/schema/decision
+  - quality gate pass/fail
+  - promotion-quality status
+  - recommended use
+  - compact metrics
+  - explicit blockers and next action
+
+Artifacts:
+- `.ax/experiments/classifier-quality-status-e477.json`
+- Source:
+  `.ax/experiments/setfit-failure-analysis-embedding-helper-fixtures-current.json`
+
+Results:
+- Live quality-status report:
+  - `quality_gate_passed=true`
+  - `promotion_quality=false`
+  - `recommended_use=candidate_mining`
+  - `accuracy_min=0.775`
+  - `accuracy_max=0.85`
+  - `macro_f1_min=0.7542`
+  - `macro_f1_max=0.8439`
+  - `none_false_positive_rate_max=0.0769`
+  - `repeated_miss_count=6`
+  - `unique_none_false_positive_count=1`
+  - blockers:
+    `residual_repeated_misses`,
+    `residual_none_false_positives`,
+    `missing_human_promotion_review`
+
+Decision:
+- The classifier is useful as a candidate/mining layer.
+- It is not yet promotion-quality. Graph facts still need reviewed evidence
+  and human promotion gates.
+
+Verification:
+```sh
+bun test src/classifiers/package-service.test.ts -t "summarizes classifier quality status"
+bun -e 'const { Effect } = await import("effect"); const { ClassifierPackageService, ClassifierPackageServiceLive } = await import("./src/classifiers/package-service.ts"); const report = await Effect.runPromise(Effect.gen(function* () { const packages = yield* ClassifierPackageService; return yield* packages.writeClassifierQualityStatusReport({ sourceReportPath: ".ax/experiments/setfit-failure-analysis-embedding-helper-fixtures-current.json", out: ".ax/experiments/classifier-quality-status-e477.json" }); }).pipe(Effect.provide(ClassifierPackageServiceLive))); console.log(JSON.stringify({ schema: report.schema, quality_gate_passed: report.quality_gate_passed, promotion_quality: report.promotion_quality, recommended_use: report.recommended_use, blockers: report.blockers, metrics: report.metrics }, null, 2));'
+```
+
+## E476 - Add Pending Review Service Write Helper
+
+Question:
+- Can Effect/service callers persist the pending workflow-candidate review
+  queue report without reimplementing CLI JSON writing?
+
+Implementation:
+- Added `ClassifierPackageService.writePendingReviewTaskListReport({ taskDir,
+  filters, out })`.
+- The write helper delegates to `pendingReviewTaskListReport` and writes the
+  same pretty JSON format used by CLI artifacts.
+- Write failures use the existing `ClassifierPackageReportWriteError`
+  vocabulary.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-service-write-e476.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Service-layer test fixture:
+  - writes `pending-review-task-list.json`
+  - persisted JSON includes `queue_status=waiting_for_review_decisions`
+  - persisted JSON includes `recommended_task_path`
+  - persisted row includes `route=collect_review_decisions`
+  - persisted row includes `review_progress_status=needs_review`
+- Live CLI parity artifact still reports:
+  - `task_count=1`
+  - `queue_status=waiting_for_review_decisions`
+  - `recommended_task_can_execute_command=false`
+
+Decision:
+- E476 gives review services a tested read/write queue report surface.
+- The live task still requires a real verdict and rationale before sync,
+  inspect, graph apply, guidance promotion, or harness promotion.
+
+Verification:
+```sh
+bun test src/classifiers/package-service.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-service-write-e476.json --json
+```
+
+## E475 - Add Pending Review Service Helper
+
+Question:
+- Can Effect/service callers load the pending workflow-candidate review queue
+  through `ClassifierPackageService` instead of shelling out to the CLI or
+  importing CLI internals directly?
+
+Implementation:
+- Added `ClassifierPackageService.pendingReviewTaskListReport({ taskDir,
+  filters })`.
+- The service method returns the same
+  `ax.workflow_candidate_pending_review_task_list.v1` report used by the CLI,
+  including queue status, row routes, progress status, command guards, artifact
+  statuses, and recommended-task headers.
+- Service errors use the existing `ClassifierPackageLoadError` vocabulary.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-service-helper-e475.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Service-layer test fixture:
+  - `queue_status=waiting_for_review_decisions`
+  - `recommended_task_route=collect_review_decisions`
+  - `recommended_task_review_progress_status=needs_review`
+  - `recommended_task_can_execute_command=false`
+  - `tasks[0].route=collect_review_decisions`
+- Live CLI parity artifact still reports the real queue as:
+  - `task_count=1`
+  - `queue_status=waiting_for_review_decisions`
+  - `recommended_task_can_execute_command=false`
+
+Decision:
+- E475 makes the pending review queue available to FX/service code for testing,
+  debugging, and scheduler routing.
+- The live task still requires a real verdict and rationale before sync,
+  inspect, graph apply, guidance promotion, or harness promotion.
+
+Verification:
+```sh
+bun test src/classifiers/package-service.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-service-helper-e475.json --json
+```
+
+## E474 - Expose Task Review Route
+
+Question:
+- Can review services inspect each pending-review task row's normalized route
+  without re-running the same routing rules used by filters, counts, and the
+  recommended-task header?
+
+Implementation:
+- Added `route` to each
+  `ax.workflow_candidate_pending_review_task_list.v1` task row.
+- Route filters, aggregate route counts, and the recommended-task route now
+  use that same row-level route value.
+- Text output now prints each row's `route`.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-task-route-e474.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live task-list report:
+  - `tasks[0].path=.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+  - `tasks[0].route=collect_review_decisions`
+  - `recommended_task_route=collect_review_decisions`
+  - `route_counts.collect_review_decisions=1`
+  - `queue_status=waiting_for_review_decisions`
+  - `recommended_task_can_execute_command=false`
+
+Decision:
+- E474 removes another client-side derivation from review services while
+  preserving the same human-review gate.
+- The live task still requires a real verdict and rationale before sync,
+  inspect, graph apply, guidance promotion, or harness promotion.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-task-route-e474.json --json
+```
+
+## E473 - Expose Pending Review Queue Status
+
+Question:
+- Can review services identify the whole pending-review queue state without
+  parsing `next_action` prose or re-checking counts client-side?
+
+Implementation:
+- Added `queue_status` to
+  `ax.workflow_candidate_pending_review_task_list.v1`.
+- Status vocabulary:
+  - `no_tasks`
+  - `needs_artifact_repair`
+  - `needs_review_repair`
+  - `ready_to_execute`
+  - `waiting_for_review_decisions`
+  - `needs_schema_repair`
+- Text output now prints `queue status`.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-queue-status-e473.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live task-list report:
+  - `queue_status=waiting_for_review_decisions`
+  - `task_count=1`
+  - `ready_for_review_count=1`
+  - `review_command_blocked_count=1`
+  - `recommended_task_review_decision_status=needs_review_decisions`
+  - `recommended_task_can_execute_command=false`
+
+Decision:
+- E473 makes the top-level queue routing state machine-readable for review
+  services.
+- The live task remains blocked on a real reviewer verdict and rationale before
+  sync, inspect, graph apply, guidance promotion, or harness promotion.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-queue-status-e473.json --json
+```
+
+## E472 - Expose Task Review Progress Status
+
+Question:
+- Can queue services inspect each pending-review task row's normalized review
+  progress state without re-deriving it from fixture counters and review
+  decision status?
+
+Implementation:
+- Added `review_progress_status` to each
+  `ax.workflow_candidate_pending_review_task_list.v1` task row.
+- The task row, recommended-task header, progress-status filter, and aggregate
+  progress counts now use the same normalized status vocabulary.
+- Text output now prints each row's `progress status`.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-task-progress-e472.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live task-list report:
+  - `tasks[0].path=.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+  - `tasks[0].review_progress_status=needs_review`
+  - `recommended_task_review_progress_status=needs_review`
+  - `review_progress_status_counts.needs_review=1`
+  - `recommended_task_can_execute_command=false`
+
+Decision:
+- E472 removes another client-side derivation from review services while
+  preserving the human-review gate.
+- The live task still requires a real verdict and rationale before sync,
+  inspect, graph apply, guidance promotion, or harness promotion.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-task-progress-e472.json --json
+```
+
+## E471 - Count Pending Review Progress Statuses
+
+Question:
+- Can queue services see how much pending-review work sits in each review
+  progress bucket without scanning every task row?
+
+Implementation:
+- Added `review_progress_status_counts` to
+  `ax.workflow_candidate_pending_review_task_list.v1`.
+- Counts use the same normalized progress-status derivation as the
+  recommended-task header and `--pending-review-progress-status` filter.
+- Text output now prints counts for `unreadable`, `needs_review`,
+  `partial_review`, `complete_review`, and `needs_repair`.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-progress-counts-e471.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live task-list report:
+  - `task_count=1`
+  - `review_progress_status_counts.needs_review=1`
+  - all other progress-status counts are `0`
+  - `recommended_task_path=.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+  - `recommended_task_review_progress_status=needs_review`
+  - `recommended_task_can_execute_command=false`
+
+Decision:
+- E471 makes queue workload shape visible at the same service boundary as
+  route counts and command counts.
+- The live task remains blocked on real review decisions before sync, inspect,
+  graph apply, guidance promotion, or harness promotion.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-progress-counts-e471.json --json
+```
+
+## E470 - Filter Pending Review Tasks By Progress Status
+
+Question:
+- Can queue services request only pending-review tasks in a specific review
+  progress state, such as `needs_review`, without fetching all tasks and
+  post-filtering client-side?
+
+Implementation:
+- Added `review_progress_status` to
+  `ax.workflow_candidate_pending_review_task_list.v1` filters.
+- Added `--pending-review-progress-status` to
+  `classifiers workflow-candidates --list-pending-review-tasks`.
+- The filter uses the same progress-status derivation as the recommended-task
+  header, so filtering and routing remain consistent.
+- Text output now prints `filter review progress`.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-progress-status-filter-e470.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live `--pending-review-progress-status=needs_review` report:
+  - `filters.review_progress_status=needs_review`
+  - `task_count=1`
+  - `recommended_task_path=.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+  - `recommended_task_review_progress_status=needs_review`
+  - `recommended_task_review_decision_status=needs_review_decisions`
+  - `recommended_task_can_execute_command=false`
+
+Decision:
+- E470 makes progress-state queue routing first-class while keeping command
+  execution blocked until human review decisions exist.
+- The live task still needs a human verdict and rationale before sync, inspect,
+  graph apply, guidance promotion, or harness promotion.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --pending-review-progress-status=needs_review --out .ax/experiments/workflow-candidate-pending-review-tasks-progress-status-filter-e470.json --json
+```
+
+## E469 - Add Recommended Review Progress Status
+
+Question:
+- Can queue services branch on the recommended task's review progress state
+  without re-deriving it from fixture counts and review decision status?
+
+Implementation:
+- Added `recommended_task_review_progress_status` to
+  `ax.workflow_candidate_pending_review_task_list.v1`.
+- Status vocabulary:
+  - `unreadable`
+  - `needs_review`
+  - `partial_review`
+  - `complete_review`
+  - `needs_repair`
+- Text output now prints `recommended review progress status`.
+- Regression coverage verifies unreadable artifact-repair tasks,
+  collect-review tasks, and complete executable review tasks.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-recommended-progress-status-e469.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live `--pending-review-route=collect_review_decisions` report:
+  - `recommended_task_review_progress_status=needs_review`
+  - `recommended_task_fixture_count=1`
+  - `recommended_task_reviewed_fixture_count=0`
+  - `recommended_task_pending_fixture_count=1`
+  - `recommended_task_review_decision_status=needs_review_decisions`
+  - `recommended_task_can_execute_command=false`
+
+Decision:
+- E469 gives services one stable progress enum for the recommended task while
+  keeping command execution blocked until real review decisions exist.
+- The live task still needs a human verdict and rationale before sync, inspect,
+  graph apply, guidance promotion, or harness promotion.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --pending-review-route=collect_review_decisions --out .ax/experiments/workflow-candidate-pending-review-tasks-recommended-progress-status-e469.json --json
+```
+
+## E468 - Expose Recommended Review Progress
+
+Question:
+- Can a review service show the recommended task's review progress from the
+  task-list header, without scanning the `tasks` array?
+
+Implementation:
+- Added recommended-task progress fields to
+  `ax.workflow_candidate_pending_review_task_list.v1`:
+  - `recommended_task_fixture_count`
+  - `recommended_task_reviewed_fixture_count`
+  - `recommended_task_pending_fixture_count`
+  - `recommended_task_invalid_fixture_count`
+  - `recommended_task_missing_rationale_count`
+- Text output now prints a compact `recommended review progress` line.
+- Regression coverage verifies progress headers for collect-review and
+  execute-command routes while leaving artifact-repair tasks sparse when
+  progress cannot be read.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-recommended-progress-e468.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live `--pending-review-route=collect_review_decisions` report:
+  - `recommended_task_fixture_count=1`
+  - `recommended_task_reviewed_fixture_count=0`
+  - `recommended_task_pending_fixture_count=1`
+  - `recommended_task_invalid_fixture_count=0`
+  - `recommended_task_missing_rationale_count=0`
+  - `recommended_task_review_decision_status=needs_review_decisions`
+
+Decision:
+- E468 makes the recommended pending-review packet sufficient for queue UI
+  progress display and service routing.
+- The live candidate is artifact-complete with one pending fixture and zero
+  reviewed fixtures; the next step is still real human review, not sync,
+  inspect, graph apply, guidance promotion, or harness promotion.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --pending-review-route=collect_review_decisions --out .ax/experiments/workflow-candidate-pending-review-tasks-recommended-progress-e468.json --json
+```
+
+## E467 - Expose Recommended Review Artifact Status
+
+Question:
+- Can a review service tell whether the recommended task's fixture pack and
+  review brief are present from the task-list header, without scanning task
+  rows?
+
+Implementation:
+- Added `recommended_task_fixture_pack_status` and
+  `recommended_task_review_brief_status` to
+  `ax.workflow_candidate_pending_review_task_list.v1`.
+- Text output now prints `recommended fixture pack status` and
+  `recommended review brief status`.
+- Regression coverage verifies status headers for artifact-repair,
+  collect-review, and execute-command routes.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-recommended-artifact-status-e467.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live `--pending-review-route=collect_review_decisions` report:
+  - `recommended_task_path=.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+  - `recommended_task_route=collect_review_decisions`
+  - `recommended_task_fixture_pack_status=present`
+  - `recommended_task_review_brief_status=present`
+  - `recommended_task_review_decision_status=needs_review_decisions`
+  - `recommended_task_can_execute_command=false`
+
+Decision:
+- E467 completes the recommended-task artifact packet for queue services:
+  path plus status is available at report level.
+- The current task is artifact-complete and still human-review blocked; no
+  sync, inspect, graph apply, guidance promotion, or harness promotion should
+  run until a real reviewed decision exists.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --pending-review-route=collect_review_decisions --out .ax/experiments/workflow-candidate-pending-review-tasks-recommended-artifact-status-e467.json --json
+```
+
+## E466 - Expose Recommended Review Artifacts
+
+Question:
+- Can a review service open the recommended task's fixture pack and review
+  brief directly from the task-list header, without scanning the `tasks` array?
+
+Implementation:
+- Added `recommended_task_fixture_pack_path` and
+  `recommended_task_review_brief_path` to
+  `ax.workflow_candidate_pending_review_task_list.v1`.
+- Text output now prints `recommended fixture pack` and
+  `recommended review brief`.
+- Regression coverage verifies the header paths for artifact-repair,
+  collect-review, and execute-command routes.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-recommended-artifacts-e466.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live `--pending-review-route=collect_review_decisions` report:
+  - `recommended_task_path=.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+  - `recommended_task_route=collect_review_decisions`
+  - `recommended_task_fixture_pack_path=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e457.jsonl`
+  - `recommended_task_review_brief_path=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e457.md`
+  - `recommended_task_can_execute_command=false`
+
+Decision:
+- E466 makes the recommended pending-review packet self-contained for review
+  services while preserving the same human-review gate.
+- The current candidate still has no reviewed decision; the correct next
+  action is to open the review brief and record a real review verdict with
+  rationale.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --pending-review-route=collect_review_decisions --out .ax/experiments/workflow-candidate-pending-review-tasks-recommended-artifacts-e466.json --json
+```
+
+## E465 - Filter Pending Review Tasks By Route
+
+Question:
+- Can review services ask directly for pending-review tasks in one route, such
+  as `collect_review_decisions` or `execute_review_command`, without combining
+  lower-level task, decision, and command-status filters?
+
+Implementation:
+- Added `--pending-review-route` to
+  `classifiers workflow-candidates --list-pending-review-tasks`.
+- Added `route` to task-list filters and text output.
+- Route filtering uses the same route function as `recommended_task_route` and
+  `route_counts`, so route selection, recommendation, and aggregation stay
+  consistent.
+- Regression coverage verifies route-filtered reports for
+  `collect_review_decisions` and `execute_review_command`.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-route-filter-e465.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live `--pending-review-route=collect_review_decisions` report:
+  - `filters.route=collect_review_decisions`
+  - `task_count=1`
+  - `route_counts.collect_review_decisions=1`
+  - `recommended_task_route=collect_review_decisions`
+  - `recommended_task_can_execute_command=false`
+- Live `--pending-review-route=execute_review_command` text report:
+  - `task_count=0`
+  - `route_counts.execute_review_command=0`
+  - `recommended task: none`
+
+Decision:
+- E465 gives schedulers a direct route-specific queue query while preserving
+  the human-review gate.
+- The current classifier candidate is still a review-collection task; no sync,
+  inspect, graph apply, guidance promotion, or harness promotion should run
+  until a real reviewed decision exists.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --pending-review-route=collect_review_decisions --out .ax/experiments/workflow-candidate-pending-review-tasks-route-filter-e465.json --json
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --pending-review-route=execute_review_command
+```
+
+## E464 - Count Pending Review Routes
+
+Question:
+- Can review services see pending-review queue workload by route without
+  scanning every task row?
+
+Implementation:
+- Added `route_counts` to
+  `ax.workflow_candidate_pending_review_task_list.v1`.
+- Counts are computed over the filtered task set using the same route function
+  as `recommended_task_route`.
+- Text output now prints route totals for:
+  - `repair_artifacts`,
+  - `repair_review_decisions`,
+  - `execute_review_command`,
+  - `collect_review_decisions`,
+  - `repair_task_schema`, and
+  - `inspect_task`.
+- Regression coverage verifies mixed route counts and filtered route counts.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-route-counts-e464.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live task-list report:
+  - `route_counts.collect_review_decisions=1`
+  - `route_counts.execute_review_command=0`
+  - `route_counts.repair_artifacts=0`
+  - `recommended_task_route=collect_review_decisions`
+  - `recommended_task_can_execute_command=false`
+- Text output confirms the filtered review-decision queue has one
+  `collect_review_decisions` task and no executable route.
+
+Decision:
+- E464 gives schedulers report-level route workload without weakening the
+  review gate.
+- The current classifier candidate still needs real review decisions before any
+  sync, inspect, graph apply, guidance promotion, or harness promotion.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-route-counts-e464.json --json
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --pending-review-decision-status=needs_review_decisions
+```
+
+## E463 - Add Recommended Review Route
+
+Question:
+- Can review services branch on the recommended pending task without parsing
+  prose next-action text or re-encoding task status rules?
+
+Implementation:
+- Added `recommended_task_route` to
+  `ax.workflow_candidate_pending_review_task_list.v1`.
+- Added `recommended_task_can_execute_command` as a direct boolean guard for
+  executors.
+- Route vocabulary:
+  - `repair_artifacts`,
+  - `repair_review_decisions`,
+  - `execute_review_command`,
+  - `collect_review_decisions`,
+  - `repair_task_schema`,
+  - `inspect_task`, and
+  - `none`.
+- Text output now prints the route and command-execution boolean.
+- Regression coverage verifies artifact repair, human-review collection, and
+  executable-command routes.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-route-e463.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live task-list report:
+  - `recommended_task_path=.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+  - `recommended_task_status=ready_for_review`
+  - `recommended_task_review_decision_status=needs_review_decisions`
+  - `recommended_task_review_command_status=blocked_until_review_decisions`
+  - `recommended_task_route=collect_review_decisions`
+  - `recommended_task_can_execute_command=false`
+- Text output confirms the same route and blocked command state.
+
+Decision:
+- E463 removes another service-side inference point: services can branch on a
+  stable route enum instead of scraping text.
+- The current classifier candidate still needs real review decisions before any
+  sync, inspect, graph apply, guidance promotion, or harness promotion.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-route-e463.json --json
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --pending-review-command-status=blocked_until_review_decisions
+```
+
+## E462 - Surface Recommended Review Commands
+
+Question:
+- Can review services get the recommended pending task command argv arrays
+  from the report header, without scanning the task rows after selecting the
+  next task?
+
+Implementation:
+- Added recommended-task command fields to
+  `ax.workflow_candidate_pending_review_task_list.v1`:
+  - `recommended_task_review_sync_command`,
+  - `recommended_task_review_sync_command_status`,
+  - `recommended_task_review_sync_command_can_execute`,
+  - `recommended_task_review_inspect_command`,
+  - `recommended_task_review_inspect_command_status`, and
+  - `recommended_task_review_inspect_command_can_execute`.
+- Text output now prints recommended sync/inspect command statuses and argv
+  arrays beside the recommended task fields.
+- Regression coverage verifies the header command status/can-execute fields
+  for unavailable, blocked, and ready-to-execute recommended tasks.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-recommended-commands-e462.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live task-list report:
+  - `recommended_task_path=.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+  - `recommended_task_review_sync_command_status=blocked_until_review_decisions`
+  - `recommended_task_review_sync_command_can_execute=false`
+  - `recommended_task_review_inspect_command_status=blocked_until_review_decisions`
+  - `recommended_task_review_inspect_command_can_execute=false`
+  - both recommended command argv arrays are present for planning, but blocked
+    from execution until real review decisions exist.
+
+Decision:
+- E462 gives review services a complete report-header routing packet:
+  recommended task, candidate ids, next action, command argv, and command
+  guards.
+- The candidate remains correctly blocked on human review; no graph promotion
+  or guidance application is warranted.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-recommended-commands-e462.json --json
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --pending-review-task-path=.ax/tasks/workflow-candidate-pending-review-nqj7es.md
+```
+
+## E461 - Recommend Next Pending Review Task
+
+Question:
+- Can review services identify the next pending review task to work on from
+  the report header, without scanning task rows or re-implementing routing
+  priority?
+
+Implementation:
+- Added report-level recommended task fields to
+  `ax.workflow_candidate_pending_review_task_list.v1`:
+  - `recommended_task_path`,
+  - `recommended_task_status`,
+  - `recommended_task_review_decision_status`,
+  - `recommended_task_review_command_status`,
+  - `recommended_task_candidate_ids`, and
+  - `recommended_task_next_action`.
+- The selector uses the same safe routing order:
+  missing artifacts, review repairs, executable commands, human review,
+  unknown schema, then any remaining task.
+- Text output prints the recommended task fields before the task rows.
+- Regression coverage verifies missing-artifact, blocked-review, and
+  ready-command recommendation behavior.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-recommended-e461.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live task-list report:
+  - `recommended_task_path=.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+  - `recommended_task_status=ready_for_review`
+  - `recommended_task_review_decision_status=needs_review_decisions`
+  - `recommended_task_review_command_status=blocked_until_review_decisions`
+  - `recommended_task_candidate_ids=[classifier_candidate_group:hybrid-window/correction_or_rejection_signal]`
+  - `recommended_task_next_action=Open the review brief and set at least one fixture to accept, revise, reject, or defer with rationale.`
+
+Decision:
+- E461 gives services a single next-task pointer while preserving the human
+  review gate.
+- The live candidate remains blocked on human review; no review facts, graph
+  apply, guidance promotion, or harness promotion is warranted from this
+  evidence alone.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-recommended-e461.json --json
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --pending-review-command-status=blocked_until_review_decisions
+```
+
+## E460 - Filter Pending Review Task Lists
+
+Question:
+- Can review services query only the pending review tasks that match a routing
+  state, such as blocked commands or ready review decisions, without fetching
+  and filtering the full task list client-side?
+
+Implementation:
+- Added task-list filters for:
+  - `--pending-review-task-path`,
+  - `--pending-review-task-status`,
+  - `--pending-review-decision-status`, and
+  - `--pending-review-command-status`.
+- The report includes the applied `filters` object and recomputes all aggregate
+  counts over the filtered task set.
+- Text output prints active filters for manual debugging.
+- Regression coverage verifies blocked-command filtering and
+  review-decision-ready filtering.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-blocked-e460.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live filtered task-list command:
+  - `filters.review_command_status=blocked_until_review_decisions`
+  - `task_count=1`
+  - `ready_for_review_count=1`
+  - `review_sync_command_ready_count=0`
+  - `review_inspect_command_ready_count=0`
+  - `review_command_blocked_count=1`
+  - `missing_artifact_count=0`
+  - `review_decision_status=needs_review_decisions`
+
+Decision:
+- E460 improves service routing/readiness without weakening the review gate.
+- The live candidate is still correctly blocked on real human review decisions;
+  no graph promotion or guidance application is warranted.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --pending-review-command-status=blocked_until_review_decisions --out .ax/experiments/workflow-candidate-pending-review-tasks-blocked-e460.json --json
+```
+
+## E459 - Summarize Pending Review Command Readiness
+
+Question:
+- Can services decide at the report level whether any pending review sync or
+  inspect commands are executable, without scanning every task row?
+
+Implementation:
+- Added aggregate command readiness fields to
+  `ax.workflow_candidate_pending_review_task_list.v1`:
+  - `review_sync_command_ready_count`,
+  - `review_inspect_command_ready_count`, and
+  - `review_command_blocked_count`.
+- Updated report routing so executable sync/inspect commands drive the top
+  level next action only when review decisions are actually ready.
+- Missing artifact tasks now report command status `unavailable` rather than a
+  blocked executable command.
+- Text output prints the aggregate command readiness totals.
+- Extended regression coverage for ready command counts, blocked command
+  counts, and text rendering.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-e459.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live task-list report:
+  - `task_count=1`
+  - `review_sync_command_ready_count=0`
+  - `review_inspect_command_ready_count=0`
+  - `review_command_blocked_count=1`
+  - `review_decision_status=needs_review_decisions`
+  - `review_sync_command_status=blocked_until_review_decisions`
+  - `review_inspect_command_status=blocked_until_review_decisions`
+- Text output now includes:
+  - `sync commands ready: 0`
+  - `inspect commands ready: 0`
+  - `commands blocked: 1`
+
+Decision:
+- E459 gives service schedulers a top-level signal for pending review command
+  execution while preserving the human-review gate.
+- The next productive work remains either real human review of the task or
+  another non-mutating service/readiness surface; graph promotion is still not
+  warranted.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-e459.json --json
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks
+```
+
+## E458 - Guard Pending Review Task Commands
+
+Question:
+- Can services see that pending review sync/inspect commands exist but must not
+  run until the linked review brief has real reviewed fixture decisions?
+
+Implementation:
+- Added command status/can-execute fields to pending review task list items:
+  - `review_sync_command_status`,
+  - `review_sync_command_can_execute`,
+  - `review_sync_command_effect`,
+  - `review_inspect_command_status`,
+  - `review_inspect_command_can_execute`, and
+  - `review_inspect_command_effect`.
+- Command status is:
+  - `ready_to_execute` only when `review_decision_status` is
+    `review_decisions_ready`,
+  - `blocked_until_review_repairs` when reviewed fixtures need rationale or
+    status fixes,
+  - `blocked_until_review_decisions` while all fixtures are still pending, and
+  - `unavailable` when command metadata is incomplete.
+- Text output now prints command status and can-execute flags next to the
+  command argv.
+- Extended regression coverage for blocked and ready command states.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-e458.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live task list reports:
+  - `review_decision_status=needs_review_decisions`
+  - `review_sync_command_status=blocked_until_review_decisions`
+  - `review_sync_command_can_execute=false`
+  - `review_inspect_command_status=blocked_until_review_decisions`
+  - `review_inspect_command_can_execute=false`
+  - `review_sync_command_effect=updates_review_pack_and_writes_report`
+  - `review_inspect_command_effect=updates_review_pack_and_writes_review_artifacts`
+- The command argv remains visible for planning, but the machine-readable guard
+  prevents services from treating it as executable before human review.
+
+Decision:
+- E458 fixes an important service-safety ambiguity from E457: sync/inspect
+  commands are available as next-step plans, but explicitly blocked until the
+  review brief has reviewed decisions.
+- The current task still requires real human review before any sync, inspect,
+  or graph apply work should run.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-e458.json --json
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks
+```
+
+## E457 - Emit Review Task Sync Commands
+
+Question:
+- Can the pending review task list tell a service exactly which non-mutating
+  command to run after the reviewer edits the linked review brief?
+
+Implementation:
+- Extended pending review task frontmatter and summaries with:
+  - `source_kind`,
+  - `output_path`,
+  - `review_facts_path`, and
+  - `review_write_plan_path`.
+- The task list now emits structured argv arrays:
+  - `review_sync_command` for syncing the edited brief back into the review
+    pack and refreshing readiness,
+  - `review_inspect_command` for producing review facts and write-plan JSON
+    before any apply.
+- The text renderer now prints the same commands for manual execution.
+- Updated regression coverage for generated task metadata and task-list command
+  output.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e457.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e457.jsonl`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e457.md`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e457.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e457.json`
+- `.ax/experiments/workflow-candidate-pending-review-tasks-e457.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live batch task summary now includes:
+  - `source_kind=hybrid_window_classifier_projection`
+  - `output_path=.ax/experiments/workflow-topic-guidance-decision-batch-e457.json`
+  - `review_facts_path=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e457.json`
+  - `review_write_plan_path=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e457.json`
+- Live task list includes `review_sync_command` and
+  `review_inspect_command` arrays for
+  `classifier_candidate_group:hybrid-window/correction_or_rejection_signal`.
+- The task still reports:
+  - `review_decision_status=needs_review_decisions`
+  - `reviewed_fixture_count=0`
+  - `pending_fixture_count=1`
+
+Decision:
+- E457 gives review services a direct next-command surface without scraping the
+  markdown review brief.
+- This remains non-mutating and does not apply graph facts; it only prepares
+  the reviewed task for a future human-edited sync/readiness step.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 --coverage-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e457.jsonl --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e457.md --review-facts=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e457.json --review-write-plan=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e457.json --review-pipeline-lifecycle --review-pipeline-verify-outputs --emit-pending-review-task --task-dir=.ax/tasks --out .ax/experiments/workflow-topic-guidance-decision-batch-e457.json --json
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-e457.json --json
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks
+```
+
+## E456 - Surface Pending Review Decision Readiness
+
+Question:
+- Can the pending review task list distinguish "artifacts exist" from "the
+  linked review brief has actual reviewed fixture decisions"?
+
+Implementation:
+- Extended pending review task list items with review-decision state:
+  - `fixture_count`,
+  - `synced_fixture_count`,
+  - `reviewed_fixture_count`,
+  - `pending_fixture_count`,
+  - `invalid_fixture_count`,
+  - `missing_rationale_count`,
+  - `review_decision_status`, and
+  - `review_decision_next_action`.
+- The list path now dry-runs
+  `syncWorkflowCandidateFixtureRowsFromBriefWithSummary` against each task's
+  fixture pack and review brief without writing files or applying graph facts.
+- Added aggregate counts for `review_decisions_ready` and
+  `review_decisions_need_repair`.
+- Added regression coverage for:
+  - missing review brief,
+  - ready-for-review but still pending decisions, and
+  - reviewed fixture with rationale ready for sync/readiness inspection.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-e456.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live JSON report:
+  - `task_count=1`
+  - `ready_for_review_count=1`
+  - `review_decisions_ready_count=0`
+  - `review_decisions_need_repair_count=0`
+  - `missing_artifact_count=0`
+  - `fixture_count=1`
+  - `synced_fixture_count=1`
+  - `reviewed_fixture_count=0`
+  - `pending_fixture_count=1`
+  - `review_decision_status=needs_review_decisions`
+- Text output now prints the same decision-readiness counts.
+
+Decision:
+- E456 closes a useful observability gap: services no longer have to open the
+  review brief manually to tell whether a pending task is only ready for review
+  or has edited decisions ready for the next sync/readiness command.
+- The current task remains blocked on human review, which is correct.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-e456.json --json
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks
+```
+
+## E455 - List Pending Review Task Readiness
+
+Question:
+- Can services and humans discover pending workflow-candidate review tasks and
+  see whether their linked fixture packs and review briefs still exist?
+
+Implementation:
+- Added `--list-pending-review-tasks` to `classifiers workflow-candidates`.
+- Added `ax.workflow_candidate_pending_review_task_list.v1` reports with:
+  - task count,
+  - ready-for-review count,
+  - missing-artifact count,
+  - unknown-schema count,
+  - per-task fixture pack status,
+  - per-task review brief status, and
+  - candidate ids.
+- Added a compact text renderer for the list report.
+- Added a regression covering ready and missing-review-brief task states while
+  ignoring unrelated markdown files.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-e455.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live JSON report:
+  - `task_count=1`
+  - `ready_for_review_count=1`
+  - `missing_artifact_count=0`
+  - `unknown_schema_count=0`
+  - `status=ready_for_review`
+  - fixture pack present:
+    `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e454.jsonl`
+  - review brief present:
+    `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e454.md`
+  - candidate:
+    `classifier_candidate_group:hybrid-window/correction_or_rejection_signal`
+- The text output gives the same status without requiring JSON parsing.
+
+Decision:
+- E455 makes the pending review work queue discoverable from the CLI and gives
+  services a read-only readiness surface before any review/apply action.
+- The queue is now operationally visible, but the classifier candidate still
+  needs real human review before graph promotion.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-e455.json --json
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks
+```
+
+## E454 - Make Pending Review Tasks Machine-Readable
+
+Question:
+- Can emitted pending-review task files be discovered and reconciled by future
+  tooling without scraping human prose?
+
+Implementation:
+- Added the `ax.workflow_candidate_pending_review_task.v1` schema marker to
+  pending review task summaries.
+- Added frontmatter to generated pending review tasks with:
+  - fixture pack path,
+  - review brief path,
+  - review pipeline stage, and
+  - candidate ids as JSON.
+- Added `parseWorkflowCandidateGuidancePendingReviewTaskMarkdown` so services
+  can read the task identity and candidate set directly.
+- Extended the pending-review task regression to assert the summary schema,
+  frontmatter fields, and parser output.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e454.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e454.jsonl`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e454.md`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e454.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e454.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live batch report includes
+  `pending_review_task.schema=ax.workflow_candidate_pending_review_task.v1`.
+- The emitted task frontmatter parses back to:
+  - fixture pack:
+    `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e454.jsonl`
+  - review brief:
+    `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e454.md`
+  - stage: `needs_review_decisions`
+  - candidate:
+    `classifier_candidate_group:hybrid-window/correction_or_rejection_signal`
+- The candidate remains blocked by `no_reviewed_fixtures`; no synthetic review
+  facts were applied.
+
+Decision:
+- E454 makes the `.ax/tasks` review handoff suitable for list/reconcile tooling
+  while keeping the existing human-review gate intact.
+- The next useful automation slice is a task-list or reconciliation command
+  that scans these markers and reports stale/missing fixture packs or review
+  briefs.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 --coverage-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e454.jsonl --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e454.md --review-facts=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e454.json --review-write-plan=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e454.json --review-pipeline-lifecycle --review-pipeline-verify-outputs --emit-pending-review-task --task-dir=.ax/tasks --out .ax/experiments/workflow-topic-guidance-decision-batch-e454.json --json
+python3 -m json.tool .ax/experiments/workflow-topic-guidance-decision-batch-e454.json >/dev/null
+TASK=$(bun -e 'const r=await Bun.file(".ax/experiments/workflow-topic-guidance-decision-batch-e454.json").json(); console.log(r.pending_review_task.path)')
+sed -n '1,28p' "$TASK"
+bun -e 'const { parseWorkflowCandidateGuidancePendingReviewTaskMarkdown } = await import("./src/cli/classifiers-workflow-candidates.ts"); const r=await Bun.file(".ax/experiments/workflow-topic-guidance-decision-batch-e454.json").json(); const parsed=parseWorkflowCandidateGuidancePendingReviewTaskMarkdown(await Bun.file(r.pending_review_task.path).text()); if (parsed.schema !== "ax.workflow_candidate_pending_review_task.v1") throw new Error(JSON.stringify(parsed)); if (parsed.fixture_pack_path !== r.pending_review_task.fixture_pack_path) throw new Error(JSON.stringify(parsed)); if (parsed.candidate_ids[0] !== "classifier_candidate_group:hybrid-window/correction_or_rejection_signal") throw new Error(JSON.stringify(parsed)); console.log(JSON.stringify(parsed, null, 2));'
+```
+
+## E453 - Emit Pending Review Task From Batch Handoff
+
+Question:
+- Can the batch pending-review queue produce a trackable human review task
+  without pretending a classifier candidate is ready for graph promotion?
+
+Implementation:
+- Added `--emit-pending-review-task` for `--guidance-decision-batch`.
+- The emitted task summary is included as `pending_review_task` in the batch
+  report.
+- The task file is written under `--task-dir` and records:
+  - fixture pack path,
+  - review brief path,
+  - candidate and fixture counts,
+  - current handoff and production guards,
+  - lifecycle status when available,
+  - exact next action for the reviewer, and
+  - candidate ids that need review.
+- Added a regression covering the task summary, task body, and text report.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e453.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e453.jsonl`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e453.md`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e453.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e453.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live batch report includes:
+  - `pending_review_task.emitted_task_count=1`
+  - `pending_review_task.path=.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+  - `pending_review_task.review_pipeline_stage=needs_review_decisions`
+- The task file points at
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e453.md`
+  and keeps the production guard at `no_reviewed_fixtures`.
+- The task asks the reviewer to set the fixture to `accept`, `revise`,
+  `reject`, or `defer` with rationale/provenance before any graph apply.
+
+Decision:
+- E453 turns the pending classifier review from a transient report row into a
+  trackable human work item while preserving the review/apply guardrails.
+- This still does not close the pending queue. It makes the remaining human
+  decision durable and discoverable.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 --coverage-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e453.jsonl --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e453.md --review-facts=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e453.json --review-write-plan=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e453.json --review-pipeline-lifecycle --review-pipeline-verify-outputs --emit-pending-review-task --task-dir=.ax/tasks --out .ax/experiments/workflow-topic-guidance-decision-batch-e453.json --json
+python3 -m json.tool .ax/experiments/workflow-topic-guidance-decision-batch-e453.json >/dev/null
+TASK=$(bun -e 'const r=await Bun.file(".ax/experiments/workflow-topic-guidance-decision-batch-e453.json").json(); console.log(r.pending_review_task.path)')
+test -f "$TASK"
+rg -n "ax pending workflow candidate review|Review brief|Set each fixture|Production guard|correction_or_rejection_signal" "$TASK"
+bun -e 'const r=await Bun.file(".ax/experiments/workflow-topic-guidance-decision-batch-e453.json").json(); if (r.pending_review_task?.emitted_task_count !== 1) throw new Error(JSON.stringify(r.pending_review_task)); if (r.pending_review_task.review_pipeline_stage !== "needs_review_decisions") throw new Error(JSON.stringify(r.pending_review_task));'
+```
+
+## E452 - Attach Review Pipeline Lifecycle to Batch Handoffs
+
+Question:
+- Can services get the same review-pipeline lifecycle routing from the
+  batch-generated pending-review handoff that they already get from the
+  lower-level review-coverage report?
+
+Implementation:
+- Factored review-pipeline lifecycle attachment down to
+  `WorkflowCandidateReviewCoverageApplySummary`.
+- `pending_review_handoff` now carries optional
+  `review_pipeline_lifecycle`.
+- Batch pending-review paths now attach that lifecycle when
+  `--review-pipeline-lifecycle` is supplied.
+- Batch handoff text now shows lifecycle status and executable state.
+- Review apply summaries can now render their pipeline commands in either
+  review-coverage mode or guidance-decision-batch mode, so lifecycle prepared
+  argv stays on the batch surface for batch handoffs.
+- Added a regression proving a reviewed batch handoff can carry
+  `ax.classifier_review_pipeline_lifecycle.v1` and that the prepared argv uses
+  `--guidance-decision-batch`.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e452.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e452.txt`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e452.jsonl`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e452.md`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e452.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e452.json`
+
+Results:
+- Live batch handoff includes:
+  - `review_pipeline_lifecycle.schema=ax.classifier_review_pipeline_lifecycle.v1`
+  - `review_pipeline_lifecycle.status=blocked_before_execution`
+  - `review_pipeline_lifecycle.summary.stage=needs_review_decisions`
+  - `review_pipeline_lifecycle.prepared.status=missing_command`
+- Text output includes:
+  - `pending review handoff lifecycle: blocked_before_execution`
+  - `pending review handoff lifecycle can execute: no`
+- The live state is still correctly blocked because the pending
+  `correction_or_rejection_signal` fixture has no real review decision yet.
+
+Decision:
+- E452 makes the batch handoff service-complete for routing. A service can now
+  inspect one batch report and see the pending candidate, review artifact
+  paths, apply guards, pipeline stage, and lifecycle execution status without
+  reconstructing lifecycle state from lower-level reports.
+- This still does not close the pending queue; the next useful action is a real
+  review decision with provenance, then guarded apply and batch recheck.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 --coverage-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e452.jsonl --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e452.md --review-facts=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e452.json --review-write-plan=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e452.json --review-pipeline-lifecycle --review-pipeline-verify-outputs --out .ax/experiments/workflow-topic-guidance-decision-batch-e452.json --json
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 --coverage-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e452.jsonl --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e452.md --review-facts=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e452.json --review-write-plan=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e452.json --review-pipeline-lifecycle --review-pipeline-verify-outputs > .ax/experiments/workflow-topic-guidance-decision-batch-e452.txt
+python3 -m json.tool .ax/experiments/workflow-topic-guidance-decision-batch-e452.json >/dev/null
+bun -e 'const report=await Bun.file(".ax/experiments/workflow-topic-guidance-decision-batch-e452.json").json(); const h=report.pending_review_handoff; if (h?.review_pipeline_lifecycle?.schema !== "ax.classifier_review_pipeline_lifecycle.v1") throw new Error(JSON.stringify(h)); if (h.review_pipeline_lifecycle.status !== "blocked_before_execution") throw new Error(JSON.stringify(h.review_pipeline_lifecycle)); if (h.review_pipeline_lifecycle.summary.stage !== "needs_review_decisions") throw new Error(JSON.stringify(h.review_pipeline_lifecycle.summary));'
+rg -n "pending review handoff lifecycle: blocked_before_execution|pending review handoff lifecycle can execute: no|pending review handoff stage: needs_review_decisions" .ax/experiments/workflow-topic-guidance-decision-batch-e452.txt
+```
+
+## E451 - Make Batch Review Briefs Self-Contained
+
+Question:
+- Can a reviewer follow the markdown handoff generated by
+  `--guidance-decision-batch` without dropping down to the lower-level
+  `--review-coverage` command?
+
+Implementation:
+- Added a review-brief command mode so the shared markdown renderer can emit
+  either review-coverage commands or guidance-decision-batch commands.
+- Batch-generated pending-review briefs now render:
+  - sync command with `--guidance-decision-batch`,
+  - apply command with `--guidance-decision-batch`,
+  - review-facts/write-plan inspection command with
+    `--guidance-decision-batch`,
+  - strict production apply command with `--guidance-decision-batch`,
+  - provenance stamp command with `--guidance-decision-batch`, and
+  - post-apply batch recheck command with `--guidance-decision-batch`.
+- Existing review-coverage briefs keep their existing review-coverage commands.
+- Added a regression that asserts batch-mode briefs contain batch commands and
+  no `--review-coverage` command.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e451.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e451.jsonl`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e451.md`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e451.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e451.json`
+
+Results:
+- The live E451 pending-review brief contains six
+  `--guidance-decision-batch` commands and zero `--review-coverage` commands.
+- The batch report still shows one pending
+  `correction_or_rejection_signal` candidate with
+  `review_pipeline_stage=needs_review_decisions`.
+- JSON artifacts parse cleanly and the generated write-plan/facts files are
+  valid JSON.
+
+Decision:
+- E451 removes an adoption trap from the review handoff. Services and humans
+  can now stay on the batch guidance-decision surface from queue generation
+  through sync, inspection, guarded apply, provenance stamping, and recheck.
+- The pending candidate remains unpromoted. This was a handoff-quality fix, not
+  a substitute for the real review decision.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 --coverage-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e451.jsonl --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e451.md --review-facts=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e451.json --review-write-plan=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e451.json --out .ax/experiments/workflow-topic-guidance-decision-batch-e451.json --json
+rg -n -- "--guidance-decision-batch|--review-coverage|re-run batch|re-run coverage" .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e451.md
+rg -n -- "--review-coverage" .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e451.md || true
+python3 -m json.tool .ax/experiments/workflow-topic-guidance-decision-batch-e451.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e451.jsonl >/dev/null
+python3 -m json.tool .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e451.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e451.json >/dev/null
+bun -e 'const brief=await Bun.file(".ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e451.md").text(); if (!brief.includes("--guidance-decision-batch")) throw new Error("missing batch command"); if (brief.includes("--review-coverage")) throw new Error("brief still points at review-coverage"); const report=await Bun.file(".ax/experiments/workflow-topic-guidance-decision-batch-e451.json").json(); if (report.pending_review_handoff?.review_pipeline_stage !== "needs_review_decisions") throw new Error(JSON.stringify(report.pending_review_handoff));'
+```
+
+## E450 - Sync Batch Pending Review Handoffs
+
+Question:
+- Can the batch guidance-decision handoff consume an edited review pack/brief
+  and surface apply readiness without dropping back to the lower-level
+  review-coverage command?
+
+Implementation:
+- `--guidance-decision-batch` now accepts `--coverage-review-pack`.
+- The batch path can now:
+  - sync review status/rationale edits from `--sync-coverage-review-brief`,
+  - stamp reviewer/reviewed-at provenance when provided,
+  - re-render the review brief,
+  - write review fact projection and write-plan artifacts,
+  - build the same pending-review handoff summary from reviewed rows, and
+  - optionally apply review facts only when existing apply guards allow it.
+- After a successful guarded apply, the batch path refreshes review facts and
+  reattaches them to the pending candidate report before rendering the final
+  batch output.
+- Added a regression proving a synced reviewed pack with rationale,
+  provenance, and complete handoff paths reports `ready_to_apply` and
+  `ready_for_production_apply` through the batch handoff surface.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e450.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e450-synced.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e450-smoke-apply-blocked.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e450.jsonl`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e450.md`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e450-synced.md`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e450-synced.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e450-synced.json`
+
+Results:
+- Initial batch handoff still reports the real pending
+  `correction_or_rejection_signal` candidate as `needs_human_review`.
+- Smoke sync from the generated markdown brief updates the JSONL fixture to
+  `review_status=reject` with a rationale, projects one reviewed candidate
+  fact, and writes a review write plan.
+- The smoke rationale intentionally includes a smoke marker, so the batch
+  handoff reports:
+  - `reviewed_fixture_count=1`
+  - `pending_fixture_count=0`
+  - `handoff_apply_guard=blocked_smoke_review`
+  - `handoff_can_apply=false`
+  - `production_apply_guard=blocked_smoke_review`
+  - `production_can_apply=false`
+  - `review_pipeline_stage=needs_review_repair`
+- A smoke apply attempt exits non-zero and does not apply review facts.
+
+Decision:
+- E450 closes the handoff loop mechanically: services can now start at the
+  batch guidance-decision surface, hand an edited markdown review back to the
+  same batch command, inspect projected graph facts/write plans, and branch on
+  structured readiness fields.
+- This still does not promote the live pending candidate. The smoke review is
+  deliberately blocked. The next aligned slice is to run a real review decision
+  with provenance through this batch path, apply only if guards pass, and
+  verify the pending queue closes or becomes a warranted artifact path.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 --coverage-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e450.jsonl --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e450.md --review-facts=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e450.json --review-write-plan=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e450.json --out .ax/experiments/workflow-topic-guidance-decision-batch-e450.json --json
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 --coverage-review-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e450.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e450.md --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e450-synced.md --review-facts=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e450-synced.json --review-write-plan=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e450-synced.json --out .ax/experiments/workflow-topic-guidance-decision-batch-e450-synced.json --json
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 --coverage-review-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e450.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e450.md --apply-review-facts --out .ax/experiments/workflow-topic-guidance-decision-batch-e450-smoke-apply-blocked.json --json
+```
+
+The third command exits `1` by design because the smoke-marked review is
+blocked from apply.
+
+## E449 - Add Machine-Readable Pending Review Handoff Routing
+
+Question:
+- Can services route the batch-generated pending-review handoff from JSON,
+  without scraping the markdown review brief?
+
+Implementation:
+- Added `ax.workflow_topic_guidance_pending_review_handoff.v1`.
+- Batch reports now include `pending_review_handoff` when
+  `--coverage-fixture-pack` is used.
+- The handoff summary carries:
+  - fixture, brief, review facts, and write-plan paths,
+  - fixture reviewed/pending counts,
+  - handoff and production apply guards,
+  - review repair status,
+  - review pipeline stage, command status, and next action.
+- `--guidance-decision-batch` now also honors `--review-facts` and
+  `--review-write-plan` for pending-review handoffs, emitting the projected
+  review graph and Surreal write plan before any review facts are applied.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e449.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e449.txt`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e449.jsonl`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e449.md`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e449.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e449.json`
+
+Results:
+- Pending handoff summary:
+  - schema: `ax.workflow_topic_guidance_pending_review_handoff.v1`
+  - fixture pack:
+    `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e449.jsonl`
+  - review brief:
+    `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e449.md`
+  - review facts:
+    `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e449.json`
+  - review write plan:
+    `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e449.json`
+  - `review_pipeline_stage=needs_review_decisions`
+  - `handoff_apply_guard=no_reviewed_fixtures`
+  - `handoff_can_apply=false`
+  - `production_apply_guard=no_reviewed_fixtures`
+  - `production_can_apply=false`
+- Pending projection sanity:
+  - reviewed candidate facts: `0`
+  - projected review facts: `0`
+  - write-plan statements: `1`
+  - write-plan fact statements: `0`
+
+Decision:
+- E449 makes the pending-review handoff service-routable. A caller can now
+  decide from JSON that the next action is review decision entry, not apply,
+  and can find every handoff artifact path without parsing markdown.
+- The pending candidate still intentionally has zero review facts. The next
+  aligned slice is to sync an edited review decision through this handoff,
+  apply the resulting review fact, and re-run the batch to verify the pending
+  queue closes or converts into a warranted artifact path.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 --coverage-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e449.jsonl --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e449.md --review-facts=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e449.json --review-write-plan=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e449.json --out .ax/experiments/workflow-topic-guidance-decision-batch-e449.json --json
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 --coverage-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e449.jsonl --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e449.md --review-facts=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e449.json --review-write-plan=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e449.json > .ax/experiments/workflow-topic-guidance-decision-batch-e449.txt
+rg -n "pending review handoff stage: needs_review_decisions|pending review handoff guard: no_reviewed_fixtures|pending review handoff can apply: no|pending review handoff next: Set at least one fixture|pending review fixture pack|pending review fixtures: 1" .ax/experiments/workflow-topic-guidance-decision-batch-e449.txt
+python3 -m json.tool .ax/experiments/workflow-topic-guidance-decision-batch-e449.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e449.jsonl >/dev/null
+python3 -m json.tool .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e449.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e449.json >/dev/null
+bun -e 'const r=await Bun.file(".ax/experiments/workflow-topic-guidance-decision-batch-e449.json").json(); const h=r.pending_review_handoff; if (h?.schema !== "ax.workflow_topic_guidance_pending_review_handoff.v1") throw new Error(JSON.stringify(h)); if (h.review_pipeline_stage !== "needs_review_decisions" || h.handoff_apply_guard !== "no_reviewed_fixtures" || h.handoff_can_apply !== false) throw new Error(JSON.stringify(h)); if (!h.review_facts_path || !h.review_write_plan_path) throw new Error(JSON.stringify(h)); const facts=await Bun.file(h.review_facts_path).json(); const plan=await Bun.file(h.review_write_plan_path).json(); if (facts.totals.reviewed_candidate_count !== 0 || facts.totals.fact_count !== 0 || plan.totals.fact_statement_count !== 0) throw new Error(JSON.stringify({facts:facts.totals, plan:plan.totals}));'
+```
+
+DB-backed pending-review handoff routing checks passed.
+
+## E448 - Emit Review Handoff From Batch Pending Queue
+
+Question:
+- Can the batch guidance-decision surface generate the actual pending-review
+  artifacts a reviewer needs, instead of only reporting that a candidate needs
+  human review?
+
+Implementation:
+- Reused the existing review-coverage fixture and markdown brief format from
+  the `--review-coverage` path.
+- `--guidance-decision-batch` now honors:
+  - `--coverage-fixture-pack=<path>` to write a JSONL review fixture pack for
+    pending candidates.
+  - `--coverage-review-brief=<path>` to write an editable markdown review
+    brief with sync/apply/provenance commands.
+- The batch report now includes `pending_review_fixture_pack` when a fixture
+  pack is emitted, including path, fixture count, candidate count, skipped
+  count, and fixture rows.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e448.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e448.txt`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e448.jsonl`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e448.md`
+
+Results:
+- Reviewed topic decisions remain unchanged:
+  - `review-coverage`: `guidance_promotion_not_warranted`
+  - `surrealml`: `guidance_promotion_not_warranted`
+- Pending review fixture pack:
+  - emitted fixtures: `1`
+  - candidate groups: `1`
+  - skipped candidates: `2`
+  - fixture candidate: `correction_or_rejection_signal`
+  - review status: `pending`
+- Markdown review brief:
+  - length: `124` lines
+  - includes the pending fixture, rationale/reviewer/reviewed-at fields,
+    sync/apply commands, provenance stamping command, and post-apply coverage
+    recheck command.
+- Next action:
+  `Review pending workflow candidates before promoting them into guidance, harness checks, fixtures, or graph facts.`
+
+Decision:
+- E448 turns the batch queue into a concrete reviewer handoff. A service or
+  user can now discover pending review work and immediately get the JSONL plus
+  markdown files needed to review, sync, apply, and recheck the graph facts.
+- The pending candidate remains unreviewed; this slice intentionally does not
+  promote it. The next aligned slice is to run the generated brief through a
+  real review decision, apply the resulting review fact, and re-run the batch
+  to confirm the pending queue closes or moves to a warranted artifact.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 --coverage-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e448.jsonl --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e448.md --out .ax/experiments/workflow-topic-guidance-decision-batch-e448.json --json
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 --coverage-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e448.jsonl --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e448.md > .ax/experiments/workflow-topic-guidance-decision-batch-e448.txt
+rg -n "pending review fixture pack|pending review fixtures: 1|needs_human_review correction_or_rejection_signal|Review pending workflow candidates|guidance_promotion_not_warranted review-coverage|guidance_promotion_not_warranted surrealml" .ax/experiments/workflow-topic-guidance-decision-batch-e448.txt
+python3 -m json.tool .ax/experiments/workflow-topic-guidance-decision-batch-e448.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e448.jsonl >/dev/null
+bun -e 'const r=await Bun.file(".ax/experiments/workflow-topic-guidance-decision-batch-e448.json").json(); if (r.pending_review_fixture_pack?.emitted_fixture_count !== 1) throw new Error(JSON.stringify(r.pending_review_fixture_pack)); const fixture=JSON.parse((await Bun.file(".ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e448.jsonl").text()).trim()); if (fixture.review_status !== "pending" || fixture.candidate_label !== "correction_or_rejection_signal") throw new Error(JSON.stringify(fixture)); const brief=await Bun.file(".ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e448.md").text(); for (const s of ["# Workflow Candidate Coverage Review", "Pending fixtures: `1`", "correction_or_rejection_signal", "Review status: `pending`", "Review rationale: _pending_"]) if (!brief.includes(s)) throw new Error(s);'
+```
+
+DB-backed pending-review handoff checks passed.
+
+## E447 - Add Pending Review Queue to Batch Guidance Decisions
+
+Question:
+- Can the batch guidance-decision surface show not only reviewed topic
+  decisions, but also unreviewed workflow candidates that are blocked before
+  they can become guidance, harness checks, fixtures, or graph facts?
+
+Implementation:
+- Extended `ax.workflow_topic_guidance_decision_batch.v1` with
+  `pending_review_candidates`.
+- Each pending row includes candidate id, label, proposed graph action,
+  recommended next artifact family, confidence, support/evidence/score, and a
+  `needs_human_review` decision.
+- The batch totals now include pending review counts split by recommended
+  artifact family: guidance, harness, classifier fixture, and review.
+- The CLI now attaches persisted review facts to the workflow candidate report
+  while building the batch so reviewed candidates are excluded from the pending
+  queue.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e447.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e447.txt`
+
+Results:
+- Reviewed topic decisions remain:
+  - `review-coverage`: `guidance_promotion_not_warranted`
+  - `surrealml`: `guidance_promotion_not_warranted`
+- Pending review queue:
+  - `correction_or_rejection_signal`
+  - candidate:
+    `classifier_candidate_group:hybrid-window/correction_or_rejection_signal`
+  - proposed action: `add_context_guardrail`
+  - recommended artifact family: `review`
+  - support/evidence/score: `1/1/0.83`
+  - decision: `needs_human_review`
+- Totals:
+  - `topic_count=2`
+  - `candidate_count=2`
+  - `pending_review_candidate_count=1`
+  - `review_pending_review_count=1`
+  - `guidance_ready_count=0`
+  - `guidance_not_warranted_count=2`
+  - `needs_human_review_count=0` for already-reviewed topic decisions
+- Next action:
+  `Review pending workflow candidates before promoting them into guidance, harness checks, fixtures, or graph facts.`
+
+Decision:
+- E447 makes the batch surface useful as a service queue: it now distinguishes
+  "reviewed but not promotion-worthy" from "not reviewed yet".
+- The live graph still has no guidance-ready candidate. The only new work item
+  is a low-support correction/rejection signal that should be reviewed before
+  becoming guidance, a harness check, a fixture, or a promoted graph fact.
+- The next aligned slice is to create a compact review handoff from this batch
+  pending queue, so a reviewer can accept/reject the candidate without running
+  the lower-level coverage commands manually.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 --out .ax/experiments/workflow-topic-guidance-decision-batch-e447.json --json
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 > .ax/experiments/workflow-topic-guidance-decision-batch-e447.txt
+rg -n "workflow topic guidance decision batch|topics: 2|pending review candidates: 1 guidance=0 harness=0 classifier_fixture=0 review=1|needs_human_review correction_or_rejection_signal|Review pending workflow candidates|Review this workflow candidate|guidance_promotion_not_warranted review-coverage|guidance_promotion_not_warranted surrealml" .ax/experiments/workflow-topic-guidance-decision-batch-e447.txt
+bun -e 'const r=await Bun.file(".ax/experiments/workflow-topic-guidance-decision-batch-e447.json").json(); if (r.schema !== "ax.workflow_topic_guidance_decision_batch.v1") throw new Error(r.schema); if (r.totals.topic_count !== 2 || r.totals.guidance_not_warranted_count !== 2 || r.totals.pending_review_candidate_count !== 1 || r.totals.review_pending_review_count !== 1 || r.totals.guidance_ready_count !== 0) throw new Error(JSON.stringify(r.totals)); const pending=r.pending_review_candidates?.[0]; if (pending?.label !== "correction_or_rejection_signal" || pending?.decision !== "needs_human_review" || pending?.recommended_artifact !== "review") throw new Error(JSON.stringify(pending));'
+```
+
+DB-backed pending-review batch checks passed.
+
+## E446 - Batch Guidance Decisions Across Reviewed Topics
+
+Question:
+- Can the guidance-decision surface run across all reviewed workflow topics so
+  services can see whether any reviewed classifier evidence is ready for
+  guidance promotion?
+
+Implementation:
+- Added `ax.workflow_topic_guidance_decision_batch.v1`.
+- Added `--guidance-decision-batch` to `classifiers workflow-candidates`.
+- Batch discovery reads persisted topic review and harness facts, extracts
+  topics, loads each topic with proposals, persisted review facts, persisted
+  harness facts, and emits one guidance decision per reviewed topic.
+- Updated single-topic guidance decisions so rejected or deferred human review
+  facts become `guidance_promotion_not_warranted` instead of falling through to
+  `needs_human_review`.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e446.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e446.txt`
+
+Results:
+- Live batch reviewed topics: `2`
+  - `review-coverage`: `guidance_promotion_not_warranted`
+  - `surrealml`: `guidance_promotion_not_warranted`
+- Totals:
+  - `candidate_count=2`
+  - `guidance_ready_count=0`
+  - `guidance_not_warranted_count=2`
+  - `needs_passing_harness_evidence_count=0`
+  - `needs_human_review_count=0`
+  - `accepted_harness_proposal_count=2`
+  - `scaffolded_harness_experiment_count=2`
+  - `passing_harness_evidence_count=2`
+  - `guidance_proposal_count=2`
+- Next action:
+  `No guidance promotion is currently warranted by reviewed topic evidence.`
+
+Decision:
+- E446 makes the promotion gate inspectable at the service level. We can now
+  ask "are any reviewed topics guidance-ready?" without manually running one
+  topic at a time.
+- The current graph does not justify a guidance change from reviewed topic
+  evidence. `review-coverage` is useful as harness/graph evidence, while the
+  reviewed `surrealml` candidate was rejected and should not be promoted.
+- The next aligned slice is to broaden the batch surface beyond already
+  reviewed topics so it can also show pending candidates that need human review
+  before they could become guidance, harness, or classifier-fixture work.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 --out .ax/experiments/workflow-topic-guidance-decision-batch-e446.json --json
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 > .ax/experiments/workflow-topic-guidance-decision-batch-e446.txt
+rg -n "workflow topic guidance decision batch|topics: 2|decisions: ready=0 not_warranted=2 needs_harness=0 needs_review=0|No guidance promotion is currently warranted|guidance_promotion_not_warranted review-coverage|guidance_promotion_not_warranted surrealml" .ax/experiments/workflow-topic-guidance-decision-batch-e446.txt
+bun -e 'const r=await Bun.file(".ax/experiments/workflow-topic-guidance-decision-batch-e446.json").json(); if (r.schema !== "ax.workflow_topic_guidance_decision_batch.v1") throw new Error(r.schema); if (r.totals.topic_count !== 2 || r.totals.guidance_not_warranted_count !== 2 || r.totals.guidance_ready_count !== 0 || r.totals.needs_human_review_count !== 0) throw new Error(JSON.stringify(r.totals)); const byTopic=Object.fromEntries(r.decisions.map(d=>[d.topic,d.decision])); if (byTopic["review-coverage"] !== "guidance_promotion_not_warranted" || byTopic.surrealml !== "guidance_promotion_not_warranted") throw new Error(JSON.stringify(byTopic));'
+```
+
+DB-backed batch guidance decision checks passed.
+
+## E445 - Guidance Decision From Harness-Backed Topic Evidence
+
+Question:
+- Once a topic has accepted review evidence, an accepted/scaffolded harness
+  proposal, and a persisted passing harness fact, should it promote guidance or
+  remain graph/harness evidence?
+
+Implementation:
+- Added `ax.workflow_topic_guidance_decision.v1`.
+- Added `--guidance-decision` to topic reports.
+- The decision report joins:
+  - accepted/revised review facts,
+  - accepted `harness_check` proposals,
+  - scaffolded harness experiments,
+  - computed and persisted passing harness facts,
+  - existing guidance proposals.
+- Added a regression proving harness-backed verification candidates do not
+  automatically become guidance proposals.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-review-coverage-guidance-decision-e445.json`
+- `.ax/experiments/workflow-topic-review-coverage-guidance-decision-e445.txt`
+
+Results:
+- Live `review-coverage` guidance decision:
+  `guidance_promotion_not_warranted`.
+- Next action:
+  `Do not promote guidance for this topic yet; use the persisted harness fact as graph evidence.`
+- Counts:
+  - `candidate_count=1`
+  - `guidance_ready_count=0`
+  - `guidance_not_warranted_count=1`
+  - `accepted_harness_proposal_count=1`
+  - `scaffolded_harness_experiment_count=1`
+  - `passing_harness_evidence_count=1`
+  - `guidance_proposal_count=0`
+- Harness evidence remains satisfied:
+  `gate_evidence_source=computed_and_persisted`,
+  `computed_passed_count=1`, `persisted_passed_count=1`.
+
+Decision:
+- Do not promote guidance for `review-coverage` yet. The reviewed candidate's
+  primary artifact is `harness_check`, and the harness fact now passes. That is
+  useful graph evidence without needing an agent-file change.
+- The next aligned slice is to run this decision surface across additional
+  reviewed topics/candidates and look for true `guidance_promotion_ready`
+  cases.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --search=review-coverage --source-kind=hybrid_window_classifier_projection --include-review-facts --include-harness-facts --guidance-decision --require-harness-checks --limit=10 --out .ax/experiments/workflow-topic-review-coverage-guidance-decision-e445.json --json
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --search=review-coverage --source-kind=hybrid_window_classifier_projection --include-review-facts --include-harness-facts --guidance-decision --require-harness-checks --limit=10 > .ax/experiments/workflow-topic-review-coverage-guidance-decision-e445.txt
+bun -e 'const r=await Bun.file(".ax/experiments/workflow-topic-review-coverage-guidance-decision-e445.json").json(); const d=r.guidance_decision; if (d?.decision !== "guidance_promotion_not_warranted") throw new Error(JSON.stringify(d)); if (d.totals.guidance_not_warranted_count !== 1 || d.totals.passing_harness_evidence_count !== 1 || d.totals.guidance_proposal_count !== 0) throw new Error(JSON.stringify(d.totals)); if (r.harness_evidence?.gate_evidence_source !== "computed_and_persisted") throw new Error(JSON.stringify(r.harness_evidence));'
+rg -n "guidance decision: guidance_promotion_not_warranted|guidance next action: Do not promote guidance|guidance evidence counts: accepted_harness=1 scaffolded_harness=1 passing_harness=1 guidance_proposals=0|guidance_promotion_not_warranted verification_or_recovery_signal|recommended: harness_check|passing_harness=yes" .ax/experiments/workflow-topic-review-coverage-guidance-decision-e445.txt
+```
+
+DB-backed guidance decision checks passed.
+
+## E444 - Accept Review Coverage Harness and Persist Passing Check
+
+Question:
+- Can the accepted `review-coverage` harness proposal become an executable
+  check and persisted harness fact, rather than only a proposal row?
+
+Implementation:
+- Accepted `harness_check__workflow_candidate__df1d675ec48a9208` through the
+  improve lifecycle, emitting a manual harness task.
+- Added an accepted-harness proposal check path: candidates cited by accepted
+  `harness_check` proposals can now produce computed checks from persisted
+  accepted review facts and source-turn evidence.
+- Added regression coverage for the accepted proposal path.
+- Added the concrete harness marker artifact:
+  `tests/harness/harness_check__workflow_candidate__df1d675ec48a9208.md`.
+- Ran `improve lint` to reconcile the accepted task into a scaffolded
+  experiment.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-review-coverage-harness-gate-pre-e444.json`
+- `.ax/experiments/workflow-topic-review-coverage-harness-facts-e444.json`
+- `.ax/experiments/workflow-topic-review-coverage-harness-write-plan-e444.json`
+- `.ax/experiments/workflow-topic-review-coverage-harness-apply-e444.json`
+- `.ax/experiments/workflow-topic-review-coverage-harness-post-apply-e444.json`
+- `.ax/experiments/workflow-topic-review-coverage-harness-lint-e444.json`
+- `.ax/experiments/workflow-topic-review-coverage-harness-proposal-scaffolded-e444.json`
+
+Results:
+- Pre-check correctly failed with no passing topic harness facts.
+- After accepting the proposal, the computed harness check passed:
+  `classifier_candidate_group__hybrid_window_verification_or_recovery_signal__accepted_review_fact_evidence`.
+- Applying harness facts wrote one passed persisted harness fact for
+  `workflow_topic_harness_check`.
+- Post-apply topic report has `gate_satisfied=true`,
+  `gate_evidence_source=computed_and_persisted`, `computed_passed_count=1`,
+  and `persisted_passed_count=1`.
+- `improve lint` reconciled
+  `harness_check__workflow_candidate__df1d675ec48a9208` from `task_emitted` to
+  `scaffolded` with no warnings.
+- Proposal list now reports the accepted harness proposal as scaffolded with
+  artifact path
+  `tests/harness/harness_check__workflow_candidate__df1d675ec48a9208.md`.
+
+Decision:
+- E444 closes the review-coverage harness proposal loop: accepted review fact
+  -> durable proposal -> accepted harness task -> executable check -> persisted
+  passing harness fact -> scaffolded improve artifact.
+- Guidance promotion remains gated; the next aligned slice is to query the
+  harness-backed topic facts and decide whether they justify a guidance change
+  or only remain graph evidence.
+
+Verification:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --search=review-coverage --source-kind=hybrid_window_classifier_projection --include-review-facts --include-harness-facts --require-harness-checks --limit=10 --out .ax/experiments/workflow-topic-review-coverage-harness-gate-pre-e444.json --json
+bun src/cli/index.ts improve accept harness_check__workflow_candidate__df1d675ec48a9208
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --search=review-coverage --source-kind=hybrid_window_classifier_projection --include-review-facts --include-harness-facts --require-harness-checks --harness-facts=.ax/experiments/workflow-topic-review-coverage-harness-facts-e444.json --harness-write-plan=.ax/experiments/workflow-topic-review-coverage-harness-write-plan-e444.json --apply-harness-facts --limit=10 --out .ax/experiments/workflow-topic-review-coverage-harness-apply-e444.json --json
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --search=review-coverage --source-kind=hybrid_window_classifier_projection --include-review-facts --include-harness-facts --require-harness-checks --limit=10 --out .ax/experiments/workflow-topic-review-coverage-harness-post-apply-e444.json --json
+bun src/cli/index.ts improve lint --root=. --json > .ax/experiments/workflow-topic-review-coverage-harness-lint-e444.json
+bun src/cli/index.ts classifiers workflow-candidates --list-proposals --search=review-coverage --proposal-status=all --expand-evidence --limit=10 --out .ax/experiments/workflow-topic-review-coverage-harness-proposal-scaffolded-e444.json --json
+```
+
+DB-backed accept, harness apply, post-apply gate, and improve-lint checks
+passed.
+
+## E443 - Apply and Rediscover Review Coverage Harness Proposal
+
+Question:
+- Can the dry-run `harness_check` proposal from E442 be written to Surreal and
+  rediscovered through the workflow-candidate proposal list and topic report?
+
+Implementation:
+- Ran the E442 harness proposal command without `--proposal-dry-run`, applying
+  the 3 proposal/evidence statements to Surreal.
+- Extended workflow-candidate proposal discovery to include both
+  `guidance__workflow_candidate__` and
+  `harness_check__workflow_candidate__` dedupe prefixes.
+- Updated proposal-list reporting so the prefix field reflects both workflow
+  proposal families.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-review-coverage-harness-proposal-apply-e443.json`
+- `.ax/experiments/workflow-topic-review-coverage-harness-proposal-list-e443.json`
+- `.ax/experiments/workflow-topic-review-coverage-harness-proposal-list-e443.txt`
+- `.ax/experiments/workflow-topic-review-coverage-harness-proposal-post-apply-e443.json`
+
+Results:
+- The apply report has `harness_proposals.dry_run=false` and
+  `emitted_proposal_count=1`.
+- The proposal list now returns
+  `harness_check__workflow_candidate__df1d675ec48a9208`, form
+  `harness_check`, status `open`.
+- The post-apply topic report now has
+  `decision=workflow_topic_evidence_found`, `proposal_count=1`, and
+  `ranked_candidate_count=1`.
+- The listed proposal cites
+  `classifier_candidate_group:hybrid-window/verification_or_recovery_signal`.
+
+Decision:
+- E443 proves the accepted classifier review fact can become durable proposal
+  state and be rediscovered as topic evidence. The next aligned slice is to
+  review/accept this `harness_check` proposal and create a passing executable
+  harness fact before guidance promotion.
+
+Verification:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --search=review-coverage --source-kind=hybrid_window_classifier_projection --include-review-facts --promote-harness-proposals --limit=10 --out .ax/experiments/workflow-topic-review-coverage-harness-proposal-apply-e443.json --json
+bun src/cli/index.ts classifiers workflow-candidates --list-proposals --search=review-coverage --proposal-status=all --expand-evidence --limit=10 --out .ax/experiments/workflow-topic-review-coverage-harness-proposal-list-e443.json --json
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --search=review-coverage --source-kind=hybrid_window_classifier_projection --include-review-facts --include-harness-facts --limit=10 --out .ax/experiments/workflow-topic-review-coverage-harness-proposal-post-apply-e443.json --json
+bun -e 'const apply=await Bun.file(".ax/experiments/workflow-topic-review-coverage-harness-proposal-apply-e443.json").json(); const list=await Bun.file(".ax/experiments/workflow-topic-review-coverage-harness-proposal-list-e443.json").json(); const post=await Bun.file(".ax/experiments/workflow-topic-review-coverage-harness-proposal-post-apply-e443.json").json(); if (apply.harness_proposals?.dry_run !== false || apply.harness_proposals?.emitted_proposal_count !== 1) throw new Error(JSON.stringify(apply.harness_proposals)); if (list.totals?.proposal_count !== 1 || list.proposals?.[0]?.form !== "harness_check") throw new Error(JSON.stringify(list)); if (post.decision !== "workflow_topic_evidence_found" || post.totals?.proposal_count !== 1) throw new Error(JSON.stringify({decision:post.decision, totals:post.totals, failures:post.failures}));'
+bun src/cli/index.ts classifiers workflow-candidates --list-proposals --search=review-coverage --proposal-status=all --expand-evidence --limit=10 > .ax/experiments/workflow-topic-review-coverage-harness-proposal-list-e443.txt
+rg -n "workflow candidate proposals|prefix: guidance__workflow_candidate__\\|harness_check__workflow_candidate__|harness_check__workflow_candidate__df1d675ec48a9208|status: open|verification_or_recovery_signal" .ax/experiments/workflow-topic-review-coverage-harness-proposal-list-e443.txt
+```
+
+DB-backed apply, proposal-list, and post-apply topic evidence checks passed.
+
+## E442 - Promote Accepted Review Fact to Harness Proposal Dry Run
+
+Question:
+- Can the accepted `verification_or_recovery_signal -> add_verification_gate`
+  review fact become a concrete harness proposal candidate without relying on
+  transcript-text topic search to rediscover the same row?
+
+Implementation:
+- Added `withWorkflowCandidateTopicPersistedReviewCandidates`, which
+  synthesizes topic candidates from persisted `workflow_topic_candidate_review`
+  facts when the topic report has review facts but no matching transcript
+  candidate rows.
+- The synthesized candidate preserves the persisted review verdict, rationale,
+  candidate id, proposed action, evidence refs, and review fact provenance.
+- Updated the lifecycle graph recommendation to point at a more concrete dry-run
+  command:
+  `classifiers workflow-candidates --topic-report --search=review-coverage
+  --source-kind=hybrid_window_classifier_projection --include-review-facts
+  --promote-harness-proposals --proposal-dry-run --limit=10`.
+
+Artifacts:
+- `.ax/experiments/classifier-lifecycle-insight-graph-recommendations-e442.json`
+- `.ax/experiments/workflow-topic-review-coverage-harness-proposal-e442.json`
+- `.ax/experiments/workflow-topic-review-coverage-harness-proposal-e442.txt`
+
+Results:
+- The DB-backed topic report now contains a synthesized
+  `verification_or_recovery_signal` candidate sourced from the accepted
+  persisted review fact.
+- The harness proposal dry-run emits one `harness_check` proposal for
+  `classifier_candidate_group:hybrid-window/verification_or_recovery_signal`.
+- The dry-run contains 3 Surreal statements: create/update proposal,
+  delete stale evidence edge, and relate the proposal to the classifier
+  candidate node.
+- The report still has `decision=needs_workflow_topic_evidence` because no
+  existing workflow proposal matched the topic; that does not block the dry-run
+  plan artifact.
+
+Decision:
+- E442 closes the gap between graph-stored review success and a concrete
+  harness proposal plan. The next aligned slice is to review/apply the harness
+  proposal and produce a passing executable harness check before any guidance
+  promotion.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers lifecycle --out .ax/experiments/classifier-lifecycle-insight-graph-recommendations-e442.json --json
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --search=review-coverage --source-kind=hybrid_window_classifier_projection --include-review-facts --promote-harness-proposals --proposal-dry-run --limit=10 --out .ax/experiments/workflow-topic-review-coverage-harness-proposal-e442.json --json
+bun -e 'const r=await Bun.file(".ax/experiments/workflow-topic-review-coverage-harness-proposal-e442.json").json(); const p=r.harness_proposals?.proposals?.[0]; if (!p || p.recommended_artifact?.primary !== "harness_check" || p.candidate_id !== "classifier_candidate_group:hybrid-window/verification_or_recovery_signal") throw new Error(JSON.stringify(r.harness_proposals)); if (r.candidates?.totals?.persisted_review_fact_count !== 1) throw new Error(JSON.stringify(r.candidates?.totals));'
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --search=review-coverage --source-kind=hybrid_window_classifier_projection --include-review-facts --promote-harness-proposals --proposal-dry-run --limit=10 > .ax/experiments/workflow-topic-review-coverage-harness-proposal-e442.txt || true
+rg -n "harness proposals: 1 emitted|harness proposal writes: dry-run \\(3 statements\\)|verification_or_recovery_signal|persisted review facts: 1" .ax/experiments/workflow-topic-review-coverage-harness-proposal-e442.txt
+```
+
+Focused tests and DB-backed dry-run artifact checks passed.
+
+## E441 - Route Graph Success Facts to Candidate Recommendations
+
+Question:
+- Once the successful review route/apply/recheck loop is persisted as graph
+  facts, can lifecycle insight use those facts to recommend the next
+  harness/guidance candidate inspection path?
+
+Implementation:
+- Added a graph-backed lifecycle recommendation emitted when the persisted
+  lifecycle fact
+  `classifier_lifecycle:workflow_candidate_review_pipeline /
+  review_pipeline_post_apply_recheck_status = gap_closed` is present.
+- The package service now queries that lifecycle success fact when building
+  lifecycle insights.
+- The lifecycle text renderer prints the recommendation, the verifying graph
+  query argv, and the candidate inspection argv:
+  `bun src/cli/index.ts classifiers workflow-candidates
+  --review-coverage --source-kind=hybrid_window_classifier_projection
+  --limit=10`.
+
+Artifacts:
+- `.ax/experiments/classifier-lifecycle-insight-graph-recommendations-e441.json`
+- `.ax/experiments/classifier-lifecycle-insight-graph-recommendations-e441.txt`
+- `.ax/experiments/workflow-candidate-review-coverage-graph-recommended-e441.json`
+
+Results:
+- The lifecycle insight report contains one `graph_recommendations` entry:
+  `review_pipeline_success_to_candidate_promotion`.
+- Its `next_action` is
+  `prioritize_reviewed_candidates_for_harness_or_guidance`.
+- Its evidence path is
+  `.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json`.
+- The text report exposes the same recommendation and candidate query command.
+- Running the recommended review-coverage query returned 3 candidate groups:
+  one accepted verification/recovery signal for `add_verification_gate`, one
+  rejected environment/preference signal, and one unreviewed
+  correction/rejection signal.
+
+Decision:
+- E441 connects persisted lifecycle success facts to an actionable service
+  surface. The next aligned slice is to run the recommended candidate query and
+  use reviewed evidence plus existing harness facts to pick concrete harness or
+  guidance proposals.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts
+bun test src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts
+bun src/cli/index.ts classifiers lifecycle --out .ax/experiments/classifier-lifecycle-insight-graph-recommendations-e441.json --json
+bun -e 'const r=await Bun.file(".ax/experiments/classifier-lifecycle-insight-graph-recommendations-e441.json").json(); const g=r.graph_recommendations?.[0]; if (!g || g.next_action !== "prioritize_reviewed_candidates_for_harness_or_guidance" || !g.evidence_paths?.length) throw new Error(JSON.stringify(r.graph_recommendations));'
+bun src/cli/index.ts classifiers lifecycle > .ax/experiments/classifier-lifecycle-insight-graph-recommendations-e441.txt || true
+rg -n "graph recommendations|review_pipeline_success_to_candidate_promotion|candidate argv: .*--review-coverage|review_pipeline_post_apply_recheck_status=gap_closed" .ax/experiments/classifier-lifecycle-insight-graph-recommendations-e441.txt
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=10 --out .ax/experiments/workflow-candidate-review-coverage-graph-recommended-e441.json --json
+```
+
+Focused tests, DB-backed lifecycle insight JSON, and rendered lifecycle text
+checks passed. The plain text lifecycle command exits nonzero while the broader
+workflow still reports `needs_human_review`; the recommendation is still
+rendered and verified in the output.
+
+## E440 - Persist Route Apply Recheck Lifecycle Facts
+
+Question:
+- Can the successful route/apply/recheck loop from E439 become durable
+  lifecycle graph facts that services can query without reading experiment
+  artifacts directly?
+
+Implementation:
+- Extended review-pipeline lifecycle loading with apply and post-apply recheck
+  fields from the workflow candidate review coverage report.
+- Projected those fields into `classifier_lifecycle_status` facts, including
+  `review_pipeline_apply_result`, `review_pipeline_applied`,
+  `review_pipeline_applied_statement_count`,
+  `review_pipeline_review_handoff_status`,
+  `review_pipeline_production_apply_guard`,
+  `review_pipeline_production_can_apply`, and
+  `review_pipeline_post_apply_recheck_status`.
+- Regenerated `.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json`
+  from the guarded apply path.
+- Generated classifier graph facts, a Surreal write plan, applied the write
+  plan, and queried the persisted graph.
+
+Artifacts:
+- `.ax/experiments/classifier-package-execution-facts-review-pipeline-apply-e440.json`
+- `.ax/experiments/classifier-package-execution-write-plan-review-pipeline-apply-e440.json`
+- `.ax/experiments/classifier-package-execution-apply-review-pipeline-apply-e440.json`
+- `.ax/experiments/classifier-graph-lifecycle-review-pipeline-apply-e440.json`
+- `.ax/experiments/classifier-graph-lifecycle-review-pipeline-apply-e440.txt`
+
+Results:
+- Fact projection contains:
+  `review_pipeline_apply_result=applied`,
+  `review_pipeline_applied=true`,
+  `review_pipeline_applied_statement_count=5`,
+  `review_pipeline_review_handoff_status=complete_review_handoff`,
+  `review_pipeline_production_apply_guard=ready_to_apply`,
+  `review_pipeline_production_can_apply=true`, and
+  `review_pipeline_post_apply_recheck_status=gap_closed`.
+- The Surreal write-plan apply reported `decision=applied`,
+  `applied_statement_count=596`, and `failed_statement_count=0`.
+- Persisted lifecycle graph query for
+  `review_pipeline_post_apply_recheck_status=gap_closed` returned
+  `query_match_status=matched`, `decision=healthy`, and one lifecycle fact.
+- Persisted lifecycle graph text query for
+  `review_pipeline_apply_result=applied` returned `query match: matched`.
+
+Decision:
+- E440 makes the successful hybrid classifier review route available through
+  graph queries. Services can now ask the graph whether review-route apply
+  closed the gap, instead of replaying route execution artifacts.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371.md --review-facts=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371-review-facts.json --review-write-plan=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371-review-write-plan.json --apply-review-facts --require-review-provenance --require-review-handoff --out=.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json --json
+bun src/cli/index.ts classifiers package-operations --facts --out .ax/experiments/classifier-package-execution-facts-review-pipeline-apply-e440.json --json
+bun src/cli/index.ts classifiers package-operations --write-plan --out .ax/experiments/classifier-package-execution-write-plan-review-pipeline-apply-e440.json --json
+bun src/cli/index.ts classifiers package-operations --apply-write-plan --out .ax/experiments/classifier-package-execution-apply-review-pipeline-apply-e440.json --json
+bun src/cli/index.ts classifiers package-operations --graph-health --graph-mode lifecycle --predicate review_pipeline_post_apply_recheck_status --value gap_closed --out .ax/experiments/classifier-graph-lifecycle-review-pipeline-apply-e440.json --json
+bun src/cli/index.ts classifiers package-operations --graph-health --graph-mode lifecycle --predicate review_pipeline_apply_result --value applied > .ax/experiments/classifier-graph-lifecycle-review-pipeline-apply-e440.txt
+bun -e 'const f=await Bun.file(".ax/experiments/classifier-package-execution-facts-review-pipeline-apply-e440.json").json(); const facts=Object.fromEntries(f.facts.filter(x=>x.subject==="classifier_lifecycle:workflow_candidate_review_pipeline").map(x=>[x.predicate,x.value])); const required={review_pipeline_apply_result:"applied",review_pipeline_applied:true,review_pipeline_applied_statement_count:5,review_pipeline_review_handoff_status:"complete_review_handoff",review_pipeline_production_apply_guard:"ready_to_apply",review_pipeline_production_can_apply:true,review_pipeline_post_apply_recheck_status:"gap_closed"}; for (const [k,v] of Object.entries(required)) { if (facts[k] !== v) throw new Error(`${k} expected ${v} got ${facts[k]}`); }'
+bun -e 'const apply=await Bun.file(".ax/experiments/classifier-package-execution-apply-review-pipeline-apply-e440.json").json(); const graph=await Bun.file(".ax/experiments/classifier-graph-lifecycle-review-pipeline-apply-e440.json").json(); if (apply.decision !== "applied" || apply.applied_statement_count !== 596 || apply.failed_statement_count !== 0) throw new Error(`bad apply ${JSON.stringify(apply)}`); if (graph.decision !== "healthy" || graph.query_match_status !== "matched" || graph.lifecycle_facts?.[0]?.value !== "gap_closed") throw new Error(`bad graph ${JSON.stringify({decision:graph.decision,status:graph.query_match_status,facts:graph.lifecycle_facts})}`);'
+rg -n "review_pipeline_apply_result|value: applied|query match: matched|decision: healthy" .ax/experiments/classifier-graph-lifecycle-review-pipeline-apply-e440.txt
+```
+
+Focused tests, projection assertions, Surreal apply, and persisted graph queries
+passed.
+
+## E439 - Apply Reviewed Route Facts and Recheck Coverage
+
+Question:
+- Once lifecycle route inspection reports `ready_for_apply`, can the guarded
+  production apply command update the graph and prove the review-coverage gap
+  closes?
+
+Implementation:
+- Executed the production apply command emitted by the completed review handoff.
+- The command included `--apply-review-facts`,
+  `--require-review-provenance`, and `--require-review-handoff`.
+- Ran the standalone post-apply review coverage recheck.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e439-apply.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e439-apply-post-apply.json`
+
+Results:
+- The guarded apply reported `apply_result=applied`.
+- `applied_statement_count=5`.
+- The embedded post-apply recheck reported `status=gap_closed`.
+- The standalone post-apply coverage report shows
+  `reviewed_candidate_count=2` and `unreviewed_candidate_count=1`.
+- The accepted `verification_or_recovery_signal` candidate now has
+  `review_fact_count=1` and topic `review-coverage`.
+
+Decision:
+- E439 proves the review route can move from classifier-derived candidate
+  evidence through review handoff, guarded graph apply, and post-apply coverage
+  closure. The next aligned slice is to project this route/apply/recheck result
+  into lifecycle graph facts so services can query the successful promotion
+  path without reading experiment artifacts directly.
+
+Verification:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371.md --review-facts=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371-review-facts.json --review-write-plan=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371-review-write-plan.json --apply-review-facts --require-review-provenance --require-review-handoff --out=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e439-apply.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=10 --out=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e439-apply-post-apply.json --json
+bun -e 'const apply=await Bun.file(".ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e439-apply.json").json(); const recheck=await Bun.file(".ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e439-apply-post-apply.json").json(); const cr=apply.coverage_review; if (cr.apply_result !== "applied" || cr.applied !== true || cr.applied_statement_count !== 5) throw new Error(`bad apply ${JSON.stringify({apply_result:cr.apply_result,applied:cr.applied,statements:cr.applied_statement_count})}`); if (cr.post_apply_recheck?.status !== "gap_closed") throw new Error(`bad embedded recheck ${JSON.stringify(cr.post_apply_recheck)}`); if (recheck.totals.reviewed_candidate_count !== 2 || recheck.totals.unreviewed_candidate_count !== 1) throw new Error(`bad recheck totals ${JSON.stringify(recheck.totals)}`);'
+rg -n '"apply_result": "applied"|"applied_statement_count": 5|"status": "gap_closed"|"reviewed_candidate_count": 2|"unreviewed_candidate_count": 1' .ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e439-apply.json .ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e439-apply-post-apply.json
+```
+
+Guarded apply and post-apply artifact assertions passed.
+
+## E438 - Complete Route Review Handoff
+
+Question:
+- Can the executed lifecycle route progress past `needs_review_handoff` once
+  the review facts and write-plan handoff artifacts are exported?
+
+Implementation:
+- Ran the non-apply review handoff export with all required handoff paths:
+  review brief, synced review brief, review facts, review write plan, and
+  readiness output.
+- Updated lifecycle route inspection to prefer the current `--out` artifact
+  over captured stdout so re-inspection reflects post-execution handoff
+  updates.
+
+Artifacts:
+- `.ax/experiments/classifier-lifecycle-route-execution-inspection-e438.json`
+- `.ax/experiments/classifier-lifecycle-route-execution-inspection-e438.txt`
+- `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371-review-facts.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371-review-write-plan.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371.json`
+
+Results:
+- Re-inspecting the E436 route execution now reports
+  `decision=ready_for_apply`.
+- `parsed_output_source=output_file`, so the inspection uses the current
+  readiness artifact rather than stale captured stdout.
+- The handoff gate is complete:
+  `review_handoff_status=complete_review_handoff`,
+  `production_apply_guard=ready_to_apply`, and `production_can_apply=true`.
+- `missing_output_paths=[]`.
+- The route inspection reports `next_action=apply_review_facts`.
+- The inner review pipeline stage is `ready_for_production_apply`; its output
+  check status remains `pending_execution` because the guarded production apply
+  command has not been run yet.
+
+Decision:
+- E438 closes the review-handoff blocker exposed by E437. The next aligned
+  slice is to execute the guarded production apply command, verify output
+  artifacts, and run the post-apply recheck before treating the graph update as
+  useful.
+
+Verification:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371.md --review-facts=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371-review-facts.json --review-write-plan=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371-review-write-plan.json --out=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371.json --json
+bun src/cli/index.ts classifiers lifecycle --inspect-route-execution .ax/experiments/classifier-lifecycle-route-execution-e436.json --out .ax/experiments/classifier-lifecycle-route-execution-inspection-e438.json --json
+bun src/cli/index.ts classifiers lifecycle --inspect-route-execution .ax/experiments/classifier-lifecycle-route-execution-e436.json > .ax/experiments/classifier-lifecycle-route-execution-inspection-e438.txt
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-lifecycle-route-execution-inspection-e438.json").json(); if (saved.decision !== "ready_for_apply" || saved.next_action !== "apply_review_facts") throw new Error(`bad inspection ${JSON.stringify({decision:saved.decision,next_action:saved.next_action})}`); if (saved.parsed_output_source !== "output_file") throw new Error(`bad source ${saved.parsed_output_source}`); if (saved.review_handoff_status !== "complete_review_handoff" || saved.production_apply_guard !== "ready_to_apply" || saved.production_can_apply !== true) throw new Error("handoff not complete"); if (saved.missing_output_paths.length !== 0) throw new Error("missing outputs");'
+rg -n -- "decision: ready_for_apply|parsed output source: output_file|handoff: complete_review_handoff production=ready_to_apply can_apply=yes|pipeline: ready_for_production_apply outputs=pending_execution|missing outputs: none|next action: apply_review_facts" .ax/experiments/classifier-lifecycle-route-execution-inspection-e438.txt
+test -s .ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371-review-facts.json
+test -s .ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371-review-write-plan.json
+```
+
+Focused artifact assertions passed.
+
+## E437 - Inspect Lifecycle Route Execution Outputs
+
+Question:
+- After a bound lifecycle route executes, can services tell whether execution
+  failed, route outputs are missing, the inner review report is parseable, and
+  which handoff/apply gate blocks promotion?
+
+Implementation:
+- Added `inspectClassifierLifecycleRouteExecution` and the
+  `ax.classifier_lifecycle_route_execution_inspection.v1` report shape.
+- The inspection detects route output artifacts from argv flags including
+  `--out`, `--coverage-review-brief`, `--review-facts`, and
+  `--review-write-plan`.
+- The inspection parses the inner JSON from stdout or the `--out` artifact and
+  surfaces review handoff, production apply, pipeline stage, and output-check
+  status.
+- Added `ax classifiers lifecycle --inspect-route-execution <path>` for CLI
+  debugging and service handoff.
+
+Artifacts:
+- `.ax/experiments/classifier-lifecycle-route-execution-inspection-e437.json`
+- `.ax/experiments/classifier-lifecycle-route-execution-inspection-e437.txt`
+
+Results:
+- The real E436 route execution inspection reports
+  `decision=needs_review_handoff`.
+- Both route output artifacts exist:
+  `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371.md`
+  and
+  `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371.json`.
+- `missing_output_paths=[]`.
+- The inner report is parsed from stdout as
+  `ax.workflow_candidate_review_coverage.v1` with
+  `decision=workflow_candidate_review_coverage_ready`.
+- The blocking gate is explicit:
+  `review_handoff_status=incomplete_review_handoff`,
+  `production_apply_guard=missing_review_handoff`,
+  `production_can_apply=false`, and `next_action=complete_review_handoff`.
+
+Decision:
+- E437 proves the post-execution failure is not a route execution or output
+  artifact problem. The next aligned work is to complete/export the review
+  handoff artifacts, then re-inspect until the lifecycle route reports
+  `ready_for_apply`.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun src/cli/index.ts classifiers lifecycle --inspect-route-execution .ax/experiments/classifier-lifecycle-route-execution-e436.json --out .ax/experiments/classifier-lifecycle-route-execution-inspection-e437.json --json
+bun src/cli/index.ts classifiers lifecycle --inspect-route-execution .ax/experiments/classifier-lifecycle-route-execution-e436.json > .ax/experiments/classifier-lifecycle-route-execution-inspection-e437.txt
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-lifecycle-route-execution-inspection-e437.json").json(); if (saved.schema !== "ax.classifier_lifecycle_route_execution_inspection.v1") throw new Error("bad schema"); if (saved.decision !== "needs_review_handoff" || saved.next_action !== "complete_review_handoff") throw new Error(`bad route inspection ${JSON.stringify({decision:saved.decision,next_action:saved.next_action})}`); if (saved.missing_output_paths.length !== 0) throw new Error(`missing outputs ${JSON.stringify(saved.missing_output_paths)}`); if (saved.review_handoff_status !== "incomplete_review_handoff" || saved.production_apply_guard !== "missing_review_handoff" || saved.production_can_apply !== false) throw new Error("bad handoff fields"); if (!saved.output_artifacts.some((x)=>x.kind === "readiness_report" && x.exists) || !saved.output_artifacts.some((x)=>x.kind === "review_brief" && x.exists)) throw new Error("missing artifact status");'
+rg -n -- "decision: needs_review_handoff|handoff: incomplete_review_handoff production=missing_review_handoff can_apply=no|pipeline: needs_review_handoff outputs=no_output_artifacts|missing outputs: none|next action: complete_review_handoff|readiness_report --out .*exists=yes|review_brief --coverage-review-brief .*exists=yes" .ax/experiments/classifier-lifecycle-route-execution-inspection-e437.txt
+```
+
+Focused tests, typecheck, real inspection, and artifact assertions passed.
+
+## E436 - Execute Bound Lifecycle Routes
+
+Question:
+- Can the lifecycle route helper move from safe planning into explicit,
+  auditable execution while preserving a report artifact for services and
+  debugging?
+
+Implementation:
+- Added `executeClassifierLifecycleRouteExecutionPlan` and the
+  `ax.classifier_lifecycle_route_execution_report.v1` report shape.
+- Added compact route execution text rendering.
+- Wired `ax classifiers lifecycle --execute-route` so route execution happens
+  only when route inputs are bound and the caller explicitly requests execution.
+- Kept `--route-execution-plan` as a non-mutating plan surface.
+
+Artifacts:
+- `.ax/experiments/classifier-lifecycle-route-execution-e436.json`
+- `.ax/experiments/classifier-lifecycle-route-execution-e436.txt`
+- `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371.json`
+
+Results:
+- The real bound review-pipeline route executed with exit code `0`.
+- The outer execution report captured the exact bound argv, stdout, stderr,
+  timestamps, duration, and `next_action=inspect_route_outputs`.
+- The inner workflow-candidate command produced review coverage output with
+  `decision=workflow_candidate_review_coverage_ready`.
+- The route did not apply graph writes; the inner report still shows the next
+  pipeline stage as `needs_review_handoff`.
+
+Decision:
+- E436 closes the service helper loop from graph-derived route discovery to
+  explicit route execution. Route output still needs a separate verification
+  and handoff gate before promotion/apply.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun src/cli/index.ts classifiers lifecycle --route-inputs reviewer=necmett,reviewed_at=2026-05-31T12:34:56.000Z --execute-route --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --out .ax/experiments/classifier-lifecycle-route-execution-e436.json --json
+bun src/cli/index.ts classifiers lifecycle --route-inputs reviewer=necmett,reviewed_at=2026-05-31T12:34:56.000Z --execute-route --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute > .ax/experiments/classifier-lifecycle-route-execution-e436.txt
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-lifecycle-route-execution-e436.json").json(); if (saved.schema !== "ax.classifier_lifecycle_route_execution_report.v1") throw new Error("bad schema"); if (saved.decision !== "executed" || saved.executed !== true || saved.exit_code !== 0) throw new Error(`bad execution ${JSON.stringify({decision:saved.decision,executed:saved.executed,exit_code:saved.exit_code})}`); if (!saved.command_argv.includes("--review-provenance-reviewer=necmett")) throw new Error("missing bound reviewer"); if (!saved.stdout.includes("workflow_candidate_review_coverage_ready")) throw new Error("missing inner coverage output");'
+rg -n -- "classifier lifecycle route execution|decision: executed|executed: yes|exit code: 0|next action: inspect_route_outputs" .ax/experiments/classifier-lifecycle-route-execution-e436.txt
+test -s .ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371.json
+```
+
+Focused tests, typecheck, real execution, and artifact assertions passed.
+
+## E435 - Gate Bound Route Execution Plans
+
+Question:
+- Can lifecycle route execution keep preview and execution permission separate,
+  so a ready bound argv does not imply a service should run it automatically?
+
+Implementation:
+- Added `buildClassifierLifecycleRouteExecutionPlan` and the
+  `ax.classifier_lifecycle_route_execution_plan.v1` report shape.
+- Added compact execution-plan text rendering.
+- Added `ax classifiers lifecycle --route-execution-plan` and explicit
+  `--execute-route` gating.
+
+Artifacts:
+- `.ax/experiments/classifier-lifecycle-route-execution-plan-denied-e435.json`
+- `.ax/experiments/classifier-lifecycle-route-execution-plan-allowed-e435.json`
+- `.ax/experiments/classifier-lifecycle-route-execution-plan-denied-e435.txt`
+
+Results:
+- Without `--execute-route`, the real route plan reports
+  `decision=denied_requires_execute`, `would_execute=false`, and
+  `next_action=request_execute_route`.
+- The denied plan includes failure
+  `route execution requires --execute-route`.
+- With `--execute-route`, the same bound route reports
+  `decision=ready_to_execute`, `would_execute=true`, and
+  `next_action=execute_bound_route`.
+
+Decision:
+- E435 makes route execution safe-by-default. Services can preview and plan
+  freely, but actual route execution requires an explicit allow signal.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts
+bun src/cli/index.ts classifiers lifecycle --route-inputs reviewer=necmett,reviewed_at=2026-05-31T12:34:56.000Z --route-execution-plan --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --out .ax/experiments/classifier-lifecycle-route-execution-plan-denied-e435.json --json
+bun src/cli/index.ts classifiers lifecycle --route-inputs reviewer=necmett,reviewed_at=2026-05-31T12:34:56.000Z --route-execution-plan --execute-route --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --out .ax/experiments/classifier-lifecycle-route-execution-plan-allowed-e435.json --json
+bun src/cli/index.ts classifiers lifecycle --route-inputs reviewer=necmett,reviewed_at=2026-05-31T12:34:56.000Z --route-execution-plan --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute > .ax/experiments/classifier-lifecycle-route-execution-plan-denied-e435.txt || true
+bun -e 'const denied=await Bun.file(".ax/experiments/classifier-lifecycle-route-execution-plan-denied-e435.json").json(); const allowed=await Bun.file(".ax/experiments/classifier-lifecycle-route-execution-plan-allowed-e435.json").json(); if (denied.decision !== "denied_requires_execute" || denied.would_execute !== false || denied.requested_execute !== false) throw new Error(`bad denied ${JSON.stringify(denied)}`); if (!denied.failures.includes("route execution requires --execute-route")) throw new Error("missing denied failure"); if (allowed.decision !== "ready_to_execute" || allowed.would_execute !== true || allowed.requested_execute !== true) throw new Error(`bad allowed ${JSON.stringify(allowed)}`); if (!allowed.command_argv.includes("--review-provenance-reviewer=necmett")) throw new Error("allowed missing bound reviewer");'
+rg -n -- "decision: denied_requires_execute|requested execute: no|would execute: no|failure: route execution requires --execute-route|next action: request_execute_route" .ax/experiments/classifier-lifecycle-route-execution-plan-denied-e435.txt
+```
+
+Focused tests and artifact assertions passed.
+
+## E434 - Preview Bound Active Route Commands
+
+Question:
+- Can services/debugging bind active route inputs into argv and verify the
+  resulting command before executing anything?
+
+Implementation:
+- Added `buildClassifierLifecycleRouteBindingPreview` and the
+  `ax.classifier_lifecycle_route_binding_preview.v1` report shape.
+- Added compact binding-preview text rendering.
+- Added `ax classifiers lifecycle --route-inputs key=value,...` so route
+  binding can be previewed from the CLI.
+
+Artifacts:
+- `.ax/experiments/classifier-lifecycle-route-binding-preview-e434.json`
+- `.ax/experiments/classifier-lifecycle-route-binding-preview-e434.txt`
+
+Results:
+- With `reviewer=necmett` and
+  `reviewed_at=2026-05-31T12:34:56.000Z`, the real preview reports
+  `decision=ready_to_execute`.
+- `missing_values=[]`.
+- Bound argv includes
+  `--review-provenance-reviewer=necmett` and
+  `--review-provenance-reviewed-at=2026-05-31T12:34:56.000Z`.
+- The preview reports `next_action=execute_bound_active_route`.
+
+Decision:
+- E434 closes the loop from route discovery to safe execution preview: services
+  can now request missing values, produce bound argv, and show or execute that
+  command deliberately rather than assembling command strings by hand.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts
+bun src/cli/index.ts classifiers lifecycle --route-inputs reviewer=necmett,reviewed_at=2026-05-31T12:34:56.000Z --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --out .ax/experiments/classifier-lifecycle-route-binding-preview-e434.json --json
+bun src/cli/index.ts classifiers lifecycle --route-inputs reviewer=necmett,reviewed_at=2026-05-31T12:34:56.000Z --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute > .ax/experiments/classifier-lifecycle-route-binding-preview-e434.txt || true
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-lifecycle-route-binding-preview-e434.json").json(); if (saved.decision !== "ready_to_execute") throw new Error(`bad decision ${saved.decision}`); if (!saved.bound_argv.includes("--review-provenance-reviewer=necmett")) throw new Error("missing reviewer binding"); if (!saved.bound_argv.includes("--review-provenance-reviewed-at=2026-05-31T12:34:56.000Z")) throw new Error("missing reviewed-at binding"); if (saved.missing_values.length !== 0) throw new Error(`missing values ${JSON.stringify(saved.missing_values)}`);'
+rg -n -- "decision: ready_to_execute|bound argv: .*--review-provenance-reviewer=necmett .*--review-provenance-reviewed-at=2026-05-31T12:34:56.000Z|next action: execute_bound_active_route" .ax/experiments/classifier-lifecycle-route-binding-preview-e434.txt
+```
+
+Focused tests and artifact assertions passed.
+
+## E433 - Surface Active Route Input Bindings
+
+Question:
+- Can lifecycle routing summaries tell services exactly which values are
+  missing and how they bind into the active command, without requiring callers
+  to inspect nested review-pipeline detail?
+
+Implementation:
+- Added `input_bindings` to `review_pipeline_action` routing items.
+- Added `active_route_missing_inputs` and `active_route_input_bindings` to the
+  lifecycle routing summary report.
+- Compact lifecycle routing text now renders missing inputs and input binding
+  metadata for the active route.
+
+Artifacts:
+- `.ax/experiments/classifier-lifecycle-routing-input-bindings-e433.json`
+- `.ax/experiments/classifier-lifecycle-routing-input-bindings-e433.txt`
+
+Results:
+- Current real routing summary reports active missing inputs:
+  `reviewer, reviewed_at`.
+- Current real routing summary reports two input bindings:
+  `--review-provenance-reviewer=<reviewer>` and
+  `--review-provenance-reviewed-at=<reviewed-at-iso>`, including argv indexes,
+  prefixes, placeholders, and value kinds.
+- The active route itself also carries the same `input_bindings`, so callers
+  can consume either the normalized top-level summary or the route object.
+
+Decision:
+- E433 makes the missing-input route actionable for a service/debug UI: ask for
+  the named values, bind them using the provided flag/prefix/placeholder
+  metadata, then re-run lifecycle routing until the active route becomes
+  executable.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts
+bun src/cli/index.ts classifiers lifecycle --routing-summary --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --out .ax/experiments/classifier-lifecycle-routing-input-bindings-e433.json --json
+bun src/cli/index.ts classifiers lifecycle --routing-summary --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute > .ax/experiments/classifier-lifecycle-routing-input-bindings-e433.txt || true
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-lifecycle-routing-input-bindings-e433.json").json(); const inputs=saved.active_route_missing_inputs ?? []; const bindings=saved.active_route_input_bindings ?? []; if (inputs.join(",") !== "reviewer,reviewed_at") throw new Error(`bad inputs ${JSON.stringify(inputs)}`); if (!bindings.some((x)=>x.includes("--review-provenance-reviewer")) || !bindings.some((x)=>x.includes("--review-provenance-reviewed-at"))) throw new Error(`bad bindings ${JSON.stringify(bindings)}`); if (saved.active_route?.input_bindings?.length !== 2) throw new Error("active route missing input_bindings");'
+rg -n -- "missing inputs: reviewer, reviewed_at|input bindings: reviewer flag=--review-provenance-reviewer.*reviewed_at flag=--review-provenance-reviewed-at" .ax/experiments/classifier-lifecycle-routing-input-bindings-e433.txt
+```
+
+Focused tests and artifact assertions passed.
+
+## E432 - Add Lifecycle Routing Summary Service Helper
+
+Question:
+- Can services and CLI debugging ask for the active classifier lifecycle route
+  directly, instead of parsing the full lifecycle insight report and
+  reimplementing route priority/executability logic?
+
+Implementation:
+- Added `summarizeClassifierLifecycleRouting` and the
+  `ax.classifier_lifecycle_routing_summary.v1` report shape.
+- Added `ClassifierPackageService.lifecycleRoutingSummaryReport` and
+  `writeLifecycleRoutingSummaryReport`.
+- Added `ax classifiers lifecycle --routing-summary` with compact text and
+  JSON output.
+
+Artifacts:
+- `.ax/experiments/classifier-lifecycle-routing-summary-e432.json`
+- `.ax/experiments/classifier-lifecycle-routing-summary-e432.txt`
+
+Results:
+- Current real routing summary reports the active route as
+  `review_pipeline_action` with `execution_status=missing_inputs` and
+  `can_execute=false`.
+- The summary reports `next_action=bind_active_route_inputs`.
+- Totals show one executable secondary route, one missing-input route, zero
+  blocked routes, and one secondary route.
+- Text output renders:
+  `routes executable/missing-input/blocked/secondary: 1/1/0/1`,
+  active route execution state, and the next action.
+
+Decision:
+- E432 gives FX services a smaller route-selection helper: inspect
+  `active_route`, follow `next_action`, and only execute routes from
+  `executable_routes` after active missing inputs are bound or cleared.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun src/cli/index.ts classifiers lifecycle --routing-summary --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --out .ax/experiments/classifier-lifecycle-routing-summary-e432.json --json
+bun src/cli/index.ts classifiers lifecycle --routing-summary --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute > .ax/experiments/classifier-lifecycle-routing-summary-e432.txt || true
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-lifecycle-routing-summary-e432.json").json(); if (saved.schema !== "ax.classifier_lifecycle_routing_summary.v1") throw new Error("bad schema"); if (saved.active_route_kind !== "review_pipeline_action" || saved.active_route_execution_status !== "missing_inputs" || saved.active_route_can_execute !== false) throw new Error(`bad active route ${JSON.stringify(saved.active_route)}`); if (saved.next_action !== "bind_active_route_inputs") throw new Error(`bad next action ${saved.next_action}`); if (saved.totals.executable_route_count !== 1 || saved.totals.missing_input_route_count !== 1 || saved.totals.secondary_route_count !== 1) throw new Error(`bad totals ${JSON.stringify(saved.totals)}`);'
+rg -n -- "active: review_pipeline_action missing_inputs stamp_review_provenance execution=missing_inputs can_execute=no|next action: bind_active_route_inputs|routes executable/missing-input/blocked/secondary: 1/1/0/1" .ax/experiments/classifier-lifecycle-routing-summary-e432.txt
+```
+
+Focused tests, typecheck, and artifact assertions passed. `bun run typecheck`
+still emits the existing Effect advisory messages, but exits `0`.
+
+## E431 - Normalize Lifecycle Route Execution Status
+
+Question:
+- Can lifecycle `routing_items` expose a shared execution shape, so FX services
+  can tell whether a route is directly executable without understanding each
+  route kind's nested fields?
+
+Implementation:
+- Added normalized `execution_status` and `can_execute` fields to
+  `graph_query_repair` routing items.
+- Added normalized `execution_status` to `review_pipeline_action` routing
+  items, derived as `ready_to_execute`, `missing_inputs`, or `blocked`.
+- Lifecycle text now renders `execution=<status>` and
+  `can_execute=yes/no/unknown` on each routing item line.
+
+Artifacts:
+- `.ax/experiments/classifier-lifecycle-route-execution-e431.json`
+- `.ax/experiments/classifier-lifecycle-route-execution-e431.txt`
+
+Results:
+- Current real JSON reports the first routing item as
+  `review_pipeline_action` with `execution_status=missing_inputs` and
+  `can_execute=false`.
+- Current real JSON reports the second routing item as `graph_query_repair`
+  with `execution_status=ready_to_execute` and `can_execute=true`.
+- Text output renders both normalized fields inline for each routing item.
+
+Decision:
+- E431 makes lifecycle routing directly consumable by services: process
+  routing items in priority order, execute only `can_execute=true`, and bind or
+  repair inputs for `execution_status=missing_inputs` before retrying.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts
+bun src/cli/index.ts classifiers lifecycle --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --out .ax/experiments/classifier-lifecycle-route-execution-e431.json --json
+bun src/cli/index.ts classifiers lifecycle --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute > .ax/experiments/classifier-lifecycle-route-execution-e431.txt
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-lifecycle-route-execution-e431.json").json(); const [first, second]=saved.routing_items ?? []; if (first?.kind !== "review_pipeline_action" || first.execution_status !== "missing_inputs" || first.can_execute !== false) throw new Error(`bad first route ${JSON.stringify(first)}`); if (second?.kind !== "graph_query_repair" || second.execution_status !== "ready_to_execute" || second.can_execute !== true) throw new Error(`bad second route ${JSON.stringify(second)}`);'
+rg -n -- "- review_pipeline_action: missing_inputs stamp_review_provenance next=inspect_review_pipeline_lifecycle blocks_decision=yes execution=missing_inputs can_execute=no|- graph_query_repair: ready_to_execute classifier_graph_query_repair next=run_repaired_query blocks_decision=no execution=ready_to_execute can_execute=yes" .ax/experiments/classifier-lifecycle-route-execution-e431.txt
+```
+
+Focused tests and artifact assertions passed. The plain text lifecycle command
+still exits non-zero when the report decision is `needs_human_review`, but it
+writes the expected text artifact before exiting.
+
+## E430 - Mark Decision-Blocking Lifecycle Routes
+
+Question:
+- Can lifecycle `routing_items` distinguish the route that blocks the current
+  top-level decision from other available work, so services do not execute
+  secondary graph repairs before the active review-pipeline blocker?
+
+Implementation:
+- Added `blocks_decision` to both `graph_query_repair` and
+  `review_pipeline_action` routing items.
+- Routing items now sort decision-blocking items before secondary available
+  work.
+- Lifecycle text renders `blocks_decision=yes/no` for each route.
+
+Artifacts:
+- `.ax/experiments/classifier-lifecycle-routing-priority-e430.json`
+- `.ax/experiments/classifier-lifecycle-routing-priority-e430.txt`
+
+Results:
+- Current real JSON reports the first routing item as
+  `review_pipeline_action` with `blocks_decision=true`.
+- Current real JSON reports the second routing item as
+  `graph_query_repair` with `blocks_decision=false`.
+- Text output renders
+  `review_pipeline_action ... blocks_decision=yes` before
+  `graph_query_repair ... blocks_decision=no`.
+- Unit coverage also proves a clean graph-query repair report marks
+  `graph_query_repair.blocks_decision=true`.
+
+Decision:
+- E430 makes lifecycle routing priority explicit. FX services can now consume
+  `routing_items` in order and only execute secondary items after the
+  decision-blocking route is cleared.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+git diff --check
+bun src/cli/index.ts classifiers lifecycle --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --out .ax/experiments/classifier-lifecycle-routing-priority-e430.json --json
+bun src/cli/index.ts classifiers lifecycle --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute > .ax/experiments/classifier-lifecycle-routing-priority-e430.txt
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-lifecycle-routing-priority-e430.json").json(); const [first, second]=saved.routing_items ?? []; if (first?.kind !== "review_pipeline_action" || first.blocks_decision !== true) throw new Error("review pipeline is not first blocking route"); if (second?.kind !== "graph_query_repair" || second.blocks_decision !== false) throw new Error("graph query route is not secondary");'
+rg -n -- "- review_pipeline_action: missing_inputs stamp_review_provenance next=inspect_review_pipeline_lifecycle blocks_decision=yes|- graph_query_repair: ready_to_execute classifier_graph_query_repair next=run_repaired_query blocks_decision=no" .ax/experiments/classifier-lifecycle-routing-priority-e430.txt
+bun test src/cli/classifiers-workflow-candidates.test.ts
+```
+
+All passed. `bun run typecheck` still emits the existing Effect advisory
+messages, but exits `0`.
+
+## E429 - Add Review Pipeline Actions To Lifecycle Routing Items
+
+Question:
+- Can lifecycle `routing_items` cover review-pipeline actions as well as graph
+  query repair, so services can consume one queue-like routing surface instead
+  of combining nested `review_pipeline` and `graph_query_suggestion` fields?
+
+Implementation:
+- Extended `ClassifierLifecycleRoutingItem` with `review_pipeline_action`.
+- The routing item carries the recommended action kind/status, lifecycle next
+  action, action-specific next action, can-execute flag, execution phase,
+  missing inputs, argv, and remediation.
+- Lifecycle text renders review-pipeline routing details in the existing
+  `routing items:` section while preserving the detailed `review_pipeline`
+  block for audit/debugging.
+
+Artifacts:
+- `.ax/experiments/classifier-lifecycle-review-routing-items-e429.json`
+- `.ax/experiments/classifier-lifecycle-review-routing-items-e429.txt`
+
+Results:
+- JSON output reports two routing item kinds:
+  `graph_query_repair` and `review_pipeline_action`.
+- Current review-pipeline routing item reports
+  `status=missing_inputs`, `command_kind=stamp_review_provenance`,
+  `can_execute=false`, and `execution_phase=bind_inputs`.
+- Text output renders both routing items, including review-pipeline missing
+  inputs `reviewer, reviewed_at`.
+
+Decision:
+- E429 makes lifecycle insight a single structured routing list for both graph
+  repair and review-pipeline execution. Services can prioritize `routing_items`
+  before consulting nested detail objects.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun src/cli/index.ts classifiers lifecycle --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --out .ax/experiments/classifier-lifecycle-review-routing-items-e429.json --json
+bun src/cli/index.ts classifiers lifecycle --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute > .ax/experiments/classifier-lifecycle-review-routing-items-e429.txt
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-lifecycle-review-routing-items-e429.json").json(); const kinds=saved.routing_items?.map((item)=>item.kind) ?? []; if (!kinds.includes("graph_query_repair")) throw new Error("missing graph query routing item"); if (!kinds.includes("review_pipeline_action")) throw new Error("missing review pipeline routing item");'
+rg -n -- "- review_pipeline_action: missing_inputs stamp_review_provenance next=inspect_review_pipeline_lifecycle|action next: Provide required pipeline input values before executing the command.|missing inputs: reviewer, reviewed_at|- graph_query_repair: ready_to_execute classifier_graph_query_repair next=run_repaired_query" .ax/experiments/classifier-lifecycle-review-routing-items-e429.txt
+bun test scripts/classifier-package-operations.test.ts src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts
+bun test src/cli/classifiers-workflow-candidates.test.ts
+git diff --check
+```
+
+All passed. `bun run typecheck` still emits the existing Effect advisory
+messages, but exits `0`.
+
+## E428 - Add Structured Lifecycle Routing Items
+
+Question:
+- Can lifecycle insight expose graph-query repair as structured routing data,
+  so FX services can enqueue or execute the repair without parsing
+  `blocking_items` strings?
+
+Implementation:
+- Added `routing_items` to `ClassifierLifecycleInsightReport`.
+- Added a `graph_query_repair` routing item with status, command kind,
+  predicate, original value, repaired value, next action, remediation, and argv.
+- Rendered routing items in lifecycle text while keeping existing blocking
+  items for human-facing summaries.
+
+Artifacts:
+- `.ax/experiments/classifier-lifecycle-routing-items-e428.json`
+- `.ax/experiments/classifier-lifecycle-routing-items-e428.txt`
+
+Results:
+- JSON output reports one routing item with
+  `kind=graph_query_repair`.
+- The routing item reports
+  `status=ready_to_execute`,
+  `command_kind=classifier_graph_query_repair`, and
+  `execute -> bind_inputs`.
+- Text output renders a `routing items:` section with the same repair and
+  executable command routing.
+
+Decision:
+- E428 makes lifecycle insight a structured service-routing surface. Services
+  can now route graph-query repair from `routing_items` and keep
+  `blocking_items` for display/audit only.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+git diff --check
+bun src/cli/index.ts classifiers lifecycle --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --out .ax/experiments/classifier-lifecycle-routing-items-e428.json --json
+bun src/cli/index.ts classifiers lifecycle --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute > .ax/experiments/classifier-lifecycle-routing-items-e428.txt
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-lifecycle-routing-items-e428.json").json(); const item=saved.routing_items?.[0]; if (item?.kind !== "graph_query_repair") throw new Error("missing routing item"); if (item.command_kind !== "classifier_graph_query_repair") throw new Error("wrong command kind"); if (item.from_value !== "execute" || item.to_value !== "bind_inputs") throw new Error("wrong repair values");'
+rg -n "routing items:|- graph_query_repair: ready_to_execute classifier_graph_query_repair next=run_repaired_query|value repair: review_pipeline_recommended_action_execution_phase execute -> bind_inputs" .ax/experiments/classifier-lifecycle-routing-items-e428.txt
+bun test src/cli/classifiers-workflow-candidates.test.ts
+```
+
+All passed. `bun run typecheck` still emits the existing Effect advisory
+messages, but exits `0`.
+
+## E427 - Promote Graph Query Repair To Lifecycle Decision Routing
+
+Question:
+- Can lifecycle insight make graph-query repair actionable at the top-level
+  routing surface, instead of requiring services to inspect the nested
+  `graph_query_suggestion` object to discover that a query repair is needed?
+
+Implementation:
+- Added `needs_graph_query_repair` as a lifecycle insight decision for clean
+  reports where the only blocker is a ready graph-query repair.
+- Added a lifecycle blocking item that names the predicate and value repair,
+  for example `execute -> bind_inputs`.
+- Kept higher-priority human-review and graph-apply decisions dominant, while
+  still preserving the graph-query repair blocking item for service queues.
+
+Artifacts:
+- `.ax/experiments/classifier-lifecycle-query-repair-decision-e427.json`
+- `.ax/experiments/classifier-lifecycle-query-repair-decision-e427.txt`
+
+Results:
+- Unit coverage proves a clean lifecycle report with a query miss now returns
+  `decision=needs_graph_query_repair`.
+- Current real CLI output remains `decision=needs_human_review` because
+  proposal/review-pipeline blockers still dominate.
+- Current real JSON and text both include
+  `graph query repair available: review_pipeline_recommended_action_execution_phase value execute -> bind_inputs`.
+- Current real JSON still reports
+  `graph_query_suggestion.suggestion.repair.command_kind=classifier_graph_query_repair`
+  and `repair.outcome_status=expected_matches`.
+
+Decision:
+- E427 makes graph-query repair queueable from the lifecycle surface. Services
+  can now route clean query-repair work from `decision=needs_graph_query_repair`
+  and can still see graph-query repair as a blocking item when human-review
+  gates are the dominant decision.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/classifiers/package-service.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun src/cli/index.ts classifiers lifecycle --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --out .ax/experiments/classifier-lifecycle-query-repair-decision-e427.json --json
+bun src/cli/index.ts classifiers lifecycle --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute > .ax/experiments/classifier-lifecycle-query-repair-decision-e427.txt
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-lifecycle-query-repair-decision-e427.json").json(); const item="graph query repair available: review_pipeline_recommended_action_execution_phase value execute -> bind_inputs"; if (!saved.blocking_items?.includes(item)) throw new Error("missing graph query repair blocking item"); if (saved.graph_query_suggestion?.suggestion?.repair?.command_kind !== "classifier_graph_query_repair") throw new Error("missing repair command kind");'
+rg -n "decision: needs_human_review|graph query repair available: review_pipeline_recommended_action_execution_phase value execute -> bind_inputs|graph query repair: expected_matches ready_to_execute classifier_graph_query_repair" .ax/experiments/classifier-lifecycle-query-repair-decision-e427.txt
+bun test src/cli/classifiers-workflow-candidates.test.ts
+git diff --check
+```
+
+All passed. `bun run typecheck` still emits the existing Effect advisory
+messages, but exits `0`.
+
+## E426 - Carry Graph Query Suggestions Into Lifecycle Insight
+
+Question:
+- Can the high-level classifier lifecycle report expose graph query repair and
+  verification routing, so services can use one lifecycle surface instead of
+  separately calling graph-health routing?
+
+Implementation:
+- Added optional `graph_query_suggestion` to
+  `ClassifierLifecycleInsightReport`.
+- `buildClassifierLifecycleInsightReport` now accepts a separate query graph,
+  preserving package graph counts from the summary graph while carrying routing
+  suggestions from the filtered graph.
+- `ClassifierPackageService.lifecycleInsightReport` accepts optional
+  `graphQuery` and fetches the query graph separately.
+- `classifiers lifecycle` accepts `--graph-mode`, `--predicate`, `--subject`,
+  `--value-contains`, and `--value` filters.
+- Lifecycle text renders graph query suggestion, repair, and verification
+  routing.
+
+Artifacts:
+- `.ax/experiments/classifier-lifecycle-query-suggestion-routing-e426.json`
+- `.ax/experiments/classifier-lifecycle-query-suggestion-routing-e426.txt`
+
+Results:
+- JSON output reports
+  `graph_query_suggestion.suggestion.repair.outcome_status=expected_matches`.
+- JSON output reports
+  `graph_query_suggestion.suggestion.verification.outcome_status=expected_matches`.
+- Text output reports
+  `graph query suggestion: expected_matches value=bind_inputs count=1`.
+- Text output reports repair and verification command kinds as ready to
+  execute.
+
+Decision:
+- E426 makes lifecycle insight the service-facing routing view: summary graph
+  health still powers package counts, and optional graph query filters add
+  actionable repair/verification routing without losing package-health context.
+
+Verification:
+```sh
+bun test src/classifiers/package-service.test.ts scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+bun src/cli/index.ts classifiers lifecycle --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --out .ax/experiments/classifier-lifecycle-query-suggestion-routing-e426.json --json
+bun src/cli/index.ts classifiers lifecycle --graph-mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute > .ax/experiments/classifier-lifecycle-query-suggestion-routing-e426.txt
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-lifecycle-query-suggestion-routing-e426.json").json(); if (saved.graph_query_suggestion?.suggestion?.repair?.outcome_status !== "expected_matches") throw new Error("wrong lifecycle repair outcome"); if (saved.graph_query_suggestion?.suggestion?.verification?.outcome_status !== "expected_matches") throw new Error("wrong lifecycle verification outcome");'
+rg -n "graph query suggestion: expected_matches value=bind_inputs count=1|graph query repair: expected_matches ready_to_execute classifier_graph_query_repair|graph query verification: expected_matches ready_to_execute classifier_graph_query_repair_verification" .ax/experiments/classifier-lifecycle-query-suggestion-routing-e426.txt
+bun test src/cli/classifiers-workflow-candidates.test.ts
+git diff --check
+```
+
+All passed. `bun run typecheck` still emits the existing Effect advisory
+messages, but exits `0`.
+
+## E425 - Persist Query Suggestion Outcomes In Graph Health JSON
+
+Question:
+- Can graph-health JSON expose the same explicit repair and verification
+  outcome statuses as the text and dedicated routing summary, so services can
+  branch without parsing text or recomputing match/count semantics?
+
+Implementation:
+- Added `repair_outcome_status` and
+  `repair_verification_outcome_status` to `ClassifierGraphQuerySuggestion`.
+- The graph-health builder now persists both statuses in report JSON.
+- The dedicated routing summary and graph-health text now read the structured
+  outcome fields instead of recomputing them.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-query-suggestion-json-outcomes-e425.json`
+- `.ax/experiments/classifier-graph-query-suggestion-json-outcomes-e425.txt`
+
+Results:
+- JSON output reports
+  `query_suggestion.repair_outcome_status=expected_matches`.
+- JSON output reports
+  `query_suggestion.repair_verification_outcome_status=expected_matches`.
+- Text output still reports both repair and verification outcome statuses.
+- Expected result counts remain present as supporting evidence.
+
+Decision:
+- E425 makes graph-health JSON a service-safe routing surface. FX services can
+  decide whether to execute repair and verification steps from explicit fields,
+  while the underlying match/count evidence remains available for audit.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts
+bun src/cli/index.ts classifiers graph --mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --out .ax/experiments/classifier-graph-query-suggestion-json-outcomes-e425.json --json
+bun src/cli/index.ts classifiers graph --mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute > .ax/experiments/classifier-graph-query-suggestion-json-outcomes-e425.txt
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-graph-query-suggestion-json-outcomes-e425.json").json(); if (saved.query_suggestion?.repair_outcome_status !== "expected_matches") throw new Error("wrong repair outcome"); if (saved.query_suggestion?.repair_verification_outcome_status !== "expected_matches") throw new Error("wrong verification outcome");'
+rg -n "query suggestion repair outcome status: expected_matches|query suggestion repair verification outcome status: expected_matches" .ax/experiments/classifier-graph-query-suggestion-json-outcomes-e425.txt
+bun test src/cli/classifiers-workflow-candidates.test.ts
+git diff --check
+bun run typecheck
+```
+
+All passed. `bun run typecheck` still emits the existing Effect advisory
+messages, but exits `0`.
+
+## E424 - Expose Query Suggestion Outcomes In Graph Health Text
+
+Question:
+- Can the normal `classifiers graph` health text surface the same repair and
+  verification outcome statuses as the dedicated query-suggestion routing
+  summary, so a service/debugger can route from the graph-health view without
+  reconstructing match/count semantics?
+
+Implementation:
+- Added a shared `classifierGraphQueryExpectedOutcomeStatus` helper.
+- Reused that helper in the dedicated query-suggestion routing summary.
+- Rendered `query suggestion repair outcome status` and
+  `query suggestion repair verification outcome status` in graph-health text.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-query-suggestion-outcomes-graph-health-e424.json`
+- `.ax/experiments/classifier-graph-query-suggestion-outcomes-graph-health-e424.txt`
+
+Results:
+- Text output reports
+  `query suggestion repair outcome status: expected_matches`.
+- Text output reports
+  `query suggestion repair verification outcome status: expected_matches`.
+- Text output still reports the supporting expected result counts for both
+  repair and verification routes.
+- JSON output still records the underlying matched query/count evidence.
+
+Decision:
+- E424 makes the standard graph-health text useful for routing repair execution
+  and post-repair verification, while keeping promotion-quality graph facts
+  behind the existing reviewed evidence path.
+
+Verification:
+```sh
+bun test src/cli/classifiers-package-operations.test.ts
+bun test src/classifiers/package-service.test.ts
+bun src/cli/index.ts classifiers graph --mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute > .ax/experiments/classifier-graph-query-suggestion-outcomes-graph-health-e424.txt
+bun src/cli/index.ts classifiers graph --mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --out .ax/experiments/classifier-graph-query-suggestion-outcomes-graph-health-e424.json --json
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-graph-query-suggestion-outcomes-graph-health-e424.json").json(); if (saved.query_suggestion?.repair_expected_query_match_status !== "matched") throw new Error("missing repair match"); if (saved.query_suggestion?.repair_verification_expected_query_match_status !== "matched") throw new Error("missing verification match");'
+rg -n "query suggestion repair outcome status: expected_matches|query suggestion repair verification outcome status: expected_matches|query suggestion repair expected result count: 1|query suggestion repair verification expected result count: 1" .ax/experiments/classifier-graph-query-suggestion-outcomes-graph-health-e424.txt
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun test src/cli/classifiers-workflow-candidates.test.ts
+git diff --check
+bun run typecheck
+```
+
+All passed. `bun run typecheck` still emits the existing Effect advisory
+messages, but exits `0`.
+
+## E423 - Expose Query Suggestion Repair Outcome
+
+Question:
+- Can services distinguish a repair route that is expected to produce matching
+  graph rows from a no-op repair route without comparing expected match/count
+  fields themselves?
+
+Implementation:
+- Added `repair.outcome_status` to
+  `ClassifierGraphQuerySuggestionRoutingSummary`.
+- The outcome is `expected_matches` when the repaired query has an expected
+  matched result with a positive expected result count.
+- The outcome is `not_applicable` for no-op repair.
+- Text rendering now prints `repair outcome status`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-query-suggestion-routing-repair-outcome-e423.json`
+- `.ax/experiments/classifier-graph-query-suggestion-routing-repair-outcome-e423.txt`
+
+Results:
+- JSON output reports `suggestion.repair.outcome_status=expected_matches`.
+- JSON output reports `suggestion.repair.expected_result_count=1`.
+- Text output reports `repair outcome status: expected_matches`.
+- Text output reports `repair expected result count: 1`.
+
+Decision:
+- E423 makes repair and verification routing symmetrical. FX services can route
+  both phases from explicit outcome status fields instead of reconstructing
+  semantics from expected match/count pairs.
+
+Verification:
+```sh
+bun test src/classifiers/package-service.test.ts
+bun test src/cli/classifiers-package-operations.test.ts
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers graph --mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --query-suggestion-routing --out .ax/experiments/classifier-graph-query-suggestion-routing-repair-outcome-e423.json --json
+bun src/cli/index.ts classifiers graph --mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --query-suggestion-routing > .ax/experiments/classifier-graph-query-suggestion-routing-repair-outcome-e423.txt
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-graph-query-suggestion-routing-repair-outcome-e423.json").json(); if (saved.suggestion?.repair?.outcome_status !== "expected_matches") throw new Error("wrong repair outcome");'
+rg -n "repair outcome status: expected_matches|repair expected result count: 1" .ax/experiments/classifier-graph-query-suggestion-routing-repair-outcome-e423.txt
+git diff --check
+bun run typecheck
+```
+
+All passed. `bun run typecheck` still emits the existing Effect advisory
+messages, but exits `0`.
+
+## E422 - Expose Query Suggestion Verification Outcome
+
+Question:
+- Can services distinguish a verification route that is expected to produce
+  matching graph rows from a no-op verification route without comparing
+  expected match/count fields themselves?
+
+Implementation:
+- Added `verification.outcome_status` to
+  `ClassifierGraphQuerySuggestionRoutingSummary`.
+- The outcome is `expected_matches` when the verification query has an expected
+  matched result with a positive expected result count.
+- The outcome is `not_applicable` for no-op verification.
+- Text rendering now prints `verification outcome status`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-query-suggestion-routing-verification-outcome-e422.json`
+- `.ax/experiments/classifier-graph-query-suggestion-routing-verification-outcome-e422.txt`
+
+Results:
+- JSON output reports
+  `suggestion.verification.outcome_status=expected_matches`.
+- JSON output reports
+  `suggestion.verification.expected_result_count=1`.
+- Text output reports `verification outcome status: expected_matches`.
+- Text output reports `verification expected result count: 1`.
+
+Decision:
+- E422 removes one more client-side inference from FX services. A caller can
+  now route verification based on the explicit outcome status instead of
+  recomputing it from expected match and count fields.
+
+Verification:
+```sh
+bun test src/classifiers/package-service.test.ts
+bun test src/cli/classifiers-package-operations.test.ts
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers graph --mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --query-suggestion-routing --out .ax/experiments/classifier-graph-query-suggestion-routing-verification-outcome-e422.json --json
+bun src/cli/index.ts classifiers graph --mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --query-suggestion-routing > .ax/experiments/classifier-graph-query-suggestion-routing-verification-outcome-e422.txt
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-graph-query-suggestion-routing-verification-outcome-e422.json").json(); if (saved.suggestion?.verification?.outcome_status !== "expected_matches") throw new Error("wrong verification outcome");'
+rg -n "verification outcome status: expected_matches|verification expected result count: 1" .ax/experiments/classifier-graph-query-suggestion-routing-verification-outcome-e422.txt
+git diff --check
+bun run typecheck
+```
+
+All passed. `bun run typecheck` still emits existing Effect advisories but exits
+`0`.
+
+## E421 - Render Query Suggestion Routing Text
+
+Question:
+- Can humans inspect the compact query-suggestion repair/verification routing
+  from the CLI without reading raw JSON?
+
+Implementation:
+- Added `renderClassifierGraphQuerySuggestionRoutingSummaryText`.
+- `classifiers graph --query-suggestion-routing` now prints a compact text
+  summary when `--json` and `--out` are not used.
+- The text summary includes query match state, suggested value, repair routing,
+  verification routing, command kinds, argv, blockers, expected outcomes, and
+  query shapes.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-query-suggestion-routing-cli-text-e421.txt`
+
+Results:
+- Text output starts with `classifier graph query suggestion routing`.
+- Text output reports `has suggestion: true`.
+- Text output reports `repair execution status: ready_to_execute`.
+- Text output reports `repair command kind: classifier_graph_query_repair`.
+- Text output reports `verification execution status: ready_to_execute`.
+- Text output reports
+  `verification command kind: classifier_graph_query_repair_verification`.
+
+Decision:
+- E421 makes the routing summary useful in normal terminal workflows. Services
+  still get JSON, while operators can scan the same repair/verification route
+  without dumping the full graph-health report or parsing the compact JSON.
+
+Verification:
+```sh
+bun test src/cli/classifiers-package-operations.test.ts
+bun test src/classifiers/package-service.test.ts
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers graph --mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --query-suggestion-routing > .ax/experiments/classifier-graph-query-suggestion-routing-cli-text-e421.txt
+rg -n "classifier graph query suggestion routing|has suggestion: true|repair execution status: ready_to_execute|verification execution status: ready_to_execute|repair command kind: classifier_graph_query_repair|verification command kind: classifier_graph_query_repair_verification" .ax/experiments/classifier-graph-query-suggestion-routing-cli-text-e421.txt
+git diff --check
+bun run typecheck
+```
+
+All passed. `bun run typecheck` still emits existing Effect advisories but exits
+`0`.
+
+## E420 - Expose Query Suggestion Routing In CLI
+
+Question:
+- Can operators generate the compact query-suggestion repair/verification
+  routing summary from `classifiers graph` without writing a custom service
+  caller or saving the full graph-health report?
+
+Implementation:
+- Added `querySuggestionRouting` command-runner support for graph-health
+  requests.
+- Added `--query-suggestion-routing` to `classifiers graph` and
+  `classifiers package-operations --graph-health`.
+- The flag routes graph queries through
+  `executionGraphQuerySuggestionRoutingSummary` or
+  `writeExecutionGraphQuerySuggestionRoutingSummaryReport` instead of the full
+  graph-health report path.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-query-suggestion-routing-cli-e420.json`
+
+Results:
+- Running
+  `bun src/cli/index.ts classifiers graph --mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --query-suggestion-routing --out .ax/experiments/classifier-graph-query-suggestion-routing-cli-e420.json --json`
+  wrote the compact routing summary.
+- The artifact reports `has_suggestion=true`.
+- The artifact reports
+  `suggestion.repair.execution_status=ready_to_execute`.
+- The artifact reports
+  `suggestion.verification.execution_status=ready_to_execute`.
+
+Decision:
+- E420 makes the service-facing query-suggestion routing summary available to
+  shell users and automation. The graph CLI can now emit the exact compact
+  payload FX services consume, keeping repair execution and verification
+  inspectable without dumping the full health report.
+
+Verification:
+```sh
+bun test src/cli/classifiers-package-operations.test.ts
+bun test src/classifiers/package-service.test.ts
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers graph --mode lifecycle --predicate review_pipeline_recommended_action_execution_phase --value execute --query-suggestion-routing --out .ax/experiments/classifier-graph-query-suggestion-routing-cli-e420.json --json
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-graph-query-suggestion-routing-cli-e420.json").json(); if (!saved.has_suggestion) throw new Error("missing suggestion"); if (saved.suggestion?.repair?.execution_status !== "ready_to_execute") throw new Error("wrong repair execution status"); if (saved.suggestion?.verification?.execution_status !== "ready_to_execute") throw new Error("wrong verification execution status");'
+git diff --check
+bun run typecheck
+```
+
+All passed. `bun run typecheck` still emits existing Effect advisories but exits
+`0`.
+
+## E419 - Persist Query Suggestion Routing Summaries
+
+Question:
+- Can services save the compact graph-query repair/verification routing summary
+  as a first-class debug artifact after computing it?
+
+Implementation:
+- Added `writeClassifierGraphQuerySuggestionRoutingSummary` for JSON artifact
+  persistence.
+- Added `writeExecutionGraphQuerySuggestionRoutingSummaryReport` to
+  `ClassifierPackageService`.
+- The write method reuses the E418 summary builder and returns the same summary
+  it writes.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-query-suggestion-routing-summary-written-e419.json`
+
+Results:
+- The written E419 artifact records
+  `suggestion.repair.command_kind=classifier_graph_query_repair`.
+- The same artifact records
+  `suggestion.verification.command_kind=classifier_graph_query_repair_verification`.
+- Service tests verify the writer creates nested output directories and saves
+  the repair/verification command routing summary.
+
+Decision:
+- E419 makes the query-suggestion routing summary recordable. FX services can
+  now produce durable debug evidence for the routing decision they consumed,
+  which keeps classifier repair execution auditable without saving the full
+  graph-health report.
+
+Verification:
+```sh
+bun test src/classifiers/package-service.test.ts
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun test src/cli/classifiers-workflow-candidates.test.ts
+git diff --check
+bun run typecheck
+bun -e 'const saved=await Bun.file(".ax/experiments/classifier-graph-query-suggestion-routing-summary-written-e419.json").json(); if (!saved.has_suggestion) throw new Error("missing suggestion"); if (saved.suggestion?.repair?.command_kind !== "classifier_graph_query_repair") throw new Error("wrong repair command kind"); if (saved.suggestion?.verification?.command_kind !== "classifier_graph_query_repair_verification") throw new Error("wrong verification command kind");'
+```
+
+All passed. `bun run typecheck` still emits existing Effect advisories but exits
+`0`.
+
+## E418 - Add Query Suggestion Routing Service Helper
+
+Question:
+- Can Effect services consume graph-query repair and verification routing
+  without scraping CLI text or walking the full graph-health report?
+
+Implementation:
+- Added `summarizeClassifierGraphQuerySuggestionRouting` as a pure projection
+  from graph-health reports into a compact service-facing summary.
+- Added `executionGraphQuerySuggestionRoutingSummary` to
+  `ClassifierPackageService`.
+- The summary preserves query match status, suggested value, repair command
+  routing, verification command routing, argv, expected outcomes, blockers,
+  and remediation.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-query-suggestion-routing-summary-no-match-e418.json`
+- `.ax/experiments/classifier-graph-query-suggestion-routing-summary-match-e418.json`
+
+Results:
+- No-match lifecycle query for
+  `review_pipeline_recommended_action_execution_phase=execute` reports
+  `has_suggestion=true`, suggested value `bind_inputs`,
+  `repair.execution_status=ready_to_execute`, and
+  `verification.execution_status=ready_to_execute`.
+- Matched lifecycle query for
+  `review_pipeline_recommended_action_execution_phase=bind_inputs` reports
+  no-op repair and verification execution statuses as `not_needed`.
+- Service tests verify callers can get the routing summary directly through the
+  Effect service layer.
+
+Decision:
+- E418 turns the dense graph-health `query_suggestion` payload into a stable
+  service/debug surface. FX services can now route repair execution and
+  verification execution without parsing the CLI or duplicating graph-health
+  field selection.
+
+Verification:
+```sh
+bun test src/classifiers/package-service.test.ts
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun test src/cli/classifiers-workflow-candidates.test.ts
+git diff --check
+bun run typecheck
+bun -e 'const noMatch=await Bun.file(".ax/experiments/classifier-graph-query-suggestion-routing-summary-no-match-e418.json").json(); const match=await Bun.file(".ax/experiments/classifier-graph-query-suggestion-routing-summary-match-e418.json").json(); if (!noMatch.has_suggestion) throw new Error("no-match missing suggestion"); if (noMatch.suggestion?.repair?.execution_status !== "ready_to_execute") throw new Error("repair status wrong"); if (noMatch.suggestion?.verification?.execution_status !== "ready_to_execute") throw new Error("verification status wrong"); if (match.suggestion?.repair?.execution_status !== "not_needed") throw new Error("match repair status wrong"); if (match.suggestion?.verification?.execution_status !== "not_needed") throw new Error("match verification status wrong");'
+```
+
+All passed. `bun run typecheck` still emits existing Effect advisories but exits
+`0`.
+
+## E417 - Expose Suggested Query Repair Verification Execution Status
+
+Question:
+- E416 exposes verification input metadata, but can executors route
+  verification with the same `ready_to_execute`/`not_needed` vocabulary used by
+  repair execution?
+
+Implementation:
+- Added `repair_verification_execution_status` to `query_suggestion`.
+- Executable lifecycle graph-query verification now reports `ready_to_execute`.
+- No-op verification reports `not_needed`.
+- Text graph-health output now renders `query suggestion repair verification
+  execution status`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-execution-status-no-match-e417.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-execution-status-match-e417.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-execution-status-no-match-e417.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_verification_execution_status=ready_to_execute`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.repair_verification_execution_status=not_needed`.
+- Text output renders `query suggestion repair verification execution status:
+  ready_to_execute`.
+
+Decision:
+- Verification routing now has both verification-specific readiness and
+  command-execution status, so services can reuse the repair execution enum
+  without overloading `repair_verification_status`.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E417 no-match report has
+  `repair_verification_execution_status=ready_to_execute`.
+- E417 match report has `repair_verification_execution_status=not_needed`.
+- E417 text output includes the repair verification execution-status line.
+
+## E416 - Expose Suggested Query Repair Verification Inputs
+
+Question:
+- E415 exposes verification blockers, but can services know whether the
+  verification command still requires input binding without inspecting argv?
+
+Implementation:
+- Added `repair_verification_requires_inputs` and
+  `repair_verification_required_inputs` to `query_suggestion`.
+- Lifecycle graph-query verification suggestions now report
+  `repair_verification_requires_inputs=false`.
+- Required input lists are empty for both executable and no-op verification.
+- Text graph-health output now renders verification required-input metadata.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-inputs-no-match-e416.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-inputs-match-e416.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-inputs-no-match-e416.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match`,
+  `repair_verification_requires_inputs=false`, and empty
+  `repair_verification_required_inputs`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched`,
+  `repair_verification_requires_inputs=false`, and empty
+  `repair_verification_required_inputs`.
+- Text output renders `query suggestion repair verification requires inputs:
+  false` and `query suggestion repair verification required inputs: none`.
+
+Decision:
+- Verification command execution now declares both executability and input
+  binding state directly, matching the repair execution contract.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E416 no-match report has `repair_verification_requires_inputs=false`.
+- E416 no-match report has empty `repair_verification_required_inputs`.
+- E416 match report has `repair_verification_requires_inputs=false`.
+- E416 match report has empty `repair_verification_required_inputs`.
+- E416 text output includes both verification input metadata lines.
+
+## E415 - Expose Suggested Query Repair Verification Blockers
+
+Question:
+- E414 exposes verification executability, but can services explain why
+  verification is not executable without parsing remediation prose?
+
+Implementation:
+- Added `repair_verification_blockers` and
+  `repair_verification_blocker_details` to `query_suggestion`.
+- Executable lifecycle graph-query repairs expose empty blocker arrays.
+- No-op suggestions expose `no_repair_needed` with a verification-specific
+  remediation.
+- Text graph-health output now renders verification blockers and blocker
+  details.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-blockers-no-match-e415.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-blockers-match-e415.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-blockers-no-match-e415.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match`,
+  `repair_verification_blockers=[]`, and
+  `repair_verification_blocker_details=[]`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched`,
+  `repair_verification_blockers=[no_repair_needed]`, and a blocker detail
+  explaining that verification execution is not required.
+- Text output renders `query suggestion repair verification blockers: none`
+  for executable verification.
+
+Decision:
+- Verification routing now has the same structured explanation pattern as
+  repair execution: executability boolean plus blocker names and detailed
+  remediations.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E415 no-match report has empty `repair_verification_blockers`.
+- E415 no-match report has empty `repair_verification_blocker_details`.
+- E415 match report has `repair_verification_blockers=[no_repair_needed]`.
+- E415 match report has the expected verification blocker detail remediation.
+- E415 text output includes the repair verification blockers line.
+
+## E414 - Expose Suggested Query Repair Verification Executability
+
+Question:
+- E413 gives verification its own query, but can services decide whether the
+  verification command is executable without interpreting status, command kind,
+  or argv length?
+
+Implementation:
+- Added `repair_verification_can_execute` to `query_suggestion`.
+- Executable lifecycle graph-query repairs now report `true`.
+- No-op suggestions report `false`.
+- Text graph-health output now renders `query suggestion repair verification
+  can execute`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-can-execute-no-match-e414.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-can-execute-match-e414.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-can-execute-no-match-e414.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_verification_can_execute=true`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.repair_verification_can_execute=false`.
+- Text output renders `query suggestion repair verification can execute: true`.
+
+Decision:
+- Services can now branch on a direct verification executability boolean while
+  still retaining verification status, action, command kind, argv, query, and
+  expected outcomes.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E414 no-match report has `repair_verification_can_execute=true`.
+- E414 match report has `repair_verification_can_execute=false`.
+- E414 text output includes the repair verification can-execute line.
+
+## E413 - Expose Suggested Query Repair Verification Query
+
+Question:
+- E412 makes verification expected outcomes self-contained, but can services
+  get the structured verification query without reusing `repair_query`?
+
+Implementation:
+- Added optional `repair_verification_query` to `query_suggestion`.
+- Executable lifecycle graph-query repairs now include the structured
+  verification query under the verification namespace.
+- No-op suggestions omit `repair_verification_query`.
+- Text graph-health output now renders `query suggestion repair verification
+  query`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-query-no-match-e413.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-query-match-e413.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-query-no-match-e413.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_verification_query={mode: lifecycle, predicate:
+  review_pipeline_recommended_action_execution_phase, value_equals:
+  bind_inputs}`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and omits
+  `query_suggestion.repair_verification_query`.
+- Text output renders `query suggestion repair verification query:
+  mode=lifecycle predicate=review_pipeline_recommended_action_execution_phase
+  value_equals=bind_inputs`.
+
+Decision:
+- Verification execution now has its own structured query, argv, command kind,
+  expected outcome, action, and remediation, so services no longer need to
+  alias `repair_query` for verification.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E413 no-match report has the expected `repair_verification_query`.
+- E413 match report omits `repair_verification_query`.
+- E413 text output includes the repair verification query line.
+
+## E412 - Expose Suggested Query Repair Verification Expected Outcome
+
+Question:
+- E411 exposes the verification command kind, but can services verify the
+  result of that command without reusing repair-level expected fields
+  implicitly?
+
+Implementation:
+- Added `repair_verification_expected_query_match_status` and optional
+  `repair_verification_expected_result_count` to `query_suggestion`.
+- Executable lifecycle graph-query repairs now expect `matched` and the
+  suggested result count.
+- No-op suggestions report `not_applicable` and omit the expected result count.
+- Text graph-health output now renders both verification expected outcome
+  fields.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-expected-outcome-no-match-e412.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-expected-outcome-match-e412.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-expected-outcome-no-match-e412.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match`,
+  `query_suggestion.repair_verification_expected_query_match_status=matched`,
+  and `repair_verification_expected_result_count=1`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched`,
+  `query_suggestion.repair_verification_expected_query_match_status=not_applicable`,
+  and omits `repair_verification_expected_result_count`.
+- Text output renders `query suggestion repair verification expected query
+  match` and `query suggestion repair verification expected result count`.
+
+Decision:
+- Verification execution is now self-contained for services: command kind,
+  argv, expected match status, expected result count, action, and remediation
+  are all under the verification namespace.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E412 no-match report has
+  `repair_verification_expected_query_match_status=matched`.
+- E412 no-match report has `repair_verification_expected_result_count=1`.
+- E412 match report has
+  `repair_verification_expected_query_match_status=not_applicable`.
+- E412 match report omits `repair_verification_expected_result_count`.
+- E412 text output includes both verification expected outcome lines.
+
+## E411 - Expose Suggested Query Repair Verification Command Kind
+
+Question:
+- E410 exposes verification remediation, but can services route post-repair
+  verification commands by kind without parsing argv or action strings?
+
+Implementation:
+- Added `repair_verification_command_kind` to `query_suggestion`.
+- Executable lifecycle graph-query repairs now report
+  `classifier_graph_query_repair_verification`.
+- No-op suggestions report `none`.
+- Text graph-health output now renders `query suggestion repair verification
+  command kind`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-command-kind-no-match-e411.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-command-kind-match-e411.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-command-kind-no-match-e411.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_verification_command_kind=classifier_graph_query_repair_verification`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.repair_verification_command_kind=none`.
+- Text output renders `query suggestion repair verification command kind:
+  classifier_graph_query_repair_verification`.
+
+Decision:
+- Services can now identify the verification command category directly from
+  graph-health output while retaining status, next action, remediation, argv,
+  and expected outcomes.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E411 no-match report has
+  `repair_verification_command_kind=classifier_graph_query_repair_verification`.
+- E411 match report has `repair_verification_command_kind=none`.
+- E411 text output includes the repair verification command-kind line.
+
+## E410 - Expose Suggested Query Repair Verification Remediation
+
+Question:
+- E409 exposes the verification next action, but can services display operator
+  guidance for verification without synthesizing copy from status/action fields?
+
+Implementation:
+- Added `repair_verification_remediation` to `query_suggestion`.
+- Executable lifecycle graph-query repairs now explain that the verification
+  query should be run and checked for expected matches.
+- No-op suggestions explain that verification is unnecessary because repair
+  execution is not required.
+- Text graph-health output now renders `query suggestion repair verification
+  remediation`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-remediation-no-match-e410.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-remediation-match-e410.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-remediation-no-match-e410.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_verification_remediation=Run the repair verification
+  query and confirm it returns the expected matches.`
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.repair_verification_remediation=Verification is not needed
+  because no repair execution is required.`
+- Text output renders `query suggestion repair verification remediation`.
+
+Decision:
+- Services can now display post-repair verification guidance directly from the
+  graph-health report while retaining status, next action, argv, and expected
+  outcomes for routing.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E410 no-match report has the executable verification remediation.
+- E410 match report has the no-op verification remediation.
+- E410 text output includes the repair verification remediation line.
+
+## E409 - Expose Suggested Query Repair Verification Next Action
+
+Question:
+- E408 exposes verification status, but can services get a direct next action
+  without branching on that status enum?
+
+Implementation:
+- Added `repair_verification_next_action` to `query_suggestion`.
+- Executable lifecycle graph-query repairs now report
+  `run_verification_query`.
+- No-op suggestions report `skip_verification`.
+- Text graph-health output now renders `query suggestion repair verification
+  next action`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-next-action-no-match-e409.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-next-action-match-e409.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-next-action-no-match-e409.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_verification_next_action=run_verification_query`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.repair_verification_next_action=skip_verification`.
+- Text output renders `query suggestion repair verification next action:
+  run_verification_query`.
+
+Decision:
+- Services can now choose post-repair verification behavior from a direct next
+  action while retaining status, boolean, argv, and expected outcomes.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E409 no-match report has
+  `repair_verification_next_action=run_verification_query`.
+- E409 match report has `repair_verification_next_action=skip_verification`.
+- E409 text output includes the repair verification next-action line.
+
+## E408 - Expose Suggested Query Repair Verification Status
+
+Question:
+- E407 exposes repair verifiability as a boolean, but can services route and
+  log verification with a stable enum instead of interpreting a boolean?
+
+Implementation:
+- Added `repair_verification_status` to `query_suggestion`.
+- Executable lifecycle graph-query repairs now report `ready_to_verify`.
+- No-op suggestions report `not_needed`.
+- Text graph-health output now renders `query suggestion repair verification
+  status`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-status-no-match-e408.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-status-match-e408.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-status-no-match-e408.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_verification_status=ready_to_verify`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.repair_verification_status=not_needed`.
+- Text output renders `query suggestion repair verification status:
+  ready_to_verify`.
+
+Decision:
+- Services can now route post-repair verification with a stable status enum
+  while retaining `repair_can_verify` as the compact boolean guard.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E408 no-match report has `repair_verification_status=ready_to_verify`.
+- E408 match report has `repair_verification_status=not_needed`.
+- E408 text output includes the repair verification status line.
+
+## E407 - Expose Suggested Query Repair Verifiability
+
+Question:
+- E406 exposes repair verification argv, but can services decide whether a
+  repair is verifiable without checking argv length?
+
+Implementation:
+- Added `repair_can_verify` to `query_suggestion`.
+- Executable lifecycle graph-query repairs now report `repair_can_verify=true`.
+- No-op suggestions report `repair_can_verify=false`.
+- Text graph-health output now renders `query suggestion repair can verify`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-can-verify-no-match-e407.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-can-verify-match-e407.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-can-verify-no-match-e407.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_can_verify=true`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.repair_can_verify=false`.
+- Text output renders `query suggestion repair can verify: true`.
+
+Decision:
+- Services can now gate post-repair verification directly on a boolean while
+  retaining verification argv and expected outcomes for execution.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E407 no-match report has `repair_can_verify=true`.
+- E407 match report has `repair_can_verify=false`.
+- E407 text output includes the repair-verifiability line.
+
+## E406 - Expose Suggested Query Repair Verification Argv
+
+Question:
+- E405 exposes repair verification expectations, but can services run the
+  verification command without reusing or reconstructing repair argv?
+
+Implementation:
+- Added `repair_verification_argv` to `query_suggestion`.
+- Executable lifecycle graph-query repairs now expose the repaired graph-query
+  argv as the verification command.
+- No-op suggestions expose an empty verification argv.
+- Text graph-health output now renders repair verification argv.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-argv-no-match-e406.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-argv-match-e406.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-argv-no-match-e406.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_verification_argv=["bun","src/cli/index.ts",
+  "classifiers","graph","--mode","lifecycle","--predicate",
+  "review_pipeline_recommended_action_execution_phase","--value",
+  "bind_inputs"]`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.repair_verification_argv=[]`.
+- Text output renders the repair verification argv command.
+
+Decision:
+- Services can now execute a repair and verify the expected repaired graph
+  query using dedicated structured fields.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E406 no-match report has the repaired graph query in
+  `repair_verification_argv`.
+- E406 match report has an empty `repair_verification_argv`.
+- E406 text output includes the repair verification argv line.
+
+## E405 - Expose Suggested Query Repair Verification Expectations
+
+Question:
+- E404 exposes repair input requirements, but can services verify a completed
+  repair command without reinterpreting generic query suggestion fields?
+
+Implementation:
+- Added `repair_expected_query_match_status` and optional
+  `repair_expected_result_count` to `query_suggestion`.
+- Executable lifecycle graph-query repairs now report the expected post-repair
+  query match as `matched` with the expected result count.
+- No-op suggestions report `not_applicable` and omit expected result count.
+- Text graph-health output now renders repair verification expectations.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-no-match-e405.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-match-e405.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-verification-no-match-e405.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match`,
+  `query_suggestion.repair_expected_query_match_status=matched`, and
+  `repair_expected_result_count=1`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched`,
+  `query_suggestion.repair_expected_query_match_status=not_applicable`, and
+  omits `repair_expected_result_count`.
+- Text output renders `query suggestion repair expected query match: matched`
+  and `query suggestion repair expected result count: 1`.
+
+Decision:
+- Services can now verify repaired graph-query execution against explicit
+  expected outcomes instead of comparing suggested-query fields client-side.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E405 no-match report has `repair_expected_query_match_status=matched`.
+- E405 no-match report has `repair_expected_result_count=1`.
+- E405 match report has `repair_expected_query_match_status=not_applicable`.
+- E405 match report omits `repair_expected_result_count`.
+- E405 text output includes repair verification expectation lines.
+
+## E404 - Expose Suggested Query Repair Input Requirements
+
+Question:
+- E403 exposes repair command kind, but can services know whether a repair
+  command needs operator-supplied inputs without inspecting argv or blockers?
+
+Implementation:
+- Added `repair_requires_inputs` and `repair_required_inputs` to
+  `query_suggestion`.
+- Lifecycle graph-query suggestions now report `repair_requires_inputs=false`
+  and empty required inputs because suggested graph-query repairs are fully
+  bound.
+- Text graph-health output now renders repair input requirements.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-inputs-no-match-e404.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-inputs-match-e404.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-inputs-no-match-e404.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match`,
+  `query_suggestion.repair_requires_inputs=false`, and empty
+  `repair_required_inputs`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched`,
+  `query_suggestion.repair_requires_inputs=false`, and empty
+  `repair_required_inputs`.
+- Text output renders `query suggestion repair requires inputs: false` and
+  `query suggestion repair required inputs: none`.
+
+Decision:
+- Services can now distinguish fully-bound repair commands from future
+  input-requiring commands without parsing argv.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E404 no-match report has `repair_requires_inputs=false` and empty
+  `repair_required_inputs`.
+- E404 match report has `repair_requires_inputs=false` and empty
+  `repair_required_inputs`.
+- E404 text output includes repair input requirement lines.
+
+## E403 - Expose Suggested Query Repair Command Kind
+
+Question:
+- E402 exposes repair blockers, but can services route an executable repair
+  argv to the right executor family without parsing the command line?
+
+Implementation:
+- Added `repair_command_kind` to `query_suggestion`.
+- Lifecycle graph-query suggestions now report
+  `classifier_graph_query_repair` for executable repair suggestions and `none`
+  for no-op suggestions.
+- Text graph-health output now renders `query suggestion repair command kind`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-command-kind-no-match-e403.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-command-kind-match-e403.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-command-kind-no-match-e403.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_command_kind=classifier_graph_query_repair`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.repair_command_kind=none`.
+- Text output renders `query suggestion repair command kind:
+  classifier_graph_query_repair`.
+
+Decision:
+- Services can now dispatch repair commands by a stable kind while retaining
+  argv, query, status, blockers, and remediation for execution/debug surfaces.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E403 no-match report has
+  `repair_command_kind=classifier_graph_query_repair`.
+- E403 match report has `repair_command_kind=none`.
+- E403 text output includes the repair command-kind line.
+
+## E402 - Expose Suggested Query Repair Blockers
+
+Question:
+- E401 exposes repair execution status, but can services explain why a repair
+  is not executable without inferring it from `repair_can_execute=false`?
+
+Implementation:
+- Added `repair_blockers` and `repair_blocker_details` to
+  `query_suggestion`.
+- Lifecycle graph-query suggestions now expose no blockers for executable
+  repair suggestions and `no_repair_needed` for no-op suggestions.
+- Text graph-health output now renders repair blockers and blocker details.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-blockers-no-match-e402.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-blockers-match-e402.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-blockers-no-match-e402.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match`,
+  `query_suggestion.repair_execution_status=ready_to_execute`, and empty
+  repair blockers.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched`,
+  `query_suggestion.repair_execution_status=not_needed`, and
+  `repair_blockers=[no_repair_needed]`.
+- Text output renders `query suggestion repair blockers: none` and
+  `query suggestion repair blocker details: none` for executable repairs.
+
+Decision:
+- Services can now route skipped repair execution with an explicit blocker
+  reason instead of relying on boolean interpretation.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E402 no-match report has empty `repair_blockers` and
+  `repair_blocker_details`.
+- E402 match report has `repair_blockers=[no_repair_needed]`.
+- E402 match report has a `no_repair_needed` blocker detail with remediation.
+- E402 text output includes repair blocker and detail lines.
+
+## E401 - Expose Suggested Query Repair Execution Status
+
+Question:
+- E400 exposes a repair execution boolean, but can services route and log
+  repair execution with a stable enum instead of interpreting a boolean?
+
+Implementation:
+- Added `repair_execution_status` to `query_suggestion`.
+- Lifecycle graph-query suggestions now report `ready_to_execute` for real
+  repair suggestions and `not_needed` for no-op suggestions.
+- Text graph-health output now renders `query suggestion repair execution
+  status`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-execution-status-no-match-e401.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-execution-status-match-e401.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-execution-status-no-match-e401.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_execution_status=ready_to_execute`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.repair_execution_status=not_needed`.
+- Text output renders `query suggestion repair execution status:
+  ready_to_execute`.
+
+Decision:
+- Services can now route repair execution through an explicit enum while
+  keeping `repair_can_execute` as the compact boolean guard.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E401 no-match report has `repair_execution_status=ready_to_execute`.
+- E401 match report has `repair_execution_status=not_needed`.
+- E401 text output includes the repair execution status line.
+
+## E400 - Expose Suggested Query Repair Executability
+
+Question:
+- E399 exposes repair query and argv, but can services decide whether a repair
+  command is executable without checking `repair_argv.length` or
+  `repair_query` presence?
+
+Implementation:
+- Added `repair_can_execute` to `query_suggestion`.
+- Lifecycle graph-query suggestions now report `true` for real repair
+  suggestions and `false` for no-op suggestions.
+- Text graph-health output now renders `query suggestion repair can execute`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-can-execute-no-match-e400.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-can-execute-match-e400.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-can-execute-no-match-e400.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_can_execute=true`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.repair_can_execute=false`.
+- Text output renders `query suggestion repair can execute: true`.
+
+Decision:
+- Services can now gate repair execution directly on a boolean while retaining
+  structured repair query and argv details for execution/debug surfaces.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E400 no-match report has `repair_can_execute=true`.
+- E400 match report has `repair_can_execute=false`.
+- E400 text output includes the repair-executability line.
+
+## E399 - Expose Suggested Query Repair Query
+
+Question:
+- E398 exposes repair-only argv, but can services inspect or execute the
+  structured repaired query without parsing command-line arguments?
+
+Implementation:
+- Added optional `repair_query` to `query_suggestion`.
+- Lifecycle graph-query suggestions now include the repaired structured query
+  only when `repair_status=repair_available`; no-op suggestions omit it.
+- Text graph-health output now renders `query suggestion repair query`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-query-no-match-e399.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-query-match-e399.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-query-no-match-e399.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_query={mode: lifecycle, predicate:
+  review_pipeline_recommended_action_execution_phase, value_equals:
+  bind_inputs}`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and no `query_suggestion.repair_query`.
+- Text output renders `query suggestion repair query: mode=lifecycle
+  predicate=review_pipeline_recommended_action_execution_phase
+  value_equals=bind_inputs`.
+
+Decision:
+- Services can now use a structured repair target directly and reserve
+  `repair_argv` for command execution surfaces.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E399 no-match report includes the repaired structured query.
+- E399 match report omits `repair_query`.
+- E399 text output includes the repaired query line.
+
+## E398 - Expose Suggested Query Repair Argv
+
+Question:
+- E397 gives repair-specific guidance, but can services execute only actual
+  graph-query repairs without interpreting the generic suggested argv?
+
+Implementation:
+- Added `repair_argv` to `query_suggestion`.
+- Lifecycle graph-query suggestions now include the repaired query argv only
+  when `repair_status=repair_available`; no-op suggestions expose an empty
+  repair argv.
+- Text graph-health output now renders `query suggestion repair argv`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-argv-no-match-e398.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-argv-match-e398.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-argv-no-match-e398.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_argv=["bun","src/cli/index.ts","classifiers","graph",
+  "--mode","lifecycle","--predicate",
+  "review_pipeline_recommended_action_execution_phase","--value","bind_inputs"]`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and `query_suggestion.repair_argv=[]`.
+- Text output renders the repaired argv command for the no-match query.
+
+Decision:
+- Services can now execute repair-only query commands directly while still
+  showing generic suggested argv for debug/no-op suggestions.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E398 no-match report includes the repaired query argv.
+- E398 match report has an empty repair argv.
+- E398 text output includes the repair argv line.
+
+## E397 - Expose Suggested Query Repair Remediation
+
+Question:
+- E396 exposes a repair-specific next action, but can services display
+  operator guidance that distinguishes a repaired query from a no-op suggestion?
+
+Implementation:
+- Added `repair_remediation` to `query_suggestion`.
+- Lifecycle graph-query suggestions now explain whether to run the repaired
+  query or keep using the current query.
+- Text graph-health output now renders `query suggestion repair remediation`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-remediation-no-match-e397.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-remediation-match-e397.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-remediation-no-match-e397.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_remediation="Run the repaired graph query to inspect
+  matching classifier lifecycle facts."`
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.repair_remediation="Use the current graph query; no filter
+  repair is needed."`
+- Text output renders `query suggestion repair remediation: Run the repaired
+  graph query to inspect matching classifier lifecycle facts.`
+
+Decision:
+- Services can now show repair-specific operator guidance without branching on
+  repair status or next action.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E397 no-match report has the repaired-query remediation.
+- E397 match report has the current-query/no-repair remediation.
+- E397 text output includes the repair-remediation line.
+
+## E396 - Expose Suggested Query Repair Next Action
+
+Question:
+- E395 exposes a repair status, but can services get a repair-specific next
+  action without mapping `repair_available` and `no_repair_needed` themselves?
+
+Implementation:
+- Added `repair_next_action` to `query_suggestion`.
+- Lifecycle graph-query suggestions now report `run_repaired_query` when a
+  suggested filter repair exists and `use_current_query` for no-op suggestions.
+- Text graph-health output now renders `query suggestion repair next action`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-next-action-no-match-e396.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-next-action-match-e396.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-next-action-no-match-e396.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_next_action=run_repaired_query`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.repair_next_action=use_current_query`.
+- Text output renders `query suggestion repair next action:
+  run_repaired_query`.
+
+Decision:
+- Services can now drive repair-specific UI or execution routing from a single
+  action field while retaining the more general `next_action` for graph query
+  execution.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E396 no-match report has `repair_next_action=run_repaired_query`.
+- E396 match report has `repair_next_action=use_current_query`.
+- E396 text output includes the repair-next-action line.
+
+## E395 - Expose Suggested Query Repair Status
+
+Question:
+- E394 names changed filters, but can services route a graph-query suggestion
+  as an actual repair versus a no-op/debug suggestion without combining counts,
+  booleans, and filter-name lists?
+
+Implementation:
+- Added `repair_status` to `query_suggestion`.
+- Lifecycle graph-query suggestions now report `repair_available` when a
+  suggested filter differs from the original query and `no_repair_needed` when
+  the suggested query already matches.
+- Text graph-health output now renders `query suggestion repair status`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-status-no-match-e395.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-status-match-e395.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-repair-status-no-match-e395.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.repair_status=repair_available`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.repair_status=no_repair_needed`.
+- Text output renders `query suggestion repair status: repair_available`.
+
+Decision:
+- Services can now branch on one status value for repair routing while still
+  retaining detailed counts, names, and before/after filter rows.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E395 no-match report has `repair_status=repair_available`.
+- E395 match report has `repair_status=no_repair_needed`.
+- E395 text output includes the repair-status line.
+
+## E394 - Expose Suggested Query Filter Name Lists
+
+Question:
+- E393 exposes whether suggested graph-query filters changed, but can services
+  name the changed and unchanged filter groups without scanning detailed
+  `filter_changes` rows?
+
+Implementation:
+- Added `changed_filters` and `unchanged_filters` to `query_suggestion`.
+- Lifecycle graph-query suggestions now summarize filter names by repair status
+  alongside the existing counts, boolean, and detailed before/after rows.
+- Text graph-health output now renders `query suggestion changed filters` and
+  `query suggestion unchanged filters`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-name-lists-no-match-e394.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-name-lists-match-e394.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-name-lists-no-match-e394.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match`,
+  `query_suggestion.changed_filters=["value_equals"]`, and
+  `query_suggestion.unchanged_filters=[]`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched`,
+  `query_suggestion.changed_filters=[]`, and
+  `query_suggestion.unchanged_filters=["value_equals"]`.
+- Text output renders `query suggestion changed filters: value_equals` and
+  `query suggestion unchanged filters: none`.
+
+Decision:
+- Services can now display or route changed filter names directly while keeping
+  detailed before/after rows available for debugging.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E394 no-match report has changed filters `["value_equals"]` and no unchanged
+  filters.
+- E394 match report has unchanged filters `["value_equals"]` and no changed
+  filters.
+- E394 text output includes both filter-name list lines.
+
+## E393 - Expose Suggested Query Actionable Filter Boolean
+
+Question:
+- E392 gives changed/unchanged filter counts, but can services branch on
+  whether a suggested graph query has actionable filter repairs without doing
+  client-side arithmetic?
+
+Implementation:
+- Added `has_changed_filters` to `query_suggestion`.
+- Lifecycle graph-query suggestions now expose a direct boolean that is `true`
+  when at least one suggested filter differs from the original query and
+  `false` for already-matching suggestions.
+- Text graph-health output now renders `query suggestion has changed filters`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-has-changed-filters-no-match-e393.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-has-changed-filters-match-e393.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-has-changed-filters-no-match-e393.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.has_changed_filters=true`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.has_changed_filters=false`.
+- Text output renders `query suggestion has changed filters: true`.
+
+Decision:
+- Services can now choose repair-routing versus no-op/debug display directly
+  from the suggestion object.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E393 no-match report has `has_changed_filters=true`.
+- E393 match report has `has_changed_filters=false`.
+- E393 text output includes the boolean line.
+
+## E392 - Expose Suggested Query Filter Change Counts
+
+Question:
+- E391 marks each suggested filter change as `changed` or `unchanged`, but can
+  services decide whether a suggestion contains actionable repairs without
+  scanning every `filter_changes` row?
+
+Implementation:
+- Added `changed_filter_count` and `unchanged_filter_count` to
+  `query_suggestion`.
+- Lifecycle graph-query suggestions now summarize real query repairs separately
+  from already-matching filter suggestions.
+- Text graph-health output now renders `query suggestion filter counts`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-counts-no-match-e392.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-counts-match-e392.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-counts-no-match-e392.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match`,
+  `query_suggestion.changed_filter_count=1`, and
+  `query_suggestion.unchanged_filter_count=0`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched`,
+  `query_suggestion.changed_filter_count=0`, and
+  `query_suggestion.unchanged_filter_count=1`.
+- Text output renders `query suggestion filter counts: changed=1 unchanged=0`.
+
+Decision:
+- Services can now route suggestions by aggregate repair/no-op counts before
+  opening detailed filter rows.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E392 no-match report has changed/unchanged counts `1/0`.
+- E392 match report has changed/unchanged counts `0/1`.
+- E392 text output includes the filter-count summary.
+
+## E391 - Expose Suggested Query Filter Change Status
+
+Question:
+- E390 lists suggested filter changes, but can services distinguish a real
+  query repair from an already-matching suggestion without comparing `from`
+  and `to` values?
+
+Implementation:
+- Added `status: changed | unchanged` to each `query_suggestion.filter_changes`
+  row.
+- Suggested lifecycle graph-query repairs now mark `value_equals` as `changed`
+  when the suggested value differs from the original query, and `unchanged`
+  when the suggested query already matches.
+- Text graph-health output now renders the filter-change status beside each
+  before/after pair.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-change-status-no-match-e391.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-change-status-match-e391.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-change-status-no-match-e391.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.filter_changes[0].status=changed`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.filter_changes[0].status=unchanged`.
+- Text output renders `query suggestion filter changes:
+  value_equals:execute->bind_inputs (changed)`.
+
+Decision:
+- Services can now route query suggestions by explicit change status, avoiding
+  repeated client-side comparisons and making no-op suggestions easy to
+  identify in logs or debug UIs.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E391 no-match report includes `status=changed` for the suggested
+  `value_equals` repair.
+- E391 match report includes `status=unchanged` for the already-matching
+  `value_equals` suggestion.
+- E391 text output includes the filter-change status.
+
+## E390 - Expose Suggested Query Filter Changes
+
+Question:
+- E389 carries original and repaired queries, but can services read the exact
+  before/after filter changes without diffing the two query objects?
+
+Implementation:
+- Added `filter_changes` to `query_suggestion`.
+- Suggested lifecycle graph-query repairs now include a row for
+  `value_equals`, with the original value and suggested value.
+- Text graph-health output now renders `query suggestion filter changes`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-changes-no-match-e390.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-changes-match-e390.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-filter-changes-no-match-e390.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.filter_changes=[{filter: value_equals, from: execute,
+  to: bind_inputs}]`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.filter_changes=[{filter: value_equals, from:
+  bind_inputs, to: bind_inputs}]`.
+- Text output renders `query suggestion filter changes:
+  value_equals:execute->bind_inputs`.
+
+Decision:
+- Services can now display and route graph-query repairs from a direct
+  before/after filter-change list rather than diffing query objects.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E390 no-match report includes the expected `value_equals` change from
+  `execute` to `bind_inputs`.
+- E390 match report includes the expected `value_equals` change from
+  `bind_inputs` to `bind_inputs`.
+- E390 text output includes the filter-change summary.
+
+## E389 - Include Original Query In Suggestion
+
+Question:
+- E388 identifies the relaxed filter, but can services compare the original
+  graph query and repaired graph query without retaining external state?
+
+Implementation:
+- Added `original_query` to `query_suggestion`.
+- The suggestion now carries both the caller's original graph query and the
+  repaired graph query.
+- Text graph-health output now renders `query suggestion original query`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-original-query-no-match-e389.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-original-query-match-e389.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-original-query-no-match-e389.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match`,
+  `query_suggestion.original_query.value_equals=execute`, and
+  `query_suggestion.query.value_equals=bind_inputs`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggestion.original_query.value_equals=bind_inputs`.
+- Text output renders the original query as
+  `mode=lifecycle predicate=review_pipeline_recommended_action_execution_phase
+  value_equals=execute`.
+
+Decision:
+- Services can now show and compare before/after graph-query repair state from
+  a single response object.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E389 no-match report includes original `value_equals=execute` and repaired
+  `value_equals=bind_inputs`.
+- E389 match report includes original `value_equals=bind_inputs`.
+- E389 text output includes the original-query summary line.
+
+## E388 - Expose Suggested Query Relaxed Filters
+
+Question:
+- E387 explains that the suggestion came from relaxing an exact value filter,
+  but can services inspect the changed filter as structured data?
+
+Implementation:
+- Added `relaxed_filters` to `query_suggestion`.
+- Suggested lifecycle graph-query repairs now report
+  `relaxed_filters=["value_equals"]`.
+- Text graph-health output now renders `query suggestion relaxed filters`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-relaxed-filters-no-match-e388.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-relaxed-filters-match-e388.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-relaxed-filters-no-match-e388.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggestion.relaxed_filters=["value_equals"]`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and the same relaxed-filter list.
+- Text output renders `query suggestion relaxed filters: value_equals`.
+
+Decision:
+- Services can now reason over the exact filter adjustment behind a suggested
+  lifecycle graph-query repair instead of parsing the provenance reason string.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E388 no-match and match reports both include
+  `query_suggestion.relaxed_filters=["value_equals"]`.
+- E388 text output includes the relaxed-filter line.
+
+## E387 - Add Suggested Query Provenance
+
+Question:
+- E386 bundles suggested query repairs, but can services tell where the
+  suggestion came from and why it is valid?
+
+Implementation:
+- Added `source` and `reason` to `query_suggestion`.
+- Suggested lifecycle graph-query repairs now identify
+  `source=lifecycle_available_value_counts` and
+  `reason=available_value_after_relaxing_value_equals`.
+- Text graph-health output now renders `query suggestion provenance`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-provenance-no-match-e387.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-provenance-match-e387.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-provenance-no-match-e387.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and a `query_suggestion` whose
+  `source` is `lifecycle_available_value_counts`, `reason` is
+  `available_value_after_relaxing_value_equals`, and `value_equals` is
+  `bind_inputs`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and the same suggestion provenance.
+- Text output renders `query suggestion provenance:
+  source=lifecycle_available_value_counts
+  reason=available_value_after_relaxing_value_equals`.
+
+Decision:
+- Services can now explain suggested lifecycle query repairs as coming from
+  available value counts after relaxing the exact value filter, rather than
+  treating the repair as an opaque hint.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E387 no-match report has expected `query_suggestion.source`,
+  `query_suggestion.reason`, and `query_suggestion.value_equals`.
+- E387 match report has `query_match_status=matched` and the same suggestion
+  provenance.
+- E387 text output includes the query-suggestion provenance line.
+
+## E386 - Bundle Suggested Query Repair
+
+Question:
+- E385 exposes all suggested-query repair fields, but can services consume the
+  repair as one structured object instead of collecting sibling fields?
+
+Implementation:
+- Added `query_suggestion` to classifier graph health reports.
+- The bundle includes `value_equals`, `result_count`, `status`, `next_action`,
+  `remediation`, the structured repaired `query`, and executable `argv`.
+- Text graph-health output now renders a compact `query suggestion` summary.
+- Existing flat `query_suggested_*` fields remain for compatibility.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-no-match-e386.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-match-e386.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-suggestion-no-match-e386.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and a `query_suggestion` object with
+  `value_equals=bind_inputs`, `result_count=1`,
+  `status=expected_matches`, `next_action=run_suggested_query`, plus repaired
+  query and argv.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and the same structured suggestion action.
+- Text output renders `query suggestion: status=expected_matches
+  next_action=run_suggested_query result_count=1 value_equals=bind_inputs`.
+
+Decision:
+- Services now have a single structured repair object for lifecycle graph
+  no-match handling while older clients can continue using the flat fields.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E386 no-match report has a `query_suggestion` with the expected value,
+  count, status, next action, repaired query, and argv.
+- E386 match report has `query_match_status=matched` and a suggestion whose
+  next action is `run_suggested_query`.
+- E386 text output includes the compact query-suggestion summary.
+
+## E385 - Expose Suggested Query Remediation
+
+Question:
+- E384 gives services the suggested next action, but can they present operator
+  guidance without hardcoding remediation copy client-side?
+
+Implementation:
+- Added `query_suggested_remediation` to classifier graph health reports.
+- Lifecycle graph queries with a ranked suggested value now explain that the
+  service should run the suggested graph query to inspect available classifier
+  lifecycle facts.
+- Text graph-health output now renders `query suggested remediation`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-remediation-no-match-e385.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-remediation-match-e385.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-remediation-no-match-e385.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match`,
+  `query_suggested_next_action=run_suggested_query`, and
+  `query_suggested_remediation=Run the suggested graph query to inspect the
+  available classifier lifecycle facts.`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and the same suggested remediation.
+- Text output renders `query suggested remediation: Run the suggested graph
+  query to inspect the available classifier lifecycle facts.`.
+
+Decision:
+- Services can now surface the suggested-query repair path as a complete
+  status/action/remediation bundle, instead of mixing report data with
+  hardcoded UI guidance.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E385 no-match report has `query_match_status=no_match`,
+  `query_suggested_next_action=run_suggested_query`, and the expected
+  `query_suggested_remediation`.
+- E385 match report has `query_match_status=matched` and the same suggested
+  remediation.
+- E385 text output includes the suggested-remediation line.
+
+## E384 - Expose Suggested Query Next Action
+
+Question:
+- E383 tells services that a repaired lifecycle query is expected to match, but
+  can they route the next step without inventing their own action label?
+
+Implementation:
+- Added `query_suggested_next_action` to classifier graph health reports.
+- Lifecycle graph queries with a ranked suggested value now emit
+  `run_suggested_query`.
+- Text graph-health output now renders `query suggested next action`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-next-action-no-match-e384.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-next-action-match-e384.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-next-action-no-match-e384.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match`,
+  `query_suggested_value_equals=bind_inputs`,
+  `query_suggested_result_count=1`,
+  `query_suggested_status=expected_matches`, and
+  `query_suggested_next_action=run_suggested_query`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggested_next_action=run_suggested_query`.
+- Text output renders `query suggested next action: run_suggested_query`.
+
+Decision:
+- Services can now route lifecycle graph-query repairs through the report's
+  suggested next action instead of mapping status/count pairs locally.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E384 no-match report has `query_match_status=no_match`,
+  `query_suggested_value_equals=bind_inputs`,
+  `query_suggested_result_count=1`,
+  `query_suggested_status=expected_matches`, and
+  `query_suggested_next_action=run_suggested_query`.
+- E384 match report has `query_match_status=matched` and
+  `query_suggested_next_action=run_suggested_query`.
+- E384 text output includes the suggested-next-action line.
+
+## E383 - Expose Suggested Query Status
+
+Question:
+- E382 gives services the expected result count for a repaired lifecycle query,
+  but can they branch on the suggestion without comparing numeric counts?
+
+Implementation:
+- Added `query_suggested_status` to classifier graph health reports.
+- Lifecycle graph queries that have a ranked suggested value now emit
+  `expected_matches`.
+- Text graph-health output now renders `query suggested status`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-status-no-match-e383.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-status-match-e383.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-status-no-match-e383.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match`,
+  `query_suggested_value_equals=bind_inputs`,
+  `query_suggested_result_count=1`, and
+  `query_suggested_status=expected_matches`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and
+  `query_suggested_status=expected_matches`.
+- Text output renders `query suggested status: expected_matches`.
+
+Decision:
+- Services can now route suggested lifecycle graph-query repairs through a
+  status enum instead of re-implementing the result-count comparison.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E383 no-match report has `query_match_status=no_match`,
+  `query_suggested_value_equals=bind_inputs`,
+  `query_suggested_result_count=1`, and
+  `query_suggested_status=expected_matches`.
+- E383 match report has `query_match_status=matched` and
+  `query_suggested_status=expected_matches`.
+- E383 text output includes the suggested-status line.
+
+## E382 - Expose Suggested Query Result Count
+
+Question:
+- E381 gives services a repaired structured query, but can they know the
+  expected result size without re-reading and ranking available value counts?
+
+Implementation:
+- Added `query_suggested_result_count` to classifier graph health reports.
+- The count comes from the same ranked lifecycle available-value row that
+  produces `query_suggested_value_equals`.
+- Text graph-health output now renders `query suggested result count`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-result-count-no-match-e382.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-result-count-match-e382.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-result-count-no-match-e382.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match`,
+  `query_suggested_value_equals=bind_inputs`, and
+  `query_suggested_result_count=1`.
+- The repaired `--value=bind_inputs` query returns
+  `query_match_status=matched` and `query_suggested_result_count=1`.
+- Text output renders `query suggested result count: 1`.
+
+Decision:
+- Services can now treat suggested lifecycle graph-query repairs as
+  service-readable reroute candidates with an expected match count, instead of
+  parsing availability buckets client-side.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E382 no-match report has `query_match_status=no_match`,
+  `query_suggested_value_equals=bind_inputs`, and
+  `query_suggested_result_count=1`.
+- E382 match report has `query_match_status=matched` and
+  `query_suggested_result_count=1`.
+- E382 text output includes the suggested result-count line.
+
+## E381 - Suggest Structured Graph Query Repair
+
+Question:
+- E380 provides a rerunnable argv, but can services consume the repaired graph
+  query as structured data without parsing CLI arguments?
+
+Implementation:
+- Added `query_suggested_query` to classifier graph health reports.
+- The suggested query copies the current graph query and replaces
+  `value_equals` with `query_suggested_value_equals`.
+- Text graph-health output now renders the structured suggested query as
+  key/value pairs.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-query-no-match-e381.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-query-match-e381.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-query-no-match-e381.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggested_query={mode: lifecycle, predicate:
+  review_pipeline_recommended_action_execution_phase, value_equals:
+  bind_inputs}`.
+- The matching `--value=bind_inputs` query returns the same structured
+  suggested query.
+- Text output renders `query suggested query: mode=lifecycle ...`.
+
+Decision:
+- Services can now repair lifecycle graph queries through a structured query
+  object or a ready argv, depending on whether they call the service layer or
+  shell out to the CLI.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E381 no-match and match reports both include the expected structured
+  suggested query.
+- E381 text output includes the structured suggested query line.
+
+## E380 - Suggest Executable Graph Query Argv
+
+Question:
+- E379 suggests an exact lifecycle value, but can services rerun the repaired
+  graph query without reconstructing CLI flags?
+
+Implementation:
+- Added `query_suggested_argv` to classifier graph health reports.
+- The argv preserves current graph query filters and replaces the exact
+  `--value` with `query_suggested_value_equals`.
+- Text graph-health output now renders `query suggested argv`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-argv-no-match-e380.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-argv-match-e380.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-argv-no-match-e380.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and `query_suggested_argv=["bun",
+  "src/cli/index.ts", "classifiers", "graph", "--mode", "lifecycle",
+  "--predicate", "review_pipeline_recommended_action_execution_phase",
+  "--value", "bind_inputs"]`.
+- The matching `--value=bind_inputs` query returns the same executable argv.
+- Text output renders the suggested argv as a runnable command line.
+
+Decision:
+- Services can now repair and rerun exact lifecycle graph queries directly
+  from the report without duplicating graph CLI flag construction.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E380 no-match and match reports both include the expected suggested argv.
+- E380 text output includes the suggested argv command line.
+
+## E379 - Suggest Exact Lifecycle Values For Query Repair
+
+Question:
+- E378 exposes available lifecycle values, but can services get one
+  deterministic exact-value suggestion without ranking the available counts?
+
+Implementation:
+- Added `query_suggested_value_equals` to classifier graph health reports.
+- The suggestion is derived from `lifecycle_available_value_counts`, choosing
+  the highest count and using predicate/value ordering as a deterministic
+  tie-breaker.
+- Text graph-health output now renders `query suggested value equals`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-value-no-match-e379.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-value-match-e379.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-suggested-value-no-match-e379.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and
+  `query_suggested_value_equals=bind_inputs`.
+- The matching `--value=bind_inputs` query also returns
+  `query_suggested_value_equals=bind_inputs`.
+- Text output renders `query suggested value equals: bind_inputs`.
+
+Decision:
+- Services can now repair exact lifecycle value queries by substituting a
+  suggested available value without implementing their own ranking logic.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E379 no-match report has `query_match_status=no_match` and
+  `query_suggested_value_equals=bind_inputs`.
+- E379 match report has `query_match_status=matched` and the same suggested
+  value.
+- E379 text output includes the suggested value line.
+
+## E378 - Expose Available Lifecycle Values For No-Match Queries
+
+Question:
+- E375 tells no-match graph queries to inspect available value counts, but can
+  the report provide those counts when an exact lifecycle value is missing?
+
+Implementation:
+- Added `lifecycle_available_value_counts` to classifier graph health reports.
+- Available counts use the lifecycle query filters while ignoring only the
+  exact `value_equals` filter.
+- Existing `lifecycle_value_counts` still describes the matched rows only.
+- Text graph-health output now renders a separate
+  `lifecycle available value counts` section.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-available-values-no-match-e378.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-available-values-match-e378.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-available-values-no-match-e378.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match`, empty `lifecycle_value_counts`, and
+  `lifecycle_available_value_counts=[{predicate:
+  review_pipeline_recommended_action_execution_phase, value: bind_inputs,
+  count: 1}]`.
+- The matching `--value=bind_inputs` query returns the same available value
+  count while still returning the matched lifecycle fact.
+- Text output renders
+  `review_pipeline_recommended_action_execution_phase=bind_inputs count=1`
+  under `lifecycle available value counts`.
+
+Decision:
+- Services can now remediate exact-value no-matches by showing or selecting
+  available lifecycle values without running a second broad query.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E378 no-match report has `query_match_status=no_match`, empty matched
+  lifecycle value counts, and available `bind_inputs` count 1.
+- E378 match report has available `bind_inputs` count 1.
+- E378 text output includes the available value-count section.
+
+## E377 - Expose Graph Query Result Kind Counts
+
+Question:
+- E376 tells services which result families matched, but can they see matched
+  row counts per family without reading lower-level totals?
+
+Implementation:
+- Added `query_result_kind_counts` to classifier graph health reports.
+- Count rows include `kind` and `count` for each non-empty primary result
+  family.
+- No-match queries return an empty count list.
+- Text graph-health output now renders `query result kind counts`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-result-kind-counts-e377.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-result-kind-counts-no-match-e377.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-result-kind-counts-e377.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=bind_inputs`
+  returns `query_result_kinds=["lifecycle_facts"]` and
+  `query_result_kind_counts=[{kind: lifecycle_facts, count: 1}]`.
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_result_kinds=[]` and `query_result_kind_counts=[]`.
+- Text output renders `query result kind counts: lifecycle_facts=1`.
+
+Decision:
+- Services can now route and size matched graph-query work from one structured
+  field instead of coupling to the report's raw result-total layout.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E377 positive report has `query_result_kinds=["lifecycle_facts"]` and
+  `query_result_kind_counts=[{kind: lifecycle_facts, count: 1}]`.
+- E377 negative report has empty result kinds and result-kind counts.
+- E377 text output includes `query result kind counts: lifecycle_facts=1`.
+
+## E376 - Expose Graph Query Result Kinds
+
+Question:
+- E375 tells services what to do after graph query matching, but can they tell
+  which result family matched without scanning several arrays or counters?
+
+Implementation:
+- Added `query_result_kinds` to classifier graph health reports.
+- Result kinds are emitted for non-empty primary result families:
+  `operations`, `guarded_operations`, `changed_artifacts`,
+  `lifecycle_facts`, and `embedding_helper_facts`.
+- No-match queries return an empty result-kind list.
+- Text graph-health output now renders `query result kinds`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-result-kinds-e376.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-result-kinds-no-match-e376.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-result-kinds-e376.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=bind_inputs`
+  returns `query_match_status=matched` and
+  `query_result_kinds=["lifecycle_facts"]`.
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` and `query_result_kinds=[]`.
+- Text output renders `query result kinds: lifecycle_facts`.
+
+Decision:
+- Services can now dispatch matched graph queries by result family without
+  coupling to low-level count fields or scanning all result arrays first.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E376 positive report has `query_match_status=matched` and
+  `query_result_kinds=["lifecycle_facts"]`.
+- E376 negative report has `query_match_status=no_match` and
+  `query_result_kinds=[]`.
+- E376 text output includes `query result kinds: lifecycle_facts`.
+
+## E375 - Expose Graph Query Routing Guidance
+
+Question:
+- E374 lets services detect graph query no-matches, but can they route the next
+  step without re-encoding result-total rules?
+
+Implementation:
+- Added `query_next_action` to classifier graph health reports.
+- Added `query_remediation` text for service/debug output.
+- Matched queries return `query_next_action=use_query_results`.
+- No-match queries return
+  `query_next_action=relax_filters_or_project_facts`.
+- Text graph-health output now renders both query routing fields.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-action-e375.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-action-no-match-e375.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-query-action-no-match-e375.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=bind_inputs`
+  returns `query_match_status=matched`,
+  `query_next_action=use_query_results`, and one lifecycle fact.
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match`,
+  `query_next_action=relax_filters_or_project_facts`, and zero lifecycle
+  facts.
+- Text output renders
+  `query next action: relax_filters_or_project_facts` and remediation.
+
+Decision:
+- Services can now route matched graph queries into result consumption and
+  no-match graph queries into filter relaxation, value-count inspection, or
+  fact projection/apply work without comparing raw counts.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E375 positive report has `query_match_status=matched`,
+  `query_next_action=use_query_results`, and one lifecycle fact.
+- E375 negative report has `query_match_status=no_match`,
+  `query_next_action=relax_filters_or_project_facts`, remediation beginning
+  with `Relax graph filters`, and zero lifecycle facts.
+- E375 text output includes the no-match query next action and remediation.
+
+## E374 - Expose Graph Query Match Status
+
+Question:
+- E373 makes lifecycle phase queries countable, but can services distinguish a
+  real no-match query from an empty result without recomputing totals?
+
+Implementation:
+- Added `query_match_status` to classifier graph health reports.
+- The status is `matched` when any primary result set is non-empty:
+  operations, guarded operations, changed artifacts, lifecycle facts, or
+  embedding-helper facts.
+- The status is `no_match` when no primary result sets match the query.
+- Evidence paths are intentionally not counted as primary matches because they
+  are derived from matched rows.
+- Text graph-health output now renders `query match`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-match-e374.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-no-match-e374.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-no-match-e374.txt`
+
+Results:
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=bind_inputs`
+  returns `query_match_status=matched` with one lifecycle fact.
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=execute`
+  returns `query_match_status=no_match` with zero lifecycle facts and no
+  lifecycle value-count rows.
+- Text output renders `query match: no_match`.
+
+Decision:
+- Review services can now branch directly on graph query matches without
+  comparing several result-total fields or accidentally treating derived
+  evidence paths as a match.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E374 positive report has `query_match_status=matched` and
+  `result_totals.lifecycle_fact_count=1`.
+- E374 negative report has `query_match_status=no_match`,
+  `result_totals.lifecycle_fact_count=0`, and empty
+  `lifecycle_value_counts`.
+- E374 text output includes `query match: no_match`.
+
+## E373 - Summarize Lifecycle Fact Values
+
+Question:
+- E372 lets services query one exact recommended-action phase, but can they
+  see the current phase distribution without grouping lifecycle facts
+  client-side?
+
+Implementation:
+- Added `lifecycle_value_counts` to classifier graph health reports.
+- Counts are derived from the filtered lifecycle facts returned by the query.
+- Each count row includes `predicate`, normalized string `value`, and `count`.
+- Text graph-health output now renders a `lifecycle value counts` section.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-counts-e373.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-counts-e373-graph.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-counts-e373.txt`
+
+Results:
+- `classifiers package-operations --graph-health --graph-mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase`
+  returns one lifecycle fact and `lifecycle_value_counts=[{predicate:
+  review_pipeline_recommended_action_execution_phase, value: bind_inputs,
+  count: 1}]`.
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase`
+  returns the same count summary through the graph alias.
+- Text output renders
+  `review_pipeline_recommended_action_execution_phase=bind_inputs count=1`.
+
+Decision:
+- Review services and dashboards can now inspect lifecycle enum distributions,
+  such as recommended-action execution phase, directly from the graph report
+  instead of fetching all facts and grouping them client-side.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E373 package-operations and graph-alias reports both include the expected
+  `lifecycle_value_counts` row for `bind_inputs`.
+- Both reports still return exactly one lifecycle fact for the requested
+  recommended-action phase predicate.
+- Text output renders the lifecycle value count section and `bind_inputs`
+  count.
+
+## E372 - Query Recommended Action Phase by Exact Value
+
+Question:
+- E371 exposes the recommended action execution phase, but can services query
+  exactly the phase they can execute, such as `bind_inputs`, without relying on
+  substring matching?
+
+Implementation:
+- Added `value_equals` to classifier graph health queries.
+- Added `--value=<value>` to `classifiers package-operations --graph-health`
+  and the `classifiers graph` alias.
+- Applied the exact-value filter to lifecycle facts, embedding-helper facts,
+  and routing-policy candidate facts.
+- Text graph-health output now renders `filter value equals`.
+
+Artifacts:
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-value-e372.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-value-e372-graph.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-value-e372.txt`
+
+Results:
+- `classifiers package-operations --graph-health --graph-mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=bind_inputs`
+  returns exactly one lifecycle fact with value `bind_inputs`.
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_recommended_action_execution_phase --value=bind_inputs`
+  returns the same exact fact through the graph alias.
+- Text output shows `filter value equals: bind_inputs` and renders
+  `review_pipeline_recommended_action_execution_phase: bind_inputs`.
+
+Decision:
+- Review executors can now discover phase-specific lifecycle facts with exact
+  equality, which is a better service contract than `--value-contains` for enum
+  routing fields.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E372 package-operations and graph-alias reports both preserve
+  `query.value_equals=bind_inputs`.
+- Both reports return exactly one lifecycle fact whose predicate is
+  `review_pipeline_recommended_action_execution_phase` and whose value is
+  `bind_inputs`.
+- Text output renders the exact-value filter and the matching phase fact.
+
+## E371 - Summarize Recommended Action Execution Route
+
+Question:
+- E370 exposes command inputs, output artifacts, and output checks, but can a
+  service route the recommended action directly without piecing together
+  several lifecycle fields?
+
+Implementation:
+- Added `recommended_action_execution_phase` and
+  `recommended_action_execution_summary` to review-pipeline lifecycle status
+  and lifecycle insight.
+- Derived phases:
+  - `bind_inputs`
+  - `execute`
+  - `execute_then_verify_outputs`
+  - `repair_outputs`
+  - `inspect_lifecycle`
+- Projected the phase and compact summary into lifecycle graph facts:
+  `review_pipeline_recommended_action_execution_phase` and
+  `review_pipeline_recommended_action_execution_summary`.
+- Lifecycle text now renders `recommended action phase` and
+  `recommended action summary`.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-execution-e371.json`
+- `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-execution-e371.json`
+- `.ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-execution-e371.json`
+- `.ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-execution-e371.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-phase-e371.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-execution-summary-e371.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-execution-e371.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-execution-e371.txt`
+
+Results:
+- Fact projection exposes:
+  - `review_pipeline_recommended_action_execution_phase=bind_inputs`
+  - `review_pipeline_recommended_action_execution_summary="kind=stamp_review_provenance phase=bind_inputs status=missing_inputs can_execute=false missing_inputs=2 output_artifacts=2 output_checks=2"`
+- Lifecycle graph queries by phase and summary each return exactly one
+  lifecycle fact.
+- Lifecycle insight JSON/text render the same phase and summary.
+
+Decision:
+- Services no longer need to reconstruct the direct executor route from
+  separate status, missing-input, and output-check fields. The graph/lifecycle
+  surface now says whether to bind inputs, execute, execute then verify,
+  repair outputs, or inspect the lifecycle.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E371 fact projection includes exactly one execution phase and one execution
+  summary fact.
+- E371 lifecycle graph queries return exactly one phase fact and one summary
+  fact.
+- E371 lifecycle insight JSON/text render both execution routing fields.
+
+## E370 - Expose Recommended Action Output Checks
+
+Question:
+- E369 exposes recommended action output artifact paths, but can a service
+  also know which checks to run and whether they are required for command
+  success without reopening the source lifecycle artifact?
+
+Implementation:
+- Added `recommended_action_output_checks` to review-pipeline lifecycle status
+  and lifecycle insight.
+- Loaded descriptors from lifecycle `prepared.output_artifact_checks`.
+- Rendered each descriptor as:
+  `kind path=<path> index=<argv_index> check=<check> status=<status> required_for_command_success=<boolean>`.
+- Projected descriptors into lifecycle graph fact
+  `review_pipeline_recommended_action_output_checks`.
+- Lifecycle text now renders `recommended action output checks`.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-output-checks-e370.json`
+- `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-output-checks-e370.json`
+- `.ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-output-checks-e370.json`
+- `.ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-output-checks-e370.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-output-checks-e370.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-output-checks-e370.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-output-checks-e370.txt`
+
+Results:
+- Fact projection and lifecycle graph query expose:
+  - `review_brief path=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-output-checks-e370.md index=10 check=file_exists_after_execution status=pending_execution required_for_command_success=true`
+  - `readiness_report path=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-output-checks-e370.json index=11 check=file_exists_after_execution status=pending_execution required_for_command_success=true`
+- Lifecycle graph query by
+  `review_pipeline_recommended_action_output_checks` returns exactly one
+  lifecycle fact.
+- Lifecycle insight JSON/text render the same output-check descriptors.
+
+Decision:
+- Services can now verify recommended action outputs from graph/lifecycle data
+  after execution, completing the recommended action execution contract with
+  command kind, blockers, input bindings, output artifacts, and output checks.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E370 fact projection and lifecycle graph query include the recommended action
+  output checks with `index=`, `check=file_exists_after_execution`,
+  `status=pending_execution`, and `required_for_command_success=true`.
+- E370 lifecycle insight JSON/text render both output-check descriptors.
+
+## E369 - Expose Recommended Action Output Artifacts
+
+Question:
+- E368 makes recommended action input binding executable, but can a service
+  also know which output artifacts to verify after executing the recommended
+  action without reopening the source lifecycle artifact?
+
+Implementation:
+- Added `recommended_action_output_artifacts` to review-pipeline lifecycle
+  status and lifecycle insight.
+- Loaded output artifact descriptors from lifecycle `prepared.output_artifacts`.
+- Rendered each descriptor as:
+  `kind path=<path> flag=<argv_flag> index=<argv_index> prefix=<argv_value_prefix> required_for_handoff=<boolean>`.
+- Projected descriptors into lifecycle graph fact
+  `review_pipeline_recommended_action_output_artifacts`.
+- Lifecycle text now renders `recommended action output artifacts`.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-outputs-e369.md --review-facts=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-outputs-e369-review-facts.json --review-write-plan=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-outputs-e369-review-write-plan.json --review-pipeline-lifecycle --out=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-outputs-e369.json --json > .ax/experiments/workflow-candidate-review-pipeline-recommended-action-outputs-e369.stdout
+cp .ax/experiments/workflow-candidate-review-pipeline-recommended-action-outputs-e369.json .ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json
+bun src/cli/index.ts classifiers package-operations --facts --workflow-status=.ax/experiments/blind-workflow-status-current.json --out=.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-outputs-e369.json --json > .ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-outputs-e369.stdout
+bun src/cli/index.ts classifiers package-operations --write-plan --facts --workflow-status=.ax/experiments/blind-workflow-status-current.json --out=.ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-outputs-e369.json --json > .ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-outputs-e369.stdout
+bun src/cli/index.ts classifiers package-operations --apply-write-plan --facts --workflow-status=.ax/experiments/blind-workflow-status-current.json --out=.ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-outputs-e369.json --json > .ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-outputs-e369.stdout
+bun src/cli/index.ts classifiers package-operations --graph-health --graph-mode=lifecycle --predicate=review_pipeline_recommended_action_output_artifacts --out=.ax/experiments/classifier-graph-lifecycle-recommended-action-output-artifacts-e369.json --json > .ax/experiments/classifier-graph-lifecycle-recommended-action-output-artifacts-e369.stdout
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-outputs-e369.json --json > .ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-outputs-e369.stdout
+bun src/cli/index.ts classifiers lifecycle > .ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-outputs-e369.txt
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-outputs-e369.json`
+- `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-outputs-e369.json`
+- `.ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-outputs-e369.json`
+- `.ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-outputs-e369.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-output-artifacts-e369.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-outputs-e369.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-outputs-e369.txt`
+
+Results:
+- Fact projection and lifecycle graph query expose:
+  - `review_brief path=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-outputs-e369.md flag=--coverage-review-brief index=10 prefix=--coverage-review-brief= required_for_handoff=true`
+  - `readiness_report path=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-outputs-e369.json flag=--out index=11 prefix=--out= required_for_handoff=false`
+- Lifecycle graph query by
+  `review_pipeline_recommended_action_output_artifacts` returns exactly one
+  lifecycle fact.
+- Lifecycle insight JSON/text render the same output artifact descriptors.
+
+Decision:
+- E369 completes the minimal recommended-action execution contract: services
+  can see what to run, why it is blocked, how to bind missing inputs, and what
+  output artifacts to verify after execution.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E369 fact projection and lifecycle graph query include the recommended action
+  output artifact descriptors with `flag=`, `index=`, `prefix=`, and
+  `required_for_handoff=`.
+- E369 lifecycle insight JSON/text render both output artifact descriptors.
+
+## E368 - Preserve Recommended Action Binding Indexes
+
+Question:
+- E367 exposes recommended action input bindings, but can an executor replace
+  the correct argv slot without re-opening the workflow readiness artifact?
+
+Implementation:
+- Extended recommended action binding summaries to preserve
+  `argv_index` and `argv_value_prefix` from lifecycle `summary.input_bindings`.
+- The binding descriptor shape is now:
+  `input flag=<argv_flag> index=<argv_index> prefix=<argv_value_prefix> placeholder=<placeholder> value_kind=<value_kind>`.
+- Existing lifecycle graph and insight fields keep the same predicate/name:
+  `review_pipeline_recommended_action_input_bindings`, but the value is now
+  more executable.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-binding-indexes-e368.md --review-facts=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-binding-indexes-e368-review-facts.json --review-write-plan=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-binding-indexes-e368-review-write-plan.json --review-pipeline-lifecycle --out=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-binding-indexes-e368.json --json > .ax/experiments/workflow-candidate-review-pipeline-recommended-action-binding-indexes-e368.stdout
+cp .ax/experiments/workflow-candidate-review-pipeline-recommended-action-binding-indexes-e368.json .ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json
+bun src/cli/index.ts classifiers package-operations --facts --workflow-status=.ax/experiments/blind-workflow-status-current.json --out=.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-binding-indexes-e368.json --json > .ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-binding-indexes-e368.stdout
+bun src/cli/index.ts classifiers package-operations --write-plan --facts --workflow-status=.ax/experiments/blind-workflow-status-current.json --out=.ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-binding-indexes-e368.json --json > .ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-binding-indexes-e368.stdout
+bun src/cli/index.ts classifiers package-operations --apply-write-plan --facts --workflow-status=.ax/experiments/blind-workflow-status-current.json --out=.ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-binding-indexes-e368.json --json > .ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-binding-indexes-e368.stdout
+bun src/cli/index.ts classifiers package-operations --graph-health --graph-mode=lifecycle --predicate=review_pipeline_recommended_action_input_bindings --out=.ax/experiments/classifier-graph-lifecycle-recommended-action-binding-indexes-e368.json --json > .ax/experiments/classifier-graph-lifecycle-recommended-action-binding-indexes-e368.stdout
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-binding-indexes-e368.json --json > .ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-binding-indexes-e368.stdout
+bun src/cli/index.ts classifiers lifecycle > .ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-binding-indexes-e368.txt
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-binding-indexes-e368.json`
+- `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-binding-indexes-e368.json`
+- `.ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-binding-indexes-e368.json`
+- `.ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-binding-indexes-e368.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-binding-indexes-e368.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-binding-indexes-e368.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-binding-indexes-e368.txt`
+
+Results:
+- Fact projection and lifecycle graph query now expose:
+  - `reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string`
+  - `reviewed_at flag=--review-provenance-reviewed-at index=9 prefix=--review-provenance-reviewed-at= placeholder=<reviewed-at-iso> value_kind=iso_datetime`
+- Lifecycle graph query by `review_pipeline_recommended_action_input_bindings`
+  returns exactly one lifecycle fact.
+- Lifecycle insight JSON/text render the same indexed binding descriptors.
+
+Decision:
+- E368 makes the recommended-action binding handoff executable enough for a
+  service to replace argv values by index or by value prefix without scraping
+  the source readiness artifact.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- E368 fact projection and lifecycle graph query include both `index=` and
+  `prefix=` for reviewer and reviewed-at bindings.
+- E368 lifecycle insight JSON/text render the indexed binding descriptors.
+
+## E367 - Expose Recommended Action Input Bindings
+
+Question:
+- E366 tells services the recommended action is blocked on missing inputs, but
+  can they discover how to bind those inputs without reopening the workflow
+  readiness artifact and parsing `summary.input_bindings`?
+
+Implementation:
+- Added `recommended_action_input_bindings` to review-pipeline lifecycle status
+  and lifecycle insight.
+- Loaded binding summaries from lifecycle `summary.input_bindings`.
+- Rendered each binding as a compact service-readable string:
+  `input flag=<argv_flag> placeholder=<placeholder> value_kind=<value_kind>`.
+- Projected bindings into the lifecycle graph predicate
+  `review_pipeline_recommended_action_input_bindings`.
+- Lifecycle text now renders `recommended action input bindings`.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-bindings-e367.md --review-facts=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-bindings-e367-review-facts.json --review-write-plan=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-bindings-e367-review-write-plan.json --review-pipeline-lifecycle --out=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-bindings-e367.json --json > .ax/experiments/workflow-candidate-review-pipeline-recommended-action-bindings-e367.stdout
+cp .ax/experiments/workflow-candidate-review-pipeline-recommended-action-bindings-e367.json .ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json
+bun src/cli/index.ts classifiers package-operations --facts --workflow-status=.ax/experiments/blind-workflow-status-current.json --out=.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-bindings-e367.json --json > .ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-bindings-e367.stdout
+bun src/cli/index.ts classifiers package-operations --write-plan --facts --workflow-status=.ax/experiments/blind-workflow-status-current.json --out=.ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-bindings-e367.json --json > .ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-bindings-e367.stdout
+bun src/cli/index.ts classifiers package-operations --apply-write-plan --facts --workflow-status=.ax/experiments/blind-workflow-status-current.json --out=.ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-bindings-e367.json --json > .ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-bindings-e367.stdout
+bun src/cli/index.ts classifiers package-operations --graph-health --graph-mode=lifecycle --predicate=review_pipeline_recommended_action_input_bindings --out=.ax/experiments/classifier-graph-lifecycle-recommended-action-input-bindings-e367.json --json > .ax/experiments/classifier-graph-lifecycle-recommended-action-input-bindings-e367.stdout
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-bindings-e367.json --json > .ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-bindings-e367.stdout
+bun src/cli/index.ts classifiers lifecycle > .ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-bindings-e367.txt
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-bindings-e367.json`
+- `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-bindings-e367.json`
+- `.ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-bindings-e367.json`
+- `.ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-bindings-e367.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-input-bindings-e367.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-bindings-e367.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-bindings-e367.txt`
+
+Results:
+- Fact projection includes `review_pipeline_recommended_action_input_bindings`
+  with:
+  - `reviewer flag=--review-provenance-reviewer placeholder=<reviewer> value_kind=nonempty_string`
+  - `reviewed_at flag=--review-provenance-reviewed-at placeholder=<reviewed-at-iso> value_kind=iso_datetime`
+- Lifecycle graph query by that predicate returns exactly one lifecycle fact.
+- Lifecycle insight JSON exposes the same binding descriptors next to
+  `recommended_action_missing_inputs`.
+- Lifecycle text renders both missing inputs and binding descriptors.
+
+Decision:
+- E367 closes the handoff gap between "the action needs inputs" and "a service
+  knows how to collect/bind those inputs." Review services can now present the
+  required fields with expected value kinds and map them back to argv flags
+  without artifact-specific parsing.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-bindings-e367.json`
+  contains the new binding predicate plus the existing recommendation facts.
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-input-bindings-e367.json`
+  has one lifecycle fact for the review-pipeline lifecycle node.
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-bindings-e367.txt`
+  renders both binding descriptors.
+
+## E366 - Add Recommended Action Safety Metadata
+
+Question:
+- E365 tells services which direct review action is recommended, but can they
+  also tell whether that action is executable, blocked on inputs, or needs
+  repair without parsing argv placeholders?
+
+Implementation:
+- Extended review-pipeline lifecycle status and insight with:
+  `recommended_action_status`, `recommended_action_can_execute`,
+  `recommended_action_next_action`, and
+  `recommended_action_missing_inputs`.
+- The recommendation derives safety metadata from prepared command state when
+  available. For missing required output artifacts or lifecycle failures, it
+  routes to `repair_review_issues` with `status=missing_outputs` and
+  `can_execute=false`.
+- Projected the new metadata into lifecycle graph facts:
+  `review_pipeline_recommended_action_status`,
+  `review_pipeline_recommended_action_can_execute`,
+  `review_pipeline_recommended_action_next_action`, and
+  `review_pipeline_recommended_action_missing_inputs`.
+- Lifecycle text now renders the recommended action status, execute boolean,
+  next action, and missing inputs.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-safety-e366.md --review-facts=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-safety-e366-review-facts.json --review-write-plan=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-safety-e366-review-write-plan.json --review-pipeline-lifecycle --out=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-safety-e366.json --json > .ax/experiments/workflow-candidate-review-pipeline-recommended-action-safety-e366.stdout
+cp .ax/experiments/workflow-candidate-review-pipeline-recommended-action-safety-e366.json .ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json
+bun src/cli/index.ts classifiers package-operations --facts --workflow-status=.ax/experiments/blind-workflow-status-current.json --out=.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-safety-e366.json --json > .ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-safety-e366.stdout
+bun src/cli/index.ts classifiers package-operations --write-plan --facts --workflow-status=.ax/experiments/blind-workflow-status-current.json --out=.ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-safety-e366.json --json > .ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-safety-e366.stdout
+bun src/cli/index.ts classifiers package-operations --apply-write-plan --facts --workflow-status=.ax/experiments/blind-workflow-status-current.json --out=.ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-safety-e366.json --json > .ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-safety-e366.stdout
+for pred in review_pipeline_recommended_action_status review_pipeline_recommended_action_can_execute review_pipeline_recommended_action_next_action review_pipeline_recommended_action_missing_inputs; do bun src/cli/index.ts classifiers package-operations --graph-health --graph-mode=lifecycle --predicate=$pred --out=.ax/experiments/classifier-graph-lifecycle-${pred#review_pipeline_}-e366.json --json > .ax/experiments/classifier-graph-lifecycle-${pred#review_pipeline_}-e366.stdout; done
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-safety-e366.json --json > .ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-safety-e366.stdout
+bun src/cli/index.ts classifiers lifecycle > .ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-safety-e366.txt
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-safety-e366.json`
+- `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-safety-e366.json`
+- `.ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-safety-e366.json`
+- `.ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-safety-e366.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended_action_status-e366.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended_action_can_execute-e366.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended_action_next_action-e366.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended_action_missing_inputs-e366.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-safety-e366.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-safety-e366.txt`
+
+Results:
+- Fact projection includes all recommended action facts:
+  kind `stamp_review_provenance`, status `missing_inputs`,
+  `can_execute=false`, next action
+  `Provide required pipeline input values before executing the command.`, argv
+  with reviewer/reviewed-at placeholders, and missing inputs
+  `reviewer`, `reviewed_at`.
+- Lifecycle graph queries by each new predicate return exactly one fact for the
+  review-pipeline lifecycle node.
+- Lifecycle insight JSON exposes the same safety state.
+- Lifecycle text renders:
+  `recommended action status: missing_inputs`,
+  `recommended action can execute: no`,
+  `recommended action next: Provide required pipeline input values before executing the command.`, and
+  `recommended action missing inputs: reviewer, reviewed_at`.
+
+Decision:
+- E366 makes the E365 recommendation safe for services to consume. A service
+  can now distinguish "this is the recommended action" from "this action is
+  executable now" and can prompt for the exact missing inputs instead of
+  accidentally running placeholder argv.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-safety-e366.json`
+  contains all six recommended action predicates.
+- Each E366 lifecycle graph predicate query returns one lifecycle fact.
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-safety-e366.json`
+  reports `recommended_action_status=missing_inputs`,
+  `recommended_action_can_execute=false`, and missing inputs
+  `reviewer`, `reviewed_at`.
+
+## E365 - Recommend Review Pipeline Direct Action
+
+Question:
+- After E364 makes all direct review argv arrays graph-visible, can services
+  ask for the single recommended direct action without inspecting every
+  pipeline predicate and re-implementing routing logic?
+
+Implementation:
+- Added review-pipeline recommendation fields to lifecycle status and insight:
+  `recommended_action_kind` and `recommended_action_argv`.
+- Recommendation logic routes missing required outputs/failures to
+  `repair_review_issues`, otherwise maps the current pipeline command kind to
+  its executable argv:
+  `repair_review_issues`, `stamp_review_provenance`, or `apply_review_facts`.
+- Projected the recommendation into lifecycle graph facts:
+  `review_pipeline_recommended_action_kind` and
+  `review_pipeline_recommended_action_argv`.
+- Lifecycle text now renders `recommended action` and
+  `recommended action argv`.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-e365.md --review-facts=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-e365-review-facts.json --review-write-plan=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-e365-review-write-plan.json --review-pipeline-lifecycle --out=.ax/experiments/workflow-candidate-review-pipeline-recommended-action-e365.json --json > .ax/experiments/workflow-candidate-review-pipeline-recommended-action-e365.stdout
+cp .ax/experiments/workflow-candidate-review-pipeline-recommended-action-e365.json .ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json
+bun src/cli/index.ts classifiers package-operations --facts --workflow-status=.ax/experiments/blind-workflow-status-current.json --out=.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-e365.json --json
+bun src/cli/index.ts classifiers package-operations --write-plan --facts --workflow-status=.ax/experiments/blind-workflow-status-current.json --out=.ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-e365.json --json > .ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-e365.stdout
+bun src/cli/index.ts classifiers package-operations --apply-write-plan --facts --workflow-status=.ax/experiments/blind-workflow-status-current.json --out=.ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-e365.json --json > .ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-e365.stdout
+bun src/cli/index.ts classifiers package-operations --graph-health --graph-mode=lifecycle --predicate=review_pipeline_recommended_action_kind --out=.ax/experiments/classifier-graph-lifecycle-recommended-action-kind-e365.json --json > .ax/experiments/classifier-graph-lifecycle-recommended-action-kind-e365.stdout
+bun src/cli/index.ts classifiers package-operations --graph-health --graph-mode=lifecycle --predicate=review_pipeline_recommended_action_argv --out=.ax/experiments/classifier-graph-lifecycle-recommended-action-argv-e365.json --json > .ax/experiments/classifier-graph-lifecycle-recommended-action-argv-e365.stdout
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-e365.json --json > .ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-e365.stdout
+bun src/cli/index.ts classifiers lifecycle > .ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-e365.txt
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-pipeline-recommended-action-e365.json`
+- `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-e365.json`
+- `.ax/experiments/classifier-package-execution-write-plan-review-pipeline-recommended-action-e365.json`
+- `.ax/experiments/classifier-package-execution-apply-review-pipeline-recommended-action-e365.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-kind-e365.json`
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-argv-e365.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-e365.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-e365.txt`
+
+Results:
+- Fact projection emits `review_pipeline_recommended_action_kind` with
+  `stamp_review_provenance`.
+- Fact projection emits `review_pipeline_recommended_action_argv` with the
+  structured provenance-stamp argv containing reviewer and reviewed-at
+  placeholders.
+- Lifecycle graph queries by each new predicate return exactly one fact for
+  `classifier_lifecycle:workflow_candidate_review_pipeline`.
+- Lifecycle insight reports status `blocked_before_execution`, command kind
+  `stamp_review_provenance`, recommended kind `stamp_review_provenance`, and
+  the matching argv.
+- Lifecycle text renders both `recommended action: stamp_review_provenance`
+  and `recommended action argv: ...`.
+
+Decision:
+- E365 gives FX services and graph clients a direct routing fact: "what should
+  I run now?" They can still inspect raw action argv facts from E364, but the
+  common path no longer needs client-side branching over pipeline status,
+  command kind, and output verification.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+```
+
+Additional artifact assertions checked:
+- `.ax/experiments/classifier-package-execution-facts-review-pipeline-recommended-action-e365.json`
+  contains both recommendation predicates.
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-kind-e365.json`
+  has one lifecycle fact with value `stamp_review_provenance`.
+- `.ax/experiments/classifier-graph-lifecycle-recommended-action-argv-e365.json`
+  has one lifecycle fact whose argv begins with
+  `bun src/cli/index.ts classifiers workflow-candidates`.
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-recommended-action-e365.txt`
+  renders the recommended action and argv.
+
+## E364 - Project Review Direct Action Argv Facts
+
+Question:
+- After E361-E363 expose direct action argv arrays in readiness output, can
+  services discover those executable commands from graph facts instead of
+  reopening the readiness artifact?
+
+Implementation:
+- Extended review-pipeline lifecycle status loading to capture
+  `production_apply_command_argv`,
+  `review_provenance_stamp_command_argv`, and
+  `review_issue_repair_command_argv` from coverage readiness artifacts.
+- Projected those arrays as lifecycle facts:
+  `review_pipeline_production_apply_argv`,
+  `review_pipeline_provenance_stamp_argv`, and
+  `review_pipeline_issue_repair_argv`.
+- Lifecycle insight JSON/text now carries and renders the same direct action
+  argv arrays.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-direct-argv-e364.md --review-facts=.ax/experiments/workflow-candidate-review-pipeline-direct-argv-e364-review-facts.json --review-write-plan=.ax/experiments/workflow-candidate-review-pipeline-direct-argv-e364-review-write-plan.json --review-pipeline-lifecycle --out=.ax/experiments/workflow-candidate-review-pipeline-direct-argv-e364.json --json > .ax/experiments/workflow-candidate-review-pipeline-direct-argv-e364.stdout
+cp .ax/experiments/workflow-candidate-review-pipeline-direct-argv-e364.json .ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json
+bun src/cli/index.ts classifiers package-operations --facts --out=.ax/experiments/classifier-package-execution-facts-review-pipeline-direct-argv-e364.json --json > .ax/experiments/classifier-package-execution-facts-review-pipeline-direct-argv-e364.stdout
+bun src/cli/index.ts classifiers package-operations --write-plan --out=.ax/experiments/classifier-package-execution-write-plan-review-pipeline-direct-argv-e364.json --json > .ax/experiments/classifier-package-execution-write-plan-review-pipeline-direct-argv-e364.txt
+bun src/cli/index.ts classifiers package-operations --apply-write-plan --out=.ax/experiments/classifier-package-execution-apply-review-pipeline-direct-argv-e364.json --json > .ax/experiments/classifier-package-execution-apply-review-pipeline-direct-argv-e364.stdout
+bun src/cli/index.ts classifiers package-operations --graph-health --graph-mode=lifecycle --predicate=review_pipeline_production_apply_argv --out=.ax/experiments/classifier-graph-lifecycle-production-apply-argv-e364.json --json > .ax/experiments/classifier-graph-lifecycle-production-apply-argv-e364.stdout
+bun src/cli/index.ts classifiers package-operations --graph-health --graph-mode=lifecycle --predicate=review_pipeline_provenance_stamp_argv --out=.ax/experiments/classifier-graph-lifecycle-provenance-stamp-argv-e364.json --json > .ax/experiments/classifier-graph-lifecycle-provenance-stamp-argv-e364.stdout
+bun src/cli/index.ts classifiers package-operations --graph-health --graph-mode=lifecycle --predicate=review_pipeline_issue_repair_argv --out=.ax/experiments/classifier-graph-lifecycle-issue-repair-argv-e364.json --json > .ax/experiments/classifier-graph-lifecycle-issue-repair-argv-e364.stdout
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifier-lifecycle-insight-review-pipeline-direct-argv-e364.json --json > .ax/experiments/classifier-lifecycle-insight-review-pipeline-direct-argv-e364.stdout
+bun src/cli/index.ts classifiers lifecycle > .ax/experiments/classifier-lifecycle-insight-review-pipeline-direct-argv-e364.txt || true
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-pipeline-direct-argv-e364.json`
+- `.ax/experiments/classifier-package-execution-facts-review-pipeline-direct-argv-e364.json`
+- `.ax/experiments/classifier-package-execution-write-plan-review-pipeline-direct-argv-e364.json`
+- `.ax/experiments/classifier-package-execution-apply-review-pipeline-direct-argv-e364.json`
+- `.ax/experiments/classifier-graph-lifecycle-production-apply-argv-e364.json`
+- `.ax/experiments/classifier-graph-lifecycle-provenance-stamp-argv-e364.json`
+- `.ax/experiments/classifier-graph-lifecycle-issue-repair-argv-e364.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-direct-argv-e364.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-direct-argv-e364.txt`
+
+Results:
+- Fact projection emits the three direct action predicates with argv arrays.
+- The write plan contains Surreal `UPSERT classifier_graph_fact` statements
+  for all three predicates.
+- Applying the write plan wrote `587` statements with `0` failures.
+- Lifecycle graph queries by each predicate return exactly one fact for
+  `classifier_lifecycle:workflow_candidate_review_pipeline`.
+- Lifecycle insight text prints `production apply argv`,
+  `provenance stamp argv`, and `issue repair argv`.
+
+Decision:
+- E364 connects the service-executable direct action commands to the graph.
+  Services can now discover and filter review repair, provenance stamp, and
+  production apply argv through lifecycle graph queries rather than scraping
+  readiness text or keeping artifact-specific knowledge.
+
+Verification:
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 - <<'PY'
+import json
+from pathlib import Path
+for name, expected in [
+    ("production-apply", "review_pipeline_production_apply_argv"),
+    ("provenance-stamp", "review_pipeline_provenance_stamp_argv"),
+    ("issue-repair", "review_pipeline_issue_repair_argv"),
+]:
+    data = json.loads(Path(f".ax/experiments/classifier-graph-lifecycle-{name}-argv-e364.json").read_text())
+    assert data["result_totals"]["lifecycle_fact_count"] == 1
+    fact = data["lifecycle_facts"][0]
+    assert fact["predicate"] == expected
+    assert fact["subject"] == "classifier_lifecycle:workflow_candidate_review_pipeline"
+    assert fact["value"][:2] == ["bun", "src/cli/index.ts"]
+PY
+```
+
+## E363 - Expose Production Apply Argv
+
+Question:
+- Can services execute the production review apply path without parsing the
+  shell-style production apply command?
+
+Implementation:
+- Added `production_apply_command_argv` to the coverage review readiness
+  summary when a complete review handoff can produce a production apply command.
+- Text coverage review output now renders
+  `coverage review production apply argv: ...`.
+- Incomplete handoff summaries still omit both the production apply command and
+  argv.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363.md --review-facts=.ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363-review-facts.json --review-write-plan=.ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363-review-write-plan.json --out=.ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363.md --review-facts=.ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363-review-facts.json --review-write-plan=.ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363-review-write-plan.json --out=.ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363.json > .ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363.txt
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363.json`
+- `.ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363.txt`
+
+Results:
+- Complete-handoff readiness reports
+  `review_handoff_status=complete_review_handoff`.
+- JSON exposes `coverage_review.production_apply_command_argv` with
+  `--review-facts`, `--review-write-plan`, `--apply-review-facts`,
+  `--require-review-provenance`, and `--require-review-handoff`.
+- Text output renders `coverage review production apply argv: ...`.
+- In this artifact `production_apply_guard=missing_review_provenance`, so the
+  command remains available as the production path while the guard still tells
+  services to stamp provenance before executing it.
+
+Decision:
+- E363 completes the direct-action argv coverage for the review pipeline:
+  review issue repair, provenance stamping, and production apply are all
+  available as structured argv arrays. Services no longer need to parse any of
+  the direct action command strings to execute or inspect the next step.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+cr = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363.json").read_text())["coverage_review"]
+text = Path(".ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363.txt").read_text()
+argv = cr["production_apply_command_argv"]
+assert cr["review_handoff_status"] == "complete_review_handoff"
+assert cr["production_apply_guard"] == "missing_review_provenance"
+assert argv[:5] == ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates", "--review-coverage"]
+assert "--apply-review-facts" in argv
+assert "--require-review-provenance" in argv
+assert "--require-review-handoff" in argv
+assert "--review-facts=.ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363-review-facts.json" in argv
+assert "--review-write-plan=.ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363-review-write-plan.json" in argv
+assert "--out=.ax/experiments/workflow-candidate-review-coverage-production-apply-argv-e363.json" in argv
+assert "coverage review production apply argv: bun | src/cli/index.ts | classifiers | workflow-candidates | --review-coverage" in text
+PY
+```
+
+## E362 - Expose Provenance Stamp Argv
+
+Question:
+- Can services stamp missing review provenance without parsing the shell-style
+  provenance command?
+
+Implementation:
+- Added `review_provenance_stamp_command_argv` to the coverage review
+  readiness summary when a provenance stamp command is available.
+- Text coverage review output now renders
+  `coverage review provenance stamp argv: ...`.
+- Incomplete handoff summaries still omit both the provenance stamp command and
+  argv, so services do not execute a command that cannot produce the expected
+  handoff artifacts.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --out=.ax/experiments/workflow-candidate-review-coverage-stamp-argv-e362.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --out=.ax/experiments/workflow-candidate-review-coverage-stamp-argv-e362.json > .ax/experiments/workflow-candidate-review-coverage-stamp-argv-e362.txt
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-stamp-argv-e362.json`
+- `.ax/experiments/workflow-candidate-review-coverage-stamp-argv-e362.txt`
+
+Results:
+- Missing-provenance readiness reports
+  `review_pipeline_stage=needs_review_provenance`.
+- JSON exposes `coverage_review.review_provenance_stamp_command_argv` with
+  placeholder inputs for `reviewer` and `reviewed_at`.
+- Pipeline input bindings still identify those placeholders as
+  `nonempty_string` and `iso_datetime`.
+- Text output renders `coverage review provenance stamp argv: ...`.
+
+Decision:
+- E362 makes the provenance-stamping branch service-executable without shell
+  parsing. Together with E361, review repair and provenance stamping now expose
+  structured argv at the direct action surface as well as the generic pipeline
+  command surface.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-stamp-argv-e362.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+cr = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-stamp-argv-e362.json").read_text())["coverage_review"]
+text = Path(".ax/experiments/workflow-candidate-review-coverage-stamp-argv-e362.txt").read_text()
+argv = cr["review_provenance_stamp_command_argv"]
+assert cr["review_pipeline_stage"] == "needs_review_provenance"
+assert cr["review_pipeline_command_kind"] == "stamp_review_provenance"
+assert cr["review_pipeline_command_status"] == "requires_inputs"
+assert cr["review_pipeline_required_inputs"] == ["reviewer", "reviewed_at"]
+assert argv[:5] == ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates", "--review-coverage"]
+assert "--review-provenance-reviewer=<reviewer>" in argv
+assert "--review-provenance-reviewed-at=<reviewed-at-iso>" in argv
+assert "--out=.ax/experiments/workflow-candidate-review-coverage-stamp-argv-e362.json" in argv
+assert "coverage review provenance stamp argv: bun | src/cli/index.ts | classifiers | workflow-candidates | --review-coverage" in text
+PY
+```
+
+## E361 - Expose Review Issue Repair Argv
+
+Question:
+- Can services repair coverage review issue queues without parsing the
+  shell-style repair command?
+
+Implementation:
+- Added `review_issue_repair_command_argv` to the coverage review readiness
+  summary when review issue rows require repair.
+- Text coverage review output now renders
+  `coverage review issue repair argv: ...`.
+- Complete repair summaries omit the argv when no review issue rows remain, so
+  service callers can distinguish active repair work from completed repair
+  state.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e268.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e268.md --out=.ax/experiments/workflow-candidate-review-coverage-repair-argv-e361.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e268.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e268.md --out=.ax/experiments/workflow-candidate-review-coverage-repair-argv-e361.json > .ax/experiments/workflow-candidate-review-coverage-repair-argv-e361.txt
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-repair-argv-e361.json`
+- `.ax/experiments/workflow-candidate-review-coverage-repair-argv-e361.txt`
+
+Results:
+- Missing-rationale readiness reports
+  `review_issue_status=needs_review_repair`.
+- JSON exposes `coverage_review.review_issue_repair_command_argv` with the
+  executable argv form of the repair command.
+- Text output renders `coverage review issue repair argv: ...`.
+- The same summary still keeps the shell-style
+  `review_issue_repair_command` for human copy/paste compatibility.
+
+Decision:
+- E361 removes one more shell parsing requirement from the review-throughput
+  path. FX services can now execute review issue repair commands from the argv
+  array while humans still see the readable command.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-repair-argv-e361.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+cr = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-repair-argv-e361.json").read_text())["coverage_review"]
+text = Path(".ax/experiments/workflow-candidate-review-coverage-repair-argv-e361.txt").read_text()
+assert cr["review_issue_status"] == "needs_review_repair"
+assert cr["review_issue_repair_command_argv"][:5] == ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates", "--review-coverage"]
+assert "--coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e268.jsonl" in cr["review_issue_repair_command_argv"]
+assert "--out=.ax/experiments/workflow-candidate-review-coverage-repair-argv-e361.json" in cr["review_issue_repair_command_argv"]
+assert "coverage review issue repair argv: bun | src/cli/index.ts | classifiers | workflow-candidates | --review-coverage" in text
+PY
+```
 
 ## Hypothesis
 
@@ -12612,6 +19991,6608 @@ bun test src/cli/classifiers-workflow-candidates.test.ts
 bun run typecheck
 python3 -m json.tool .ax/experiments/workflow-topic-report-helper-review-hints-e237.json >/dev/null
 rg -n 'Helper review hint|Helper matched controls|Helper rationale|Suggested reviewer verdict|Promoted Helper Controls|none-maintenance' .ax/experiments/workflow-topic-evidence-pack-helper-review-hints-e237.md
+```
+
+## E238 - Sync Reviewed Helper-Hinted Topic Packs
+
+Question:
+
+- Can a reviewer take the helper-hinted topic evidence pack, choose the hinted
+  `reject` verdict, and round-trip that decision back into a topic report?
+
+Implementation:
+
+- Added `syncWorkflowCandidateTopicReportFromBrief(report, brief, syncedFrom)`.
+- The topic-report CLI path now honors `--sync-brief`, using the same markdown
+  review parser as standard workflow-candidate briefs.
+- The synced topic report keeps helper explanations and harness evidence, but
+  updates `report.candidates.review` and candidate-level `review` fields.
+- This still does not auto-apply helper hints. A human-edited pack must provide
+  the verdict/rationale.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --search=surrealml --source-kind=hybrid_window_classifier_projection --limit=10 --examples=100 --include-helper-facts --sync-brief <(awk '{ if ($0 == "- Verdict: `pending`") print "- Verdict: `reject`"; else if ($0 == "- Rationale: _pending_") print "- Rationale: Promoted helper control marks this as an information request, not a durable preference."; else print }' .ax/experiments/workflow-topic-evidence-pack-helper-review-hints-e237.md) --out=.ax/experiments/workflow-topic-report-helper-review-sync-e238.json --json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-topic-report-helper-review-sync-e238.json`
+
+Results:
+
+- Synced review summary:
+  - reviewed candidates: `1`
+  - pending candidates: `0`
+  - invalid verdicts: `0`
+  - missing rationales: `0`
+  - unknown candidates: `0`
+- Synced candidate:
+  `classifier_candidate_group:hybrid-window/environment_or_preference_signal`
+- Verdict: `reject`
+- Rationale:
+  `Promoted helper control marks this as an information request, not a durable preference.`
+
+Decision:
+
+- The helper layer now supports the full reviewer loop through topic evidence
+  packs: graph helper fact -> reviewer hint -> human verdict -> synced topic
+  report.
+- Next useful work is to project these synced topic review outcomes into graph
+  facts, so later queries can distinguish reviewed noise from merely hinted
+  noise.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun run typecheck
+python3 -m json.tool .ax/experiments/workflow-topic-report-helper-review-sync-e238.json >/dev/null
+python3 - <<'PY'
+import json
+with open(".ax/experiments/workflow-topic-report-helper-review-sync-e238.json") as f:
+    data = json.load(f)
+assert data["candidates"]["review"]["reviewed_candidate_count"] == 1
+assert data["candidates"]["review"]["pending_candidate_count"] == 0
+assert data["candidates"]["candidates"][0]["review"]["verdict"] == "reject"
+PY
+```
+
+## E239 - Persist Synced Topic Reviews As Graph Facts
+
+Question:
+
+- Can synced topic review outcomes become graph facts, so later queries can
+  distinguish reviewed noise from merely hinted noise?
+
+Implementation:
+
+- Added `buildWorkflowCandidateTopicReviewGraphProjection(report)`.
+- Added `buildWorkflowCandidateTopicReviewGraphWritePlan(projection)`.
+- Added topic-report CLI outputs:
+  - `--review-facts=<path>`
+  - `--review-write-plan=<path>`
+  - `--apply-review-facts`
+- The projection writes:
+  - `workflow_topic` node
+  - `workflow_topic_candidate_review` node
+  - `topic_has_candidate_review` edge
+  - `candidate_review_reviews_candidate` edge
+  - `workflow_topic_candidate_review` fact with the human verdict,
+    rationale, evidence refs, helper fact IDs, and helper source fixture IDs
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --search=surrealml --source-kind=hybrid_window_classifier_projection --limit=10 --examples=100 --include-helper-facts --sync-brief <(awk '{ if ($0 == "- Verdict: `pending`") print "- Verdict: `reject`"; else if ($0 == "- Rationale: _pending_") print "- Rationale: Promoted helper control marks this as an information request, not a durable preference."; else print }' .ax/experiments/workflow-topic-evidence-pack-helper-review-hints-e237.md) --review-facts=.ax/experiments/workflow-topic-review-graph-projection-e239.json --review-write-plan=.ax/experiments/workflow-topic-review-graph-write-plan-e239.json --apply-review-facts --out=.ax/experiments/workflow-topic-report-helper-review-graph-apply-e239.json --json
+printf '%s\n' 'SELECT graph_id, kind, subject, predicate, object, properties_json FROM classifier_graph_fact WHERE source_kind = "workflow_topic_candidate_review" AND kind = "workflow_topic_candidate_review";' | surreal sql --endpoint http://127.0.0.1:8521 --username root --password root --namespace ax --database main --json --hide-welcome > .ax/experiments/workflow-topic-review-graph-query-e239.json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-topic-review-graph-projection-e239.json`
+- `.ax/experiments/workflow-topic-review-graph-write-plan-e239.json`
+- `.ax/experiments/workflow-topic-report-helper-review-graph-apply-e239.json`
+- `.ax/experiments/workflow-topic-review-graph-query-e239.json`
+
+Results:
+
+- Projection totals:
+  - reviewed candidates: `1`
+  - rejected: `1`
+  - nodes: `2`
+  - edges: `2`
+  - facts: `1`
+- Write-plan totals:
+  - statements: `5`
+  - node statements: `2`
+  - edge statements: `2`
+  - fact statements: `1`
+- Persisted graph fact:
+  - kind: `workflow_topic_candidate_review`
+  - predicate: `reject`
+  - object:
+    `classifier_candidate_group:hybrid-window/environment_or_preference_signal`
+  - helper source fixture:
+    `session-section-chunks/none-maintenance-question`
+
+Decision:
+
+- The helper layer now completes the graph loop for this case. A reviewed
+  helper hint becomes a durable graph fact with evidence and helper provenance.
+- Still no automatic ranking suppression. The next useful work is to query
+  these review facts from candidate reports/evidence packs so reviewed noise is
+  visible on future runs.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun run typecheck
+python3 -m json.tool .ax/experiments/workflow-topic-review-graph-projection-e239.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-topic-review-graph-write-plan-e239.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-topic-review-graph-query-e239.json >/dev/null
+python3 - <<'PY'
+import json
+with open(".ax/experiments/workflow-topic-review-graph-query-e239.json") as f:
+    rows = json.load(f)[0]
+assert rows[0]["predicate"] == "reject"
+props = json.loads(rows[0]["properties_json"])
+assert props["helper_source_fixture_ids"] == ["session-section-chunks/none-maintenance-question"]
+PY
+```
+
+## E240 - Surface Persisted Review Facts In Topic Packs
+
+Question:
+
+- Once a topic review verdict is persisted as a graph fact, can future topic
+  reports/evidence packs show that reviewed context back to reviewers?
+
+Implementation:
+
+- Added `--include-review-facts` to `classifiers workflow-candidates`.
+- Added `buildWorkflowCandidateTopicReviewGraphListReport(...)`.
+- Topic reports now query `workflow_topic_candidate_review` facts/edges for
+  the requested topic and include review totals.
+- Topic evidence packs now include:
+  - persisted review fact count,
+  - rejected/accepted/deferred/revised totals,
+  - predicate, subject, object, candidate id, rationale, helper source fixture,
+    and stored value JSON.
+
+Command:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --topic-report --search=surrealml --source-kind=hybrid_window_classifier_projection --limit=10 --examples=100 --include-review-facts --include-helper-facts --out=.ax/experiments/workflow-topic-report-persisted-review-context-e240.json --evidence-pack=.ax/experiments/workflow-topic-evidence-pack-persisted-review-context-e240.md --json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-topic-report-persisted-review-context-e240.json`
+- `.ax/experiments/workflow-topic-evidence-pack-persisted-review-context-e240.md`
+
+Results:
+
+- Persisted review facts: `1`
+- Persisted review edges: `2`
+- Rejected: `1`
+- Accepted/deferred/revised: `0`
+- Fact predicate: `reject`
+- Fact object:
+  `classifier_candidate_group:hybrid-window/environment_or_preference_signal`
+- Helper source fixture:
+  `session-section-chunks/none-maintenance-question`
+- The evidence pack includes a `Persisted Review Facts` section before the
+  promoted helper controls.
+
+Decision:
+
+- E240 closes the immediate reviewer-context loop. A future SurrealML topic
+  pack now shows that the `environment_or_preference_signal` candidate was
+  already reviewed and rejected because a promoted helper hard-negative marked
+  the maintenance question as `none`.
+- This remains context only. It does not suppress ranking automatically.
+- Next useful work is to use these persisted review facts across broader
+  candidate reports/topics, with explicit controls before any ranking
+  suppression is introduced.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-topic-report-persisted-review-context-e240.json >/dev/null
+rg -n 'Persisted review facts|Persisted Review Facts|Predicate: `reject`|Helper source fixture|none-maintenance' .ax/experiments/workflow-topic-evidence-pack-persisted-review-context-e240.md
+python3 - <<'PY'
+import json
+with open(".ax/experiments/workflow-topic-report-persisted-review-context-e240.json") as f:
+    data = json.load(f)
+totals = data["persisted_review_facts"]["totals"]
+assert totals["fact_count"] == 1
+assert totals["rejected_count"] == 1
+assert totals["edge_count"] == 2
+PY
+```
+
+## E241 - Carry Persisted Reviews Into Candidate Reports
+
+Question:
+
+- Can plain workflow-candidate reports show previous topic review outcomes for
+  ranked candidates, without using those reviews to suppress ranking?
+
+Implementation:
+
+- Added per-candidate `persisted_review_facts` context.
+- Added `attachWorkflowCandidatePersistedReviewFacts(report, facts)`.
+- `--include-review-facts` now also works on plain
+  `classifiers workflow-candidates` reports by querying persisted
+  `workflow_topic_candidate_review` facts where `object` matches the ranked
+  candidate id.
+- Text reports and generated review briefs show the prior review predicate,
+  topic, rationale, and helper source fixture.
+- Scoring, ordering, and decision status are unchanged.
+
+Command:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --search=surrealml --source-kind=hybrid_window_classifier_projection --limit=10 --examples=100 --include-review-facts --out=.ax/experiments/workflow-candidate-report-persisted-review-context-e241.json --brief=.ax/experiments/workflow-candidate-brief-persisted-review-context-e241.md --json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-report-persisted-review-context-e241.json`
+- `.ax/experiments/workflow-candidate-brief-persisted-review-context-e241.md`
+
+Results:
+
+- Candidate report decision: `workflow_candidates_ranked`
+- Returned candidates: `1`
+- Persisted review facts attached: `1`
+- Attached predicate: `reject`
+- Attached topic: `surrealml`
+- Helper source fixture:
+  `session-section-chunks/none-maintenance-question`
+
+Decision:
+
+- E241 makes persisted review facts useful outside topic packs. A future
+  candidate-review brief now carries prior review context directly on the
+  candidate, but the candidate still ranks normally until explicit suppression
+  controls exist.
+- Next useful work is aggregation: list review-context coverage across more
+  candidate groups/topics and use that to identify where the review graph is
+  thin.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-report-persisted-review-context-e241.json >/dev/null
+rg -n 'Persisted review facts|Persisted review|Predicate: `reject`|Helper source fixture|none-maintenance' .ax/experiments/workflow-candidate-brief-persisted-review-context-e241.md
+python3 - <<'PY'
+import json
+with open(".ax/experiments/workflow-candidate-report-persisted-review-context-e241.json") as f:
+    data = json.load(f)
+assert data["decision"] == "workflow_candidates_ranked"
+assert data["totals"]["persisted_review_fact_count"] == 1
+fact = data["candidates"][0]["persisted_review_facts"][0]
+assert fact["predicate"] == "reject"
+assert fact["helper_source_fixture_ids"] == ["session-section-chunks/none-maintenance-question"]
+PY
+```
+
+## E242 - Aggregate Review Coverage Across Candidates
+
+Question:
+
+- Can we summarize where persisted review context exists or is missing across
+  workflow candidate groups, before adding any ranking suppression?
+
+Implementation:
+
+- Added `--review-coverage` mode to `classifiers workflow-candidates`.
+- Added `buildWorkflowCandidateReviewCoverageReport(...)`.
+- The report aggregates candidate groups, evidence counts, persisted
+  `workflow_topic_candidate_review` facts, verdict totals, reviewed topics, and
+  helper source fixtures.
+- The report is informational only. It does not change candidate scores,
+  filters, promotions, or review verdicts.
+
+Command:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --out=.ax/experiments/workflow-candidate-review-coverage-e242.json --json
+```
+
+Artifact:
+
+- `.ax/experiments/workflow-candidate-review-coverage-e242.json`
+
+Results:
+
+- Decision: `workflow_candidate_review_coverage_ready`
+- Candidate groups: `3`
+- Reviewed candidates: `1`
+- Unreviewed candidates: `2`
+- Review facts: `1`
+- Rejected facts: `1`
+- Helper source fixtures: `1`
+- Reviewed candidate:
+  `classifier_candidate_group:hybrid-window/environment_or_preference_signal`
+- Unreviewed candidates:
+  - `classifier_candidate_group:hybrid-window/verification_or_recovery_signal`
+  - `classifier_candidate_group:hybrid-window/correction_or_rejection_signal`
+
+Decision:
+
+- E242 makes the review graph useful for planning the next review/eval work:
+  the SurrealML maintenance-question false positive is covered, but the
+  verification/recovery and correction/rejection hybrid-window groups still
+  have no persisted topic review facts.
+- Still no automatic ranking suppression. Coverage should drive review fixture
+  selection first.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-e242.json >/dev/null
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20
+python3 - <<'PY'
+import json
+with open(".ax/experiments/workflow-candidate-review-coverage-e242.json") as f:
+    data = json.load(f)
+assert data["decision"] == "workflow_candidate_review_coverage_ready"
+assert data["totals"]["candidate_group_count"] == 3
+assert data["totals"]["reviewed_candidate_count"] == 1
+assert data["totals"]["unreviewed_candidate_count"] == 2
+assert data["totals"]["review_fact_count"] == 1
+assert data["totals"]["rejected_fact_count"] == 1
+PY
+```
+
+## E243 - Emit Review Fixtures For Coverage Gaps
+
+Question:
+
+- Can review coverage gaps produce concrete pending review/eval fixtures, so
+  the next work is not just another aggregate report?
+
+Implementation:
+
+- Added `--coverage-fixture-pack=<path>` for
+  `classifiers workflow-candidates --review-coverage`.
+- Added `buildWorkflowCandidateReviewCoverageFixtureSummary(...)`.
+- The fixture emitter:
+  - builds a ranked candidate report,
+  - attaches persisted review facts,
+  - skips already reviewed candidates,
+  - emits pending fixtures for unreviewed candidate examples.
+- The coverage report now includes a `fixture_pack` summary when fixtures are
+  emitted.
+
+Command:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --examples=2 --coverage-fixture-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-e243.jsonl --out=.ax/experiments/workflow-candidate-review-coverage-with-gaps-e243.json --json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-coverage-with-gaps-e243.json`
+- `.ax/experiments/workflow-candidate-review-coverage-gaps-e243.jsonl`
+
+Results:
+
+- Coverage candidate groups: `3`
+- Reviewed candidates skipped: `1`
+- Unreviewed candidates selected: `2`
+- Pending fixtures emitted: `3`
+- Fixture candidate labels:
+  - `verification_or_recovery_signal`
+  - `correction_or_rejection_signal`
+- All emitted rows have:
+  - `suite = "workflow-candidate-review-coverage"`
+  - `review_status = "pending"`
+  - `topic = "review-coverage"`
+
+Decision:
+
+- E243 turns coverage gaps into reviewable work. The system can now identify
+  thin review areas and emit pending fixtures without relying on LLM brute
+  force or automatic suppression.
+- Next useful work is a review/apply path for these coverage-gap fixtures:
+  reviewed rows should become persisted topic/candidate review facts, with the
+  same no-suppression default.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-with-gaps-e243.json >/dev/null
+wc -l .ax/experiments/workflow-candidate-review-coverage-gaps-e243.jsonl
+python3 - <<'PY'
+import json
+from pathlib import Path
+report = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-with-gaps-e243.json").read_text())
+assert report["fixture_pack"]["emitted_fixture_count"] == 3
+assert report["fixture_pack"]["candidate_count"] == 2
+assert report["fixture_pack"]["skipped_candidate_count"] == 1
+rows = [json.loads(line) for line in Path(".ax/experiments/workflow-candidate-review-coverage-gaps-e243.jsonl").read_text().splitlines() if line.strip()]
+assert len(rows) == 3
+assert {row["candidate_label"] for row in rows} == {"verification_or_recovery_signal", "correction_or_rejection_signal"}
+assert all(row["suite"] == "workflow-candidate-review-coverage" for row in rows)
+assert all(row["review_status"] == "pending" for row in rows)
+PY
+```
+
+## E244 - Project Reviewed Coverage Fixtures To Review Facts
+
+Question:
+
+- Can reviewed coverage-gap fixture rows become the same graph review facts as
+  topic-pack reviews, without applying unreviewed/smoke verdicts to SurrealDB?
+
+Implementation:
+
+- Added `--coverage-review-pack=<path>` for
+  `classifiers workflow-candidates --review-coverage`.
+- Added `parseWorkflowCandidateFixtureRowsJsonl(...)`.
+- Added `buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures(...)`.
+- Reviewed fixture rows with `review_status` in
+  `accept | revise | reject | defer` project to
+  `workflow_topic_candidate_review` facts under topic `review-coverage`.
+- Pending rows are ignored.
+- Fixture-backed review graph node ids include the fixture id, so multiple
+  reviewed examples for the same candidate do not collide.
+- For this checkpoint, the reviewed fixture pack is a smoke artifact and was
+  not applied to SurrealDB.
+
+Command:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-reviewed-smoke-e244.jsonl --review-facts=.ax/experiments/workflow-candidate-review-coverage-review-projection-e244.json --review-write-plan=.ax/experiments/workflow-candidate-review-coverage-review-write-plan-e244.json --out=.ax/experiments/workflow-candidate-review-coverage-review-smoke-e244.json --json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-coverage-gaps-reviewed-smoke-e244.jsonl`
+- `.ax/experiments/workflow-candidate-review-coverage-review-projection-e244.json`
+- `.ax/experiments/workflow-candidate-review-coverage-review-write-plan-e244.json`
+- `.ax/experiments/workflow-candidate-review-coverage-review-smoke-e244.json`
+
+Results:
+
+- Reviewed fixture rows projected: `3`
+- Accepted facts: `2`
+- Deferred facts: `1`
+- Nodes: `4`
+- Edges: `6`
+- Facts: `3`
+- Write-plan statements: `13`
+- Applied to SurrealDB: `no`
+
+Decision:
+
+- E244 proves the apply path shape for coverage-gap reviews without polluting
+  local graph state with smoke verdicts.
+- The next real step is to use genuinely reviewed coverage-gap rows, run this
+  projection, apply it, and re-run coverage to prove the unreviewed count drops.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-review-projection-e244.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-review-write-plan-e244.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+projection = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-review-projection-e244.json").read_text())
+plan = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-review-write-plan-e244.json").read_text())
+assert projection["source_report_schema"] == "ax.workflow_candidate_review_coverage_fixture_pack.v1"
+assert projection["topic"] == "review-coverage"
+assert projection["totals"]["reviewed_candidate_count"] == 3
+assert projection["totals"]["accepted_count"] == 2
+assert projection["totals"]["deferred_count"] == 1
+assert projection["totals"]["fact_count"] == 3
+assert projection["totals"]["node_count"] == 4
+assert projection["totals"]["edge_count"] == 6
+assert plan["totals"]["fact_statement_count"] == 3
+assert plan["totals"]["node_statement_count"] == 4
+assert plan["totals"]["edge_statement_count"] == 6
+assert plan["totals"]["statement_count"] == 13
+PY
+```
+
+## E245 - Block Smoke Coverage Review Applies
+
+Question:
+
+- Can the coverage-review apply path refuse smoke-marked fixture packs while
+  still producing inspectable projection/write-plan artifacts?
+
+Implementation:
+
+- Added `WorkflowCandidateReviewCoverageApplySummary`.
+- Added `buildWorkflowCandidateReviewCoverageApplySummary(...)`.
+- Coverage-review reports now include `coverage_review` when
+  `--coverage-review-pack` is used.
+- `--apply-review-facts` is blocked when:
+  - no reviewed rows exist, or
+  - the review pack/path/rationale carries smoke markers.
+- Blocked applies set `process.exitCode = 1`, keep `applied = false`, and still
+  write the requested projection/write-plan artifacts for inspection.
+
+Command:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-reviewed-smoke-e244.jsonl --review-facts=.ax/experiments/workflow-candidate-review-coverage-apply-guard-projection-e245.json --review-write-plan=.ax/experiments/workflow-candidate-review-coverage-apply-guard-write-plan-e245.json --apply-review-facts --out=.ax/experiments/workflow-candidate-review-coverage-apply-guard-e245.json --json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-coverage-apply-guard-e245.json`
+- `.ax/experiments/workflow-candidate-review-coverage-apply-guard-projection-e245.json`
+- `.ax/experiments/workflow-candidate-review-coverage-apply-guard-write-plan-e245.json`
+
+Results:
+
+- Command exit: `1`
+- Apply requested: `true`
+- Applied: `false`
+- Apply guard: `blocked_smoke_review`
+- Reviewed fixture rows: `3`
+- Projection facts: `3`
+- Write-plan statements: `13`
+- Persisted DB `review-coverage` facts after blocked apply: `0`
+
+Decision:
+
+- E245 makes the review boundary enforceable. Smoke-reviewed fixtures can prove
+  projection shape, but cannot accidentally enter the graph through
+  `--apply-review-facts`.
+- The next real step is to review the coverage-gap fixtures without smoke
+  markers, apply them, and re-run coverage to prove the gap closes.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-apply-guard-e245.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-apply-guard-projection-e245.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-apply-guard-write-plan-e245.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+report = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-apply-guard-e245.json").read_text())
+review = report["coverage_review"]
+assert review["apply_requested"] is True
+assert review["applied"] is False
+assert review["apply_guard"] == "blocked_smoke_review"
+assert review["reviewed_fixture_count"] == 3
+assert review["projection_totals"]["fact_count"] == 3
+assert review["write_plan_totals"]["statement_count"] == 13
+PY
+printf '%s\n' 'SELECT count() AS count FROM classifier_graph_fact WHERE source_kind = "workflow_topic_candidate_review" AND kind = "workflow_topic_candidate_review" AND string::lowercase(properties_json) CONTAINS "review-coverage" GROUP ALL;' | surreal sql --endpoint http://127.0.0.1:8521 --username root --password root --namespace ax --database main --json --hide-welcome
+```
+
+## E246 - Report Coverage Review Readiness
+
+Question:
+
+- Can a coverage review pack report why it is not ready to apply before a user
+  attempts `--apply-review-facts`?
+
+Implementation:
+
+- Extended `WorkflowCandidateReviewCoverageApplySummary` with:
+  - `invalid_fixture_count`
+  - `missing_rationale_count`
+- `buildWorkflowCandidateReviewCoverageApplySummary(...)` now distinguishes:
+  - `invalid_review_pack`
+  - `no_reviewed_fixtures`
+  - `missing_review_rationale`
+  - `blocked_smoke_review`
+  - `ready_to_apply`
+- `--coverage-review-pack` now produces a `coverage_review` readiness summary
+  even without `--review-facts`, `--review-write-plan`, or
+  `--apply-review-facts`.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-e243.jsonl --out=.ax/experiments/workflow-candidate-review-coverage-readiness-e246.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e246.jsonl --out=.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e246.json --json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-coverage-readiness-e246.json`
+- `.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e246.jsonl`
+- `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e246.json`
+
+Results:
+
+- Pending coverage-gap pack:
+  - reviewed fixtures: `0`
+  - pending fixtures: `3`
+  - apply guard: `no_reviewed_fixtures`
+  - projection facts: `0`
+- Reviewed-without-rationale pack:
+  - reviewed fixtures: `3`
+  - missing rationales: `3`
+  - apply guard: `missing_review_rationale`
+  - projection facts: `3`
+
+Decision:
+
+- E246 makes the real review gate clearer: a pack must contain reviewed rows
+  with rationales, no invalid statuses, and no smoke markers before it is
+  ready to apply.
+- The current real coverage-gap pack remains pending, so no facts should be
+  applied yet.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-readiness-e246.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-missing-rationale-e246.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+pending = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-readiness-e246.json").read_text())["coverage_review"]
+missing = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-missing-rationale-e246.json").read_text())["coverage_review"]
+assert pending["apply_guard"] == "no_reviewed_fixtures"
+assert pending["reviewed_fixture_count"] == 0
+assert pending["pending_fixture_count"] == 3
+assert pending["projection_totals"]["fact_count"] == 0
+assert missing["apply_guard"] == "missing_review_rationale"
+assert missing["reviewed_fixture_count"] == 3
+assert missing["missing_rationale_count"] == 3
+assert missing["projection_totals"]["fact_count"] == 3
+PY
+```
+
+## E247 - Coverage Review Markdown Brief Round Trip
+
+Question:
+
+- Can coverage-gap fixtures become a reviewer-friendly markdown brief and sync
+  reviewed decisions back into JSONL rows for readiness/projection?
+
+Implementation:
+
+- Added `--coverage-review-brief=<path>`.
+- Added `--sync-coverage-review-brief=<path>`.
+- Added `renderWorkflowCandidateReviewCoverageBriefMarkdown(rows)`.
+- Added `syncWorkflowCandidateFixtureRowsFromBrief(rows, brief)`.
+- `--coverage-fixture-pack` can now emit a markdown review brief alongside the
+  JSONL fixture pack.
+- `--coverage-review-pack` can now sync a filled markdown brief back into the
+  JSONL rows before readiness/projection.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --examples=2 --coverage-fixture-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-e247.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-e247.md --out=.ax/experiments/workflow-candidate-review-coverage-with-brief-e247.json --json
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e247.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-synced-e247.jsonl
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-synced-e247.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-reviewed-smoke-e247.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-synced-e247.md --out=.ax/experiments/workflow-candidate-review-coverage-synced-brief-e247.json --json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-coverage-gaps-e247.jsonl`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-e247.md`
+- `.ax/experiments/workflow-candidate-review-coverage-with-brief-e247.json`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-reviewed-smoke-e247.md`
+- `.ax/experiments/workflow-candidate-review-coverage-gaps-synced-e247.jsonl`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-synced-e247.md`
+- `.ax/experiments/workflow-candidate-review-coverage-synced-brief-e247.json`
+
+Results:
+
+- Generated review brief fixtures: `3`
+- Pending review statuses in generated brief: `3`
+- Synced smoke-reviewed fixture rows: `1`
+- Remaining pending fixture rows: `2`
+- Synced projection facts: `1`
+- Apply guard after synced smoke brief: `blocked_smoke_review`
+
+Decision:
+
+- E247 removes raw JSONL as the primary review surface. Reviewers can edit a
+  markdown brief, then sync it back into JSONL for the same readiness and
+  projection path.
+- The smoke-filled brief still cannot apply facts. A real review brief must
+  avoid smoke markers and include rationales.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-with-brief-e247.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-synced-brief-e247.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+brief = Path(".ax/experiments/workflow-candidate-review-coverage-brief-e247.md").read_text()
+assert "# Workflow Candidate Coverage Review" in brief
+assert brief.count("- Review status: `pending`") == 3
+report = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-with-brief-e247.json").read_text())
+assert report["fixture_pack"]["emitted_fixture_count"] == 3
+synced = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-synced-brief-e247.json").read_text())["coverage_review"]
+assert synced["reviewed_fixture_count"] == 1
+assert synced["pending_fixture_count"] == 2
+assert synced["smoke_marker_count"] == 1
+assert synced["apply_guard"] == "blocked_smoke_review"
+rows = [json.loads(line) for line in Path(".ax/experiments/workflow-candidate-review-coverage-gaps-synced-e247.jsonl").read_text().splitlines() if line.strip()]
+assert rows[0]["review_status"] == "accept"
+assert rows[0]["review_rationale"] == "Review smoke: useful verification behavior worth preserving."
+PY
+```
+
+## E248 - Report Coverage Brief Sync Diagnostics
+
+Question:
+
+- Can markdown coverage review sync make invalid statuses and unknown fixture ids
+  visible before any graph facts are applied?
+
+Implementation:
+
+- Added `syncWorkflowCandidateFixtureRowsFromBriefWithSummary(rows, brief)`.
+- Kept `syncWorkflowCandidateFixtureRowsFromBrief(rows, brief)` as the existing
+  row-only API.
+- Added `synced_fixture_count` and `unknown_fixture_count` to coverage review
+  readiness/apply summaries.
+- `--coverage-review-pack --sync-coverage-review-brief` now reports how many
+  known fixture rows were synced and how many markdown fixture ids were unknown.
+- Text reports include the sync counts beside existing review readiness issues.
+
+Commands:
+
+```sh
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e247.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-invalid-sync-e248.jsonl
+awk 'BEGIN{status=0; rationale=0} /^- Review status: `pending`$/ && status==0 {print "- Review status: `maybe`"; status=1; next} /^- Review rationale: _pending_$/ && rationale==0 {print "- Review rationale: Invalid status should be reported."; rationale=1; next} {print} END{print ""; print "## Fixture 99: unknown"; print ""; print "- Fixture id: `workflow-candidate-review-coverage/unknown/e248`"; print "- Review status: `accept`"; print "- Review rationale: Unknown row should be reported."}' .ax/experiments/workflow-candidate-review-coverage-brief-e247.md > .ax/experiments/workflow-candidate-review-coverage-brief-invalid-unknown-e248.md
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-invalid-sync-e248.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-invalid-unknown-e248.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-invalid-unknown-synced-e248.md --out=.ax/experiments/workflow-candidate-review-coverage-invalid-sync-e248.json --json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-coverage-gaps-invalid-sync-e248.jsonl`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-invalid-unknown-e248.md`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-invalid-unknown-synced-e248.md`
+- `.ax/experiments/workflow-candidate-review-coverage-invalid-sync-e248.json`
+
+Results:
+
+- Synced known fixture rows: `3`
+- Unknown markdown fixture ids: `1`
+- Invalid synced fixture statuses: `1`
+- Reviewed fixture rows after invalid sync: `0`
+- Pending/non-reviewed fixture rows: `3`
+- Apply guard: `invalid_review_pack`
+
+Decision:
+
+- E248 closes a review-loop blind spot. A typo or stale fixture id in a
+  markdown review brief is now visible in readiness output instead of being
+  silently ignored.
+- Invalid review statuses continue to block graph writes before any facts are
+  applied.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-invalid-sync-e248.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+report = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-invalid-sync-e248.json").read_text())
+review = report["coverage_review"]
+assert review["synced_fixture_count"] == 3
+assert review["unknown_fixture_count"] == 1
+assert review["invalid_fixture_count"] == 1
+assert review["reviewed_fixture_count"] == 0
+assert review["pending_fixture_count"] == 3
+assert review["apply_guard"] == "invalid_review_pack"
+PY
+```
+
+## E249 - Report Coverage Review Pack Impact
+
+Question:
+
+- Before applying a reviewed coverage pack, can the report say whether the pack
+  would cover new candidate gaps, duplicate already-reviewed candidates, or
+  point at candidates outside the current coverage query?
+
+Implementation:
+
+- Added coverage review impact counts to `coverage_review`:
+  - `pack_candidate_count`
+  - `new_candidate_count`
+  - `existing_candidate_count`
+  - `unknown_candidate_count`
+- `buildWorkflowCandidateReviewCoverageApplySummary` now compares valid reviewed
+  fixture candidate ids against the current returned coverage rows.
+- Text reports include `coverage review impact` next to sync/readiness issues.
+
+Commands:
+
+```sh
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e247.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-impact-e249.jsonl
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-impact-e249.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-reviewed-smoke-e247.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-impact-synced-e249.md --out=.ax/experiments/workflow-candidate-review-coverage-impact-e249.json --json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-coverage-gaps-impact-e249.jsonl`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-impact-synced-e249.md`
+- `.ax/experiments/workflow-candidate-review-coverage-impact-e249.json`
+
+Results:
+
+- Reviewed pack candidate ids: `1`
+- New candidate coverage if this were a real review: `1`
+- Existing reviewed candidate ids in pack: `0`
+- Unknown/out-of-scope candidate ids in pack: `0`
+- Apply guard remains `blocked_smoke_review`, so no facts are applied from the
+  smoke artifact.
+
+Decision:
+
+- E249 separates "would this review close a useful coverage gap?" from "is this
+  review allowed to apply?". That gives a reviewer a concrete payoff signal
+  without weakening the review gates.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-impact-e249.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+review = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-impact-e249.json").read_text())["coverage_review"]
+assert review["pack_candidate_count"] == 1
+assert review["new_candidate_count"] == 1
+assert review["existing_candidate_count"] == 0
+assert review["unknown_candidate_count"] == 0
+assert review["apply_guard"] == "blocked_smoke_review"
+PY
+```
+
+## E250 - Project Coverage After Reviewed Pack Apply
+
+Question:
+
+- Can a reviewer see the projected reviewed/unreviewed coverage totals before a
+  coverage review pack is applied?
+
+Implementation:
+
+- Added `projected_reviewed_candidate_count` and
+  `projected_unreviewed_candidate_count` to `coverage_review`.
+- The projection starts from current coverage rows and adds only reviewed pack
+  candidates that are known to the current coverage query and do not already
+  have persisted review facts.
+- Text reports include `coverage review projected coverage`.
+
+Commands:
+
+```sh
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e247.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-projected-e250.jsonl
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-projected-e250.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-reviewed-smoke-e247.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-projected-synced-e250.md --out=.ax/experiments/workflow-candidate-review-coverage-projected-e250.json --json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-coverage-gaps-projected-e250.jsonl`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-projected-synced-e250.md`
+- `.ax/experiments/workflow-candidate-review-coverage-projected-e250.json`
+
+Results:
+
+- Current coverage: `1` reviewed / `2` unreviewed candidate groups.
+- Reviewed pack candidate ids: `1`.
+- New candidate coverage if this were a real review: `1`.
+- Projected coverage: `2` reviewed / `1` unreviewed candidate groups.
+- Apply guard remains `blocked_smoke_review`, so no facts are applied from the
+  smoke artifact.
+
+Decision:
+
+- E250 makes the payoff of a review pack visible before apply. The report can
+  now answer "will this close a gap, and how much remains?" while preserving the
+  existing readiness guards.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-projected-e250.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+review = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-projected-e250.json").read_text())["coverage_review"]
+assert review["pack_candidate_count"] == 1
+assert review["new_candidate_count"] == 1
+assert review["projected_reviewed_candidate_count"] == 2
+assert review["projected_unreviewed_candidate_count"] == 1
+assert review["apply_guard"] == "blocked_smoke_review"
+PY
+```
+
+## E251 - Add Review Impact Context To Coverage Briefs
+
+Question:
+
+- Can the human-editable coverage review brief show enough candidate context for
+  reviewers to prioritize high-impact rows without opening the JSON report?
+
+Implementation:
+
+- Extended coverage fixture rows with:
+  - `candidate_support_count`
+  - `candidate_evidence_count`
+  - `candidate_score`
+- Coverage review markdown briefs now include:
+  - `Review impact: new_candidate_review`
+  - candidate support
+  - candidate evidence
+  - candidate score
+- Existing brief sync remains compatible because it still keys only on fixture
+  id, review status, and review rationale.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --examples=2 --coverage-fixture-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-e251.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-e251.md --out=.ax/experiments/workflow-candidate-review-coverage-with-brief-e251.json --json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-coverage-gaps-e251.jsonl`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-e251.md`
+- `.ax/experiments/workflow-candidate-review-coverage-with-brief-e251.json`
+
+Results:
+
+- Emitted fixture rows: `3`
+- Candidate groups represented by fixture pack: `2`
+- All emitted rows include support/evidence/score context.
+- The markdown brief includes `Review impact`, `Candidate support`,
+  `Candidate evidence`, and `Candidate score` lines.
+
+Decision:
+
+- E251 improves review throughput without weakening gates. Reviewers can now see
+  which pending rows belong to high-support candidates directly in the markdown
+  work surface.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-with-brief-e251.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+brief = Path(".ax/experiments/workflow-candidate-review-coverage-brief-e251.md").read_text()
+rows = [json.loads(line) for line in Path(".ax/experiments/workflow-candidate-review-coverage-gaps-e251.jsonl").read_text().splitlines() if line.strip()]
+assert rows
+assert all("candidate_support_count" in row for row in rows)
+assert all("candidate_evidence_count" in row for row in rows)
+assert all("candidate_score" in row for row in rows)
+assert "- Review impact: `new_candidate_review`" in brief
+assert "- Candidate support: `" in brief
+assert "- Candidate evidence: `" in brief
+assert "- Candidate score: `" in brief
+report = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-with-brief-e251.json").read_text())
+assert report["fixture_pack"]["emitted_fixture_count"] == len(rows)
+PY
+```
+
+## E252 - Add Coverage Brief Queue Summary
+
+Question:
+
+- Can the markdown review brief expose the shape and priority of the review
+  queue before a reviewer reads each individual fixture?
+
+Implementation:
+
+- `renderWorkflowCandidateReviewCoverageBriefMarkdown` now adds:
+  - `Review Queue Summary`
+  - total fixture count
+  - candidate group count
+  - pending/reviewed fixture counts
+  - `Candidate Queue` sorted by score, support, evidence, and label
+- Candidate queue rows include candidate id, fixture count, proposed action,
+  support, evidence, and score.
+- Existing sync parsing remains compatible because sync still keys only on
+  fixture id, review status, and rationale lines.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --examples=2 --coverage-fixture-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-e252.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-e252.md --out=.ax/experiments/workflow-candidate-review-coverage-with-brief-e252.json --json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-coverage-gaps-e252.jsonl`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-e252.md`
+- `.ax/experiments/workflow-candidate-review-coverage-with-brief-e252.json`
+
+Results:
+
+- Emitted fixture rows: `3`
+- Candidate groups represented by fixture pack: `2`
+- Pending fixtures: `3`
+- Reviewed fixtures: `0`
+- Candidate queue ranks `verification_or_recovery_signal` first with
+  `fixtures=2`, `support=41`, `evidence=41`, `score=34.5122`.
+
+Decision:
+
+- E252 makes the review surface scannable. Reviewers can now decide where to
+  spend attention from the top of the brief, while the exact fixture rows remain
+  the editable source of review decisions.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-with-brief-e252.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+brief = Path(".ax/experiments/workflow-candidate-review-coverage-brief-e252.md").read_text()
+rows = [json.loads(line) for line in Path(".ax/experiments/workflow-candidate-review-coverage-gaps-e252.jsonl").read_text().splitlines() if line.strip()]
+report = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-with-brief-e252.json").read_text())
+assert report["fixture_pack"]["emitted_fixture_count"] == len(rows) == 3
+assert "## Review Queue Summary" in brief
+assert "- Fixtures: `3`" in brief
+assert "- Candidate groups: `2`" in brief
+assert "- Pending fixtures: `3`" in brief
+assert "- Reviewed fixtures: `0`" in brief
+assert "## Candidate Queue" in brief
+assert "verification_or_recovery_signal" in brief
+assert "correction_or_rejection_signal" in brief
+assert "support=`41`" in brief
+assert "fixtures=`2`" in brief
+assert "- Review impact: `new_candidate_review`" in brief
+PY
+```
+
+## E253 - Add Review Brief Sync And Apply Commands
+
+Question:
+
+- Can the generated markdown review brief tell reviewers exactly how to sync
+  edits back into JSONL, check readiness, and apply graph facts once ready?
+
+Implementation:
+
+- Added optional context to
+  `renderWorkflowCandidateReviewCoverageBriefMarkdown(rows, context)`.
+- Coverage brief generation now passes source kind, pack path, brief path, and
+  output path from the CLI.
+- Markdown briefs now include `Review Commands` when enough path context is
+  available:
+  - sync/readiness command
+  - apply command gated by `ready_to_apply`
+- Existing renderer calls remain compatible because the context argument is
+  optional.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --examples=2 --coverage-fixture-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-e253.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-e253.md --out=.ax/experiments/workflow-candidate-review-coverage-with-brief-e253.json --json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-coverage-gaps-e253.jsonl`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-e253.md`
+- `.ax/experiments/workflow-candidate-review-coverage-with-brief-e253.json`
+
+Results:
+
+- Emitted fixture rows: `3`
+- The generated brief includes:
+  - `Review Commands`
+  - `--coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-e253.jsonl`
+  - `--sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-e253.md`
+  - `--apply-review-facts`
+  - the `ready_to_apply` guard text.
+
+Decision:
+
+- E253 removes another manual handoff gap. A reviewer can now edit the markdown
+  brief and immediately run the exact command needed to sync and inspect
+  readiness before applying graph facts.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-with-brief-e253.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+brief = Path(".ax/experiments/workflow-candidate-review-coverage-brief-e253.md").read_text()
+rows = [json.loads(line) for line in Path(".ax/experiments/workflow-candidate-review-coverage-gaps-e253.jsonl").read_text().splitlines() if line.strip()]
+report = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-with-brief-e253.json").read_text())
+assert report["fixture_pack"]["emitted_fixture_count"] == len(rows) == 3
+assert "## Review Commands" in brief
+assert "--coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-e253.jsonl" in brief
+assert "--sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-e253.md" in brief
+assert "--coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-e253.md" in brief
+assert "--out=.ax/experiments/workflow-candidate-review-coverage-with-brief-e253.json" in brief
+assert "--apply-review-facts" in brief
+assert "ready_to_apply" in brief
+assert "## Review Queue Summary" in brief
+PY
+```
+
+## E254 - Add Verdict Distribution To Coverage Brief Summary
+
+Question:
+
+- After a reviewer syncs a markdown coverage brief, can the regenerated brief
+  show accept/revise/reject/defer/invalid counts at the top?
+
+Implementation:
+
+- `renderWorkflowCandidateReviewCoverageBriefMarkdown` now includes:
+  - accepted fixture count
+  - revised fixture count
+  - rejected fixture count
+  - deferred fixture count
+  - invalid fixture count
+- The verdict summary appears in both newly emitted pending briefs and
+  regenerated synced briefs.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --examples=2 --coverage-fixture-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-e254.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-e254.md --out=.ax/experiments/workflow-candidate-review-coverage-with-brief-e254.json --json
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e254.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-synced-e254.jsonl
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-synced-e254.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-reviewed-smoke-e247.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-synced-e254.md --out=.ax/experiments/workflow-candidate-review-coverage-synced-brief-e254.json --json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-coverage-gaps-e254.jsonl`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-e254.md`
+- `.ax/experiments/workflow-candidate-review-coverage-with-brief-e254.json`
+- `.ax/experiments/workflow-candidate-review-coverage-gaps-synced-e254.jsonl`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-synced-e254.md`
+- `.ax/experiments/workflow-candidate-review-coverage-synced-brief-e254.json`
+
+Results:
+
+- Fresh pending brief: `3` pending, `0` reviewed, `0` accepted, `0` invalid.
+- Synced smoke brief: `2` pending, `1` reviewed, `1` accepted, `0` rejected.
+- Synced smoke readiness remains blocked by `blocked_smoke_review`.
+
+Decision:
+
+- E254 makes synced review progress visible in the markdown itself. The reviewer
+  does not need to open JSON just to see the current verdict distribution.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-with-brief-e254.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-synced-brief-e254.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+pending_brief = Path(".ax/experiments/workflow-candidate-review-coverage-brief-e254.md").read_text()
+synced_brief = Path(".ax/experiments/workflow-candidate-review-coverage-brief-synced-e254.md").read_text()
+pending_rows = [json.loads(line) for line in Path(".ax/experiments/workflow-candidate-review-coverage-gaps-e254.jsonl").read_text().splitlines() if line.strip()]
+synced_review = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-synced-brief-e254.json").read_text())["coverage_review"]
+assert len(pending_rows) == 3
+assert "- Pending fixtures: `3`" in pending_brief
+assert "- Reviewed fixtures: `0`" in pending_brief
+assert "- Accepted fixtures: `0`" in pending_brief
+assert "- Invalid fixtures: `0`" in pending_brief
+assert "- Pending fixtures: `2`" in synced_brief
+assert "- Reviewed fixtures: `1`" in synced_brief
+assert "- Accepted fixtures: `1`" in synced_brief
+assert "- Rejected fixtures: `0`" in synced_brief
+assert synced_review["reviewed_fixture_count"] == 1
+assert synced_review["pending_fixture_count"] == 2
+assert synced_review["apply_guard"] == "blocked_smoke_review"
+PY
+```
+
+## E255 - Add Rationale Completeness To Coverage Brief Summary
+
+Question:
+
+- Can the markdown brief show whether reviewed rows have complete rationales
+  before the readiness command blocks apply?
+
+Implementation:
+
+- `renderWorkflowCandidateReviewCoverageBriefMarkdown` now includes:
+  - complete rationale count
+  - missing rationale count
+- Counts are based only on reviewed verdict rows; pending rows do not count as
+  missing rationales.
+- The summary aligns with the existing `missing_review_rationale` readiness
+  guard.
+
+Commands:
+
+```sh
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e254.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e255.jsonl
+python3 - <<'PY'
+from pathlib import Path
+brief = Path(".ax/experiments/workflow-candidate-review-coverage-brief-e254.md").read_text()
+brief = brief.replace("- Review status: `pending`", "- Review status: `accept`", 1)
+Path(".ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e255.md").write_text(brief)
+PY
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e255.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e255.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-synced-e255.md --out=.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e255.json --json
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e254.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-e255.jsonl
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-e255.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-reviewed-smoke-e247.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-e255.md --out=.ax/experiments/workflow-candidate-review-coverage-complete-rationale-e255.json --json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e255.md`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-synced-e255.md`
+- `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e255.json`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-e255.md`
+- `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-e255.json`
+
+Results:
+
+- Missing-rationale synced brief: `1` reviewed, `0` complete rationales,
+  `1` missing rationale; readiness guard is `missing_review_rationale`.
+- Complete-rationale synced brief: `1` reviewed, `1` complete rationale,
+  `0` missing rationales; readiness guard is still `blocked_smoke_review`
+  because the fixture is smoke-marked.
+
+Decision:
+
+- E255 moves another readiness failure into the markdown work surface. Reviewers
+  can see missing rationale state before inspecting JSON output.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-missing-rationale-e255.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-complete-rationale-e255.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+missing_brief = Path(".ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-synced-e255.md").read_text()
+complete_brief = Path(".ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-e255.md").read_text()
+missing = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-missing-rationale-e255.json").read_text())["coverage_review"]
+complete = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-complete-rationale-e255.json").read_text())["coverage_review"]
+assert "- Reviewed fixtures: `1`" in missing_brief
+assert "- Complete rationales: `0`" in missing_brief
+assert "- Missing rationales: `1`" in missing_brief
+assert missing["missing_rationale_count"] == 1
+assert missing["apply_guard"] == "missing_review_rationale"
+assert "- Reviewed fixtures: `1`" in complete_brief
+assert "- Complete rationales: `1`" in complete_brief
+assert "- Missing rationales: `0`" in complete_brief
+assert complete["missing_rationale_count"] == 0
+assert complete["apply_guard"] == "blocked_smoke_review"
+PY
+```
+
+## E256 - Add Apply Guard To Coverage Brief Summary
+
+Question:
+
+- Can regenerated markdown briefs show the same apply guard reason as the
+  readiness JSON before a reviewer opens the JSON report?
+
+Implementation:
+
+- `renderWorkflowCandidateReviewCoverageBriefMarkdown` now derives and renders:
+  - smoke marker count
+  - apply guard
+- Guard derivation follows the readiness ordering:
+  - invalid review pack
+  - no reviewed fixtures
+  - missing review rationale
+  - blocked smoke review
+  - ready to apply
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --examples=2 --coverage-fixture-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-e256.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-e256.md --out=.ax/experiments/workflow-candidate-review-coverage-with-brief-e256.json --json
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e256.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e256.jsonl
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e256.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e255.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e256.md --out=.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e256.json --json
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e256.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-smoke-guard-e256.jsonl
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-smoke-guard-e256.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-reviewed-smoke-e247.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-smoke-guard-e256.md --out=.ax/experiments/workflow-candidate-review-coverage-smoke-guard-e256.json --json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-coverage-brief-e256.md`
+- `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e256.json`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e256.md`
+- `.ax/experiments/workflow-candidate-review-coverage-smoke-guard-e256.json`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-smoke-guard-e256.md`
+
+Results:
+
+- Pending brief apply guard: `no_reviewed_fixtures`.
+- Missing-rationale brief apply guard: `missing_review_rationale`.
+- Smoke-reviewed brief apply guard: `blocked_smoke_review`.
+- Smoke-reviewed brief reports `2` smoke markers because both the reviewed row
+  and pack path are smoke-marked.
+
+Decision:
+
+- E256 makes the markdown brief a near-complete readiness surface. Reviewers can
+  see why apply is blocked before opening JSON, while the JSON report remains
+  the authoritative machine-readable output.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-with-brief-e256.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-missing-rationale-e256.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-smoke-guard-e256.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+pending_brief = Path(".ax/experiments/workflow-candidate-review-coverage-brief-e256.md").read_text()
+missing_brief = Path(".ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e256.md").read_text()
+smoke_brief = Path(".ax/experiments/workflow-candidate-review-coverage-brief-smoke-guard-e256.md").read_text()
+missing = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-missing-rationale-e256.json").read_text())["coverage_review"]
+smoke = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-smoke-guard-e256.json").read_text())["coverage_review"]
+assert "- Apply guard: `no_reviewed_fixtures`" in pending_brief
+assert "- Smoke markers: `0`" in pending_brief
+assert "- Apply guard: `missing_review_rationale`" in missing_brief
+assert "- Missing rationales: `1`" in missing_brief
+assert missing["apply_guard"] == "missing_review_rationale"
+assert "- Apply guard: `blocked_smoke_review`" in smoke_brief
+assert "- Smoke markers: `2`" in smoke_brief
+assert "- Complete rationales: `1`" in smoke_brief
+assert smoke["smoke_marker_count"] == 2
+assert smoke["apply_guard"] == "blocked_smoke_review"
+PY
+```
+
+## E257 - Add Next Actions To Coverage Brief Guards
+
+Question:
+
+- Can the markdown coverage-review brief tell reviewers exactly what to fix for
+  each blocked apply guard, without requiring them to infer it from JSON?
+
+Implementation:
+
+- Added a typed `WorkflowCandidateReviewCoverageApplyGuard` alias shared by the
+  coverage-review summary.
+- Added guard-specific next-action guidance to
+  `renderWorkflowCandidateReviewCoverageBriefMarkdown`.
+- The review queue summary now renders both:
+  - `Apply guard`
+  - `Next action`
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --examples=2 --coverage-fixture-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-e257.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-e257.md --out=.ax/experiments/workflow-candidate-review-coverage-with-brief-e257.json --json
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e257.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e257.jsonl
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e257.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e255.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e257.md --out=.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e257.json --json
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e257.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-smoke-guard-e257.jsonl
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-smoke-guard-e257.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-reviewed-smoke-e247.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-smoke-guard-e257.md --out=.ax/experiments/workflow-candidate-review-coverage-smoke-guard-e257.json --json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-coverage-brief-e257.md`
+- `.ax/experiments/workflow-candidate-review-coverage-with-brief-e257.json`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e257.md`
+- `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e257.json`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-smoke-guard-e257.md`
+- `.ax/experiments/workflow-candidate-review-coverage-smoke-guard-e257.json`
+
+Results:
+
+- Pending brief:
+  - apply guard: `no_reviewed_fixtures`
+  - next action: set at least one fixture to a reviewed status and add a
+    rationale
+- Missing-rationale brief:
+  - apply guard: `missing_review_rationale`
+  - next action: add rationale text for every reviewed fixture
+- Smoke-reviewed brief:
+  - apply guard: `blocked_smoke_review`
+  - next action: replace smoke/example review markers with real review
+    decisions before applying
+
+Decision:
+
+- E257 removes one more manual inference step from the review loop. The brief
+  now names the readiness blocker and the exact action needed to unblock it,
+  while JSON remains the authoritative machine-readable status.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-with-brief-e257.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-missing-rationale-e257.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-smoke-guard-e257.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+pending_brief = Path(".ax/experiments/workflow-candidate-review-coverage-brief-e257.md").read_text()
+missing_brief = Path(".ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e257.md").read_text()
+smoke_brief = Path(".ax/experiments/workflow-candidate-review-coverage-brief-smoke-guard-e257.md").read_text()
+missing = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-missing-rationale-e257.json").read_text())["coverage_review"]
+smoke = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-smoke-guard-e257.json").read_text())["coverage_review"]
+assert "- Apply guard: `no_reviewed_fixtures`" in pending_brief
+assert "- Next action: Set at least one fixture to accept, revise, reject, or defer and add a rationale." in pending_brief
+assert "- Apply guard: `missing_review_rationale`" in missing_brief
+assert "- Next action: Add rationale text for every reviewed fixture." in missing_brief
+assert missing["apply_guard"] == "missing_review_rationale"
+assert "- Apply guard: `blocked_smoke_review`" in smoke_brief
+assert "- Next action: Replace smoke or example review markers with real review decisions before applying." in smoke_brief
+assert smoke["smoke_marker_count"] == 2
+assert smoke["apply_guard"] == "blocked_smoke_review"
+PY
+```
+
+## E258 - Add Next Action To Coverage Readiness Output
+
+Question:
+
+- Can non-markdown consumers see the same guard-specific unblock instruction
+  that reviewers see in coverage briefs?
+
+Implementation:
+
+- Added `next_action` to `WorkflowCandidateReviewCoverageApplySummary`.
+- `buildWorkflowCandidateReviewCoverageApplySummary` now derives `next_action`
+  from the same apply guard helper used by markdown briefs.
+- `renderWorkflowCandidateReviewCoverageText` now prints the coverage review
+  next action alongside the apply guard.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --examples=2 --coverage-fixture-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-e258.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-e258.md --out=.ax/experiments/workflow-candidate-review-coverage-with-brief-e258.json --json
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e258.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e258.jsonl
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e258.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e255.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e258.md --out=.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e258.json --json
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e258.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-smoke-guard-e258.jsonl
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-smoke-guard-e258.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-reviewed-smoke-e247.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-smoke-guard-e258.md --out=.ax/experiments/workflow-candidate-review-coverage-smoke-guard-e258.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e258.jsonl > .ax/experiments/workflow-candidate-review-coverage-missing-rationale-e258.txt
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e258.json`
+- `.ax/experiments/workflow-candidate-review-coverage-smoke-guard-e258.json`
+- `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e258.txt`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e258.md`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-smoke-guard-e258.md`
+
+Results:
+
+- Missing-rationale JSON now includes:
+  - `apply_guard: missing_review_rationale`
+  - `next_action: Add rationale text for every reviewed fixture.`
+- Smoke-guard JSON now includes:
+  - `apply_guard: blocked_smoke_review`
+  - `next_action: Replace smoke or example review markers with real review decisions before applying.`
+- Text output now includes:
+  - `coverage review next action: Add rationale text for every reviewed fixture.`
+
+Decision:
+
+- E258 makes coverage-review readiness self-explanatory in JSON, text, and
+  markdown. This helps services, dashboards, and review scripts explain blocked
+  applies without duplicating guard interpretation.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-missing-rationale-e258.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-smoke-guard-e258.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+missing = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-missing-rationale-e258.json").read_text())["coverage_review"]
+smoke = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-smoke-guard-e258.json").read_text())["coverage_review"]
+text = Path(".ax/experiments/workflow-candidate-review-coverage-missing-rationale-e258.txt").read_text()
+assert missing["apply_guard"] == "missing_review_rationale"
+assert missing["next_action"] == "Add rationale text for every reviewed fixture."
+assert smoke["apply_guard"] == "blocked_smoke_review"
+assert smoke["next_action"] == "Replace smoke or example review markers with real review decisions before applying."
+assert "coverage review next action: Add rationale text for every reviewed fixture." in text
+PY
+```
+
+## E259 - Add Explicit Can-Apply Readiness Gate
+
+Question:
+
+- Can readiness consumers avoid re-implementing the apply decision from
+  `apply_guard` and write-plan totals?
+
+Implementation:
+
+- Added `can_apply` to `WorkflowCandidateReviewCoverageApplySummary`.
+- The shared summary now sets `can_apply` when:
+  - `apply_guard` is `ready_to_apply`
+  - the review write plan has statements
+- The CLI apply path now uses `pendingApplySummary.can_apply` instead of
+  recomputing the gate locally.
+- Text output now prints `coverage review can apply: yes/no`.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --examples=2 --coverage-fixture-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-e259.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-e259.md --out=.ax/experiments/workflow-candidate-review-coverage-with-brief-e259.json --json
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e258.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e259.jsonl
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e259.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e255.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e259.md --out=.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e259.json --json
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e258.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-e259.jsonl
+cp .ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-e255.md .ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e259.md
+perl -0pi -e 's/Review smoke: useful verification behavior worth preserving\./Reviewed fixture: useful verification behavior worth preserving./g' .ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e259.md
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-e259.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e259.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e259.md --out=.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e259.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-e259.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e259.md > .ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e259.txt
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e259.jsonl > .ax/experiments/workflow-candidate-review-coverage-missing-rationale-e259.txt
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e259.json`
+- `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e259.txt`
+- `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e259.json`
+- `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e259.txt`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e259.md`
+
+Results:
+
+- Missing-rationale output:
+  - `apply_guard: missing_review_rationale`
+  - `can_apply: false`
+  - text prints `coverage review can apply: no`
+- Clean complete-rationale output:
+  - `apply_guard: ready_to_apply`
+  - `can_apply: true`
+  - text prints `coverage review can apply: yes`
+- The clean complete-rationale artifact was not applied; it only proves the
+  readiness gate and write-plan availability.
+
+Decision:
+
+- E259 makes readiness easier for FX services and dashboards to consume. They
+  can branch on `can_apply` directly, while still displaying `apply_guard` and
+  `next_action` for explanation.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-missing-rationale-e259.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e259.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+missing = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-missing-rationale-e259.json").read_text())["coverage_review"]
+ready = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e259.json").read_text())["coverage_review"]
+missing_text = Path(".ax/experiments/workflow-candidate-review-coverage-missing-rationale-e259.txt").read_text()
+ready_text = Path(".ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e259.txt").read_text()
+assert missing["apply_guard"] == "missing_review_rationale"
+assert missing["can_apply"] is False
+assert ready["apply_guard"] == "ready_to_apply"
+assert ready["can_apply"] is True
+assert ready["applied"] is False
+assert "coverage review can apply: no" in missing_text
+assert "coverage review can apply: yes" in ready_text
+PY
+```
+
+## E260 - Add Structured Coverage Apply Blockers
+
+Question:
+
+- Can readiness consumers explain blocked review applies without parsing
+  `apply_guard` or natural-language `next_action`?
+
+Implementation:
+
+- Added `WorkflowCandidateReviewCoverageApplyBlocker`.
+- Added `apply_blockers` to `WorkflowCandidateReviewCoverageApplySummary`.
+- Blockers are additive:
+  - `invalid_review_pack`
+  - `no_reviewed_fixtures`
+  - `missing_review_rationale`
+  - `blocked_smoke_review`
+  - `empty_write_plan`
+- Text output now prints `coverage review blockers: ...` or `none`.
+
+Commands:
+
+```sh
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e258.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e260.jsonl
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e260.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e255.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e260.md --out=.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e260.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e260.jsonl > .ax/experiments/workflow-candidate-review-coverage-missing-rationale-e260.txt
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e258.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e260.jsonl
+cp .ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e259.md .ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e260.md
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e260.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e260.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e260.md --out=.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e260.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e260.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e260.md > .ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e260.txt
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e260.json`
+- `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e260.txt`
+- `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e260.json`
+- `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e260.txt`
+
+Results:
+
+- Missing-rationale output:
+  - `apply_guard: missing_review_rationale`
+  - `can_apply: false`
+  - `apply_blockers: [missing_review_rationale]`
+  - text prints `coverage review blockers: missing_review_rationale`
+- Clean complete-rationale output:
+  - `apply_guard: ready_to_apply`
+  - `can_apply: true`
+  - `apply_blockers: []`
+  - text prints `coverage review blockers: none`
+
+Decision:
+
+- E260 gives FX services and dashboards a stable blocker vector for filtering,
+  badges, and queued remediation without duplicating readiness logic.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-missing-rationale-e260.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e260.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+missing = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-missing-rationale-e260.json").read_text())["coverage_review"]
+ready = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e260.json").read_text())["coverage_review"]
+missing_text = Path(".ax/experiments/workflow-candidate-review-coverage-missing-rationale-e260.txt").read_text()
+ready_text = Path(".ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e260.txt").read_text()
+assert missing["apply_guard"] == "missing_review_rationale"
+assert missing["can_apply"] is False
+assert missing["apply_blockers"] == ["missing_review_rationale"]
+assert ready["apply_guard"] == "ready_to_apply"
+assert ready["can_apply"] is True
+assert ready["apply_blockers"] == []
+assert "coverage review blockers: missing_review_rationale" in missing_text
+assert "coverage review blockers: none" in ready_text
+PY
+```
+
+## E261 - Add Coverage Apply Blocker Detail Counts
+
+Question:
+
+- Can service consumers show blocker badges with counts without re-reading the
+  fixture rows?
+
+Implementation:
+
+- Added `WorkflowCandidateReviewCoverageApplyBlockerDetail`.
+- Added `apply_blocker_details` to `WorkflowCandidateReviewCoverageApplySummary`.
+- Detail counts map blockers to the directly affected count:
+  - invalid review rows
+  - rows in a no-reviewed pack
+  - reviewed rows missing rationales
+  - smoke markers
+  - one empty write-plan gate
+- Text output now prints compact details like
+  `coverage review blocker details: missing_review_rationale=1`.
+
+Commands:
+
+```sh
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e258.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e261.jsonl
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e261.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e255.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e261.md --out=.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e261.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e261.jsonl > .ax/experiments/workflow-candidate-review-coverage-missing-rationale-e261.txt
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e258.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e261.jsonl
+cp .ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e260.md .ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e261.md
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e261.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e261.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e261.md --out=.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e261.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e261.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e261.md > .ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e261.txt
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e261.json`
+- `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e261.txt`
+- `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e261.json`
+- `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e261.txt`
+
+Results:
+
+- Missing-rationale output:
+  - `apply_blockers: [missing_review_rationale]`
+  - `apply_blocker_details: [{ blocker: missing_review_rationale, count: 1 }]`
+  - text prints `coverage review blocker details: missing_review_rationale=1`
+- Clean complete-rationale output:
+  - `apply_blockers: []`
+  - `apply_blocker_details: []`
+  - text prints `coverage review blocker details: none`
+
+Decision:
+
+- E261 makes review readiness easier to render in FX services: consumers can
+  show both the blocker label and its affected count from the summary alone.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-missing-rationale-e261.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e261.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+missing = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-missing-rationale-e261.json").read_text())["coverage_review"]
+ready = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e261.json").read_text())["coverage_review"]
+missing_text = Path(".ax/experiments/workflow-candidate-review-coverage-missing-rationale-e261.txt").read_text()
+ready_text = Path(".ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e261.txt").read_text()
+assert missing["apply_blockers"] == ["missing_review_rationale"]
+assert missing["apply_blocker_details"] == [{"blocker": "missing_review_rationale", "count": 1}]
+assert ready["apply_blockers"] == []
+assert ready["apply_blocker_details"] == []
+assert "coverage review blocker details: missing_review_rationale=1" in missing_text
+assert "coverage review blocker details: none" in ready_text
+PY
+```
+
+## E262 - Add Coverage Blocker Remediation Text
+
+Question:
+
+- Can services show a reviewer-facing remediation per blocker without
+  hardcoding text outside the classifier readiness summary?
+
+Implementation:
+
+- Extended `WorkflowCandidateReviewCoverageApplyBlockerDetail` with
+  `remediation`.
+- Added `workflowCandidateReviewCoverageBlockerRemediation` for additive
+  blocker-specific guidance.
+- Text output now prints a compact remediation line such as:
+  `coverage review blocker remediations: missing_review_rationale: Add rationale text to each reviewed fixture.`
+
+Commands:
+
+```sh
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e258.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e262.jsonl
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e262.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e255.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e262.md --out=.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e262.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e262.jsonl > .ax/experiments/workflow-candidate-review-coverage-missing-rationale-e262.txt
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e258.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e262.jsonl
+cp .ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e261.md .ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e262.md
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e262.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e262.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e262.md --out=.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e262.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e262.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e262.md > .ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e262.txt
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e262.json`
+- `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e262.txt`
+- `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e262.json`
+- `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e262.txt`
+
+Results:
+
+- Missing-rationale output:
+  - `apply_blocker_details[0].remediation: Add rationale text to each reviewed fixture.`
+  - text prints the same remediation in the blocker remediation line
+- Clean complete-rationale output:
+  - `apply_blocker_details: []`
+  - text prints `coverage review blocker remediations: none`
+
+Decision:
+
+- E262 makes the readiness contract more directly useful for FX services and
+  dashboards: the UI can render blocker labels, counts, and remediation text
+  from one summary object.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-missing-rationale-e262.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e262.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+missing = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-missing-rationale-e262.json").read_text())["coverage_review"]
+ready = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e262.json").read_text())["coverage_review"]
+missing_text = Path(".ax/experiments/workflow-candidate-review-coverage-missing-rationale-e262.txt").read_text()
+ready_text = Path(".ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e262.txt").read_text()
+assert missing["apply_blocker_details"] == [{
+    "blocker": "missing_review_rationale",
+    "count": 1,
+    "remediation": "Add rationale text to each reviewed fixture.",
+}]
+assert ready["apply_blocker_details"] == []
+assert "coverage review blocker remediations: missing_review_rationale: Add rationale text to each reviewed fixture." in missing_text
+assert "coverage review blocker remediations: none" in ready_text
+PY
+```
+
+## E354 - Show Blocking Routing Policy Floors
+
+Question:
+
+- When requested routing floors are impossible, can services see which floors
+  block adoption and which floor has the largest gap without comparing routing
+  metrics client-side?
+
+Change:
+
+- Added `blocking_floor_fields` to `routing_policy_summary`.
+- Added `largest_gap_floor` to `routing_policy_summary`.
+- Text graph output now renders the blocking floors and largest gap floor.
+- Blocking floors are derived from positive gap values after comparing the
+  requested floors to the best available reviewed routing policy.
+
+Evidence:
+
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.json`
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.txt`
+
+Result:
+
+- `classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2` returned 0 matching routing facts.
+- The report has `routing_policy_summary.blocking_floor_fields=["positive_recall","call_reduction"]`.
+- The report has `routing_policy_summary.largest_gap_floor=positive_recall`.
+- Text output renders `routing policy blocking floors: positive_recall, call_reduction`.
+- Text output renders `routing policy largest gap: positive_recall`.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 --out=.ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.json --json > .ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.stdout
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 > .ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.txt || true
+python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.json >/dev/null
+rg -n 'routing policy blocking floors: positive_recall, call_reduction|routing policy largest gap: positive_recall|"blocking_floor_fields"|"largest_gap_floor"|"positive_recall_gap_to_request"|"call_reduction_gap_to_request"' .ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.txt .ax/experiments/classifier-graph-embedding-helper-routing-policy-blocking-floors-e354.json
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 84 passed.
+
+## E360 - Route Recommended Floor Follow-Up
+
+Question:
+
+- After a no-match routing policy report finds a reviewed policy under
+  recommended relaxed floors, can automation branch on one field instead of
+  inferring the next step from candidate counts and best-threshold metrics?
+
+Change:
+
+- Added `recommended_floor_next_action` to `routing_policy_summary`.
+- The field is `choose_recommended_routing_threshold` when the recommended
+  relaxed-floor query is expected to match reviewed policies.
+- The field is `review_more_routing_candidates` when the recommended relaxed
+  floor query still has no expected reviewed match.
+- Text graph output now renders the recommended-floor next action.
+
+Evidence:
+
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-next-action-e360.json`
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-next-action-e360.txt`
+
+Result:
+
+- The impossible `min-positive-recall=0.95`, `min-call-reduction=0.2`
+  report still returns 0 matching routing facts.
+- The recommended relaxed-floor candidate set has one expected match and
+  selects threshold `none`.
+- The report has
+  `routing_policy_summary.recommended_floor_next_action=choose_recommended_routing_threshold`.
+- Text output renders
+  `routing policy recommended floor next action: choose_recommended_routing_threshold`.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 --out=.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-next-action-e360.json --json > .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-next-action-e360.stdout
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 > .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-next-action-e360.txt || true
+python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-next-action-e360.json >/dev/null
+rg -n 'routing policy recommended floor next action|"recommended_floor_next_action"|choose_recommended_routing_threshold' .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-next-action-e360.txt .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-next-action-e360.json
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 84 passed.
+
+## E359 - Select Best Recommended Routing Policy
+
+Question:
+
+- Once the recommended relaxed-floor query is expected to match reviewed
+  routing policies, can services see which reviewed threshold to choose without
+  reranking the matched policy set client-side?
+
+Change:
+
+- Added `recommended_floor_best_threshold_by_call_reduction` to
+  `routing_policy_summary`.
+- Added `recommended_floor_best_positive_recall` and
+  `recommended_floor_best_call_reduction` to `routing_policy_summary`.
+- The best recommended policy is selected from the recommended relaxed-floor
+  candidate set by call reduction, then positive recall, then threshold.
+- Text graph output now renders the best recommended threshold and metrics.
+
+Evidence:
+
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-best-e359.json`
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-best-e359.txt`
+
+Result:
+
+- The impossible `min-positive-recall=0.95`, `min-call-reduction=0.2`
+  report still returns 0 matching routing facts.
+- The recommended relaxed-floor candidate set has one expected match.
+- The report selects `recommended_floor_best_threshold_by_call_reduction=none`.
+- The report shows `recommended_floor_best_positive_recall=0.9028` and
+  `recommended_floor_best_call_reduction=0.1778`.
+- Text output renders the same best threshold and metrics.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 --out=.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-best-e359.json --json > .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-best-e359.stdout
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 > .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-best-e359.txt || true
+python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-best-e359.json >/dev/null
+rg -n 'routing policy recommended floor best|"recommended_floor_best_threshold_by_call_reduction"|"recommended_floor_best_positive_recall"|"recommended_floor_best_call_reduction"' .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-best-e359.txt .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-best-e359.json
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 84 passed.
+
+## E358 - Preflight Recommended Routing Query Result
+
+Question:
+
+- Before an FX service executes a recommended relaxed-floor routing query, can
+  it tell whether that query is expected to produce a usable reviewed routing
+  policy?
+
+Change:
+
+- Added `recommended_floor_status` to `routing_policy_summary`.
+- Added `recommended_floor_candidate_count` to `routing_policy_summary`.
+- These fields are inferred from the reviewed routing candidates already loaded
+  by the graph report, after applying the recommended relaxed floors.
+- Text graph output now renders the expected status and candidate count.
+
+Evidence:
+
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-status-e358.json`
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-status-e358.txt`
+
+Result:
+
+- `classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2` returned 0 matching routing facts.
+- The report has `routing_policy_summary.recommended_floor_status=expected_matches`.
+- The report has `routing_policy_summary.recommended_floor_candidate_count=1`.
+- Text output renders `routing policy recommended floor status: expected_matches`
+  and `routing policy recommended floor candidates: 1`.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 --out=.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-status-e358.json --json > .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-status-e358.stdout
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 > .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-status-e358.txt || true
+python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-status-e358.json >/dev/null
+rg -n 'routing policy recommended floor status|routing policy recommended floor candidates|"recommended_floor_status"|"recommended_floor_candidate_count"' .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-status-e358.txt .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-status-e358.json
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 84 passed.
+
+## E357 - Expose Executable Recommended Routing Query
+
+Question:
+
+- Can an FX service execute the recommended relaxed-floor routing query without
+  translating structured query fields into CLI arguments itself?
+
+Change:
+
+- Added `recommended_floor_argv` to `routing_policy_summary`.
+- The argv preserves the original graph filters and replaces only impossible
+  routing floors with reviewed recommended floors.
+- Text graph output now renders the argv for quick debugging.
+
+Evidence:
+
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-argv-e357.json`
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-argv-e357.txt`
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-argv-e357-rerun.json`
+
+Result:
+
+- The no-match report includes:
+  `recommended_floor_argv=["bun","src/cli/index.ts","classifiers","graph","--mode","embedding-helper","--source-kind","embedding_helper_review_projection","--fact-kind","embedding_helper_routing_candidate","--min-positive-recall","0.9028","--min-call-reduction","0.1778"]`.
+- Text output renders:
+  `routing policy recommended floor argv: bun src/cli/index.ts classifiers graph --mode embedding-helper --source-kind embedding_helper_review_projection --fact-kind embedding_helper_routing_candidate --min-positive-recall 0.9028 --min-call-reduction 0.1778`.
+- Running that argv returned `routing_policy_summary.status=meets_requested_floors`
+  and one matching embedding-helper routing fact.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 --out=.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-argv-e357.json --json > .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-argv-e357.stdout
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 > .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-argv-e357.txt || true
+python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-argv-e357.json >/dev/null
+rg -n 'routing policy recommended floor argv|"recommended_floor_argv"|--min-positive-recall|--min-call-reduction|--source-kind' .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-argv-e357.txt .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-argv-e357.json
+bun src/cli/index.ts classifiers graph --mode embedding-helper --source-kind embedding_helper_review_projection --fact-kind embedding_helper_routing_candidate --min-positive-recall 0.9028 --min-call-reduction 0.1778 --out=.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-argv-e357-rerun.json --json > .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-argv-e357-rerun.stdout
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 84 passed.
+
+## E356 - Expose Recommended Routing Floor Query
+
+Question:
+
+- After a no-match routing policy report recommends relaxed floors, can an FX
+  service rerun the graph query from structured fields without parsing text or
+  recomputing floor values?
+
+Change:
+
+- Added `recommended_floor_query` to `routing_policy_summary`.
+- The recommended query preserves the original non-floor filters and replaces
+  only blocking floor values with the reviewed recommended floors.
+- Text graph output now renders the recommended floor query as key/value
+  filters for quick debugging.
+
+Evidence:
+
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-query-e356.json`
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-query-e356.txt`
+
+Result:
+
+- `classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2` returned 0 matching routing facts.
+- The report has
+  `routing_policy_summary.recommended_floor_query.min_positive_recall=0.9028`
+  and `min_call_reduction=0.1778`.
+- Text output renders:
+  `routing policy recommended floor query: mode=embedding-helper source_kind=embedding_helper_review_projection fact_kind=embedding_helper_routing_candidate min_positive_recall=0.9028 min_call_reduction=0.1778`.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 --out=.ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-query-e356.json --json > .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-query-e356.stdout
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 > .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-query-e356.txt || true
+python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-query-e356.json >/dev/null
+rg -n 'routing policy recommended floor query|"recommended_floor_query"|"min_positive_recall": 0.9028|"min_call_reduction": 0.1778|fact_kind=embedding_helper_routing_candidate' .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-query-e356.txt .ax/experiments/classifier-graph-embedding-helper-routing-policy-recommended-query-e356.json
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 84 passed.
+
+## E355 - Recommend Routing Floor Adjustments
+
+Question:
+
+- When requested routing floors are impossible, can services get concrete
+  recommended relaxed floor values from reviewed evidence instead of
+  recomputing them from best-available metrics?
+
+Change:
+
+- Added `recommended_floor_adjustments` to `routing_policy_summary`.
+- Each adjustment records the blocking floor, requested floor, recommended
+  reviewed value, gap, and source threshold.
+- Text graph output now renders the recommended floor adjustments.
+
+Evidence:
+
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-floor-adjustments-e355.json`
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-floor-adjustments-e355.txt`
+
+Result:
+
+- `classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2` returned 0 matching routing facts.
+- The report has two `routing_policy_summary.recommended_floor_adjustments` rows:
+  `positive_recall<=0.9028` and `call_reduction<=0.1778`.
+- Text output renders:
+  `routing policy recommended floor adjustments: positive_recall<=0.9028 (requested 0.95, gap 0.0472, threshold none); call_reduction<=0.1778 (requested 0.2, gap 0.0222, threshold none)`.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 --out=.ax/experiments/classifier-graph-embedding-helper-routing-policy-floor-adjustments-e355.json --json > .ax/experiments/classifier-graph-embedding-helper-routing-policy-floor-adjustments-e355.stdout
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 > .ax/experiments/classifier-graph-embedding-helper-routing-policy-floor-adjustments-e355.txt || true
+python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-routing-policy-floor-adjustments-e355.json >/dev/null
+rg -n 'routing policy recommended floor adjustments|"recommended_floor_adjustments"|"floor"|"recommended"|"gap"' .ax/experiments/classifier-graph-embedding-helper-routing-policy-floor-adjustments-e355.txt .ax/experiments/classifier-graph-embedding-helper-routing-policy-floor-adjustments-e355.json
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 84 passed.
+
+## E353 - Show Routing Policy Floor Gaps
+
+Question:
+
+- When requested routing floors are impossible, can services see exactly how
+  far the best reviewed routing policy is from the requested positive-recall
+  and call-reduction floors?
+
+Change:
+
+- Added `positive_recall_gap_to_request` to `routing_policy_summary`.
+- Added `call_reduction_gap_to_request` to `routing_policy_summary`.
+- Gaps are computed from requested floor minus best available reviewed policy,
+  clamped at zero and rounded to four decimals.
+- Text graph output now renders both routing policy floor gaps.
+
+Evidence:
+
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-gap-e353.json`
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-gap-e353.txt`
+
+Result:
+
+- `classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2` returned 0 matching routing facts.
+- The report has `routing_policy_summary.best_available_positive_recall=0.9028`.
+- The report has `routing_policy_summary.best_available_call_reduction=0.1778`.
+- The report has `routing_policy_summary.positive_recall_gap_to_request=0.0472`.
+- The report has `routing_policy_summary.call_reduction_gap_to_request=0.0222`.
+- Text output renders `routing policy positive recall gap: 0.0472`.
+- Text output renders `routing policy call reduction gap: 0.0222`.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 --out=.ax/experiments/classifier-graph-embedding-helper-routing-policy-gap-e353.json --json > .ax/experiments/classifier-graph-embedding-helper-routing-policy-gap-e353.stdout
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 > .ax/experiments/classifier-graph-embedding-helper-routing-policy-gap-e353.txt || true
+python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-routing-policy-gap-e353.json >/dev/null
+rg -n 'routing policy status: no_matching_policy|routing policy positive recall gap: 0.0472|routing policy call reduction gap: 0.0222|"positive_recall_gap_to_request"|"call_reduction_gap_to_request"|"best_available_positive_recall"|"best_available_call_reduction"' .ax/experiments/classifier-graph-embedding-helper-routing-policy-gap-e353.txt .ax/experiments/classifier-graph-embedding-helper-routing-policy-gap-e353.json
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 84 passed.
+
+## E352 - Show Best Available Routing Policy On No-Match
+
+Question:
+
+- When requested routing floors are impossible, can services see the best
+  reviewed routing policy that failed the floors so they can lower thresholds
+  with concrete evidence instead of guessing?
+
+Change:
+
+- Added `evaluated_policy_count` to `routing_policy_summary`.
+- Added best-available reviewed routing policy metrics selected outside the
+  positive-recall and call-reduction floor filters:
+  `best_available_threshold_by_recall`,
+  `best_available_positive_recall`, and
+  `best_available_call_reduction`.
+- Text graph output now renders the evaluated policy count and best-available
+  threshold/metrics.
+- Matching policy count remains separate from evaluated policy count, so
+  services can distinguish no reviewed policies from reviewed policies that
+  failed the requested floors.
+
+Evidence:
+
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-best-available-e352.json`
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-best-available-e352.txt`
+
+Result:
+
+- `classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2` returned 0 matching routing facts.
+- The report has `routing_policy_summary.evaluated_policy_count=1`.
+- The report has `routing_policy_summary.candidate_count=0`.
+- The report has `best_available_threshold_by_recall=none`.
+- The report has `best_available_positive_recall=0.9028`.
+- The report has `best_available_call_reduction=0.1778`.
+- Text output renders the same evaluated count and best-available metrics.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 --out=.ax/experiments/classifier-graph-embedding-helper-routing-policy-best-available-e352.json --json > .ax/experiments/classifier-graph-embedding-helper-routing-policy-best-available-e352.stdout
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 > .ax/experiments/classifier-graph-embedding-helper-routing-policy-best-available-e352.txt || true
+python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-routing-policy-best-available-e352.json >/dev/null
+rg -n 'routing policy status: no_matching_policy|routing policy evaluated: 1|routing policy candidates: 0|routing policy best available threshold: none|routing policy best available positive recall: 0.9028|routing policy best available call reduction: 0.1778|"evaluated_policy_count"|"best_available_threshold_by_recall"|"best_available_positive_recall"|"best_available_call_reduction"' .ax/experiments/classifier-graph-embedding-helper-routing-policy-best-available-e352.txt .ax/experiments/classifier-graph-embedding-helper-routing-policy-best-available-e352.json
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 84 passed.
+
+## E351 - Route No-Match Routing Policy Floors
+
+Question:
+
+- Can services distinguish an impossible reviewed routing-policy floor from a
+  healthy empty query and route it to either floor adjustment or more review?
+
+Change:
+
+- Added `remediation` to `routing_policy_summary`.
+- The no-match summary now returns
+  `status=no_matching_policy`,
+  `next_action=lower_floor_or_review_more_candidates`, and a remediation string
+  telling services to lower requested floors or review more routing candidates.
+- Text graph output now renders the routing policy remediation.
+- Existing formatter behavior remains compatible with older graph-health
+  reports that do not contain `routing_policy_summary`.
+
+Evidence:
+
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-no-match-e351.json`
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-no-match-e351.txt`
+
+Result:
+
+- `classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2` returned 0 embedding-helper routing facts.
+- The report has `routing_policy_summary.status=no_matching_policy`.
+- The report has `routing_policy_summary.next_action=lower_floor_or_review_more_candidates`.
+- The report has remediation:
+  `Lower the requested routing floors or review more routing candidates before enabling this policy.`
+- Text output renders `routing policy candidates: 0`, the no-match status, the
+  lower/review next action, and the remediation.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 --out=.ax/experiments/classifier-graph-embedding-helper-routing-policy-no-match-e351.json --json > .ax/experiments/classifier-graph-embedding-helper-routing-policy-no-match-e351.stdout
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.95 --min-call-reduction=0.2 > .ax/experiments/classifier-graph-embedding-helper-routing-policy-no-match-e351.txt || true
+python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-routing-policy-no-match-e351.json >/dev/null
+rg -n 'routing policy status: no_matching_policy|routing policy candidates: 0|routing policy best threshold: none|routing policy next action: lower_floor_or_review_more_candidates|routing policy remediation: Lower the requested routing floors|"routing_policy_summary"|"status": "no_matching_policy"|"remediation"' .ax/experiments/classifier-graph-embedding-helper-routing-policy-no-match-e351.txt .ax/experiments/classifier-graph-embedding-helper-routing-policy-no-match-e351.json
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 84 passed.
+
+## E350 - Summarize Reviewed Routing Policy Floors
+
+Question:
+
+- Can services query reviewed routing policy facts with both positive-recall and
+  call-reduction floors and get a direct routing decision surface without
+  re-ranking returned facts client-side?
+
+Change:
+
+- Added `routing_policy_summary` to classifier graph-health reports.
+- The summary records requested positive-recall and call-reduction floors,
+  matching routing candidate count, best threshold by call reduction, best
+  positive recall, best call reduction, status, and next action.
+- Text graph output now renders the routing policy status, candidate count,
+  best threshold, best metrics, and next action.
+- The best reviewed routing policy is selected from filtered
+  `embedding_helper_routing_candidate` facts by highest
+  `setfit_call_reduction_rate_mean`, then highest
+  `positive_recall_after_routing_mean`.
+
+Evidence:
+
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-summary-e350.json`
+- `.ax/experiments/classifier-graph-embedding-helper-routing-policy-summary-e350.txt`
+
+Result:
+
+- `classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.9 --min-call-reduction=0.17` returned 1 embedding-helper routing fact.
+- The report has `routing_policy_summary.status=meets_requested_floors`.
+- The report has `routing_policy_summary.next_action=choose_reviewed_routing_threshold`.
+- The summary selected `best_threshold_by_call_reduction=none`.
+- The summary selected `best_positive_recall=0.9028`.
+- The summary selected `best_call_reduction=0.1778`.
+- Text output renders the same routing policy status, candidate count, best
+  threshold, metrics, and next action.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.9 --min-call-reduction=0.17 --out=.ax/experiments/classifier-graph-embedding-helper-routing-policy-summary-e350.json --json > .ax/experiments/classifier-graph-embedding-helper-routing-policy-summary-e350.stdout
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.9 --min-call-reduction=0.17 > .ax/experiments/classifier-graph-embedding-helper-routing-policy-summary-e350.txt || true
+python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-routing-policy-summary-e350.json >/dev/null
+rg -n 'routing policy status: meets_requested_floors|routing policy candidates: 1|routing policy best threshold: none|routing policy best positive recall: 0.9028|routing policy best call reduction: 0.1778|routing policy next action: choose_reviewed_routing_threshold|"routing_policy_summary"|"requested_min_positive_recall"|"requested_min_call_reduction"|"best_threshold_by_call_reduction"' .ax/experiments/classifier-graph-embedding-helper-routing-policy-summary-e350.txt .ax/experiments/classifier-graph-embedding-helper-routing-policy-summary-e350.json
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 83 passed.
+
+## E349 - Filter Helper Graph Facts By Minimum Call Reduction
+
+Question:
+
+- Can services query advisory routing policy facts that meet a call-reduction
+  floor without loading every embedding-helper fact and filtering by
+  `setfit_call_reduction_rate_mean` client-side?
+
+Change:
+
+- Added optional `min_call_reduction` to classifier graph-health queries.
+- Threaded `--min-call-reduction=<number>` through
+  `classifiers package-operations --graph-health` and the `classifiers graph`
+  shortcut.
+- Text output now renders `filter min call reduction`.
+- Embedding-helper graph fact result sets now keep only facts with
+  `setfit_call_reduction_rate_mean >= min_call_reduction`.
+- Call-reduction-constrained evidence queries intentionally exclude lifecycle
+  facts, because lifecycle facts do not carry routing evaluation metrics.
+
+Evidence:
+
+- `.ax/experiments/classifier-graph-embedding-helper-min-call-reduction-e349.json`
+- `.ax/experiments/classifier-graph-embedding-helper-min-call-reduction-e349.txt`
+
+Result:
+
+- `classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-call-reduction=0.17` returned 1 embedding-helper fact.
+- The returned embedding-helper fact has `kind=embedding_helper_routing_candidate`.
+- The returned embedding-helper fact has `setfit_call_reduction_rate_mean=0.1778`.
+- Text output shows `filter min call reduction: 0.17`.
+- Text output shows `results operations/guarded/changed/lifecycle/helper/evidence: 0/0/0/0/1/1`.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-call-reduction=0.17 --out=.ax/experiments/classifier-graph-embedding-helper-min-call-reduction-e349.json --json > .ax/experiments/classifier-graph-embedding-helper-min-call-reduction-e349.stdout
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-call-reduction=0.17 > .ax/experiments/classifier-graph-embedding-helper-min-call-reduction-e349.txt || true
+python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-min-call-reduction-e349.json >/dev/null
+rg -n "filter min call reduction: 0.17|filter fact kind: embedding_helper_routing_candidate|results operations/guarded/changed/lifecycle|call_reduction=|\"min_call_reduction\"|\"setfit_call_reduction_rate_mean\"" .ax/experiments/classifier-graph-embedding-helper-min-call-reduction-e349.txt .ax/experiments/classifier-graph-embedding-helper-min-call-reduction-e349.json
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 82 passed.
+
+## E348 - Filter Helper Graph Facts By Minimum Positive Recall
+
+Question:
+
+- Can services query advisory routing policy facts that meet a positive-recall
+  floor without loading every embedding-helper fact and filtering by
+  `positive_recall_after_routing_mean` client-side?
+
+Change:
+
+- Added optional `min_positive_recall` to classifier graph-health queries.
+- Threaded `--min-positive-recall=<number>` through
+  `classifiers package-operations --graph-health` and the `classifiers graph`
+  shortcut.
+- Text output now renders `filter min positive recall`.
+- Embedding-helper graph fact result sets now keep only facts with
+  `positive_recall_after_routing_mean >= min_positive_recall`.
+- Positive-recall-constrained evidence queries intentionally exclude lifecycle
+  facts, because lifecycle facts do not carry routing evaluation metrics.
+
+Evidence:
+
+- `.ax/experiments/classifier-graph-embedding-helper-min-positive-recall-e348.json`
+- `.ax/experiments/classifier-graph-embedding-helper-min-positive-recall-e348.txt`
+
+Result:
+
+- `classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.9` returned 1 embedding-helper fact.
+- The returned embedding-helper fact has `kind=embedding_helper_routing_candidate`.
+- The returned embedding-helper fact has `positive_recall_after_routing_mean=0.9028`.
+- Text output shows `filter min positive recall: 0.9`.
+- Text output shows `results operations/guarded/changed/lifecycle/helper/evidence: 0/0/0/0/1/1`.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.9 --out=.ax/experiments/classifier-graph-embedding-helper-min-positive-recall-e348.json --json > .ax/experiments/classifier-graph-embedding-helper-min-positive-recall-e348.stdout
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --min-positive-recall=0.9 > .ax/experiments/classifier-graph-embedding-helper-min-positive-recall-e348.txt || true
+python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-min-positive-recall-e348.json >/dev/null
+rg -n "filter min positive recall: 0.9|filter fact kind: embedding_helper_routing_candidate|results operations/guarded/changed/lifecycle|positive_recall=|\"min_positive_recall\"|\"positive_recall_after_routing_mean\"" .ax/experiments/classifier-graph-embedding-helper-min-positive-recall-e348.txt .ax/experiments/classifier-graph-embedding-helper-min-positive-recall-e348.json
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 81 passed.
+
+## E347 - Filter Helper Graph Facts By Minimum Seed Count
+
+Question:
+
+- Can services prioritize better-supported helper hard-negative facts without
+  loading every helper fact and filtering by `seed_count` client-side?
+
+Change:
+
+- Added optional `min_seed_count` to classifier graph-health queries.
+- Threaded `--min-seed-count=<number>` through
+  `classifiers package-operations --graph-health` and the `classifiers graph`
+  shortcut.
+- Text output now renders `filter min seed count`.
+- Embedding-helper graph fact result sets now keep only facts with
+  `seed_count >= min_seed_count`.
+- Seed-count-constrained evidence queries intentionally exclude lifecycle facts,
+  because lifecycle facts do not carry helper review support counts.
+
+Evidence:
+
+- `.ax/experiments/classifier-graph-embedding-helper-min-seed-count-e347.json`
+- `.ax/experiments/classifier-graph-embedding-helper-min-seed-count-e347.txt`, `.ax/experiments/classifier-graph-embedding-helper-min-positive-recall-e348.json`, `.ax/experiments/classifier-graph-embedding-helper-min-positive-recall-e348.txt`
+
+Result:
+
+- `classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_hard_negative_candidate --status=accepted --proposed-label=none --min-seed-count=2` returned 1 embedding-helper fact.
+- The returned embedding-helper fact has `status=accepted`.
+- The returned embedding-helper fact has `proposed_label=none`.
+- The returned embedding-helper fact has `seed_count=2`.
+- Text output shows `filter min seed count: 2`.
+- Text output shows `results operations/guarded/changed/lifecycle/helper/evidence: 0/0/0/0/1/1`.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_hard_negative_candidate --status=accepted --proposed-label=none --min-seed-count=2 --out=.ax/experiments/classifier-graph-embedding-helper-min-seed-count-e347.json --json > .ax/experiments/classifier-graph-embedding-helper-min-seed-count-e347.stdout
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_hard_negative_candidate --status=accepted --proposed-label=none --min-seed-count=2 > .ax/experiments/classifier-graph-embedding-helper-min-seed-count-e347.txt || true
+python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-min-seed-count-e347.json >/dev/null
+rg -n "filter min seed count: 2|filter proposed label: none|results operations/guarded/changed/lifecycle|seeds=|\"min_seed_count\"|\"seed_count\"" .ax/experiments/classifier-graph-embedding-helper-min-seed-count-e347.txt .ax/experiments/classifier-graph-embedding-helper-min-seed-count-e347.json
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 80 passed.
+
+## E346 - Filter Helper Graph Facts By Routing Threshold
+
+Question:
+
+- Can services query the advisory routing policy facts for a specific
+  recommended threshold without loading every embedding-helper fact and
+  filtering by `threshold` client-side?
+
+Change:
+
+- Added optional `threshold` to classifier graph-health queries.
+- Threaded `--threshold=<value>` through
+  `classifiers package-operations --graph-health` and the `classifiers graph`
+  shortcut.
+- Text output now renders `filter threshold`.
+- Embedding-helper graph fact result sets now filter by routing threshold.
+- Threshold-constrained evidence queries intentionally exclude lifecycle facts,
+  because lifecycle facts do not carry embedding-helper routing thresholds.
+
+Evidence:
+
+- `.ax/experiments/classifier-graph-embedding-helper-threshold-none-e346.json`
+- `.ax/experiments/classifier-graph-embedding-helper-threshold-none-e346.txt`, `.ax/experiments/classifier-graph-embedding-helper-min-seed-count-e347.json`, `.ax/experiments/classifier-graph-embedding-helper-min-seed-count-e347.txt`, `.ax/experiments/classifier-graph-embedding-helper-min-positive-recall-e348.json`, `.ax/experiments/classifier-graph-embedding-helper-min-positive-recall-e348.txt`
+
+Result:
+
+- `classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --threshold=none` returned 1 embedding-helper fact.
+- The returned embedding-helper fact has `kind=embedding_helper_routing_candidate`.
+- The returned embedding-helper fact has `threshold=none`.
+- Text output shows `filter threshold: none`.
+- Text output shows `results operations/guarded/changed/lifecycle/helper/evidence: 0/0/0/0/1/1`.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --threshold=none --out=.ax/experiments/classifier-graph-embedding-helper-threshold-none-e346.json --json > .ax/experiments/classifier-graph-embedding-helper-threshold-none-e346.stdout
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_routing_candidate --threshold=none > .ax/experiments/classifier-graph-embedding-helper-threshold-none-e346.txt || true
+python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-threshold-none-e346.json >/dev/null
+rg -n "filter threshold: none|filter fact kind: embedding_helper_routing_candidate|results operations/guarded/changed/lifecycle|threshold=none|\"threshold\"" .ax/experiments/classifier-graph-embedding-helper-threshold-none-e346.txt .ax/experiments/classifier-graph-embedding-helper-threshold-none-e346.json
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 79 passed.
+
+## E345 - Filter Helper Graph Facts By Minimum Nearest Similarity
+
+Question:
+
+- Can services isolate boundary-near helper hard-negative facts by nearest
+  neighbor similarity without loading every helper fact and scanning
+  `nearest_neighbors` client-side?
+
+Change:
+
+- Added optional `min_nearest_similarity` to classifier graph-health queries.
+- Threaded `--min-nearest-similarity=<number>` through
+  `classifiers package-operations --graph-health` and the `classifiers graph`
+  shortcut.
+- Text output now renders `filter min nearest similarity`.
+- Embedding-helper graph fact result sets now keep only facts with at least one
+  nearest neighbor at or above the requested similarity.
+- Min-similarity-constrained evidence queries intentionally exclude lifecycle
+  facts, because lifecycle facts do not carry nearest-neighbor similarity.
+
+Evidence:
+
+- `.ax/experiments/classifier-graph-embedding-helper-min-nearest-similarity-e345.json`
+- `.ax/experiments/classifier-graph-embedding-helper-min-nearest-similarity-e345.txt`, `.ax/experiments/classifier-graph-embedding-helper-threshold-none-e346.json`, `.ax/experiments/classifier-graph-embedding-helper-threshold-none-e346.txt`, `.ax/experiments/classifier-graph-embedding-helper-min-seed-count-e347.json`, `.ax/experiments/classifier-graph-embedding-helper-min-seed-count-e347.txt`, `.ax/experiments/classifier-graph-embedding-helper-min-positive-recall-e348.json`, `.ax/experiments/classifier-graph-embedding-helper-min-positive-recall-e348.txt`
+
+Result:
+
+- `classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_hard_negative_candidate --status=accepted --proposed-label=none --min-nearest-similarity=0.8` returned 3 embedding-helper facts.
+- Every returned embedding-helper fact has `proposed_label=none`.
+- Every returned embedding-helper fact has `status=accepted`.
+- Every returned embedding-helper fact has at least one nearest neighbor with `similarity >= 0.8`.
+- Text output shows `filter min nearest similarity: 0.8`.
+- Text output shows `results operations/guarded/changed/lifecycle/helper/evidence: 0/0/0/0/3/1`.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_hard_negative_candidate --status=accepted --proposed-label=none --min-nearest-similarity=0.8 --out=.ax/experiments/classifier-graph-embedding-helper-min-nearest-similarity-e345.json --json > .ax/experiments/classifier-graph-embedding-helper-min-nearest-similarity-e345.stdout
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_hard_negative_candidate --status=accepted --proposed-label=none --min-nearest-similarity=0.8 > .ax/experiments/classifier-graph-embedding-helper-min-nearest-similarity-e345.txt || true
+python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-min-nearest-similarity-e345.json >/dev/null
+rg -n "filter min nearest similarity: 0.8|filter proposed label: none|results operations/guarded/changed/lifecycle|sim=0\\.|\"min_nearest_similarity\"|\"similarity\"" .ax/experiments/classifier-graph-embedding-helper-min-nearest-similarity-e345.txt .ax/experiments/classifier-graph-embedding-helper-min-nearest-similarity-e345.json
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 78 passed.
+
+## E344 - Filter Helper Graph Facts By Proposed Label
+
+Question:
+
+- Can services list accepted helper hard-negative facts for a specific proposed
+  label without loading every helper fact and filtering by `proposed_label`
+  client-side?
+
+Change:
+
+- Added optional `proposed_label` to classifier graph-health queries.
+- Threaded `--proposed-label=<label>` through
+  `classifiers package-operations --graph-health` and the `classifiers graph`
+  shortcut.
+- Text output now renders `filter proposed label`.
+- Embedding-helper graph fact result sets now filter by proposed label.
+- Proposed-label-constrained evidence queries intentionally exclude lifecycle
+  facts, because lifecycle facts do not carry proposed labels.
+
+Evidence:
+
+- `.ax/experiments/classifier-graph-embedding-helper-proposed-label-none-e344.json`
+- `.ax/experiments/classifier-graph-embedding-helper-proposed-label-none-e344.txt`, `.ax/experiments/classifier-graph-embedding-helper-min-nearest-similarity-e345.json`, `.ax/experiments/classifier-graph-embedding-helper-min-nearest-similarity-e345.txt`, `.ax/experiments/classifier-graph-embedding-helper-threshold-none-e346.json`, `.ax/experiments/classifier-graph-embedding-helper-threshold-none-e346.txt`, `.ax/experiments/classifier-graph-embedding-helper-min-seed-count-e347.json`, `.ax/experiments/classifier-graph-embedding-helper-min-seed-count-e347.txt`, `.ax/experiments/classifier-graph-embedding-helper-min-positive-recall-e348.json`, `.ax/experiments/classifier-graph-embedding-helper-min-positive-recall-e348.txt`
+
+Result:
+
+- `classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_hard_negative_candidate --status=accepted --proposed-label=none` returned 12 embedding-helper facts.
+- Every returned embedding-helper fact has `proposed_label=none`.
+- Every returned embedding-helper fact has `status=accepted`.
+- Text output shows `filter proposed label: none`.
+- Text output shows `results operations/guarded/changed/lifecycle/helper/evidence: 0/0/0/0/12/1`.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_hard_negative_candidate --status=accepted --proposed-label=none --out=.ax/experiments/classifier-graph-embedding-helper-proposed-label-none-e344.json --json > .ax/experiments/classifier-graph-embedding-helper-proposed-label-none-e344.stdout
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_hard_negative_candidate --status=accepted --proposed-label=none > .ax/experiments/classifier-graph-embedding-helper-proposed-label-none-e344.txt || true
+python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-proposed-label-none-e344.json >/dev/null
+rg -n "filter proposed label: none|filter status: accepted|results operations/guarded/changed/lifecycle|proposed=none|\"proposed_label\"" .ax/experiments/classifier-graph-embedding-helper-proposed-label-none-e344.txt .ax/experiments/classifier-graph-embedding-helper-proposed-label-none-e344.json
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 78 passed.
+
+## E343 - Filter Helper Graph Facts By Source Fixture
+
+Question:
+
+- Can services inspect the accepted/rejected helper graph fact for one source
+  fixture without knowing the internal graph subject id or overloading the
+  artifact filter?
+
+Change:
+
+- Added optional `source_fixture_id` to classifier graph-health queries.
+- Threaded `--source-fixture=<fixture-id>` through
+  `classifiers package-operations --graph-health` and the `classifiers graph`
+  shortcut.
+- Text output now renders `filter source fixture`.
+- Embedding-helper graph fact result sets now filter by source fixture id.
+- Source-fixture-constrained evidence queries intentionally exclude lifecycle
+  facts, because lifecycle facts do not carry source fixture ids.
+
+Evidence:
+
+- `.ax/experiments/classifier-graph-embedding-helper-source-fixture-e343.json`
+- `.ax/experiments/classifier-graph-embedding-helper-source-fixture-e343.txt`, `.ax/experiments/classifier-graph-embedding-helper-proposed-label-none-e344.json`, `.ax/experiments/classifier-graph-embedding-helper-proposed-label-none-e344.txt`, `.ax/experiments/classifier-graph-embedding-helper-min-nearest-similarity-e345.json`, `.ax/experiments/classifier-graph-embedding-helper-min-nearest-similarity-e345.txt`, `.ax/experiments/classifier-graph-embedding-helper-threshold-none-e346.json`, `.ax/experiments/classifier-graph-embedding-helper-threshold-none-e346.txt`, `.ax/experiments/classifier-graph-embedding-helper-min-seed-count-e347.json`, `.ax/experiments/classifier-graph-embedding-helper-min-seed-count-e347.txt`, `.ax/experiments/classifier-graph-embedding-helper-min-positive-recall-e348.json`, `.ax/experiments/classifier-graph-embedding-helper-min-positive-recall-e348.txt`
+
+Result:
+
+- `classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_hard_negative_candidate --status=accepted --source-fixture=session-section-chunks/none-next-step` returned 1 embedding-helper fact.
+- The returned embedding-helper fact has `source_fixture_id=session-section-chunks/none-next-step`.
+- The returned embedding-helper fact has `status=accepted`.
+- Text output shows `filter source fixture: session-section-chunks/none-next-step`.
+- Text output shows `results operations/guarded/changed/lifecycle/helper/evidence: 0/0/0/0/1/1`.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_hard_negative_candidate --status=accepted --source-fixture=session-section-chunks/none-next-step --out=.ax/experiments/classifier-graph-embedding-helper-source-fixture-e343.json --json > .ax/experiments/classifier-graph-embedding-helper-source-fixture-e343.stdout
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_hard_negative_candidate --status=accepted --source-fixture=session-section-chunks/none-next-step > .ax/experiments/classifier-graph-embedding-helper-source-fixture-e343.txt || true
+python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-source-fixture-e343.json >/dev/null
+rg -n "filter source fixture: session-section-chunks/none-next-step|filter status: accepted|results operations/guarded/changed/lifecycle|session-section-chunks/none-next-step|\"source_fixture_id\"" .ax/experiments/classifier-graph-embedding-helper-source-fixture-e343.txt .ax/experiments/classifier-graph-embedding-helper-source-fixture-e343.json
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 78 passed.
+
+## E342 - Filter Helper Graph Facts By Nearest Fixture
+
+Question:
+
+- Can services find accepted embedding-helper hard-negative facts that are explained by a specific reviewed fixture without loading every accepted hard negative and scanning `nearest_neighbors` client-side?
+
+Change:
+
+- Added optional `nearest_fixture_id` to classifier graph-health queries.
+- Threaded `--nearest-fixture=<fixture-id>` through `classifiers package-operations --graph-health` and the `classifiers graph` shortcut.
+- Text output now renders `filter nearest fixture`.
+- Embedding-helper graph fact result sets now filter by nearest reviewed fixture id.
+- Nearest-fixture-constrained evidence queries intentionally exclude lifecycle facts, because lifecycle facts do not carry nearest-neighbor explanations.
+
+Evidence:
+
+- `.ax/experiments/classifier-graph-embedding-helper-nearest-fixture-e342.json`
+- `.ax/experiments/classifier-graph-embedding-helper-nearest-fixture-e342.txt`, `.ax/experiments/classifier-graph-embedding-helper-source-fixture-e343.json`, `.ax/experiments/classifier-graph-embedding-helper-source-fixture-e343.txt`, `.ax/experiments/classifier-graph-embedding-helper-proposed-label-none-e344.json`, `.ax/experiments/classifier-graph-embedding-helper-proposed-label-none-e344.txt`, `.ax/experiments/classifier-graph-embedding-helper-min-nearest-similarity-e345.json`, `.ax/experiments/classifier-graph-embedding-helper-min-nearest-similarity-e345.txt`, `.ax/experiments/classifier-graph-embedding-helper-threshold-none-e346.json`, `.ax/experiments/classifier-graph-embedding-helper-threshold-none-e346.txt`, `.ax/experiments/classifier-graph-embedding-helper-min-seed-count-e347.json`, `.ax/experiments/classifier-graph-embedding-helper-min-seed-count-e347.txt`, `.ax/experiments/classifier-graph-embedding-helper-min-positive-recall-e348.json`, `.ax/experiments/classifier-graph-embedding-helper-min-positive-recall-e348.txt`
+
+Result:
+
+- `classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_hard_negative_candidate --status=accepted --nearest-fixture=session-section-chunks/approval-alright-go` returned 4 embedding-helper facts.
+- Every returned embedding-helper fact includes `session-section-chunks/approval-alright-go` in `nearest_neighbors`.
+- Text output shows `filter nearest fixture: session-section-chunks/approval-alright-go`.
+- Text output shows `results operations/guarded/changed/lifecycle/helper/evidence: 0/0/0/0/4/1`.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_hard_negative_candidate --status=accepted --nearest-fixture=session-section-chunks/approval-alright-go --out=.ax/experiments/classifier-graph-embedding-helper-nearest-fixture-e342.json --json > .ax/experiments/classifier-graph-embedding-helper-nearest-fixture-e342.stdout
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_hard_negative_candidate --status=accepted --nearest-fixture=session-section-chunks/approval-alright-go > .ax/experiments/classifier-graph-embedding-helper-nearest-fixture-e342.txt || true
+python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-nearest-fixture-e342.json >/dev/null
+rg -n "filter nearest fixture: session-section-chunks/approval-alright-go|filter status: accepted|results operations/guarded/changed/lifecycle|nearest: session-section-chunks/approval-alright-go|\"nearest_fixture_id\"" .ax/experiments/classifier-graph-embedding-helper-nearest-fixture-e342.txt .ax/experiments/classifier-graph-embedding-helper-nearest-fixture-e342.json
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 78 passed.
+
+## E341 - Filter Helper Graph Facts By Status
+
+Question:
+
+- Can services query only accepted or rejected embedding-helper hard-negative facts without loading every hard-negative fact and checking review status client-side?
+
+Change:
+
+- Added optional `status` to classifier graph-health queries.
+- Threaded `--status=<status>` through `classifiers package-operations --graph-health` and the `classifiers graph` shortcut.
+- Text output now renders `filter status`.
+- Embedding-helper graph fact result sets now filter by fact review status.
+- Status-constrained evidence queries intentionally exclude lifecycle facts, because lifecycle facts do not carry a review status field.
+
+Evidence:
+
+- `.ax/experiments/classifier-graph-embedding-helper-status-accepted-e341.json`
+- `.ax/experiments/classifier-graph-embedding-helper-status-accepted-e341.txt`
+
+Result:
+
+- `classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_hard_negative_candidate --status=accepted` returned 12 embedding-helper facts.
+- Every returned embedding-helper fact has `status=accepted`.
+- Text output shows `filter status: accepted`.
+- Text output shows `results operations/guarded/changed/lifecycle/helper/evidence: 0/0/0/0/12/1`.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_hard_negative_candidate --status=accepted --out=.ax/experiments/classifier-graph-embedding-helper-status-accepted-e341.json --json > .ax/experiments/classifier-graph-embedding-helper-status-accepted-e341.stdout
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_hard_negative_candidate --status=accepted > .ax/experiments/classifier-graph-embedding-helper-status-accepted-e341.txt || true
+python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-status-accepted-e341.json >/dev/null
+rg -n "filter status: accepted|filter fact kind: embedding_helper_hard_negative_candidate|results operations/guarded/changed/lifecycle|status=accepted|\"status\": \"accepted\"" .ax/experiments/classifier-graph-embedding-helper-status-accepted-e341.txt .ax/experiments/classifier-graph-embedding-helper-status-accepted-e341.json
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 78 passed.
+
+## E340 - Filter Graph Facts By Fact Kind
+
+Question:
+
+- Can services isolate one graph fact family, such as embedding-helper hard-negative candidates, without loading all helper facts and filtering by `kind` client-side?
+
+Change:
+
+- Added optional `fact_kind` to classifier graph-health queries.
+- Threaded `--fact-kind=<kind>` through `classifiers package-operations --graph-health` and the `classifiers graph` shortcut.
+- Text output now renders `filter fact kind`.
+- Lifecycle and embedding-helper graph fact result sets now filter by fact `kind`.
+- Lifecycle fact outputs now include the graph fact kind for audit symmetry with helper facts.
+
+Evidence:
+
+- `.ax/experiments/classifier-graph-embedding-helper-fact-kind-e340.json`
+- `.ax/experiments/classifier-graph-embedding-helper-fact-kind-e340.txt`
+
+Result:
+
+- `classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_hard_negative_candidate` returned 15 embedding-helper facts.
+- Every returned embedding-helper fact has `kind=embedding_helper_hard_negative_candidate`.
+- Text output shows `filter fact kind: embedding_helper_hard_negative_candidate`.
+- Text output shows `results operations/guarded/changed/lifecycle/helper/evidence: 0/0/0/0/15/1`.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_hard_negative_candidate --out=.ax/experiments/classifier-graph-embedding-helper-fact-kind-e340.json --json > .ax/experiments/classifier-graph-embedding-helper-fact-kind-e340.stdout
+bun src/cli/index.ts classifiers graph --mode=embedding-helper --source-kind=embedding_helper_review_projection --fact-kind=embedding_helper_hard_negative_candidate > .ax/experiments/classifier-graph-embedding-helper-fact-kind-e340.txt || true
+python3 -m json.tool .ax/experiments/classifier-graph-embedding-helper-fact-kind-e340.json >/dev/null
+rg -n "filter fact kind: embedding_helper_hard_negative_candidate|filter source kind: embedding_helper_review_projection|results operations/guarded/changed/lifecycle|embedding_helper_hard_negative_candidate|embedding helper facts" .ax/experiments/classifier-graph-embedding-helper-fact-kind-e340.txt .ax/experiments/classifier-graph-embedding-helper-fact-kind-e340.json
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 78 passed.
+
+## E339 - Filter Graph Facts By Source Kind
+
+Question:
+
+- Can services isolate lifecycle graph facts from one graph projection source before applying subject, predicate, and value filters?
+
+Change:
+
+- Added optional `source_kind` to classifier graph-health queries.
+- Threaded `--source-kind=<kind>` through `classifiers package-operations --graph-health` and the `classifiers graph` shortcut.
+- Text output now renders `filter source kind`.
+- Lifecycle and embedding-helper graph fact result sets now filter by fact `source_kind`, and returned fact rows carry that source kind for audit.
+
+Evidence:
+
+- `.ax/experiments/classifier-graph-lifecycle-source-kind-review-pipeline-e339.json`
+- `.ax/experiments/classifier-graph-lifecycle-source-kind-review-pipeline-e339.txt`
+
+Result:
+
+- `classifiers graph --mode=lifecycle --source-kind=classifier_package_execution --subject=classifier_lifecycle:workflow_candidate_review_pipeline --predicate=review_pipeline_output_artifact_paths --value-contains=workflow-candidate-review-pipeline-lifecycle-cli-e331.md` returned exactly one lifecycle fact.
+- The returned fact has `source_kind=classifier_package_execution`.
+- The returned fact subject is `classifier_lifecycle:workflow_candidate_review_pipeline`.
+- The returned fact predicate is `review_pipeline_output_artifact_paths`.
+- The returned value includes `.ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md`.
+- Text output shows `filter source kind: classifier_package_execution`.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph --mode=lifecycle --source-kind=classifier_package_execution --subject=classifier_lifecycle:workflow_candidate_review_pipeline --predicate=review_pipeline_output_artifact_paths --value-contains=workflow-candidate-review-pipeline-lifecycle-cli-e331.md --out=.ax/experiments/classifier-graph-lifecycle-source-kind-review-pipeline-e339.json --json > .ax/experiments/classifier-graph-lifecycle-source-kind-review-pipeline-e339.stdout
+bun src/cli/index.ts classifiers graph --mode=lifecycle --source-kind=classifier_package_execution --subject=classifier_lifecycle:workflow_candidate_review_pipeline --predicate=review_pipeline_output_artifact_paths --value-contains=workflow-candidate-review-pipeline-lifecycle-cli-e331.md > .ax/experiments/classifier-graph-lifecycle-source-kind-review-pipeline-e339.txt || true
+python3 -m json.tool .ax/experiments/classifier-graph-lifecycle-source-kind-review-pipeline-e339.json >/dev/null
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 78 passed.
+
+## E338 - Filter Graph Facts By Value Content
+
+Question:
+
+- Can services find array-valued lifecycle facts that mention a specific argv token or output artifact path without loading every matching predicate and scanning JSON client-side?
+
+Change:
+
+- Added optional `value_contains` to classifier graph-health queries.
+- Threaded `--value-contains=<text>` through `classifiers package-operations --graph-health` and the `classifiers graph` shortcut.
+- Text output now renders `filter value contains`.
+- Lifecycle, evidence, and embedding-helper graph queries now apply the value filter across string, scalar, array, and object fact values.
+
+Evidence:
+
+- `.ax/experiments/classifier-graph-lifecycle-value-filter-review-pipeline-e338.json`
+- `.ax/experiments/classifier-graph-lifecycle-value-filter-review-pipeline-e338.txt`
+
+Result:
+
+- `classifiers graph --mode=lifecycle --subject=classifier_lifecycle:workflow_candidate_review_pipeline --predicate=review_pipeline_output_artifact_paths --value-contains=workflow-candidate-review-pipeline-lifecycle-cli-e331.md` returned exactly one lifecycle fact.
+- The returned fact predicate is `review_pipeline_output_artifact_paths`.
+- The returned value contains:
+  - `.ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md`
+  - `.ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.json`
+- Text output shows `filter value contains: workflow-candidate-review-pipeline-lifecycle-cli-e331.md`.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph --mode=lifecycle --subject=classifier_lifecycle:workflow_candidate_review_pipeline --predicate=review_pipeline_output_artifact_paths --value-contains=workflow-candidate-review-pipeline-lifecycle-cli-e331.md --out=.ax/experiments/classifier-graph-lifecycle-value-filter-review-pipeline-e338.json --json > .ax/experiments/classifier-graph-lifecycle-value-filter-review-pipeline-e338.stdout
+bun src/cli/index.ts classifiers graph --mode=lifecycle --subject=classifier_lifecycle:workflow_candidate_review_pipeline --predicate=review_pipeline_output_artifact_paths --value-contains=workflow-candidate-review-pipeline-lifecycle-cli-e331.md > .ax/experiments/classifier-graph-lifecycle-value-filter-review-pipeline-e338.txt || true
+python3 -m json.tool .ax/experiments/classifier-graph-lifecycle-value-filter-review-pipeline-e338.json >/dev/null
+rg -n "filter value contains: workflow-candidate-review-pipeline-lifecycle-cli-e331.md|filter subject: classifier_lifecycle:workflow_candidate_review_pipeline|review_pipeline_output_artifact_paths|results operations/guarded/changed/lifecycle" .ax/experiments/classifier-graph-lifecycle-value-filter-review-pipeline-e338.txt .ax/experiments/classifier-graph-lifecycle-value-filter-review-pipeline-e338.json
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 78 passed.
+- `bun run typecheck`: passed with existing Effect advisory messages.
+- `git diff --check`: passed.
+
+## E337 - Filter Lifecycle Graph Queries By Subject
+
+Question:
+
+- Can services inspect a lifecycle fact for one lifecycle node and one predicate without post-filtering graph-health output?
+
+Change:
+
+- Added optional `subject` to classifier graph-health queries.
+- Threaded `--subject=<graph-id>` through `classifiers package-operations --graph-health` and the `classifiers graph` shortcut.
+- Text output now renders `filter subject`.
+- Lifecycle and evidence modes now filter lifecycle and helper facts by subject.
+
+Evidence:
+
+- `.ax/experiments/classifier-graph-lifecycle-subject-predicate-review-pipeline-e337.json`
+- `.ax/experiments/classifier-graph-lifecycle-subject-predicate-review-pipeline-e337.txt`
+
+Result:
+
+- `classifiers graph --mode=lifecycle --subject=classifier_lifecycle:workflow_candidate_review_pipeline --predicate=review_pipeline_prepared_argv` returned exactly one lifecycle fact.
+- The returned fact subject is `classifier_lifecycle:workflow_candidate_review_pipeline`.
+- The returned fact predicate is `review_pipeline_prepared_argv`.
+- The returned argv value has 13 entries.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph --mode=lifecycle --subject=classifier_lifecycle:workflow_candidate_review_pipeline --predicate=review_pipeline_prepared_argv --out=.ax/experiments/classifier-graph-lifecycle-subject-predicate-review-pipeline-e337.json --json > .ax/experiments/classifier-graph-lifecycle-subject-predicate-review-pipeline-e337.stdout
+bun src/cli/index.ts classifiers graph --mode=lifecycle --subject=classifier_lifecycle:workflow_candidate_review_pipeline --predicate=review_pipeline_prepared_argv > .ax/experiments/classifier-graph-lifecycle-subject-predicate-review-pipeline-e337.txt || true
+python3 -m json.tool .ax/experiments/classifier-graph-lifecycle-subject-predicate-review-pipeline-e337.json >/dev/null
+rg -n "filter subject: classifier_lifecycle:workflow_candidate_review_pipeline|filter predicate: review_pipeline_prepared_argv|review_pipeline_prepared_argv|results operations/guarded/changed/lifecycle" .ax/experiments/classifier-graph-lifecycle-subject-predicate-review-pipeline-e337.txt .ax/experiments/classifier-graph-lifecycle-subject-predicate-review-pipeline-e337.json
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 78 passed.
+- `bun run typecheck`: passed with existing Effect advisory messages.
+- `git diff --check`: passed.
+
+## E336 - Filter Lifecycle Graph Queries By Predicate
+
+Question:
+
+- Can services inspect one lifecycle graph fact, such as `review_pipeline_prepared_argv`, without dumping every classifier lifecycle fact?
+
+Change:
+
+- Added optional `predicate` to classifier graph-health queries.
+- Threaded `--predicate=<name>` through `classifiers package-operations --graph-health` and the `classifiers graph` shortcut.
+- Text output now renders `filter predicate`.
+- Lifecycle and evidence modes now filter lifecycle facts by predicate; embedding-helper/evidence queries use the same predicate filter for helper facts.
+
+Evidence:
+
+- `.ax/experiments/classifier-package-execution-apply-review-pipeline-predicate-e336.json`
+- `.ax/experiments/classifier-graph-lifecycle-predicate-review-pipeline-e336.json`
+- `.ax/experiments/classifier-graph-lifecycle-predicate-review-pipeline-e336.txt`
+
+Result:
+
+- Applied `588` graph write statements to local SurrealDB.
+- `classifiers graph --mode=lifecycle --predicate=review_pipeline_prepared_argv` returned exactly one lifecycle fact.
+- The returned `review_pipeline_prepared_argv` fact contains 13 argv entries.
+- Text output shows `filter predicate: review_pipeline_prepared_argv`.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers package-operations --apply-write-plan --out=.ax/experiments/classifier-package-execution-apply-review-pipeline-predicate-e336.json --json > .ax/experiments/classifier-package-execution-apply-review-pipeline-predicate-e336.stdout
+bun src/cli/index.ts classifiers graph --mode=lifecycle --predicate=review_pipeline_prepared_argv --out=.ax/experiments/classifier-graph-lifecycle-predicate-review-pipeline-e336.json --json > .ax/experiments/classifier-graph-lifecycle-predicate-review-pipeline-e336.stdout
+bun src/cli/index.ts classifiers graph --mode=lifecycle --predicate=review_pipeline_prepared_argv > .ax/experiments/classifier-graph-lifecycle-predicate-review-pipeline-e336.txt || true
+python3 -m json.tool .ax/experiments/classifier-package-execution-apply-review-pipeline-predicate-e336.json >/dev/null
+python3 -m json.tool .ax/experiments/classifier-graph-lifecycle-predicate-review-pipeline-e336.json >/dev/null
+rg -n "filter predicate: review_pipeline_prepared_argv|review_pipeline_prepared_argv|results operations/guarded/changed/lifecycle" .ax/experiments/classifier-graph-lifecycle-predicate-review-pipeline-e336.txt .ax/experiments/classifier-graph-lifecycle-predicate-review-pipeline-e336.json
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 78 passed.
+- `bun run typecheck`: passed with existing Effect advisory messages.
+- `git diff --check`: passed.
+
+## E335 - Project Review Pipeline Command Artifacts Into Graph Facts
+
+Question:
+
+- Can the review-pipeline prepared argv and output artifact checks become classifier lifecycle graph facts so graph queries and Surreal write plans can reason about the exact command and handoff artifacts?
+
+Change:
+
+- Extended classifier lifecycle fact projection to support string-array fact values.
+- Projected `review_pipeline_prepared_argv`, `review_pipeline_output_artifact_paths`, `review_pipeline_checked_artifact_paths`, and `review_pipeline_checked_artifact_states` from review-pipeline lifecycle status.
+- Surreal write plans now persist those array facts as JSON strings in `classifier_graph_fact.value_json`.
+
+Evidence:
+
+- `.ax/experiments/classifier-package-execution-facts-review-pipeline-artifacts-e335.json`
+- `.ax/experiments/classifier-package-execution-write-plan-review-pipeline-artifacts-e335.json`
+- `.ax/experiments/classifier-package-execution-write-plan-review-pipeline-artifacts-e335.txt`
+
+Result:
+
+- The E335 fact projection includes:
+  - `review_pipeline_prepared_argv`
+  - `review_pipeline_output_artifact_paths`
+  - `review_pipeline_checked_artifact_paths`
+  - `review_pipeline_checked_artifact_states=["review_brief:ok","readiness_report:ok"]`
+- The E335 write plan includes `UPSERT classifier_graph_fact` statements for all four array facts.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers package-operations --facts --out=.ax/experiments/classifier-package-execution-facts-review-pipeline-artifacts-e335.json --json > .ax/experiments/classifier-package-execution-facts-review-pipeline-artifacts-e335.stdout
+bun src/cli/index.ts classifiers package-operations --write-plan --out=.ax/experiments/classifier-package-execution-write-plan-review-pipeline-artifacts-e335.json --json > .ax/experiments/classifier-package-execution-write-plan-review-pipeline-artifacts-e335.txt
+python3 -m json.tool .ax/experiments/classifier-package-execution-facts-review-pipeline-artifacts-e335.json >/dev/null
+python3 -m json.tool .ax/experiments/classifier-package-execution-write-plan-review-pipeline-artifacts-e335.json >/dev/null
+rg -n "review_pipeline_prepared_argv|review_pipeline_output_artifact_paths|review_pipeline_checked_artifact_paths|review_pipeline_checked_artifact_states" .ax/experiments/classifier-package-execution-facts-review-pipeline-artifacts-e335.json .ax/experiments/classifier-package-execution-write-plan-review-pipeline-artifacts-e335.json .ax/experiments/classifier-package-execution-write-plan-review-pipeline-artifacts-e335.txt
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 78 passed.
+- `bun run typecheck`: passed with existing Effect advisory messages.
+
+## E334 - Carry Review Pipeline Command Artifacts In Lifecycle Insights
+
+Question:
+
+- Can lifecycle insights carry the executable review-pipeline argv and output artifact checks so services can act on the routing summary without reopening the raw lifecycle report?
+
+Change:
+
+- Extended review-pipeline lifecycle loading to preserve `prepared.argv`, prepared output artifacts, and checked output artifacts.
+- Added those fields to the derived `review_pipeline` lifecycle insight summary.
+- Human-readable lifecycle output now renders the prepared argv, expected output artifacts, and checked artifact states.
+
+Evidence:
+
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-artifacts-e334.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-artifacts-e334.txt`
+
+Result:
+
+- The E334 JSON artifact reports `review_pipeline.prepared_argv` with 13 argv entries.
+- The E334 JSON artifact reports two output artifacts:
+  - `review_brief=.ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md`
+  - `readiness_report=.ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.json`
+- The E334 text artifact renders the prepared argv and checked artifacts as `ok`.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifier-lifecycle-insight-review-pipeline-artifacts-e334.json --json > .ax/experiments/classifier-lifecycle-insight-review-pipeline-artifacts-e334.stdout
+bun src/cli/index.ts classifiers lifecycle > .ax/experiments/classifier-lifecycle-insight-review-pipeline-artifacts-e334.txt || true
+python3 -m json.tool .ax/experiments/classifier-lifecycle-insight-review-pipeline-artifacts-e334.json >/dev/null
+rg -n "argv:|output artifacts:|checked artifacts:|review pipeline:" .ax/experiments/classifier-lifecycle-insight-review-pipeline-artifacts-e334.txt
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 78 passed.
+- `bun run typecheck`: passed with existing Effect advisory messages.
+
+## E333 - Surface Review Pipeline Lifecycle In Lifecycle Insights
+
+Question:
+
+- Can the classifier lifecycle insight report summarize review-pipeline lifecycle state so services do not have to scrape raw workflow status or graph facts to decide the next review action?
+
+Change:
+
+- Added a derived `review_pipeline` summary to classifier lifecycle insight reports.
+- The summary includes lifecycle status, command kind, prepared status, output verification status, execute/continue booleans, checked/missing artifact counts, failures, and a `next_action`.
+- Lifecycle insight blocking items now include missing review-pipeline outputs, cannot-continue lifecycle state, and lifecycle failures.
+- Human-readable lifecycle output now renders the review-pipeline command, output verification, execute/continue state, and next action.
+
+Evidence:
+
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-e333.json`
+- `.ax/experiments/classifier-lifecycle-insight-review-pipeline-e333.txt`
+
+Result:
+
+- The E333 JSON artifact includes `review_pipeline.next_action=continue_review_pipeline`.
+- The E333 text artifact renders:
+  - `review pipeline: verified_after_execution`
+  - `command: stamp_review_provenance prepared=ready_to_execute`
+  - `outputs: verified checked=2 missing=0`
+  - `execute/continue: yes/yes next=continue_review_pipeline`
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers lifecycle --out=.ax/experiments/classifier-lifecycle-insight-review-pipeline-e333.json --json > .ax/experiments/classifier-lifecycle-insight-review-pipeline-e333.stdout
+bun src/cli/index.ts classifiers lifecycle > .ax/experiments/classifier-lifecycle-insight-review-pipeline-e333.txt || true
+rg -n "review pipeline:|command:|outputs:|execute/continue:|decision:" .ax/experiments/classifier-lifecycle-insight-review-pipeline-e333.json .ax/experiments/classifier-lifecycle-insight-review-pipeline-e333.txt
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts`: 78 passed.
+- `bun run typecheck`: passed with existing Effect advisory messages.
+
+## E332 - Project Review Pipeline Lifecycle Into Graph Facts
+
+Question:
+
+- Can review pipeline lifecycle reports become classifier lifecycle graph facts so graph health/lifecycle queries can reason about command readiness and output verification?
+
+Change:
+
+- Extended classifier lifecycle status loading to pick up sibling `workflow-candidate-review-pipeline-lifecycle-current.json` artifacts.
+- Projected review pipeline lifecycle reports into a `classifier_lifecycle:workflow_candidate_review_pipeline` node.
+- Added `classifier_lifecycle_status` facts for lifecycle status, command kind, prepared status, output verification status, execute/continue booleans, and output artifact counts.
+- Surreal write plans now include the review pipeline lifecycle node, evidence edge, and graph facts.
+
+Evidence:
+
+- `.ax/experiments/classifier-package-execution-facts-review-pipeline-lifecycle-e332.json`
+- `.ax/experiments/classifier-package-execution-write-plan-review-pipeline-lifecycle-e332.json`
+- `.ax/experiments/classifier-package-execution-write-plan-review-pipeline-lifecycle-e332.txt`
+
+Result:
+
+- The fact projection includes `classifier_lifecycle:workflow_candidate_review_pipeline`.
+- The write plan includes `UPSERT classifier_graph_fact` statements for:
+  - `review_pipeline_lifecycle_status=verified_after_execution`
+  - `review_pipeline_prepared_status=ready_to_execute`
+  - `review_pipeline_output_verification_status=verified`
+  - `review_pipeline_can_execute=true`
+  - `review_pipeline_can_continue=true`
+  - `review_pipeline_checked_artifact_count=2`
+
+Commands:
+
+```sh
+cp .ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.json .ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json
+bun src/cli/index.ts classifiers package-operations --facts --out=.ax/experiments/classifier-package-execution-facts-review-pipeline-lifecycle-e332.json --json
+bun src/cli/index.ts classifiers package-operations --write-plan --out=.ax/experiments/classifier-package-execution-write-plan-review-pipeline-lifecycle-e332.json --json > .ax/experiments/classifier-package-execution-write-plan-review-pipeline-lifecycle-e332.txt
+rg -n "workflow_candidate_review_pipeline|review_pipeline_lifecycle_status|review_pipeline_output_verification_status|review_pipeline_can_continue|review_pipeline_checked_artifact_count" .ax/experiments/classifier-package-execution-facts-review-pipeline-lifecycle-e332.json .ax/experiments/classifier-package-execution-write-plan-review-pipeline-lifecycle-e332.json .ax/experiments/classifier-package-execution-write-plan-review-pipeline-lifecycle-e332.txt
+```
+
+Verification:
+
+- `bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts`: 56 passed.
+- `bun run typecheck`: passed with existing Effect advisory messages.
+- `git diff --check`: passed.
+
+## E331 - Expose Review Pipeline Lifecycle In Workflow CLI
+
+Question:
+
+- Can `workflow-candidates --review-coverage` expose the service lifecycle report directly so review services can debug command preparation and output verification without scraping text?
+- Can lifecycle input binding be inspected without mutating the review pack provenance?
+
+Change:
+
+- Added `withWorkflowCandidateReviewPipelineLifecycle` to attach `ClassifierReviewPipelineService.commandLifecycle` reports to coverage review output.
+- Added `--review-pipeline-lifecycle` and `--review-pipeline-verify-outputs` to the workflow candidates CLI.
+- Added `--review-pipeline-reviewer` and `--review-pipeline-reviewed-at` as debug-only lifecycle input bindings, separate from the mutating `--review-provenance-*` stamp flags.
+- Rendered lifecycle status, prepared argv, output verification status, and missing required outputs in text output.
+
+Evidence:
+
+- `.ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.txt`
+
+Result:
+
+- The E331 JSON artifact includes `review_pipeline_lifecycle.schema=ax.classifier_review_pipeline_lifecycle.v1`.
+- The lifecycle report prepared the provenance stamp command with `--review-provenance-reviewer=necmett` and `--review-provenance-reviewed-at=2026-05-31T12:34:56.000Z`.
+- Filesystem output verification returned `verified` for the generated review brief and readiness report.
+
+Commands:
+
+```sh
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-provenance-e269.jsonl .ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.jsonl
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-provenance-e269.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md --review-pipeline-reviewer=necmett --review-pipeline-reviewed-at=2026-05-31T12:34:56.000Z --review-pipeline-lifecycle --review-pipeline-verify-outputs --out=.ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.json --json > .ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.txt
+rg -n "review_pipeline_lifecycle|status|prepared argv|review-provenance-reviewer|missing_required_outputs|ready_to_execute" .ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.json .ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.txt
+bun test src/cli/classifiers-workflow-candidates.test.ts src/classifiers/review-pipeline-service.test.ts
+bun test src/classifiers/review-pipeline-service.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+git diff --check
+```
+
+Verification:
+
+- `bun test src/cli/classifiers-workflow-candidates.test.ts src/classifiers/review-pipeline-service.test.ts`: 71 passed.
+- `bun test src/classifiers/review-pipeline-service.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts`: 125 passed.
+- `bun run typecheck`: passed with existing Effect advisory messages.
+- `git diff --check`: passed.
+
+## E330 - Add Filesystem Output Verifier Helper
+
+Question:
+
+- Can FX services use the lifecycle report against real generated output files
+  without each caller writing its own filesystem adapter?
+
+Implementation:
+
+- Added `nodeFileOutputVerifier`.
+- The helper implements `ClassifierReviewPipelineOutputVerifier` using local
+  filesystem existence checks wrapped in `Effect.sync`.
+- Added tests that verify lifecycle reports against real temp files for both
+  present and missing output artifacts.
+
+Commands:
+
+```sh
+bun test src/classifiers/review-pipeline-service.test.ts
+bun run typecheck
+python3 -m json.tool .ax/experiments/workflow-candidate-review-pipeline-node-file-verifier-e330.json >/dev/null
+rg -n "schema|verified_after_execution|missing_required_outputs|can_continue|missing_required_artifacts|exists" .ax/experiments/workflow-candidate-review-pipeline-node-file-verifier-e330.json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-pipeline-node-file-verifier-e330.json`
+
+Results:
+
+- A lifecycle report with an existing output file returns
+  `status=verified_after_execution`, `can_continue=true`, and
+  `exists=true` for the checked artifact.
+- A lifecycle report with a missing output file returns
+  `status=missing_required_outputs`, `can_continue=false`,
+  `exists=false`, and the exact missing required artifact path.
+
+Decision:
+
+- E330 gives services a production-usable verifier adapter while preserving the
+  injectable verifier boundary for tests and non-filesystem executors.
+
+Verification:
+
+```sh
+bun test src/classifiers/review-pipeline-service.test.ts
+bun run typecheck
+```
+
+## E329 - Add Review Pipeline Lifecycle Report
+
+Question:
+
+- Can FX services consume one lifecycle object that shows whether a review
+  pipeline command is blocked, ready for an external executor, or verified after
+  execution?
+
+Implementation:
+
+- Added `ClassifierReviewPipelineService.commandLifecycle`.
+- The helper composes `commandSummary`, `prepareCommand`, and optional
+  `verifyOutputArtifacts`.
+- It returns a versioned lifecycle report with summary, prepared command,
+  optional output verification, `can_execute`, `can_continue`, and a next
+  action.
+- The method intentionally does not spawn shell processes; an executor remains
+  responsible for running prepared argv and then calling back with output
+  verification.
+
+Commands:
+
+```sh
+bun test src/classifiers/review-pipeline-service.test.ts
+bun run typecheck
+python3 -m json.tool .ax/experiments/workflow-candidate-review-pipeline-lifecycle-e329.json >/dev/null
+rg -n "schema|blocked_before_execution|ready_to_execute|verified_after_execution|can_execute|can_continue|output_verification" .ax/experiments/workflow-candidate-review-pipeline-lifecycle-e329.json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-pipeline-lifecycle-e329.json`
+
+Results:
+
+- Missing required inputs produce `status=blocked_before_execution`,
+  `can_execute=false`, and no output verification.
+- Valid inputs without a verifier produce `status=ready_to_execute`,
+  `can_execute=true`, and `can_continue=false` until an executor runs the argv.
+- Valid inputs with successful output verification produce
+  `status=verified_after_execution`, `can_execute=true`, and
+  `can_continue=true`.
+
+Decision:
+
+- E329 gives FX services one debuggable lifecycle report while keeping process
+  execution outside this service boundary.
+
+Verification:
+
+```sh
+bun test src/classifiers/review-pipeline-service.test.ts
+bun run typecheck
+```
+
+## E328 - Verify Review Pipeline Outputs In Service
+
+Question:
+
+- Can FX services verify command output artifacts after execution without
+  re-parsing CLI text or duplicating output-check rules?
+
+Implementation:
+
+- Added `ClassifierReviewPipelineService.verifyOutputArtifacts`.
+- The helper accepts a prepared command and an Effectful `exists(path)` checker.
+- It returns a versioned output-verification report with per-artifact existence,
+  missing required artifact paths, `can_continue`, and a next action.
+- The method supports verified, missing-required-output, and no-output-artifact
+  states.
+
+Commands:
+
+```sh
+bun test src/classifiers/review-pipeline-service.test.ts
+bun run typecheck
+python3 -m json.tool .ax/experiments/workflow-candidate-review-pipeline-output-verification-e328.json >/dev/null
+rg -n "schema|prepared_status|verified|missing_required_outputs|missing_required_artifacts|can_continue" .ax/experiments/workflow-candidate-review-pipeline-output-verification-e328.json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-pipeline-output-verification-e328.json`
+
+Results:
+
+- A prepared provenance command with the expected readiness report present
+  returns `status=verified` and `can_continue=true`.
+- The same prepared command with the output missing returns
+  `status=missing_required_outputs`, `can_continue=false`, and the exact missing
+  required artifact path.
+
+Decision:
+
+- E328 closes the service-side command lifecycle for this slice: services can
+  summarize, prepare, and verify review pipeline commands with structured
+  objects instead of scraping CLI text.
+
+Verification:
+
+```sh
+bun test src/classifiers/review-pipeline-service.test.ts
+bun run typecheck
+```
+
+## E327 - Prepare Review Pipeline Commands In Service
+
+Question:
+
+- Can FX services bind pipeline command inputs and get structured execution
+  readiness without re-implementing placeholder replacement or validation?
+
+Implementation:
+
+- Added `ClassifierReviewPipelineService.prepareCommand`.
+- The helper validates required pipeline inputs by `value_kind`.
+- It binds valid values into `review_pipeline_command_argv` using the existing
+  input binding metadata.
+- It returns a versioned prepared-command object with `ready_to_execute`,
+  `missing_inputs`, or `invalid_inputs` status.
+- It preserves output artifact and output-check metadata for executor services.
+
+Commands:
+
+```sh
+bun test src/classifiers/review-pipeline-service.test.ts
+bun run typecheck
+python3 -m json.tool .ax/experiments/workflow-candidate-review-pipeline-prepare-command-e327.json >/dev/null
+rg -n "schema|missing_inputs|invalid_inputs|ready_to_execute|--review-provenance-reviewer=codex|not-a-date" .ax/experiments/workflow-candidate-review-pipeline-prepare-command-e327.json
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-pipeline-prepare-command-e327.json`
+
+Results:
+
+- Missing input values produce `status=missing_inputs` and list the missing
+  required input names.
+- Invalid values produce `status=invalid_inputs` with per-input reasons.
+- Valid provenance values produce `status=ready_to_execute`,
+  `can_execute=true`, and argv with reviewer/reviewed-at placeholders replaced.
+- Unboundable input bindings are kept non-executable as `missing_command`
+  rather than silently returning a partially prepared argv.
+
+Decision:
+
+- E327 moves the review pipeline service beyond passive summaries: services can
+  now prepare executable argv safely from the CLI-derived binding metadata while
+  preserving review/promotion gates.
+
+Verification:
+
+```sh
+bun test src/classifiers/review-pipeline-service.test.ts
+bun test src/classifiers/review-pipeline-service.test.ts src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E326 - Add Review Pipeline Service Helper
+
+Question:
+
+- Can FX services consume the review pipeline command state through a small
+  Effect service helper instead of scraping CLI-rendered text?
+
+Implementation:
+
+- Added `ClassifierReviewPipelineService`.
+- Added `commandSummary`, which converts coverage-review pipeline fields into
+  a compact service-facing command routing summary.
+- The summary preserves command status, can-execute, next action, blockers,
+  input bindings, argv, output artifacts, and output checks.
+- Added focused service tests for executable repair commands and blocked
+  provenance-stamping commands.
+
+Commands:
+
+```sh
+bun test src/classifiers/review-pipeline-service.test.ts
+bun run typecheck
+python3 -m json.tool .ax/experiments/workflow-candidate-review-pipeline-service-helper-e326.json >/dev/null
+rg -n "schema|command_can_execute|command_next_action|requires_inputs|ready_to_execute|missing_pipeline_inputs" .ax/experiments/workflow-candidate-review-pipeline-service-helper-e326.json .ax/experiments/workflow-candidate-review-pipeline-service-helper-e326.test.stdout
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-pipeline-service-helper-e326.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-service-helper-e326.test.stdout`
+
+Results:
+
+- Ready repair commands summarize as `command_status=ready_to_execute` and
+  `command_can_execute=true`.
+- Provenance-stamping commands with placeholders summarize as
+  `command_status=requires_inputs`, `command_can_execute=false`, and
+  `command_blockers=[missing_pipeline_inputs]`.
+- The service summary carries the exact input bindings and output checks that
+  executor services need for debug/test routing.
+
+Decision:
+
+- E326 creates the first FX-service helper around the review pipeline command
+  state while keeping human review promotion gated.
+
+Verification:
+
+```sh
+bun test src/classifiers/review-pipeline-service.test.ts
+bun run typecheck
+```
+
+## E325 - Add Pipeline Command Next Action
+
+Question:
+
+- Can FX services see the exact command-execution next action without
+  translating command status and blockers themselves?
+
+Implementation:
+
+- Added `review_pipeline_command_next_action` to coverage review readiness.
+- `requires_inputs` now maps to binding required pipeline inputs.
+- `ready_to_execute` maps to executing the pipeline command and capturing
+  output artifacts.
+- Text and markdown outputs render the command next action beside status,
+  can-execute, and blockers.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-command-next-action-e325.md --out=.ax/experiments/workflow-candidate-review-pipeline-command-next-action-e325.bootstrap.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-command-next-action-e325.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-command-next-action-e325.md --out=.ax/experiments/workflow-candidate-review-pipeline-command-next-action-e325.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-command-next-action-e325.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-command-next-action-e325.md --out=.ax/experiments/workflow-candidate-review-pipeline-command-next-action-e325.txt
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-command-next-action-repair-e325.md --out=.ax/experiments/workflow-candidate-review-pipeline-command-next-action-repair-e325.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-command-next-action-repair-e325.md --out=.ax/experiments/workflow-candidate-review-pipeline-command-next-action-repair-e325.txt
+rg -n "review_pipeline_command_next_action|coverage review pipeline command next action|Pipeline command next action|Bind required pipeline inputs|Execute the pipeline command" .ax/experiments/workflow-candidate-review-pipeline-command-next-action-e325.json .ax/experiments/workflow-candidate-review-pipeline-command-next-action-e325.stdout .ax/experiments/workflow-candidate-review-pipeline-command-next-action-e325.text.stdout .ax/experiments/workflow-candidate-review-pipeline-command-next-action-e325.md .ax/experiments/workflow-candidate-review-pipeline-command-next-action-repair-e325.json .ax/experiments/workflow-candidate-review-pipeline-command-next-action-repair-e325.stdout .ax/experiments/workflow-candidate-review-pipeline-command-next-action-repair-e325.text.stdout .ax/experiments/workflow-candidate-review-pipeline-command-next-action-repair-e325.md
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-pipeline-command-next-action-e325.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-command-next-action-e325.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-command-next-action-e325.text.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-command-next-action-e325.md`
+- `.ax/experiments/workflow-candidate-review-pipeline-command-next-action-repair-e325.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-command-next-action-repair-e325.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-command-next-action-repair-e325.text.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-command-next-action-repair-e325.md`
+
+Results:
+
+- Provenance readiness reports `Bind required pipeline inputs before executing
+  the command.`
+- Missing-rationale repair readiness reports `Execute the pipeline command and
+  capture its output artifacts.`
+- JSON, text, and markdown outputs expose the same executor-facing action.
+
+Decision:
+
+- E325 gives FX services an executable instruction for the current command
+  state, while preserving status, can-execute, blockers, and remediations for
+  auditing.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports reviewed coverage rows without rationale"
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports coverage review pack impact"
+```
+
+## E324 - Add Pipeline Command Can Execute
+
+Question:
+
+- Can FX services decide whether to execute the current pipeline command
+  without re-encoding command-status enum rules?
+
+Implementation:
+
+- Added `review_pipeline_command_can_execute` to coverage review readiness.
+- The boolean is true only when `review_pipeline_command_status` is
+  `ready_to_execute`.
+- Text and markdown outputs render the boolean as `yes` or `no` beside the
+  command status and blockers.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-command-can-execute-e324.md --out=.ax/experiments/workflow-candidate-review-pipeline-command-can-execute-e324.bootstrap.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-command-can-execute-e324.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-command-can-execute-e324.md --out=.ax/experiments/workflow-candidate-review-pipeline-command-can-execute-e324.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-command-can-execute-e324.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-command-can-execute-e324.md --out=.ax/experiments/workflow-candidate-review-pipeline-command-can-execute-e324.txt
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-command-can-execute-repair-e324.md --out=.ax/experiments/workflow-candidate-review-pipeline-command-can-execute-repair-e324.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-command-can-execute-repair-e324.md --out=.ax/experiments/workflow-candidate-review-pipeline-command-can-execute-repair-e324.txt
+rg -n "review_pipeline_command_can_execute|coverage review pipeline command can execute|Pipeline command can execute" .ax/experiments/workflow-candidate-review-pipeline-command-can-execute-e324.json .ax/experiments/workflow-candidate-review-pipeline-command-can-execute-e324.stdout .ax/experiments/workflow-candidate-review-pipeline-command-can-execute-e324.text.stdout .ax/experiments/workflow-candidate-review-pipeline-command-can-execute-e324.md .ax/experiments/workflow-candidate-review-pipeline-command-can-execute-repair-e324.json .ax/experiments/workflow-candidate-review-pipeline-command-can-execute-repair-e324.stdout .ax/experiments/workflow-candidate-review-pipeline-command-can-execute-repair-e324.text.stdout .ax/experiments/workflow-candidate-review-pipeline-command-can-execute-repair-e324.md
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-pipeline-command-can-execute-e324.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-command-can-execute-e324.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-command-can-execute-e324.text.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-command-can-execute-e324.md`
+- `.ax/experiments/workflow-candidate-review-pipeline-command-can-execute-repair-e324.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-command-can-execute-repair-e324.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-command-can-execute-repair-e324.text.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-command-can-execute-repair-e324.md`
+
+Results:
+
+- Provenance readiness reports
+  `review_pipeline_command_can_execute=false` while reviewer and reviewed-at
+  inputs are still placeholders.
+- Missing-rationale repair readiness reports
+  `review_pipeline_command_can_execute=true` for its ready repair command.
+- Text and markdown outputs render `coverage review pipeline command can
+  execute: no/yes` and `Pipeline command can execute: no/yes`.
+
+Decision:
+
+- E324 gives FX services a direct execution gate while preserving status,
+  blockers, and blocker details for explanation.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports reviewed coverage rows without rationale"
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports coverage review pack impact"
+```
+
+## E323 - Add Pipeline Output Check Next Action
+
+Question:
+
+- Can FX services know what to do with pending pipeline output verification
+  without inferring behavior from the status enum?
+
+Implementation:
+
+- Added `review_pipeline_command_output_check_next_action` to coverage review
+  readiness.
+- The next action says to execute the pipeline command and verify every
+  required output artifact path when checks are pending.
+- Text and markdown outputs render the next action beside the aggregate status
+  and detailed output checks.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-output-next-action-e323.md --out=.ax/experiments/workflow-candidate-review-pipeline-output-next-action-e323.bootstrap.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-output-next-action-e323.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-output-next-action-e323.md --out=.ax/experiments/workflow-candidate-review-pipeline-output-next-action-e323.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-output-next-action-e323.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-output-next-action-e323.md --out=.ax/experiments/workflow-candidate-review-pipeline-output-next-action-e323.txt
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-output-next-action-repair-e323.md --out=.ax/experiments/workflow-candidate-review-pipeline-output-next-action-repair-e323.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-output-next-action-repair-e323.md --out=.ax/experiments/workflow-candidate-review-pipeline-output-next-action-repair-e323.txt
+rg -n "review_pipeline_command_output_check_next_action|coverage review pipeline command output check next action|Pipeline command output check next action|Execute the pipeline command|No pipeline output" .ax/experiments/workflow-candidate-review-pipeline-output-next-action-e323.json .ax/experiments/workflow-candidate-review-pipeline-output-next-action-e323.stdout .ax/experiments/workflow-candidate-review-pipeline-output-next-action-e323.text.stdout .ax/experiments/workflow-candidate-review-pipeline-output-next-action-e323.md .ax/experiments/workflow-candidate-review-pipeline-output-next-action-repair-e323.json .ax/experiments/workflow-candidate-review-pipeline-output-next-action-repair-e323.stdout .ax/experiments/workflow-candidate-review-pipeline-output-next-action-repair-e323.text.stdout .ax/experiments/workflow-candidate-review-pipeline-output-next-action-repair-e323.md
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-pipeline-output-next-action-e323.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-output-next-action-e323.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-output-next-action-e323.text.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-output-next-action-e323.md`
+- `.ax/experiments/workflow-candidate-review-pipeline-output-next-action-repair-e323.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-output-next-action-repair-e323.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-output-next-action-repair-e323.text.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-output-next-action-repair-e323.md`
+
+Results:
+
+- Provenance readiness reports the output check next action with pending
+  `review_brief@10` and `readiness_report@11` checks.
+- Missing-rationale repair readiness reports the same action with pending
+  `review_brief@8` and `readiness_report@9` checks.
+- JSON, text, and markdown outputs all expose the executor-facing action.
+
+Decision:
+
+- E323 keeps output verification service-friendly by pairing the status with an
+  explicit action string.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports coverage review pack impact"
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports reviewed coverage rows without rationale"
+```
+
+## E322 - Add Pipeline Output Check Status
+
+Question:
+
+- Can FX services route pipeline output verification from one aggregate status
+  instead of scanning every artifact check row?
+
+Implementation:
+
+- Added `review_pipeline_command_output_check_status` to coverage review
+  readiness.
+- The status is `pending_execution` whenever pipeline output artifact checks
+  exist, and `no_output_artifacts` otherwise.
+- Text and markdown outputs render the aggregate status beside the detailed
+  artifact check rows.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-output-status-e322.md --out=.ax/experiments/workflow-candidate-review-pipeline-output-status-e322.bootstrap.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-output-status-e322.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-output-status-e322.md --out=.ax/experiments/workflow-candidate-review-pipeline-output-status-e322.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-output-status-e322.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-output-status-e322.md --out=.ax/experiments/workflow-candidate-review-pipeline-output-status-e322.txt
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-output-status-repair-e322.md --out=.ax/experiments/workflow-candidate-review-pipeline-output-status-repair-e322.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-output-status-repair-e322.md --out=.ax/experiments/workflow-candidate-review-pipeline-output-status-repair-e322.txt
+rg -n "review_pipeline_command_output_check_status|coverage review pipeline command output check status|Pipeline command output check status|pending_execution|no_output_artifacts" .ax/experiments/workflow-candidate-review-pipeline-output-status-e322.json .ax/experiments/workflow-candidate-review-pipeline-output-status-e322.stdout .ax/experiments/workflow-candidate-review-pipeline-output-status-e322.text.stdout .ax/experiments/workflow-candidate-review-pipeline-output-status-e322.md .ax/experiments/workflow-candidate-review-pipeline-output-status-repair-e322.json .ax/experiments/workflow-candidate-review-pipeline-output-status-repair-e322.stdout .ax/experiments/workflow-candidate-review-pipeline-output-status-repair-e322.text.stdout .ax/experiments/workflow-candidate-review-pipeline-output-status-repair-e322.md
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-pipeline-output-status-e322.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-output-status-e322.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-output-status-e322.text.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-output-status-e322.md`
+- `.ax/experiments/workflow-candidate-review-pipeline-output-status-repair-e322.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-output-status-repair-e322.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-output-status-repair-e322.text.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-output-status-repair-e322.md`
+
+Results:
+
+- Provenance readiness reports
+  `review_pipeline_command_output_check_status=pending_execution` with
+  pending checks for `review_brief@10` and `readiness_report@11`.
+- Missing-rationale repair readiness reports the same aggregate status with
+  pending checks for `review_brief@8` and `readiness_report@9`.
+- Text and markdown outputs expose the status directly for service routing.
+
+Decision:
+
+- E322 gives FX services a single verification-routing field while preserving
+  detailed per-artifact checks for the executor.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports coverage review pack impact"
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports reviewed coverage rows without rationale"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E321 - Add Pipeline Output Artifact Checks
+
+Question:
+
+- Can FX services see the post-execution checks they should run for pipeline
+  command output artifacts?
+
+Implementation:
+
+- Added `review_pipeline_command_output_artifact_checks` to coverage review
+  readiness.
+- Each output artifact now gets a pending `file_exists_after_execution` check.
+- Check rows include `kind`, `path`, `argv_index`, `check`, `status`, and
+  `required_for_command_success`.
+- Text and markdown output render compact output check summaries.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-output-checks-e321.md --out=.ax/experiments/workflow-candidate-review-pipeline-output-checks-e321.bootstrap.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-output-checks-e321.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-output-checks-e321.md --out=.ax/experiments/workflow-candidate-review-pipeline-output-checks-e321.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-output-checks-e321.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-output-checks-e321.md --out=.ax/experiments/workflow-candidate-review-pipeline-output-checks-e321.txt
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-output-checks-repair-e321.md --out=.ax/experiments/workflow-candidate-review-pipeline-output-checks-repair-e321.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-output-checks-repair-e321.md --out=.ax/experiments/workflow-candidate-review-pipeline-output-checks-repair-e321.txt
+rg -n "review_pipeline_command_output_artifact_checks|file_exists_after_execution|pending_execution|coverage review pipeline command output checks|Pipeline command output checks" .ax/experiments/workflow-candidate-review-pipeline-output-checks-e321.json .ax/experiments/workflow-candidate-review-pipeline-output-checks-e321.stdout .ax/experiments/workflow-candidate-review-pipeline-output-checks-e321.text.stdout .ax/experiments/workflow-candidate-review-pipeline-output-checks-e321.md .ax/experiments/workflow-candidate-review-pipeline-output-checks-repair-e321.json .ax/experiments/workflow-candidate-review-pipeline-output-checks-repair-e321.stdout .ax/experiments/workflow-candidate-review-pipeline-output-checks-repair-e321.text.stdout .ax/experiments/workflow-candidate-review-pipeline-output-checks-repair-e321.md
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-pipeline-output-checks-e321.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-output-checks-e321.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-output-checks-e321.text.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-output-checks-e321.md`
+- `.ax/experiments/workflow-candidate-review-pipeline-output-checks-repair-e321.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-output-checks-repair-e321.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-output-checks-repair-e321.text.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-output-checks-repair-e321.md`
+
+Results:
+
+- Missing-provenance readiness reports pending file-existence checks for
+  `review_brief@10` and `readiness_report@11`.
+- Missing-rationale repair readiness reports pending file-existence checks for
+  `review_brief@8` and `readiness_report@9`.
+- Text and markdown outputs render the pending check summaries.
+
+Decision:
+
+- E321 gives FX services a machine-readable post-execution checklist for the
+  stage-specific pipeline command without probing the filesystem inside the
+  readiness builder.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports reviewed coverage rows without rationale"
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports coverage review pack impact"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E320 - Add Pipeline Output Artifact Indexes
+
+Question:
+
+- Can FX services locate pipeline command output arguments by index without
+  re-parsing argv?
+
+Implementation:
+
+- Added `argv_index` to `review_pipeline_command_output_artifacts`.
+- Added `argv_value_prefix` to `review_pipeline_command_output_artifacts`.
+- Text and markdown output now render output artifacts as `kind@index=path`.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-output-indexes-e320.md --out=.ax/experiments/workflow-candidate-review-pipeline-output-indexes-e320.bootstrap.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-output-indexes-e320.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-output-indexes-e320.md --out=.ax/experiments/workflow-candidate-review-pipeline-output-indexes-e320.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-output-indexes-e320.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-output-indexes-e320.md --out=.ax/experiments/workflow-candidate-review-pipeline-output-indexes-e320.txt
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-output-indexes-repair-e320.md --out=.ax/experiments/workflow-candidate-review-pipeline-output-indexes-repair-e320.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-output-indexes-repair-e320.md --out=.ax/experiments/workflow-candidate-review-pipeline-output-indexes-repair-e320.txt
+rg -n "review_pipeline_command_output_artifacts|argv_index|argv_value_prefix|coverage review pipeline command output artifacts|Pipeline command output artifacts" .ax/experiments/workflow-candidate-review-pipeline-output-indexes-e320.json .ax/experiments/workflow-candidate-review-pipeline-output-indexes-e320.stdout .ax/experiments/workflow-candidate-review-pipeline-output-indexes-e320.text.stdout .ax/experiments/workflow-candidate-review-pipeline-output-indexes-e320.md .ax/experiments/workflow-candidate-review-pipeline-output-indexes-repair-e320.json .ax/experiments/workflow-candidate-review-pipeline-output-indexes-repair-e320.stdout .ax/experiments/workflow-candidate-review-pipeline-output-indexes-repair-e320.text.stdout .ax/experiments/workflow-candidate-review-pipeline-output-indexes-repair-e320.md
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-pipeline-output-indexes-e320.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-output-indexes-e320.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-output-indexes-e320.text.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-output-indexes-e320.md`
+- `.ax/experiments/workflow-candidate-review-pipeline-output-indexes-repair-e320.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-output-indexes-repair-e320.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-output-indexes-repair-e320.text.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-output-indexes-repair-e320.md`
+
+Results:
+
+- Missing-provenance readiness reports `review_brief` at argv index 10 and
+  `readiness_report` at argv index 11.
+- Missing-rationale repair readiness reports `review_brief` at argv index 8 and
+  `readiness_report` at argv index 9.
+- JSON includes `argv_value_prefix` for each output artifact.
+- Text and markdown outputs render indexed output artifact summaries.
+
+Decision:
+
+- E320 gives FX services the same argv-position precision for output artifacts
+  that E315 added for input bindings.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports reviewed coverage rows without rationale"
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports coverage review pack impact"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E319 - Add Pipeline Command Output Artifacts
+
+Question:
+
+- Can FX services know which files the next review pipeline command is expected
+  to write, without parsing shell arguments?
+
+Implementation:
+
+- Added `review_pipeline_command_output_artifacts` to coverage review readiness.
+- Output artifact rows include `kind`, `path`, `argv_flag`, and
+  `required_for_handoff`.
+- The artifact extractor derives output paths from structured argv flags:
+  `--coverage-review-brief`, `--review-facts`, `--review-write-plan`, and
+  `--out`.
+- Text and markdown output render compact output artifact summaries.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-outputs-e319.md --out=.ax/experiments/workflow-candidate-review-pipeline-outputs-e319.bootstrap.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-outputs-e319.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-outputs-e319.md --out=.ax/experiments/workflow-candidate-review-pipeline-outputs-e319.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-outputs-e319.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-outputs-e319.md --out=.ax/experiments/workflow-candidate-review-pipeline-outputs-e319.txt
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-outputs-repair-e319.md --out=.ax/experiments/workflow-candidate-review-pipeline-outputs-repair-e319.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-outputs-repair-e319.md --out=.ax/experiments/workflow-candidate-review-pipeline-outputs-repair-e319.txt
+rg -n "review_pipeline_command_output_artifacts|coverage review pipeline command output artifacts|Pipeline command output artifacts|review_brief|readiness_report" .ax/experiments/workflow-candidate-review-pipeline-outputs-e319.json .ax/experiments/workflow-candidate-review-pipeline-outputs-e319.stdout .ax/experiments/workflow-candidate-review-pipeline-outputs-e319.text.stdout .ax/experiments/workflow-candidate-review-pipeline-outputs-e319.md .ax/experiments/workflow-candidate-review-pipeline-outputs-repair-e319.json .ax/experiments/workflow-candidate-review-pipeline-outputs-repair-e319.stdout .ax/experiments/workflow-candidate-review-pipeline-outputs-repair-e319.text.stdout .ax/experiments/workflow-candidate-review-pipeline-outputs-repair-e319.md
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-pipeline-outputs-e319.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-outputs-e319.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-outputs-e319.text.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-outputs-e319.md`
+- `.ax/experiments/workflow-candidate-review-pipeline-outputs-repair-e319.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-outputs-repair-e319.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-outputs-repair-e319.text.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-outputs-repair-e319.md`
+
+Results:
+
+- Missing-provenance readiness reports `review_brief` and `readiness_report`
+  output artifacts for the provenance-stamping command.
+- Missing-rationale repair readiness reports `review_brief` and
+  `readiness_report` output artifacts for the repair command.
+- Text and markdown outputs render the same output artifact summaries.
+
+Decision:
+
+- E319 gives FX services enough structured output-path metadata to verify the
+  next pipeline command produced the files it promised, without scraping argv.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports reviewed coverage rows without rationale"
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports coverage review pack impact"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E318 - Add Pipeline Command Blockers
+
+Question:
+
+- Can FX services route the next review pipeline command from explicit blocker
+  reasons instead of inferring them from command status?
+
+Implementation:
+
+- Added `review_pipeline_command_blockers` to coverage review readiness.
+- Added `review_pipeline_command_blocker_details` with counts and remediation.
+- `requires_inputs` maps to `missing_pipeline_inputs`.
+- `unavailable` maps to `missing_pipeline_command`.
+- `ready_to_execute` has no pipeline command blockers.
+- Text and markdown output render blocker summaries and details.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-blockers-e318.md --out=.ax/experiments/workflow-candidate-review-pipeline-blockers-e318.bootstrap.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-blockers-e318.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-blockers-e318.md --out=.ax/experiments/workflow-candidate-review-pipeline-blockers-e318.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-blockers-e318.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-blockers-e318.md --out=.ax/experiments/workflow-candidate-review-pipeline-blockers-e318.txt
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-blockers-repair-e318.md --out=.ax/experiments/workflow-candidate-review-pipeline-blockers-repair-e318.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-blockers-repair-e318.md --out=.ax/experiments/workflow-candidate-review-pipeline-blockers-repair-e318.txt
+rg -n "review_pipeline_command_blockers|review_pipeline_command_blocker_details|coverage review pipeline command blockers|Pipeline command blockers" .ax/experiments/workflow-candidate-review-pipeline-blockers-e318.json .ax/experiments/workflow-candidate-review-pipeline-blockers-e318.stdout .ax/experiments/workflow-candidate-review-pipeline-blockers-e318.text.stdout .ax/experiments/workflow-candidate-review-pipeline-blockers-e318.md .ax/experiments/workflow-candidate-review-pipeline-blockers-repair-e318.json .ax/experiments/workflow-candidate-review-pipeline-blockers-repair-e318.stdout .ax/experiments/workflow-candidate-review-pipeline-blockers-repair-e318.text.stdout .ax/experiments/workflow-candidate-review-pipeline-blockers-repair-e318.md
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-pipeline-blockers-e318.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-blockers-e318.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-blockers-e318.text.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-blockers-e318.md`
+- `.ax/experiments/workflow-candidate-review-pipeline-blockers-repair-e318.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-blockers-repair-e318.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-blockers-repair-e318.text.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-blockers-repair-e318.md`
+
+Results:
+
+- Provenance-stamping readiness reports
+  `review_pipeline_command_blockers=["missing_pipeline_inputs"]`.
+- Provenance blocker details report `count=2` with the remediation to bind
+  required inputs.
+- Repair readiness reports no command blockers because the command is ready to
+  execute.
+- Text and markdown outputs render both the blocked and ready states.
+
+Decision:
+
+- E318 makes the review pipeline easier for FX services to execute safely:
+  routing can key off explicit command blockers and remediation details instead
+  of deriving failure causes from `review_pipeline_command_status`.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports reviewed coverage rows without rationale"
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports coverage review pack impact"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E317 - Add Pipeline Input Value Kinds
+
+Question:
+
+- Can services validate stage-specific pipeline input values before binding them
+  into argv?
+
+Implementation:
+
+- Added `value_kind` to `review_pipeline_input_bindings`.
+- `reviewer` is marked `nonempty_string`.
+- `reviewed_at` is marked `iso_datetime`.
+- Text and markdown output include the value kind in each binding summary.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-value-kinds-e317.md --out=.ax/experiments/workflow-candidate-review-pipeline-value-kinds-e317.bootstrap.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-value-kinds-e317.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-value-kinds-e317.md --out=.ax/experiments/workflow-candidate-review-pipeline-value-kinds-e317.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-value-kinds-e317.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-value-kinds-e317.md --out=.ax/experiments/workflow-candidate-review-pipeline-value-kinds-e317.txt
+rg -n "value_kind|nonempty_string|iso_datetime|coverage review pipeline input bindings|Pipeline input bindings" .ax/experiments/workflow-candidate-review-pipeline-value-kinds-e317.json .ax/experiments/workflow-candidate-review-pipeline-value-kinds-e317.stdout .ax/experiments/workflow-candidate-review-pipeline-value-kinds-e317.text.stdout .ax/experiments/workflow-candidate-review-pipeline-value-kinds-e317.md
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-pipeline-value-kinds-e317.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-value-kinds-e317.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-value-kinds-e317.text.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-value-kinds-e317.md`
+
+Results:
+
+- JSON readiness reports `value_kind: nonempty_string` for `reviewer`.
+- JSON readiness reports `value_kind: iso_datetime` for `reviewed_at`.
+- Text and markdown binding summaries render both value kinds.
+
+Decision:
+
+- E317 gives FX services enough metadata to render/validate provenance-stamping
+  inputs before replacing argv placeholders.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports coverage review pack impact"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E316 - Add Pipeline Command Status
+
+Question:
+
+- Can services tell whether the next stage-specific pipeline command is ready
+  to execute or still needs input binding?
+
+Implementation:
+
+- Added `review_pipeline_command_status` to coverage review readiness.
+- Status values are `unavailable`, `requires_inputs`, and `ready_to_execute`.
+- Text and markdown output render the command status next to the pipeline stage
+  and next action.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-status-e316.md --out=.ax/experiments/workflow-candidate-review-pipeline-status-e316.bootstrap.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-status-e316.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-status-e316.md --out=.ax/experiments/workflow-candidate-review-pipeline-status-e316.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-status-e316.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-status-e316.md --out=.ax/experiments/workflow-candidate-review-pipeline-status-e316.txt
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-status-repair-e316.md --out=.ax/experiments/workflow-candidate-review-pipeline-status-repair-e316.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-status-repair-e316.md --out=.ax/experiments/workflow-candidate-review-pipeline-status-repair-e316.txt
+rg -n "review_pipeline_command_status|coverage review pipeline command status|Pipeline command status" .ax/experiments/workflow-candidate-review-pipeline-status-e316.json .ax/experiments/workflow-candidate-review-pipeline-status-e316.stdout .ax/experiments/workflow-candidate-review-pipeline-status-e316.text.stdout .ax/experiments/workflow-candidate-review-pipeline-status-e316.md .ax/experiments/workflow-candidate-review-pipeline-status-repair-e316.json .ax/experiments/workflow-candidate-review-pipeline-status-repair-e316.stdout .ax/experiments/workflow-candidate-review-pipeline-status-repair-e316.text.stdout .ax/experiments/workflow-candidate-review-pipeline-status-repair-e316.md
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-pipeline-status-e316.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-status-e316.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-status-e316.text.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-status-e316.md`
+- `.ax/experiments/workflow-candidate-review-pipeline-status-repair-e316.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-status-repair-e316.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-status-repair-e316.text.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-status-repair-e316.md`
+
+Results:
+
+- Missing-provenance readiness reports `review_pipeline_command_status` as
+  `requires_inputs`.
+- Missing-rationale repair readiness reports `review_pipeline_command_status`
+  as `ready_to_execute`.
+- Text and markdown outputs render both statuses.
+
+Decision:
+
+- E316 lets FX services route the next pipeline step without inferring
+  executability from command kind, required-input length, or placeholder
+  presence.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports coverage review pack impact|reports reviewed coverage rows without rationale"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E315 - Add Pipeline Binding Indexes
+
+Question:
+
+- Can services replace required input placeholders in the next pipeline argv by
+  index without scanning argv tokens?
+
+Implementation:
+
+- Added `argv_index` and `argv_value_prefix` to
+  `review_pipeline_input_bindings`.
+- Binding indexes are derived from the actual `review_pipeline_command_argv`
+  array.
+- Text and markdown output now render the index alongside the input, flag, and
+  placeholder.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-binding-indexes-e315.md --out=.ax/experiments/workflow-candidate-review-pipeline-binding-indexes-e315.bootstrap.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-binding-indexes-e315.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-binding-indexes-e315.md --out=.ax/experiments/workflow-candidate-review-pipeline-binding-indexes-e315.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-binding-indexes-e315.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-binding-indexes-e315.md --out=.ax/experiments/workflow-candidate-review-pipeline-binding-indexes-e315.txt
+rg -n "argv_index|argv_value_prefix|coverage review pipeline input bindings|Pipeline input bindings" .ax/experiments/workflow-candidate-review-pipeline-binding-indexes-e315.json .ax/experiments/workflow-candidate-review-pipeline-binding-indexes-e315.stdout .ax/experiments/workflow-candidate-review-pipeline-binding-indexes-e315.text.stdout .ax/experiments/workflow-candidate-review-pipeline-binding-indexes-e315.md
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-pipeline-binding-indexes-e315.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-binding-indexes-e315.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-binding-indexes-e315.text.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-binding-indexes-e315.md`
+
+Results:
+
+- Missing-provenance readiness reports reviewer binding at argv index `8` with
+  prefix `--review-provenance-reviewer=`.
+- Missing-provenance readiness reports reviewed-at binding at argv index `9`
+  with prefix `--review-provenance-reviewed-at=`.
+- Text and markdown outputs render `reviewer@8` and `reviewed_at@9`.
+
+Decision:
+
+- E315 lets an FX service bind command inputs with
+  `argv[binding.argv_index] = binding.argv_value_prefix + value`, avoiding both
+  shell parsing and argv scanning.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports coverage review pack impact"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E314 - Add Pipeline Input Bindings
+
+Question:
+
+- Can services bind user-provided values into a stage-specific pipeline argv
+  without parsing flags or placeholder strings?
+
+Implementation:
+
+- Added `review_pipeline_input_bindings` to coverage review readiness.
+- `stamp_review_provenance` now maps `reviewer` to
+  `--review-provenance-reviewer:<reviewer>` and `reviewed_at` to
+  `--review-provenance-reviewed-at:<reviewed-at-iso>`.
+- Text and markdown outputs render the same bindings next to required inputs and
+  argv.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-bindings-e314.md --out=.ax/experiments/workflow-candidate-review-pipeline-bindings-e314.bootstrap.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-bindings-e314.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-bindings-e314.md --out=.ax/experiments/workflow-candidate-review-pipeline-bindings-e314.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-bindings-e314.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-bindings-e314.md --out=.ax/experiments/workflow-candidate-review-pipeline-bindings-e314.txt
+rg -n "review_pipeline_input_bindings|coverage review pipeline input bindings|Pipeline input bindings" .ax/experiments/workflow-candidate-review-pipeline-bindings-e314.json .ax/experiments/workflow-candidate-review-pipeline-bindings-e314.stdout .ax/experiments/workflow-candidate-review-pipeline-bindings-e314.text.stdout .ax/experiments/workflow-candidate-review-pipeline-bindings-e314.md
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-pipeline-bindings-e314.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-bindings-e314.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-bindings-e314.text.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-bindings-e314.md`
+
+Results:
+
+- Missing-provenance readiness reports `review_pipeline_input_bindings` with
+  `reviewer` and `reviewed_at` bindings.
+- Text output reports `coverage review pipeline input bindings:
+  reviewer=--review-provenance-reviewer:<reviewer>,
+  reviewed_at=--review-provenance-reviewed-at:<reviewed-at-iso>`.
+- Markdown brief reports `Pipeline input bindings` with the same two mappings.
+
+Decision:
+
+- E314 gives FX services enough structured metadata to substitute required
+  values into the next pipeline argv without parsing the shell command or
+  scanning argv tokens.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports coverage review pack impact"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E313 - Add Pipeline Command Argv
+
+Question:
+
+- Can services execute the next stage-specific review pipeline command without
+  parsing a shell command string?
+
+Implementation:
+
+- Added `review_pipeline_command_argv` to coverage review readiness.
+- Refactored stage-specific review pipeline command construction so argv arrays
+  are built first and the existing shell command string is rendered from them.
+- Text and markdown outputs render the argv list next to the command kind,
+  required inputs, and shell command.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-argv-e313.md --out=.ax/experiments/workflow-candidate-review-pipeline-argv-e313.bootstrap.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-argv-e313.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-argv-e313.md --out=.ax/experiments/workflow-candidate-review-pipeline-argv-e313.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-argv-e313.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-argv-e313.md --out=.ax/experiments/workflow-candidate-review-pipeline-argv-e313.txt
+rg -n "review_pipeline_command_argv|coverage review pipeline command argv|Pipeline command argv" .ax/experiments/workflow-candidate-review-pipeline-argv-e313.json .ax/experiments/workflow-candidate-review-pipeline-argv-e313.stdout .ax/experiments/workflow-candidate-review-pipeline-argv-e313.text.stdout .ax/experiments/workflow-candidate-review-pipeline-argv-e313.md
+```
+
+Artifacts:
+
+- `.ax/experiments/workflow-candidate-review-pipeline-argv-e313.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-argv-e313.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-argv-e313.text.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-argv-e313.md`
+
+Results:
+
+- Missing-provenance readiness reports `review_pipeline_command_argv` as an
+  argv array beginning with `bun`, `src/cli/index.ts`, `classifiers`,
+  `workflow-candidates`.
+- Text output reports `coverage review pipeline command argv` with pipe-delimited
+  arguments.
+- Markdown brief reports `Pipeline command argv` with each argument rendered as
+  a separate token.
+
+Decision:
+
+- E313 removes shell-string parsing from service execution of the next review
+  pipeline step.
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports coverage review pack impact"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E312 - Add Pipeline Required Inputs
+
+Question:
+- Can services know which values a stage-specific command needs without
+  parsing placeholder tokens from the shell command?
+
+Implementation:
+- Added `review_pipeline_required_inputs` to coverage review readiness.
+- `stamp_review_provenance` reports `reviewer` and `reviewed_at`.
+- Other current command kinds report an empty input list.
+- Text and markdown outputs render the required input list.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-inputs-e312.md --out=.ax/experiments/workflow-candidate-review-pipeline-inputs-e312.bootstrap.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-inputs-e312.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-inputs-e312.md --out=.ax/experiments/workflow-candidate-review-pipeline-inputs-e312.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-inputs-e312.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-inputs-e312.md --out=.ax/experiments/workflow-candidate-review-pipeline-inputs-e312.txt
+rg -n "review_pipeline_required_inputs|coverage review pipeline required inputs|Pipeline required inputs" .ax/experiments/workflow-candidate-review-pipeline-inputs-e312.json .ax/experiments/workflow-candidate-review-pipeline-inputs-e312.stdout .ax/experiments/workflow-candidate-review-pipeline-inputs-e312.text.stdout .ax/experiments/workflow-candidate-review-pipeline-inputs-e312.md
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-pipeline-inputs-e312.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-inputs-e312.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-inputs-e312.text.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-inputs-e312.md`
+
+Results:
+- Missing-provenance readiness reports `review_pipeline_required_inputs` as
+  `["reviewer", "reviewed_at"]`.
+- Text output reports `coverage review pipeline required inputs: reviewer,
+  reviewed_at`.
+- Markdown brief reports `Pipeline required inputs: reviewer, reviewed_at`.
+
+Decision:
+- E312 removes placeholder parsing from pipeline command consumers.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports coverage review pack impact"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E311 - Add Pipeline Command Kind
+
+Question:
+- Can services identify the executable category for the next review pipeline
+  step without parsing the shell command string?
+
+Implementation:
+- Added optional `review_pipeline_command_kind` to coverage review readiness.
+- Command kind values are `repair_review_issues`,
+  `stamp_review_provenance`, and `apply_review_facts`.
+- Text and markdown outputs render the command kind when a pipeline command is
+  available.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-command-kind-e311.md --out=.ax/experiments/workflow-candidate-review-pipeline-command-kind-e311.bootstrap.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-command-kind-e311.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-command-kind-e311.md --out=.ax/experiments/workflow-candidate-review-pipeline-command-kind-e311.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-command-kind-e311.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-command-kind-e311.md --out=.ax/experiments/workflow-candidate-review-pipeline-command-kind-e311.txt
+rg -n "review_pipeline_command_kind|coverage review pipeline command kind|Pipeline command kind|stamp_review_provenance" .ax/experiments/workflow-candidate-review-pipeline-command-kind-e311.json .ax/experiments/workflow-candidate-review-pipeline-command-kind-e311.stdout .ax/experiments/workflow-candidate-review-pipeline-command-kind-e311.text.stdout .ax/experiments/workflow-candidate-review-pipeline-command-kind-e311.md
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-pipeline-command-kind-e311.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-command-kind-e311.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-command-kind-e311.text.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-command-kind-e311.md`
+
+Results:
+- Missing-provenance readiness reports
+  `review_pipeline_command_kind=stamp_review_provenance`.
+- Text output reports the same command kind.
+- Markdown brief reports the same command kind.
+
+Decision:
+- E311 removes command-string parsing from pipeline consumers.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports coverage review pack impact"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E310 - Add Stage-Specific Pipeline Command
+
+Question:
+- Can services execute the next review pipeline step without selecting between
+  repair, provenance stamp, and production apply commands themselves?
+
+Implementation:
+- Added optional `review_pipeline_command` to coverage review readiness.
+- Pipeline command selects the repair command for `needs_review_repair`.
+- Pipeline command selects the provenance stamp command for
+  `needs_review_provenance`.
+- Pipeline command selects the production apply command for
+  `ready_for_production_apply`.
+- Text and markdown outputs render the pipeline command when available.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-command-e310.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-command-e310.md --out=.ax/experiments/workflow-candidate-review-pipeline-command-e310.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-command-e310.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-command-e310.md --out=.ax/experiments/workflow-candidate-review-pipeline-command-e310.txt
+rg -n "review_pipeline_command|coverage review pipeline command|Pipeline command|review-provenance-reviewer|review-provenance-reviewed-at" .ax/experiments/workflow-candidate-review-pipeline-command-e310.json .ax/experiments/workflow-candidate-review-pipeline-command-e310.stdout .ax/experiments/workflow-candidate-review-pipeline-command-e310.text.stdout .ax/experiments/workflow-candidate-review-pipeline-command-e310.md
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-pipeline-command-e310.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-command-e310.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-command-e310.text.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-command-e310.md`
+
+Results:
+- Missing-provenance readiness reports `review_pipeline_command`.
+- JSON/text/markdown all point the pipeline command at the provenance stamping
+  command for `needs_review_provenance`.
+
+Decision:
+- E310 removes another service-side branch: consumers can follow
+  `review_pipeline_stage`, `review_pipeline_next_action`, and
+  `review_pipeline_command` together.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports coverage review pack impact"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E309 - Split Provenance Pipeline Stage
+
+Question:
+- Can services distinguish provenance stamping work from generic review repair
+  when base apply is already ready but production apply is blocked on
+  reviewer/reviewed-at metadata?
+
+Implementation:
+- Added `needs_review_provenance` to `review_pipeline_stage`.
+- Pipeline routing now checks base apply guard before provenance, handoff, and
+  production readiness.
+- Pipeline next action uses the existing provenance next action for this stage.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-provenance-pipeline-stage-e309.md --out=.ax/experiments/workflow-candidate-review-provenance-pipeline-stage-e309.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-provenance-pipeline-stage-e309.md --out=.ax/experiments/workflow-candidate-review-provenance-pipeline-stage-e309.txt
+rg -n "review_pipeline_stage|review_pipeline_next_action|needs_review_provenance|coverage review pipeline stage|coverage review pipeline next action|Pipeline stage|Pipeline next action" .ax/experiments/workflow-candidate-review-provenance-pipeline-stage-e309.json .ax/experiments/workflow-candidate-review-provenance-pipeline-stage-e309.stdout .ax/experiments/workflow-candidate-review-provenance-pipeline-stage-e309.text.stdout .ax/experiments/workflow-candidate-review-provenance-pipeline-stage-e309.md
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-provenance-pipeline-stage-e309.json`
+- `.ax/experiments/workflow-candidate-review-provenance-pipeline-stage-e309.stdout`
+- `.ax/experiments/workflow-candidate-review-provenance-pipeline-stage-e309.text.stdout`
+- `.ax/experiments/workflow-candidate-review-provenance-pipeline-stage-e309.md`
+
+Results:
+- Complete-rationale missing-provenance readiness reports `review_pipeline_stage=needs_review_provenance`.
+- Text output reports the same pipeline stage and provenance next action.
+- Markdown brief reports the same pipeline stage and provenance next action.
+
+Decision:
+- E309 lets services route provenance stamping separately from base review
+  repair queues.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports coverage review pack impact"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E308 - Expose Review Pipeline Stage
+
+Question:
+- Can services route coverage-review work from one field instead of combining
+  review issues, handoff guards, and production apply guards?
+
+Implementation:
+- Added `review_pipeline_stage` to coverage review readiness.
+- Added `review_pipeline_next_action`.
+- Text output prints `coverage review pipeline stage` and next action.
+- Markdown review briefs print `Pipeline stage` and `Pipeline next action`.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-stage-e308.md --out=.ax/experiments/workflow-candidate-review-pipeline-stage-e308.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-pipeline-stage-e308.md --out=.ax/experiments/workflow-candidate-review-pipeline-stage-e308.txt
+rg -n "review_pipeline_stage|review_pipeline_next_action|coverage review pipeline stage|coverage review pipeline next action|Pipeline stage|Pipeline next action" .ax/experiments/workflow-candidate-review-pipeline-stage-e308.json .ax/experiments/workflow-candidate-review-pipeline-stage-e308.stdout .ax/experiments/workflow-candidate-review-pipeline-stage-e308.text.stdout .ax/experiments/workflow-candidate-review-pipeline-stage-e308.md
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-pipeline-stage-e308.json`
+- `.ax/experiments/workflow-candidate-review-pipeline-stage-e308.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-stage-e308.text.stdout`
+- `.ax/experiments/workflow-candidate-review-pipeline-stage-e308.md`
+
+Results:
+- Missing-rationale readiness reports `review_pipeline_stage=needs_review_repair`.
+- Text output reports the same pipeline stage and repair next action.
+- Markdown brief reports the same pipeline stage and repair next action.
+
+Decision:
+- E308 gives FX/review services one explicit routing field for the review
+  pipeline instead of requiring local guard joins.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports reviewed coverage rows without rationale"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E307 - Consolidate Review Issue Scope Summaries
+
+Question:
+- Can services consume one per-scope summary row instead of joining issue,
+  fixture, and candidate count arrays by blocking scope?
+
+Implementation:
+- Added `review_issue_scope_summaries` to coverage review readiness.
+- Text output prints `coverage review issue scope summaries`.
+- Markdown review briefs print `Issue scope summaries`.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-issue-scope-summaries-e307.md --out=.ax/experiments/workflow-candidate-review-issue-scope-summaries-e307.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-issue-scope-summaries-e307.md --out=.ax/experiments/workflow-candidate-review-issue-scope-summaries-e307.txt
+rg -n "review_issue_scope_summaries|coverage review issue scope summaries|Issue scope summaries" .ax/experiments/workflow-candidate-review-issue-scope-summaries-e307.json .ax/experiments/workflow-candidate-review-issue-scope-summaries-e307.stdout .ax/experiments/workflow-candidate-review-issue-scope-summaries-e307.text.stdout .ax/experiments/workflow-candidate-review-issue-scope-summaries-e307.md
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-issue-scope-summaries-e307.json`
+- `.ax/experiments/workflow-candidate-review-issue-scope-summaries-e307.stdout`
+- `.ax/experiments/workflow-candidate-review-issue-scope-summaries-e307.text.stdout`
+- `.ax/experiments/workflow-candidate-review-issue-scope-summaries-e307.md`
+
+Results:
+- Missing-rationale readiness reports `review_issue_scope_summaries`.
+- Text output reports `base_apply issues=1 fixtures=1 candidates=1; production_apply issues=2 fixtures=1 candidates=1`.
+- Markdown brief reports the same consolidated per-scope summaries.
+
+Decision:
+- E307 removes one more service-side join: issue, fixture, and candidate
+  workload are now packaged together per blocking scope.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports reviewed coverage rows without rationale"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E306 - Count Scoped Review Issue Workload
+
+Question:
+- Can services distinguish issue-row volume from distinct fixture/candidate
+  repair workload inside each blocking scope?
+
+Implementation:
+- Added `review_issue_scope_fixture_counts` to coverage review readiness.
+- Added `review_issue_scope_candidate_counts`.
+- Text output prints scoped fixture and candidate workload counts.
+- Markdown review briefs print the same scoped workload counts.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-issue-scope-workload-e306.md --out=.ax/experiments/workflow-candidate-review-issue-scope-workload-e306.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-issue-scope-workload-e306.md --out=.ax/experiments/workflow-candidate-review-issue-scope-workload-e306.txt
+rg -n "review_issue_scope_fixture_counts|review_issue_scope_candidate_counts|coverage review issue scope fixtures|coverage review issue scope candidates|Issue scope fixtures|Issue scope candidates" .ax/experiments/workflow-candidate-review-issue-scope-workload-e306.json .ax/experiments/workflow-candidate-review-issue-scope-workload-e306.stdout .ax/experiments/workflow-candidate-review-issue-scope-workload-e306.text.stdout .ax/experiments/workflow-candidate-review-issue-scope-workload-e306.md
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-issue-scope-workload-e306.json`
+- `.ax/experiments/workflow-candidate-review-issue-scope-workload-e306.stdout`
+- `.ax/experiments/workflow-candidate-review-issue-scope-workload-e306.text.stdout`
+- `.ax/experiments/workflow-candidate-review-issue-scope-workload-e306.md`
+
+Results:
+- JSON readiness reports scoped fixture and candidate counts.
+- Text output reports `base_apply=1, production_apply=1` for both scoped
+  fixtures and scoped candidates.
+- Markdown brief reports the same values.
+
+Decision:
+- E306 lets review services batch by affected fixture/candidate workload,
+  while preserving row-level issue volume for diagnostics.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports reviewed coverage rows without rationale"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E305 - Summarize Review Issues By Blocking Scope
+
+Question:
+- Can services route base-apply and production-apply repair workload without
+  scanning every issue row?
+
+Implementation:
+- Added `review_issue_scope_counts` to coverage review readiness.
+- Text output prints `coverage review issue scope counts`.
+- Markdown review briefs print `Issue scope counts`.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-issue-scope-counts-e305.md --out=.ax/experiments/workflow-candidate-review-issue-scope-counts-e305.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-issue-scope-counts-e305.md --out=.ax/experiments/workflow-candidate-review-issue-scope-counts-e305.txt
+rg -n "review_issue_scope_counts|coverage review issue scope counts|Issue scope counts" .ax/experiments/workflow-candidate-review-issue-scope-counts-e305.json .ax/experiments/workflow-candidate-review-issue-scope-counts-e305.stdout .ax/experiments/workflow-candidate-review-issue-scope-counts-e305.text.stdout .ax/experiments/workflow-candidate-review-issue-scope-counts-e305.md
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-issue-scope-counts-e305.json`
+- `.ax/experiments/workflow-candidate-review-issue-scope-counts-e305.stdout`
+- `.ax/experiments/workflow-candidate-review-issue-scope-counts-e305.text.stdout`
+- `.ax/experiments/workflow-candidate-review-issue-scope-counts-e305.md`
+
+Results:
+- Missing-rationale readiness reports `review_issue_scope_counts`.
+- Text output reports `base_apply=1, production_apply=2`.
+- Markdown brief reports the same scope counts.
+
+Decision:
+- E305 makes review repair routing cheaper for FX services by exposing scoped
+  workload counts directly next to the fixture/candidate issue counts.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports reviewed coverage rows without rationale"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E304 - Add Review Issue Blocking Scope
+
+Question:
+- Can services route review issue rows by which apply gate they block instead
+  of inferring that from the issue name?
+
+Implementation:
+- Added `blocking_scope` to each coverage review issue row.
+- Base apply blockers use `base_apply`.
+- Strict/production provenance blockers use `production_apply`.
+- Text output and markdown review briefs render the same scope.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-issue-scope-e304.md --out=.ax/experiments/workflow-candidate-review-issue-scope-e304.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-issue-scope-e304.md --out=.ax/experiments/workflow-candidate-review-issue-scope-e304.txt
+rg -n 'blocking_scope|scope=|scope=`' .ax/experiments/workflow-candidate-review-issue-scope-e304.json .ax/experiments/workflow-candidate-review-issue-scope-e304.stdout .ax/experiments/workflow-candidate-review-issue-scope-e304.text.stdout .ax/experiments/workflow-candidate-review-issue-scope-e304.md
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-issue-scope-e304.json`
+- `.ax/experiments/workflow-candidate-review-issue-scope-e304.stdout`
+- `.ax/experiments/workflow-candidate-review-issue-scope-e304.text.stdout`
+- `.ax/experiments/workflow-candidate-review-issue-scope-e304.md`
+
+Results:
+- Missing rationale rows report `blocking_scope: base_apply`.
+- Missing reviewer and reviewed-at rows report
+  `blocking_scope: production_apply`.
+- Text and markdown render the same scope next to each issue row.
+
+Decision:
+- E304 removes another service-side inference: repair workers can route base
+  apply blockers separately from production/provenance blockers using the
+  structured issue rows.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports reviewed coverage rows without rationale"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E303 - Verify Clean Review Issues Omit Repair Command
+
+Question:
+- Can services rely on the absence of `review_issue_repair_command` when a
+  provenance-complete review pack has no repair issues?
+
+Implementation:
+- Added regression coverage that a provenance-complete applied review summary
+  reports an empty repair queue and does not render a repair command.
+- Generated a readiness/text/brief artifact from the provenance-stamped review
+  pack to prove the clean queue shape.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-provenance-stamped-e280.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-no-issue-command-e303.md --out=.ax/experiments/workflow-candidate-review-no-issue-command-e303.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-provenance-stamped-e280.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-no-issue-command-e303.md --out=.ax/experiments/workflow-candidate-review-no-issue-command-e303.txt
+rg -n "review_issue_status|review_issue_next_action|review_issue_repair_command|coverage review issue status|coverage review issue next action|coverage review issue repair command|Issue status|Issue next action|Issue repair command" .ax/experiments/workflow-candidate-review-no-issue-command-e303.json .ax/experiments/workflow-candidate-review-no-issue-command-e303.stdout .ax/experiments/workflow-candidate-review-no-issue-command-e303.text.stdout .ax/experiments/workflow-candidate-review-no-issue-command-e303.md
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-no-issue-command-e303.json`
+- `.ax/experiments/workflow-candidate-review-no-issue-command-e303.stdout`
+- `.ax/experiments/workflow-candidate-review-no-issue-command-e303.text.stdout`
+- `.ax/experiments/workflow-candidate-review-no-issue-command-e303.md`
+
+Results:
+- Provenance-stamped readiness reports
+  `review_issue_status: review_repair_complete`.
+- JSON and text report `Review issue repairs are complete.`
+- `review_issue_repair_command` is absent when `review_issue_rows` is empty.
+- Markdown renders `Review Issues` as `_none_`.
+
+Decision:
+- E303 locks down the clean service contract: repair commands are emitted only
+  for non-empty review issue queues, while complete queues use status/next
+  action as the routing signal.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports applied coverage review statement counts"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E302 - Expose Review Issue Repair Command
+
+Question:
+- Can FX/review services get a machine-readable command for rerunning a
+  repaired coverage review issue queue after the markdown brief is edited?
+
+Implementation:
+- Added optional `review_issue_repair_command` to coverage review readiness
+  when review issue rows exist.
+- Text output prints `coverage review issue repair command`.
+- Markdown review briefs print `Issue repair command`.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-issue-repair-command-e302.md --out=.ax/experiments/workflow-candidate-review-issue-repair-command-e302.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-issue-repair-command-e302.md --out=.ax/experiments/workflow-candidate-review-issue-repair-command-e302.txt
+rg -n "review_issue_repair_command|coverage review issue repair command|Issue repair command" .ax/experiments/workflow-candidate-review-issue-repair-command-e302.json .ax/experiments/workflow-candidate-review-issue-repair-command-e302.stdout .ax/experiments/workflow-candidate-review-issue-repair-command-e302.text.stdout .ax/experiments/workflow-candidate-review-issue-repair-command-e302.md
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-issue-repair-command-e302.json`
+- `.ax/experiments/workflow-candidate-review-issue-repair-command-e302.stdout`
+- `.ax/experiments/workflow-candidate-review-issue-repair-command-e302.text.stdout`
+- `.ax/experiments/workflow-candidate-review-issue-repair-command-e302.md`
+
+Results:
+- Missing-rationale readiness reports `review_issue_repair_command`.
+- Text output reports `coverage review issue repair command`.
+- Markdown brief reports `Issue repair command`.
+
+Decision:
+- E302 gives review services an explicit rerun/sync command for issue repair,
+  so they can route the queue without reconstructing CLI flags from separate
+  fields.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports reviewed coverage rows without rationale"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E301 - Count Candidate Groups With Review Repair Issues
+
+Question:
+- Can FX/review services route review repair work by affected candidate group
+  count, not only issue or fixture count?
+
+Implementation:
+- Added `review_issue_candidate_count` to coverage review readiness.
+- Text output prints `coverage review issue candidates`.
+- Markdown review briefs print `Issue candidates`.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-issue-candidates-e301.md --out=.ax/experiments/workflow-candidate-review-issue-candidates-e301.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --out=.ax/experiments/workflow-candidate-review-issue-candidates-e301.txt
+rg -n "review_issue_candidate_count|coverage review issue candidates|Issue candidates" .ax/experiments/workflow-candidate-review-issue-candidates-e301.json .ax/experiments/workflow-candidate-review-issue-candidates-e301.stdout .ax/experiments/workflow-candidate-review-issue-candidates-e301.text.stdout .ax/experiments/workflow-candidate-review-issue-candidates-e301.md
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-issue-candidates-e301.json`
+- `.ax/experiments/workflow-candidate-review-issue-candidates-e301.stdout`
+- `.ax/experiments/workflow-candidate-review-issue-candidates-e301.text.stdout`
+- `.ax/experiments/workflow-candidate-review-issue-candidates-e301.md`
+
+Results:
+- Missing-rationale readiness reports `review_issue_candidate_count: 1`.
+- Text output reports `coverage review issue candidates: 1`.
+- Markdown brief reports `Issue candidates: 1`.
+
+Decision:
+- E301 separates candidate-group scope from issue and fixture workload, making
+  review repair routing clearer for services.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports reviewed coverage rows without rationale"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E300 - Add Review Repair Status
+
+Question:
+- Can services branch directly on whether a coverage review pack still needs
+  repair before apply?
+
+Implementation:
+- Added `review_issue_status` to coverage review readiness:
+  `needs_review_repair` or `review_repair_complete`.
+- Added `review_issue_next_action`.
+- Text output and markdown briefs render both fields.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-repair-status-e300.md --out=.ax/experiments/workflow-candidate-review-repair-status-e300.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --out=.ax/experiments/workflow-candidate-review-repair-status-e300.txt
+rg -n "review_issue_status|review_issue_next_action|coverage review issue status|coverage review issue next action|Issue status|Issue next action|needs_review_repair|Fix review issue rows" .ax/experiments/workflow-candidate-review-repair-status-e300.json .ax/experiments/workflow-candidate-review-repair-status-e300.stdout .ax/experiments/workflow-candidate-review-repair-status-e300.text.stdout .ax/experiments/workflow-candidate-review-repair-status-e300.md
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-repair-status-e300.json`
+- `.ax/experiments/workflow-candidate-review-repair-status-e300.stdout`
+- `.ax/experiments/workflow-candidate-review-repair-status-e300.text.stdout`
+- `.ax/experiments/workflow-candidate-review-repair-status-e300.md`
+
+Results:
+- Missing-rationale readiness reports
+  `review_issue_status=needs_review_repair`.
+- JSON, text, and markdown all report the same next action:
+  `Fix review issue rows before applying reviewed coverage facts.`
+
+Decision:
+- E300 turns the review repair queue into an explicit service gate, so
+  automation does not need to interpret issue counts before deciding whether
+  to route repair work or continue toward apply.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports reviewed coverage rows without rationale"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E299 - Count Fixtures With Review Repair Issues
+
+Question:
+- Can FX/review services route review work by affected fixture count rather
+  than counting issue rows themselves?
+
+Implementation:
+- Added `review_issue_fixture_count` to coverage review readiness.
+- Text output prints `coverage review issue fixtures`.
+- Markdown review briefs print `Issue fixtures`.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-issue-fixtures-e299.md --out=.ax/experiments/workflow-candidate-review-issue-fixtures-e299.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --out=.ax/experiments/workflow-candidate-review-issue-fixtures-e299.txt
+rg -n "review_issue_fixture_count|coverage review issue fixtures|Issue fixtures" .ax/experiments/workflow-candidate-review-issue-fixtures-e299.json .ax/experiments/workflow-candidate-review-issue-fixtures-e299.stdout .ax/experiments/workflow-candidate-review-issue-fixtures-e299.text.stdout .ax/experiments/workflow-candidate-review-issue-fixtures-e299.md
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-issue-fixtures-e299.json`
+- `.ax/experiments/workflow-candidate-review-issue-fixtures-e299.stdout`
+- `.ax/experiments/workflow-candidate-review-issue-fixtures-e299.text.stdout`
+- `.ax/experiments/workflow-candidate-review-issue-fixtures-e299.md`
+
+Results:
+- Missing-rationale readiness reports `review_issue_fixture_count: 1`.
+- Text output reports `coverage review issue fixtures: 1`.
+- Markdown brief reports `Issue fixtures: 1`.
+
+Decision:
+- E299 separates issue volume from fixture workload, making review routing and
+  batching clearer for services while preserving per-issue detail.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports reviewed coverage rows without rationale"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E298 - Show Review Repair Issues In Briefs
+
+Question:
+- Can reviewers see the same fixture-level repair queue in the markdown brief
+  that services see in readiness JSON/text?
+
+Implementation:
+- Added a `## Review Issues` section to coverage review briefs.
+- The section includes compact issue counts plus one fixture-level row per
+  repair issue with status and remediation.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-issues-brief-e298.md --out=.ax/experiments/workflow-candidate-review-issues-brief-e298.json --json
+rg -n "Review Issues|Issue counts|missing_review_rationale|missing_reviewer|missing_reviewed_at|Add rationale text to this reviewed fixture|Add reviewer metadata|Add reviewed-at metadata" .ax/experiments/workflow-candidate-review-issues-brief-e298.md .ax/experiments/workflow-candidate-review-issues-brief-e298.json .ax/experiments/workflow-candidate-review-issues-brief-e298.stdout
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-issues-brief-e298.md`
+- `.ax/experiments/workflow-candidate-review-issues-brief-e298.json`
+- `.ax/experiments/workflow-candidate-review-issues-brief-e298.stdout`
+
+Results:
+- The markdown brief now renders `## Review Issues`.
+- It reports
+  `Issue counts: missing_review_rationale=1, missing_reviewer=1, missing_reviewed_at=1`.
+- It lists exact fixture repair rows and per-issue remediations.
+
+Decision:
+- E298 closes the visibility gap between machine readiness and human review:
+  reviewers no longer need to infer missing rationale/provenance repairs from
+  aggregate summary counts.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports reviewed coverage rows without rationale"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E297 - Summarize Review Repair Issue Counts
+
+Question:
+- Can FX/review services and dashboards see review repair counts directly
+  without counting `review_issue_rows` themselves?
+
+Implementation:
+- Added `review_issue_counts` to coverage review readiness.
+- Text output now prints a compact `coverage review issue counts` line.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --out=.ax/experiments/workflow-candidate-review-issue-counts-e297.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --out=.ax/experiments/workflow-candidate-review-issue-counts-e297.txt
+rg -n "review_issue_counts|coverage review issue counts|missing_review_rationale=1|missing_reviewer=1|missing_reviewed_at=1" .ax/experiments/workflow-candidate-review-issue-counts-e297.json .ax/experiments/workflow-candidate-review-issue-counts-e297.stdout .ax/experiments/workflow-candidate-review-issue-counts-e297.text.stdout
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-issue-counts-e297.json`
+- `.ax/experiments/workflow-candidate-review-issue-counts-e297.stdout`
+- `.ax/experiments/workflow-candidate-review-issue-counts-e297.text.stdout`
+
+Results:
+- Missing-rationale readiness includes `review_issue_counts`.
+- Text output reports
+  `coverage review issue counts: missing_review_rationale=1, missing_reviewer=1, missing_reviewed_at=1`.
+
+Decision:
+- E297 makes review repair load measurable for service routing and reporting
+  without losing the fixture-level queue from E296.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports reviewed coverage rows without rationale"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E296 - Expose Review Repair Issue Rows
+
+Question:
+- Can FX/review services get exact fixture-level review repair rows instead of
+  inferring them from aggregate blocker counts?
+
+Implementation:
+- Added `review_issue_rows` to coverage review readiness.
+- Each row includes fixture id, candidate id, issue, review status, and a
+  specific remediation.
+- Text output now prints the review issue row count plus one line per issue.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --out=.ax/experiments/workflow-candidate-review-issue-rows-e296.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --out=.ax/experiments/workflow-candidate-review-issue-rows-e296.txt
+rg -n "review_issue_rows|coverage review issue rows|coverage review issue:|missing_review_rationale|missing_reviewer|missing_reviewed_at" .ax/experiments/workflow-candidate-review-issue-rows-e296.json .ax/experiments/workflow-candidate-review-issue-rows-e296.stdout .ax/experiments/workflow-candidate-review-issue-rows-e296.text.stdout
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-issue-rows-e296.json`
+- `.ax/experiments/workflow-candidate-review-issue-rows-e296.stdout`
+- `.ax/experiments/workflow-candidate-review-issue-rows-e296.text.stdout`
+
+Results:
+- Missing-rationale readiness includes `review_issue_rows` with exact fixture
+  repair rows for `missing_review_rationale`, `missing_reviewer`, and
+  `missing_reviewed_at`.
+- Text output reports `coverage review issue rows: 3` and prints each fixture
+  id, candidate id, issue, and status.
+
+Decision:
+- E296 gives review automation a direct repair queue for coverage review packs,
+  reducing another markdown/count inference step before real review facts are
+  applied.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports reviewed coverage rows without rationale"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E295 - Expose Provenance Stamp Command In Readiness
+
+Question:
+- Can FX/review services get the reviewer/reviewed-at provenance stamping
+  command from readiness JSON/text instead of scraping the markdown brief?
+
+Implementation:
+- Added optional `review_provenance_stamp_command` to coverage review
+  readiness.
+- The command is emitted only when rendered and synced review brief paths are
+  present.
+- Text output prints the command when available.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-stamp-command-readiness-e295.md --out=.ax/experiments/workflow-candidate-review-coverage-stamp-command-brief-e295.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-stamp-command-readiness-e295.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-stamp-command-readiness-e295.md --out=.ax/experiments/workflow-candidate-review-coverage-stamp-command-readiness-e295.json --json
+rg -n "review_provenance_stamp_command|provenance stamp command|review-provenance-reviewer|review-provenance-reviewed-at" .ax/experiments/workflow-candidate-review-coverage-stamp-command-readiness-e295.json .ax/experiments/workflow-candidate-review-coverage-stamp-command-readiness-e295.stdout
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --out=.ax/experiments/workflow-candidate-review-coverage-stamp-command-missing-e295.json --json
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-stamp-command-readiness-e295.json`
+- `.ax/experiments/workflow-candidate-review-coverage-stamp-command-readiness-e295.stdout`
+- `.ax/experiments/workflow-candidate-review-coverage-stamp-command-readiness-e295.md`
+- `.ax/experiments/workflow-candidate-review-coverage-stamp-command-missing-e295.json`
+
+Results:
+- Complete brief readiness includes `review_provenance_stamp_command` with
+  `--review-provenance-reviewer` and `--review-provenance-reviewed-at`.
+- Incomplete handoff readiness omits `review_provenance_stamp_command`.
+
+Decision:
+- E295 lets review automation stamp audit provenance from machine-readable
+  readiness without relying on markdown parsing.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports coverage review pack impact"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E294 - Emit Machine-readable Production Apply Command
+
+Question:
+- Can FX/review services get the safe production apply command from readiness
+  JSON instead of scraping the markdown brief?
+
+Implementation:
+- Added optional `production_apply_command` to coverage review readiness.
+- The command is emitted only when review facts, write plan, rendered brief, and
+  synced brief paths are all present.
+- Text output prints the command when available.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-production-command-e294.md --out=.ax/experiments/workflow-candidate-review-coverage-production-command-brief-e294.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-production-command-e294.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-production-command-e294.md --review-facts=.ax/experiments/workflow-candidate-review-coverage-production-command-e294-review-facts.json --review-write-plan=.ax/experiments/workflow-candidate-review-coverage-production-command-e294-review-write-plan.json --out=.ax/experiments/workflow-candidate-review-coverage-production-command-e294.json --json
+rg -n "production_apply_command|production apply command|require-review-provenance|require-review-handoff|apply-review-facts" .ax/experiments/workflow-candidate-review-coverage-production-command-e294.json .ax/experiments/workflow-candidate-review-coverage-production-command-e294.stdout
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --out=.ax/experiments/workflow-candidate-review-coverage-production-command-missing-e294.json --json
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-production-command-e294.json`
+- `.ax/experiments/workflow-candidate-review-coverage-production-command-e294.stdout`
+- `.ax/experiments/workflow-candidate-review-coverage-production-command-missing-e294.json`
+- `.ax/experiments/workflow-candidate-review-coverage-production-command-e294.md`
+
+Results:
+- Complete handoff readiness includes a `production_apply_command` with
+  `--apply-review-facts`, `--require-review-provenance`, and
+  `--require-review-handoff`.
+- Incomplete handoff readiness omits `production_apply_command`.
+
+Decision:
+- E294 gives review automation a machine-readable safe command for the shared
+  graph path without making incomplete handoffs look executable.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports coverage review pack impact"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E293 - Add Production Next Action
+
+Question:
+- Can readiness and review briefs tell services what to do for the production
+  gate, not only for the non-production apply guard?
+
+Implementation:
+- Added `production_next_action` to coverage review readiness.
+- Text output now prints `coverage review production next action`.
+- Coverage review briefs now include `Production next action`.
+- The production next action is derived from the combined production apply
+  guard, not from the base apply guard.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-production-next-action-e293.md --review-facts=.ax/experiments/workflow-candidate-review-coverage-production-next-action-e293-review-facts.json --review-write-plan=.ax/experiments/workflow-candidate-review-coverage-production-next-action-e293-review-write-plan.json --out=.ax/experiments/workflow-candidate-review-coverage-production-next-action-e293.json --json
+rg -n "production_next_action|production next action|Production next action|production_apply_guard|Production apply guard" .ax/experiments/workflow-candidate-review-coverage-production-next-action-e293.json .ax/experiments/workflow-candidate-review-coverage-production-next-action-e293.stdout .ax/experiments/workflow-candidate-review-coverage-production-next-action-e293.md
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-production-next-action-e293.json`
+- `.ax/experiments/workflow-candidate-review-coverage-production-next-action-e293.stdout`
+- `.ax/experiments/workflow-candidate-review-coverage-production-next-action-e293.md`
+
+Results:
+- The readiness JSON and stdout include
+  `production_next_action=Add reviewer and reviewed-at metadata...` when
+  `production_apply_guard=missing_review_provenance`.
+- The markdown brief includes the same production next action next to the
+  production apply guard.
+
+Decision:
+- E293 prevents automation from following the base `next_action` when the
+  production/shared graph path is blocked by stricter gates.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports coverage review pack impact|renders and syncs coverage review briefs"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E292 - Show Production Gate In Review Briefs
+
+Question:
+- Can the markdown review brief show the combined production/shared graph gate
+  that readiness JSON now exposes?
+
+Implementation:
+- Added production apply guard, production blockers, and production blocker
+  remediations to coverage review brief summaries.
+- The production brief gate uses the same combined strict-provenance plus
+  complete-handoff semantics as readiness.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-fixture-pack=.ax/experiments/workflow-candidate-review-coverage-brief-production-summary-e292.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-production-summary-e292.md --out=.ax/experiments/workflow-candidate-review-coverage-brief-production-summary-e292.json --json
+rg -n "Production apply guard|Production blockers|Production blocker remediations|Handoff status|Strict provenance apply guard" .ax/experiments/workflow-candidate-review-coverage-brief-production-summary-e292.md
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-brief-production-summary-e292.json`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-production-summary-e292.jsonl`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-production-summary-e292.md`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-production-summary-e292.stdout`
+
+Results:
+- The generated brief includes `Production apply guard`,
+  `Production blockers`, and `Production blocker remediations`.
+- In the pending-review pack, the production gate reports
+  `no_reviewed_fixtures`, matching the base, handoff, and strict provenance
+  gates.
+
+Decision:
+- E292 makes the markdown review artifact self-contained for production/shared
+  graph readiness. Reviewers can see the exact production gate without reading
+  JSON readiness output.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "renders and syncs coverage review briefs|blocks strict provenance apply when reviewed-at is invalid"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E291 - Expose Combined Production Apply Guard
+
+Question:
+- Can services preview the exact production/shared graph apply gate without
+  combining strict provenance and handoff readiness themselves?
+
+Implementation:
+- Added `production_apply_guard`, `production_can_apply`,
+  `production_apply_blockers`, and `production_apply_blocker_details` to
+  coverage review readiness.
+- Text output now prints production guard, can-apply, blockers, details, and
+  remediations.
+- The production preview combines the existing strict provenance gate with the
+  complete-handoff requirement used by the production apply command.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-production-guard-e291.md --review-facts=.ax/experiments/workflow-candidate-review-coverage-production-guard-e291-review-facts.json --review-write-plan=.ax/experiments/workflow-candidate-review-coverage-production-guard-e291-review-write-plan.json --out=.ax/experiments/workflow-candidate-review-coverage-production-guard-e291.json --json
+rg -n "production_apply_guard|production_can_apply|production_apply_blockers|production_apply_blocker_details|production apply guard|production can apply|production blockers" .ax/experiments/workflow-candidate-review-coverage-production-guard-e291.json .ax/experiments/workflow-candidate-review-coverage-production-guard-e291.stdout
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-production-guard-e291.json`
+- `.ax/experiments/workflow-candidate-review-coverage-production-guard-e291.stdout`
+- `.ax/experiments/workflow-candidate-review-coverage-production-guard-e291.md`
+
+Results:
+- The generated readiness JSON reports
+  `production_apply_guard=missing_review_provenance` and
+  `production_can_apply=false`.
+- Production blockers are explicit in the same readiness object, so services
+  can use one field family for the shared graph apply path.
+
+Decision:
+- E291 removes an inference step for FX/review services: production readiness is
+  now directly queryable instead of assembled from separate strict provenance
+  and handoff previews.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports coverage review pack impact"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E290 - Show Handoff Gate In Review Briefs
+
+Question:
+- Can the markdown review brief show the same handoff gate that automation sees
+  in readiness JSON?
+
+Implementation:
+- Added handoff status, missing paths, handoff apply guard, handoff blockers,
+  and handoff blocker remediations to coverage review brief summaries.
+- Kept the production apply command unchanged; this is a visibility/readability
+  improvement for human and service review handoffs.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-fixture-pack=.ax/experiments/workflow-candidate-review-coverage-brief-handoff-summary-e290.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-handoff-summary-e290.md --out=.ax/experiments/workflow-candidate-review-coverage-brief-handoff-summary-e290.json --json
+rg -n "Handoff status|Handoff missing paths|Handoff apply guard|Handoff blockers|Handoff blocker remediations" .ax/experiments/workflow-candidate-review-coverage-brief-handoff-summary-e290.md
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-brief-handoff-summary-e290.json`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-handoff-summary-e290.jsonl`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-handoff-summary-e290.md`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-handoff-summary-e290.stdout`
+
+Results:
+- The generated brief now includes:
+  - `Handoff status: complete_review_handoff`
+  - `Handoff missing paths: none`
+  - `Handoff apply guard: no_reviewed_fixtures`
+  - `Handoff blockers: no_reviewed_fixtures`
+  - handoff blocker remediation text.
+
+Decision:
+- E290 closes the visibility gap between JSON readiness and the markdown review
+  artifact: reviewers can see whether the production handoff gate is complete
+  before attempting a shared graph apply.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "renders and syncs coverage review briefs"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E289 - Expose Handoff Apply Guard In Readiness
+
+Question:
+- Can services preview whether the production handoff gate would pass without
+  requesting an apply?
+
+Implementation:
+- Added `handoff_apply_guard`, `handoff_can_apply`,
+  `handoff_apply_blockers`, and `handoff_apply_blocker_details` to coverage
+  review readiness summaries.
+- Added text output for the handoff apply guard and can-apply status.
+- Kept this separate from strict provenance readiness so services can inspect
+  handoff completeness and provenance completeness independently.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-handoff-guard-e289.md --review-facts=.ax/experiments/workflow-candidate-review-coverage-handoff-guard-e289-review-facts.json --review-write-plan=.ax/experiments/workflow-candidate-review-coverage-handoff-guard-e289-review-write-plan.json --out=.ax/experiments/workflow-candidate-review-coverage-handoff-guard-e289.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-handoff-guard-e289.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-handoff-guard-e289.md --review-facts=.ax/experiments/workflow-candidate-review-coverage-handoff-guard-e289-review-facts.json --review-write-plan=.ax/experiments/workflow-candidate-review-coverage-handoff-guard-e289-review-write-plan.json --out=.ax/experiments/workflow-candidate-review-coverage-handoff-guard-complete-e289.json --json
+rg -n "handoff_apply_guard|handoff_can_apply|handoff_apply_blockers|review_handoff_status|review_handoff_missing_paths" .ax/experiments/workflow-candidate-review-coverage-handoff-guard-e289.json .ax/experiments/workflow-candidate-review-coverage-handoff-guard-complete-e289.json
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-handoff-guard-e289.json`
+- `.ax/experiments/workflow-candidate-review-coverage-handoff-guard-e289.stdout`
+- `.ax/experiments/workflow-candidate-review-coverage-handoff-guard-complete-e289.json`
+- `.ax/experiments/workflow-candidate-review-coverage-handoff-guard-complete-e289.stdout`
+
+Results:
+- Incomplete handoff readiness reports
+  `review_handoff_status=incomplete_review_handoff`,
+  `handoff_apply_guard=missing_review_handoff`, `handoff_can_apply=false`,
+  and `handoff_apply_blockers=[missing_review_handoff]`.
+- Complete handoff readiness reports
+  `review_handoff_status=complete_review_handoff`,
+  `handoff_apply_guard=ready_to_apply`, `handoff_can_apply=true`, and empty
+  handoff blockers.
+
+Decision:
+- E289 makes the production/shared graph handoff requirement observable during
+  ordinary readiness checks. Automation can now decide whether to ask for more
+  review artifacts before it attempts an apply.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports coverage review pack impact"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E288 - Make Production Review Handoff Command Complete
+
+Question:
+- Does the production/shared graph apply command in coverage review briefs pass
+  the artifact paths required by `--require-review-handoff`?
+
+Implementation:
+- Updated the strict production apply command in coverage review briefs to
+  include `--coverage-review-brief`, `--review-facts`, and
+  `--review-write-plan`.
+- Kept `--require-review-provenance` and `--require-review-handoff` on that
+  production command.
+- Added a regression test for the exact command shape.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-fixture-pack=.ax/experiments/workflow-candidate-review-coverage-complete-handoff-command-e288.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-complete-handoff-command-e288.md --out=.ax/experiments/workflow-candidate-review-coverage-complete-handoff-command-e288.json --json
+rg -n "production|shared graph|require-review-handoff|review-facts|review-write-plan|coverage-review-brief|apply-review-facts" .ax/experiments/workflow-candidate-review-coverage-complete-handoff-command-e288.md
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-complete-handoff-command-e288.json`
+- `.ax/experiments/workflow-candidate-review-coverage-complete-handoff-command-e288.jsonl`
+- `.ax/experiments/workflow-candidate-review-coverage-complete-handoff-command-e288.md`
+- `.ax/experiments/workflow-candidate-review-coverage-complete-handoff-command-e288.stdout`
+
+Results:
+- The production command now includes:
+  `--coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-complete-handoff-command-e288.md`.
+- The same command includes:
+  `--review-facts=.ax/experiments/workflow-candidate-review-coverage-complete-handoff-command-e288-review-facts.json`.
+- The same command includes:
+  `--review-write-plan=.ax/experiments/workflow-candidate-review-coverage-complete-handoff-command-e288-review-write-plan.json`.
+- The same command keeps `--require-review-provenance` and
+  `--require-review-handoff`.
+
+Decision:
+- E288 closes the usability gap introduced by E287: the safe production command
+  shown to reviewers can satisfy the complete-handoff gate instead of always
+  blocking due to missing artifact paths.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "renders and syncs coverage review briefs|reports coverage review pack impact"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E287 - Require Complete Review Handoff Before Apply
+
+Question:
+- Can shared graph updates require the full review handoff artifacts before
+  applying reviewed coverage facts?
+
+Implementation:
+- Added `--require-review-handoff` to `ax classifiers workflow-candidates`.
+- Added `missing_review_handoff` as an apply guard/blocker when the flag is set
+  and any required handoff path is absent.
+- Production review brief commands now include both `--require-review-provenance`
+  and `--require-review-handoff`.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-provenance-stamped-e280.jsonl --apply-review-facts --require-review-handoff --out=.ax/experiments/workflow-candidate-review-coverage-require-handoff-e287.json --json > .ax/experiments/workflow-candidate-review-coverage-require-handoff-e287.stdout; printf "exit_code=%s\n" $? > .ax/experiments/workflow-candidate-review-coverage-require-handoff-e287.exit
+rg -n "apply_guard|can_apply|apply_blockers|missing_review_handoff|review_handoff_status|review_handoff_missing_paths|apply_result|applied_statement_count" .ax/experiments/workflow-candidate-review-coverage-require-handoff-e287.json .ax/experiments/workflow-candidate-review-coverage-require-handoff-e287.stdout
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-require-handoff-e287.json`
+- `.ax/experiments/workflow-candidate-review-coverage-require-handoff-e287.stdout`
+- `.ax/experiments/workflow-candidate-review-coverage-require-handoff-e287.exit`
+
+Results:
+- Command exited with `exit_code=1`.
+- Readiness output reports `review_handoff_status=incomplete_review_handoff`.
+- Readiness output reports `apply_guard=missing_review_handoff`,
+  `can_apply=false`, `apply_result=blocked`, and `applied_statement_count=0`.
+
+Decision:
+- E287 makes the handoff completeness signal enforceable for automation. A
+  reviewer/service can still inspect readiness without applying, but shared
+  graph writes can now require the saved review facts, write plan, rendered
+  brief, and synced source brief paths.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "renders and syncs coverage review briefs|reports coverage review pack impact"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E286 - Add Coverage Review Handoff Completeness Status
+
+Question:
+- Can review services tell whether the coverage review handoff has every
+  expected artifact path without inferring from optional fields one by one?
+
+Implementation:
+- Added `review_handoff_status` to coverage review readiness summaries:
+  `complete_review_handoff` or `incomplete_review_handoff`.
+- Added `review_handoff_missing_paths` with any absent path keys from:
+  `review_facts_path`, `review_write_plan_path`, `review_brief_path`, and
+  `synced_review_brief_path`.
+- Text output prints the handoff status and missing path keys.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-write-plan-command-e283.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-handoff-status-e286.md --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-write-plan-command-e283.md --review-facts=.ax/experiments/workflow-candidate-review-coverage-handoff-status-e286-review-facts.json --review-write-plan=.ax/experiments/workflow-candidate-review-coverage-handoff-status-e286-review-write-plan.json --out=.ax/experiments/workflow-candidate-review-coverage-handoff-status-e286.json --json
+rg -n "review_handoff_status|review_handoff_missing_paths|review_(facts|write_plan|brief)_path|synced_review_brief_path" .ax/experiments/workflow-candidate-review-coverage-handoff-status-e286.json .ax/experiments/workflow-candidate-review-coverage-handoff-status-e286.stdout
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-handoff-status-e286.json`
+- `.ax/experiments/workflow-candidate-review-coverage-handoff-status-e286.stdout`
+- `.ax/experiments/workflow-candidate-review-coverage-handoff-status-e286.md`
+- `.ax/experiments/workflow-candidate-review-coverage-handoff-status-e286-review-facts.json`
+- `.ax/experiments/workflow-candidate-review-coverage-handoff-status-e286-review-write-plan.json`
+
+Results:
+- JSON readiness output contains
+  `review_handoff_status=complete_review_handoff`.
+- JSON readiness output contains `review_handoff_missing_paths=[]`.
+- Unit coverage also verifies an incomplete handoff reports all four missing
+  path keys.
+
+Decision:
+- E286 gives review services a stable automation gate for the inspect/sync/apply
+  handoff without applying any graph facts or fabricating review decisions.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports coverage review pack impact"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E285 - Record Coverage Review Brief Handoff Paths
+
+Question:
+- Can review services reconstruct which markdown brief was rendered and which
+  edited brief was synced into a coverage review pack?
+
+Implementation:
+- Added optional `review_brief_path` and `synced_review_brief_path` fields to
+  coverage review readiness summaries.
+- The CLI fills `review_brief_path` from `--coverage-review-brief` and
+  `synced_review_brief_path` from `--sync-coverage-review-brief`.
+- Text readiness output prints both paths when present.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-write-plan-command-e283.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-paths-e285.md --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-write-plan-command-e283.md --review-facts=.ax/experiments/workflow-candidate-review-coverage-brief-paths-e285-review-facts.json --review-write-plan=.ax/experiments/workflow-candidate-review-coverage-brief-paths-e285-review-write-plan.json --out=.ax/experiments/workflow-candidate-review-coverage-brief-paths-e285.json --json
+rg -n "review_brief_path|synced_review_brief_path|review_facts_path|review_write_plan_path" .ax/experiments/workflow-candidate-review-coverage-brief-paths-e285.json .ax/experiments/workflow-candidate-review-coverage-brief-paths-e285.stdout
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-brief-paths-e285.json`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-paths-e285.stdout`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-paths-e285.md`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-paths-e285-review-facts.json`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-paths-e285-review-write-plan.json`
+
+Results:
+- JSON readiness output contains
+  `review_brief_path=.ax/experiments/workflow-candidate-review-coverage-brief-paths-e285.md`.
+- JSON readiness output contains
+  `synced_review_brief_path=.ax/experiments/workflow-candidate-review-coverage-write-plan-command-e283.md`.
+- Existing review facts and write-plan export paths remain present.
+
+Decision:
+- E285 completes the review handoff trace for this loop: pack path, synced
+  source brief, rendered current brief, exported graph facts, and exported write
+  plan are all machine-visible from readiness output.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports coverage review pack impact"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E284 - Record Review Export Artifact Paths In Readiness
+
+Question:
+- When a review service exports review facts and a write plan for inspection,
+  can downstream tooling discover the saved artifact paths from the readiness
+  output itself?
+
+Implementation:
+- Added optional `review_facts_path` and `review_write_plan_path` fields to
+  coverage review readiness summaries.
+- The CLI now fills those fields whenever `--review-facts` or
+  `--review-write-plan` is passed for coverage review.
+- Text output renders those paths so non-JSON service logs remain debuggable.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-write-plan-command-e283.jsonl --review-facts=.ax/experiments/workflow-candidate-review-coverage-output-paths-e284-review-facts.json --review-write-plan=.ax/experiments/workflow-candidate-review-coverage-output-paths-e284-review-write-plan.json --out=.ax/experiments/workflow-candidate-review-coverage-output-paths-e284.json --json > .ax/experiments/workflow-candidate-review-coverage-output-paths-e284.stdout
+rg -n "review_facts_path|review_write_plan_path" .ax/experiments/workflow-candidate-review-coverage-output-paths-e284.json .ax/experiments/workflow-candidate-review-coverage-output-paths-e284.stdout
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-output-paths-e284.json`
+- `.ax/experiments/workflow-candidate-review-coverage-output-paths-e284.stdout`
+- `.ax/experiments/workflow-candidate-review-coverage-output-paths-e284-review-facts.json`
+- `.ax/experiments/workflow-candidate-review-coverage-output-paths-e284-review-write-plan.json`
+
+Results:
+- JSON readiness output contains
+  `review_facts_path=.ax/experiments/workflow-candidate-review-coverage-output-paths-e284-review-facts.json`.
+- JSON readiness output contains
+  `review_write_plan_path=.ax/experiments/workflow-candidate-review-coverage-output-paths-e284-review-write-plan.json`.
+- Both referenced files were written.
+
+Decision:
+- E284 makes the inspect-before-apply path easier for services to test and
+  debug because the readiness report records the exact exported artifacts.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reports coverage review pack impact"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/cli/classifiers-package-operations.test.ts scripts/classifier-package-operations.test.ts
+bun run typecheck
+```
+
+## E283 - Surface Pre-Apply Review Write Plan Export
+
+Question:
+- Can reviewers inspect the graph review facts and Surreal write plan before
+  applying coverage-review facts to the shared graph?
+
+Implementation:
+- Added a derived sibling output path helper for review command artifacts.
+- Coverage review briefs now include a command that writes both
+  `--review-facts` and `--review-write-plan` outputs without applying.
+- The command stays next to the apply commands in `## Review Commands`.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-fixture-pack=.ax/experiments/workflow-candidate-review-coverage-write-plan-command-e283.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-write-plan-command-e283.md --out=.ax/experiments/workflow-candidate-review-coverage-write-plan-command-e283.json --json
+rg -n "inspect the review graph write|review-facts|review-write-plan|apply-review-facts|require-review-provenance" .ax/experiments/workflow-candidate-review-coverage-write-plan-command-e283.md
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-write-plan-command-e283.json`
+- `.ax/experiments/workflow-candidate-review-coverage-write-plan-command-e283.jsonl`
+- `.ax/experiments/workflow-candidate-review-coverage-write-plan-command-e283.md`
+- `.ax/experiments/workflow-candidate-review-coverage-write-plan-command-e283.stdout`
+
+Results:
+- The generated brief contains an inspect command with
+  `--review-facts=.ax/experiments/workflow-candidate-review-coverage-write-plan-command-e283-review-facts.json`.
+- The same command contains
+  `--review-write-plan=.ax/experiments/workflow-candidate-review-coverage-write-plan-command-e283-review-write-plan.json`.
+- Apply and strict-apply commands remain separate, so inspection does not write
+  graph facts.
+
+Decision:
+- E283 improves the review/apply safety path: reviewers can inspect projected
+  graph facts and exact Surreal statements before using the apply command.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "renders and syncs coverage review briefs"
+rg -q "To inspect the review graph write before applying, run:" .ax/experiments/workflow-candidate-review-coverage-write-plan-command-e283.md
+rg -q "--review-facts=.ax/experiments/workflow-candidate-review-coverage-write-plan-command-e283-review-facts.json" .ax/experiments/workflow-candidate-review-coverage-write-plan-command-e283.md
+rg -q "--review-write-plan=.ax/experiments/workflow-candidate-review-coverage-write-plan-command-e283-review-write-plan.json" .ax/experiments/workflow-candidate-review-coverage-write-plan-command-e283.md
+```
+
+## E282 - Surface Provenance Stamping In Review Briefs
+
+Question:
+- Can reviewers and review services discover the explicit provenance-stamping
+  path directly from the generated markdown brief?
+
+Implementation:
+- Added a provenance-stamping command template to the `## Review Commands`
+  section of coverage review briefs.
+- The command uses `--review-provenance-reviewer=<reviewer>` and
+  `--review-provenance-reviewed-at=<reviewed-at-iso>` placeholders rather than
+  inventing identity or timestamps.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-fixture-pack=.ax/experiments/workflow-candidate-review-coverage-stamp-command-e282.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-stamp-command-e282.md --out=.ax/experiments/workflow-candidate-review-coverage-stamp-command-e282.json --json
+rg -n "To stamp provenance|review-provenance-reviewer|review-provenance-reviewed-at|require-review-provenance|After applying" .ax/experiments/workflow-candidate-review-coverage-stamp-command-e282.md
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-stamp-command-e282.json`
+- `.ax/experiments/workflow-candidate-review-coverage-stamp-command-e282.jsonl`
+- `.ax/experiments/workflow-candidate-review-coverage-stamp-command-e282.md`
+- `.ax/experiments/workflow-candidate-review-coverage-stamp-command-e282.stdout`
+
+Results:
+- The generated brief includes the strict `--require-review-provenance` apply
+  command.
+- The same brief now includes a separate provenance-stamp command with reviewer
+  and reviewed-at placeholders.
+- The post-apply recheck command remains visible below the apply commands.
+
+Decision:
+- E282 makes E280's provenance stamping path discoverable at the review handoff
+  point, reducing review-service integration friction without weakening the
+  human-review gate.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "renders and syncs coverage review briefs"
+rg -q "To stamp provenance from a review service, run:" .ax/experiments/workflow-candidate-review-coverage-stamp-command-e282.md
+rg -q "--review-provenance-reviewer=<reviewer>" .ax/experiments/workflow-candidate-review-coverage-stamp-command-e282.md
+rg -q "--review-provenance-reviewed-at=<reviewed-at-iso>" .ax/experiments/workflow-candidate-review-coverage-stamp-command-e282.md
+```
+
+## E281 - Summarize Post-Apply Coverage Rechecks
+
+Question:
+- Once real review facts are applied, can the same readiness output summarize
+  whether the follow-up coverage query actually closed the projected gap?
+
+Implementation:
+- Added `buildWorkflowCandidateReviewCoveragePostApplyRecheckSummary`.
+- Successful `--apply-review-facts` runs now refresh review coverage and attach
+  `post_apply_recheck` to the coverage review summary.
+- Text output renders post-apply status and before/projected/after deltas when
+  a recheck is present.
+
+Commands:
+```sh
+bun -e 'import { buildWorkflowCandidateReviewCoveragePostApplyRecheckSummary } from "./src/cli/classifiers-workflow-candidates.ts"; const before={reviewedCandidateCount:1,unreviewedCandidateCount:2,projectedReviewedCandidateCount:2,projectedUnreviewedCandidateCount:1}; const after={reviewedCandidateCount:2,unreviewedCandidateCount:1}; const summary=buildWorkflowCandidateReviewCoveragePostApplyRecheckSummary({before,after,command:"bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --out=.ax/experiments/workflow-candidate-review-coverage-post-apply-e281.json --json"}); console.log(JSON.stringify({schema:"ax.workflow_candidate_review_coverage_recheck_artifact.v1",source:"planned_from_e280_projected_counts",recheck:summary}, null, 2));' > .ax/experiments/workflow-candidate-review-coverage-recheck-summary-e281.json
+jq -r '"post-apply recheck status: \(.recheck.status)\nreviewed delta: \(.recheck.reviewed_candidate_delta) projected_delta=\(.recheck.projected_reviewed_delta)\nunreviewed delta: \(.recheck.unreviewed_candidate_delta) projected_delta=\(.recheck.projected_unreviewed_delta)\ncommand: \(.recheck.command)"' .ax/experiments/workflow-candidate-review-coverage-recheck-summary-e281.json > .ax/experiments/workflow-candidate-review-coverage-recheck-summary-e281.txt
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-recheck-summary-e281.json`
+- `.ax/experiments/workflow-candidate-review-coverage-recheck-summary-e281.txt`
+
+Results:
+- Recheck schema: `ax.workflow_candidate_review_coverage_recheck.v1`.
+- Planned E280-style before/projected/after counts produce `status=gap_closed`.
+- The summary records reviewed/unreviewed deltas and projected deltas, making it
+  clear whether a real apply matched the expected coverage movement.
+
+Decision:
+- E281 makes the apply/re-run loop machine-checkable. It still does not apply
+  fabricated review facts; it provides the summary that a real apply can carry
+  once a human-reviewed pack is promoted.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "post-apply coverage recheck"
+jq -e '.recheck.status == "gap_closed" and .recheck.projected_reviewed_delta == 0 and .recheck.projected_unreviewed_delta == 0' .ax/experiments/workflow-candidate-review-coverage-recheck-summary-e281.json >/dev/null
+rg -q "post-apply recheck status: gap_closed" .ax/experiments/workflow-candidate-review-coverage-recheck-summary-e281.txt
+```
+
+## E280 - Stamp Explicit Review Provenance During Sync
+
+Question:
+- Can a human or review service stamp reviewer and reviewed-at provenance on a
+  reviewed coverage pack without manually editing every markdown fixture line?
+
+Implementation:
+- Added `stampWorkflowCandidateReviewProvenance` for opt-in provenance stamping
+  on reviewed coverage rows only.
+- Added CLI flags `--review-provenance-reviewer` and
+  `--review-provenance-reviewed-at`.
+- Readiness summaries now record `stamped_reviewer_count` and
+  `stamped_reviewed_at_count`, and text output prints the same counts.
+
+Commands:
+```sh
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl .ax/experiments/workflow-candidate-review-coverage-provenance-stamped-e280.jsonl
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-provenance-stamped-e280.jsonl --review-provenance-reviewer=reviewer@example.test --review-provenance-reviewed-at=2026-05-31T12:00:00Z --require-review-provenance --out=.ax/experiments/workflow-candidate-review-coverage-provenance-stamped-e280.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-provenance-stamped-e280.jsonl --review-provenance-reviewer=reviewer@example.test --review-provenance-reviewed-at=2026-05-31T12:00:00Z --require-review-provenance > .ax/experiments/workflow-candidate-review-coverage-provenance-stamped-e280.txt
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-provenance-stamped-e280.jsonl`
+- `.ax/experiments/workflow-candidate-review-coverage-provenance-stamped-e280.json`
+- `.ax/experiments/workflow-candidate-review-coverage-provenance-stamped-e280.txt`
+- `.ax/experiments/workflow-candidate-review-coverage-provenance-stamped-e280.stdout`
+
+Results:
+- The copied review pack was stamped with `reviewer@example.test` and
+  `2026-05-31T12:00:00Z` for the reviewed row.
+- JSON readiness reports `stamped_reviewer_count=1`,
+  `stamped_reviewed_at_count=1`, zero missing/invalid provenance counts,
+  `provenance_status=complete_review_provenance`, and strict
+  `ready_to_apply`.
+- Text output prints `coverage review provenance stamp: reviewer=1
+  reviewed_at=1` and `coverage review strict can apply: yes`.
+
+Decision:
+- E280 reduces review-throughput friction while keeping provenance explicit:
+  the caller must supply reviewer identity and timestamp, and the readiness
+  artifact records exactly what was stamped.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+jq '{stamped_reviewer_count:.coverage_review.stamped_reviewer_count,stamped_reviewed_at_count:.coverage_review.stamped_reviewed_at_count,missing_reviewer_count:.coverage_review.missing_reviewer_count,missing_reviewed_at_count:.coverage_review.missing_reviewed_at_count,invalid_reviewed_at_count:.coverage_review.invalid_reviewed_at_count,provenance_status:.coverage_review.provenance_status,apply_guard:.coverage_review.apply_guard,can_apply:.coverage_review.can_apply,strict_apply_guard:.coverage_review.strict_apply_guard,strict_can_apply:.coverage_review.strict_can_apply,strict_apply_blockers:.coverage_review.strict_apply_blockers,provenance_issue_rows:(.coverage_review.provenance_issue_rows|length)}' .ax/experiments/workflow-candidate-review-coverage-provenance-stamped-e280.json
+rg -n "coverage review (provenance stamp|provenance status|apply guard|strict apply guard|strict can apply|provenance issue rows)" .ax/experiments/workflow-candidate-review-coverage-provenance-stamped-e280.txt
+head -1 .ax/experiments/workflow-candidate-review-coverage-provenance-stamped-e280.jsonl | jq '{review_status,review_reviewer,review_reviewed_at}'
+```
+
+## E279 - Expose Strict Readiness Without Strict Apply Request
+
+Question:
+- Can normal coverage readiness expose the production/strict provenance gate
+  without changing legacy non-strict apply behavior?
+
+Implementation:
+- Split coverage review readiness into base apply readiness and strict
+  provenance readiness.
+- Added `strict_apply_guard`, `strict_can_apply`, `strict_apply_blockers`, and
+  `strict_apply_blocker_details` to the JSON summary.
+- Added matching text output lines so FX services and dashboards can debug the
+  strict path from an ordinary readiness run.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --out=.ax/experiments/workflow-candidate-review-coverage-strict-readiness-e279.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md > .ax/experiments/workflow-candidate-review-coverage-strict-readiness-e279.txt
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-strict-readiness-e279.json`
+- `.ax/experiments/workflow-candidate-review-coverage-strict-readiness-e279.txt`
+- `.ax/experiments/workflow-candidate-review-coverage-strict-readiness-e279.stdout`
+
+Results:
+- Normal readiness still reports `apply_guard=ready_to_apply`, `can_apply=true`,
+  and no normal blockers for the legacy reviewed pack.
+- The same JSON reports `strict_apply_guard=missing_review_provenance`,
+  `strict_can_apply=false`, and
+  `strict_apply_blockers=["missing_review_provenance"]`.
+- Text output now prints strict guard, strict can-apply, strict blockers, and
+  strict blocker details alongside the normal readiness path.
+
+Decision:
+- E279 gives services one stable readiness response for both current apply
+  behavior and stricter production/audit readiness.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+jq '{apply_guard:.coverage_review.apply_guard,can_apply:.coverage_review.can_apply,apply_blockers:.coverage_review.apply_blockers,strict_apply_guard:.coverage_review.strict_apply_guard,strict_can_apply:.coverage_review.strict_can_apply,strict_apply_blockers:.coverage_review.strict_apply_blockers,strict_detail_count:(.coverage_review.strict_apply_blocker_details|length),provenance_issue_rows:(.coverage_review.provenance_issue_rows|length),missing_reviewer_count:.coverage_review.missing_reviewer_count,missing_reviewed_at_count:.coverage_review.missing_reviewed_at_count}' .ax/experiments/workflow-candidate-review-coverage-strict-readiness-e279.json
+rg -n "coverage review (apply guard|can apply|strict apply guard|strict can apply|strict blockers|strict blocker details|provenance issue rows)" .ax/experiments/workflow-candidate-review-coverage-strict-readiness-e279.txt
+```
+
+## E278 - Render Provenance Issues In Review Briefs
+
+Question:
+- Can the markdown review brief show the same fixture-level provenance issues
+  as the JSON/text readiness output, so reviewers do not need to cross-reference
+  a separate report?
+
+Implementation:
+- Added a `## Provenance Issues` section to coverage review briefs.
+- The section renders `_none_` when provenance is clean.
+- For each issue, the brief renders issue kind, fixture id, candidate id, and
+  reviewed-at value.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-invalid-reviewed-at-e276.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-provenance-issues-brief-e278.md --apply-review-facts --require-review-provenance --out=.ax/experiments/workflow-candidate-review-coverage-provenance-issues-brief-e278.json --json
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-provenance-issues-brief-e278.json`
+- `.ax/experiments/workflow-candidate-review-coverage-provenance-issues-brief-e278.md`
+- `.ax/experiments/workflow-candidate-review-coverage-provenance-issues-brief-e278.exit`
+
+Results:
+- Strict apply remains blocked.
+- JSON still includes one `invalid_reviewed_at` provenance issue row.
+- Markdown brief now includes `## Provenance Issues` with the exact affected
+  fixture id, candidate id, and `reviewed_at=not-a-date`.
+
+Decision:
+- E278 closes the loop between service-readable readiness and human-readable
+  review handoff. A reviewer can now fix strict provenance issues directly from
+  the markdown artifact.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "reviewed-at is invalid|renders and syncs coverage review briefs"
+python3 - <<'PY'
+import json
+from pathlib import Path
+summary = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-provenance-issues-brief-e278.json").read_text())["coverage_review"]
+brief = Path(".ax/experiments/workflow-candidate-review-coverage-provenance-issues-brief-e278.md").read_text()
+assert Path(".ax/experiments/workflow-candidate-review-coverage-provenance-issues-brief-e278.exit").read_text().strip() == "1"
+assert summary["apply_result"] == "blocked"
+assert len(summary["provenance_issue_rows"]) == 1
+row = summary["provenance_issue_rows"][0]
+assert row["issue"] == "invalid_reviewed_at"
+assert row["reviewed_at"] == "not-a-date"
+assert "## Provenance Issues" in brief
+assert "- `invalid_reviewed_at` fixture=`workflow-candidate-review-coverage/verification_or_recovery_signal/" in brief
+assert "candidate=`classifier_candidate_group:hybrid-window/verification_or_recovery_signal` reviewed_at=`not-a-date`" in brief
+PY
+```
+
+## E277 - Add Structured Provenance Issue Rows
+
+Question:
+- Can readiness output identify the exact review fixture and provenance issue
+  to fix, instead of only reporting aggregate provenance counts?
+
+Implementation:
+- Added `provenance_issue_rows` to coverage review readiness JSON.
+- Each issue row includes fixture id, candidate id, issue kind, reviewer, and
+  reviewed-at value.
+- Text output now prints the provenance issue row count and one line per issue.
+- Issue kinds are:
+  - `missing_reviewer`
+  - `missing_reviewed_at`
+  - `invalid_reviewed_at`
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-invalid-reviewed-at-e276.jsonl --apply-review-facts --require-review-provenance --out=.ax/experiments/workflow-candidate-review-coverage-provenance-issue-rows-e277.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-invalid-reviewed-at-e276.jsonl --apply-review-facts --require-review-provenance > .ax/experiments/workflow-candidate-review-coverage-provenance-issue-rows-e277.txt
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-provenance-issue-rows-e277.json`
+- `.ax/experiments/workflow-candidate-review-coverage-provenance-issue-rows-e277.txt`
+- `.ax/experiments/workflow-candidate-review-coverage-provenance-issue-rows-e277.exit`
+- `.ax/experiments/workflow-candidate-review-coverage-provenance-issue-rows-e277-text.exit`
+
+Results:
+- Strict apply remains blocked.
+- JSON includes one provenance issue row:
+  `issue=invalid_reviewed_at`, the affected fixture id, the candidate id, and
+  `reviewed_at=not-a-date`.
+- Text output includes `coverage review provenance issue rows: 1` and the
+  corresponding issue line.
+
+Decision:
+- E277 makes the strict review gate actionable for FX services and UIs: they
+  can render exact fixture-level repairs instead of asking reviewers to infer
+  them from aggregate counters.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "strict provenance"
+python3 - <<'PY'
+import json
+from pathlib import Path
+summary = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-provenance-issue-rows-e277.json").read_text())["coverage_review"]
+text = Path(".ax/experiments/workflow-candidate-review-coverage-provenance-issue-rows-e277.txt").read_text()
+assert Path(".ax/experiments/workflow-candidate-review-coverage-provenance-issue-rows-e277.exit").read_text().strip() == "1"
+assert Path(".ax/experiments/workflow-candidate-review-coverage-provenance-issue-rows-e277-text.exit").read_text().strip() == "1"
+assert summary["apply_result"] == "blocked"
+assert len(summary["provenance_issue_rows"]) == 1
+row = summary["provenance_issue_rows"][0]
+assert row["issue"] == "invalid_reviewed_at"
+assert row["candidate_id"] == "classifier_candidate_group:hybrid-window/verification_or_recovery_signal"
+assert row["reviewed_at"] == "not-a-date"
+assert row["fixture_id"].startswith("workflow-candidate-review-coverage/verification_or_recovery_signal/")
+assert "coverage review provenance issue rows: 1" in text
+assert "coverage review provenance issue: invalid_reviewed_at fixture=workflow-candidate-review-coverage/verification_or_recovery_signal/" in text
+PY
+```
+
+## E276 - Validate Reviewed-At Provenance Timestamps
+
+Question:
+- Does strict review provenance reject non-parseable reviewed-at values instead
+  of treating any non-empty string as auditable provenance?
+
+Implementation:
+- Added reviewed-at validation for coverage review rows.
+- Readiness now reports `invalid_reviewed_at_count`.
+- Strict provenance treats missing or invalid reviewed-at metadata as
+  `missing_review_provenance`.
+- Brief summaries now show `Invalid reviewed-at timestamps`.
+- Provenance remediation now says "valid reviewed-at metadata".
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-invalid-reviewed-at-e276.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-invalid-reviewed-at-e276.md --apply-review-facts --require-review-provenance --out=.ax/experiments/workflow-candidate-review-coverage-invalid-reviewed-at-e276.json --json
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-invalid-reviewed-at-e276.jsonl`
+- `.ax/experiments/workflow-candidate-review-coverage-invalid-reviewed-at-e276.json`
+- `.ax/experiments/workflow-candidate-review-coverage-invalid-reviewed-at-e276.md`
+- `.ax/experiments/workflow-candidate-review-coverage-invalid-reviewed-at-e276.exit`
+
+Results:
+- Command exits `1` because strict apply is blocked.
+- Readiness reports `apply_guard=missing_review_provenance`,
+  `can_apply=false`, `invalid_reviewed_at_count=1`, and blocker remediation
+  `Add reviewer and valid reviewed-at metadata or rerun without strict provenance.`
+- Brief reports `Invalid reviewed-at timestamps: 1` and the strict provenance
+  remediation.
+
+Decision:
+- E276 closes an audit loophole before real review facts reach the shared
+  graph. Strict provenance now requires a parseable reviewed-at timestamp, not
+  just a filled string.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "strict provenance|review briefs"
+python3 - <<'PY'
+import json
+from pathlib import Path
+summary = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-invalid-reviewed-at-e276.json").read_text())["coverage_review"]
+brief = Path(".ax/experiments/workflow-candidate-review-coverage-invalid-reviewed-at-e276.md").read_text()
+assert Path(".ax/experiments/workflow-candidate-review-coverage-invalid-reviewed-at-e276.exit").read_text().strip() == "1"
+assert summary["apply_result"] == "blocked"
+assert summary["apply_guard"] == "missing_review_provenance"
+assert summary["can_apply"] is False
+assert summary["invalid_reviewed_at_count"] == 1
+assert summary["apply_blocker_details"][0]["remediation"] == "Add reviewer and valid reviewed-at metadata or rerun without strict provenance."
+assert "- Invalid reviewed-at timestamps: `1`" in brief
+PY
+```
+
+## E275 - Add Post-Apply Coverage Recheck Command
+
+Question:
+- Can readiness and reviewer handoff artifacts make the apply verification loop
+  explicit, so real review facts are followed by a coverage re-run instead of
+  relying on memory?
+
+Implementation:
+- Added `post_apply_recheck_command` to coverage review readiness JSON.
+- Text readiness output now prints `coverage review post-apply recheck`.
+- Coverage review briefs now include an "After applying" command that re-runs
+  `classifiers workflow-candidates --review-coverage` without the review pack,
+  targeting a `*-post-apply.json` artifact.
+- Brief recheck commands now preserve the caller's `--limit`.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-post-apply-recheck-e275.md --out=.ax/experiments/workflow-candidate-review-coverage-post-apply-recheck-e275.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md > .ax/experiments/workflow-candidate-review-coverage-post-apply-recheck-e275.txt
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-post-apply-recheck-e275.json`
+- `.ax/experiments/workflow-candidate-review-coverage-post-apply-recheck-e275.md`
+- `.ax/experiments/workflow-candidate-review-coverage-post-apply-recheck-e275.txt`
+
+Results:
+- JSON readiness includes:
+  `post_apply_recheck_command="bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --out=.ax/experiments/workflow-candidate-review-coverage-post-apply-recheck-e275-post-apply.json --json"`.
+- Markdown reviewer brief includes the same command under
+  "After applying, re-run coverage to verify the gap closed:".
+- Text readiness output includes `coverage review post-apply recheck`, giving
+  services and shell users the same verification hook.
+
+Decision:
+- E275 does not apply synthetic review facts. It improves the path for real
+  review application by attaching the verification command to the artifact that
+  asks a reviewer to apply facts.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "coverage review"
+python3 - <<'PY'
+import json
+from pathlib import Path
+report = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-post-apply-recheck-e275.json").read_text())
+summary = report["coverage_review"]
+brief = Path(".ax/experiments/workflow-candidate-review-coverage-post-apply-recheck-e275.md").read_text()
+text = Path(".ax/experiments/workflow-candidate-review-coverage-post-apply-recheck-e275.txt").read_text()
+expected_json = "bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --out=.ax/experiments/workflow-candidate-review-coverage-post-apply-recheck-e275-post-apply.json --json"
+expected_text = "bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --out=.ax/experiments/workflow-candidate-review-coverage-post-apply.json --json"
+assert summary["post_apply_recheck_command"] == expected_json
+assert expected_json in brief
+assert "After applying, re-run coverage to verify the gap closed:" in brief
+assert f"coverage review post-apply recheck: {expected_text}" in text
+PY
+```
+
+## E274 - Surface Strict Provenance Path In Review Briefs
+
+Question:
+- Can the human-editable coverage review brief make the safer production apply
+  path visible without requiring reviewers to remember the strict provenance
+  flag?
+
+Implementation:
+- Coverage review briefs now include reviewer provenance counts:
+  `Missing reviewers`, `Missing reviewed-at timestamps`, and
+  `Provenance status`.
+- Brief summaries now show the derived strict provenance apply guard and
+  blockers with remediations.
+- The `Review Commands` section now includes a separate production/shared graph
+  apply command with `--require-review-provenance`.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-fixture-pack=.ax/experiments/workflow-candidate-review-coverage-strict-brief-e274.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-strict-brief-e274.md --out=.ax/experiments/workflow-candidate-review-coverage-strict-brief-e274.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-strict-brief-reviewed-e274.md --out=.ax/experiments/workflow-candidate-review-coverage-strict-brief-reviewed-e274.json --json
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-strict-brief-e274.md`
+- `.ax/experiments/workflow-candidate-review-coverage-strict-brief-e274.json`
+- `.ax/experiments/workflow-candidate-review-coverage-strict-brief-reviewed-e274.md`
+- `.ax/experiments/workflow-candidate-review-coverage-strict-brief-reviewed-e274.json`
+
+Results:
+- Pending brief shows provenance counts and strict provenance blockers while
+  preserving the normal review flow.
+- Reviewed rationale-only brief shows
+  `Provenance status: missing_review_provenance`,
+  `Strict provenance apply guard: missing_review_provenance`, a strict
+  provenance remediation, and includes a command containing
+  `--require-review-provenance`.
+- The brief therefore makes E273's stricter service/production path visible at
+  the reviewer handoff point.
+
+Decision:
+- E274 improves review throughput without weakening gates: reviewers get the
+  normal apply path for local/exploratory use and the strict provenance path
+  for production/shared graph updates in the same artifact.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "renders and syncs coverage review briefs"
+python3 - <<'PY'
+from pathlib import Path
+brief = Path(".ax/experiments/workflow-candidate-review-coverage-strict-brief-reviewed-e274.md").read_text()
+for needle in [
+    "- Missing reviewers: `1`",
+    "- Missing reviewed-at timestamps: `1`",
+    "- Provenance status: `missing_review_provenance`",
+    "- Strict provenance apply guard: `missing_review_provenance`",
+    "- Strict provenance blockers: `missing_review_provenance`",
+    "- Strict provenance blocker remediations: missing_review_provenance: Add reviewer and reviewed-at metadata or rerun without strict provenance.",
+    "--require-review-provenance",
+]:
+    assert needle in brief
+PY
+```
+
+## E273 - Add Strict Coverage Review Provenance Gate
+
+Question:
+- Can callers opt into blocking coverage review apply when reviewed fixtures
+  are missing reviewer or reviewed-at provenance?
+
+Implementation:
+- Added `--require-review-provenance` to
+  `classifiers workflow-candidates`.
+- When strict provenance is required, readiness now adds
+  `missing_review_provenance` to `apply_blockers`, sets
+  `apply_guard=missing_review_provenance`, and reports remediation text.
+- Compatibility remains unchanged for callers that do not pass the flag.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --apply-review-facts --require-review-provenance --out=.ax/experiments/workflow-candidate-review-coverage-strict-provenance-blocked-e273.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-audit-provenance-e270.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-audit-provenance-e270.md --require-review-provenance --out=.ax/experiments/workflow-candidate-review-coverage-strict-provenance-ready-e273.json --json
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-strict-provenance-blocked-e273.json`
+- `.ax/experiments/workflow-candidate-review-coverage-strict-provenance-blocked-e273.exit`
+- `.ax/experiments/workflow-candidate-review-coverage-strict-provenance-ready-e273.json`
+- `.ax/experiments/workflow-candidate-review-coverage-strict-provenance-cleanup-e273.json`
+
+Results:
+- Rationale-only legacy pack with strict provenance requested exits blocked:
+  `apply_result=blocked`, `apply_guard=missing_review_provenance`,
+  `can_apply=false`, and `apply_blockers=[missing_review_provenance]`.
+- Provenance-complete pack with strict provenance requested but no apply flag
+  reports `apply_result=not_requested`, `apply_guard=ready_to_apply`,
+  `can_apply=true`, and `provenance_status=complete_review_provenance`.
+- An accidental synthetic apply from the provenance fixture pack was removed
+  from the local graph before using E273 evidence. Cleanup showed matching
+  graph rows went from fact/edge/node counts `1/1/2` to `0/0/0`.
+
+Decision:
+- E273 gives FX services and automation a stricter, explicit switch without
+  breaking existing review packs. Production apply paths can require
+  provenance; exploratory/local review loops can remain rationale-gated.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "strict provenance"
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "coverage"
+python3 - <<'PY'
+import json
+from pathlib import Path
+blocked = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-strict-provenance-blocked-e273.json").read_text())["coverage_review"]
+ready = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-strict-provenance-ready-e273.json").read_text())["coverage_review"]
+cleanup = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-strict-provenance-cleanup-e273.json").read_text())
+assert Path(".ax/experiments/workflow-candidate-review-coverage-strict-provenance-blocked-e273.exit").read_text().strip() == "1"
+assert blocked["apply_result"] == "blocked"
+assert blocked["apply_guard"] == "missing_review_provenance"
+assert blocked["can_apply"] is False
+assert blocked["apply_blockers"] == ["missing_review_provenance"]
+assert ready["apply_result"] == "not_requested"
+assert ready["apply_guard"] == "ready_to_apply"
+assert ready["can_apply"] is True
+assert ready["provenance_status"] == "complete_review_provenance"
+assert cleanup["after"] == [[{"count": 0}], [{"count": 0}], [{"count": 0}]]
+PY
+```
+
+## E272 - Classify Coverage Review Provenance Status
+
+Question:
+- Can readiness reports distinguish fully auditable review packs from
+  ready-but-missing-provenance packs without making provenance a hard gate?
+
+Implementation:
+- Added `provenance_status` to coverage review readiness:
+  - `complete_review_provenance`
+  - `missing_review_provenance`
+- Added `provenance_next_action`.
+- Text output now prints both provenance status and provenance next action.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-audit-provenance-e270.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-audit-provenance-e270.md --out=.ax/experiments/workflow-candidate-review-coverage-provenance-status-complete-e272.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-audit-provenance-e270.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-audit-provenance-e270.md > .ax/experiments/workflow-candidate-review-coverage-provenance-status-complete-e272.txt
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --out=.ax/experiments/workflow-candidate-review-coverage-provenance-status-missing-e272.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md > .ax/experiments/workflow-candidate-review-coverage-provenance-status-missing-e272.txt
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-provenance-status-complete-e272.json`
+- `.ax/experiments/workflow-candidate-review-coverage-provenance-status-complete-e272.txt`
+- `.ax/experiments/workflow-candidate-review-coverage-provenance-status-missing-e272.json`
+- `.ax/experiments/workflow-candidate-review-coverage-provenance-status-missing-e272.txt`
+
+Results:
+- Provenance-complete pack reports
+  `provenance_status=complete_review_provenance` and
+  `provenance_next_action="Review provenance is complete."`.
+- Rationale-only pack remains `ready_to_apply`, but reports
+  `provenance_status=missing_review_provenance` and asks the reviewer to add
+  reviewer/reviewed-at metadata if audit provenance is required.
+
+Decision:
+- E272 keeps the current compatibility stance from E271 while making the
+  choice explicit for services: apply can remain review/rationale-gated, and
+  a stricter caller can require `complete_review_provenance` before applying.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "coverage"
+python3 - <<'PY'
+import json
+from pathlib import Path
+complete = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-provenance-status-complete-e272.json").read_text())["coverage_review"]
+missing = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-provenance-status-missing-e272.json").read_text())["coverage_review"]
+assert complete["provenance_status"] == "complete_review_provenance"
+assert complete["provenance_next_action"] == "Review provenance is complete."
+assert missing["provenance_status"] == "missing_review_provenance"
+assert missing["provenance_next_action"] == "Add reviewer and reviewed-at metadata before applying if audit provenance is required."
+complete_text = Path(".ax/experiments/workflow-candidate-review-coverage-provenance-status-complete-e272.txt").read_text()
+missing_text = Path(".ax/experiments/workflow-candidate-review-coverage-provenance-status-missing-e272.txt").read_text()
+assert "coverage review provenance status: complete_review_provenance" in complete_text
+assert "coverage review provenance next action: Review provenance is complete." in complete_text
+assert "coverage review provenance status: missing_review_provenance" in missing_text
+assert "coverage review provenance next action: Add reviewer and reviewed-at metadata before applying if audit provenance is required." in missing_text
+PY
+```
+
+## E271 - Count Coverage Review Provenance Gaps
+
+Question:
+- Can readiness reports show whether reviewed fixtures are missing reviewer or
+  reviewed-at provenance without changing the apply gate yet?
+
+Implementation:
+- `WorkflowCandidateReviewCoverageApplySummary` now includes:
+  - `missing_reviewer_count`
+  - `missing_reviewed_at_count`
+- Text output now prints
+  `coverage review provenance: missing_reviewer=N missing_reviewed_at=N`.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-audit-provenance-e270.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-audit-provenance-e270.md --out=.ax/experiments/workflow-candidate-review-coverage-provenance-counts-complete-e271.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-audit-provenance-e270.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-audit-provenance-e270.md > .ax/experiments/workflow-candidate-review-coverage-provenance-counts-complete-e271.txt
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --out=.ax/experiments/workflow-candidate-review-coverage-provenance-counts-missing-e271.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md > .ax/experiments/workflow-candidate-review-coverage-provenance-counts-missing-e271.txt
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-provenance-counts-complete-e271.json`
+- `.ax/experiments/workflow-candidate-review-coverage-provenance-counts-complete-e271.txt`
+- `.ax/experiments/workflow-candidate-review-coverage-provenance-counts-missing-e271.json`
+- `.ax/experiments/workflow-candidate-review-coverage-provenance-counts-missing-e271.txt`
+
+Results:
+- Provenance-complete reviewed fixture reports
+  `missing_reviewer_count=0` and `missing_reviewed_at_count=0`.
+- Older rationale-only reviewed fixture still remains `ready_to_apply`, but
+  now reports `missing_reviewer_count=1` and
+  `missing_reviewed_at_count=1`.
+
+Decision:
+- E271 keeps provenance as an audit signal rather than a hard blocker. This
+  avoids retroactively invalidating older review packs while giving reviewers
+  and services the evidence needed to decide whether to require provenance
+  before applying real review facts.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "coverage"
+python3 - <<'PY'
+import json
+from pathlib import Path
+complete = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-provenance-counts-complete-e271.json").read_text())["coverage_review"]
+missing = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-provenance-counts-missing-e271.json").read_text())["coverage_review"]
+assert complete["missing_reviewer_count"] == 0
+assert complete["missing_reviewed_at_count"] == 0
+assert missing["missing_reviewer_count"] == 1
+assert missing["missing_reviewed_at_count"] == 1
+complete_text = Path(".ax/experiments/workflow-candidate-review-coverage-provenance-counts-complete-e271.txt").read_text()
+missing_text = Path(".ax/experiments/workflow-candidate-review-coverage-provenance-counts-missing-e271.txt").read_text()
+assert "coverage review provenance: missing_reviewer=0 missing_reviewed_at=0" in complete_text
+assert "coverage review provenance: missing_reviewer=1 missing_reviewed_at=1" in missing_text
+PY
+```
+
+## E270 - Add Coverage Apply Audit Provenance
+
+Question:
+- Can readiness/apply audit rows show reviewer provenance directly, without
+  requiring a reviewer or FX service to open projected graph fact payloads?
+
+Implementation:
+- `WorkflowCandidateReviewCoverageApplyAuditRow` now includes `reviewer` and
+  `reviewed_at`.
+- Coverage readiness summaries populate those fields from synced fixture
+  review provenance.
+- Text reports render reviewer provenance on each
+  `coverage review audit row`.
+
+Commands:
+```sh
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-provenance-e269.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-audit-provenance-e270.jsonl
+cp .ax/experiments/workflow-candidate-review-coverage-brief-provenance-synced-e269.md .ax/experiments/workflow-candidate-review-coverage-brief-audit-provenance-e270.md
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-audit-provenance-e270.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-audit-provenance-e270.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-audit-provenance-synced-e270.md --out=.ax/experiments/workflow-candidate-review-coverage-audit-provenance-e270.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-audit-provenance-e270.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-audit-provenance-e270.md > .ax/experiments/workflow-candidate-review-coverage-audit-provenance-e270.txt
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-audit-provenance-e270.json`
+- `.ax/experiments/workflow-candidate-review-coverage-audit-provenance-e270.txt`
+
+Results:
+- Readiness JSON `apply_audit_rows[0]` includes
+  `reviewer=reviewer.test` and `reviewed_at=2026-05-31T10:00:00Z`.
+- Text output includes the same provenance on the
+  `coverage review audit row`.
+
+Decision:
+- E270 keeps review fact application gated, but makes the non-mutating
+  readiness report a complete audit surface: fixture, candidate, verdict,
+  projected fact id, reviewer, and reviewed timestamp are visible together.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "coverage"
+python3 - <<'PY'
+import json
+from pathlib import Path
+report = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-audit-provenance-e270.json").read_text())
+row = report["coverage_review"]["apply_audit_rows"][0]
+assert row["reviewer"] == "reviewer.test"
+assert row["reviewed_at"] == "2026-05-31T10:00:00Z"
+text = Path(".ax/experiments/workflow-candidate-review-coverage-audit-provenance-e270.txt").read_text()
+assert "reviewer=reviewer.test reviewed_at=2026-05-31T10:00:00Z" in text
+PY
+```
+
+## E269 - Add Coverage Review Provenance Fields
+
+Question:
+- Can coverage-review briefs capture reviewer provenance so accepted/revised/
+  rejected/deferred fixture decisions are auditable when projected into graph
+  facts?
+
+Implementation:
+- Coverage review markdown now renders editable `Reviewer` and `Reviewed at`
+  fields for every fixture.
+- Brief sync now preserves those fields as `review_reviewer` and
+  `review_reviewed_at` on fixture rows.
+- Review graph projection now copies those values into review node/fact
+  properties as `reviewer` and `reviewed_at`.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-fixture-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-e269.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-pending-e269.md --out=.ax/experiments/workflow-candidate-review-coverage-pending-e269.json --json
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e258.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-provenance-e269.jsonl
+cp .ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e262.md .ax/experiments/workflow-candidate-review-coverage-brief-provenance-edit-e269.md
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-provenance-e269.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-provenance-edit-e269.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-provenance-e269.md --out=.ax/experiments/workflow-candidate-review-coverage-provenance-e269.json --json
+cp .ax/experiments/workflow-candidate-review-coverage-brief-provenance-e269.md .ax/experiments/workflow-candidate-review-coverage-brief-provenance-edit-e269.md
+perl -0pi -e 's/- Reviewer: _pending_/- Reviewer: reviewer.test/; s/- Reviewed at: _pending_/- Reviewed at: 2026-05-31T10:00:00Z/' .ax/experiments/workflow-candidate-review-coverage-brief-provenance-edit-e269.md
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-provenance-e269.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-provenance-edit-e269.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-provenance-synced-e269.md --out=.ax/experiments/workflow-candidate-review-coverage-provenance-synced-e269.json --json
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-brief-pending-e269.md`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-provenance-synced-e269.md`
+- `.ax/experiments/workflow-candidate-review-coverage-provenance-synced-e269.json`
+
+Results:
+- Pending brief renders `Reviewer: _pending_` and `Reviewed at: _pending_`
+  for each fixture.
+- Synced provenance brief preserves `Reviewer: reviewer.test` and
+  `Reviewed at: 2026-05-31T10:00:00Z` on the reviewed fixture.
+- Unit coverage verifies an email-shaped reviewer value also round-trips and
+  is projected into review graph facts.
+
+Decision:
+- E269 does not apply any review facts. It makes future real review decisions
+  more auditable by carrying reviewer provenance from editable markdown through
+  JSONL sync into graph projection properties.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "coverage"
+python3 - <<'PY'
+from pathlib import Path
+pending = Path(".ax/experiments/workflow-candidate-review-coverage-brief-pending-e269.md").read_text()
+synced = Path(".ax/experiments/workflow-candidate-review-coverage-brief-provenance-synced-e269.md").read_text()
+assert "- Reviewer: _pending_" in pending
+assert "- Reviewed at: _pending_" in pending
+assert "- Reviewer: reviewer.test" in synced
+assert "- Reviewed at: 2026-05-31T10:00:00Z" in synced
+PY
+```
+
+## E268 - Add Coverage Brief Blocker Remediations
+
+Question:
+- Can the markdown coverage-review brief show the same blocker/remediation
+  guidance as readiness reports before reviewers open JSON or text reports?
+
+Implementation:
+- `renderWorkflowCandidateReviewCoverageBriefMarkdown` now emits:
+  - `Apply blockers`
+  - `Blocker remediations`
+- The lines are derived from the same guard/blocker helpers used by readiness
+  summaries.
+
+Commands:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-fixture-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-e268.jsonl --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-pending-e268.md --out=.ax/experiments/workflow-candidate-review-coverage-pending-e268.json --json
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e258.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e268.jsonl
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e255.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e268.md --out=.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e268.json --json
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e258.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl
+cp .ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e262.md .ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e268.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md --out=.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e268.json --json
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-brief-pending-e268.md`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e268.md`
+- `.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md`
+
+Results:
+- Pending brief reports `Apply blockers: no_reviewed_fixtures` and the
+  matching remediation.
+- Missing-rationale brief reports `Apply blockers:
+  missing_review_rationale` and the matching remediation.
+- Clean complete-rationale brief reports `Apply blockers: none` and
+  `Blocker remediations: none`.
+
+Decision:
+- E268 makes the editable markdown brief self-contained for reviewer triage:
+  the same blocker/remediation contract is available before sync/apply.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 - <<'PY'
+from pathlib import Path
+pending = Path(".ax/experiments/workflow-candidate-review-coverage-brief-pending-e268.md").read_text()
+missing = Path(".ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e268.md").read_text()
+ready = Path(".ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e268.md").read_text()
+assert "- Apply blockers: `no_reviewed_fixtures`" in pending
+assert "no_reviewed_fixtures: Review at least one fixture and add a rationale before applying." in pending
+assert "- Apply blockers: `missing_review_rationale`" in missing
+assert "missing_review_rationale: Add rationale text to each reviewed fixture." in missing
+assert "- Apply blockers: `none`" in ready
+assert "- Blocker remediations: none" in ready
+PY
+```
+
+## E267 - Render Coverage Apply Audit Rows In Text
+
+Question:
+- Can a reviewer inspect fixture -> candidate -> verdict -> graph fact mappings
+  without opening the JSON readiness report?
+
+Implementation:
+- `renderWorkflowCandidateReviewCoverageText` now prints one compact
+  `coverage review audit row: ...` line for each `apply_audit_rows` entry.
+- The line includes verdict, fixture id, candidate id, and projected fact id.
+
+Commands:
+```sh
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e258.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e255.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e267.md --out=.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e267.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e267.jsonl > .ax/experiments/workflow-candidate-review-coverage-missing-rationale-e267.txt
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e258.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl
+cp .ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e262.md .ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e267.md
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e267.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e267.md --out=.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e267.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e267.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e267.md > .ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e267.txt
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e267.json`
+- `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e267.txt`
+- `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e267.json`
+- `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e267.txt`
+
+Results:
+- Missing-rationale text prints the audit-row count and the concrete
+  `accept fixture=... candidate=... fact=...` row while remaining blocked.
+- Clean complete-rationale text prints the same concrete audit row while
+  remaining non-applied `can_apply=true`.
+
+Decision:
+- E267 makes the per-fixture apply audit usable in both service JSON and
+  reviewer-facing text output.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-missing-rationale-e267.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e267.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+missing = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-missing-rationale-e267.json").read_text())["coverage_review"]
+ready = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e267.json").read_text())["coverage_review"]
+missing_text = Path(".ax/experiments/workflow-candidate-review-coverage-missing-rationale-e267.txt").read_text()
+ready_text = Path(".ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e267.txt").read_text()
+row = missing["apply_audit_rows"][0]
+line = f"coverage review audit row: {row['verdict']} fixture={row['fixture_id']} candidate={row['candidate_id']} fact={row['projected_fact_id']}"
+assert missing["apply_audit_rows"] == ready["apply_audit_rows"]
+assert line in missing_text
+assert line in ready_text
+PY
+```
+
+## E266 - Add Per-Fixture Coverage Apply Audit Rows
+
+Question:
+- Can services see the exact fixture -> candidate -> verdict -> graph fact
+  mapping without inferring it from separate ID arrays?
+
+Implementation:
+- Added `apply_audit_rows` to the coverage readiness summary.
+- Each row includes `fixture_id`, `candidate_id`, `verdict`, and
+  `projected_fact_id`.
+- Text output now prints `coverage review audit rows: N`.
+
+Commands:
+```sh
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e258.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e266.jsonl
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e266.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e255.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e266.md --out=.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e266.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e266.jsonl > .ax/experiments/workflow-candidate-review-coverage-missing-rationale-e266.txt
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e258.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e266.jsonl
+cp .ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e262.md .ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e266.md
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e266.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e266.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e266.md --out=.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e266.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e266.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e266.md > .ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e266.txt
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e266.json`
+- `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e266.txt`
+- `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e266.json`
+- `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e266.txt`
+
+Results:
+- Missing-rationale JSON still reports `can_apply=false`, but includes one
+  `apply_audit_rows` entry mapping the reviewed fixture to the projected fact.
+- Clean complete-rationale JSON reports the same fixture -> fact audit row with
+  `can_apply=true`.
+- Text output prints `coverage review audit rows: 1`.
+
+Decision:
+- E266 makes the planned graph mutation directly inspectable per reviewed
+  fixture, which is safer for FX services, dashboards, and later review UIs
+  than relying on parallel ID arrays.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-missing-rationale-e266.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e266.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+missing = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-missing-rationale-e266.json").read_text())["coverage_review"]
+ready = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e266.json").read_text())["coverage_review"]
+missing_text = Path(".ax/experiments/workflow-candidate-review-coverage-missing-rationale-e266.txt").read_text()
+ready_text = Path(".ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e266.txt").read_text()
+assert len(missing["apply_audit_rows"]) == 1
+assert len(ready["apply_audit_rows"]) == 1
+assert missing["apply_audit_rows"][0]["projected_fact_id"] == missing["projected_fact_ids"][0]
+assert ready["apply_audit_rows"][0]["projected_fact_id"] == ready["projected_fact_ids"][0]
+assert missing["apply_audit_rows"] == ready["apply_audit_rows"]
+assert "coverage review audit rows: 1" in missing_text
+assert "coverage review audit rows: 1" in ready_text
+PY
+```
+
+## E265 - Add Coverage Apply Result Metadata
+
+Question:
+- Can FX services distinguish a readiness check that did not request apply
+  from a guarded apply request, and see how many statements actually applied?
+
+Implementation:
+- Added `apply_result: not_requested | blocked | applied` to the coverage
+  readiness summary.
+- Added `applied_statement_count`, which stays `0` unless the apply path
+  actually writes the review facts.
+- Runtime apply now rebuilds the summary after a successful write so `applied`
+  and `applied_statement_count` cannot drift.
+- Text output now prints `coverage review apply result: ... statements=N`.
+
+Commands:
+```sh
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e258.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e265.jsonl
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e265.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e255.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e265.md --out=.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e265.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e265.jsonl > .ax/experiments/workflow-candidate-review-coverage-missing-rationale-e265.txt
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e258.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e265.jsonl
+cp .ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e262.md .ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e265.md
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e265.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e265.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e265.md --out=.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e265.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e265.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e265.md > .ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e265.txt
+set +e
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e265.jsonl --apply-review-facts --out=.ax/experiments/workflow-candidate-review-coverage-missing-rationale-apply-blocked-e265.json > .ax/experiments/workflow-candidate-review-coverage-missing-rationale-apply-blocked-e265.txt
+rc=$?
+set -e
+test "$rc" -eq 1
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e265.json`
+- `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e265.txt`
+- `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e265.json`
+- `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e265.txt`
+- `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-apply-blocked-e265.json`
+- `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-apply-blocked-e265.txt`
+
+Results:
+- Missing-rationale readiness reports `apply_result=not_requested`,
+  `applied=false`, and `applied_statement_count=0`.
+- Clean complete-rationale readiness also reports `not_requested` with
+  `can_apply=true`, proving readiness without mutation.
+- Requested apply on the missing-rationale pack exits `1`, writes a JSON report,
+  and reports `apply_result=blocked`, `applied=false`,
+  `applied_statement_count=0`.
+
+Decision:
+- E265 makes the readiness/apply contract explicit enough for services to
+  handle three states: no apply requested, apply requested but guarded, and
+  successful apply with a concrete applied statement count.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-missing-rationale-e265.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e265.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-missing-rationale-apply-blocked-e265.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+missing = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-missing-rationale-e265.json").read_text())["coverage_review"]
+ready = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e265.json").read_text())["coverage_review"]
+blocked = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-missing-rationale-apply-blocked-e265.json").read_text())["coverage_review"]
+blocked_text = Path(".ax/experiments/workflow-candidate-review-coverage-missing-rationale-apply-blocked-e265.txt").read_text()
+assert missing["apply_result"] == "not_requested"
+assert ready["apply_result"] == "not_requested"
+assert blocked["apply_result"] == "blocked"
+assert blocked["apply_requested"] is True
+assert blocked["applied"] is False
+assert blocked["applied_statement_count"] == 0
+assert "coverage review apply result: blocked statements=0" in blocked_text
+PY
+```
+
+## E264 - Add Coverage Apply Audit IDs
+
+Question:
+- Can a reviewer or FX service see the exact fixture IDs and graph fact IDs
+  involved before applying coverage-review facts?
+
+Implementation:
+- Added `reviewed_fixture_ids` and `projected_fact_ids` to the coverage
+  readiness summary.
+- Text output now prints `coverage review audit ids: fixtures=N facts=N`.
+- Existing readiness guards still control apply; audit IDs only make the
+  planned graph mutation traceable.
+
+Commands:
+```sh
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e258.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e264.jsonl
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e264.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e255.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e264.md --out=.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e264.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e264.jsonl > .ax/experiments/workflow-candidate-review-coverage-missing-rationale-e264.txt
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e258.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e264.jsonl
+cp .ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e262.md .ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e264.md
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e264.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e264.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e264.md --out=.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e264.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e264.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e264.md > .ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e264.txt
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e264.json`
+- `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e264.txt`
+- `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e264.json`
+- `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e264.txt`
+
+Results:
+- Missing-rationale JSON remains `can_apply=false` and reports one
+  `reviewed_fixture_id` plus one `projected_fact_id`.
+- Clean complete-rationale JSON remains non-applied `can_apply=true` and
+  reports the same one fixture -> one fact audit mapping.
+- Text output prints `coverage review audit ids: fixtures=1 facts=1`.
+
+Decision:
+- E264 makes the coverage-review apply path auditable without requiring a DB
+  mutation: reviewers and services can compare reviewed fixture IDs with the
+  exact graph fact IDs that would be written.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-missing-rationale-e264.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e264.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+missing = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-missing-rationale-e264.json").read_text())["coverage_review"]
+ready = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e264.json").read_text())["coverage_review"]
+missing_text = Path(".ax/experiments/workflow-candidate-review-coverage-missing-rationale-e264.txt").read_text()
+ready_text = Path(".ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e264.txt").read_text()
+assert len(missing["reviewed_fixture_ids"]) == 1
+assert len(missing["projected_fact_ids"]) == 1
+assert len(ready["reviewed_fixture_ids"]) == 1
+assert len(ready["projected_fact_ids"]) == 1
+assert missing["projected_fact_ids"] == ready["projected_fact_ids"]
+assert "coverage review audit ids: fixtures=1 facts=1" in missing_text
+assert "coverage review audit ids: fixtures=1 facts=1" in ready_text
+PY
+```
+
+## E263 - Add Coverage Readiness Schema Marker
+
+Question:
+- Can services detect the nested readiness-summary contract independently of
+  the outer coverage report schema?
+
+Implementation:
+- Added `schema: ax.workflow_candidate_review_readiness.v1` to
+  `WorkflowCandidateReviewCoverageApplySummary`.
+- `buildWorkflowCandidateReviewCoverageApplySummary` now emits the schema in
+  every readiness summary.
+- Text output now prints `coverage review schema: ...`.
+
+Commands:
+```sh
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e258.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e263.jsonl
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e263.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e255.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-missing-rationale-e263.md --out=.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e263.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-missing-rationale-e263.jsonl > .ax/experiments/workflow-candidate-review-coverage-missing-rationale-e263.txt
+cp .ax/experiments/workflow-candidate-review-coverage-gaps-e258.jsonl .ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e263.jsonl
+cp .ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e262.md .ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e263.md
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e263.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e263.md --coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e263.md --out=.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e263.json --json
+bun src/cli/index.ts classifiers workflow-candidates --review-coverage --source-kind=hybrid_window_classifier_projection --limit=20 --coverage-review-pack=.ax/experiments/workflow-candidate-review-coverage-gaps-complete-rationale-clean-e263.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-candidate-review-coverage-brief-complete-rationale-clean-e263.md > .ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e263.txt
+```
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e263.json`
+- `.ax/experiments/workflow-candidate-review-coverage-missing-rationale-e263.txt`
+- `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e263.json`
+- `.ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e263.txt`
+
+Results:
+- Missing-rationale JSON reports `schema:
+  ax.workflow_candidate_review_readiness.v1` and remains `can_apply=false`.
+- Clean complete-rationale JSON reports the same schema and remains
+  non-applied `can_apply=true`.
+- Text output prints `coverage review schema:
+  ax.workflow_candidate_review_readiness.v1`.
+
+Decision:
+- E263 makes the nested readiness contract versioned for FX services and
+  dashboards, so they can gate parsing on the summary schema rather than only
+  the outer report schema.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-missing-rationale-e263.json >/dev/null
+python3 -m json.tool .ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e263.json >/dev/null
+python3 - <<'PY'
+import json
+from pathlib import Path
+missing = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-missing-rationale-e263.json").read_text())["coverage_review"]
+ready = json.loads(Path(".ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e263.json").read_text())["coverage_review"]
+missing_text = Path(".ax/experiments/workflow-candidate-review-coverage-missing-rationale-e263.txt").read_text()
+ready_text = Path(".ax/experiments/workflow-candidate-review-coverage-complete-rationale-clean-e263.txt").read_text()
+assert missing["schema"] == "ax.workflow_candidate_review_readiness.v1"
+assert ready["schema"] == "ax.workflow_candidate_review_readiness.v1"
+assert missing["can_apply"] is False
+assert ready["can_apply"] is True
+assert "coverage review schema: ax.workflow_candidate_review_readiness.v1" in missing_text
+assert "coverage review schema: ax.workflow_candidate_review_readiness.v1" in ready_text
+PY
 ```
 
 ## E235 - Explain Promoted Helper Facts From Graph Queries

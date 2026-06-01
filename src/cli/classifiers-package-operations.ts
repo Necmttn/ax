@@ -1,17 +1,38 @@
 import { Effect } from "effect";
+import { readFileSync } from "node:fs";
 import type { SurrealClient } from "../lib/db.ts";
+import { safeJsonParse } from "../lib/shared/safe-json.ts";
 import {
     ClassifierPackageService,
+    type ClassifierQualityStatusReport,
     type ClassifierPackageOperationReportInput,
 } from "../classifiers/package-service.ts";
+import {
+    buildClassifierLifecycleRouteBindingPreview,
+    buildClassifierLifecycleRouteExecutionPlan,
+    executeClassifierLifecycleRouteExecutionPlan,
+    inspectClassifierLifecycleRouteExecution,
+    writeClassifierLifecycleRouteBindingPreviewReport,
+    writeClassifierLifecycleRouteExecutionReport,
+    writeClassifierLifecycleRouteExecutionInspectionReport,
+    writeClassifierLifecycleRouteExecutionPlanReport,
+} from "../classifiers/package-operations.ts";
 import type {
     ClassifierPackageExecutionFactProjectionReport,
     ClassifierPackageExecutionHistoryReport,
     ClassifierPackageExecutionSurrealApplyReport,
     ClassifierPackageExecutionSurrealWritePlanReport,
     ClassifierPackageExecutionGraphHealthReport,
+    ClassifierLifecycleRouteExecutionInspectionReport,
+    ClassifierLifecycleRouteExecutionReport,
+    ClassifierLifecycleRouteExecutionPlanReport,
+    ClassifierLifecycleRouteBindingPreviewReport,
     ClassifierLifecycleInsightReport,
+    ClassifierLifecycleRoutingSummaryReport,
+    ClassifierGraphBoundaryReplaySummary,
+    ClassifierGraphQuerySuggestionRoutingSummary,
     ClassifierGraphHealthMode,
+    ClassifierGraphHealthQuery,
     ClassifierPackageOperationDryRunReport,
     ClassifierPackageOperationExecutionReport,
     ClassifierPackageOperationExecutionPlanReport,
@@ -32,8 +53,27 @@ export interface ClassifierPackageOperationsCommandInput extends ClassifierPacka
     readonly writePlan?: boolean;
     readonly applyWritePlan?: boolean;
     readonly graphHealth?: boolean;
+    readonly querySuggestionRouting?: boolean;
+    readonly boundaryReplaySummary?: boolean;
+    readonly qualityStatus?: boolean;
+    readonly sourceReportPath?: string;
     readonly graphMode?: ClassifierGraphHealthMode;
     readonly artifact?: string;
+    readonly sourceKind?: string;
+    readonly factKind?: string;
+    readonly status?: string;
+    readonly sourceFixture?: string;
+    readonly proposedLabel?: string;
+    readonly threshold?: string;
+    readonly minSeedCount?: number;
+    readonly minPositiveRecall?: number;
+    readonly minCallReduction?: number;
+    readonly minNearestSimilarity?: number;
+    readonly nearestFixture?: string;
+    readonly predicate?: string;
+    readonly subject?: string;
+    readonly valueContains?: string;
+    readonly valueEquals?: string;
     readonly root?: string;
     readonly workflowStatusPath?: string;
 }
@@ -43,6 +83,32 @@ export interface ClassifierPackagesOperationsCommandInput {
     readonly out?: string;
     readonly json: boolean;
 }
+
+const buildLifecycleGraphQueryInput = (input: {
+    readonly graphMode?: ClassifierGraphHealthMode;
+    readonly predicate?: string;
+    readonly subject?: string;
+    readonly valueContains?: string;
+    readonly valueEquals?: string;
+}): Partial<ClassifierGraphHealthQuery> | undefined => {
+    if (
+        input.graphMode === undefined &&
+        input.predicate === undefined &&
+        input.subject === undefined &&
+        input.valueContains === undefined &&
+        input.valueEquals === undefined
+    ) {
+        return undefined;
+    }
+
+    return {
+        mode: input.graphMode ?? "summary",
+        ...(input.predicate === undefined ? {} : { predicate: input.predicate }),
+        ...(input.subject === undefined ? {} : { subject: input.subject }),
+        ...(input.valueContains === undefined ? {} : { value_contains: input.valueContains }),
+        ...(input.valueEquals === undefined ? {} : { value_equals: input.valueEquals }),
+    };
+};
 
 export function renderClassifierPackageOperationsText(report: ClassifierPackageOperationsReport): string {
     const lines = [
@@ -169,6 +235,28 @@ function executionFailed(decision: ClassifierPackageOperationExecutionReport["de
     return decision !== "executed";
 }
 
+export function renderClassifierQualityStatusText(report: ClassifierQualityStatusReport): string {
+    const lines = [
+        "classifier quality status",
+        `source: ${report.source_report_path}`,
+        `source decision: ${report.source_decision ?? "unknown"}`,
+        `quality gate passed: ${report.quality_gate_passed ? "yes" : "no"}`,
+        `promotion quality: ${report.promotion_quality ? "yes" : "no"}`,
+        `recommended use: ${report.recommended_use}`,
+        `repeated misses: ${report.metrics.repeated_miss_count}`,
+        `unique none false positives: ${report.metrics.unique_none_false_positive_count}`,
+        `next action: ${report.next_action}`,
+    ];
+    if (report.metrics.macro_f1_min !== undefined) lines.push(`macro f1 min: ${report.metrics.macro_f1_min}`);
+    if (report.metrics.none_false_positive_rate_max !== undefined) {
+        lines.push(`none false positive max: ${report.metrics.none_false_positive_rate_max}`);
+    }
+    for (const blocker of report.blockers) {
+        lines.push(`blocker: ${blocker}`);
+    }
+    return lines.join("\n");
+}
+
 export function renderClassifierPackagesOperationsText(report: ClassifierPackagesOperationsReport): string {
     const lines = [
         `classifier packages: ${report.totals.package_count}`,
@@ -252,17 +340,303 @@ export function renderClassifierPackageExecutionApplyText(report: ClassifierPack
     return lines.join("\n");
 }
 
+const renderGraphQuery = (query: object | undefined): string =>
+    query === undefined
+        ? "none"
+        : Object.entries(query)
+            .map(([key, value]) => `${key}=${value}`)
+            .join(" ");
+
+export function renderClassifierGraphQuerySuggestionRoutingSummaryText(
+    report: ClassifierGraphQuerySuggestionRoutingSummary,
+): string {
+    const suggestion = report.suggestion;
+    const lines = [
+        "classifier graph query suggestion routing",
+        `has suggestion: ${report.has_suggestion}`,
+        `query match: ${report.query_match_status ?? "unknown"}`,
+        `query next action: ${report.query_next_action ?? "unknown"}`,
+        `suggested value equals: ${report.suggested_value_equals ?? "none"}`,
+        `suggested status: ${report.suggested_status ?? "none"}`,
+        `suggested next action: ${report.suggested_next_action ?? "none"}`,
+    ];
+    if (suggestion === undefined) return lines.join("\n");
+    lines.push(`suggestion: status=${suggestion.status} next_action=${suggestion.next_action} result_count=${suggestion.result_count} value_equals=${suggestion.value_equals}`);
+    lines.push(`suggestion provenance: source=${suggestion.source} reason=${suggestion.reason}`);
+    lines.push(`suggestion original query: ${renderGraphQuery(suggestion.original_query)}`);
+    lines.push(`suggestion query: ${renderGraphQuery(suggestion.query)}`);
+    lines.push(`repair status: ${suggestion.repair.status}`);
+    lines.push(`repair outcome status: ${suggestion.repair.outcome_status}`);
+    lines.push(`repair execution status: ${suggestion.repair.execution_status}`);
+    lines.push(`repair next action: ${suggestion.repair.next_action}`);
+    lines.push(`repair command kind: ${suggestion.repair.command_kind}`);
+    lines.push(`repair can execute: ${suggestion.repair.can_execute}`);
+    lines.push(`repair requires inputs: ${suggestion.repair.requires_inputs}`);
+    lines.push(`repair required inputs: ${suggestion.repair.required_inputs.join(", ") || "none"}`);
+    lines.push(`repair blockers: ${suggestion.repair.blockers.join(", ") || "none"}`);
+    lines.push(`repair argv: ${suggestion.repair.argv.join(" ") || "none"}`);
+    lines.push(`repair query: ${renderGraphQuery(suggestion.repair.query)}`);
+    lines.push(`repair expected query match: ${suggestion.repair.expected_query_match_status}`);
+    lines.push(`repair expected result count: ${suggestion.repair.expected_result_count ?? "none"}`);
+    lines.push(`verification status: ${suggestion.verification.status}`);
+    lines.push(`verification outcome status: ${suggestion.verification.outcome_status}`);
+    lines.push(`verification execution status: ${suggestion.verification.execution_status}`);
+    lines.push(`verification next action: ${suggestion.verification.next_action}`);
+    lines.push(`verification command kind: ${suggestion.verification.command_kind}`);
+    lines.push(`verification can execute: ${suggestion.verification.can_execute}`);
+    lines.push(`verification requires inputs: ${suggestion.verification.requires_inputs}`);
+    lines.push(`verification required inputs: ${suggestion.verification.required_inputs.join(", ") || "none"}`);
+    lines.push(`verification blockers: ${suggestion.verification.blockers.join(", ") || "none"}`);
+    lines.push(`verification argv: ${suggestion.verification.argv.join(" ") || "none"}`);
+    lines.push(`verification query: ${renderGraphQuery(suggestion.verification.query)}`);
+    lines.push(`verification expected query match: ${suggestion.verification.expected_query_match_status}`);
+    lines.push(`verification expected result count: ${suggestion.verification.expected_result_count ?? "none"}`);
+    return lines.join("\n");
+}
+
+export function renderClassifierGraphBoundaryReplaySummaryText(
+    summary: ClassifierGraphBoundaryReplaySummary,
+): string {
+    return [
+        "classifier boundary replay summary",
+        `status: ${summary.status}`,
+        `production posture: ${summary.production_posture}`,
+        `next action: ${summary.next_action}`,
+        `remediation: ${summary.remediation}`,
+        `covered subjects: ${summary.covered_subject_count}`,
+        `deterministic label subjects: ${summary.deterministic_label_subject_count}`,
+        `evidence paths: ${summary.evidence_path_count}`,
+        `classifiers: ${summary.classifier_keys.join(", ") || "none"}`,
+        `targets: ${summary.targets.join(", ") || "none"}`,
+        `subjects: ${summary.subjects.join(", ") || "none"}`,
+        `recommended argv: ${summary.recommended_argv?.join(" ") ?? "none"}`,
+    ].join("\n");
+}
+
 export function renderClassifierPackageExecutionGraphHealthText(report: ClassifierPackageExecutionGraphHealthReport): string {
+    const routingPolicySummary = report.routing_policy_summary ?? {
+        status: "not_requested",
+        next_action: "set_routing_floors",
+        remediation: "Set positive-recall and call-reduction floors to evaluate reviewed routing policies.",
+        evaluated_policy_count: 0,
+        candidate_count: 0,
+    };
+    const boundaryReplaySummary = report.boundary_replay_summary ?? {
+        status: "not_requested",
+        production_posture: "not_applicable",
+        next_action: "query_boundary_replay_facts",
+        remediation: "Run a boundary-replay graph query to inspect reviewed deterministic facts.",
+        covered_subject_count: 0,
+        deterministic_label_subject_count: 0,
+        evidence_path_count: 0,
+        classifier_keys: [],
+        targets: [],
+        subjects: [],
+    };
+    const routingPolicyRecommendedFloorAdjustments = (routingPolicySummary.recommended_floor_adjustments ?? [])
+        .map((adjustment) =>
+            `${adjustment.floor}<=${adjustment.recommended} (requested ${adjustment.requested}, gap ${adjustment.gap}, threshold ${adjustment.source_threshold ?? "none"})`
+        )
+        .join("; ") || "none";
+    const routingPolicyRecommendedFloorQuery = routingPolicySummary.recommended_floor_query === undefined
+        ? "none"
+        : Object.entries(routingPolicySummary.recommended_floor_query)
+            .map(([key, value]) => `${key}=${value}`)
+            .join(" ");
+    const routingPolicyRecommendedFloorArgv = routingPolicySummary.recommended_floor_argv?.join(" ") ?? "none";
+    const querySuggestedQuery = report.query_suggested_query === undefined
+        ? "none"
+        : Object.entries(report.query_suggested_query)
+            .map(([key, value]) => `${key}=${value}`)
+            .join(" ");
+    const querySuggestionOriginalQuery = report.query_suggestion === undefined
+        ? "none"
+        : Object.entries(report.query_suggestion.original_query)
+            .map(([key, value]) => `${key}=${value}`)
+            .join(" ");
+    const querySuggestionFilterChanges = report.query_suggestion === undefined
+        ? "none"
+        : report.query_suggestion.filter_changes
+            .map((change) => `${change.filter}:${change.from ?? "none"}->${change.to} (${change.status})`)
+            .join(", ") || "none";
+    const querySuggestion = report.query_suggestion === undefined
+        ? "none"
+        : `status=${report.query_suggestion.status} next_action=${report.query_suggestion.next_action} result_count=${report.query_suggestion.result_count} value_equals=${report.query_suggestion.value_equals}`;
+    const querySuggestionFilterCounts = report.query_suggestion === undefined
+        ? "none"
+        : `changed=${report.query_suggestion.changed_filter_count} unchanged=${report.query_suggestion.unchanged_filter_count}`;
+    const querySuggestionHasChangedFilters = report.query_suggestion === undefined
+        ? "none"
+        : String(report.query_suggestion.has_changed_filters);
+    const querySuggestionChangedFilters = report.query_suggestion?.changed_filters.join(", ") || "none";
+    const querySuggestionUnchangedFilters = report.query_suggestion?.unchanged_filters.join(", ") || "none";
+    const querySuggestionRepairStatus = report.query_suggestion?.repair_status ?? "none";
+    const querySuggestionRepairNextAction = report.query_suggestion?.repair_next_action ?? "none";
+    const querySuggestionRepairRemediation = report.query_suggestion?.repair_remediation ?? "none";
+    const querySuggestionRepairCanExecute = report.query_suggestion === undefined
+        ? "none"
+        : String(report.query_suggestion.repair_can_execute);
+    const querySuggestionRepairExecutionStatus = report.query_suggestion?.repair_execution_status ?? "none";
+    const querySuggestionRepairOutcomeStatus = report.query_suggestion?.repair_outcome_status ?? "none";
+    const querySuggestionRepairCommandKind = report.query_suggestion?.repair_command_kind ?? "none";
+    const querySuggestionRepairRequiresInputs = report.query_suggestion === undefined
+        ? "none"
+        : String(report.query_suggestion.repair_requires_inputs);
+    const querySuggestionRepairRequiredInputs = report.query_suggestion?.repair_required_inputs.join(", ") || "none";
+    const querySuggestionRepairExpectedQueryMatch = report.query_suggestion?.repair_expected_query_match_status ?? "none";
+    const querySuggestionRepairExpectedResultCount = report.query_suggestion?.repair_expected_result_count ?? "none";
+    const querySuggestionRepairBlockers = report.query_suggestion?.repair_blockers.join(", ") || "none";
+    const querySuggestionRepairBlockerDetails = report.query_suggestion?.repair_blocker_details
+        .map((detail) => `${detail.blocker}: ${detail.remediation}`)
+        .join(", ") || "none";
+    const querySuggestionRepairArgv = report.query_suggestion?.repair_argv.join(" ") || "none";
+    const querySuggestionRepairCanVerify = report.query_suggestion === undefined
+        ? "none"
+        : String(report.query_suggestion.repair_can_verify);
+    const querySuggestionRepairVerificationStatus = report.query_suggestion?.repair_verification_status ?? "none";
+    const querySuggestionRepairVerificationExecutionStatus = report.query_suggestion?.repair_verification_execution_status ?? "none";
+    const querySuggestionRepairVerificationOutcomeStatus = report.query_suggestion?.repair_verification_outcome_status ?? "none";
+    const querySuggestionRepairVerificationNextAction = report.query_suggestion?.repair_verification_next_action ?? "none";
+    const querySuggestionRepairVerificationRemediation = report.query_suggestion?.repair_verification_remediation ?? "none";
+    const querySuggestionRepairVerificationCanExecute = report.query_suggestion === undefined
+        ? "none"
+        : String(report.query_suggestion.repair_verification_can_execute);
+    const querySuggestionRepairVerificationCommandKind = report.query_suggestion?.repair_verification_command_kind ?? "none";
+    const querySuggestionRepairVerificationRequiresInputs = report.query_suggestion === undefined
+        ? "none"
+        : String(report.query_suggestion.repair_verification_requires_inputs);
+    const querySuggestionRepairVerificationRequiredInputs = report.query_suggestion?.repair_verification_required_inputs.join(", ") || "none";
+    const querySuggestionRepairVerificationBlockers = report.query_suggestion?.repair_verification_blockers.join(", ") || "none";
+    const querySuggestionRepairVerificationBlockerDetails = report.query_suggestion?.repair_verification_blocker_details
+        .map((detail) => `${detail.blocker}: ${detail.remediation}`)
+        .join(", ") || "none";
+    const querySuggestionRepairVerificationExpectedQueryMatch = report.query_suggestion?.repair_verification_expected_query_match_status ?? "none";
+    const querySuggestionRepairVerificationExpectedResultCount = report.query_suggestion?.repair_verification_expected_result_count ?? "none";
+    const querySuggestionRepairVerificationArgv = report.query_suggestion?.repair_verification_argv.join(" ") || "none";
+    const querySuggestionRepairVerificationQuery = report.query_suggestion?.repair_verification_query === undefined
+        ? "none"
+        : Object.entries(report.query_suggestion.repair_verification_query)
+            .map(([key, value]) => `${key}=${value}`)
+            .join(" ");
+    const querySuggestionRepairQuery = report.query_suggestion?.repair_query === undefined
+        ? "none"
+        : Object.entries(report.query_suggestion.repair_query)
+            .map(([key, value]) => `${key}=${value}`)
+            .join(" ");
+    const querySuggestionProvenance = report.query_suggestion === undefined
+        ? "none"
+        : `source=${report.query_suggestion.source} reason=${report.query_suggestion.reason}`;
+    const querySuggestionRelaxedFilters = report.query_suggestion?.relaxed_filters.join(", ") ?? "none";
     const lines = [
         "classifier package execution graph health",
         `decision: ${report.decision}`,
         `mode: ${report.query.mode}`,
         `filter operation: ${report.query.operation_id ?? "all"}`,
         `filter artifact: ${report.query.artifact_path ?? "all"}`,
+        `filter source kind: ${report.query.source_kind ?? "all"}`,
+        `filter fact kind: ${report.query.fact_kind ?? "all"}`,
+        `filter status: ${report.query.status ?? "all"}`,
+        `filter source fixture: ${report.query.source_fixture_id ?? "all"}`,
+        `filter proposed label: ${report.query.proposed_label ?? "all"}`,
+        `filter threshold: ${report.query.threshold ?? "all"}`,
+        `filter min seed count: ${report.query.min_seed_count ?? "all"}`,
+        `filter min positive recall: ${report.query.min_positive_recall ?? "all"}`,
+        `filter min call reduction: ${report.query.min_call_reduction ?? "all"}`,
+        `filter min nearest similarity: ${report.query.min_nearest_similarity ?? "all"}`,
+        `filter nearest fixture: ${report.query.nearest_fixture_id ?? "all"}`,
+        `filter predicate: ${report.query.predicate ?? "all"}`,
+        `filter subject: ${report.query.subject ?? "all"}`,
+        `filter value contains: ${report.query.value_contains ?? "all"}`,
+        `filter value equals: ${report.query.value_equals ?? "all"}`,
+        `query match: ${report.query_match_status ?? "unknown"}`,
+        `query next action: ${report.query_next_action ?? "unknown"}`,
+        `query remediation: ${report.query_remediation ?? "unknown"}`,
+        `query result kinds: ${(report.query_result_kinds ?? []).join(", ") || "none"}`,
+        `query result kind counts: ${(report.query_result_kind_counts ?? []).map((entry) => `${entry.kind}=${entry.count}`).join(", ") || "none"}`,
+        `query suggested value equals: ${report.query_suggested_value_equals ?? "none"}`,
+        `query suggested result count: ${report.query_suggested_result_count ?? "none"}`,
+        `query suggested status: ${report.query_suggested_status ?? "none"}`,
+        `query suggested next action: ${report.query_suggested_next_action ?? "none"}`,
+        `query suggested remediation: ${report.query_suggested_remediation ?? "none"}`,
+        `query suggestion: ${querySuggestion}`,
+        `query suggestion filter counts: ${querySuggestionFilterCounts}`,
+        `query suggestion has changed filters: ${querySuggestionHasChangedFilters}`,
+        `query suggestion changed filters: ${querySuggestionChangedFilters}`,
+        `query suggestion unchanged filters: ${querySuggestionUnchangedFilters}`,
+        `query suggestion repair status: ${querySuggestionRepairStatus}`,
+        `query suggestion repair next action: ${querySuggestionRepairNextAction}`,
+        `query suggestion repair remediation: ${querySuggestionRepairRemediation}`,
+        `query suggestion repair can execute: ${querySuggestionRepairCanExecute}`,
+        `query suggestion repair execution status: ${querySuggestionRepairExecutionStatus}`,
+        `query suggestion repair outcome status: ${querySuggestionRepairOutcomeStatus}`,
+        `query suggestion repair command kind: ${querySuggestionRepairCommandKind}`,
+        `query suggestion repair requires inputs: ${querySuggestionRepairRequiresInputs}`,
+        `query suggestion repair required inputs: ${querySuggestionRepairRequiredInputs}`,
+        `query suggestion repair expected query match: ${querySuggestionRepairExpectedQueryMatch}`,
+        `query suggestion repair expected result count: ${querySuggestionRepairExpectedResultCount}`,
+        `query suggestion repair blockers: ${querySuggestionRepairBlockers}`,
+        `query suggestion repair blocker details: ${querySuggestionRepairBlockerDetails}`,
+        `query suggestion repair argv: ${querySuggestionRepairArgv}`,
+        `query suggestion repair can verify: ${querySuggestionRepairCanVerify}`,
+        `query suggestion repair verification status: ${querySuggestionRepairVerificationStatus}`,
+        `query suggestion repair verification execution status: ${querySuggestionRepairVerificationExecutionStatus}`,
+        `query suggestion repair verification outcome status: ${querySuggestionRepairVerificationOutcomeStatus}`,
+        `query suggestion repair verification next action: ${querySuggestionRepairVerificationNextAction}`,
+        `query suggestion repair verification remediation: ${querySuggestionRepairVerificationRemediation}`,
+        `query suggestion repair verification can execute: ${querySuggestionRepairVerificationCanExecute}`,
+        `query suggestion repair verification command kind: ${querySuggestionRepairVerificationCommandKind}`,
+        `query suggestion repair verification requires inputs: ${querySuggestionRepairVerificationRequiresInputs}`,
+        `query suggestion repair verification required inputs: ${querySuggestionRepairVerificationRequiredInputs}`,
+        `query suggestion repair verification blockers: ${querySuggestionRepairVerificationBlockers}`,
+        `query suggestion repair verification blocker details: ${querySuggestionRepairVerificationBlockerDetails}`,
+        `query suggestion repair verification expected query match: ${querySuggestionRepairVerificationExpectedQueryMatch}`,
+        `query suggestion repair verification expected result count: ${querySuggestionRepairVerificationExpectedResultCount}`,
+        `query suggestion repair verification argv: ${querySuggestionRepairVerificationArgv}`,
+        `query suggestion repair verification query: ${querySuggestionRepairVerificationQuery}`,
+        `query suggestion repair query: ${querySuggestionRepairQuery}`,
+        `query suggestion provenance: ${querySuggestionProvenance}`,
+        `query suggestion relaxed filters: ${querySuggestionRelaxedFilters}`,
+        `query suggestion original query: ${querySuggestionOriginalQuery}`,
+        `query suggestion filter changes: ${querySuggestionFilterChanges}`,
+        `query suggested argv: ${report.query_suggested_argv?.join(" ") ?? "none"}`,
+        `query suggested query: ${querySuggestedQuery}`,
         `nodes/edges/facts: ${report.totals.node_count}/${report.totals.edge_count}/${report.totals.fact_count}`,
         `packages/operations/executions/artifacts: ${report.totals.package_count}/${report.totals.operation_count}/${report.totals.execution_count}/${report.totals.artifact_count}`,
-        `execution/guard/artifact/lifecycle/helper facts: ${report.totals.execution_fact_count}/${report.totals.guard_fact_count}/${report.totals.artifact_fact_count}/${report.totals.lifecycle_fact_count}/${report.totals.embedding_helper_fact_count}`,
-        `results operations/guarded/changed/lifecycle/helper/evidence: ${report.result_totals.operation_count}/${report.result_totals.guarded_operation_count}/${report.result_totals.changed_artifact_count}/${report.result_totals.lifecycle_fact_count}/${report.result_totals.embedding_helper_fact_count}/${report.result_totals.evidence_path_count}`,
+        `execution/guard/artifact/lifecycle/helper/boundary facts: ${report.totals.execution_fact_count}/${report.totals.guard_fact_count}/${report.totals.artifact_fact_count}/${report.totals.lifecycle_fact_count}/${report.totals.embedding_helper_fact_count}/${report.totals.boundary_replay_fact_count ?? 0}`,
+        `results operations/guarded/changed/lifecycle/helper/boundary/evidence: ${report.result_totals.operation_count}/${report.result_totals.guarded_operation_count}/${report.result_totals.changed_artifact_count}/${report.result_totals.lifecycle_fact_count}/${report.result_totals.embedding_helper_fact_count}/${report.result_totals.boundary_replay_fact_count ?? 0}/${report.result_totals.evidence_path_count}`,
+        `boundary replay summary: ${boundaryReplaySummary.status}`,
+        `boundary replay production posture: ${boundaryReplaySummary.production_posture}`,
+        `boundary replay next action: ${boundaryReplaySummary.next_action}`,
+        `boundary replay remediation: ${boundaryReplaySummary.remediation}`,
+        `boundary replay covered/labels/evidence: ${boundaryReplaySummary.covered_subject_count}/${boundaryReplaySummary.deterministic_label_subject_count}/${boundaryReplaySummary.evidence_path_count}`,
+        `boundary replay classifiers: ${boundaryReplaySummary.classifier_keys.join(", ") || "none"}`,
+        `boundary replay targets: ${boundaryReplaySummary.targets.join(", ") || "none"}`,
+        `boundary replay subjects: ${boundaryReplaySummary.subjects.join(", ") || "none"}`,
+        `boundary replay recommended argv: ${boundaryReplaySummary.recommended_argv?.join(" ") ?? "none"}`,
+        `routing policy status: ${routingPolicySummary.status}`,
+        `routing policy evaluated: ${routingPolicySummary.evaluated_policy_count ?? "unknown"}`,
+        `routing policy candidates: ${routingPolicySummary.candidate_count}`,
+        `routing policy best threshold: ${routingPolicySummary.best_threshold_by_call_reduction ?? "none"}`,
+        `routing policy best positive recall: ${routingPolicySummary.best_positive_recall ?? "none"}`,
+        `routing policy best call reduction: ${routingPolicySummary.best_call_reduction ?? "none"}`,
+        `routing policy best available threshold: ${routingPolicySummary.best_available_threshold_by_recall ?? "none"}`,
+        `routing policy best available positive recall: ${routingPolicySummary.best_available_positive_recall ?? "none"}`,
+        `routing policy best available call reduction: ${routingPolicySummary.best_available_call_reduction ?? "none"}`,
+        `routing policy positive recall gap: ${routingPolicySummary.positive_recall_gap_to_request ?? "none"}`,
+        `routing policy call reduction gap: ${routingPolicySummary.call_reduction_gap_to_request ?? "none"}`,
+        `routing policy blocking floors: ${(routingPolicySummary.blocking_floor_fields ?? []).join(", ") || "none"}`,
+        `routing policy largest gap: ${routingPolicySummary.largest_gap_floor ?? "none"}`,
+        `routing policy recommended floor adjustments: ${routingPolicyRecommendedFloorAdjustments}`,
+        `routing policy recommended floor query: ${routingPolicyRecommendedFloorQuery}`,
+        `routing policy recommended floor argv: ${routingPolicyRecommendedFloorArgv}`,
+        `routing policy recommended floor status: ${routingPolicySummary.recommended_floor_status ?? "none"}`,
+        `routing policy recommended floor candidates: ${routingPolicySummary.recommended_floor_candidate_count ?? "none"}`,
+        `routing policy recommended floor best threshold: ${routingPolicySummary.recommended_floor_best_threshold_by_call_reduction ?? "none"}`,
+        `routing policy recommended floor best positive recall: ${routingPolicySummary.recommended_floor_best_positive_recall ?? "none"}`,
+        `routing policy recommended floor best call reduction: ${routingPolicySummary.recommended_floor_best_call_reduction ?? "none"}`,
+        `routing policy recommended floor next action: ${routingPolicySummary.recommended_floor_next_action ?? "none"}`,
+        `routing policy next action: ${routingPolicySummary.next_action}`,
+        `routing policy remediation: ${routingPolicySummary.remediation}`,
     ];
     for (const operation of report.operations) {
         lines.push(`- ${operation.package_key}/${operation.operation_id}`);
@@ -305,6 +679,20 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
             }
         }
     }
+    const lifecycleValueCounts = report.lifecycle_value_counts ?? [];
+    if (lifecycleValueCounts.length > 0) {
+        lines.push("lifecycle value counts:");
+        for (const entry of lifecycleValueCounts) {
+            lines.push(`- ${entry.predicate}=${entry.value} count=${entry.count}`);
+        }
+    }
+    const lifecycleAvailableValueCounts = report.lifecycle_available_value_counts ?? [];
+    if (lifecycleAvailableValueCounts.length > 0) {
+        lines.push("lifecycle available value counts:");
+        for (const entry of lifecycleAvailableValueCounts) {
+            lines.push(`- ${entry.predicate}=${entry.value} count=${entry.count}`);
+        }
+    }
     if (report.embedding_helper_facts.length > 0) {
         lines.push("embedding helper facts:");
         for (const fact of report.embedding_helper_facts) {
@@ -319,6 +707,25 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
                 lines.push(`- dedupe ${fact.subject}: ${fact.predicate}`);
             } else {
                 lines.push(`- ${fact.kind} ${fact.predicate}: ${fact.subject}`);
+            }
+            if (fact.evidence_paths.length > 0) {
+                lines.push(`  evidence: ${fact.evidence_paths.join(", ")}`);
+            }
+        }
+    }
+    const boundaryReplayFacts = report.boundary_replay_facts ?? [];
+    if (boundaryReplayFacts.length > 0) {
+        lines.push("boundary replay facts:");
+        for (const fact of boundaryReplayFacts) {
+            const value = typeof fact.value === "string"
+                ? fact.value
+                : JSON.stringify(fact.value);
+            lines.push(`- ${fact.predicate}: ${value} subject=${fact.subject}`);
+            if (fact.classifier_key || fact.target || fact.confidence !== undefined) {
+                lines.push(`  classifier: ${fact.classifier_key ?? "unknown"} target=${fact.target ?? "unknown"} confidence=${fact.confidence ?? "unknown"}`);
+            }
+            if ((fact.signals ?? []).length > 0) {
+                lines.push(`  signals: ${(fact.signals ?? []).join(", ")}`);
             }
             if (fact.evidence_paths.length > 0) {
                 lines.push(`  evidence: ${fact.evidence_paths.join(", ")}`);
@@ -385,6 +792,120 @@ export function renderClassifierLifecycleInsightText(report: ClassifierLifecycle
         const smoke = report.workflow_status.proposal_ready_smoke;
         lines.push(`proposal ready smoke: ${smoke.promotion_decision ?? "unknown"} (${smoke.promotion_report_path})`);
         lines.push(`  drafts/skipped: ${smoke.emitted_draft_count ?? 0}/${smoke.skipped_proposal_count ?? 0}`);
+    }
+    if (report.graph_query_suggestion?.suggestion) {
+        const suggestion = report.graph_query_suggestion.suggestion;
+        lines.push(`graph query suggestion: ${suggestion.status} value=${suggestion.value_equals} count=${suggestion.result_count}`);
+        lines.push(`  original query: ${renderGraphQuery(suggestion.original_query)}`);
+        lines.push(`  suggested query: ${renderGraphQuery(suggestion.query)}`);
+        lines.push(`graph query repair: ${suggestion.repair.outcome_status} ${suggestion.repair.execution_status} ${suggestion.repair.command_kind}`);
+        if (suggestion.repair.argv.length > 0) {
+            lines.push(`graph query repair argv: ${suggestion.repair.argv.join(" ")}`);
+        }
+        lines.push(`graph query verification: ${suggestion.verification.outcome_status} ${suggestion.verification.execution_status} ${suggestion.verification.command_kind}`);
+        if (suggestion.verification.argv.length > 0) {
+            lines.push(`graph query verification argv: ${suggestion.verification.argv.join(" ")}`);
+        }
+    }
+    if (report.routing_items.length > 0) {
+        lines.push("routing items:");
+        for (const item of report.routing_items) {
+            const canExecute = item.can_execute === true ? "yes" : item.can_execute === false ? "no" : "unknown";
+            lines.push(`- ${item.kind}: ${item.status} ${item.command_kind} next=${item.next_action} blocks_decision=${item.blocks_decision ? "yes" : "no"} execution=${item.execution_status} can_execute=${canExecute}`);
+            if (item.kind === "graph_query_repair") {
+                lines.push(`  value repair: ${item.predicate ?? "any_predicate"} ${item.from_value ?? "any"} -> ${item.to_value}`);
+            } else {
+                lines.push(`  action next: ${item.action_next_action ?? "unknown"}`);
+                lines.push(`  can execute: ${canExecute}`);
+                if (item.execution_phase) {
+                    lines.push(`  execution phase: ${item.execution_phase}`);
+                }
+                if (item.missing_inputs.length > 0) {
+                    lines.push(`  missing inputs: ${item.missing_inputs.join(", ")}`);
+                }
+                if (item.input_bindings.length > 0) {
+                    lines.push(`  input bindings: ${item.input_bindings.join("; ")}`);
+                }
+            }
+            if (item.argv.length > 0) {
+                lines.push(`  argv: ${item.argv.join(" ")}`);
+            }
+            lines.push(`  remediation: ${item.remediation}`);
+        }
+    }
+    if (report.graph_recommendations.length > 0) {
+        lines.push("graph recommendations:");
+        for (const recommendation of report.graph_recommendations) {
+            lines.push(`- ${recommendation.kind}: ${recommendation.status} next=${recommendation.next_action}`);
+            lines.push(`  source: ${recommendation.source} ${recommendation.predicate}=${recommendation.value}`);
+            lines.push(`  query argv: ${recommendation.query_argv.join(" ")}`);
+            lines.push(`  candidate argv: ${recommendation.candidate_query_argv.join(" ")}`);
+            if (recommendation.evidence_paths.length > 0) {
+                lines.push(`  evidence: ${recommendation.evidence_paths.join(", ")}`);
+            }
+            lines.push(`  remediation: ${recommendation.remediation}`);
+        }
+    }
+    if (report.review_pipeline) {
+        const pipeline = report.review_pipeline;
+        lines.push(`review pipeline: ${pipeline.status ?? "unknown"} (${pipeline.report_path})`);
+        lines.push(`  command: ${pipeline.command_kind ?? "unknown"} prepared=${pipeline.prepared_status ?? "unknown"}`);
+        if (pipeline.prepared_argv && pipeline.prepared_argv.length > 0) {
+            lines.push(`  argv: ${pipeline.prepared_argv.join(" ")}`);
+        }
+        if (pipeline.production_apply_argv && pipeline.production_apply_argv.length > 0) {
+            lines.push(`  production apply argv: ${pipeline.production_apply_argv.join(" ")}`);
+        }
+        if (pipeline.review_provenance_stamp_argv && pipeline.review_provenance_stamp_argv.length > 0) {
+            lines.push(`  provenance stamp argv: ${pipeline.review_provenance_stamp_argv.join(" ")}`);
+        }
+        if (pipeline.review_issue_repair_argv && pipeline.review_issue_repair_argv.length > 0) {
+            lines.push(`  issue repair argv: ${pipeline.review_issue_repair_argv.join(" ")}`);
+        }
+        if (pipeline.recommended_action_kind) {
+            lines.push(`  recommended action: ${pipeline.recommended_action_kind}`);
+        }
+        if (pipeline.recommended_action_argv && pipeline.recommended_action_argv.length > 0) {
+            lines.push(`  recommended action argv: ${pipeline.recommended_action_argv.join(" ")}`);
+        }
+        if (pipeline.recommended_action_status) {
+            lines.push(`  recommended action status: ${pipeline.recommended_action_status}`);
+        }
+        if (pipeline.recommended_action_can_execute !== undefined) {
+            lines.push(`  recommended action can execute: ${pipeline.recommended_action_can_execute ? "yes" : "no"}`);
+        }
+        if (pipeline.recommended_action_execution_phase) {
+            lines.push(`  recommended action phase: ${pipeline.recommended_action_execution_phase}`);
+        }
+        if (pipeline.recommended_action_execution_summary) {
+            lines.push(`  recommended action summary: ${pipeline.recommended_action_execution_summary}`);
+        }
+        if (pipeline.recommended_action_next_action) {
+            lines.push(`  recommended action next: ${pipeline.recommended_action_next_action}`);
+        }
+        if (pipeline.recommended_action_missing_inputs && pipeline.recommended_action_missing_inputs.length > 0) {
+            lines.push(`  recommended action missing inputs: ${pipeline.recommended_action_missing_inputs.join(", ")}`);
+        }
+        if (pipeline.recommended_action_input_bindings && pipeline.recommended_action_input_bindings.length > 0) {
+            lines.push(`  recommended action input bindings: ${pipeline.recommended_action_input_bindings.join("; ")}`);
+        }
+        if (pipeline.recommended_action_output_artifacts && pipeline.recommended_action_output_artifacts.length > 0) {
+            lines.push(`  recommended action output artifacts: ${pipeline.recommended_action_output_artifacts.join("; ")}`);
+        }
+        if (pipeline.recommended_action_output_checks && pipeline.recommended_action_output_checks.length > 0) {
+            lines.push(`  recommended action output checks: ${pipeline.recommended_action_output_checks.join("; ")}`);
+        }
+        lines.push(`  outputs: ${pipeline.output_verification_status ?? "unknown"} checked=${pipeline.checked_artifact_count} missing=${pipeline.missing_required_artifact_count}`);
+        if (pipeline.output_artifacts.length > 0) {
+            lines.push(`  output artifacts: ${pipeline.output_artifacts.map((artifact) => `${artifact.kind ?? "artifact"}=${artifact.path}`).join(", ")}`);
+        }
+        if (pipeline.checked_artifacts.length > 0) {
+            lines.push(`  checked artifacts: ${pipeline.checked_artifacts.map((artifact) => `${artifact.kind ?? "artifact"}=${artifact.path} ${artifact.exists === true ? "ok" : artifact.exists === false ? "missing" : "unknown"}`).join(", ")}`);
+        }
+        lines.push(`  execute/continue: ${pipeline.can_execute === true ? "yes" : pipeline.can_execute === false ? "no" : "unknown"}/${pipeline.can_continue === true ? "yes" : pipeline.can_continue === false ? "no" : "unknown"} next=${pipeline.next_action}`);
+        if (pipeline.failures.length > 0) {
+            lines.push(`  failures: ${pipeline.failures.join("; ")}`);
+        }
     }
     if (report.workflow_status.focused_batch) {
         const batch = report.workflow_status.focused_batch;
@@ -506,6 +1027,114 @@ export function renderClassifierLifecycleInsightText(report: ClassifierLifecycle
     return lines.join("\n");
 }
 
+export function renderClassifierLifecycleRoutingSummaryText(report: ClassifierLifecycleRoutingSummaryReport): string {
+    const lines = [
+        "classifier lifecycle routing",
+        `decision: ${report.decision}`,
+        `routes executable/missing-input/blocked/secondary: ${report.totals.executable_route_count}/${report.totals.missing_input_route_count}/${report.totals.blocked_route_count}/${report.totals.secondary_route_count}`,
+    ];
+    if (report.active_route) {
+        const canExecute = report.active_route_can_execute === true ? "yes" : report.active_route_can_execute === false ? "no" : "unknown";
+        lines.push(`active: ${report.active_route_kind} ${report.active_route_status ?? "unknown"} ${report.active_route_command_kind ?? "unknown"} execution=${report.active_route_execution_status ?? "unknown"} can_execute=${canExecute}`);
+        lines.push(`next action: ${report.next_action}`);
+        if (report.active_route_missing_inputs.length > 0) {
+            lines.push(`missing inputs: ${report.active_route_missing_inputs.join(", ")}`);
+        }
+        if (report.active_route_input_bindings.length > 0) {
+            lines.push(`input bindings: ${report.active_route_input_bindings.join("; ")}`);
+        }
+        if (report.active_route_argv && report.active_route_argv.length > 0) {
+            lines.push(`argv: ${report.active_route_argv.join(" ")}`);
+        }
+    } else {
+        lines.push("active: none");
+        lines.push(`next action: ${report.next_action}`);
+    }
+    lines.push(`remediation: ${report.remediation}`);
+    return lines.join("\n");
+}
+
+export function renderClassifierLifecycleRouteBindingPreviewText(report: ClassifierLifecycleRouteBindingPreviewReport): string {
+    return [
+        "classifier lifecycle route binding preview",
+        `decision: ${report.decision}`,
+        `active: ${report.active_route_kind ?? "none"} ${report.active_route_command_kind ?? "none"}`,
+        `provided inputs: ${report.provided_inputs.join(", ") || "none"}`,
+        `missing values: ${report.missing_values.join(", ") || "none"}`,
+        `input bindings: ${report.input_bindings.join("; ") || "none"}`,
+        `original argv: ${report.original_argv.join(" ") || "none"}`,
+        `bound argv: ${report.bound_argv.join(" ") || "none"}`,
+        `next action: ${report.next_action}`,
+        `remediation: ${report.remediation}`,
+    ].join("\n");
+}
+
+export function renderClassifierLifecycleRouteExecutionPlanText(report: ClassifierLifecycleRouteExecutionPlanReport): string {
+    const lines = [
+        "classifier lifecycle route execution plan",
+        `decision: ${report.decision}`,
+        `active: ${report.active_route_kind ?? "none"} ${report.active_route_command_kind ?? "none"}`,
+        `requested execute: ${report.requested_execute ? "yes" : "no"}`,
+        `would execute: ${report.would_execute ? "yes" : "no"}`,
+        `command argv: ${report.command_argv.join(" ") || "none"}`,
+        `next action: ${report.next_action}`,
+        `remediation: ${report.remediation}`,
+    ];
+    for (const failure of report.failures) {
+        lines.push(`failure: ${failure}`);
+    }
+    return lines.join("\n");
+}
+
+export function renderClassifierLifecycleRouteExecutionText(report: ClassifierLifecycleRouteExecutionReport): string {
+    const lines = [
+        "classifier lifecycle route execution",
+        `decision: ${report.decision}`,
+        `active: ${report.active_route_kind ?? "none"} ${report.active_route_command_kind ?? "none"}`,
+        `executed: ${report.executed ? "yes" : "no"}`,
+        `exit code: ${report.exit_code ?? "none"}`,
+        `signal: ${report.signal ?? "none"}`,
+        `duration ms: ${report.duration_ms}`,
+        `command argv: ${report.command_argv.join(" ") || "none"}`,
+        `next action: ${report.next_action}`,
+    ];
+    if (report.stdout.trim().length > 0) {
+        lines.push(`stdout: ${report.stdout.trim()}`);
+    }
+    if (report.stderr.trim().length > 0) {
+        lines.push(`stderr: ${report.stderr.trim()}`);
+    }
+    for (const failure of report.failures) {
+        lines.push(`failure: ${failure}`);
+    }
+    return lines.join("\n");
+}
+
+export function renderClassifierLifecycleRouteExecutionInspectionText(report: ClassifierLifecycleRouteExecutionInspectionReport): string {
+    const lines = [
+        "classifier lifecycle route execution inspection",
+        `decision: ${report.decision}`,
+        `active: ${report.active_route_kind ?? "none"} ${report.active_route_command_kind ?? "none"}`,
+        `parsed output source: ${report.parsed_output_source ?? "none"}`,
+        `inner: ${report.inner_schema ?? "unknown"} ${report.inner_decision ?? "unknown"}`,
+        `handoff: ${report.review_handoff_status ?? "unknown"} production=${report.production_apply_guard ?? "unknown"} can_apply=${report.production_can_apply === true ? "yes" : report.production_can_apply === false ? "no" : "unknown"}`,
+        `pipeline: ${report.review_pipeline_stage ?? "unknown"} outputs=${report.review_pipeline_command_output_check_status ?? "unknown"}`,
+        `missing outputs: ${report.missing_output_paths.join(", ") || "none"}`,
+        `next action: ${report.next_action}`,
+        `remediation: ${report.remediation}`,
+    ];
+    if (report.output_artifacts.length > 0) {
+        lines.push("output artifacts:");
+        for (const artifact of report.output_artifacts) {
+            lines.push(`- ${artifact.kind} ${artifact.flag} ${artifact.path} exists=${artifact.exists ? "yes" : "no"}`);
+        }
+    }
+    for (const failure of report.failures) {
+        lines.push(`failure: ${failure}`);
+    }
+    return lines.join("\n");
+}
+
 const serviceErrorText = (error: unknown): string => {
     if (error && typeof error === "object" && "_tag" in error) {
         if ("message" in error && typeof error.message === "string") {
@@ -543,12 +1172,87 @@ export const runClassifiersPackageOperations = (
             }
             return;
         }
+        if (input.qualityStatus) {
+            const sourceReportPath = input.sourceReportPath ?? input.artifact ?? ".ax/experiments/setfit-failure-analysis-workflow-fixtures-current.json";
+            const report = input.out
+                ? yield* packages.writeClassifierQualityStatusReport({ sourceReportPath, out: input.out })
+                : yield* packages.classifierQualityStatusReport({ sourceReportPath });
+            if (input.json) {
+                console.log(JSON.stringify(report, null, 2));
+            } else if (!input.out) {
+                console.log(renderClassifierQualityStatusText(report));
+            }
+            if (!report.quality_gate_passed) {
+                process.exitCode = 1;
+            }
+            return;
+        }
+        if (input.boundaryReplaySummary) {
+            const query = {
+                ...(input.graphMode ? { mode: input.graphMode } : {}),
+                ...(input.operationId ? { operation_id: input.operationId } : {}),
+                ...(input.artifact ? { artifact_path: input.artifact } : {}),
+                ...(input.sourceKind ? { source_kind: input.sourceKind } : {}),
+                ...(input.factKind ? { fact_kind: input.factKind } : {}),
+                ...(input.status ? { status: input.status } : {}),
+                ...(input.sourceFixture ? { source_fixture_id: input.sourceFixture } : {}),
+                ...(input.proposedLabel ? { proposed_label: input.proposedLabel } : {}),
+                ...(input.threshold ? { threshold: input.threshold } : {}),
+                ...(input.minSeedCount === undefined ? {} : { min_seed_count: input.minSeedCount }),
+                ...(input.minPositiveRecall === undefined ? {} : { min_positive_recall: input.minPositiveRecall }),
+                ...(input.minCallReduction === undefined ? {} : { min_call_reduction: input.minCallReduction }),
+                ...(input.minNearestSimilarity === undefined ? {} : { min_nearest_similarity: input.minNearestSimilarity }),
+                ...(input.nearestFixture ? { nearest_fixture_id: input.nearestFixture } : {}),
+                ...(input.predicate ? { predicate: input.predicate } : {}),
+                ...(input.subject ? { subject: input.subject } : {}),
+                ...(input.valueContains ? { value_contains: input.valueContains } : {}),
+                ...(input.valueEquals !== undefined ? { value_equals: input.valueEquals } : {}),
+            } as const;
+            const report = input.out
+                ? yield* packages.writeBoundaryReplaySummaryReport({ out: input.out, query })
+                : yield* packages.boundaryReplaySummaryReport({ query });
+            if (input.json) {
+                console.log(JSON.stringify(report, null, 2));
+            } else if (!input.out) {
+                console.log(renderClassifierGraphBoundaryReplaySummaryText(report));
+            }
+            if (report.status !== "reviewed_deterministic_facts_available") {
+                process.exitCode = 1;
+            }
+            return;
+        }
         if (input.graphHealth) {
             const query = {
                 mode: input.graphMode ?? "summary",
                 ...(input.operationId ? { operation_id: input.operationId } : {}),
                 ...(input.artifact ? { artifact_path: input.artifact } : {}),
+                ...(input.sourceKind ? { source_kind: input.sourceKind } : {}),
+                ...(input.factKind ? { fact_kind: input.factKind } : {}),
+                ...(input.status ? { status: input.status } : {}),
+                ...(input.sourceFixture ? { source_fixture_id: input.sourceFixture } : {}),
+                ...(input.proposedLabel ? { proposed_label: input.proposedLabel } : {}),
+                ...(input.threshold ? { threshold: input.threshold } : {}),
+                ...(input.minSeedCount === undefined ? {} : { min_seed_count: input.minSeedCount }),
+                ...(input.minPositiveRecall === undefined ? {} : { min_positive_recall: input.minPositiveRecall }),
+                ...(input.minCallReduction === undefined ? {} : { min_call_reduction: input.minCallReduction }),
+                ...(input.minNearestSimilarity === undefined ? {} : { min_nearest_similarity: input.minNearestSimilarity }),
+                ...(input.nearestFixture ? { nearest_fixture_id: input.nearestFixture } : {}),
+                ...(input.predicate ? { predicate: input.predicate } : {}),
+                ...(input.subject ? { subject: input.subject } : {}),
+                ...(input.valueContains ? { value_contains: input.valueContains } : {}),
+                ...(input.valueEquals !== undefined ? { value_equals: input.valueEquals } : {}),
             } as const;
+            if (input.querySuggestionRouting) {
+                const report = input.out
+                    ? yield* packages.writeExecutionGraphQuerySuggestionRoutingSummaryReport({ out: input.out, query })
+                    : yield* packages.executionGraphQuerySuggestionRoutingSummary({ query });
+                if (input.json) {
+                    console.log(JSON.stringify(report, null, 2));
+                } else if (!input.out) {
+                    console.log(renderClassifierGraphQuerySuggestionRoutingSummaryText(report));
+                }
+                return;
+            }
             const report = input.out
                 ? yield* packages.writeExecutionGraphHealthReport({ out: input.out, query })
                 : yield* packages.executionGraphHealthReport({ query });
@@ -719,27 +1423,120 @@ export const runClassifiersLifecycle = (
     input: {
         readonly root?: string;
         readonly workflowStatusPath?: string;
+        readonly routingSummary?: boolean;
+        readonly routeInputValues?: Readonly<Record<string, string>>;
+        readonly routeExecutionPlan?: boolean;
+        readonly executeRoute?: boolean;
+        readonly inspectRouteExecutionPath?: string;
+        readonly graphMode?: ClassifierGraphHealthMode;
+        readonly predicate?: string;
+        readonly subject?: string;
+        readonly valueContains?: string;
+        readonly valueEquals?: string;
         readonly out?: string;
         readonly json: boolean;
     },
 ): Effect.Effect<void, never, ClassifierPackageService | SurrealClient> =>
     Effect.gen(function* () {
         const packages = yield* ClassifierPackageService;
-        const report = input.out
+        if (input.inspectRouteExecutionPath !== undefined) {
+            const raw = readFileSync(input.inspectRouteExecutionPath, "utf8");
+            const execution = safeJsonParse<ClassifierLifecycleRouteExecutionReport>(raw);
+            if (execution?.schema !== "ax.classifier_lifecycle_route_execution_report.v1") {
+                console.error("axctl classifiers lifecycle: --inspect-route-execution must point at ax.classifier_lifecycle_route_execution_report.v1 JSON");
+                process.exitCode = 2;
+                return;
+            }
+            const report = inspectClassifierLifecycleRouteExecution(execution);
+            if (input.out !== undefined) {
+                writeClassifierLifecycleRouteExecutionInspectionReport(input.out, report);
+            }
+            if (input.json) {
+                console.log(JSON.stringify(report, null, 2));
+            } else if (input.out === undefined) {
+                console.log(renderClassifierLifecycleRouteExecutionInspectionText(report));
+            }
+            if (report.decision === "failed_execution" || report.decision === "needs_output_verification" || report.decision === "uninspectable_output") {
+                process.exitCode = 1;
+            }
+            return;
+        }
+        const graphQuery = buildLifecycleGraphQueryInput(input);
+        const routeInputValues = input.routeInputValues;
+        const routingSummary = routeInputValues === undefined
+            ? undefined
+            : yield* packages.lifecycleRoutingSummaryReport({
+                ...(input.root === undefined ? {} : { root: input.root }),
+                ...(input.workflowStatusPath === undefined ? {} : { workflowStatusPath: input.workflowStatusPath }),
+                ...(graphQuery === undefined ? {} : { graphQuery }),
+            });
+        const routePreview = routeInputValues === undefined || routingSummary === undefined
+            ? undefined
+            : buildClassifierLifecycleRouteBindingPreview(routingSummary, routeInputValues);
+        const routeExecutionPlan = routePreview !== undefined && (input.routeExecutionPlan === true || input.executeRoute === true)
+            ? buildClassifierLifecycleRouteExecutionPlan(routePreview, { allowExecute: input.executeRoute === true })
+            : undefined;
+        const routeExecution = routeExecutionPlan !== undefined && input.executeRoute === true && input.routeExecutionPlan !== true
+            ? yield* Effect.promise(() => executeClassifierLifecycleRouteExecutionPlan(routeExecutionPlan))
+            : undefined;
+        const report = routeExecution !== undefined
+            ? routeExecution
+            : routeExecutionPlan !== undefined
+            ? routeExecutionPlan
+            : routePreview !== undefined
+            ? routePreview
+            : input.routingSummary === true
+            ? input.out
+                ? yield* packages.writeLifecycleRoutingSummaryReport({
+                    ...(input.root === undefined ? {} : { root: input.root }),
+                    ...(input.workflowStatusPath === undefined ? {} : { workflowStatusPath: input.workflowStatusPath }),
+                    ...(graphQuery === undefined ? {} : { graphQuery }),
+                    out: input.out,
+                })
+                : yield* packages.lifecycleRoutingSummaryReport({
+                    ...(input.root === undefined ? {} : { root: input.root }),
+                    ...(input.workflowStatusPath === undefined ? {} : { workflowStatusPath: input.workflowStatusPath }),
+                    ...(graphQuery === undefined ? {} : { graphQuery }),
+                })
+            : input.out
             ? yield* packages.writeLifecycleInsightReport({
                 ...(input.root === undefined ? {} : { root: input.root }),
                 ...(input.workflowStatusPath === undefined ? {} : { workflowStatusPath: input.workflowStatusPath }),
+                ...(graphQuery === undefined ? {} : { graphQuery }),
                 out: input.out,
             })
             : yield* packages.lifecycleInsightReport({
                 ...(input.root === undefined ? {} : { root: input.root }),
                 ...(input.workflowStatusPath === undefined ? {} : { workflowStatusPath: input.workflowStatusPath }),
+                ...(graphQuery === undefined ? {} : { graphQuery }),
             });
 
         if (input.json) {
             console.log(JSON.stringify(report, null, 2));
         } else if (!input.out) {
-            console.log(renderClassifierLifecycleInsightText(report));
+            console.log(routeExecution !== undefined
+                ? renderClassifierLifecycleRouteExecutionText(report as ClassifierLifecycleRouteExecutionReport)
+                : routeExecutionPlan !== undefined
+                ? renderClassifierLifecycleRouteExecutionPlanText(report as ClassifierLifecycleRouteExecutionPlanReport)
+                : routePreview !== undefined
+                ? renderClassifierLifecycleRouteBindingPreviewText(report as ClassifierLifecycleRouteBindingPreviewReport)
+                : input.routingSummary === true
+                ? renderClassifierLifecycleRoutingSummaryText(report as ClassifierLifecycleRoutingSummaryReport)
+                : renderClassifierLifecycleInsightText(report as ClassifierLifecycleInsightReport));
+        }
+        if (routeExecution !== undefined && input.out !== undefined) {
+            writeClassifierLifecycleRouteExecutionReport(input.out, report as ClassifierLifecycleRouteExecutionReport);
+        } else if (routeExecutionPlan !== undefined && input.out !== undefined) {
+            writeClassifierLifecycleRouteExecutionPlanReport(input.out, report as ClassifierLifecycleRouteExecutionPlanReport);
+        } else if (routePreview !== undefined && input.out !== undefined) {
+            writeClassifierLifecycleRouteBindingPreviewReport(input.out, report as ClassifierLifecycleRouteBindingPreviewReport);
+        }
+        if (routeExecution !== undefined && report.decision !== "executed") {
+            process.exitCode = 1;
+            return;
+        }
+        if (routeExecution !== undefined) {
+            return;
         }
         if (!input.out && report.decision !== "healthy") {
             process.exitCode = 1;

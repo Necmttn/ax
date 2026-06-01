@@ -38,6 +38,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mode", choices=["generate", "sync", "evaluate"], default="generate")
     parser.add_argument("--min-hit-count", type=int, default=2)
     parser.add_argument("--source-group", default=DEFAULT_SOURCE_GROUP)
+    parser.add_argument("--pending-exit-zero", action="store_true")
     parser.add_argument("--json", action="store_true")
     return parser.parse_args()
 
@@ -262,6 +263,13 @@ def evaluate_review(review: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def exit_code_for_report(report: dict[str, Any], pending_exit_zero: bool = False) -> int:
+    failures = list(report.get("failures") or [])
+    if pending_exit_zero and failures == ["boundary miss review still has pending items"]:
+        return 0
+    return 0 if not failures else 1
+
+
 def main() -> int:
     args = parse_args()
     if args.mode == "generate":
@@ -287,7 +295,7 @@ def main() -> int:
         print(f"decision: {report['decision']}")
         if report["failures"]:
             print(f"failures: {report['failures']}")
-    return 0 if not report["failures"] else 1
+    return exit_code_for_report(report, args.pending_exit_zero)
 
 
 if __name__ == "__main__":

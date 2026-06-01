@@ -1,5 +1,9 @@
 import { Context, Effect, Layer, Schema } from "effect";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+import { prettyPrint } from "../lib/json.ts";
 import { SurrealClient } from "../lib/db.ts";
+import { safeJsonParse } from "../lib/shared/safe-json.ts";
 import {
     applyExecutionSurrealWritePlanReport,
     buildClassifierLifecycleInsightReport,
@@ -18,13 +22,17 @@ import {
     executeOperationPlanReport,
     loadClassifierPackageExecutionReport,
     loadClassifierLifecycleReviewStatus,
+    summarizeClassifierGraphQuerySuggestionRouting,
+    summarizeClassifierLifecycleRouting,
     summarizeClassifierPackageOperations,
     writeExecutionHistoryReport,
     writeExecutionFactProjectionReport,
     writeExecutionSurrealWritePlanReport,
     writeExecutionSurrealApplyReport,
     writeExecutionGraphHealthReport,
+    writeClassifierGraphQuerySuggestionRoutingSummary,
     writeClassifierLifecycleInsightReport,
+    writeClassifierLifecycleRoutingSummaryReport,
     writePackagesOperationsReport,
     writeOperationPreflightReport,
     writeOperationDryRunReport,
@@ -37,7 +45,10 @@ import {
     type ClassifierPackageExecutionSurrealWritePlanReport,
     type ClassifierPackageExecutionSurrealApplyReport,
     type ClassifierPackageExecutionGraphHealthReport,
+    type ClassifierGraphBoundaryReplaySummary,
+    type ClassifierGraphQuerySuggestionRoutingSummary,
     type ClassifierLifecycleInsightReport,
+    type ClassifierLifecycleRoutingSummaryReport,
     type ClassifierGraphHealthQuery,
     type ClassifierGraphEdgeRow,
     type ClassifierGraphFactRow,
@@ -49,6 +60,11 @@ import {
     type ClassifierPackageOperationsReport,
     type ClassifierPackageOperationsSummary,
 } from "./package-operations.ts";
+import {
+    loadWorkflowCandidateGuidancePendingReviewTaskListReport,
+    type WorkflowCandidateGuidancePendingReviewTaskListFilters,
+    type WorkflowCandidateGuidancePendingReviewTaskListReport,
+} from "../cli/classifiers-workflow-candidates.ts";
 import {
     findClassifierPackageOperation,
     listClassifierPackageOperations,
@@ -176,14 +192,168 @@ export interface ClassifierPackageExecutionGraphHealthWriteInput extends Classif
     readonly out: string;
 }
 
+export interface ClassifierGraphQuerySuggestionRoutingSummaryWriteInput extends ClassifierPackageExecutionGraphHealthInput {
+    readonly out: string;
+}
+
+export interface ClassifierBoundaryReplaySummaryInput {
+    readonly query?: Partial<ClassifierGraphHealthQuery>;
+}
+
+export interface ClassifierBoundaryReplaySummaryWriteInput extends ClassifierBoundaryReplaySummaryInput {
+    readonly out: string;
+}
+
 export interface ClassifierLifecycleInsightInput {
     readonly root?: string;
     readonly workflowStatusPath?: string;
+    readonly graphQuery?: Partial<ClassifierGraphHealthQuery>;
 }
 
 export interface ClassifierLifecycleInsightWriteInput extends ClassifierLifecycleInsightInput {
     readonly out: string;
 }
+
+export interface ClassifierLifecycleRoutingSummaryWriteInput extends ClassifierLifecycleInsightInput {
+    readonly out: string;
+}
+
+export interface ClassifierPendingReviewTaskListInput {
+    readonly taskDir: string;
+    readonly filters?: WorkflowCandidateGuidancePendingReviewTaskListFilters;
+}
+
+export interface ClassifierPendingReviewTaskListWriteInput extends ClassifierPendingReviewTaskListInput {
+    readonly out: string;
+}
+
+export type ClassifierQualityRecommendedUse = "candidate_mining" | "model_quality_work";
+
+export interface ClassifierQualityStatusInput {
+    readonly sourceReportPath: string;
+}
+
+export interface ClassifierQualityStatusWriteInput extends ClassifierQualityStatusInput {
+    readonly out: string;
+}
+
+export interface ClassifierQualityStatusMetrics {
+    readonly accuracy_min?: number;
+    readonly accuracy_max?: number;
+    readonly macro_f1_min?: number;
+    readonly macro_f1_max?: number;
+    readonly none_false_positive_rate_max?: number;
+    readonly repeated_miss_count: number;
+    readonly unique_none_false_positive_count: number;
+}
+
+export interface ClassifierQualityStatusReport {
+    readonly schema: "ax.classifier_quality_status.v1";
+    readonly source_report_path: string;
+    readonly source_schema?: string;
+    readonly source_decision?: string;
+    readonly quality_gate_passed: boolean;
+    readonly promotion_quality: false;
+    readonly recommended_use: ClassifierQualityRecommendedUse;
+    readonly metrics: ClassifierQualityStatusMetrics;
+    readonly blockers: readonly string[];
+    readonly next_action: string;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+
+const numberValue = (value: unknown): number | undefined =>
+    typeof value === "number" && Number.isFinite(value) ? value : undefined;
+
+const stringValue = (value: unknown): string | undefined =>
+    typeof value === "string" ? value : undefined;
+
+const minNumber = (values: readonly (number | undefined)[]): number | undefined => {
+    const numbers = values.filter((value): value is number => value !== undefined);
+    return numbers.length > 0 ? Math.min(...numbers) : undefined;
+};
+
+const maxNumber = (values: readonly (number | undefined)[]): number | undefined => {
+    const numbers = values.filter((value): value is number => value !== undefined);
+    return numbers.length > 0 ? Math.max(...numbers) : undefined;
+};
+
+const boundaryReplaySummaryQuery = (query?: Partial<ClassifierGraphHealthQuery>): Partial<ClassifierGraphHealthQuery> => ({
+    mode: "boundary-replay",
+    source_kind: "boundary_replay_deterministic_projection",
+    fact_kind: "classifier_boundary_replay",
+    predicate: "covered_by_deterministic",
+    value_equals: "true",
+    ...query,
+});
+
+const fallbackBoundaryReplaySummary = (): ClassifierGraphBoundaryReplaySummary => ({
+    status: "no_reviewed_deterministic_facts",
+    production_posture: "not_applicable",
+    next_action: "project_or_apply_boundary_replay_facts",
+    remediation: "Project and apply boundary replay facts before routing product behavior from reviewed deterministic evidence.",
+    covered_subject_count: 0,
+    deterministic_label_subject_count: 0,
+    evidence_path_count: 0,
+    classifier_keys: [],
+    targets: [],
+    subjects: [],
+});
+
+export const buildClassifierQualityStatusReport = (
+    sourceReportPath: string,
+    source: unknown,
+): ClassifierQualityStatusReport => {
+    const report = isRecord(source) ? source : {};
+    const gate = isRecord(report.gate) ? report.gate : {};
+    const gateObserved = isRecord(gate.observed) ? gate.observed : {};
+    const runs = Array.isArray(report.runs) ? report.runs.filter(isRecord) : [];
+    const sourceSchema = stringValue(report.schema);
+    const sourceDecision = stringValue(report.decision);
+    const repeatedMissCount = Array.isArray(report.all_seed_repeated_misses)
+        ? report.all_seed_repeated_misses.length
+        : 0;
+    const uniqueNoneFalsePositiveCount = numberValue(report.all_seed_unique_none_false_positive_count) ?? 0;
+    const qualityGatePassed = gate.passed === true;
+    const accuracyMin = minNumber(runs.map((run) => numberValue(run.accuracy)));
+    const accuracyMax = maxNumber(runs.map((run) => numberValue(run.accuracy)));
+    const macroF1Min = numberValue(gateObserved.macro_f1_min) ?? minNumber(runs.map((run) => numberValue(run.macro_f1)));
+    const macroF1Max = maxNumber(runs.map((run) => numberValue(run.macro_f1)));
+    const noneFalsePositiveRateMax =
+        numberValue(gateObserved.none_false_positive_rate_max) ??
+        maxNumber(runs.map((run) => numberValue(run.none_false_positive_rate)));
+    const blockers = [
+        qualityGatePassed ? null : "model_quality_gate_not_passed",
+        repeatedMissCount > 0 ? "residual_repeated_misses" : null,
+        uniqueNoneFalsePositiveCount > 0 ? "residual_none_false_positives" : null,
+        "missing_human_promotion_review",
+    ].filter((blocker): blocker is string => blocker !== null);
+    const metrics = {
+        ...(accuracyMin === undefined ? {} : { accuracy_min: accuracyMin }),
+        ...(accuracyMax === undefined ? {} : { accuracy_max: accuracyMax }),
+        ...(macroF1Min === undefined ? {} : { macro_f1_min: macroF1Min }),
+        ...(macroF1Max === undefined ? {} : { macro_f1_max: macroF1Max }),
+        ...(noneFalsePositiveRateMax === undefined ? {} : { none_false_positive_rate_max: noneFalsePositiveRateMax }),
+        repeated_miss_count: repeatedMissCount,
+        unique_none_false_positive_count: uniqueNoneFalsePositiveCount,
+    } satisfies ClassifierQualityStatusMetrics;
+
+    return {
+        schema: "ax.classifier_quality_status.v1",
+        source_report_path: sourceReportPath,
+        ...(sourceSchema === undefined ? {} : { source_schema: sourceSchema }),
+        ...(sourceDecision === undefined ? {} : { source_decision: sourceDecision }),
+        quality_gate_passed: qualityGatePassed,
+        promotion_quality: false,
+        recommended_use: qualityGatePassed ? "candidate_mining" : "model_quality_work",
+        metrics,
+        blockers,
+        next_action: qualityGatePassed
+            ? "Use this classifier for candidate mining and route promotion-quality facts through human review."
+            : "Keep this classifier in model-quality work until robustness gates pass.",
+    };
+};
 
 export interface ClassifierPackageServiceShape {
     readonly loadManifest: (path: string) => Effect.Effect<ClassifierPackageManifest, ClassifierPackageLoadError>;
@@ -257,6 +427,18 @@ export interface ClassifierPackageServiceShape {
     readonly executionGraphHealthReport: (
         input?: ClassifierPackageExecutionGraphHealthInput,
     ) => Effect.Effect<ClassifierPackageExecutionGraphHealthReport, ClassifierPackageReportWriteError, SurrealClient>;
+    readonly executionGraphQuerySuggestionRoutingSummary: (
+        input?: ClassifierPackageExecutionGraphHealthInput,
+    ) => Effect.Effect<ClassifierGraphQuerySuggestionRoutingSummary, ClassifierPackageReportWriteError, SurrealClient>;
+    readonly writeExecutionGraphQuerySuggestionRoutingSummaryReport: (
+        input: ClassifierGraphQuerySuggestionRoutingSummaryWriteInput,
+    ) => Effect.Effect<ClassifierGraphQuerySuggestionRoutingSummary, ClassifierPackageReportWriteError, SurrealClient>;
+    readonly boundaryReplaySummaryReport: (
+        input?: ClassifierBoundaryReplaySummaryInput,
+    ) => Effect.Effect<ClassifierGraphBoundaryReplaySummary, ClassifierPackageReportWriteError, SurrealClient>;
+    readonly writeBoundaryReplaySummaryReport: (
+        input: ClassifierBoundaryReplaySummaryWriteInput,
+    ) => Effect.Effect<ClassifierGraphBoundaryReplaySummary, ClassifierPackageReportWriteError, SurrealClient>;
     readonly writeExecutionGraphHealthReport: (
         input: ClassifierPackageExecutionGraphHealthWriteInput,
     ) => Effect.Effect<ClassifierPackageExecutionGraphHealthReport, ClassifierPackageReportWriteError, SurrealClient>;
@@ -266,6 +448,24 @@ export interface ClassifierPackageServiceShape {
     readonly writeLifecycleInsightReport: (
         input: ClassifierLifecycleInsightWriteInput,
     ) => Effect.Effect<ClassifierLifecycleInsightReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, SurrealClient>;
+    readonly lifecycleRoutingSummaryReport: (
+        input?: ClassifierLifecycleInsightInput,
+    ) => Effect.Effect<ClassifierLifecycleRoutingSummaryReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, SurrealClient>;
+    readonly writeLifecycleRoutingSummaryReport: (
+        input: ClassifierLifecycleRoutingSummaryWriteInput,
+    ) => Effect.Effect<ClassifierLifecycleRoutingSummaryReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, SurrealClient>;
+    readonly pendingReviewTaskListReport: (
+        input: ClassifierPendingReviewTaskListInput,
+    ) => Effect.Effect<WorkflowCandidateGuidancePendingReviewTaskListReport, ClassifierPackageLoadError>;
+    readonly writePendingReviewTaskListReport: (
+        input: ClassifierPendingReviewTaskListWriteInput,
+    ) => Effect.Effect<WorkflowCandidateGuidancePendingReviewTaskListReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError>;
+    readonly classifierQualityStatusReport: (
+        input: ClassifierQualityStatusInput,
+    ) => Effect.Effect<ClassifierQualityStatusReport, ClassifierPackageLoadError>;
+    readonly writeClassifierQualityStatusReport: (
+        input: ClassifierQualityStatusWriteInput,
+    ) => Effect.Effect<ClassifierQualityStatusReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError>;
 }
 
 export class ClassifierPackageService extends Context.Service<ClassifierPackageService, ClassifierPackageServiceShape>()(
@@ -569,11 +769,66 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService>
             return report;
         });
 
+        const executionGraphQuerySuggestionRoutingSummary = Effect.fn("ClassifierPackageService.executionGraphQuerySuggestionRoutingSummary")(function* (
+            input?: ClassifierPackageExecutionGraphHealthInput,
+        ) {
+            const report = yield* executionGraphHealth(input);
+            return summarizeClassifierGraphQuerySuggestionRouting(report);
+        });
+
+        const writeExecutionGraphQuerySuggestionRoutingSummary = Effect.fn("ClassifierPackageService.writeExecutionGraphQuerySuggestionRoutingSummaryReport")(function* (
+            input: ClassifierGraphQuerySuggestionRoutingSummaryWriteInput,
+        ) {
+            const report = yield* executionGraphQuerySuggestionRoutingSummary(input);
+            yield* Effect.try({
+                try: () => writeClassifierGraphQuerySuggestionRoutingSummary(input.out, report),
+                catch: (error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) }),
+            });
+            return report;
+        });
+
+        const boundaryReplaySummary = Effect.fn("ClassifierPackageService.boundaryReplaySummaryReport")(function* (
+            input?: ClassifierBoundaryReplaySummaryInput,
+        ) {
+            const report = yield* executionGraphHealth({
+                query: boundaryReplaySummaryQuery(input?.query),
+            });
+            return report.boundary_replay_summary ?? fallbackBoundaryReplaySummary();
+        });
+
+        const writeBoundaryReplaySummary = Effect.fn("ClassifierPackageService.writeBoundaryReplaySummaryReport")(function* (
+            input: ClassifierBoundaryReplaySummaryWriteInput,
+        ) {
+            const report = yield* boundaryReplaySummary(input);
+            yield* Effect.try({
+                try: () => {
+                    mkdirSync(dirname(input.out), { recursive: true });
+                    writeFileSync(input.out, `${prettyPrint(report)}\n`, "utf8");
+                },
+                catch: (error) => ClassifierPackageReportWriteError.make({
+                    path: input.out,
+                    message: errorMessage(error),
+                }),
+            });
+            return report;
+        });
+
         const lifecycleInsight = Effect.fn("ClassifierPackageService.lifecycleInsightReport")(function* (
             input?: ClassifierLifecycleInsightInput,
         ) {
             const packages = yield* packagesOperationsReport({ root: input?.root ?? "packages" });
             const graph = yield* executionGraphHealth({ query: { mode: "summary" } });
+            const lifecycleSuccessGraph = yield* executionGraphHealth({
+                query: {
+                    mode: "lifecycle",
+                    subject: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                    predicate: "review_pipeline_post_apply_recheck_status",
+                    value_equals: "gap_closed",
+                },
+            });
+            const queryGraph = input?.graphQuery === undefined
+                ? undefined
+                : yield* executionGraphHealth({ query: input.graphQuery });
             const workflowStatusPath = input?.workflowStatusPath ?? ".ax/experiments/blind-workflow-status-current.json";
             const workflowStatus = yield* Effect.try({
                 try: () => loadClassifierLifecycleReviewStatus(workflowStatusPath),
@@ -582,7 +837,13 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService>
                     message: errorMessage(error),
                 }),
             });
-            return buildClassifierLifecycleInsightReport({ packages, graph, workflowStatus });
+            return buildClassifierLifecycleInsightReport({
+                packages,
+                graph,
+                ...(queryGraph === undefined ? {} : { queryGraph }),
+                lifecycleSuccessGraph,
+                workflowStatus,
+            });
         });
 
         const writeLifecycleInsight = Effect.fn("ClassifierPackageService.writeLifecycleInsightReport")(function* (
@@ -592,6 +853,82 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService>
             yield* Effect.try({
                 try: () => writeClassifierLifecycleInsightReport(input.out, report),
                 catch: (error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) }),
+            });
+            return report;
+        });
+
+        const lifecycleRoutingSummary = Effect.fn("ClassifierPackageService.lifecycleRoutingSummaryReport")(function* (
+            input?: ClassifierLifecycleInsightInput,
+        ) {
+            const report = yield* lifecycleInsight(input);
+            return summarizeClassifierLifecycleRouting(report);
+        });
+
+        const writeLifecycleRoutingSummary = Effect.fn("ClassifierPackageService.writeLifecycleRoutingSummaryReport")(function* (
+            input: ClassifierLifecycleRoutingSummaryWriteInput,
+        ) {
+            const report = yield* lifecycleRoutingSummary(input);
+            yield* Effect.try({
+                try: () => writeClassifierLifecycleRoutingSummaryReport(input.out, report),
+                catch: (error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) }),
+            });
+            return report;
+        });
+
+        const pendingReviewTaskList = Effect.fn("ClassifierPackageService.pendingReviewTaskListReport")(function* (
+            input: ClassifierPendingReviewTaskListInput,
+        ) {
+            return yield* Effect.try({
+                try: () => loadWorkflowCandidateGuidancePendingReviewTaskListReport(input.taskDir, input.filters),
+                catch: (error) => ClassifierPackageLoadError.make({
+                    path: input.taskDir,
+                    message: errorMessage(error),
+                }),
+            });
+        });
+
+        const writePendingReviewTaskList = Effect.fn("ClassifierPackageService.writePendingReviewTaskListReport")(function* (
+            input: ClassifierPendingReviewTaskListWriteInput,
+        ) {
+            const report = yield* pendingReviewTaskList(input);
+            yield* Effect.try({
+                try: () => writeFileSync(input.out, `${prettyPrint(report)}\n`, "utf8"),
+                catch: (error) => ClassifierPackageReportWriteError.make({
+                    path: input.out,
+                    message: errorMessage(error),
+                }),
+            });
+            return report;
+        });
+
+        const classifierQualityStatus = Effect.fn("ClassifierPackageService.classifierQualityStatusReport")(function* (
+            input: ClassifierQualityStatusInput,
+        ) {
+            return yield* Effect.try({
+                try: () => {
+                    const parsed = safeJsonParse<unknown>(readFileSync(input.sourceReportPath, "utf8"));
+                    if (parsed === null) {
+                        throw new Error("Invalid classifier quality source JSON");
+                    }
+                    return buildClassifierQualityStatusReport(input.sourceReportPath, parsed);
+                },
+                catch: (error) => ClassifierPackageLoadError.make({
+                    path: input.sourceReportPath,
+                    message: errorMessage(error),
+                }),
+            });
+        });
+
+        const writeClassifierQualityStatus = Effect.fn("ClassifierPackageService.writeClassifierQualityStatusReport")(function* (
+            input: ClassifierQualityStatusWriteInput,
+        ) {
+            const report = yield* classifierQualityStatus(input);
+            yield* Effect.try({
+                try: () => writeFileSync(input.out, `${prettyPrint(report)}\n`, "utf8"),
+                catch: (error) => ClassifierPackageReportWriteError.make({
+                    path: input.out,
+                    message: errorMessage(error),
+                }),
             });
             return report;
         });
@@ -623,9 +960,19 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService>
             applyExecutionSurrealWritePlanReport: applyExecutionSurrealWritePlan,
             writeExecutionSurrealApplyReport: writeExecutionSurrealApply,
             executionGraphHealthReport: executionGraphHealth,
+            executionGraphQuerySuggestionRoutingSummary,
+            writeExecutionGraphQuerySuggestionRoutingSummaryReport: writeExecutionGraphQuerySuggestionRoutingSummary,
+            boundaryReplaySummaryReport: boundaryReplaySummary,
+            writeBoundaryReplaySummaryReport: writeBoundaryReplaySummary,
             writeExecutionGraphHealthReport: writeExecutionGraphHealth,
             lifecycleInsightReport: lifecycleInsight,
             writeLifecycleInsightReport: writeLifecycleInsight,
+            lifecycleRoutingSummaryReport: lifecycleRoutingSummary,
+            writeLifecycleRoutingSummaryReport: writeLifecycleRoutingSummary,
+            pendingReviewTaskListReport: pendingReviewTaskList,
+            writePendingReviewTaskListReport: writePendingReviewTaskList,
+            classifierQualityStatusReport: classifierQualityStatus,
+            writeClassifierQualityStatusReport: writeClassifierQualityStatus,
         });
     }),
 );

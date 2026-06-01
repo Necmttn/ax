@@ -1,6 +1,7 @@
 {
   "name": "axctl",
   "version": "0.5.0",
+  "license": "AGPL-3.0-only",
   "description": "ax is local memory and telemetry for coding agents. axctl ingests transcripts, skills, and git history into SurrealDB; surfaces what skills are worth keeping and what the user actually does on demand.",
   "type": "module",
   "workspaces": [
@@ -105,7 +106,8 @@
     "classifiers:strict-none-gate": "python3 packages/ax-classifier-session-sections/strict_none_gate_eval.py",
     "classifiers:relabel-audit": "python3 packages/ax-classifier-session-sections/relabel_audit.py",
     "classifiers:split-audit": "python3 packages/ax-classifier-session-sections/split_audit.py",
-    "classifiers:fixture-metadata": "python3 packages/ax-classifier-session-sections/fixture_metadata.py"
+    "classifiers:fixture-metadata": "python3 packages/ax-classifier-session-sections/fixture_metadata.py",
+    "classifiers:workflow-quality-conclusion": "bun scripts/classifier-workflow-quality-conclusion.ts"
   },
   "dependencies": {
     "@opentui/core": "^0.2.5",

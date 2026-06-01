@@ -78,6 +78,7 @@ describe("classifier package manifest", () => {
         expect(manifest.operations?.find((operation) => operation.id === "workflow-fixture-none-safety-window-replay")?.command).toContain("classifiers:none-safety-window-replay");
         expect(manifest.operations?.find((operation) => operation.id === "workflow-fixture-hybrid-robustness")?.command).toContain("classifiers:hybrid-robustness");
         expect(manifest.operations?.find((operation) => operation.id === "workflow-fixture-hybrid-graph-usefulness")?.command).toContain("classifiers:hybrid-graph-usefulness");
+        expect(manifest.operations?.find((operation) => operation.id === "workflow-fixture-quality-conclusion")?.command).toContain("classifiers:workflow-quality-conclusion");
     });
 
     test("lists and resolves classifier package operations", () => {
@@ -118,6 +119,7 @@ describe("classifier package manifest", () => {
         const workflowNoneSafetyWindowReplay = requireClassifierPackageOperation(manifest, "workflow-fixture-none-safety-window-replay");
         const workflowHybridRobustness = requireClassifierPackageOperation(manifest, "workflow-fixture-hybrid-robustness");
         const workflowHybridGraphUsefulness = requireClassifierPackageOperation(manifest, "workflow-fixture-hybrid-graph-usefulness");
+        const workflowQualityConclusion = requireClassifierPackageOperation(manifest, "workflow-fixture-quality-conclusion");
 
         expect(operations.map((operation) => operation.id)).toContain("blind-workflow-status");
         expect(refresh?.command).toBe("bun run classifiers:blind-review-refresh");
@@ -160,6 +162,8 @@ describe("classifier package manifest", () => {
         expect(workflowHybridRobustness.outputs).toContain(".ax/experiments/hybrid-robustness-workflow-fixtures-current.json");
         expect(workflowHybridGraphUsefulness.inputs).toContain(".ax/experiments/hybrid-robustness-workflow-fixtures-current.json");
         expect(workflowHybridGraphUsefulness.outputs).toContain(".ax/experiments/hybrid-graph-usefulness-workflow-fixtures-current.json");
+        expect(workflowQualityConclusion.inputs).toContain(".ax/experiments/boundary-replay-graph-query-e497.json");
+        expect(workflowQualityConclusion.outputs).toContain(".ax/experiments/workflow-classifier-quality-conclusion-current.json");
     });
 
     test("requires classifier package operation by id", () => {

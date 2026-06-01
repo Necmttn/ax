@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadClassifierPackageManifest } from "../src/classifiers/package-manifest.ts";
@@ -18,6 +18,12 @@ import {
     discoverClassifierPackageExecutionReportPaths,
     discoverClassifierPackageManifestPaths,
     executeOperationPlanReport,
+    buildClassifierLifecycleRouteBindingPreview,
+    buildClassifierLifecycleRouteExecutionPlan,
+    executeClassifierLifecycleRouteExecutionPlan,
+    inspectClassifierLifecycleRouteExecution,
+    loadClassifierLifecycleReviewStatus,
+    summarizeClassifierLifecycleRouting,
     summarizeClassifierPackageOperations,
     writeOperationPreflightReport,
     writeOperationDryRunReport,
@@ -496,6 +502,331 @@ describe("classifier package operations report", () => {
         ]));
     });
 
+    test("projects review pipeline lifecycle artifacts into graph facts", () => {
+        const report = buildExecutionFactProjectionReport(".ax/experiments", [], {
+            path: ".ax/experiments/blind-workflow-status-current.json",
+            exists: true,
+            decision: "needs_human_review",
+            review_pipeline_lifecycle: {
+                report_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                lifecycle_status: "verified_after_execution",
+                command_kind: "stamp_review_provenance",
+                prepared_status: "ready_to_execute",
+                output_verification_status: "verified",
+                apply_result: "applied",
+                applied: true,
+                applied_statement_count: 5,
+                review_handoff_status: "complete_review_handoff",
+                production_apply_guard: "ready_to_apply",
+                production_can_apply: true,
+                post_apply_recheck_status: "gap_closed",
+                post_apply_reviewed_candidate_delta: 1,
+                post_apply_unreviewed_candidate_delta: -1,
+                post_apply_projected_reviewed_delta: 0,
+                post_apply_projected_unreviewed_delta: 0,
+                can_execute: true,
+                can_continue: true,
+                missing_required_artifact_count: 0,
+                checked_artifact_count: 2,
+                prepared_argv: ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates"],
+                production_apply_argv: ["bun", "src/cli/index.ts", "--apply-review-facts"],
+                review_provenance_stamp_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+                review_issue_repair_argv: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
+                recommended_action_kind: "stamp_review_provenance",
+                recommended_action_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+                recommended_action_status: "requires_inputs",
+                recommended_action_can_execute: false,
+                recommended_action_execution_phase: "bind_inputs",
+                recommended_action_execution_summary: "kind=stamp_review_provenance phase=bind_inputs status=requires_inputs can_execute=false missing_inputs=1 output_artifacts=1 output_checks=1",
+                recommended_action_next_action: "Bind required pipeline inputs before executing the command.",
+                recommended_action_missing_inputs: ["reviewer"],
+                recommended_action_input_bindings: ["reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string"],
+                recommended_action_output_artifacts: ["review_brief path=.ax/experiments/review.md flag=--coverage-review-brief index=10 prefix=--coverage-review-brief= required_for_handoff=true"],
+                recommended_action_output_checks: ["review_brief path=.ax/experiments/review.md index=10 check=file_exists_after_execution status=pending_execution required_for_command_success=true"],
+                output_artifacts: [
+                    { kind: "review_brief", path: ".ax/experiments/review.md", required_for_handoff: true },
+                    { kind: "readiness_report", path: ".ax/experiments/readiness.json", required_for_handoff: false },
+                ],
+                checked_artifacts: [
+                    { kind: "review_brief", path: ".ax/experiments/review.md", exists: true },
+                    { kind: "readiness_report", path: ".ax/experiments/readiness.json", exists: true },
+                ],
+                failures: [],
+            },
+            next_actions: [],
+        });
+
+        expect(report.totals.lifecycle_fact_count).toBe(37);
+        expect(report.nodes).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                id: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                kind: "classifier_lifecycle",
+            }),
+        ]));
+        expect(report.edges).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                kind: "has_evidence",
+                evidence_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+            }),
+        ]));
+        expect(report.facts).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                kind: "classifier_lifecycle_status",
+                subject: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                predicate: "review_pipeline_lifecycle_status",
+                value: "verified_after_execution",
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_command_kind",
+                value: "stamp_review_provenance",
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_output_verification_status",
+                value: "verified",
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_apply_result",
+                value: "applied",
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_applied",
+                value: true,
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_applied_statement_count",
+                value: 5,
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_review_handoff_status",
+                value: "complete_review_handoff",
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_production_apply_guard",
+                value: "ready_to_apply",
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_production_can_apply",
+                value: true,
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_post_apply_recheck_status",
+                value: "gap_closed",
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_post_apply_reviewed_candidate_delta",
+                value: 1,
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_post_apply_unreviewed_candidate_delta",
+                value: -1,
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_can_continue",
+                value: true,
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_checked_artifact_count",
+                value: 2,
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_prepared_argv",
+                value: ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates"],
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_production_apply_argv",
+                value: ["bun", "src/cli/index.ts", "--apply-review-facts"],
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_provenance_stamp_argv",
+                value: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_issue_repair_argv",
+                value: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_recommended_action_kind",
+                value: "stamp_review_provenance",
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_recommended_action_argv",
+                value: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_recommended_action_status",
+                value: "requires_inputs",
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_recommended_action_can_execute",
+                value: false,
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_recommended_action_execution_phase",
+                value: "bind_inputs",
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_recommended_action_execution_summary",
+                value: "kind=stamp_review_provenance phase=bind_inputs status=requires_inputs can_execute=false missing_inputs=1 output_artifacts=1 output_checks=1",
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_recommended_action_next_action",
+                value: "Bind required pipeline inputs before executing the command.",
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_recommended_action_missing_inputs",
+                value: ["reviewer"],
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_recommended_action_input_bindings",
+                value: ["reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string"],
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_recommended_action_output_artifacts",
+                value: ["review_brief path=.ax/experiments/review.md flag=--coverage-review-brief index=10 prefix=--coverage-review-brief= required_for_handoff=true"],
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_recommended_action_output_checks",
+                value: ["review_brief path=.ax/experiments/review.md index=10 check=file_exists_after_execution status=pending_execution required_for_command_success=true"],
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_output_artifact_paths",
+                value: [".ax/experiments/review.md", ".ax/experiments/readiness.json"],
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_checked_artifact_paths",
+                value: [".ax/experiments/review.md", ".ax/experiments/readiness.json"],
+            }),
+            expect.objectContaining({
+                predicate: "review_pipeline_checked_artifact_states",
+                value: ["review_brief:ok", "readiness_report:ok"],
+            }),
+        ]));
+    });
+
+    test("loads review pipeline lifecycle status beside workflow status", () => {
+        const dir = mkdtempSync(join(tmpdir(), "ax-review-pipeline-lifecycle-"));
+        const statusPath = join(dir, "blind-workflow-status-current.json");
+        const lifecyclePath = join(dir, "workflow-candidate-review-pipeline-lifecycle-current.json");
+        writeFileSync(statusPath, JSON.stringify({
+            schema: "ax.blind_workflow_status.v1",
+            decision: "needs_human_review",
+            next_actions: [],
+        }), "utf8");
+        writeFileSync(lifecyclePath, JSON.stringify({
+            schema: "ax.workflow_candidate_review_coverage.v1",
+            coverage_review: {
+                review_pipeline_command_kind: "stamp_review_provenance",
+                production_apply_command_argv: ["bun", "src/cli/index.ts", "--apply-review-facts"],
+                review_provenance_stamp_command_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+                review_issue_repair_command_argv: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
+                apply_result: "applied",
+                applied: true,
+                applied_statement_count: 5,
+                review_handoff_status: "complete_review_handoff",
+                production_apply_guard: "ready_to_apply",
+                production_can_apply: true,
+                review_pipeline_lifecycle: {
+                    schema: "ax.classifier_review_pipeline_lifecycle.v1",
+                    status: "verified_after_execution",
+                    can_execute: true,
+                    can_continue: true,
+                    summary: {
+                        input_bindings: [
+                            {
+                                input: "reviewer",
+                                argv_flag: "--review-provenance-reviewer",
+                                argv_index: 8,
+                                argv_value_prefix: "--review-provenance-reviewer=",
+                                placeholder: "<reviewer>",
+                                value_kind: "nonempty_string",
+                            },
+                        ],
+                    },
+                    output_verification: {
+                        status: "verified",
+                        checked_artifacts: [
+                            { kind: "readiness_report", path: "one.json", exists: true },
+                            { kind: "review_brief", path: "two.md", exists: true },
+                        ],
+                        missing_required_artifacts: [],
+                    },
+                    prepared: {
+                        status: "ready_to_execute",
+                        can_execute: true,
+                        next_action: "Execute the pipeline command.",
+                        missing_inputs: [],
+                        argv: ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates"],
+                        output_artifacts: [
+                            { kind: "readiness_report", path: "one.json", argv_flag: "--out", argv_index: 11, argv_value_prefix: "--out=", required_for_handoff: false },
+                            { kind: "review_brief", path: "two.md", argv_flag: "--coverage-review-brief", argv_index: 10, argv_value_prefix: "--coverage-review-brief=", required_for_handoff: true },
+                        ],
+                        output_artifact_checks: [
+                            { kind: "readiness_report", path: "one.json", argv_index: 11, check: "file_exists_after_execution", status: "pending_execution", required_for_command_success: true },
+                            { kind: "review_brief", path: "two.md", argv_index: 10, check: "file_exists_after_execution", status: "pending_execution", required_for_command_success: true },
+                        ],
+                    },
+                },
+                post_apply_recheck: {
+                    status: "gap_closed",
+                    reviewed_candidate_delta: 1,
+                    unreviewed_candidate_delta: -1,
+                    projected_reviewed_delta: 0,
+                    projected_unreviewed_delta: 0,
+                },
+            },
+        }), "utf8");
+
+        const status = loadClassifierLifecycleReviewStatus(statusPath);
+
+        expect(status.review_pipeline_lifecycle).toMatchObject({
+            report_path: lifecyclePath,
+            lifecycle_status: "verified_after_execution",
+            command_kind: "stamp_review_provenance",
+            prepared_status: "ready_to_execute",
+            output_verification_status: "verified",
+            apply_result: "applied",
+            applied: true,
+            applied_statement_count: 5,
+            review_handoff_status: "complete_review_handoff",
+            production_apply_guard: "ready_to_apply",
+            production_can_apply: true,
+            post_apply_recheck_status: "gap_closed",
+            post_apply_reviewed_candidate_delta: 1,
+            post_apply_unreviewed_candidate_delta: -1,
+            can_execute: true,
+            can_continue: true,
+            missing_required_artifact_count: 0,
+            checked_artifact_count: 2,
+            prepared_argv: ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates"],
+            production_apply_argv: ["bun", "src/cli/index.ts", "--apply-review-facts"],
+            review_provenance_stamp_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+            review_issue_repair_argv: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
+            recommended_action_kind: "stamp_review_provenance",
+            recommended_action_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+            recommended_action_status: "ready_to_execute",
+            recommended_action_can_execute: true,
+            recommended_action_next_action: "Execute the pipeline command.",
+            recommended_action_missing_inputs: [],
+            recommended_action_input_bindings: ["reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string"],
+            recommended_action_output_artifacts: [
+                "readiness_report path=one.json flag=--out index=11 prefix=--out= required_for_handoff=false",
+                "review_brief path=two.md flag=--coverage-review-brief index=10 prefix=--coverage-review-brief= required_for_handoff=true",
+            ],
+            recommended_action_output_checks: [
+                "readiness_report path=one.json index=11 check=file_exists_after_execution status=pending_execution required_for_command_success=true",
+                "review_brief path=two.md index=10 check=file_exists_after_execution status=pending_execution required_for_command_success=true",
+            ],
+            output_artifacts: [
+                { kind: "readiness_report", path: "one.json", required_for_handoff: false },
+                { kind: "review_brief", path: "two.md", required_for_handoff: true },
+            ],
+            checked_artifacts: [
+                { kind: "readiness_report", path: "one.json", exists: true },
+                { kind: "review_brief", path: "two.md", exists: true },
+            ],
+        });
+    });
+
     test("writes execution fact projection reports", async () => {
         const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
         const plan = buildOperationExecutionPlanReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "missing", {
@@ -811,21 +1142,371 @@ describe("classifier package operations report", () => {
                     lifecycle_key: "proposal_review",
                     artifact_path: ".ax/experiments/workflow-candidate-proposal-review-current.json",
                 }),
+            }, {
+                graph_id: "fact:lifecycle:other-subject",
+                kind: "classifier_lifecycle_status",
+                subject: "classifier_lifecycle:other_pipeline",
+                predicate: "review_pipeline_prepared_argv",
+                value_json: JSON.stringify(["other"]),
+                evidence_edges_json: JSON.stringify(["edge:lifecycle"]),
+                properties_json: JSON.stringify({
+                    lifecycle_key: "review_pipeline_lifecycle",
+                    artifact_path: ".ax/experiments/workflow-candidate-proposal-review-current.json",
+                }),
+            }, {
+                graph_id: "fact:lifecycle:argv",
+                kind: "classifier_lifecycle_status",
+                subject: "classifier_lifecycle:workflow_candidate_proposal",
+                predicate: "review_pipeline_prepared_argv",
+                value_json: JSON.stringify(["bun", "src/cli/index.ts"]),
+                evidence_edges_json: JSON.stringify(["edge:lifecycle"]),
+                source_kind: "classifier_package_execution",
+                properties_json: JSON.stringify({
+                    lifecycle_key: "review_pipeline_lifecycle",
+                    artifact_path: ".ax/experiments/workflow-candidate-proposal-review-current.json",
+                }),
+            }, {
+                graph_id: "fact:lifecycle:argv-other-source",
+                kind: "classifier_lifecycle_status",
+                subject: "classifier_lifecycle:workflow_candidate_proposal",
+                predicate: "review_pipeline_prepared_argv",
+                value_json: JSON.stringify(["bun", "src/cli/index.ts"]),
+                evidence_edges_json: JSON.stringify(["edge:lifecycle"]),
+                source_kind: "other_projection",
+                properties_json: JSON.stringify({
+                    lifecycle_key: "review_pipeline_lifecycle",
+                    artifact_path: ".ax/experiments/workflow-candidate-proposal-review-current.json",
+                }),
+            }, {
+                graph_id: "fact:lifecycle:argv-other-value",
+                kind: "classifier_lifecycle_status",
+                subject: "classifier_lifecycle:workflow_candidate_proposal",
+                predicate: "review_pipeline_prepared_argv",
+                value_json: JSON.stringify(["python", "other.py"]),
+                evidence_edges_json: JSON.stringify(["edge:lifecycle"]),
+                properties_json: JSON.stringify({
+                    lifecycle_key: "review_pipeline_lifecycle",
+                    artifact_path: ".ax/experiments/workflow-candidate-proposal-review-current.json",
+                }),
             }],
-            query: { mode: "lifecycle" },
+            query: {
+                mode: "lifecycle",
+                predicate: "review_pipeline_prepared_argv",
+                subject: "classifier_lifecycle:workflow_candidate_proposal",
+                source_kind: "classifier_package_execution",
+                value_contains: "src/cli/index.ts",
+            },
         });
 
         expect(report.query.mode).toBe("lifecycle");
-        expect(report.totals.lifecycle_fact_count).toBe(1);
+        expect(report.query.predicate).toBe("review_pipeline_prepared_argv");
+        expect(report.query.subject).toBe("classifier_lifecycle:workflow_candidate_proposal");
+        expect(report.query.source_kind).toBe("classifier_package_execution");
+        expect(report.query.value_contains).toBe("src/cli/index.ts");
+        expect(report.totals.lifecycle_fact_count).toBe(5);
         expect(report.result_totals.lifecycle_fact_count).toBe(1);
         expect(report.lifecycle_facts[0]).toMatchObject({
-            predicate: "proposal_review_pending_count",
-            value: 4,
-            lifecycle_key: "proposal_review",
+            predicate: "review_pipeline_prepared_argv",
+            value: ["bun", "src/cli/index.ts"],
+            lifecycle_key: "review_pipeline_lifecycle",
             artifact_path: ".ax/experiments/workflow-candidate-proposal-review-current.json",
             evidence_paths: [".ax/experiments/workflow-candidate-proposal-review-current.json"],
         });
         expect(report.evidence_paths).toEqual([".ax/experiments/workflow-candidate-proposal-review-current.json"]);
+    });
+
+    test("filters lifecycle graph facts by exact value", () => {
+        const report = buildExecutionGraphHealthReport({
+            nodes: [],
+            edges: [{
+                graph_id: "edge:lifecycle",
+                kind: "has_evidence",
+                from_id: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                to_id: "artifact:.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                evidence_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                properties_json: JSON.stringify({ lifecycle_key: "review_pipeline_lifecycle" }),
+            }],
+            facts: [{
+                graph_id: "fact:lifecycle:phase-bind",
+                kind: "classifier_lifecycle_status",
+                subject: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                predicate: "review_pipeline_recommended_action_execution_phase",
+                value_json: JSON.stringify("bind_inputs"),
+                evidence_edges_json: JSON.stringify(["edge:lifecycle"]),
+                properties_json: JSON.stringify({
+                    lifecycle_key: "review_pipeline_lifecycle",
+                    artifact_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                }),
+            }, {
+                graph_id: "fact:lifecycle:phase-inspect",
+                kind: "classifier_lifecycle_status",
+                subject: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                predicate: "review_pipeline_recommended_action_execution_phase",
+                value_json: JSON.stringify("inspect_lifecycle"),
+                evidence_edges_json: JSON.stringify(["edge:lifecycle"]),
+                properties_json: JSON.stringify({
+                    lifecycle_key: "review_pipeline_lifecycle",
+                    artifact_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                }),
+            }, {
+                graph_id: "fact:lifecycle:summary",
+                kind: "classifier_lifecycle_status",
+                subject: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                predicate: "review_pipeline_recommended_action_execution_summary",
+                value_json: JSON.stringify("kind=stamp_review_provenance phase=bind_inputs status=missing_inputs"),
+                evidence_edges_json: JSON.stringify(["edge:lifecycle"]),
+                properties_json: JSON.stringify({
+                    lifecycle_key: "review_pipeline_lifecycle",
+                    artifact_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                }),
+            }],
+            query: {
+                mode: "lifecycle",
+                predicate: "review_pipeline_recommended_action_execution_phase",
+                value_equals: "bind_inputs",
+            },
+        });
+
+        expect(report.query.value_equals).toBe("bind_inputs");
+        expect(report.query_match_status).toBe("matched");
+        expect(report.query_next_action).toBe("use_query_results");
+        expect(report.query_remediation).toBe("Use the returned graph rows for the requested classifier workflow.");
+        expect(report.query_result_kinds).toEqual(["lifecycle_facts"]);
+        expect(report.query_result_kind_counts).toEqual([{
+            kind: "lifecycle_facts",
+            count: 1,
+        }]);
+        expect(report.totals.lifecycle_fact_count).toBe(3);
+        expect(report.result_totals.lifecycle_fact_count).toBe(1);
+        expect(report.lifecycle_facts[0]).toMatchObject({
+            predicate: "review_pipeline_recommended_action_execution_phase",
+            value: "bind_inputs",
+        });
+    });
+
+    test("marks graph health reports with no matching query results", () => {
+        const report = buildExecutionGraphHealthReport({
+            nodes: [],
+            edges: [{
+                graph_id: "edge:lifecycle",
+                kind: "has_evidence",
+                from_id: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                to_id: "artifact:.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                evidence_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                properties_json: JSON.stringify({ lifecycle_key: "review_pipeline_lifecycle" }),
+            }],
+            facts: [{
+                graph_id: "fact:lifecycle:phase-bind",
+                kind: "classifier_lifecycle_status",
+                subject: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                predicate: "review_pipeline_recommended_action_execution_phase",
+                value_json: JSON.stringify("bind_inputs"),
+                evidence_edges_json: JSON.stringify(["edge:lifecycle"]),
+                properties_json: JSON.stringify({
+                    lifecycle_key: "review_pipeline_lifecycle",
+                    artifact_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                }),
+            }],
+            query: {
+                mode: "lifecycle",
+                predicate: "review_pipeline_recommended_action_execution_phase",
+                value_equals: "execute",
+            },
+        });
+
+        expect(report.query_match_status).toBe("no_match");
+        expect(report.query_next_action).toBe("relax_filters_or_project_facts");
+        expect(report.query_remediation).toBe("Relax graph filters, inspect available value counts, or project/apply the missing classifier facts before routing from this query.");
+        expect(report.query_result_kinds).toEqual([]);
+        expect(report.query_result_kind_counts).toEqual([]);
+        expect(report.result_totals.lifecycle_fact_count).toBe(0);
+        expect(report.lifecycle_facts).toEqual([]);
+        expect(report.lifecycle_value_counts).toEqual([]);
+        expect(report.lifecycle_available_value_counts).toEqual([{
+            predicate: "review_pipeline_recommended_action_execution_phase",
+            value: "bind_inputs",
+            count: 1,
+        }]);
+        expect(report.query_suggested_value_equals).toBe("bind_inputs");
+        expect(report.query_suggested_argv).toEqual([
+            "bun",
+            "src/cli/index.ts",
+            "classifiers",
+            "graph",
+            "--mode",
+            "lifecycle",
+            "--predicate",
+            "review_pipeline_recommended_action_execution_phase",
+            "--value",
+            "bind_inputs",
+        ]);
+        expect(report.query_suggested_query).toEqual({
+            mode: "lifecycle",
+            predicate: "review_pipeline_recommended_action_execution_phase",
+            value_equals: "bind_inputs",
+        });
+        expect(report.query_suggested_result_count).toBe(1);
+        expect(report.query_suggested_status).toBe("expected_matches");
+        expect(report.query_suggested_next_action).toBe("run_suggested_query");
+        expect(report.query_suggested_remediation).toBe("Run the suggested graph query to inspect the available classifier lifecycle facts.");
+        expect(report.query_suggestion).toEqual({
+            value_equals: "bind_inputs",
+            result_count: 1,
+            changed_filter_count: 1,
+            unchanged_filter_count: 0,
+            has_changed_filters: true,
+            changed_filters: ["value_equals"],
+            unchanged_filters: [],
+            repair_status: "repair_available",
+            repair_next_action: "run_repaired_query",
+            repair_remediation: "Run the repaired graph query to inspect matching classifier lifecycle facts.",
+            repair_can_execute: true,
+            repair_execution_status: "ready_to_execute",
+            repair_command_kind: "classifier_graph_query_repair",
+            repair_requires_inputs: false,
+            repair_required_inputs: [],
+            repair_expected_query_match_status: "matched",
+            repair_outcome_status: "expected_matches",
+            repair_expected_result_count: 1,
+            repair_blockers: [],
+            repair_blocker_details: [],
+            repair_argv: [
+                "bun",
+                "src/cli/index.ts",
+                "classifiers",
+                "graph",
+                "--mode",
+                "lifecycle",
+                "--predicate",
+                "review_pipeline_recommended_action_execution_phase",
+                "--value",
+                "bind_inputs",
+            ],
+            repair_can_verify: true,
+            repair_verification_status: "ready_to_verify",
+            repair_verification_execution_status: "ready_to_execute",
+            repair_verification_next_action: "run_verification_query",
+            repair_verification_remediation: "Run the repair verification query and confirm it returns the expected matches.",
+            repair_verification_can_execute: true,
+            repair_verification_command_kind: "classifier_graph_query_repair_verification",
+            repair_verification_requires_inputs: false,
+            repair_verification_required_inputs: [],
+            repair_verification_blockers: [],
+            repair_verification_blocker_details: [],
+            repair_verification_expected_query_match_status: "matched",
+            repair_verification_outcome_status: "expected_matches",
+            repair_verification_expected_result_count: 1,
+            repair_verification_argv: [
+                "bun",
+                "src/cli/index.ts",
+                "classifiers",
+                "graph",
+                "--mode",
+                "lifecycle",
+                "--predicate",
+                "review_pipeline_recommended_action_execution_phase",
+                "--value",
+                "bind_inputs",
+            ],
+            repair_verification_query: {
+                mode: "lifecycle",
+                predicate: "review_pipeline_recommended_action_execution_phase",
+                value_equals: "bind_inputs",
+            },
+            repair_query: {
+                mode: "lifecycle",
+                predicate: "review_pipeline_recommended_action_execution_phase",
+                value_equals: "bind_inputs",
+            },
+            status: "expected_matches",
+            next_action: "run_suggested_query",
+            remediation: "Run the suggested graph query to inspect the available classifier lifecycle facts.",
+            source: "lifecycle_available_value_counts",
+            reason: "available_value_after_relaxing_value_equals",
+            relaxed_filters: ["value_equals"],
+            original_query: {
+                mode: "lifecycle",
+                predicate: "review_pipeline_recommended_action_execution_phase",
+                value_equals: "execute",
+            },
+            query: {
+                mode: "lifecycle",
+                predicate: "review_pipeline_recommended_action_execution_phase",
+                value_equals: "bind_inputs",
+            },
+            filter_changes: [{
+                filter: "value_equals",
+                from: "execute",
+                to: "bind_inputs",
+                status: "changed",
+            }],
+            argv: [
+                "bun",
+                "src/cli/index.ts",
+                "classifiers",
+                "graph",
+                "--mode",
+                "lifecycle",
+                "--predicate",
+                "review_pipeline_recommended_action_execution_phase",
+                "--value",
+                "bind_inputs",
+            ],
+        });
+    });
+
+    test("summarizes lifecycle graph fact values", () => {
+        const report = buildExecutionGraphHealthReport({
+            nodes: [],
+            edges: [{
+                graph_id: "edge:lifecycle",
+                kind: "has_evidence",
+                from_id: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                to_id: "artifact:.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                evidence_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                properties_json: JSON.stringify({ lifecycle_key: "review_pipeline_lifecycle" }),
+            }],
+            facts: [{
+                graph_id: "fact:lifecycle:phase-bind-a",
+                kind: "classifier_lifecycle_status",
+                subject: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                predicate: "review_pipeline_recommended_action_execution_phase",
+                value_json: JSON.stringify("bind_inputs"),
+                evidence_edges_json: JSON.stringify(["edge:lifecycle"]),
+                properties_json: JSON.stringify({ lifecycle_key: "review_pipeline_lifecycle" }),
+            }, {
+                graph_id: "fact:lifecycle:phase-bind-b",
+                kind: "classifier_lifecycle_status",
+                subject: "classifier_lifecycle:workflow_candidate_review_pipeline:other",
+                predicate: "review_pipeline_recommended_action_execution_phase",
+                value_json: JSON.stringify("bind_inputs"),
+                evidence_edges_json: JSON.stringify(["edge:lifecycle"]),
+                properties_json: JSON.stringify({ lifecycle_key: "review_pipeline_lifecycle" }),
+            }, {
+                graph_id: "fact:lifecycle:phase-repair",
+                kind: "classifier_lifecycle_status",
+                subject: "classifier_lifecycle:workflow_candidate_review_pipeline:repair",
+                predicate: "review_pipeline_recommended_action_execution_phase",
+                value_json: JSON.stringify("repair_outputs"),
+                evidence_edges_json: JSON.stringify(["edge:lifecycle"]),
+                properties_json: JSON.stringify({ lifecycle_key: "review_pipeline_lifecycle" }),
+            }],
+            query: {
+                mode: "lifecycle",
+                predicate: "review_pipeline_recommended_action_execution_phase",
+            },
+        });
+
+        expect(report.result_totals.lifecycle_fact_count).toBe(3);
+        expect(report.lifecycle_value_counts).toEqual([{
+            predicate: "review_pipeline_recommended_action_execution_phase",
+            value: "bind_inputs",
+            count: 2,
+        }, {
+            predicate: "review_pipeline_recommended_action_execution_phase",
+            value: "repair_outputs",
+            count: 1,
+        }]);
     });
 
     test("lists embedding helper graph facts in embedding-helper mode", () => {
@@ -873,6 +1554,15 @@ describe("classifier package operations report", () => {
                     source_kind: "embedding_helper_review_projection",
                 },
                 {
+                    graph_id: "edge:hn-other-neighbor",
+                    kind: "nearest_reviewed_fixture",
+                    from_id: "embedding_helper_hard_negative:session-section-chunks/none-other-neighbor",
+                    to_id: "classifier_evidence:session-section-chunks/verification-runtime",
+                    evidence_path: ".ax/experiments/embedding-helper-review-e210.json",
+                    properties_json: JSON.stringify({ similarity: 0.8123 }),
+                    source_kind: "embedding_helper_review_projection",
+                },
+                {
                     graph_id: "edge:promoted",
                     kind: "promoted_as_fixture",
                     from_id: "embedding_helper_hard_negative:session-section-chunks/none-start-building",
@@ -915,16 +1605,67 @@ describe("classifier package operations report", () => {
                     }),
                     source_kind: "embedding_helper_review_projection",
                 },
+                {
+                    graph_id: "fact:hard-negative-other-neighbor",
+                    kind: "embedding_helper_hard_negative_candidate",
+                    subject: "embedding_helper_hard_negative:session-section-chunks/none-other-neighbor",
+                    predicate: "promoted_hard_negative_fixture",
+                    value_json: "true",
+                    evidence_edges_json: JSON.stringify(["edge:hn-other-neighbor"]),
+                    properties_json: JSON.stringify({
+                        source_fixture_id: "session-section-chunks/none-other-neighbor",
+                        status: "accepted",
+                        proposed_label: "none",
+                    }),
+                    source_kind: "embedding_helper_review_projection",
+                },
+                {
+                    graph_id: "fact:hard-negative-wrong-label",
+                    kind: "embedding_helper_hard_negative_candidate",
+                    subject: "embedding_helper_hard_negative:session-section-chunks/direction-example",
+                    predicate: "promoted_hard_negative_fixture",
+                    value_json: "true",
+                    evidence_edges_json: JSON.stringify(["edge:hn"]),
+                    properties_json: JSON.stringify({
+                        source_fixture_id: "session-section-chunks/direction-example",
+                        status: "accepted",
+                        proposed_label: "direction",
+                    }),
+                    source_kind: "embedding_helper_review_projection",
+                },
+                {
+                    graph_id: "fact:hard-negative-rejected",
+                    kind: "embedding_helper_hard_negative_candidate",
+                    subject: "embedding_helper_hard_negative:session-section-chunks/rejected-example",
+                    predicate: "rejected_hard_negative_candidate",
+                    value_json: "false",
+                    evidence_edges_json: JSON.stringify(["edge:hn"]),
+                    properties_json: JSON.stringify({
+                        source_fixture_id: "session-section-chunks/rejected-example",
+                        status: "rejected",
+                        proposed_label: "none",
+                    }),
+                    source_kind: "embedding_helper_review_projection",
+                },
             ],
-            query: { mode: "embedding-helper" },
+            query: {
+                mode: "embedding-helper",
+                fact_kind: "embedding_helper_hard_negative_candidate",
+                status: "accepted",
+                proposed_label: "none",
+                min_nearest_similarity: 0.85,
+            },
         });
 
         expect(report.query.mode).toBe("embedding-helper");
-        expect(report.totals.embedding_helper_fact_count).toBe(2);
-        expect(report.result_totals.embedding_helper_fact_count).toBe(2);
+        expect(report.query.fact_kind).toBe("embedding_helper_hard_negative_candidate");
+        expect(report.query.status).toBe("accepted");
+        expect(report.query.proposed_label).toBe("none");
+        expect(report.query.min_nearest_similarity).toBe(0.85);
+        expect(report.totals.embedding_helper_fact_count).toBe(5);
+        expect(report.result_totals.embedding_helper_fact_count).toBe(1);
         expect(report.embedding_helper_facts.map((fact) => fact.predicate)).toEqual([
             "promoted_hard_negative_fixture",
-            "recommended_threshold",
         ]);
         expect(report.embedding_helper_facts[0]).toMatchObject({
             source_fixture_id: "session-section-chunks/none-start-building",
@@ -938,6 +1679,503 @@ describe("classifier package operations report", () => {
                 similarity: 0.8565,
             }],
             evidence_paths: [".ax/experiments/embedding-helper-review-e210.json"],
+        });
+    });
+
+    test("lists boundary replay graph facts in boundary-replay mode", () => {
+        const report = buildExecutionGraphHealthReport({
+            nodes: [],
+            edges: [{
+                graph_id: "edge:boundary",
+                kind: "reported_boundary_miss",
+                from_id: "artifact:boundary",
+                to_id: "classifier_boundary_miss:workflow",
+                evidence_path: ".ax/experiments/boundary-review-deterministic-replay-workflow-candidate-current.json",
+                properties_json: "{}",
+                source_kind: "boundary_replay_deterministic_projection",
+            }],
+            facts: [{
+                graph_id: "fact:boundary:covered",
+                kind: "classifier_boundary_replay",
+                subject: "classifier_boundary_miss:workflow",
+                predicate: "covered_by_deterministic",
+                value_json: JSON.stringify(true),
+                evidence_edges_json: JSON.stringify(["edge:boundary"]),
+                properties_json: JSON.stringify({
+                    classifier_key: "correction-event",
+                    actual: "correction_or_rejection_signal",
+                    target: "workflow_state",
+                }),
+                source_kind: "boundary_replay_deterministic_projection",
+            }, {
+                graph_id: "fact:boundary:label",
+                kind: "classifier_boundary_replay",
+                subject: "classifier_boundary_miss:workflow",
+                predicate: "deterministic_label",
+                object: "classifier_deterministic_result:workflow",
+                value_json: JSON.stringify({ label: "correction", target: "workflow_state" }),
+                evidence_edges_json: JSON.stringify(["edge:boundary"]),
+                properties_json: JSON.stringify({
+                    classifier_key: "correction-event",
+                    confidence: 0.84,
+                    signals: ["correction:workflow_state"],
+                }),
+                source_kind: "boundary_replay_deterministic_projection",
+            }],
+            query: {
+                mode: "boundary-replay",
+                source_kind: "boundary_replay_deterministic_projection",
+                fact_kind: "classifier_boundary_replay",
+                predicate: "covered_by_deterministic",
+                value_equals: "true",
+            },
+        });
+
+        expect(report.query_match_status).toBe("matched");
+        expect(report.result_totals.boundary_replay_fact_count).toBe(1);
+        expect(report.query_result_kinds).toContain("boundary_replay_facts");
+        expect(report.query_result_kind_counts).toContainEqual({ kind: "boundary_replay_facts", count: 1 });
+        expect(report.boundary_replay_summary).toMatchObject({
+            status: "reviewed_deterministic_facts_available",
+            production_posture: "deterministic_and_reviewed_graph_facts_only",
+            next_action: "use_reviewed_deterministic_graph_facts",
+            covered_subject_count: 1,
+            deterministic_label_subject_count: 1,
+            evidence_path_count: 1,
+            classifier_keys: ["correction-event"],
+            targets: ["workflow_state"],
+            subjects: ["classifier_boundary_miss:workflow"],
+        });
+        expect(report.boundary_replay_facts?.[0]).toMatchObject({
+            predicate: "covered_by_deterministic",
+            classifier_key: "correction-event",
+            target: "workflow_state",
+            value: true,
+            evidence_paths: [".ax/experiments/boundary-review-deterministic-replay-workflow-candidate-current.json"],
+        });
+    });
+
+    test("filters embedding helper graph facts by routing threshold", () => {
+        const report = buildExecutionGraphHealthReport({
+            nodes: [],
+            edges: [{
+                graph_id: "edge:routing-none",
+                kind: "emitted_routing_candidate",
+                from_id: "artifact:.ax/experiments/embedding-helper-review-e210.json",
+                to_id: "embedding_helper_routing:session-section-chunks",
+                evidence_path: ".ax/experiments/embedding-helper-review-e210.json",
+                properties_json: "{}",
+                source_kind: "embedding_helper_review_projection",
+            }, {
+                graph_id: "edge:routing-04",
+                kind: "emitted_routing_candidate",
+                from_id: "artifact:.ax/experiments/embedding-helper-review-e210.json",
+                to_id: "embedding_helper_routing:session-section-chunks",
+                evidence_path: ".ax/experiments/embedding-helper-review-e210.json",
+                properties_json: "{}",
+                source_kind: "embedding_helper_review_projection",
+            }],
+            facts: [{
+                graph_id: "fact:routing-none",
+                kind: "embedding_helper_routing_candidate",
+                subject: "embedding_helper_routing:session-section-chunks",
+                predicate: "recommended_threshold",
+                value_json: JSON.stringify({ threshold: "none", positive_recall_after_routing_mean: 0.9028 }),
+                evidence_edges_json: JSON.stringify(["edge:routing-none"]),
+                properties_json: JSON.stringify({
+                    threshold: "none",
+                    setfit_call_reduction_rate_mean: 0.1778,
+                    positive_recall_after_routing_mean: 0.9028,
+                }),
+                source_kind: "embedding_helper_review_projection",
+            }, {
+                graph_id: "fact:routing-04",
+                kind: "embedding_helper_routing_candidate",
+                subject: "embedding_helper_routing:session-section-chunks",
+                predicate: "recommended_threshold",
+                value_json: JSON.stringify({ threshold: "0.4", positive_recall_after_routing_mean: 0.8123 }),
+                evidence_edges_json: JSON.stringify(["edge:routing-04"]),
+                properties_json: JSON.stringify({
+                    threshold: "0.4",
+                    setfit_call_reduction_rate_mean: 0.2912,
+                    positive_recall_after_routing_mean: 0.8123,
+                }),
+                source_kind: "embedding_helper_review_projection",
+            }],
+            query: {
+                mode: "embedding-helper",
+                fact_kind: "embedding_helper_routing_candidate",
+                threshold: "none",
+            },
+        });
+
+        expect(report.query.threshold).toBe("none");
+        expect(report.totals.embedding_helper_fact_count).toBe(2);
+        expect(report.result_totals.embedding_helper_fact_count).toBe(1);
+        expect(report.embedding_helper_facts[0]).toMatchObject({
+            kind: "embedding_helper_routing_candidate",
+            predicate: "recommended_threshold",
+            threshold: "none",
+            positive_recall_after_routing_mean: 0.9028,
+            setfit_call_reduction_rate_mean: 0.1778,
+        });
+    });
+
+    test("filters embedding helper graph facts by minimum positive recall", () => {
+        const report = buildExecutionGraphHealthReport({
+            nodes: [],
+            edges: [{
+                graph_id: "edge:routing-none",
+                kind: "emitted_routing_candidate",
+                from_id: "artifact:.ax/experiments/embedding-helper-review-e210.json",
+                to_id: "embedding_helper_routing:session-section-chunks",
+                evidence_path: ".ax/experiments/embedding-helper-review-e210.json",
+                properties_json: "{}",
+                source_kind: "embedding_helper_review_projection",
+            }, {
+                graph_id: "edge:routing-04",
+                kind: "emitted_routing_candidate",
+                from_id: "artifact:.ax/experiments/embedding-helper-review-e210.json",
+                to_id: "embedding_helper_routing:session-section-chunks",
+                evidence_path: ".ax/experiments/embedding-helper-review-e210.json",
+                properties_json: "{}",
+                source_kind: "embedding_helper_review_projection",
+            }],
+            facts: [{
+                graph_id: "fact:routing-none",
+                kind: "embedding_helper_routing_candidate",
+                subject: "embedding_helper_routing:session-section-chunks",
+                predicate: "recommended_threshold",
+                value_json: JSON.stringify({ threshold: "none", positive_recall_after_routing_mean: 0.9028 }),
+                evidence_edges_json: JSON.stringify(["edge:routing-none"]),
+                properties_json: JSON.stringify({
+                    threshold: "none",
+                    setfit_call_reduction_rate_mean: 0.1778,
+                    positive_recall_after_routing_mean: 0.9028,
+                }),
+                source_kind: "embedding_helper_review_projection",
+            }, {
+                graph_id: "fact:routing-04",
+                kind: "embedding_helper_routing_candidate",
+                subject: "embedding_helper_routing:session-section-chunks",
+                predicate: "recommended_threshold",
+                value_json: JSON.stringify({ threshold: "0.4", positive_recall_after_routing_mean: 0.8123 }),
+                evidence_edges_json: JSON.stringify(["edge:routing-04"]),
+                properties_json: JSON.stringify({
+                    threshold: "0.4",
+                    setfit_call_reduction_rate_mean: 0.2912,
+                    positive_recall_after_routing_mean: 0.8123,
+                }),
+                source_kind: "embedding_helper_review_projection",
+            }],
+            query: {
+                mode: "embedding-helper",
+                fact_kind: "embedding_helper_routing_candidate",
+                min_positive_recall: 0.9,
+            },
+        });
+
+        expect(report.query.min_positive_recall).toBe(0.9);
+        expect(report.totals.embedding_helper_fact_count).toBe(2);
+        expect(report.result_totals.embedding_helper_fact_count).toBe(1);
+        expect(report.embedding_helper_facts[0]).toMatchObject({
+            threshold: "none",
+            positive_recall_after_routing_mean: 0.9028,
+        });
+    });
+
+    test("filters embedding helper graph facts by minimum call reduction", () => {
+        const report = buildExecutionGraphHealthReport({
+            nodes: [],
+            edges: [{
+                graph_id: "edge:routing-low",
+                kind: "emitted_routing_candidate",
+                from_id: "artifact:.ax/experiments/embedding-helper-review-e210.json",
+                to_id: "embedding_helper_routing:session-section-chunks",
+                evidence_path: ".ax/experiments/embedding-helper-review-e210.json",
+                properties_json: "{}",
+                source_kind: "embedding_helper_review_projection",
+            }, {
+                graph_id: "edge:routing-high",
+                kind: "emitted_routing_candidate",
+                from_id: "artifact:.ax/experiments/embedding-helper-review-e210.json",
+                to_id: "embedding_helper_routing:session-section-chunks",
+                evidence_path: ".ax/experiments/embedding-helper-review-e210.json",
+                properties_json: "{}",
+                source_kind: "embedding_helper_review_projection",
+            }],
+            facts: [{
+                graph_id: "fact:routing-low",
+                kind: "embedding_helper_routing_candidate",
+                subject: "embedding_helper_routing:session-section-chunks",
+                predicate: "recommended_threshold",
+                value_json: JSON.stringify({ threshold: "none", positive_recall_after_routing_mean: 0.9028 }),
+                evidence_edges_json: JSON.stringify(["edge:routing-low"]),
+                properties_json: JSON.stringify({
+                    threshold: "none",
+                    setfit_call_reduction_rate_mean: 0.1778,
+                    positive_recall_after_routing_mean: 0.9028,
+                }),
+                source_kind: "embedding_helper_review_projection",
+            }, {
+                graph_id: "fact:routing-high",
+                kind: "embedding_helper_routing_candidate",
+                subject: "embedding_helper_routing:session-section-chunks",
+                predicate: "recommended_threshold",
+                value_json: JSON.stringify({ threshold: "0.4", positive_recall_after_routing_mean: 0.8123 }),
+                evidence_edges_json: JSON.stringify(["edge:routing-high"]),
+                properties_json: JSON.stringify({
+                    threshold: "0.4",
+                    setfit_call_reduction_rate_mean: 0.2912,
+                    positive_recall_after_routing_mean: 0.8123,
+                }),
+                source_kind: "embedding_helper_review_projection",
+            }],
+            query: {
+                mode: "embedding-helper",
+                fact_kind: "embedding_helper_routing_candidate",
+                min_call_reduction: 0.25,
+            },
+        });
+
+        expect(report.query.min_call_reduction).toBe(0.25);
+        expect(report.totals.embedding_helper_fact_count).toBe(2);
+        expect(report.result_totals.embedding_helper_fact_count).toBe(1);
+        expect(report.embedding_helper_facts[0]).toMatchObject({
+            threshold: "0.4",
+            setfit_call_reduction_rate_mean: 0.2912,
+        });
+    });
+
+    test("summarizes routing policies that meet recall and call reduction floors", () => {
+        const report = buildExecutionGraphHealthReport({
+            nodes: [],
+            edges: [{
+                graph_id: "edge:routing-safe",
+                kind: "emitted_routing_candidate",
+                from_id: "artifact:.ax/experiments/embedding-helper-review-e210.json",
+                to_id: "embedding_helper_routing:session-section-chunks",
+                evidence_path: ".ax/experiments/embedding-helper-review-e210.json",
+                properties_json: "{}",
+                source_kind: "embedding_helper_review_projection",
+            }, {
+                graph_id: "edge:routing-risky",
+                kind: "emitted_routing_candidate",
+                from_id: "artifact:.ax/experiments/embedding-helper-review-e210.json",
+                to_id: "embedding_helper_routing:session-section-chunks",
+                evidence_path: ".ax/experiments/embedding-helper-review-e210.json",
+                properties_json: "{}",
+                source_kind: "embedding_helper_review_projection",
+            }],
+            facts: [{
+                graph_id: "fact:routing-safe",
+                kind: "embedding_helper_routing_candidate",
+                subject: "embedding_helper_routing:session-section-chunks",
+                predicate: "recommended_threshold",
+                value_json: JSON.stringify({ threshold: "none", positive_recall_after_routing_mean: 0.9028 }),
+                evidence_edges_json: JSON.stringify(["edge:routing-safe"]),
+                properties_json: JSON.stringify({
+                    threshold: "none",
+                    setfit_call_reduction_rate_mean: 0.1778,
+                    positive_recall_after_routing_mean: 0.9028,
+                }),
+                source_kind: "embedding_helper_review_projection",
+            }, {
+                graph_id: "fact:routing-risky",
+                kind: "embedding_helper_routing_candidate",
+                subject: "embedding_helper_routing:session-section-chunks",
+                predicate: "recommended_threshold",
+                value_json: JSON.stringify({ threshold: "0.4", positive_recall_after_routing_mean: 0.8123 }),
+                evidence_edges_json: JSON.stringify(["edge:routing-risky"]),
+                properties_json: JSON.stringify({
+                    threshold: "0.4",
+                    setfit_call_reduction_rate_mean: 0.2912,
+                    positive_recall_after_routing_mean: 0.8123,
+                }),
+                source_kind: "embedding_helper_review_projection",
+            }],
+            query: {
+                mode: "embedding-helper",
+                fact_kind: "embedding_helper_routing_candidate",
+                min_positive_recall: 0.9,
+                min_call_reduction: 0.17,
+            },
+        });
+
+        expect(report.result_totals.embedding_helper_fact_count).toBe(1);
+        expect(report.routing_policy_summary).toMatchObject({
+            status: "meets_requested_floors",
+            next_action: "choose_reviewed_routing_threshold",
+            requested_min_positive_recall: 0.9,
+            requested_min_call_reduction: 0.17,
+            candidate_count: 1,
+            best_threshold_by_call_reduction: "none",
+            best_positive_recall: 0.9028,
+            best_call_reduction: 0.1778,
+        });
+    });
+
+    test("summarizes routing policies with a no-match remediation", () => {
+        const report = buildExecutionGraphHealthReport({
+            nodes: [],
+            edges: [{
+                graph_id: "edge:routing-safe",
+                kind: "emitted_routing_candidate",
+                from_id: "artifact:.ax/experiments/embedding-helper-review-e210.json",
+                to_id: "embedding_helper_routing:session-section-chunks",
+                evidence_path: ".ax/experiments/embedding-helper-review-e210.json",
+                properties_json: "{}",
+                source_kind: "embedding_helper_review_projection",
+            }],
+            facts: [{
+                graph_id: "fact:routing-safe",
+                kind: "embedding_helper_routing_candidate",
+                subject: "embedding_helper_routing:session-section-chunks",
+                predicate: "recommended_threshold",
+                value_json: JSON.stringify({ threshold: "none", positive_recall_after_routing_mean: 0.9028 }),
+                evidence_edges_json: JSON.stringify(["edge:routing-safe"]),
+                properties_json: JSON.stringify({
+                    threshold: "none",
+                    setfit_call_reduction_rate_mean: 0.1778,
+                    positive_recall_after_routing_mean: 0.9028,
+                }),
+                source_kind: "embedding_helper_review_projection",
+            }],
+            query: {
+                mode: "embedding-helper",
+                fact_kind: "embedding_helper_routing_candidate",
+                min_positive_recall: 0.95,
+                min_call_reduction: 0.2,
+            },
+        });
+
+        expect(report.result_totals.embedding_helper_fact_count).toBe(0);
+        expect(report.routing_policy_summary).toMatchObject({
+            status: "no_matching_policy",
+            next_action: "lower_floor_or_review_more_candidates",
+            remediation: "Lower the requested routing floors or review more routing candidates before enabling this policy.",
+            requested_min_positive_recall: 0.95,
+            requested_min_call_reduction: 0.2,
+            evaluated_policy_count: 1,
+            candidate_count: 0,
+            best_available_threshold_by_recall: "none",
+            best_available_positive_recall: 0.9028,
+            best_available_call_reduction: 0.1778,
+            positive_recall_gap_to_request: 0.0472,
+            call_reduction_gap_to_request: 0.0222,
+            blocking_floor_fields: ["positive_recall", "call_reduction"],
+            largest_gap_floor: "positive_recall",
+            recommended_floor_adjustments: [
+                {
+                    floor: "positive_recall",
+                    requested: 0.95,
+                    recommended: 0.9028,
+                    gap: 0.0472,
+                    source_threshold: "none",
+                },
+                {
+                    floor: "call_reduction",
+                    requested: 0.2,
+                    recommended: 0.1778,
+                    gap: 0.0222,
+                    source_threshold: "none",
+                },
+            ],
+            recommended_floor_query: {
+                mode: "embedding-helper",
+                fact_kind: "embedding_helper_routing_candidate",
+                min_positive_recall: 0.9028,
+                min_call_reduction: 0.1778,
+            },
+            recommended_floor_argv: [
+                "bun",
+                "src/cli/index.ts",
+                "classifiers",
+                "graph",
+                "--mode",
+                "embedding-helper",
+                "--fact-kind",
+                "embedding_helper_routing_candidate",
+                "--min-positive-recall",
+                "0.9028",
+                "--min-call-reduction",
+                "0.1778",
+            ],
+            recommended_floor_status: "expected_matches",
+            recommended_floor_candidate_count: 1,
+            recommended_floor_best_threshold_by_call_reduction: "none",
+            recommended_floor_best_positive_recall: 0.9028,
+            recommended_floor_best_call_reduction: 0.1778,
+            recommended_floor_next_action: "choose_recommended_routing_threshold",
+        });
+    });
+
+    test("filters embedding helper graph facts by minimum seed count", () => {
+        const report = buildExecutionGraphHealthReport({
+            nodes: [],
+            edges: [{
+                graph_id: "edge:seeded",
+                kind: "promoted_as_fixture",
+                from_id: "embedding_helper_hard_negative:session-section-chunks/none-seeded",
+                to_id: "classifier_promoted_fixture:session-section-chunks/none-seeded",
+                evidence_path: ".ax/experiments/embedding-helper-review-e210.json",
+                properties_json: "{}",
+                source_kind: "embedding_helper_review_projection",
+            }, {
+                graph_id: "edge:single-seed",
+                kind: "promoted_as_fixture",
+                from_id: "embedding_helper_hard_negative:session-section-chunks/none-single-seed",
+                to_id: "classifier_promoted_fixture:session-section-chunks/none-single-seed",
+                evidence_path: ".ax/experiments/embedding-helper-review-e210.json",
+                properties_json: "{}",
+                source_kind: "embedding_helper_review_projection",
+            }],
+            facts: [{
+                graph_id: "fact:seeded",
+                kind: "embedding_helper_hard_negative_candidate",
+                subject: "embedding_helper_hard_negative:session-section-chunks/none-seeded",
+                predicate: "promoted_hard_negative_fixture",
+                value_json: "true",
+                evidence_edges_json: JSON.stringify(["edge:seeded"]),
+                properties_json: JSON.stringify({
+                    source_fixture_id: "session-section-chunks/none-seeded",
+                    status: "accepted",
+                    proposed_label: "none",
+                    seed_count: 2,
+                }),
+                source_kind: "embedding_helper_review_projection",
+            }, {
+                graph_id: "fact:single-seed",
+                kind: "embedding_helper_hard_negative_candidate",
+                subject: "embedding_helper_hard_negative:session-section-chunks/none-single-seed",
+                predicate: "promoted_hard_negative_fixture",
+                value_json: "true",
+                evidence_edges_json: JSON.stringify(["edge:single-seed"]),
+                properties_json: JSON.stringify({
+                    source_fixture_id: "session-section-chunks/none-single-seed",
+                    status: "accepted",
+                    proposed_label: "none",
+                    seed_count: 1,
+                }),
+                source_kind: "embedding_helper_review_projection",
+            }],
+            query: {
+                mode: "embedding-helper",
+                fact_kind: "embedding_helper_hard_negative_candidate",
+                status: "accepted",
+                proposed_label: "none",
+                min_seed_count: 2,
+            },
+        });
+
+        expect(report.query.min_seed_count).toBe(2);
+        expect(report.totals.embedding_helper_fact_count).toBe(2);
+        expect(report.result_totals.embedding_helper_fact_count).toBe(1);
+        expect(report.embedding_helper_facts[0]).toMatchObject({
+            source_fixture_id: "session-section-chunks/none-seeded",
+            status: "accepted",
+            proposed_label: "none",
+            seed_count: 2,
         });
     });
 
@@ -1072,6 +2310,533 @@ describe("classifier package operations report", () => {
         expect(report.packages[0]?.failed_operation_count).toBe(1);
     });
 
+    test("recommends candidate promotion from persisted review pipeline success facts", () => {
+        const lifecycleSuccessGraph = buildExecutionGraphHealthReport({
+            nodes: [],
+            edges: [{
+                graph_id: "edge:lifecycle-success",
+                kind: "has_evidence",
+                from_id: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                to_id: "artifact:.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                evidence_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                properties_json: JSON.stringify({ lifecycle_key: "review_pipeline_lifecycle" }),
+            }],
+            facts: [{
+                graph_id: "fact:lifecycle:gap-closed",
+                kind: "classifier_lifecycle_status",
+                subject: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                predicate: "review_pipeline_post_apply_recheck_status",
+                value_json: JSON.stringify("gap_closed"),
+                evidence_edges_json: JSON.stringify(["edge:lifecycle-success"]),
+                properties_json: JSON.stringify({
+                    lifecycle_key: "review_pipeline_lifecycle",
+                    artifact_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                }),
+            }],
+            query: {
+                mode: "lifecycle",
+                subject: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                predicate: "review_pipeline_post_apply_recheck_status",
+                value_equals: "gap_closed",
+            },
+        });
+
+        const report = buildClassifierLifecycleInsightReport({
+            packages: buildPackagesOperationsReport("packages", []),
+            graph: buildExecutionGraphHealthReport({ nodes: [], edges: [], facts: [] }),
+            lifecycleSuccessGraph,
+            workflowStatus: {
+                path: ".ax/experiments/blind-workflow-status-current.json",
+                exists: true,
+                decision: "healthy",
+                next_actions: [],
+            },
+        });
+
+        expect(report.graph_recommendations).toHaveLength(1);
+        expect(report.graph_recommendations[0]).toMatchObject({
+            kind: "review_pipeline_success_to_candidate_promotion",
+            status: "ready",
+            source: "persisted_lifecycle_fact",
+            predicate: "review_pipeline_post_apply_recheck_status",
+            value: "gap_closed",
+            next_action: "prioritize_reviewed_candidates_for_harness_or_guidance",
+            evidence_paths: [".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json"],
+            query: {
+                mode: "lifecycle",
+                subject: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                predicate: "review_pipeline_post_apply_recheck_status",
+                value_equals: "gap_closed",
+            },
+        });
+        expect(report.graph_recommendations[0]?.candidate_query_argv).toContain("--topic-report");
+        expect(report.graph_recommendations[0]?.candidate_query_argv).toContain("--search=review-coverage");
+        expect(report.graph_recommendations[0]?.candidate_query_argv).toContain("--include-review-facts");
+        expect(report.graph_recommendations[0]?.candidate_query_argv).toContain("--promote-harness-proposals");
+        expect(report.graph_recommendations[0]?.candidate_query_argv).toContain("--proposal-dry-run");
+        expect(report.graph_recommendations[0]?.candidate_query_argv).toContain("--source-kind=hybrid_window_classifier_projection");
+    });
+
+    test("summarizes review pipeline lifecycle routing in lifecycle insight reports", () => {
+        const report = buildClassifierLifecycleInsightReport({
+            packages: buildPackagesOperationsReport("packages", []),
+            graph: buildExecutionGraphHealthReport({
+                nodes: [{
+                    graph_id: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                    kind: "classifier_lifecycle",
+                    label: "workflow candidate review pipeline lifecycle",
+                    properties_json: "{}",
+                }],
+                edges: [{
+                    graph_id: "edge:lifecycle",
+                    kind: "has_evidence",
+                    from_id: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                    to_id: "artifact:.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                    evidence_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                    properties_json: JSON.stringify({ lifecycle_key: "review_pipeline_lifecycle" }),
+                }],
+                facts: [{
+                    graph_id: "fact:phase",
+                    kind: "classifier_lifecycle_status",
+                    subject: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                    predicate: "review_pipeline_recommended_action_execution_phase",
+                    value_json: "\"bind_inputs\"",
+                    evidence_edges_json: JSON.stringify(["edge:lifecycle"]),
+                    properties_json: JSON.stringify({
+                        lifecycle_key: "review_pipeline_lifecycle",
+                        artifact_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                    }),
+                }],
+                query: {
+                    mode: "lifecycle",
+                    predicate: "review_pipeline_recommended_action_execution_phase",
+                    value_equals: "execute",
+                },
+            }),
+            workflowStatus: {
+                path: ".ax/experiments/blind-workflow-status-current.json",
+                exists: true,
+                decision: "healthy",
+                review_pipeline_lifecycle: {
+                    report_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                    lifecycle_status: "needs_output_verification",
+                    command_kind: "stamp_review_provenance",
+                    prepared_status: "ready_to_execute",
+                    output_verification_status: "missing_required_outputs",
+                    can_execute: true,
+                    can_continue: false,
+                    missing_required_artifact_count: 2,
+                    checked_artifact_count: 1,
+                    prepared_argv: ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates"],
+                    review_provenance_stamp_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+                    recommended_action_kind: "repair_review_issues",
+                    recommended_action_argv: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
+                    recommended_action_status: "missing_outputs",
+                    recommended_action_can_execute: false,
+                    recommended_action_execution_phase: "repair_outputs",
+                    recommended_action_execution_summary: "kind=repair_review_issues phase=repair_outputs status=missing_outputs can_execute=false missing_inputs=0 output_artifacts=1 output_checks=1",
+                    recommended_action_next_action: "Repair review pipeline outputs before continuing.",
+                    recommended_action_missing_inputs: [],
+                    recommended_action_input_bindings: ["reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string"],
+                    recommended_action_output_artifacts: ["review_brief path=.ax/experiments/review.md flag=--coverage-review-brief index=10 prefix=--coverage-review-brief= required_for_handoff=true"],
+                    recommended_action_output_checks: ["review_brief path=.ax/experiments/review.md index=10 check=file_exists_after_execution status=pending_execution required_for_command_success=true"],
+                    review_issue_repair_argv: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
+                    output_artifacts: [{
+                        kind: "review_brief",
+                        path: ".ax/experiments/review.md",
+                        required_for_handoff: true,
+                    }],
+                    checked_artifacts: [{
+                        kind: "review_brief",
+                        path: ".ax/experiments/review.md",
+                        exists: false,
+                    }],
+                    failures: ["missing required output: review facts"],
+                },
+                next_actions: [],
+            },
+        });
+
+        expect(report.review_pipeline).toMatchObject({
+            report_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+            status: "needs_output_verification",
+            command_kind: "stamp_review_provenance",
+            output_verification_status: "missing_required_outputs",
+            can_execute: true,
+            can_continue: false,
+            missing_required_artifact_count: 2,
+            checked_artifact_count: 1,
+            next_action: "repair_review_pipeline_outputs",
+            prepared_argv: ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates"],
+            review_provenance_stamp_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+            recommended_action_kind: "repair_review_issues",
+            recommended_action_argv: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
+            recommended_action_status: "missing_outputs",
+            recommended_action_can_execute: false,
+            recommended_action_execution_phase: "repair_outputs",
+            recommended_action_execution_summary: "kind=repair_review_issues phase=repair_outputs status=missing_outputs can_execute=false missing_inputs=0 output_artifacts=1 output_checks=1",
+            recommended_action_next_action: "Repair review pipeline outputs before continuing.",
+            recommended_action_missing_inputs: [],
+            recommended_action_input_bindings: ["reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string"],
+            recommended_action_output_artifacts: ["review_brief path=.ax/experiments/review.md flag=--coverage-review-brief index=10 prefix=--coverage-review-brief= required_for_handoff=true"],
+            recommended_action_output_checks: ["review_brief path=.ax/experiments/review.md index=10 check=file_exists_after_execution status=pending_execution required_for_command_success=true"],
+            output_artifacts: [{
+                kind: "review_brief",
+                path: ".ax/experiments/review.md",
+                required_for_handoff: true,
+            }],
+            checked_artifacts: [{
+                kind: "review_brief",
+                path: ".ax/experiments/review.md",
+                exists: false,
+            }],
+        });
+        expect(report.decision).toBe("needs_human_review");
+        expect(report.blocking_items).toContain("review pipeline missing 2 required output artifact(s)");
+        expect(report.blocking_items).toContain("review pipeline lifecycle cannot continue: needs_output_verification");
+        expect(report.routing_items[0]).toEqual({
+            kind: "review_pipeline_action",
+            blocks_decision: true,
+            status: "missing_outputs",
+            execution_status: "blocked",
+            command_kind: "repair_review_issues",
+            next_action: "repair_review_pipeline_outputs",
+            action_next_action: "Repair review pipeline outputs before continuing.",
+            can_execute: false,
+            execution_phase: "repair_outputs",
+            missing_inputs: [],
+            input_bindings: ["reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string"],
+            argv: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
+            remediation: "Repair review pipeline outputs before continuing.",
+        });
+        expect(report.routing_items.find((item) => item.kind === "graph_query_repair")).toMatchObject({
+            blocks_decision: false,
+        });
+        expect(report.graph_query_suggestion?.suggestion?.repair.outcome_status).toBe("expected_matches");
+        expect(report.graph_query_suggestion?.suggestion?.verification.outcome_status).toBe("expected_matches");
+        expect(report.graph_query_suggestion?.suggestion?.repair.command_kind).toBe("classifier_graph_query_repair");
+    });
+
+    test("summarizes lifecycle routing for service execution helpers", () => {
+        const report = buildClassifierLifecycleInsightReport({
+            packages: buildPackagesOperationsReport("packages", []),
+            graph: buildExecutionGraphHealthReport({
+                nodes: [],
+                edges: [],
+                facts: [],
+            }),
+            workflowStatus: {
+                path: ".ax/experiments/blind-workflow-status-current.json",
+                exists: true,
+                decision: "healthy",
+                review_pipeline_lifecycle: {
+                    report_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                    lifecycle_status: "blocked_before_execution",
+                    command_kind: "stamp_review_provenance",
+                    prepared_status: "missing_inputs",
+                    can_execute: false,
+                    can_continue: false,
+                    missing_required_artifact_count: 0,
+                    checked_artifact_count: 0,
+                    review_provenance_stamp_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+                    recommended_action_kind: "stamp_review_provenance",
+                    recommended_action_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+                    recommended_action_status: "missing_inputs",
+                    recommended_action_can_execute: false,
+                    recommended_action_next_action: "Provide required pipeline input values before executing the command.",
+                    recommended_action_missing_inputs: ["reviewer"],
+                    recommended_action_input_bindings: ["reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string"],
+                    output_artifacts: [],
+                    checked_artifacts: [],
+                    failures: [],
+                },
+                next_actions: [],
+            },
+        });
+
+        const summary = summarizeClassifierLifecycleRouting(report);
+
+        expect(summary).toMatchObject({
+            schema: "ax.classifier_lifecycle_routing_summary.v1",
+            source_schema: "ax.classifier_lifecycle_insight_report.v1",
+            decision: "needs_graph_apply",
+            next_action: "bind_active_route_inputs",
+            remediation: "Provide required pipeline input values before executing the command.",
+            active_route_kind: "review_pipeline_action",
+            active_route_execution_status: "missing_inputs",
+            active_route_can_execute: false,
+            active_route_missing_inputs: ["reviewer"],
+            active_route_input_bindings: ["reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string"],
+            totals: {
+                route_count: 1,
+                executable_route_count: 0,
+                missing_input_route_count: 1,
+                blocked_route_count: 0,
+                secondary_route_count: 0,
+            },
+        });
+        expect(summary.active_route?.kind).toBe("review_pipeline_action");
+        expect(summary.missing_input_routes).toHaveLength(1);
+        expect(summary.missing_input_routes[0]).toMatchObject({
+            missing_inputs: ["reviewer"],
+            input_bindings: ["reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string"],
+        });
+        expect(summary.executable_routes).toEqual([]);
+        expect(summary.active_route_argv).toEqual(["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"]);
+
+        const preview = buildClassifierLifecycleRouteBindingPreview(summary, { reviewer: "necmett" });
+
+        expect(preview).toMatchObject({
+            schema: "ax.classifier_lifecycle_route_binding_preview.v1",
+            source_schema: "ax.classifier_lifecycle_routing_summary.v1",
+            decision: "ready_to_execute",
+            active_route_kind: "review_pipeline_action",
+            missing_values: [],
+            provided_inputs: ["reviewer"],
+            bound_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=necmett"],
+            next_action: "execute_bound_active_route",
+        });
+
+        const deniedPlan = buildClassifierLifecycleRouteExecutionPlan(preview, { allowExecute: false });
+        expect(deniedPlan).toMatchObject({
+            schema: "ax.classifier_lifecycle_route_execution_plan.v1",
+            source_schema: "ax.classifier_lifecycle_route_binding_preview.v1",
+            decision: "denied_requires_execute",
+            requested_execute: false,
+            would_execute: false,
+            failures: ["route execution requires --execute-route"],
+        });
+
+        const allowedPlan = buildClassifierLifecycleRouteExecutionPlan(preview, { allowExecute: true });
+        expect(allowedPlan).toMatchObject({
+            decision: "ready_to_execute",
+            requested_execute: true,
+            would_execute: true,
+            command_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=necmett"],
+            failures: [],
+        });
+    });
+
+    test("does not execute lifecycle route plans without explicit allowance", async () => {
+        const preview = {
+            schema: "ax.classifier_lifecycle_route_binding_preview.v1" as const,
+            source_schema: "ax.classifier_lifecycle_routing_summary.v1" as const,
+            decision: "ready_to_execute" as const,
+            active_route_kind: "review_pipeline_action" as const,
+            active_route_command_kind: "stamp_review_provenance",
+            provided_inputs: ["reviewer"],
+            missing_values: [],
+            input_bindings: [],
+            original_argv: ["bun", "-e", "console.log('route ok')"],
+            bound_argv: ["bun", "-e", "console.log('route ok')"],
+            next_action: "execute_bound_active_route" as const,
+            remediation: "Execute the bound active route command.",
+        };
+        const plan = buildClassifierLifecycleRouteExecutionPlan(preview, { allowExecute: false });
+
+        const report = await executeClassifierLifecycleRouteExecutionPlan(plan);
+
+        expect(report).toMatchObject({
+            schema: "ax.classifier_lifecycle_route_execution_report.v1",
+            source_schema: "ax.classifier_lifecycle_route_execution_plan.v1",
+            decision: "not_executed",
+            executed: false,
+            exit_code: null,
+            stdout: "",
+            failures: ["route execution requires --execute-route"],
+        });
+    });
+
+    test("executes ready lifecycle route plans and captures output", async () => {
+        const preview = {
+            schema: "ax.classifier_lifecycle_route_binding_preview.v1" as const,
+            source_schema: "ax.classifier_lifecycle_routing_summary.v1" as const,
+            decision: "ready_to_execute" as const,
+            active_route_kind: "review_pipeline_action" as const,
+            active_route_command_kind: "stamp_review_provenance",
+            provided_inputs: ["reviewer"],
+            missing_values: [],
+            input_bindings: [],
+            original_argv: ["bun", "-e", "console.log('route ok')"],
+            bound_argv: ["bun", "-e", "console.log('route ok')"],
+            next_action: "execute_bound_active_route" as const,
+            remediation: "Execute the bound active route command.",
+        };
+        const plan = buildClassifierLifecycleRouteExecutionPlan(preview, { allowExecute: true });
+
+        const report = await executeClassifierLifecycleRouteExecutionPlan(plan);
+
+        expect(report).toMatchObject({
+            decision: "executed",
+            executed: true,
+            exit_code: 0,
+            signal: null,
+            failures: [],
+            command_argv: ["bun", "-e", "console.log('route ok')"],
+        });
+        expect(report.stdout.trim()).toBe("route ok");
+    });
+
+    test("inspects lifecycle route execution outputs and surfaces handoff blockers", () => {
+        const dir = mkdtempSync(join(tmpdir(), "ax-route-execution-inspection-"));
+        const reportPath = join(dir, "review-coverage.json");
+        const briefPath = join(dir, "review-coverage.md");
+        writeFileSync(reportPath, JSON.stringify({
+            schema: "ax.workflow_candidate_review_coverage.v1",
+            decision: "workflow_candidate_review_coverage_ready",
+            coverage_review: {
+                review_handoff_status: "incomplete_review_handoff",
+                production_apply_guard: "missing_review_handoff",
+                production_can_apply: false,
+                review_pipeline_stage: "needs_review_handoff",
+                review_pipeline_next_action: "Complete the review handoff artifacts before applying.",
+                review_pipeline_command_output_check_status: "no_output_artifacts",
+                review_pipeline_command_output_check_next_action: "No pipeline output artifacts need verification.",
+            },
+        }), "utf8");
+        writeFileSync(briefPath, "# Review\n", "utf8");
+        const execution = {
+            schema: "ax.classifier_lifecycle_route_execution_report.v1" as const,
+            source_schema: "ax.classifier_lifecycle_route_execution_plan.v1" as const,
+            decision: "executed" as const,
+            active_route_kind: "review_pipeline_action" as const,
+            active_route_command_kind: "stamp_review_provenance",
+            command_argv: [
+                "bun",
+                "src/cli/index.ts",
+                "classifiers",
+                "workflow-candidates",
+                `--coverage-review-brief=${briefPath}`,
+                `--out=${reportPath}`,
+                "--json",
+            ],
+            plan: buildClassifierLifecycleRouteExecutionPlan({
+                schema: "ax.classifier_lifecycle_route_binding_preview.v1",
+                source_schema: "ax.classifier_lifecycle_routing_summary.v1",
+                decision: "ready_to_execute",
+                active_route_kind: "review_pipeline_action",
+                active_route_command_kind: "stamp_review_provenance",
+                provided_inputs: [],
+                missing_values: [],
+                input_bindings: [],
+                original_argv: [],
+                bound_argv: ["bun", "src/cli/index.ts"],
+                next_action: "execute_bound_active_route",
+                remediation: "Execute the bound active route command.",
+            }, { allowExecute: true }),
+            executed: true,
+            started_at: "2026-05-31T12:34:56.000Z",
+            finished_at: "2026-05-31T12:34:57.000Z",
+            duration_ms: 1000,
+            exit_code: 0,
+            signal: null,
+            stdout: readFileSync(reportPath, "utf8"),
+            stderr: "",
+            failures: [],
+            next_action: "inspect_route_outputs" as const,
+        };
+
+        const inspection = inspectClassifierLifecycleRouteExecution(execution);
+
+        expect(inspection).toMatchObject({
+            schema: "ax.classifier_lifecycle_route_execution_inspection.v1",
+            source_schema: "ax.classifier_lifecycle_route_execution_report.v1",
+            decision: "needs_review_handoff",
+            parsed_output_source: "output_file",
+            inner_schema: "ax.workflow_candidate_review_coverage.v1",
+            inner_decision: "workflow_candidate_review_coverage_ready",
+            review_handoff_status: "incomplete_review_handoff",
+            production_apply_guard: "missing_review_handoff",
+            production_can_apply: false,
+            review_pipeline_stage: "needs_review_handoff",
+            review_pipeline_command_output_check_status: "no_output_artifacts",
+            next_action: "complete_review_handoff",
+            failures: [],
+        });
+        expect(inspection.output_artifacts).toEqual(expect.arrayContaining([
+            expect.objectContaining({ kind: "review_brief", path: briefPath, exists: true }),
+            expect.objectContaining({ kind: "readiness_report", path: reportPath, exists: true }),
+        ]));
+    });
+
+    test("routes lifecycle insight reports to graph query repair when the filtered graph has a suggestion", () => {
+        const graphRows = {
+            nodes: [{
+                graph_id: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                kind: "classifier_lifecycle",
+                label: "workflow candidate review pipeline lifecycle",
+                properties_json: "{}",
+            }],
+            edges: [{
+                graph_id: "edge:lifecycle",
+                kind: "has_evidence",
+                from_id: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                to_id: "artifact:.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                evidence_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                properties_json: JSON.stringify({ lifecycle_key: "review_pipeline_lifecycle" }),
+            }],
+            facts: [{
+                graph_id: "fact:phase",
+                kind: "classifier_lifecycle_status",
+                subject: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                predicate: "review_pipeline_recommended_action_execution_phase",
+                value_json: "\"bind_inputs\"",
+                evidence_edges_json: JSON.stringify(["edge:lifecycle"]),
+                properties_json: JSON.stringify({
+                    lifecycle_key: "review_pipeline_lifecycle",
+                    artifact_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                }),
+            }],
+        };
+        const report = buildClassifierLifecycleInsightReport({
+            packages: buildPackagesOperationsReport("packages", []),
+            graph: buildExecutionGraphHealthReport(graphRows),
+            queryGraph: buildExecutionGraphHealthReport({
+                ...graphRows,
+                query: {
+                    mode: "lifecycle",
+                    predicate: "review_pipeline_recommended_action_execution_phase",
+                    value_equals: "execute",
+                },
+            }),
+            workflowStatus: {
+                path: ".ax/experiments/blind-workflow-status-current.json",
+                exists: true,
+                decision: "healthy",
+                next_actions: [],
+            },
+        });
+
+        expect(report.decision).toBe("needs_graph_query_repair");
+        expect(report.blocking_items).toContain("graph query repair available: review_pipeline_recommended_action_execution_phase value execute -> bind_inputs");
+        expect(report.routing_items).toContainEqual({
+            kind: "graph_query_repair",
+            blocks_decision: true,
+            status: "ready_to_execute",
+            execution_status: "ready_to_execute",
+            can_execute: true,
+            command_kind: "classifier_graph_query_repair",
+            predicate: "review_pipeline_recommended_action_execution_phase",
+            from_value: "execute",
+            to_value: "bind_inputs",
+            next_action: "run_repaired_query",
+            remediation: "Run the repaired graph query to inspect matching classifier lifecycle facts.",
+            argv: [
+                "bun",
+                "src/cli/index.ts",
+                "classifiers",
+                "graph",
+                "--mode",
+                "lifecycle",
+                "--predicate",
+                "review_pipeline_recommended_action_execution_phase",
+                "--value",
+                "bind_inputs",
+            ],
+        });
+        expect(report.graph_query_suggestion?.suggestion?.repair.command_kind).toBe("classifier_graph_query_repair");
+    });
+
     test("writes lifecycle insight reports", () => {
         const report = buildClassifierLifecycleInsightReport({
             packages: buildPackagesOperationsReport("packages", []),
@@ -1105,17 +2870,17 @@ describe("classifier package operations report", () => {
         expect(report.totals.operation_count).toBeGreaterThanOrEqual(37);
         expect(report.totals.operation_kinds.train).toBe(1);
         expect(report.totals.operation_kinds.eval).toBe(9);
-        expect(report.totals.operation_kinds.review).toBe(18);
-        expect(report.totals.operation_kinds.status).toBe(24);
+        expect(report.totals.operation_kinds.review).toBe(20);
+        expect(report.totals.operation_kinds.status).toBe(27);
         expect(report.totals.operation_kinds.publish).toBe(4);
         expect(report.totals.operation_kinds.debug).toBe(1);
         expect(report.totals.local_model_ready_count).toBe(1);
         expect(report.totals.local_model_incomplete_count).toBe(0);
-        expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_count).toBe(57);
+        expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_count).toBe(62);
         expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_kinds.train).toBe(1);
         expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_kinds.eval).toBe(9);
-        expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_kinds.review).toBe(18);
-        expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_kinds.status).toBe(24);
+        expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_kinds.review).toBe(20);
+        expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_kinds.status).toBe(27);
         expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_kinds.publish).toBe(4);
         expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.lifecycle_readiness.status).toBe("ready");
         expect(report.packages.find((entry) => entry.package_key === "direction-event")?.lifecycle_readiness.status).toBe("not_applicable");
