@@ -1735,6 +1735,17 @@ describe("classifier package operations report", () => {
         expect(report.result_totals.boundary_replay_fact_count).toBe(1);
         expect(report.query_result_kinds).toContain("boundary_replay_facts");
         expect(report.query_result_kind_counts).toContainEqual({ kind: "boundary_replay_facts", count: 1 });
+        expect(report.boundary_replay_summary).toMatchObject({
+            status: "reviewed_deterministic_facts_available",
+            production_posture: "deterministic_and_reviewed_graph_facts_only",
+            next_action: "use_reviewed_deterministic_graph_facts",
+            covered_subject_count: 1,
+            deterministic_label_subject_count: 1,
+            evidence_path_count: 1,
+            classifier_keys: ["correction-event"],
+            targets: ["workflow_state"],
+            subjects: ["classifier_boundary_miss:workflow"],
+        });
         expect(report.boundary_replay_facts?.[0]).toMatchObject({
             predicate: "covered_by_deterministic",
             classifier_key: "correction-event",

@@ -665,6 +665,67 @@ jq '{conclusion,production_posture,setfit,hybrid,boundary_replay,graph}' \
 Returned `conclusion=continue_hybrid_not_raw_setfit` and
 `production_posture=deterministic_and_reviewed_graph_facts_only`.
 
+## E499 - Boundary Replay Service Summary
+
+Question: can services consume the reviewed deterministic replay posture
+directly from graph query results, without reinterpreting individual graph
+facts?
+
+Changes:
+
+- Added `boundary_replay_summary` to classifier graph health reports.
+- The summary is emitted for `boundary-replay` and `evidence` graph modes.
+- Text rendering now exposes the summary status, production posture, next
+  action, remediation, covered subject count, deterministic-label count,
+  evidence count, classifiers, targets, subjects, and recommended query argv
+  when filters need relaxing.
+
+Command:
+
+```sh
+bun src/cli/index.ts classifiers graph \
+  --mode=boundary-replay \
+  --source-kind=boundary_replay_deterministic_projection \
+  --fact-kind=classifier_boundary_replay \
+  --predicate=covered_by_deterministic \
+  --value=true \
+  --out=.ax/experiments/boundary-replay-summary-e499.json \
+  --json
+```
+
+Artifact:
+
+- `.ax/experiments/boundary-replay-summary-e499.json`
+
+Result:
+
+- `query_match_status=matched`
+- `boundary_replay_summary.status=reviewed_deterministic_facts_available`
+- `boundary_replay_summary.production_posture=deterministic_and_reviewed_graph_facts_only`
+- `boundary_replay_summary.next_action=use_reviewed_deterministic_graph_facts`
+- `covered_subject_count=1`
+- `deterministic_label_subject_count=1`
+- `evidence_path_count=1`
+- classifier key: `correction-event`
+- target: `workflow_state`
+
+Decision:
+
+- Continue building product/service behavior on this summary shape.
+- Services can now branch on a compact posture field instead of inferring
+  promotion safety from raw graph rows.
+- Raw model output still remains review/mining input only.
+
+Verification:
+
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+```
+
+Passed: `82` Bun tests. Typecheck exited `0` with the existing Effect lint
+messages.
+
 Current recommendation:
 
 - Index continuation: E488 turns the accepted classifier-fixture follow-up into

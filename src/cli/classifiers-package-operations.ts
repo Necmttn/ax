@@ -400,6 +400,18 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         evaluated_policy_count: 0,
         candidate_count: 0,
     };
+    const boundaryReplaySummary = report.boundary_replay_summary ?? {
+        status: "not_requested",
+        production_posture: "not_applicable",
+        next_action: "query_boundary_replay_facts",
+        remediation: "Run a boundary-replay graph query to inspect reviewed deterministic facts.",
+        covered_subject_count: 0,
+        deterministic_label_subject_count: 0,
+        evidence_path_count: 0,
+        classifier_keys: [],
+        targets: [],
+        subjects: [],
+    };
     const routingPolicyRecommendedFloorAdjustments = (routingPolicySummary.recommended_floor_adjustments ?? [])
         .map((adjustment) =>
             `${adjustment.floor}<=${adjustment.recommended} (requested ${adjustment.requested}, gap ${adjustment.gap}, threshold ${adjustment.source_threshold ?? "none"})`
@@ -571,6 +583,15 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `packages/operations/executions/artifacts: ${report.totals.package_count}/${report.totals.operation_count}/${report.totals.execution_count}/${report.totals.artifact_count}`,
         `execution/guard/artifact/lifecycle/helper/boundary facts: ${report.totals.execution_fact_count}/${report.totals.guard_fact_count}/${report.totals.artifact_fact_count}/${report.totals.lifecycle_fact_count}/${report.totals.embedding_helper_fact_count}/${report.totals.boundary_replay_fact_count ?? 0}`,
         `results operations/guarded/changed/lifecycle/helper/boundary/evidence: ${report.result_totals.operation_count}/${report.result_totals.guarded_operation_count}/${report.result_totals.changed_artifact_count}/${report.result_totals.lifecycle_fact_count}/${report.result_totals.embedding_helper_fact_count}/${report.result_totals.boundary_replay_fact_count ?? 0}/${report.result_totals.evidence_path_count}`,
+        `boundary replay summary: ${boundaryReplaySummary.status}`,
+        `boundary replay production posture: ${boundaryReplaySummary.production_posture}`,
+        `boundary replay next action: ${boundaryReplaySummary.next_action}`,
+        `boundary replay remediation: ${boundaryReplaySummary.remediation}`,
+        `boundary replay covered/labels/evidence: ${boundaryReplaySummary.covered_subject_count}/${boundaryReplaySummary.deterministic_label_subject_count}/${boundaryReplaySummary.evidence_path_count}`,
+        `boundary replay classifiers: ${boundaryReplaySummary.classifier_keys.join(", ") || "none"}`,
+        `boundary replay targets: ${boundaryReplaySummary.targets.join(", ") || "none"}`,
+        `boundary replay subjects: ${boundaryReplaySummary.subjects.join(", ") || "none"}`,
+        `boundary replay recommended argv: ${boundaryReplaySummary.recommended_argv?.join(" ") ?? "none"}`,
         `routing policy status: ${routingPolicySummary.status}`,
         `routing policy evaluated: ${routingPolicySummary.evaluated_policy_count ?? "unknown"}`,
         `routing policy candidates: ${routingPolicySummary.candidate_count}`,

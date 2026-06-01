@@ -403,6 +403,21 @@ export interface ClassifierGraphBoundaryReplayFact {
     readonly evidence_paths: readonly string[];
 }
 
+export interface ClassifierGraphBoundaryReplaySummary {
+    readonly status: "not_requested" | "reviewed_deterministic_facts_available" | "no_reviewed_deterministic_facts";
+    readonly production_posture: "deterministic_and_reviewed_graph_facts_only" | "not_applicable";
+    readonly next_action: "query_boundary_replay_facts" | "use_reviewed_deterministic_graph_facts" | "project_or_apply_boundary_replay_facts";
+    readonly remediation: string;
+    readonly covered_subject_count: number;
+    readonly deterministic_label_subject_count: number;
+    readonly evidence_path_count: number;
+    readonly classifier_keys: readonly string[];
+    readonly targets: readonly string[];
+    readonly subjects: readonly string[];
+    readonly recommended_query?: ClassifierGraphHealthQuery;
+    readonly recommended_argv?: readonly string[];
+}
+
 export interface ClassifierGraphRoutingPolicyRecommendedQuery {
     readonly mode: "embedding-helper" | "evidence";
     readonly operation_id?: string;
@@ -562,6 +577,7 @@ export interface ClassifierPackageExecutionGraphHealthReport {
     readonly lifecycle_available_value_counts?: readonly ClassifierGraphLifecycleValueCount[];
     readonly embedding_helper_facts: readonly ClassifierGraphEmbeddingHelperFact[];
     readonly boundary_replay_facts?: readonly ClassifierGraphBoundaryReplayFact[];
+    readonly boundary_replay_summary?: ClassifierGraphBoundaryReplaySummary;
     readonly routing_policy_summary?: ClassifierGraphRoutingPolicySummary;
     readonly evidence_paths: readonly string[];
     readonly query_match_status?: "matched" | "no_match";
@@ -3275,6 +3291,84 @@ export function buildExecutionGraphHealthReport(input: {
         ...(resultEmbeddingHelperFacts.length > 0 ? [{ kind: "embedding_helper_facts" as const, count: resultEmbeddingHelperFacts.length }] : []),
         ...(resultBoundaryReplayFacts.length > 0 ? [{ kind: "boundary_replay_facts" as const, count: resultBoundaryReplayFacts.length }] : []),
     ];
+    const boundaryReplaySummary: ClassifierGraphBoundaryReplaySummary | undefined =
+        query.mode === "boundary-replay" || query.mode === "evidence"
+            ? (() => {
+                const summaryFacts = boundaryReplayFacts;
+                const coveredSubjects = Array.from(new Set(summaryFacts
+                    .filter((fact) => fact.predicate === "covered_by_deterministic" && fact.value === true)
+                    .map((fact) => fact.subject)))
+                    .sort();
+                const deterministicLabelSubjects = Array.from(new Set(summaryFacts
+                    .filter((fact) => fact.predicate === "deterministic_label")
+                    .map((fact) => fact.subject)))
+                    .sort();
+                const classifierKeys = Array.from(new Set(summaryFacts
+                    .map((fact) => fact.classifier_key)
+                    .filter((key): key is string => typeof key === "string")))
+                    .sort();
+                const targets = Array.from(new Set(summaryFacts
+                    .map((fact) => fact.target)
+                    .filter((target): target is string => typeof target === "string")))
+                    .sort();
+                const summaryEvidencePaths = Array.from(new Set(summaryFacts.flatMap((fact) => fact.evidence_paths))).sort();
+                const recommendedSourceKind = query.source_kind ?? "boundary_replay_deterministic_projection";
+                const recommendedFactKind = query.fact_kind ?? "classifier_boundary_replay";
+                const recommendedPredicate = "covered_by_deterministic";
+                const recommendedValueEquals = "true";
+                const recommendedQuery: ClassifierGraphHealthQuery = {
+                    mode: "boundary-replay",
+                    source_kind: recommendedSourceKind,
+                    fact_kind: recommendedFactKind,
+                    predicate: recommendedPredicate,
+                    value_equals: recommendedValueEquals,
+                };
+                const recommendedArgv = [
+                    "bun",
+                    "src/cli/index.ts",
+                    "classifiers",
+                    "graph",
+                    "--mode",
+                    recommendedQuery.mode,
+                    "--source-kind",
+                    recommendedSourceKind,
+                    "--fact-kind",
+                    recommendedFactKind,
+                    "--predicate",
+                    recommendedPredicate,
+                    "--value",
+                    recommendedValueEquals,
+                ];
+                const factsAvailable = summaryFacts.length > 0;
+                const resultFactsAvailable = resultBoundaryReplayFacts.length > 0;
+                const coveredAvailable = coveredSubjects.length > 0;
+                return {
+                    status: factsAvailable
+                        ? "reviewed_deterministic_facts_available"
+                        : "no_reviewed_deterministic_facts",
+                    production_posture: factsAvailable
+                        ? "deterministic_and_reviewed_graph_facts_only"
+                        : "not_applicable",
+                    next_action: resultFactsAvailable
+                        ? "use_reviewed_deterministic_graph_facts"
+                        : boundaryReplayFacts.length > 0
+                            ? "query_boundary_replay_facts"
+                            : "project_or_apply_boundary_replay_facts",
+                    remediation: resultFactsAvailable
+                        ? "Use these reviewed deterministic replay facts as promotion-safe graph evidence; keep raw model output in review/mining workflows."
+                        : boundaryReplayFacts.length > 0
+                            ? "Relax boundary-replay filters or run the recommended query to inspect available reviewed deterministic facts."
+                            : "Project and apply boundary replay facts before routing product behavior from reviewed deterministic evidence.",
+                    covered_subject_count: coveredSubjects.length,
+                    deterministic_label_subject_count: deterministicLabelSubjects.length,
+                    evidence_path_count: summaryEvidencePaths.length,
+                    classifier_keys: classifierKeys,
+                    targets,
+                    subjects: Array.from(new Set([...coveredSubjects, ...deterministicLabelSubjects])).sort(),
+                    ...(!coveredAvailable && boundaryReplayFacts.length > 0 ? { recommended_query: recommendedQuery, recommended_argv: recommendedArgv } : {}),
+                };
+            })()
+            : undefined;
 
     return {
         schema: "ax.classifier_package_execution_graph_health_report.v1",
@@ -3288,6 +3382,7 @@ export function buildExecutionGraphHealthReport(input: {
         lifecycle_available_value_counts: lifecycleAvailableValueCounts,
         embedding_helper_facts: resultEmbeddingHelperFacts,
         boundary_replay_facts: resultBoundaryReplayFacts,
+        ...(boundaryReplaySummary === undefined ? {} : { boundary_replay_summary: boundaryReplaySummary }),
         routing_policy_summary: routingPolicySummary,
         evidence_paths: resultEvidencePaths,
         query_match_status: queryMatchStatus,
