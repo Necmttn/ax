@@ -20,10 +20,18 @@ fast.
 bun install
 bun scripts/db-start.sh
 bun scripts/apply-schema.sh
-bun src/cli/index.ts ingest --since=7
+bun apps/axctl/src/cli/index.ts ingest --since=7   # or: bun run ingest --since=7
 ```
 
 Requirements: Bun ≥ 1.3, SurrealDB ≥ 3.0.
+
+## Repo layout
+
+Bun-workspace monorepo: `apps/axctl` (the CLI), `apps/site` (landing site),
+`packages/lib` (`@ax/lib`), `packages/schema` (`@ax/schema`), plus the
+`@ax-classifier/*` packages. Turbo orchestrates tasks; see [`CLAUDE.md`](CLAUDE.md)
+for the full tree. Internal code imports by package name (`@ax/lib/db`), not
+relative paths across packages.
 
 ## Verify before pushing
 
