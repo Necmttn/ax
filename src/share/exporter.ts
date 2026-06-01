@@ -11,6 +11,7 @@ import { SurrealClient } from "../lib/db.ts";
 import type { DbError } from "../lib/errors.ts";
 import type {
     SessionOverview,
+    SessionTokenUsageDetail,
     SessionToolCall,
     SessionTopSkill,
 } from "../lib/shared/dashboard-types.ts";
@@ -21,6 +22,8 @@ import {
     sessionShareFilesQuery,
     sessionShareTimelineQuery,
     sessionShareTurnsQuery,
+    sessionTokenUsageQuery,
+    sessionTurnTokenUsageQuery,
     sessionToolCallsQuery,
     sessionTopSkillsQuery,
 } from "../queries/session-detail.ts";
@@ -31,6 +34,7 @@ export interface ShareArtifactParts {
     readonly overview: SessionOverview;
     readonly topSkills: ReadonlyArray<SessionTopSkill>;
     readonly toolCalls: ReadonlyArray<SessionToolCall>;
+    readonly tokenUsage?: SessionTokenUsageDetail | null;
     readonly turns: ReadonlyArray<ShareTurn>;
     readonly timeline: ReadonlyArray<ShareEvent>;
     readonly files: ReadonlyArray<ShareFile>;
@@ -126,6 +130,7 @@ export function buildShareArtifactFromParts(
             skills_used: parts.topSkills.length,
             failures,
         },
+        token_usage: parts.tokenUsage ?? null,
         turns: parts.turns,
         timeline: parts.timeline,
         files,
@@ -167,6 +172,17 @@ const attachTurnContent = (
         return content ? { ...turn, content } : turn;
     });
 
+const attachTurnTokenUsage = (
+    turns: ReadonlyArray<ShareTurn>,
+    usages: ReadonlyArray<NonNullable<ShareTurn["token_usage"]>>,
+): ReadonlyArray<ShareTurn> => {
+    const bySeq = new Map(usages.map((usage) => [usage.seq, usage]));
+    return turns.map((turn) => {
+        const tokenUsage = bySeq.get(turn.seq);
+        return tokenUsage ? { ...turn, token_usage: tokenUsage } : turn;
+    });
+};
+
 export const exportSessionShare = (
     sessionId: string,
     axVersion: string,
@@ -176,11 +192,13 @@ export const exportSessionShare = (
         if (recordRef === null) return null;
 
         const params = { recordRef };
-        const [overview, topSkillsRaw, toolCallsRaw, turnsRaw, timelineRaw, filesRaw, turnContent] =
+        const [overview, topSkillsRaw, toolCallsRaw, tokenUsage, turnTokenUsageRaw, turnsRaw, timelineRaw, filesRaw, turnContent] =
             yield* Effect.all([
                 runSingleQuery(sessionOverviewQuery, params),
                 runQuery(sessionTopSkillsQuery, params),
                 runQuery(sessionToolCallsQuery, params),
+                runSingleQuery(sessionTokenUsageQuery, params),
+                runQuery(sessionTurnTokenUsageQuery, params),
                 runQuery(sessionShareTurnsQuery, params),
                 runQuery(sessionShareTimelineQuery, params),
                 runQuery(sessionShareFilesQuery, params),
@@ -195,7 +213,11 @@ export const exportSessionShare = (
             overview,
             topSkills: topSkillsRaw.filter(isPresent),
             toolCalls: toolCallsRaw.filter(isPresent),
-            turns: attachTurnContent(turnsRaw.filter(isPresent), turnContent),
+            tokenUsage,
+            turns: attachTurnContent(
+                attachTurnTokenUsage(turnsRaw.filter(isPresent), turnTokenUsageRaw.filter(isPresent)),
+                turnContent,
+            ),
             timeline: timelineRaw.filter(isPresent),
             files: filesRaw.filter(isPresent),
         });

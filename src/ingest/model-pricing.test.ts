@@ -131,6 +131,30 @@ describe("model pricing", () => {
         expect(cost.totalUsd).toBe(3.4);
     });
 
+    it("prices fresh input separately from cache reads", () => {
+        const cost = estimateCost({
+            modelKey: "gpt-5",
+            promptTokens: 1000,
+            completionTokens: 100,
+            cacheCreationInputTokens: null,
+            cacheReadInputTokens: 800,
+            estimatedTokens: 1100,
+        });
+
+        expect(cost.inputUsd).toBeCloseTo(0.00025);
+        expect(cost.cacheReadUsd).toBeCloseTo(0.0001);
+        expect(cost.outputUsd).toBeCloseTo(0.001);
+    });
+
+    it("falls back gpt-5 point releases to gpt-5 pricing when no exact row exists", () => {
+        const catalog = new Map([["gpt-5", builtInPricingCatalog().get("gpt-5")!]]);
+
+        expect(pricingForModel("gpt-5.9", catalog)).toMatchObject({
+            inputPerMillionUsd: 1.25,
+            outputPerMillionUsd: 10,
+        });
+    });
+
     it("loads cached pricing locally when refresh is not requested", async () => {
         const root = mkdtempSync(join(tmpdir(), "ax-pricing-"));
         const cache = join(root, "pricing");

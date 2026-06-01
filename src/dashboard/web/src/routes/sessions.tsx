@@ -98,10 +98,9 @@ function Row({ s, indent, expandedToggle }: RowProps) {
             <td style={{ fontFamily: "ui-monospace, monospace", fontSize: 12, color: "#64748b", textAlign: "right" }}>{fmtDuration(s.started_at, s.ended_at)}</td>
             <td style={{ textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 12, color: "#cbd5e1" }}>{s.turn_count > 0 ? s.turn_count.toLocaleString() : "-"}</td>
             <td style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <Link to="/sessions/$sessionId" params={{ sessionId: sid }} preload="intent" style={{ color: "var(--muted, #64748b)" }}>overview</Link>
                 {s.has_raw_file ? (
-                    <Link to="/sessions/$sessionId/inspect" params={{ sessionId: sid }} preload="intent" style={{ color: "var(--blue, #3b82f6)", fontWeight: 600 }}>
-                        inspect →
+                    <Link to="/sessions/$sessionId" params={{ sessionId: sid }} preload="intent" style={{ color: "var(--blue, #3b82f6)", fontWeight: 600 }}>
+                        open →
                     </Link>
                 ) : (
                     <span style={{ color: "#cbd5e1", fontSize: 11 }} title="No raw transcript stored - cannot inspect">no transcript</span>

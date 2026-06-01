@@ -9,6 +9,8 @@
 import { readFile } from "node:fs/promises";
 import { Data, Effect } from "effect";
 import { dissectTurn, type TurnSpan } from "../ingest/turn-dissect.ts";
+import { extractCodexJsonlLines, type CodexTurnTokenUsage } from "../ingest/codex.ts";
+import { estimateCost } from "../ingest/model-pricing.ts";
 import { SurrealClient } from "../lib/db.ts";
 import { decodeJsonRecordOrNull, encodeJson } from "../lib/decode.ts";
 import { resolveTurnContent } from "../queries/session-turn-content.ts";
@@ -20,7 +22,9 @@ import type {
     InspectTurnContentDto,
     InspectTurnDto,
     SessionInspectPayload,
+    SessionTokenUsageDetail,
     SpawnMeta,
+    TurnTokenUsageDetail,
 } from "../lib/shared/dashboard-types.ts";
 import {
     interpolateRid,
@@ -244,6 +248,28 @@ const HOOK_FIRES_SQL = `
     WHERE session = $sid
     ORDER BY ts ASC;
 `;
+const TOKEN_USAGE_SQL = `
+    SELECT model, prompt_tokens, completion_tokens,
+           cache_creation_input_tokens, cache_read_input_tokens,
+           estimated_tokens,
+           estimated_input_cost_usd, estimated_output_cost_usd,
+           estimated_cache_creation_cost_usd, estimated_cache_read_cost_usd,
+           estimated_cost_usd, pricing_source
+    FROM session_token_usage
+    WHERE session = $sid
+    LIMIT 1;
+`;
+const TURN_TOKEN_USAGE_SQL = `
+    SELECT seq, model, prompt_tokens, completion_tokens,
+           cache_creation_input_tokens, cache_read_input_tokens,
+           fresh_input_tokens, estimated_tokens,
+           estimated_input_cost_usd, estimated_output_cost_usd,
+           estimated_cache_creation_cost_usd, estimated_cache_read_cost_usd,
+           estimated_cost_usd, pricing_source, usage_source, usage_quality
+    FROM turn_token_usage
+    WHERE session = $sid
+    ORDER BY seq ASC;
+`;
 
 interface ParentRow { readonly parent: string | null; readonly nickname: string | null }
 interface ChildEdgeRow {
@@ -262,6 +288,26 @@ interface HookFireRow {
     readonly reason: string;
     readonly latency_ms: number;
     readonly injected_titles: ReadonlyArray<string> | null;
+}
+interface TokenUsageRow {
+    readonly model: string | null;
+    readonly prompt_tokens: number | null;
+    readonly completion_tokens: number | null;
+    readonly cache_creation_input_tokens: number | null;
+    readonly cache_read_input_tokens: number | null;
+    readonly estimated_tokens: number;
+    readonly estimated_input_cost_usd?: number | null;
+    readonly estimated_output_cost_usd?: number | null;
+    readonly estimated_cache_creation_cost_usd?: number | null;
+    readonly estimated_cache_read_cost_usd?: number | null;
+    readonly estimated_cost_usd: number | null;
+    readonly pricing_source: string | null;
+}
+interface TurnTokenUsageRow extends TokenUsageRow {
+    readonly seq: number;
+    readonly fresh_input_tokens: number | null;
+    readonly usage_source: string | null;
+    readonly usage_quality: string | null;
 }
 
 /** Resolve the spawning parent of this session (codex spawn_agent / claude
@@ -314,6 +360,89 @@ const resolveHookFires = (sessionId: string): Effect.Effect<ReadonlyArray<HookFi
         }),
         "session-inspect resolveHookFires",
     );
+
+const resolveTokenUsage = (sessionId: string): Effect.Effect<SessionTokenUsageDetail | null, never, SurrealClient> =>
+    queryOptional<TokenUsageRow, SessionTokenUsageDetail>(
+        interpolateRid(TOKEN_USAGE_SQL, toBareSessionId(sessionId)),
+        (row) => ({
+            model: row.model ?? null,
+            prompt_tokens: row.prompt_tokens ?? null,
+            completion_tokens: row.completion_tokens ?? null,
+            cache_creation_input_tokens: row.cache_creation_input_tokens ?? null,
+            cache_read_input_tokens: row.cache_read_input_tokens ?? null,
+            estimated_tokens: Number(row.estimated_tokens ?? 0),
+            estimated_input_cost_usd: row.estimated_input_cost_usd ?? null,
+            estimated_output_cost_usd: row.estimated_output_cost_usd ?? null,
+            estimated_cache_creation_cost_usd: row.estimated_cache_creation_cost_usd ?? null,
+            estimated_cache_read_cost_usd: row.estimated_cache_read_cost_usd ?? null,
+            estimated_cost_usd: row.estimated_cost_usd ?? null,
+            pricing_source: row.pricing_source ?? null,
+        }),
+        "session-inspect resolveTokenUsage",
+    );
+
+const mapTurnTokenUsageRow = (row: TurnTokenUsageRow): TurnTokenUsageDetail => ({
+    seq: Number(row.seq),
+    model: row.model ?? null,
+    prompt_tokens: row.prompt_tokens ?? null,
+    completion_tokens: row.completion_tokens ?? null,
+    cache_creation_input_tokens: row.cache_creation_input_tokens ?? null,
+    cache_read_input_tokens: row.cache_read_input_tokens ?? null,
+    fresh_input_tokens: row.fresh_input_tokens ?? null,
+    estimated_tokens: Number(row.estimated_tokens ?? 0),
+    estimated_input_cost_usd: row.estimated_input_cost_usd ?? null,
+    estimated_output_cost_usd: row.estimated_output_cost_usd ?? null,
+    estimated_cache_creation_cost_usd: row.estimated_cache_creation_cost_usd ?? null,
+    estimated_cache_read_cost_usd: row.estimated_cache_read_cost_usd ?? null,
+    estimated_cost_usd: row.estimated_cost_usd ?? null,
+    pricing_source: row.pricing_source ?? null,
+    usage_source: row.usage_source ?? "unknown",
+    usage_quality: row.usage_quality ?? "unknown",
+});
+
+const resolveTurnTokenUsage = (sessionId: string): Effect.Effect<Map<number, TurnTokenUsageDetail>, never, SurrealClient> =>
+    queryMany<TurnTokenUsageRow, TurnTokenUsageDetail>(
+        interpolateRid(TURN_TOKEN_USAGE_SQL, toBareSessionId(sessionId)),
+        mapTurnTokenUsageRow,
+        "session-inspect resolveTurnTokenUsage",
+    ).pipe(
+        Effect.map((rows) => new Map(rows.map((row) => [row.seq, row]))),
+    );
+
+function codexTurnUsageToDetail(usage: CodexTurnTokenUsage): TurnTokenUsageDetail {
+    const cost = estimateCost({
+        modelKey: usage.model,
+        promptTokens: usage.promptTokens,
+        completionTokens: usage.completionTokens,
+        cacheCreationInputTokens: usage.cacheCreationInputTokens,
+        cacheReadInputTokens: usage.cacheReadInputTokens,
+        estimatedTokens: usage.estimatedTokens,
+    });
+    return {
+        seq: usage.seq,
+        model: usage.model,
+        prompt_tokens: usage.promptTokens,
+        completion_tokens: usage.completionTokens,
+        cache_creation_input_tokens: usage.cacheCreationInputTokens,
+        cache_read_input_tokens: usage.cacheReadInputTokens,
+        fresh_input_tokens: usage.freshInputTokens,
+        estimated_tokens: usage.estimatedTokens,
+        estimated_input_cost_usd: cost.inputUsd,
+        estimated_output_cost_usd: cost.outputUsd,
+        estimated_cache_creation_cost_usd: cost.cacheCreationUsd,
+        estimated_cache_read_cost_usd: cost.cacheReadUsd,
+        estimated_cost_usd: cost.totalUsd,
+        pricing_source: cost.pricingSource,
+        usage_source: usage.usageSource,
+        usage_quality: usage.usageQuality,
+    };
+}
+
+function deriveCodexTurnTokenUsage(raw: string): Map<number, TurnTokenUsageDetail> {
+    const extracted = extractCodexJsonlLines(raw.split("\n"));
+    const usages = extracted?.turnTokenUsages ?? [];
+    return new Map(usages.map((usage) => [usage.seq, codexTurnUsageToDetail(usage)]));
+}
 
 /** Spawn args parsed out of a parent tool_use call. Keyed by call_id when
  *  available (codex), else by ts so we can match approximately. */
@@ -438,11 +567,13 @@ export const fetchSessionInspect = (
         // Normalise inbound id at the seam so the rest of the function operates
         // on a bare id (also what we echo back as payload.session_id).
         const bareSessionId = toBareSessionId(sessionId);
-        const [parent, childrenEdges, allHookFires, turnContent, found] = yield* Effect.all([
+        const [parent, childrenEdges, allHookFires, turnContent, tokenUsage, turnTokenUsage, found] = yield* Effect.all([
             resolveParent(bareSessionId),
             resolveChildren(bareSessionId),
             resolveHookFires(bareSessionId),
             resolveTurnContent(bareSessionId),
+            resolveTokenUsage(bareSessionId),
+            resolveTurnTokenUsage(bareSessionId),
             locateTranscript(bareSessionId),
         ], { concurrency: "unbounded" });
         const { offset: turnOffset, limit: turnLimit } = clampPagination(
@@ -453,6 +584,15 @@ export const fetchSessionInspect = (
         try: async () => {
             const raw = await readFile(found.path, "utf8");
             const parseLine = found.harness === "codex" ? parseCodexLine : parseClaudeLine;
+            const derivedTurnTokenUsage = found.harness === "codex"
+                ? deriveCodexTurnTokenUsage(raw)
+                : new Map<number, TurnTokenUsageDetail>();
+            const tokenUsageForSeq = (currentSeq: number): TurnTokenUsageDetail | null =>
+                turnTokenUsage.get(currentSeq + 1) ??
+                turnTokenUsage.get(currentSeq) ??
+                derivedTurnTokenUsage.get(currentSeq + 1) ??
+                derivedTurnTokenUsage.get(currentSeq) ??
+                null;
 
             const turns: InspectTurnDto[] = [];
             const totals: Partial<Record<InspectSpanKind, number>> = {};
@@ -482,6 +622,7 @@ export const fetchSessionInspect = (
                     char_count: text.length,
                     raw_text: text,
                     spans: spans.map(toSpanDto),
+                    token_usage: tokenUsageForSeq(currentSeq),
                     content: findTurnContent(turnContent, currentSeq, text),
                 });
             }
@@ -584,6 +725,7 @@ export const fetchSessionInspect = (
                 session_id: bareSessionId,
                 source_path: found.path,
                 total_chars: totalChars,
+                token_usage: tokenUsage,
                 total_turns: turns.length,
                 turn_window: { offset: turnOffset, limit: turnLimit },
                 turns: turnSlice,

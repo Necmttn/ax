@@ -127,5 +127,44 @@ describe("inspectPayloadFromShare", () => {
 
         expect(payload.turns[0]?.raw_text).toBe("I'll patch it.");
         expect(payload.turns[0]?.content?.blocks[0]?.text).toBe("I'll patch it.");
+        expect(payload.token_usage).toBeNull();
+    });
+
+    test("carries token usage into the shared cost lens when exported", () => {
+        const payload = inspectPayloadFromShare({
+            schema_version: 1,
+            exported_at: "2026-05-31T00:00:00.000Z",
+            ax_version: "0.5.0",
+            session: { id: "session-1", source: "codex" },
+            stats: {
+                turns: 1,
+                tool_calls: 0,
+                files_changed: 0,
+                skills_used: 0,
+                failures: 0,
+            },
+            token_usage: {
+                model: "gpt-5",
+                prompt_tokens: 100,
+                completion_tokens: 20,
+                cache_creation_input_tokens: 30,
+                cache_read_input_tokens: 40,
+                estimated_tokens: 190,
+                estimated_input_cost_usd: 0.01,
+                estimated_output_cost_usd: 0.02,
+                estimated_cache_creation_cost_usd: 0.003,
+                estimated_cache_read_cost_usd: 0.001,
+                estimated_cost_usd: 0.034,
+                pricing_source: "test",
+            },
+            turns: [{
+                id: "turn-1",
+                seq: 1,
+                role: "user",
+                text: "hello",
+            }],
+        }, "gist:Necmttn/abc123");
+
+        expect(payload.token_usage?.estimated_cost_usd).toBe(0.034);
     });
 });

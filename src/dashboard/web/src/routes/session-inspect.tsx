@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { api } from "../api.ts";
-import type { HookFireDto, InspectSpanDto, InspectSpanKind, InspectTurnDto } from "@shared/dashboard-types.ts";
+import type { HookFireDto, InspectSpanDto, InspectSpanKind, InspectTurnDto, SessionInspectPayload, SessionTokenUsageDetail, TurnTokenUsageDetail } from "@shared/dashboard-types.ts";
 import { childrenByAnchorTurn, spawnAnchorSet, turnText } from "./inspector-filters.ts";
 import { spliceHookFires } from "@shared/hook-fire-splice.ts";
 import { FilterBar } from "./inspector-filter-bar.tsx";
@@ -23,6 +23,8 @@ export const KIND_STYLE: Record<InspectSpanKind, KindStyle> = {
     subagent_task:         { bg: "#ffe4e6", fg: "#9f1239", bar: "#e11d48", label: "subagent task" },
     pasted_reference:      { bg: "#fecaca", fg: "#7f1d1d", bar: "#ef4444", label: "pasted" },
 };
+
+const JUMP_TARGET_SCROLL_MARGIN = 76;
 
 export function Span({ span }: { span: InspectSpanDto }) {
     const s = KIND_STYLE[span.kind];
@@ -56,6 +58,129 @@ const ALIAS_STYLE: Record<string, ContentTone> = {
     verification:          { bg: "#dcfce7", fg: "#14532d", bar: "#16a34a", label: "verification" },
     reference:             { bg: "#f1f5f9", fg: "#334155", bar: "#64748b", label: "reference" },
 };
+
+const numberOrNull = (value: number | null | undefined): number | null =>
+    typeof value === "number" && Number.isFinite(value) ? value : null;
+
+const fmtCount = (value: number | null | undefined): string =>
+    numberOrNull(value)?.toLocaleString() ?? "-";
+
+const fmtUsd = (value: number | null | undefined): string => {
+    const n = numberOrNull(value);
+    if (n === null) return "-";
+    if (n === 0) return "$0";
+    if (n < 0.01) return `$${n.toFixed(4)}`;
+    return `$${n.toFixed(2)}`;
+};
+
+const pctOf = (part: number | null | undefined, total: number | null | undefined): string => {
+    const p = numberOrNull(part);
+    const t = numberOrNull(total);
+    if (p === null || t === null || t <= 0) return "-";
+    return `${((p / t) * 100).toFixed(1)}%`;
+};
+
+export function estimateCharWeightedCost(
+    totalCost: number | null | undefined,
+    totalChars: number,
+    chars: number,
+): number | null {
+    const cost = numberOrNull(totalCost);
+    if (cost === null || totalChars <= 0 || chars <= 0) return null;
+    return cost * (chars / totalChars);
+}
+
+function tokenCostTotal(usage: SessionTokenUsageDetail | null): number | null {
+    return numberOrNull(usage?.estimated_cost_usd);
+}
+
+function totalBreakdownCost(usage: SessionTokenUsageDetail): number {
+    return [
+        usage.estimated_input_cost_usd,
+        usage.estimated_cache_creation_cost_usd,
+        usage.estimated_cache_read_cost_usd,
+        usage.estimated_output_cost_usd,
+    ].reduce((sum, value) => sum + (numberOrNull(value) ?? 0), 0);
+}
+
+function costBarSegments(usage: SessionTokenUsageDetail): ReadonlyArray<{ label: string; value: number | null; color: string }> {
+    return [
+        { label: "fresh input", value: numberOrNull(usage.estimated_input_cost_usd), color: "#2567a8" },
+        { label: "cache write", value: numberOrNull(usage.estimated_cache_creation_cost_usd), color: "#f59e0b" },
+        { label: "cache read", value: numberOrNull(usage.estimated_cache_read_cost_usd), color: "#10b981" },
+        { label: "output", value: numberOrNull(usage.estimated_output_cost_usd), color: "#8b5cf6" },
+    ];
+}
+
+function usageTokenLine(usage: TurnTokenUsageDetail): string {
+    const parts = [
+        `${fmtCount(usage.estimated_tokens)} tok`,
+        usage.fresh_input_tokens !== null ? `${fmtCount(usage.fresh_input_tokens)} fresh` : null,
+        usage.cache_read_input_tokens !== null ? `${fmtCount(usage.cache_read_input_tokens)} cached` : null,
+        usage.completion_tokens !== null ? `${fmtCount(usage.completion_tokens)} out` : null,
+    ].filter((part): part is string => part !== null);
+    return parts.join(" · ");
+}
+
+type CostProgress = {
+    seq: number | null;
+    exactTurns: number;
+    estimatedTokens: number;
+    totalCostUsd: number;
+    freshInputCostUsd: number;
+    cacheWriteCostUsd: number;
+    cacheReadCostUsd: number;
+    outputCostUsd: number;
+};
+
+const EMPTY_COST_PROGRESS: CostProgress = {
+    seq: null,
+    exactTurns: 0,
+    estimatedTokens: 0,
+    totalCostUsd: 0,
+    freshInputCostUsd: 0,
+    cacheWriteCostUsd: 0,
+    cacheReadCostUsd: 0,
+    outputCostUsd: 0,
+};
+
+export function costProgressThrough(
+    turns: ReadonlyArray<Pick<InspectTurnDto, "seq" | "token_usage">>,
+    seq: number | null,
+): CostProgress {
+    if (seq == null) return EMPTY_COST_PROGRESS;
+    return turns.reduce<CostProgress>((acc, turn) => {
+        if (turn.seq > seq || !turn.token_usage) return acc;
+        const usage = turn.token_usage;
+        return {
+            seq,
+            exactTurns: acc.exactTurns + 1,
+            estimatedTokens: acc.estimatedTokens + (numberOrNull(usage.estimated_tokens) ?? 0),
+            totalCostUsd: acc.totalCostUsd + (numberOrNull(usage.estimated_cost_usd) ?? 0),
+            freshInputCostUsd: acc.freshInputCostUsd + (numberOrNull(usage.estimated_input_cost_usd) ?? 0),
+            cacheWriteCostUsd: acc.cacheWriteCostUsd + (numberOrNull(usage.estimated_cache_creation_cost_usd) ?? 0),
+            cacheReadCostUsd: acc.cacheReadCostUsd + (numberOrNull(usage.estimated_cache_read_cost_usd) ?? 0),
+            outputCostUsd: acc.outputCostUsd + (numberOrNull(usage.estimated_output_cost_usd) ?? 0),
+        };
+    }, { ...EMPTY_COST_PROGRESS, seq });
+}
+
+function turnTokenUsageTitle(turn: InspectTurnDto): string {
+    const usage = turn.token_usage;
+    if (!usage) {
+        return "No direct provider token usage event is attached to this transcript turn. Codex emits token accounting for model responses, not every user/tool/status row.";
+    }
+    return [
+        `Exact provider usage for turn #${turn.seq}`,
+        `cost ${fmtUsd(usage.estimated_cost_usd)}`,
+        `tokens ${fmtCount(usage.estimated_tokens)}`,
+        `fresh input ${fmtCount(usage.fresh_input_tokens)} / ${fmtUsd(usage.estimated_input_cost_usd)}`,
+        `cache write ${fmtCount(usage.cache_creation_input_tokens)} / ${fmtUsd(usage.estimated_cache_creation_cost_usd)}`,
+        `cache read ${fmtCount(usage.cache_read_input_tokens)} / ${fmtUsd(usage.estimated_cache_read_cost_usd)}`,
+        `output ${fmtCount(usage.completion_tokens)} / ${fmtUsd(usage.estimated_output_cost_usd)}`,
+        `${usage.usage_quality} · ${usage.usage_source}`,
+    ].join("\n");
+}
 
 function blockFamily(kind: string): ContentTone {
     if (kind.includes("system") || kind.includes("instruction")) return { bg: "#e5e7eb", fg: "#1f2937", bar: "#64748b", label: "system" };
@@ -303,6 +428,213 @@ export function rawBlockTextStyle({
     };
 }
 
+export function InspectGuide({ data }: { data: Pick<SessionInspectPayload, "total_chars" | "total_turns" | "token_usage"> }) {
+    const usage = data.token_usage;
+    const totalCost = tokenCostTotal(usage);
+    const breakdownTotal = usage ? totalBreakdownCost(usage) : 0;
+    const segments = usage ? costBarSegments(usage) : [];
+    const gradient = segments
+        .filter((segment) => (segment.value ?? 0) > 0 && breakdownTotal > 0)
+        .reduce<{ stops: string[]; cursor: number }>((acc, segment) => {
+            const width = ((segment.value ?? 0) / breakdownTotal) * 100;
+            const next = acc.cursor + width;
+            acc.stops.push(`${segment.color} ${acc.cursor.toFixed(2)}% ${next.toFixed(2)}%`);
+            acc.cursor = next;
+            return acc;
+        }, { stops: [], cursor: 0 }).stops.join(", ");
+
+    if (!usage) return null;
+
+    return (
+        <div style={{
+            margin: "4px 24px 10px",
+            padding: "8px 10px",
+            border: "1px solid #cfd8d4",
+            background: "#f8fafc",
+            display: "grid",
+            gap: 7,
+        }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 12, alignItems: "baseline", flexWrap: "wrap" }}>
+                    <strong
+                        title="Estimated total provider cost for this session from stored token usage and the model pricing catalog."
+                        style={{ color: "#141615", font: "700 15px/1 ui-monospace, monospace" }}
+                    >
+                        {fmtUsd(totalCost)}
+                    </strong>
+                    <span
+                        title="Total provider tokens reported for the session. This is billing telemetry, unlike the structure percentages below which are character share."
+                        style={{ color: "#64748b", font: "11px/1.4 ui-monospace, monospace" }}
+                    >
+                        {fmtCount(usage.estimated_tokens)} tokens · {usage.model ?? "unknown model"}
+                    </span>
+                </div>
+                <span style={{ color: "#64748b", font: "10px/1.4 ui-monospace, monospace" }}>
+                    structure % = character share · hover metrics for definitions
+                </span>
+            </div>
+            <div
+                title={`Cost mix by provider billing component. Pricing: ${usage.pricing_source ?? "unknown"}. Per-turn headers below use turn usage when available; inspector block/span cost is character-allocated within the selected turn.`}
+                style={{
+                    height: 8,
+                    border: "1px solid #cfd8d4",
+                    background: gradient ? `linear-gradient(90deg, ${gradient})` : "#e5e7eb",
+                }}
+            />
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {segments.map((segment) => (
+                    <span
+                        key={segment.label}
+                        title={`${segment.label}: ${fmtUsd(segment.value)} (${pctOf(segment.value, breakdownTotal || totalCost)} of known cost components)`}
+                        style={{
+                            background: "#fff",
+                            color: "#334155",
+                            border: "1px solid #e2e8f0",
+                            borderLeft: `3px solid ${segment.color}`,
+                            padding: "2px 7px",
+                            font: "10px/1.2 ui-monospace, monospace",
+                        }}
+                    >
+                        {segment.label} {fmtUsd(segment.value)}
+                    </span>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+export function useVisibleTurnSeq(
+    turns: ReadonlyArray<Pick<InspectTurnDto, "seq">>,
+    fallbackSeq: number | null,
+): number | null {
+    const [visibleSeq, setVisibleSeq] = useState<number | null>(fallbackSeq);
+    const turnSeqKey = turns.map((turn) => turn.seq).join(",");
+
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        if (turns.length === 0) {
+            setVisibleSeq(null);
+            return;
+        }
+
+        let raf = 0;
+        const update = () => {
+            raf = 0;
+            const anchorY = JUMP_TARGET_SCROLL_MARGIN + 24;
+            let candidate: number | null = null;
+            for (const turn of turns) {
+                const el = document.getElementById(`turn-${turn.seq}`);
+                if (!el) continue;
+                const rect = el.getBoundingClientRect();
+                if (rect.bottom < anchorY) {
+                    candidate = turn.seq;
+                    continue;
+                }
+                if (rect.top <= anchorY) {
+                    candidate = turn.seq;
+                    break;
+                }
+                if (candidate == null) candidate = turn.seq;
+                break;
+            }
+            setVisibleSeq(candidate ?? fallbackSeq ?? turns[0]?.seq ?? null);
+        };
+        const schedule = () => {
+            if (raf) return;
+            raf = window.requestAnimationFrame(update);
+        };
+
+        update();
+        window.addEventListener("scroll", schedule, { passive: true });
+        window.addEventListener("resize", schedule);
+        return () => {
+            if (raf) window.cancelAnimationFrame(raf);
+            window.removeEventListener("scroll", schedule);
+            window.removeEventListener("resize", schedule);
+        };
+    }, [fallbackSeq, turnSeqKey]);
+
+    return visibleSeq;
+}
+
+export function CostRail({
+    data,
+    currentSeq,
+}: {
+    data: Pick<SessionInspectPayload, "turns" | "total_turns" | "token_usage">;
+    currentSeq: number | null;
+}) {
+    const usage = data.token_usage;
+    const sessionCost = tokenCostTotal(usage);
+    const progress = costProgressThrough(data.turns, currentSeq);
+    const exactTurnCount = data.turns.filter((turn) => turn.token_usage).length;
+    const progressPct = sessionCost && sessionCost > 0
+        ? `${((progress.totalCostUsd / sessionCost) * 100).toFixed(1)}%`
+        : "-";
+    const rows = [
+        ["fresh", progress.freshInputCostUsd, "#2567a8", "Fresh input billed at normal input price."],
+        ["cache write", progress.cacheWriteCostUsd, "#f59e0b", "Cache creation cost reported by provider usage."],
+        ["cache read", progress.cacheReadCostUsd, "#10b981", "Cached input read cost reported by provider usage."],
+        ["output", progress.outputCostUsd, "#8b5cf6", "Output token cost reported by provider usage."],
+    ] as const;
+
+    if (!usage) return null;
+
+    return (
+        <aside style={{
+            position: "sticky",
+            top: 48,
+            alignSelf: "flex-start",
+            flex: "0 0 228px",
+            margin: "0 24px 16px 0",
+            border: "1px solid #d8dee8",
+            background: "#f8fafc",
+            fontFamily: "ui-monospace, monospace",
+            color: "#334155",
+            maxHeight: "calc(100vh - 64px)",
+            overflow: "auto",
+        }}>
+            <div style={{ padding: "8px 9px", borderBottom: "1px solid #e2e8f0" }}>
+                <div style={{ color: "#64748b", font: "700 10px/1.2 ui-monospace, monospace", textTransform: "uppercase" }}>
+                    cost so far
+                </div>
+                <div
+                    title="Exact provider token usage summed through the currently visible turn. Missing transcript rows are not estimated in this rail."
+                    style={{ marginTop: 6, color: "#111827", font: "700 20px/1 ui-monospace, monospace" }}
+                >
+                    {fmtUsd(progress.totalCostUsd)}
+                </div>
+                <div style={{ marginTop: 5, color: "#64748b", font: "10px/1.35 ui-monospace, monospace" }}>
+                    through #{currentSeq ?? "-"} · {progressPct} of session
+                </div>
+            </div>
+            <dl style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "5px 8px", margin: 0, padding: "8px 9px", font: "10px/1.25 ui-monospace, monospace" }}>
+                <dt style={{ color: "#64748b" }}>exact turns</dt>
+                <dd style={{ margin: 0, fontWeight: 700 }}>{progress.exactTurns}/{exactTurnCount}</dd>
+                <dt style={{ color: "#64748b" }}>tokens</dt>
+                <dd style={{ margin: 0, fontWeight: 700 }}>{fmtCount(progress.estimatedTokens)}</dd>
+                <dt style={{ color: "#64748b" }}>session total</dt>
+                <dd style={{ margin: 0, fontWeight: 700 }}>{fmtUsd(sessionCost)}</dd>
+            </dl>
+            <div style={{ display: "grid", gap: 5, padding: "0 9px 9px" }}>
+                {rows.map(([label, value, color, title]) => (
+                    <div
+                        key={label}
+                        title={title}
+                        style={{ display: "flex", justifyContent: "space-between", gap: 8, border: "1px solid #e2e8f0", background: "#fff", borderLeft: `3px solid ${color}`, padding: "5px 6px", font: "10px/1.2 ui-monospace, monospace" }}
+                    >
+                        <span style={{ color: "#64748b" }}>{label}</span>
+                        <strong>{fmtUsd(value)}</strong>
+                    </div>
+                ))}
+            </div>
+            <div style={{ borderTop: "1px solid #e2e8f0", padding: "7px 9px", color: "#64748b", font: "10px/1.35 ui-monospace, monospace" }}>
+                Exact provider rows only. Turns without token events are explained on hover.
+            </div>
+        </aside>
+    );
+}
+
 function AnnotatedRawText({
     content,
     rawText,
@@ -368,15 +700,28 @@ function TurnContentInspector({
     content,
     activeTarget,
     setActiveTarget,
+    turnUsage,
+    turnChars,
 }: {
     content: InspectTurnContentDto;
     activeTarget: InspectTarget | null;
     setActiveTarget: (target: InspectTarget | null) => void;
+    turnUsage?: TurnTokenUsageDetail | null;
+    turnChars: number;
 }) {
     const block = selectedBlock(content, activeTarget) ?? visibleTextBlocks(content)[0] ?? content.blocks[0] ?? null;
     const atom = selectedAtom(block, activeTarget);
     const family = block ? blockTone(block) : ALIAS_STYLE.reference;
     const blockAtoms = block?.atoms ?? [];
+    const blockChars = block
+        ? Math.max(0, (block.end_offset ?? 0) - (block.start_offset ?? 0))
+        : 0;
+    const blockTotalCost = turnUsage
+        ? estimateCharWeightedCost(turnUsage.estimated_cost_usd, turnChars, blockChars)
+        : null;
+    const blockCacheReadCost = turnUsage
+        ? estimateCharWeightedCost(turnUsage.estimated_cache_read_cost_usd, turnChars, blockChars)
+        : null;
 
     return (
         <aside style={{ border: "1px solid #d8dee8", background: "#f8fafc", minWidth: 0, maxHeight: 400, overflow: "auto" }}>
@@ -411,6 +756,32 @@ function TurnContentInspector({
                             {contentBrief(block.text_excerpt ?? block.text)}
                         </pre>
                     </div>
+
+                    {turnUsage ? (
+                        <div style={{ background: "#fff", border: "1px solid #e2e8f0", padding: "8px 9px" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
+                                <strong style={{ color: "#334155", font: "700 10px/1 ui-monospace, monospace", textTransform: "uppercase" }}>
+                                    estimated cost lens
+                                </strong>
+                                <span style={{ color: "#94a3b8", font: "10px/1 ui-monospace, monospace" }}>
+                                    char-weighted
+                                </span>
+                            </div>
+                            <dl style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "4px 8px", margin: "7px 0 0", font: "11px/1.35 ui-monospace, monospace" }}>
+                                <dt style={{ color: "#64748b" }}>allocated block cost</dt>
+                                <dd style={{ margin: 0, fontWeight: 700 }}>{fmtUsd(blockTotalCost)}</dd>
+                                <dt style={{ color: "#64748b" }}>cache-read share</dt>
+                                <dd style={{ margin: 0, fontWeight: 700 }}>{fmtUsd(blockCacheReadCost)}</dd>
+                                <dt style={{ color: "#64748b" }}>block chars</dt>
+                                <dd style={{ margin: 0 }}>{fmtCount(blockChars)}</dd>
+                                <dt style={{ color: "#64748b" }}>turn tokens</dt>
+                                <dd style={{ margin: 0 }}>{fmtCount(turnUsage.estimated_tokens)}</dd>
+                            </dl>
+                            <div style={{ marginTop: 6, color: "#64748b", fontSize: 11, lineHeight: 1.35 }}>
+                                Turn usage is provider-derived; block/span cost is allocated by character share inside this turn.
+                            </div>
+                        </div>
+                    ) : null}
 
                     {atom ? (
                         <AtomCard atom={atom} active />
@@ -602,6 +973,7 @@ function HookFireMarker({ hook }: { hook: HookFireDto }) {
             data-hook-fire="true"
             style={{
                 margin: "4px 24px", padding: "6px 10px",
+                scrollMarginTop: JUMP_TARGET_SCROLL_MARGIN,
                 borderLeft: "3px solid #10b981",
                 background: hook.inject ? "#ecfdf5" : "#f8fafc",
                 borderRadius: 3, fontSize: 11,
@@ -639,7 +1011,15 @@ function HookFireMarker({ hook }: { hook: HookFireDto }) {
     );
 }
 
-export function Turn({ turn, anchored, childrenSpawnedHere }: { turn: InspectTurnDto; anchored: boolean; childrenSpawnedHere?: ReadonlyArray<SpawnChildDto> }) {
+export function Turn({
+    turn,
+    anchored,
+    childrenSpawnedHere,
+}: {
+    turn: InspectTurnDto;
+    anchored: boolean;
+    childrenSpawnedHere?: ReadonlyArray<SpawnChildDto>;
+}) {
     const [showInspector, setShowInspector] = useState(false);
     const [activeTarget, setActiveTarget] = useState<InspectTarget | null>(null);
     const s = KIND_STYLE[turn.semantic_role];
@@ -652,7 +1032,11 @@ export function Turn({ turn, anchored, childrenSpawnedHere }: { turn: InspectTur
             const c = KIND_STYLE[kind];
             const pct = total > 0 ? ((n / total) * 100).toFixed(0) : "0";
             return (
-                <span key={kind} style={{ background: c.bg, color: c.fg, padding: "0 6px", borderRadius: 3, fontSize: 10, fontFamily: "ui-monospace, monospace" }}>
+                <span
+                    key={kind}
+                    title={`${c.label}: ${pct}% of this turn's characters. This is structure share, not token or billing share.`}
+                    style={{ background: c.bg, color: c.fg, padding: "0 6px", borderRadius: 3, fontSize: 10, fontFamily: "ui-monospace, monospace" }}
+                >
                     {c.label} {pct}%
                 </span>
             );
@@ -660,7 +1044,7 @@ export function Turn({ turn, anchored, childrenSpawnedHere }: { turn: InspectTur
     const aliasChips = turn.content ? semanticAliasCounts(turn.content).slice(0, 8).map(({ alias, label, count, tone }) => (
         <span
             key={alias}
-            title={`${label} · ${count} block${count === 1 ? "" : "s"}`}
+            title={`${label}: ${count} semantic block${count === 1 ? "" : "s"} detected inside this turn.`}
             style={{
                 background: tone.bg,
                 color: tone.fg,
@@ -677,6 +1061,8 @@ export function Turn({ turn, anchored, childrenSpawnedHere }: { turn: InspectTur
     )) : [];
     const ts = turn.ts ? new Date(turn.ts).toISOString().slice(11, 19) : "";
     const sizeStr = turn.char_count > 1000 ? `${(turn.char_count / 1000).toFixed(1)}k` : `${turn.char_count}`;
+    const turnUsage = turn.token_usage ?? null;
+    const turnCost = numberOrNull(turnUsage?.estimated_cost_usd);
     const spawnedChildCount = childrenSpawnedHere?.length ?? 0;
     const jsonlBadge = turn.role !== turn.semantic_role.replace(/_text$|_input$/, "")
         ? <span style={{ color: "#94a3b8", fontSize: 10 }}>(jsonl: {turn.role})</span>
@@ -684,10 +1070,12 @@ export function Turn({ turn, anchored, childrenSpawnedHere }: { turn: InspectTur
     return (
         <div
             id={`turn-${turn.seq}`}
+            title={turnTokenUsageTitle(turn)}
             style={{
                 display: "grid",
                 gridTemplateColumns: "1fr",
                 padding: "6px 24px",
+                scrollMarginTop: JUMP_TARGET_SCROLL_MARGIN,
                 borderLeft: `3px solid ${s.bar}`,
                 background: anchored ? "#fef3c7" : "transparent",
                 transition: "background 0.6s",
@@ -708,8 +1096,21 @@ export function Turn({ turn, anchored, childrenSpawnedHere }: { turn: InspectTur
                     </span>
                 ) : null}
                 {jsonlBadge}
-                <span style={{ color: "#94a3b8" }}>{ts}</span>
-                <span style={{ color: "#94a3b8" }}>{sizeStr}c · {turn.spans.length}span</span>
+                <span title="Turn timestamp from the source transcript." style={{ color: "#94a3b8" }}>{ts}</span>
+                <span
+                    title={`${sizeStr}c = ${turn.char_count.toLocaleString()} characters in this turn. ${turn.spans.length}span = ${turn.spans.length} classified message slice${turn.spans.length === 1 ? "" : "s"} from the raw transcript.`}
+                    style={{ color: "#94a3b8" }}
+                >
+                    {sizeStr}c · {turn.spans.length}span
+                </span>
+                {turnUsage ? (
+                    <span
+                        title={turnTokenUsageTitle(turn)}
+                        style={{ color: "#64748b" }}
+                    >
+                        {turnCost !== null ? fmtUsd(turnCost) : "cost ?"} · {usageTokenLine(turnUsage)}
+                    </span>
+                ) : null}
                 {turn.content ? (
                     <button
                         onClick={() => setShowInspector((value) => !value)}
@@ -758,6 +1159,8 @@ export function Turn({ turn, anchored, childrenSpawnedHere }: { turn: InspectTur
                                 content={turn.content}
                                 activeTarget={activeTarget}
                                 setActiveTarget={setActiveTarget}
+                                turnUsage={turnUsage}
+                                turnChars={turn.char_count}
                             />
                         ) : null}
                     </div>
@@ -773,6 +1176,10 @@ export function Turn({ turn, anchored, childrenSpawnedHere }: { turn: InspectTur
 
 export function SessionInspectRoute() {
     const { sessionId } = useParams({ from: "/sessions/$sessionId/inspect" });
+    return <SessionInspectView sessionId={sessionId} />;
+}
+
+export function SessionInspectView({ sessionId }: { readonly sessionId: string }) {
     const decoded = decodeURIComponent(sessionId);
     const queryClient = useQueryClient();
 
@@ -875,6 +1282,7 @@ export function SessionInspectRoute() {
         () => spawnAnchorSet(data?.children ?? []),
         [data?.children],
     );
+    const visibleSeq = useVisibleTurnSeq(data?.turns ?? [], anchoredSeq ?? data?.turns[0]?.seq ?? null);
 
     // IntersectionObserver on a sentinel triggers the next page load.
     const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -899,8 +1307,6 @@ export function SessionInspectRoute() {
                 <h2>Session inspect</h2>
                 <span className="meta">
                     <code>{shortSessionId(decoded)}…</code>
-                    {" · "}
-                    <Link to="/sessions/$sessionId" params={{ sessionId }} style={{ color: "var(--muted, #64748b)" }}>← overview</Link>
                 </span>
             </header>
             {query.error ? <div className="error">Error: {String(query.error)}</div> : null}
@@ -966,70 +1372,78 @@ export function SessionInspectRoute() {
                         getHookFireIdxs={() => hookFireIdxsRef.current}
                         totalHookFires={data.total_hook_fires}
                     />
+                    <InspectGuide data={data} />
                     <div style={{ display: "flex", gap: 4, flexWrap: "wrap", padding: "4px 24px 8px" }}>
                         {(Object.keys(KIND_STYLE) as InspectSpanKind[]).map((kind) => {
                             const c = KIND_STYLE[kind];
                             const n = data.totals_by_kind[kind] ?? 0;
                             const pct = data.total_chars > 0 ? ((n / data.total_chars) * 100).toFixed(1) : "0";
                             return (
-                                <span key={kind} style={{ background: c.bg, color: c.fg, padding: "2px 10px", borderRadius: 4, fontSize: 11, fontWeight: 600, borderLeft: `3px solid ${c.bar}` }}>
+                                <span
+                                    key={kind}
+                                    title={`${c.label}: ${pct}% of exported characters in this session view. This is not token share or billing share.`}
+                                    style={{ background: c.bg, color: c.fg, padding: "2px 10px", borderRadius: 4, fontSize: 11, fontWeight: 600, borderLeft: `3px solid ${c.bar}` }}
+                                >
                                     {c.label} <em style={{ fontStyle: "normal", opacity: 0.7, fontWeight: 400 }}>{pct}%</em>
                                 </span>
                             );
                         })}
                     </div>
-                    <div>
-                        {(() => {
-                            const childrenByTurn = childrenByAnchorTurn(data.children);
-                            const items = spliceHookFires(data.turns, data.hook_fires);
-                            return items.map((item) => {
-                                if (item.kind === "hook_fire") {
-                                    return <HookFireMarker key={`hook-${item.hook.idx}`} hook={item.hook} />;
-                                }
-                                const t = item.turn;
-                                return (
-                                    <Turn
-                                        key={`turn-${t.seq}`}
-                                        turn={t}
-                                        anchored={anchoredSeq === t.seq}
-                                        childrenSpawnedHere={childrenByTurn.get(t.seq)}
-                                    />
-                                );
-                            });
-                        })()}
-                        {data.turns.length < data.total_turns ? (
-                            <div
-                                ref={sentinelRef}
-                                style={{
-                                    padding: "12px 24px", color: "#64748b", fontSize: 12, fontFamily: "ui-monospace, monospace",
-                                    textAlign: "center", borderTop: "1px dashed #e2e8f0",
-                                }}
-                            >
-                                {appendLoading
-                                    ? `loading next ${PAGE_SIZE} of ${data.total_turns.toLocaleString()}…`
-                                    : `loaded ${data.turns.length.toLocaleString()} of ${data.total_turns.toLocaleString()} turns ·`}
-                                {!appendLoading ? (
-                                    <>
-                                        {" "}
-                                        <button
-                                            onClick={() => void loadMore(200)}
-                                            style={{
-                                                padding: "2px 10px", marginLeft: 6, fontSize: 11, border: "1px solid #e2e8f0",
-                                                background: "#fff", color: "#475569", borderRadius: 4, cursor: "pointer",
-                                            }}
-                                        >load 200 more</button>
-                                        {" "}
-                                        <button
-                                            onClick={() => void loadMore(data.total_turns - data.turns.length)}
-                                            style={{
-                                                padding: "2px 10px", fontSize: 11, border: "1px solid #e2e8f0",
-                                                background: "#fff", color: "#475569", borderRadius: 4, cursor: "pointer",
-                                            }}
-                                        >load all</button>
-                                    </>
-                                ) : null}
-                            </div>
-                        ) : null}
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                        <div style={{ minWidth: 0, flex: "1 1 auto" }}>
+                            {(() => {
+                                const childrenByTurn = childrenByAnchorTurn(data.children);
+                                const items = spliceHookFires(data.turns, data.hook_fires);
+                                return items.map((item) => {
+                                    if (item.kind === "hook_fire") {
+                                        return <HookFireMarker key={`hook-${item.hook.idx}`} hook={item.hook} />;
+                                    }
+                                    const t = item.turn;
+                                    return (
+                                        <Turn
+                                            key={`turn-${t.seq}`}
+                                            turn={t}
+                                            anchored={anchoredSeq === t.seq}
+                                            childrenSpawnedHere={childrenByTurn.get(t.seq)}
+                                        />
+                                    );
+                                });
+                            })()}
+                            {data.turns.length < data.total_turns ? (
+                                <div
+                                    ref={sentinelRef}
+                                    style={{
+                                        padding: "12px 24px", color: "#64748b", fontSize: 12, fontFamily: "ui-monospace, monospace",
+                                        textAlign: "center", borderTop: "1px dashed #e2e8f0",
+                                    }}
+                                >
+                                    {appendLoading
+                                        ? `loading next ${PAGE_SIZE} of ${data.total_turns.toLocaleString()}…`
+                                        : `loaded ${data.turns.length.toLocaleString()} of ${data.total_turns.toLocaleString()} turns ·`}
+                                    {!appendLoading ? (
+                                        <>
+                                            {" "}
+                                            <button
+                                                onClick={() => void loadMore(200)}
+                                                style={{
+                                                    padding: "2px 10px", marginLeft: 6, fontSize: 11, border: "1px solid #e2e8f0",
+                                                    background: "#fff", color: "#475569", borderRadius: 4, cursor: "pointer",
+                                                }}
+                                            >load 200 more</button>
+                                            {" "}
+                                            <button
+                                                onClick={() => void loadMore(data.total_turns - data.turns.length)}
+                                                style={{
+                                                    padding: "2px 10px", fontSize: 11, border: "1px solid #e2e8f0",
+                                                    background: "#fff", color: "#475569", borderRadius: 4, cursor: "pointer",
+                                                }}
+                                            >load all</button>
+                                        </>
+                                    ) : null}
+                                </div>
+                            ) : null}
+                        </div>
+                        <CostRail data={data} currentSeq={visibleSeq} />
                     </div>
                 </>
             ) : null}

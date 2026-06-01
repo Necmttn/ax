@@ -390,6 +390,7 @@ export function pricingForModel(
     if (!modelKey) return null;
     const exact = catalog.get(modelKey);
     if (exact) return exact;
+    if (/^gpt-5(?:\.\d+)?$/i.test(modelKey)) return catalog.get("gpt-5") ?? null;
     if (modelKey.startsWith("claude-opus-4")) return catalog.get("claude-opus-4") ?? null;
     if (modelKey.startsWith("claude-sonnet-4")) return catalog.get("claude-sonnet-4") ?? null;
     return null;
@@ -424,7 +425,8 @@ export function estimateCost(input: {
     const promptTokens = input.promptTokens ?? input.estimatedTokens;
     const cacheCreationTokens = input.cacheCreationInputTokens ?? 0;
     const cacheReadTokens = input.cacheReadInputTokens ?? 0;
-    const inputUsd = componentCost(promptTokens, pricing.inputPerMillionUsd, pricing.inputAbove200kPerMillionUsd);
+    const freshInputTokens = Math.max(0, promptTokens - cacheCreationTokens - cacheReadTokens);
+    const inputUsd = componentCost(freshInputTokens, pricing.inputPerMillionUsd, pricing.inputAbove200kPerMillionUsd);
     const outputUsd = input.completionTokens === null
         ? null
         : componentCost(input.completionTokens, pricing.outputPerMillionUsd, pricing.outputAbove200kPerMillionUsd);

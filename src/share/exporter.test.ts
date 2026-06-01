@@ -20,6 +20,20 @@ describe("buildShareArtifactFromParts", () => {
             },
             topSkills: [{ skill: "superpowers:writing-plans", count: 1, last_used: "2026-05-29T00:01:00.000Z" }],
             toolCalls: [{ label: "exec_command", count: 2, failures: 1, last_used: "2026-05-29T00:02:00.000Z" }],
+            tokenUsage: {
+                model: "gpt-5",
+                prompt_tokens: 100,
+                completion_tokens: 20,
+                cache_creation_input_tokens: 30,
+                cache_read_input_tokens: 40,
+                estimated_tokens: 190,
+                estimated_input_cost_usd: 0.01,
+                estimated_output_cost_usd: 0.02,
+                estimated_cache_creation_cost_usd: 0.003,
+                estimated_cache_read_cost_usd: 0.001,
+                estimated_cost_usd: 0.034,
+                pricing_source: "test",
+            },
             turns: [
                 {
                     id: "turn:abc-0",
@@ -59,6 +73,7 @@ describe("buildShareArtifactFromParts", () => {
         expect(artifact.stats.tool_calls).toBe(2);
         expect(artifact.stats.skills_used).toBe(1);
         expect(artifact.stats.failures).toBe(1);
+        expect(artifact.token_usage?.estimated_cache_read_cost_usd).toBe(0.001);
         expect(artifact.files).toHaveLength(1);
         expect(artifact.graph.nodes.some((n) => n.id === "session:abc123")).toBe(true);
     });

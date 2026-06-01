@@ -45,6 +45,7 @@ import { extractToolFileEvidence } from "./tool-file-evidence.ts";
 import { executeStatements } from "../lib/shared/statement-exec.ts";
 import { safeKeyPart } from "../lib/shared/derive-keys.ts";
 import { tokenQualityLabels } from "./token-quality.ts";
+import { estimateCost } from "./model-pricing.ts";
 
 const DEFAULT_CODEX_RAW_MAX_BYTES = 5 * 1024 * 1024;
 const DEFAULT_CODEX_PROGRESS_EVERY = 10;
@@ -97,6 +98,22 @@ interface CodexTokenUsage {
     ts: string;
 }
 
+export interface CodexTurnTokenUsage {
+    session: string;
+    seq: number;
+    ts: string;
+    model: string | null;
+    promptTokens: number | null;
+    completionTokens: number | null;
+    cacheCreationInputTokens: number | null;
+    cacheReadInputTokens: number | null;
+    freshInputTokens: number | null;
+    estimatedTokens: number;
+    usageSource: string;
+    usageQuality: string;
+    raw: Record<string, unknown>;
+}
+
 function parseJsonl(line: string): Record<string, unknown> | null {
     const decoded = decodeJsonOrNull(line);
     return isRecord(decoded) ? decoded : null;
@@ -131,6 +148,11 @@ function jsonText(input: unknown): string | null {
         return null;
     }
 }
+
+const surrealOptionFloat = (value: number | null | undefined): string =>
+    value === null || value === undefined || !Number.isFinite(value)
+        ? "NONE"
+        : Number(value.toFixed(8)).toString();
 
 function outputText(input: unknown): string | null {
     return typeof input === "string" ? input : jsonText(input);
@@ -341,6 +363,81 @@ function codexTokenUsageFromPayload(
     };
 }
 
+const positiveDelta = (current: number | null, previous: number | null): number | null => {
+    if (current === null) return null;
+    if (previous === null) return current;
+    return Math.max(0, current - previous);
+};
+
+const tokenMetricsFromRecord = (usage: Record<string, unknown>) => {
+    const promptTokens = numberField(usage, "input_tokens");
+    const completionTokens = numberField(usage, "output_tokens");
+    const cacheReadInputTokens = numberField(usage, "cached_input_tokens");
+    const cacheCreationInputTokens = numberField(usage, "cache_creation_input_tokens");
+    const estimatedTokens = numberField(usage, "total_tokens") ??
+        (promptTokens ?? 0) + (completionTokens ?? 0);
+    const freshInputTokens = promptTokens === null
+        ? null
+        : Math.max(0, promptTokens - (cacheReadInputTokens ?? 0) - (cacheCreationInputTokens ?? 0));
+    return {
+        promptTokens,
+        completionTokens,
+        cacheCreationInputTokens,
+        cacheReadInputTokens,
+        freshInputTokens,
+        estimatedTokens,
+    };
+};
+
+function codexTurnTokenUsageFromPayload(
+    usage: CodexTokenUsage,
+    seq: number,
+    previousTotalUsage: Record<string, unknown> | null,
+): CodexTurnTokenUsage | null {
+    if (seq <= 0) return null;
+    if (usage.lastTokenUsage) {
+        const metrics = tokenMetricsFromRecord(usage.lastTokenUsage);
+        return {
+            session: usage.session,
+            seq,
+            ts: usage.ts,
+            model: usage.model,
+            ...metrics,
+            usageSource: "codex_token_count.last_token_usage",
+            usageQuality: "provider_turn",
+            raw: usage.lastTokenUsage,
+        };
+    }
+
+    const current = tokenMetricsFromRecord(usage.totalTokenUsage);
+    const previous = previousTotalUsage ? tokenMetricsFromRecord(previousTotalUsage) : null;
+    const promptTokens = positiveDelta(current.promptTokens, previous?.promptTokens ?? null);
+    const completionTokens = positiveDelta(current.completionTokens, previous?.completionTokens ?? null);
+    const cacheCreationInputTokens = positiveDelta(current.cacheCreationInputTokens, previous?.cacheCreationInputTokens ?? null);
+    const cacheReadInputTokens = positiveDelta(current.cacheReadInputTokens, previous?.cacheReadInputTokens ?? null);
+    const estimatedTokens = positiveDelta(current.estimatedTokens, previous?.estimatedTokens ?? null) ?? current.estimatedTokens;
+    const freshInputTokens = promptTokens === null
+        ? null
+        : Math.max(0, promptTokens - (cacheCreationInputTokens ?? 0) - (cacheReadInputTokens ?? 0));
+    return {
+        session: usage.session,
+        seq,
+        ts: usage.ts,
+        model: usage.model,
+        promptTokens,
+        completionTokens,
+        cacheCreationInputTokens,
+        cacheReadInputTokens,
+        freshInputTokens,
+        estimatedTokens,
+        usageSource: previousTotalUsage
+            ? "codex_token_count.total_token_usage_delta"
+            : "codex_token_count.total_token_usage_first",
+        usageQuality: previousTotalUsage ? "derived_delta" : "first_total",
+        raw: usage.totalTokenUsage,
+    };
+}
+
 const concreteCodexModel = (session: CodexSession): string | null => {
     if (session.model) return session.model;
     const provider = session.model_provider;
@@ -393,10 +490,11 @@ async function walkJsonlFiles(root: string, cutoffMs: number): Promise<CodexFile
     return out;
 }
 
-interface CodexExtract {
+export interface CodexExtract {
     session: CodexSession;
     sourcePath: string | null;
     turns: CodexTurn[];
+    turnTokenUsages: CodexTurnTokenUsage[];
     invocations: CodexInvocation[];
     toolCalls: ToolCallWrite[];
     providerEvents: AgentEventWrite[];
@@ -410,6 +508,7 @@ interface MutableCodexExtract {
     session: CodexSession | null;
     sourcePath: string | null;
     turns: CodexTurn[];
+    turnTokenUsages: CodexTurnTokenUsage[];
     invocations: CodexInvocation[];
     toolCalls: MutableToolCallWrite[];
     providerEvents: AgentEventWrite[];
@@ -425,6 +524,7 @@ function createCodexExtractor(
 ) {
     let session: CodexSession | null = null;
     const turns: CodexTurn[] = [];
+    const turnTokenUsages: CodexTurnTokenUsage[] = [];
     const invocations: CodexInvocation[] = [];
     const toolCalls: MutableToolCallWrite[] = [];
     const providerEvents: AgentEventWrite[] = [];
@@ -433,6 +533,7 @@ function createCodexExtractor(
     const planSnapshots: PlanSnapshotWrite[] = [];
     let tokenUsage: CodexTokenUsage | null = null;
     let tokenCountEvents = 0;
+    let previousTotalTokenUsage: Record<string, unknown> | null = null;
     const toolCallsByCallId = new Map<string, MutableToolCallWrite>();
     const pendingToolResultsByCallId = new Map<string, ToolResultFields>();
     const planCreatedAtBySource = new Map<string, string>();
@@ -711,6 +812,7 @@ function createCodexExtractor(
             return true;
         });
         const drainedTurns = turns.splice(0, turns.length);
+        const drainedTurnTokenUsages = turnTokenUsages.splice(0, turnTokenUsages.length);
         const drainedProviderEvents = providerEvents.splice(0, providerEvents.length);
         for (const event of drainedProviderEvents) {
             if (event.providerEventId) pendingProviderEventIds.delete(event.providerEventId);
@@ -733,6 +835,7 @@ function createCodexExtractor(
             session,
             sourcePath: filePath,
             turns: drainedTurns,
+            turnTokenUsages: drainedTurnTokenUsages,
             invocations: drainedInvocations,
             toolCalls: drainedToolCalls,
             providerEvents: drainedProviderEvents,
@@ -780,7 +883,13 @@ function createCodexExtractor(
 
             if (type === "event_msg" && payload && stringField(payload, "type") === "token_count") {
                 tokenCountEvents += 1;
-                tokenUsage = codexTokenUsageFromPayload(payload, ts, session, tokenCountEvents) ?? tokenUsage;
+                const nextUsage = codexTokenUsageFromPayload(payload, ts, session, tokenCountEvents);
+                if (nextUsage) {
+                    const turnUsage = codexTurnTokenUsageFromPayload(nextUsage, seq, previousTotalTokenUsage);
+                    if (turnUsage) turnTokenUsages.push(turnUsage);
+                    previousTotalTokenUsage = nextUsage.totalTokenUsage;
+                    tokenUsage = nextUsage;
+                }
                 return;
             }
 
@@ -846,6 +955,7 @@ function createCodexExtractor(
                 session,
                 sourcePath: remaining.sourcePath,
                 turns: remaining.turns,
+                turnTokenUsages: remaining.turnTokenUsages,
                 invocations: remaining.invocations,
                 toolCalls: remaining.toolCalls,
                 providerEvents: remaining.providerEvents,
@@ -859,12 +969,16 @@ function createCodexExtractor(
     };
 }
 
-export function __testExtractCodexJsonlLines(lines: Iterable<string>): CodexExtract | null {
+export function extractCodexJsonlLines(lines: Iterable<string>): CodexExtract | null {
     const extractor = createCodexExtractor("codex-test.jsonl");
     for (const line of lines) {
         extractor.processLine(line);
     }
     return extractor.finish();
+}
+
+export function __testExtractCodexJsonlLines(lines: Iterable<string>): CodexExtract | null {
+    return extractCodexJsonlLines(lines);
 }
 
 export function __testStreamCodexJsonlLines(lines: Iterable<string>, every: number): CodexExtract[] {
@@ -878,6 +992,7 @@ export function __testStreamCodexJsonlLines(lines: Iterable<string>, every: numb
             const batch = extractor.drain(false);
             if (batch.session && (
                 batch.turns.length > 0 ||
+                batch.turnTokenUsages.length > 0 ||
                 batch.invocations.length > 0 ||
                 batch.toolCalls.length > 0 ||
                 batch.providerEvents.length > 0 ||
@@ -893,6 +1008,7 @@ export function __testStreamCodexJsonlLines(lines: Iterable<string>, every: numb
     const final = extractor.drain(true);
     if (final.session && (
         final.turns.length > 0 ||
+        final.turnTokenUsages.length > 0 ||
         final.invocations.length > 0 ||
         final.toolCalls.length > 0 ||
         final.providerEvents.length > 0 ||
@@ -987,6 +1103,14 @@ const buildCodexProviderStatements = (batch: MutableCodexExtract): string[] => {
 
 const buildCodexTokenUsageStatements = (usage: CodexTokenUsage | null): string[] => {
     if (!usage) return [];
+    const cost = estimateCost({
+        modelKey: usage.model,
+        promptTokens: usage.promptTokens,
+        completionTokens: usage.completionTokens,
+        cacheCreationInputTokens: null,
+        cacheReadInputTokens: usage.cacheReadInputTokens,
+        estimatedTokens: usage.estimatedTokens,
+    });
     return [
         `UPSERT ${recordRef("session_token_usage", safeKeyPart(usage.session))} MERGE ${surrealObject([
             ["session", recordRef("session", usage.session)],
@@ -1000,6 +1124,13 @@ const buildCodexTokenUsageStatements = (usage: CodexTokenUsage | null): string[]
             ["estimated_tokens", Math.trunc(usage.estimatedTokens).toString(10)],
             ["transcript_bytes", "0"],
             ["context_window", surrealOptionInt(usage.contextWindow)],
+            ["model_ref", usage.model ? recordRef("agent_model", usage.model) : "NONE"],
+            ["estimated_input_cost_usd", surrealOptionFloat(cost.inputUsd)],
+            ["estimated_output_cost_usd", surrealOptionFloat(cost.outputUsd)],
+            ["estimated_cache_creation_cost_usd", surrealOptionFloat(cost.cacheCreationUsd)],
+            ["estimated_cache_read_cost_usd", surrealOptionFloat(cost.cacheReadUsd)],
+            ["estimated_cost_usd", surrealOptionFloat(cost.totalUsd)],
+            ["pricing_source", surrealOptionString(cost.pricingSource)],
             ["labels", surrealJsonOption(tokenQualityLabels({
                 source: "codex_token_count",
                 tokenSourceQuality: "explicit",
@@ -1017,6 +1148,45 @@ const buildCodexTokenUsageStatements = (usage: CodexTokenUsage | null): string[]
     ];
 };
 
+const buildCodexTurnTokenUsageStatements = (
+    usages: readonly CodexTurnTokenUsage[],
+): string[] =>
+    usages.map((usage) => {
+        const cost = estimateCost({
+            modelKey: usage.model,
+            promptTokens: usage.promptTokens,
+            completionTokens: usage.completionTokens,
+            cacheCreationInputTokens: usage.cacheCreationInputTokens,
+            cacheReadInputTokens: usage.cacheReadInputTokens,
+            estimatedTokens: usage.estimatedTokens,
+        });
+        const turnKey = turnRecordKey(usage.session, usage.seq);
+        return `UPSERT ${recordRef("turn_token_usage", turnKey)} MERGE ${surrealObject([
+            ["session", recordRef("session", usage.session)],
+            ["turn", recordRef("turn", turnKey)],
+            ["seq", Math.trunc(usage.seq).toString(10)],
+            ["source", surrealString("codex")],
+            ["model", surrealOptionString(usage.model)],
+            ["prompt_tokens", surrealOptionInt(usage.promptTokens)],
+            ["completion_tokens", surrealOptionInt(usage.completionTokens)],
+            ["cache_creation_input_tokens", surrealOptionInt(usage.cacheCreationInputTokens)],
+            ["cache_read_input_tokens", surrealOptionInt(usage.cacheReadInputTokens)],
+            ["fresh_input_tokens", surrealOptionInt(usage.freshInputTokens)],
+            ["estimated_tokens", Math.trunc(usage.estimatedTokens).toString(10)],
+            ["model_ref", usage.model ? recordRef("agent_model", usage.model) : "NONE"],
+            ["estimated_input_cost_usd", surrealOptionFloat(cost.inputUsd)],
+            ["estimated_output_cost_usd", surrealOptionFloat(cost.outputUsd)],
+            ["estimated_cache_creation_cost_usd", surrealOptionFloat(cost.cacheCreationUsd)],
+            ["estimated_cache_read_cost_usd", surrealOptionFloat(cost.cacheReadUsd)],
+            ["estimated_cost_usd", surrealOptionFloat(cost.totalUsd)],
+            ["pricing_source", surrealOptionString(cost.pricingSource)],
+            ["usage_source", surrealString(usage.usageSource)],
+            ["usage_quality", surrealString(usage.usageQuality)],
+            ["raw", surrealJsonOption(usage.raw)],
+            ["ts", surrealDate(usage.ts)],
+        ])};`;
+    });
+
 const buildCodexBatchStatements = (
     batch: MutableCodexExtract,
     payloadMaxBytes: number,
@@ -1024,6 +1194,7 @@ const buildCodexBatchStatements = (
     ...buildCodexProviderStatements(batch),
     ...buildCodexTokenUsageStatements(batch.tokenUsage),
     ...buildTurnStatements(batch.turns),
+    ...buildCodexTurnTokenUsageStatements(batch.turnTokenUsages),
     ...buildToolCallStatements(batch.toolCalls.map((call) =>
         compactCodexToolCall(call, payloadMaxBytes),
     )),
