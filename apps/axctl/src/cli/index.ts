@@ -126,6 +126,7 @@ import type { DbError } from "@ax/lib/errors";
 import { StageRegistry, type StageRegistryShape } from "../ingest/stage/registry.ts";
 import { IngestRuntimeLayer } from "../ingest/stage/runtime.ts";
 import { ConsoleTransportLayer } from "@ax/lib/live-traces/transports/console";
+import { PipelineTraceTransportLayer } from "./ingest-trace-progress.ts";
 import { selectByKeys, selectByTag } from "../ingest/stage/select.ts";
 import { type BaseStageStats, type StageDef } from "../ingest/stage/types.ts";
 import { runIngest } from "../ingest/run.ts";
@@ -4896,15 +4897,24 @@ const withDb = (args: ReadonlyArray<string>): CliProgram =>
  * Provide IngestRuntimeLayer (AppLayer + StageRegistryDefault) for the
  * ingest command so the CLI handler can yield* StageRegistry.
  *
- * When `--debug` is present in argv, layer `ConsoleTransportLayer` on top
- * so trace events stream to **stderr**. Default (no --debug) keeps the
- * silent NoopTransport from AppLayer so stdout stays clean for
- * machine-readable output (e.g. `--progress=json`).
+ * Transport selection for the ingest live-trace spans:
+ *   - `--debug`            → ConsoleTransport (raw JSON events to stderr)
+ *   - interactive terminal → PipelineTraceTransport (animated step pipeline)
+ *   - piped / CI / AX_PROGRESS=off → silent NoopTransport (from AppLayer), so
+ *     machine-readable stdout (e.g. `--progress=json`) stays clean.
+ * All transports write to **stderr**, never stdout.
  */
 const withIngest = (args: ReadonlyArray<string>): CliProgram => {
     const debug = args.includes("--debug");
-    const layer = debug
-        ? Layer.provideMerge(IngestRuntimeLayer, ConsoleTransportLayer)
+    const interactive = process.stderr.isTTY === true;
+    const progressOff = (process.env.AX_PROGRESS ?? "").toLowerCase() === "off";
+    const transport = debug
+        ? ConsoleTransportLayer
+        : interactive && !progressOff
+            ? PipelineTraceTransportLayer
+            : undefined;
+    const layer = transport
+        ? Layer.provideMerge(IngestRuntimeLayer, transport)
         : IngestRuntimeLayer;
     return runCli(args).pipe(Effect.provide(layer), Effect.scoped);
 };
