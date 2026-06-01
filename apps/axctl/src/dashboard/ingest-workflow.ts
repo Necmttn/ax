@@ -33,6 +33,16 @@ import type { IngestStreamBus } from "./ingest-stream.ts";
 export type IngestBaseServices = SurrealClient | AxConfig | ProcessService | StageRegistry;
 
 /**
+ * The `baseLayer` accepted by {@link startIngestWorkflow}. It must provide
+ * {@link IngestBaseServices}; any layer-build error (e.g. a `DbError` from the
+ * production `IngestRuntimeLayer`) is swallowed by the workflow's `catchCause`
+ * and surfaced as a synthetic terminal `run_finished{failed}` event, so the
+ * error channel is intentionally unconstrained. Providing extra services
+ * (e.g. `TraceSink`) is fine - they are ignored.
+ */
+export type IngestBaseLayer = Layer.Layer<IngestBaseServices, unknown>;
+
+/**
  * Per-invocation terminal-event guard. The transport flips `finished` to `true`
  * once it forwards a `run_finished` event (any status), so the workflow's
  * failure handler can publish a synthetic terminal event ONLY when the normal
@@ -99,7 +109,7 @@ export interface StartIngestResult {
 export const startIngestWorkflow = (
     opts: RunIngestOptions,
     bus: IngestStreamBus,
-    baseLayer: Layer.Layer<IngestBaseServices>,
+    baseLayer: IngestBaseLayer,
 ): Effect.Effect<StartIngestResult> =>
     Effect.gen(function* () {
         const runId = crypto.randomUUID();

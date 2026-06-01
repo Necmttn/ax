@@ -1,6 +1,10 @@
-import { Effect } from "effect";
+import { Effect, type Layer, ManagedRuntime } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { AppLayer } from "@ax/lib/layers";
+import { IngestRuntimeLayer } from "../ingest/stage/runtime.ts";
+import { createDurableIngestStream, type DurableIngestStream } from "./ingest-stream-durable.ts";
+import { ingestStreamName } from "./ingest-stream.ts";
+import { startIngestWorkflow } from "./ingest-workflow.ts";
 import { graphHealthSql } from "../queries/graph-health.ts";
 import { checkoutActivitySql, gitCorrelationSql } from "../queries/insights.ts";
 import { addIngestEventSubscriber, removeIngestEventSubscriber } from "./telemetry.ts";
@@ -381,7 +385,66 @@ const API_CAPABILITIES = [
     "wrapped",     // /api/wrapped + public-preview
     "improve",     // /api/improve + accept/reject/verdict
     "events",      // /api/events (SSE)
+    "ingest",      // POST /api/ingest -> { runId, stream } + Durable Streams sidecar
 ] as const;
+
+/**
+ * Server-lifetime ingest state, set up once by {@link serveDashboard} at
+ * startup and torn down on shutdown.
+ *
+ * `runtime` is a LONG-LIVED {@link ManagedRuntime} (not a throwaway
+ * per-request `Effect.runPromise`): `startIngestWorkflow` forks the pipeline
+ * onto a detached daemon fiber that MUST outlive the HTTP request that
+ * triggered it. A fresh per-request runtime would tear down when the request
+ * resolves and kill the daemon mid-run. `stream` is the Durable Streams
+ * sidecar the browser subscribes to directly.
+ */
+interface ServeIngestState {
+    readonly stream: DurableIngestStream;
+    readonly runtime: ManagedRuntime.ManagedRuntime<
+        Layer.Success<typeof IngestRuntimeLayer>,
+        Layer.Error<typeof IngestRuntimeLayer>
+    >;
+}
+
+let serveIngestState: ServeIngestState | null = null;
+
+/** Handle `POST /api/ingest`: trigger an in-process run, return its `runId`. */
+async function handleIngestTrigger(req: Request): Promise<Response> {
+    const state = serveIngestState;
+    if (state === null) {
+        // The handler can be invoked directly in tests without a running
+        // server; the sidecar + runtime only exist once serveDashboard boots.
+        return jsonResponse({ error: "ingest_unavailable" }, 503);
+    }
+    const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+    const sinceDays = typeof body.since === "number" && Number.isInteger(body.since) && body.since > 0
+        ? body.since
+        : undefined;
+    try {
+        // `runIngest` reads `--since=N` from `args` (see ingest/run.ts), so the
+        // server-triggered run is shaped exactly like the CLI's `ax ingest`.
+        const { runId } = await state.runtime.runPromise(
+            startIngestWorkflow(
+                {
+                    command: "ingest",
+                    args: sinceDays === undefined ? [] : [`--since=${sinceDays}`],
+                    cwd: process.cwd(),
+                },
+                state.stream,
+                IngestRuntimeLayer,
+            ),
+        );
+        return jsonResponse({
+            runId,
+            stream: state.stream.streamUrl(runId),
+            streamName: ingestStreamName(runId),
+            streamBaseUrl: state.stream.baseUrl,
+        });
+    } catch (err) {
+        return jsonResponse({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+}
 
 export async function handleDashboardRequest(req: Request): Promise<Response> {
     const url = new URL(req.url);
@@ -817,6 +880,9 @@ export async function handleDashboardRequest(req: Request): Promise<Response> {
         if (!sig) return jsonResponse({ error: "missing proposal sig" }, 400);
         return handleImproveAction(sig, action, req);
     }
+    if (url.pathname === "/api/ingest" && req.method === "POST") {
+        return handleIngestTrigger(req);
+    }
     if (url.pathname.startsWith("/api/")) return queryApi(url.pathname);
 
     // Non-API GET: serve a tiny landing pointing the user at the hosted
@@ -921,9 +987,54 @@ export async function handleDashboardRequestWithCors(req: Request): Promise<Resp
 
 export async function serveDashboard(args: string[]): Promise<void> {
     const { port } = parseDashboardServeArgs(args);
-    // 60s idle timeout - recall queries currently full-scan turn excerpts
-    // (no full-text index yet) and can take 5-15s on a year-old graph.
-    Bun.serve({ port, fetch: handleDashboardRequestWithCors, idleTimeout: 60 });
+
+    // Start the Durable Streams sidecar + a long-lived runtime ONCE, before we
+    // accept requests. POST /api/ingest forks the ingest pipeline onto this
+    // runtime's daemon fiber and publishes progress to this sidecar, which the
+    // browser subscribes to directly (the sidecar has permissive CORS).
+    const stream = await createDurableIngestStream();
+
+    // From here the sidecar port is bound. If anything before a successful
+    // `Bun.serve` listen throws (most commonly EADDRINUSE - port in use), tear
+    // down what we already started so we don't leak the sidecar port, then
+    // rethrow. Only the success path leaves `serveIngestState` + the shutdown
+    // handler in place.
+    let runtime: ServeIngestState["runtime"] | undefined;
+    let server: ReturnType<typeof Bun.serve>;
+    try {
+        runtime = ManagedRuntime.make(IngestRuntimeLayer);
+        serveIngestState = { stream, runtime };
+
+        // 60s idle timeout - recall queries currently full-scan turn excerpts
+        // (no full-text index yet) and can take 5-15s on a year-old graph.
+        server = Bun.serve({ port, fetch: handleDashboardRequestWithCors, idleTimeout: 60 });
+    } catch (err) {
+        serveIngestState = null;
+        await stream.stop().catch(() => undefined);
+        if (runtime) await runtime.dispose().catch(() => undefined);
+        throw err;
+    }
+
     const { formatServeBanner } = await import("../cli/banner.ts");
     console.log(formatServeBanner(port));
+
+    // Tear down the sidecar + runtime on shutdown. Bun's serve never resolves,
+    // so the process exits via a signal; close the open run streams and dispose
+    // the runtime (which interrupts any in-flight ingest daemon) first.
+    let shuttingDown = false;
+    const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
+        if (shuttingDown) return;
+        shuttingDown = true;
+        serveIngestState = null;
+        await server.stop();
+        await stream.stop().catch(() => undefined);
+        await runtime.dispose().catch(() => undefined);
+        process.removeListener("SIGINT", onSigint);
+        process.removeListener("SIGTERM", onSigterm);
+        process.kill(process.pid, signal);
+    };
+    const onSigint = (): void => void shutdown("SIGINT");
+    const onSigterm = (): void => void shutdown("SIGTERM");
+    process.once("SIGINT", onSigint);
+    process.once("SIGTERM", onSigterm);
 }
