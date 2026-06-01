@@ -9,6 +9,41 @@ RUN_INSTALL="${AXCTL_RUN_INSTALL:-1}"
 BINARY_PATH=""
 MODIFY_PATH=1
 
+# ---------------------------------------------------------------------------
+# Pretty output. Colors auto-disable when stdout isn't a TTY, when NO_COLOR is
+# set, or under a dumb terminal. `esc` is built with printf (not $'...') so it
+# stays portable when the installer is run via `curl ... | sh`.
+# ---------------------------------------------------------------------------
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != "dumb" ]; then
+  esc=$(printf '\033')
+  C_RESET="${esc}[0m"; C_BOLD="${esc}[1m"; C_DIM="${esc}[2m"
+  C_GREEN="${esc}[32m"; C_YELLOW="${esc}[33m"; C_RED="${esc}[31m"
+else
+  C_RESET=""; C_BOLD=""; C_DIM=""; C_GREEN=""; C_YELLOW=""; C_RED=""
+fi
+
+banner() {
+  printf '%s%s' "$C_GREEN" "$C_BOLD"
+  cat <<'ART'
+
+   █████╗ ██╗  ██╗
+  ██╔══██╗╚██╗██╔╝
+  ███████║ ╚███╔╝
+  ██╔══██║ ██╔██╗
+  ██║  ██║██╔╝ ██╗
+  ╚═╝  ╚═╝╚═╝  ╚═╝
+ART
+  printf '%s' "$C_RESET"
+  printf '  %sthe agent experience layer%s\n' "$C_DIM" "$C_RESET"
+  printf '  %slocal memory + telemetry for your coding agents%s\n\n' "$C_DIM" "$C_RESET"
+}
+
+step()  { printf '  %s▸%s %s\n' "$C_GREEN" "$C_RESET" "$*"; }
+ok()    { printf '  %s✓%s %s\n' "$C_GREEN" "$C_RESET" "$*"; }
+info()  { printf '    %s%s%s\n' "$C_DIM" "$*" "$C_RESET"; }
+warn()  { printf '  %s!%s %s\n' "$C_YELLOW" "$C_RESET" "$*" >&2; }
+err()   { printf '  %s✗%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; }
+
 usage() {
   cat <<'EOF'
 Install axctl from a GitHub Release artifact.
@@ -28,6 +63,7 @@ Environment:
   AXCTL_INSTALL_ROOT=path        Install root (default: ~/.local/share/ax)
   AXCTL_BIN_DIR=path             Symlink dir (default: ~/.local/bin)
   AXCTL_RUN_INSTALL=0            Only install the binary; skip `axctl install`
+  NO_COLOR=1                     Disable colored output
   GH_TOKEN/GITHUB_TOKEN=token    Token for private repo downloads when gh is unavailable
 EOF
 }
@@ -40,7 +76,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     -v|--version)
       if [[ -z "${2:-}" ]]; then
-        echo "axctl install: --version requires a value" >&2
+        err "--version requires a value"
         exit 2
       fi
       VERSION="$2"
@@ -48,7 +84,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     -b|--binary)
       if [[ -z "${2:-}" ]]; then
-        echo "axctl install: --binary requires a path" >&2
+        err "--binary requires a path"
         exit 2
       fi
       BINARY_PATH="$2"
@@ -63,7 +99,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     *)
-      echo "axctl install: unknown option: $1" >&2
+      err "unknown option: $1"
       usage >&2
       exit 2
       ;;
@@ -72,7 +108,7 @@ done
 
 need() {
   if ! command -v "$1" >/dev/null 2>&1; then
-    echo "axctl install: missing required command: $1" >&2
+    err "missing required command: $1"
     exit 1
   fi
 }
@@ -83,7 +119,7 @@ detect_platform() {
     Darwin) os="darwin" ;;
     Linux) os="linux" ;;
     *)
-      echo "axctl install: unsupported OS $(uname -s)" >&2
+      err "unsupported OS $(uname -s)"
       exit 1
       ;;
   esac
@@ -92,7 +128,7 @@ detect_platform() {
     arm64|aarch64) arch="arm64" ;;
     x86_64|amd64) arch="x64" ;;
     *)
-      echo "axctl install: unsupported architecture $(uname -m)" >&2
+      err "unsupported architecture $(uname -m)"
       exit 1
       ;;
   esac
@@ -137,13 +173,16 @@ download_with_curl() {
   fi
 }
 
+banner
+
 platform="$(detect_platform)"
 artifact="axctl-${platform}.tar.gz"
+step "platform $C_BOLD${platform}$C_RESET · channel $C_BOLD${VERSION}$C_RESET"
 
 if [[ -z "$BINARY_PATH" && "$VERSION" != "latest" && "$(command -v axctl || true)" != "" ]]; then
   installed="$(axctl --version 2>/dev/null || true)"
   if [[ "$installed" == "${VERSION#v}" || "$installed" == *"axctl ${VERSION#v}"* || "$installed" == *"axctl v${VERSION#v}"* ]]; then
-    echo "[axctl] version ${VERSION#v} already installed"
+    ok "version ${VERSION#v} already installed"
     exit 0
   fi
 fi
@@ -153,23 +192,26 @@ trap 'rm -rf "$tmp_dir"' EXIT
 
 if [[ -n "$BINARY_PATH" ]]; then
   if [[ ! -f "$BINARY_PATH" ]]; then
-    echo "axctl install: local binary not found: $BINARY_PATH" >&2
+    err "local binary not found: $BINARY_PATH"
     exit 1
   fi
-  echo "[axctl] installing local binary: $BINARY_PATH"
+  step "installing local binary"
+  info "$BINARY_PATH"
 else
-  echo "[axctl] downloading ${artifact} from ${REPO} (${VERSION})"
+  step "downloading ${artifact}"
+  info "from ${REPO} (${VERSION})"
 
   if ! download_with_gh "$artifact" "$tmp_dir"; then
     if ! download_with_curl "$artifact" "$tmp_dir/$artifact"; then
+      err "failed to download ${artifact}"
       cat >&2 <<EOF
-axctl install: failed to download ${artifact}
 
-For private repos, either:
-  1. run 'gh auth login', or
-  2. export GH_TOKEN or GITHUB_TOKEN with repo read access.
+  For private repos, either:
+    1. run 'gh auth login', or
+    2. export GH_TOKEN or GITHUB_TOKEN with repo read access.
 
-If no release exists yet, run the Release Please workflow and merge the release PR first.
+  If no release exists yet, run the Release Please workflow and merge the
+  release PR first.
 EOF
       exit 1
     fi
@@ -180,18 +222,20 @@ EOF
       cd "$tmp_dir"
       awk -v f="$artifact" '$2 == f || $2 == "./" f { print; found = 1; exit } END { if (!found) exit 1 }' checksums.txt
     )" || {
-      echo "[axctl] checksums.txt did not include ${artifact}" >&2
+      err "checksums.txt did not include ${artifact}"
       exit 1
     }
     if command -v shasum >/dev/null 2>&1; then
-      (cd "$tmp_dir" && printf '%s\n' "$checksum_line" | shasum -a 256 -c -)
+      (cd "$tmp_dir" && printf '%s\n' "$checksum_line" | shasum -a 256 -c - >/dev/null)
+      ok "checksum verified"
     elif command -v sha256sum >/dev/null 2>&1; then
-      (cd "$tmp_dir" && printf '%s\n' "$checksum_line" | sha256sum -c -)
+      (cd "$tmp_dir" && printf '%s\n' "$checksum_line" | sha256sum -c - >/dev/null)
+      ok "checksum verified"
     else
-      echo "[axctl] checksum file downloaded; no sha256 checker found, skipping verification"
+      warn "no sha256 checker found, skipping verification"
     fi
   else
-    echo "[axctl] checksums.txt not found; skipping checksum verification"
+    warn "checksums.txt not found, skipping verification"
   fi
 
   need tar
@@ -208,18 +252,33 @@ fi
 ln -sfn "$install_bin" "$BIN_DIR/axctl"
 ln -sfn "$install_bin" "$BIN_DIR/ax"
 
-echo "[axctl] installed binary: $install_bin"
-echo "[axctl] symlink: $BIN_DIR/axctl -> $install_bin"
-echo "[axctl] alias symlink: $BIN_DIR/ax -> $install_bin"
+ok "installed $C_BOLD${install_bin}$C_RESET"
+info "$BIN_DIR/axctl → $install_bin"
+info "$BIN_DIR/ax    → $install_bin  (alias)"
 
 if [[ "$MODIFY_PATH" == "1" && ":$PATH:" != *":$BIN_DIR:"* ]]; then
-  echo "[axctl] add this to PATH if needed: export PATH=\"$BIN_DIR:\$PATH\""
+  warn "$BIN_DIR is not on your PATH"
+  info "add it: export PATH=\"$BIN_DIR:\$PATH\""
 fi
 
 if [[ "$RUN_INSTALL" == "1" ]]; then
   if [[ "$(uname -s)" == "Darwin" ]]; then
+    printf '\n'
+    step "running ${C_BOLD}axctl install${C_RESET} (SurrealDB + watcher)"
     "$install_bin" install
   else
-    echo "[axctl] binary installed. Full daemon install is currently macOS-only; skipping axctl install."
+    printf '\n'
+    warn "full daemon install is macOS-only for now; skipping 'axctl install'"
   fi
 fi
+
+# ---------------------------------------------------------------------------
+# Done.
+# ---------------------------------------------------------------------------
+printf '\n'
+printf '  %s%sax is ready.%s\n\n' "$C_GREEN" "$C_BOLD" "$C_RESET"
+printf '    %sax doctor%s    %scheck your setup%s\n' "$C_BOLD" "$C_RESET" "$C_DIM" "$C_RESET"
+printf '    %sax serve%s     %sopen the dashboard → http://127.0.0.1:8520%s\n' "$C_BOLD" "$C_RESET" "$C_DIM" "$C_RESET"
+printf '    %sax recall%s    %ssearch what your agents actually did%s\n' "$C_BOLD" "$C_RESET" "$C_DIM" "$C_RESET"
+printf '\n'
+printf '  %sdocs %shttps://ax.necmttn.com/docs%s\n\n' "$C_DIM" "$C_RESET" "$C_RESET"

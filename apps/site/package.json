@@ -8,7 +8,7 @@
     "predev": "bun ../../scripts/extract-stage-rationale.ts && cp ../../install.sh public/install",
     "prebuild": "bun ../../scripts/extract-stage-rationale.ts && cp ../../install.sh public/install",
     "dev": "vite dev",
-    "build": "bun ../../scripts/extract-stage-rationale.ts && cp ../../install.sh public/install && vite build && cp dist/client/_shell.html dist/client/index.html",
+    "build": "bun ../../scripts/extract-stage-rationale.ts && cp ../../install.sh public/install && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "deploy": "bun run build && wrangler pages deploy dist/client --project-name=ax --branch=main",
