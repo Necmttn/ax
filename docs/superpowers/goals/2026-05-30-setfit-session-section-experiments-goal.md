@@ -33,11 +33,13 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E487 preserves reviewed target provenance through review
-  graph projection, persisted review fact rehydration, and accepted
-  classifier-fixture export. The reviewed `correction_or_rejection_signal`
-  candidate is still not guidance, but the accepted fixture-pack row now emits
-  `target="workflow_state"` instead of `unknown`.
+- Index continuation: E488 turns the accepted classifier-fixture follow-up into
+  an append-ready workflow fixture row and proves the existing package append,
+  metadata, and split-audit gates accept it. The reviewed
+  `correction_or_rejection_signal` candidate is still not guidance; it now
+  appends as package label `correction` with candidate label
+  `correction_or_rejection_signal`, target `workflow_state`, accepted review
+  status, and human review notes.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
   append-only fixtures, graph projection, and workflow/harness usefulness
@@ -106,9 +108,91 @@ Current recommendation:
   analysis passes the candidate-layer quality gate but remains
   `promotion_quality=false` because residual repeated misses, residual `none`
   false positives, and missing human promotion review still block autonomous
-  fact promotion. The immediate bottleneck is now appending the generated
-  accepted fixture into a real package, then rerunning package quality checks to
-  see whether it improves the model or just the review graph.
+  fact promotion. The immediate bottleneck is now running the expensive SetFit
+  robustness/failure-analysis path on the 137-row workflow-augmented fixture set
+  to see whether the accepted fixture improves classifier quality or only the
+  review graph.
+
+## E488 - Append Accepted Fixture Into Package Experiment Set
+
+Question:
+- Can the accepted classifier fixture become a package-appendable row and pass
+  the existing workflow fixture append/metadata/split-audit gates?
+
+Implementation:
+- Changed accepted classifier fixture export to emit package-ready workflow
+  rows:
+  - maps graph label `correction_or_rejection_signal` to package fixture label
+    `correction`
+  - keeps the graph label in `candidate_label`
+  - emits `review_status="accepted"` for the existing append gate
+  - carries human rationale as `review_notes`
+- Kept target propagation from E487, so the append row keeps
+  `target="workflow_state"`.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e488-accepted-append-ready.json`
+- `.ax/experiments/workflow-fixtures-accepted-current.jsonl`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-append-e488.json`
+- `.ax/experiments/fixture-append-workflow-current-report.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-metadata-e488.json`
+- `.ax/experiments/classifier-package-dry-run-workflow-fixture-setfit-robustness-e488.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-split-audit-e488.json`
+- `.ax/experiments/workflow-fixture-split-audit-current.json`
+
+Live results:
+- Accepted append-ready row:
+  - label: `correction`
+  - target: `workflow_state`
+  - source group: `workflow-candidate`
+  - review status: `accepted`
+  - candidate label: `correction_or_rejection_signal`
+  - topic: `review-coverage`
+- Workflow fixture append:
+  - decision: `ready_to_write_combined_fixtures`
+  - base rows: `136`
+  - append rows: `1`
+  - new append rows: `1`
+  - combined rows: `137`
+  - append label counts: `{ "correction": 1 }`
+  - failures: `[]`
+- Metadata enrichment:
+  - execution decision: `executed`
+  - enriched rows: `137`
+- Split audit:
+  - execution decision: `executed`
+  - fixtures: `137`
+  - labels:
+    `{ approval: 20, correction_or_rejection_signal: 26, environment_or_preference_signal: 24, none: 37, verification_or_recovery_signal: 30 }`
+  - seeds `7`, `13`, and `42` all reported `viable_split`
+  - overlap groups: `0`
+  - overlap pair groups: `0`
+- SetFit robustness operation dry-run:
+  - decision: `ready_to_run`
+  - preflight: `ready`
+  - command:
+    `bun run classifiers:setfit-robustness -- --fixtures=.ax/experiments/chunks-with-workflow-fixture-metadata-current.jsonl --group-field=pair_group --label-mode=coarse --seeds=7,13,42 --epochs=1 --batch-size=8 --calibration-threshold=0.4 --out=.ax/experiments/setfit-robustness-workflow-fixtures-current.json --json`
+
+Decision:
+- Continue. The graph-reviewed fixture now reaches the package experiment set
+  through the same append-only gates as earlier workflow fixtures.
+- Next useful slice: run the SetFit robustness and failure-analysis operations
+  for the current workflow fixture set, then compare quality status against the
+  prior candidate-layer quality report.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "accepted classifier fixture follow-ups materialize"
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "accepted classifier fixtures preserve target"
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=transcript_classifier_projection --include-review-facts --classifier-fixture-pack=.ax/experiments/workflow-fixtures-accepted-current.jsonl --out=.ax/experiments/workflow-topic-guidance-decision-batch-e488-accepted-append-ready.json --json
+head -n 1 .ax/experiments/workflow-fixtures-accepted-current.jsonl | jq '{id,label,target,source_group,review_status,review_notes,candidate_label,topic}'
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-append --execute --out=.ax/experiments/classifier-package-execution-workflow-fixture-append-e488.json --json
+jq '{decision,base_rows,append_rows,new_append_rows,combined_rows,append_label_counts,failures}' .ax/experiments/fixture-append-workflow-current-report.json
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-metadata --execute --out=.ax/experiments/classifier-package-execution-workflow-fixture-metadata-e488.json --json
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-setfit-robustness --dry-run --out=.ax/experiments/classifier-package-dry-run-workflow-fixture-setfit-robustness-e488.json --json
+bun src/cli/index.ts classifiers package-operations --operation=workflow-fixture-split-audit --execute --allow-expensive --out=.ax/experiments/classifier-package-execution-workflow-fixture-split-audit-e488.json --json
+jq '{fixtures, labels, runs: [.runs[] | {seed, decision, overlap_groups: (.overlap_groups|length), overlap_pair_groups: (.overlap_pair_groups|length)}]}' .ax/experiments/workflow-fixture-split-audit-current.json
+```
 
 ## E487 - Preserve Accepted Fixture Target Provenance
 

@@ -907,7 +907,8 @@ export interface WorkflowCandidateTopicClassifierFixtureRow {
     readonly target: string;
     readonly text: string;
     readonly source_group: "workflow-candidate";
-    readonly review_status: "pending" | "accept" | "revise" | "reject" | "defer";
+    readonly review_status: "pending" | "accept" | "accepted" | "revise" | "reject" | "defer";
+    readonly review_notes?: string;
     readonly review_rationale?: string;
     readonly review_reviewer?: string;
     readonly review_reviewed_at?: string;
@@ -7175,6 +7176,24 @@ export function buildWorkflowCandidateTopicClassifierFixtureSummary(
     };
 }
 
+const workflowPackageLabelForAcceptedCandidate = (candidate: WorkflowCandidate): string => {
+    const label = String(candidate.classifier_label ?? candidate.label ?? "none");
+    if (label === "correction_or_rejection_signal") return "correction";
+    if (label === "environment_or_preference_signal") return "direction";
+    if (label === "verification_or_recovery_signal") return "verification_request";
+    return label;
+};
+
+const workflowPackageReviewNotesForAcceptedCandidate = (candidate: WorkflowCandidate): string => {
+    const persistedRationale = candidate.persisted_review_facts
+        ?.map((fact) => fact.rationale)
+        .find((rationale): rationale is string => typeof rationale === "string" && rationale.trim().length > 0);
+    const reviewRationale = candidate.review?.rationale;
+    const rationale = persistedRationale ?? reviewRationale;
+    if (typeof rationale === "string" && rationale.trim().length > 0) return rationale.trim();
+    return `Accepted reviewed workflow candidate ${candidate.label} as a classifier fixture.`;
+};
+
 export function buildWorkflowCandidateAcceptedClassifierFixtureSummary(
     reports: readonly WorkflowCandidateTopicReport[],
     path: string,
@@ -7199,11 +7218,12 @@ export function buildWorkflowCandidateAcceptedClassifierFixtureSummary(
                     id: classifierFixtureIdForExample(report, candidate, example),
                     suite: "workflow-candidate-topic",
                     name: classifierFixtureNameForCandidate(report, candidate, index),
-                    label: String(candidate.classifier_label ?? candidate.label ?? "none"),
+                    label: workflowPackageLabelForAcceptedCandidate(candidate),
                     target: String(candidate.target ?? "unknown"),
                     text: classifierFixtureTextForExample(example),
                     source_group: "workflow-candidate",
-                    review_status: "accept",
+                    review_status: "accepted",
+                    review_notes: workflowPackageReviewNotesForAcceptedCandidate(candidate),
                     topic: report.topic,
                     candidate_id: candidate.group_id,
                     candidate_label: candidate.label,

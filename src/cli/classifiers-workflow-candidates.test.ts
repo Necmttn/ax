@@ -3939,10 +3939,11 @@ describe("classifiers workflow-candidates", () => {
         });
         expect(summary.fixtures[0]).toMatchObject({
             suite: "workflow-candidate-topic",
-            label: "correction_or_rejection_signal",
+            label: "correction",
             target: "unknown",
             source_group: "workflow-candidate",
-            review_status: "accept",
+            review_status: "accepted",
+            review_notes: "Accepted reviewed workflow candidate correction_or_rejection_signal as a classifier fixture.",
             topic: "review-coverage",
             candidate_id: "classifier_candidate_group:hybrid-window/correction_or_rejection_signal",
             candidate_label: "correction_or_rejection_signal",
@@ -4010,9 +4011,10 @@ describe("classifiers workflow-candidates", () => {
 
         expect(summary.fixtures).toHaveLength(1);
         expect(summary.fixtures[0]).toMatchObject({
-            label: "correction_or_rejection_signal",
+            label: "correction",
             target: "workflow_state",
-            review_status: "accept",
+            review_status: "accepted",
+            review_notes: "Accepted as a workflow-state correction fixture.",
             topic: "review-coverage",
             candidate_id: "classifier_candidate_group:hybrid-window/correction_or_rejection_signal",
             result_id: "fact:workflow_topic_candidate_review__review_coverage__correction",
