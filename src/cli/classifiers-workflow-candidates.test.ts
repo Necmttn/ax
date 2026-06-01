@@ -4789,6 +4789,54 @@ describe("classifiers workflow-candidates", () => {
         expect(renderWorkflowCandidateGuidancePendingReviewContextRepairText(report)).toContain("target resolution required: 1");
     });
 
+    test("pending review context repair applies explicit target override", () => {
+        const fixtureRow = {
+            id: "workflow-candidate-review-coverage/correction_or_rejection_signal/target-override",
+            suite: "workflow-candidate-review-coverage" as const,
+            name: "coverage-gap-correction_or_rejection_signal-01",
+            label: "correction_or_rejection_signal",
+            target: "unknown",
+            text: "USER:\nthis is not bad, can we create another scenario\n\nPREVIOUS_ASSISTANT:\nI showed an example workflow.",
+            source_group: "workflow-candidate" as const,
+            review_status: "pending" as const,
+            topic: "review-coverage",
+            candidate_id: "classifier_candidate_group:hybrid-window/correction_or_rejection_signal",
+            candidate_label: "correction_or_rejection_signal",
+            proposed_action: "add_context_guardrail",
+            turn: "turn:demo__seq_000709",
+        };
+
+        const report = buildWorkflowCandidateGuidancePendingReviewContextRepairReport({
+            fixturePackPath: ".ax/experiments/pending-review.jsonl",
+            reviewBriefPath: ".ax/experiments/pending-review.md",
+            rows: [fixtureRow],
+            turnContexts: [],
+            repairTarget: "workflow_state",
+        });
+
+        expect(report).toMatchObject({
+            repaired_fixture_count: 1,
+            fully_repaired_fixture_count: 1,
+            partially_repaired_fixture_count: 0,
+            repaired_issue_count: 1,
+            remaining_issue_count: 0,
+            target_resolution_required_count: 0,
+            target_resolution_next_action: "No target resolution is required before human verdict collection.",
+            next_action: "Review the regenerated fixture brief and record a human verdict with rationale.",
+        });
+        expect(report.target_resolution_rows).toEqual([]);
+        expect(report.rows[0]).toMatchObject({
+            status: "fully_repaired",
+            repaired_issues: ["unknown_target"],
+            remaining_issues: [],
+        });
+        expect(report.rows[0]?.repaired_fixture.target).toBe("workflow_state");
+        expect(report.repaired_jsonl).toContain("\"target\":\"workflow_state\"");
+        expect(report.repaired_review_brief_markdown).toContain("## Target Resolution");
+        expect(report.repaired_review_brief_markdown).toContain("- _none_");
+        expect(renderWorkflowCandidateGuidancePendingReviewContextRepairText(report)).toContain("target resolution required: 0");
+    });
+
     test("topic harness gates fail with only persisted failed harness facts", () => {
         const proposals = buildWorkflowCandidateProposalListReport({
             rows: [],

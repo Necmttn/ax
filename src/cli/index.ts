@@ -2102,6 +2102,7 @@ const classifiersWorkflowCandidatesCommand = Command.make(
         emitPendingReviewTask: Flag.boolean("emit-pending-review-task").pipe(Flag.withDefault(false)),
         listPendingReviewTasks: Flag.boolean("list-pending-review-tasks").pipe(Flag.withDefault(false)),
         repairPendingReviewContext: Flag.boolean("repair-pending-review-context").pipe(Flag.withDefault(false)),
+        repairTarget: Flag.string("repair-target").pipe(Flag.optional),
         repairedFixturePack: Flag.string("repaired-fixture-pack").pipe(Flag.optional),
         repairedReviewBrief: Flag.string("repaired-review-brief").pipe(Flag.optional),
         pendingReviewTaskPath: Flag.string("pending-review-task-path").pipe(Flag.optional),
@@ -2153,7 +2154,7 @@ const classifiersWorkflowCandidatesCommand = Command.make(
         proposalSection: Flag.string("proposal-section").pipe(Flag.optional),
         json: jsonFlag,
     },
-    ({ sourceKind, action, classifier, search, taskLike, topicReport, listProposals, listHarnessFacts, reviewCoverage, includeHarnessFacts, includeHelperFacts, includeReviewFacts, guidanceDecision, guidanceDecisionBatch, proposalStatus, expandEvidence, evidencePack, classifierFixturePack, coverageFixturePack, coverageReviewPack, coverageReviewBrief, syncCoverageReviewBrief, harnessFacts, harnessWritePlan, applyHarnessFacts, reviewFacts, reviewWritePlan, applyReviewFacts, requireReviewProvenance, requireReviewHandoff, reviewProvenanceReviewer, reviewProvenanceReviewedAt, reviewPipelineLifecycle, reviewPipelineVerifyOutputs, reviewPipelineReviewer, reviewPipelineReviewedAt, limit, examples, out, brief, syncBrief, promoteTasks, emitAdjacentTasks, emitPendingReviewTask, listPendingReviewTasks, repairPendingReviewContext, repairedFixturePack, repairedReviewBrief, pendingReviewTaskPath, pendingReviewTaskStatus, pendingReviewDecisionStatus, pendingReviewCommandStatus, pendingReviewRoute, pendingReviewProgressStatus, promoteHarnessProposals, requireHarnessChecks, promoteProposals, proposalDryRun, promotionMode, taskDir, proposalTarget, proposalSection, json }) => {
+    ({ sourceKind, action, classifier, search, taskLike, topicReport, listProposals, listHarnessFacts, reviewCoverage, includeHarnessFacts, includeHelperFacts, includeReviewFacts, guidanceDecision, guidanceDecisionBatch, proposalStatus, expandEvidence, evidencePack, classifierFixturePack, coverageFixturePack, coverageReviewPack, coverageReviewBrief, syncCoverageReviewBrief, harnessFacts, harnessWritePlan, applyHarnessFacts, reviewFacts, reviewWritePlan, applyReviewFacts, requireReviewProvenance, requireReviewHandoff, reviewProvenanceReviewer, reviewProvenanceReviewedAt, reviewPipelineLifecycle, reviewPipelineVerifyOutputs, reviewPipelineReviewer, reviewPipelineReviewedAt, limit, examples, out, brief, syncBrief, promoteTasks, emitAdjacentTasks, emitPendingReviewTask, listPendingReviewTasks, repairPendingReviewContext, repairTarget, repairedFixturePack, repairedReviewBrief, pendingReviewTaskPath, pendingReviewTaskStatus, pendingReviewDecisionStatus, pendingReviewCommandStatus, pendingReviewRoute, pendingReviewProgressStatus, promoteHarnessProposals, requireHarnessChecks, promoteProposals, proposalDryRun, promotionMode, taskDir, proposalTarget, proposalSection, json }) => {
         const actionValue = optionValue(action);
         const classifierValue = optionValue(classifier);
         const searchValue = optionValue(search);
@@ -2180,6 +2181,7 @@ const classifiersWorkflowCandidatesCommand = Command.make(
         const pendingReviewCommandStatusValue = optionValue(pendingReviewCommandStatus);
         const pendingReviewRouteValue = optionValue(pendingReviewRoute);
         const pendingReviewProgressStatusValue = optionValue(pendingReviewProgressStatus);
+        const repairTargetValue = optionValue(repairTarget);
         const repairedFixturePackPath = optionValue(repairedFixturePack);
         const repairedReviewBriefPath = optionValue(repairedReviewBrief);
         const taskDirPath = optionValue(taskDir);
@@ -2232,6 +2234,7 @@ const classifiersWorkflowCandidatesCommand = Command.make(
             emitPendingReviewTask,
             listPendingReviewTasks,
             repairPendingReviewContext,
+            ...(repairTargetValue === undefined ? {} : { repairTarget: repairTargetValue }),
             ...(repairedFixturePackPath === undefined ? {} : { repairedFixturePack: repairedFixturePackPath }),
             ...(repairedReviewBriefPath === undefined ? {} : { repairedReviewBrief: repairedReviewBriefPath }),
             ...(pendingReviewTaskPathValue === undefined ? {} : { pendingReviewTaskPath: pendingReviewTaskPathValue }),

@@ -33,10 +33,11 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E481 makes the remaining E480 `unknown_target` blocker
-  machine-actionable. The repaired packet now carries a target-resolution row
-  and regenerated review brief section telling reviewers/services to set a
-  concrete target or defer/reject before human verdict collection.
+- Index continuation: E482 lets a reviewer/service explicitly resolve the E481
+  `unknown_target` blocker during pending-review context repair. The repaired
+  packet now reaches `remaining_issue_count=0` with target `workflow_state`,
+  leaving the candidate blocked only on a real human review decision and
+  rationale.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
   append-only fixtures, graph projection, and workflow/harness usefulness
@@ -105,9 +106,58 @@ Current recommendation:
   analysis passes the candidate-layer quality gate but remains
   `promotion_quality=false` because residual repeated misses, residual `none`
   false positives, and missing human promotion review still block autonomous
-  fact promotion. The immediate bottleneck is now explicit target resolution
-  plus a real human review decision for the repaired pending candidate, not
-  promoting synthetic or harness-only evidence.
+  fact promotion. The immediate bottleneck is now a real human review decision
+  and rationale for the target-resolved pending candidate, not promoting
+  synthetic or harness-only evidence.
+
+## E482 - Resolve Pending Review Target Override
+
+Question:
+- Once target-resolution work is visible in E481, can a service or reviewer
+  provide a concrete target during context repair so the pending fixture moves
+  from repair-blocked to normal human verdict collection?
+
+Implementation:
+- Added `--repair-target=<target>` to
+  `axctl classifiers workflow-candidates --repair-pending-review-context`.
+- Threaded the same explicit target into
+  `buildWorkflowCandidateGuidancePendingReviewContextRepairReport`.
+- The repair only applies to rows that already have `unknown_target`; it does
+  not rewrite concrete targets.
+- Context-derived targets still take precedence when available. The explicit
+  CLI target is a fallback for unresolved repair packets.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-context-target-resolved-e482.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e482-target-resolved.jsonl`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e482-target-resolved.md`
+
+Live results:
+- Fixture count: `1`
+- Repaired fixtures: `1`
+- Fully repaired fixtures: `1`
+- Remaining context issues: `0`
+- Target-resolution required count: `0`
+- Repaired target: `workflow_state`
+- Next action:
+  `Review the regenerated fixture brief and record a human verdict with rationale.`
+
+Decision:
+- Continue. The current candidate has crossed the context/target repair gate,
+  but it is still not promotion-quality until a human review decision and
+  rationale are recorded.
+- Next useful slice: use the target-resolved fixture pack as the input to the
+  review-brief sync/readiness path, record or simulate a real reviewed verdict
+  with rationale, and verify the graph write plan remains gated until review
+  provenance/handoff requirements are satisfied.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "pending review context repair applies explicit target override"
+bun src/cli/index.ts classifiers workflow-candidates --repair-pending-review-context --task-dir=.ax/tasks --repair-target=workflow_state --out=.ax/experiments/workflow-candidate-pending-review-context-target-resolved-e482.json --repaired-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e482-target-resolved.jsonl --repaired-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e482-target-resolved.md --json
+jq '{fixture_count,repaired_fixture_count,fully_repaired_fixture_count,remaining_issue_count,target_resolution_required_count,target_resolution_rows,target: .rows[0].repaired_fixture.target,next_action}' .ax/experiments/workflow-candidate-pending-review-context-target-resolved-e482.json
+rg -n "Target Resolution|_none_|workflow_state|unknown_target" .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e482-target-resolved.md .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e482-target-resolved.jsonl .ax/experiments/workflow-candidate-pending-review-context-target-resolved-e482.json
+```
 
 ## E481 - Add Target Resolution Guidance
 

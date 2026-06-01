@@ -76,6 +76,7 @@ export interface WorkflowCandidateCommandInput {
     readonly emitPendingReviewTask?: boolean;
     readonly listPendingReviewTasks?: boolean;
     readonly repairPendingReviewContext?: boolean;
+    readonly repairTarget?: string;
     readonly repairedFixturePack?: string;
     readonly repairedReviewBrief?: string;
     readonly pendingReviewTaskPath?: string;
@@ -3624,8 +3625,10 @@ export function buildWorkflowCandidateGuidancePendingReviewContextRepairReport(i
     readonly reviewBriefPath?: string;
     readonly rows: readonly WorkflowCandidateTopicClassifierFixtureRow[];
     readonly turnContexts: readonly WorkflowCandidateGuidancePendingReviewContextRepairTurnContext[];
+    readonly repairTarget?: string;
 }): WorkflowCandidateGuidancePendingReviewContextRepairReport {
     const contexts = new Map(input.turnContexts.map((context) => [context.turn_id, context]));
+    const explicitRepairTarget = input.repairTarget?.trim();
     const rows = input.rows.map((row): WorkflowCandidateGuidancePendingReviewContextRepairRow => {
         const beforeIssues = pendingReviewFixtureContextIssues(row);
         const context = typeof row.turn === "string" ? contexts.get(row.turn) : undefined;
@@ -3641,8 +3644,14 @@ export function buildWorkflowCandidateGuidancePendingReviewContextRepairReport(i
             previousAssistantText = context!.previous_assistant_text!.trim();
             repairedIssues.push("missing_previous_assistant_context");
         }
-        if (beforeIssues.includes("unknown_target") && (context?.target ?? "").trim().length > 0 && context?.target !== "unknown") {
-            target = context!.target!.trim();
+        const contextTarget = context?.target?.trim();
+        const resolvedTarget = contextTarget !== undefined && contextTarget.length > 0 && contextTarget !== "unknown"
+            ? contextTarget
+            : explicitRepairTarget !== undefined && explicitRepairTarget.length > 0 && explicitRepairTarget !== "unknown"
+                ? explicitRepairTarget
+                : undefined;
+        if (beforeIssues.includes("unknown_target") && resolvedTarget !== undefined) {
+            target = resolvedTarget;
             repairedIssues.push("unknown_target");
         }
         const repairedFixture = {
@@ -7675,6 +7684,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 ...(task.review_brief_path === undefined ? {} : { reviewBriefPath: task.review_brief_path }),
                 rows,
                 turnContexts,
+                ...(input.repairTarget === undefined ? {} : { repairTarget: input.repairTarget }),
             });
             if (input.repairedFixturePack) {
                 mkdirSync(dirname(input.repairedFixturePack), { recursive: true });
