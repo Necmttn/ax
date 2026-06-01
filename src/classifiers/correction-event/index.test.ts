@@ -40,4 +40,18 @@ describe("correction-event classifier", () => {
             target: "misclassified_intent",
         });
     });
+
+    test("classifies reviewed workflow candidate correction facts", async () => {
+        const results = await run(
+            "Persisted review fact accepted workflow candidate correction_or_rejection_signal. add_context_guardrail Accepted as a real workflow-state correction case.",
+        );
+
+        expect(results[0]).toMatchObject({
+            classifierKey: "correction-event",
+            label: "correction",
+            target: "workflow_state",
+            durability: "repo_preference",
+            signals: ["correction:workflow_state", "source:reviewed_workflow_candidate"],
+        });
+    });
 });

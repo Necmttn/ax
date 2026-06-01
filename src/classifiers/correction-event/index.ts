@@ -58,6 +58,20 @@ function classify(window: EventWindow): readonly ClassifierResult[] {
         })];
     }
 
+    if (/\b(accepted workflow candidate|persisted review fact)\b.*\b(correction_or_rejection_signal|workflow-state correction|workflow_state|add_context_guardrail)\b/i.test(lower)) {
+        return [label(window, {
+            classifierKey,
+            classifierVersion,
+            label: "correction",
+            target: "workflow_state",
+            polarity: "revise",
+            durability: "repo_preference",
+            confidence: 0.84,
+            evidence: evidenceFor(window, "workflow_state_reviewed_candidate"),
+            signals: ["correction:workflow_state", "source:reviewed_workflow_candidate"],
+        })];
+    }
+
     if (/^(no|nope|nah)\b|\b(wrong|not what i asked|not that)\b/i.test(lower)) {
         return [label(window, {
             classifierKey,
@@ -82,6 +96,6 @@ export const correctionEventClassifier = defineClassifier({
     description: "Identifies user corrections and what was wrong with the agent response or interpretation.",
     input: "event_window",
     labels: ["correction"],
-    targets: ["wrong_artifact", "missing_context", "misclassified_intent", "wrong_output"],
+    targets: ["wrong_artifact", "missing_context", "misclassified_intent", "wrong_output", "workflow_state"],
     classify: (window) => Effect.succeed(classify(window)),
 });

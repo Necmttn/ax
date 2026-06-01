@@ -237,6 +237,45 @@ Decision:
   the workflow-candidate row from its context, then encode the result as a
   focused gate/eval rather than another broad SetFit run.
 
+## E492 - Deterministic Workflow Correction Catch
+
+Question: can a cheap deterministic classifier catch the exact
+workflow-candidate correction row that SetFit and the current hybrid layer keep
+missing as `none`?
+
+Change:
+
+- Extended `correction-event` with a narrow `workflow_state` target for reviewed
+  workflow-candidate correction facts containing `accepted workflow candidate`
+  or `persisted review fact` plus `correction_or_rejection_signal`,
+  `workflow-state correction`, `workflow_state`, or `add_context_guardrail`.
+- Added unit and golden fixture coverage for the E489/E491 missed row shape.
+
+Verification:
+
+```sh
+bun test src/classifiers/correction-event/index.test.ts src/classifiers/eval.test.ts src/classifiers/list.test.ts
+bun src/cli/index.ts classifiers eval --path=src/classifiers/eval-fixtures/correction-event.json --json
+```
+
+Results:
+
+- Unit/eval/list tests passed: `10 pass`.
+- Correction-event golden eval: `8/8` passed.
+- The new fixture
+  `reviewed-workflow-candidate-correction` is classified as
+  `correction-event:correction/workflow_state` with repo durability.
+
+Decision:
+
+- This is a narrow deterministic routing fix, not evidence that SetFit has
+  improved.
+- It supports the hybrid architecture: reviewed graph/workflow-candidate
+  artifacts can be routed cheaply before model classification.
+- Next useful slice: project or query this deterministic result path against
+  the same workflow-candidate evidence so the graph can prefer deterministic
+  reviewed correction facts over raw model `none` predictions.
+
 Current recommendation:
 
 - Index continuation: E488 turns the accepted classifier-fixture follow-up into
