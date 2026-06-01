@@ -15,11 +15,18 @@ view with replay-from-start rehydration on refresh).
   daemon on 1738, serving the freshly-built SPA with the new `/ingest-live`
   route against the running local daemon.
 
-> Note on the compiled binary: `bun build --compile` produces `dist/axctl`, but
-> running the compiled binary fails at startup with
-> `No native build was found for platform=darwin arch=arm64` - a native module
-> cannot be bundled into a single-file `--compile` binary. This is a packaging
-> limitation unrelated to this feature; `ax serve` runs cleanly from source.
+> Note on the compiled binary: live ingest is verified **from source** (full
+> dashboard Live view + refresh-mid-run rehydration, below). The compiled
+> `bun build --compile` binary (`dist/axctl`, shipped by `install.sh`) **boots
+> `ax serve` cleanly and degrades gracefully** - it serves the dashboard and
+> every other route, but live ingest is disabled. The Durable Streams sidecar
+> loads native **lmdb**, which cannot load from a single-file `--compile` binary
+> (`No native build was found for platform=darwin arch=arm64`); native modules
+> fundamentally can't be bundled into `--compile`. On the binary, `ax serve`
+> logs `[ax] live ingest disabled: Durable Streams sidecar unavailable (…)` at
+> startup and `POST /api/ingest` returns `503 {"error":"live ingest unavailable:
+> run ax from source …"}` instead of crashing. The `bin/axctl` shim already runs
+> from source, so the live path works for that entrypoint.
 
 ## What was verified
 

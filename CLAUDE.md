@@ -92,6 +92,7 @@ Run `bun refs:setup` after fresh clone to populate `.references/`.
 - The dashboard live view subscribes from offset `-1` (replay history from start, then continue live), so a **page refresh / reconnect mid-run rehydrates** already-done stages and resumes the live tail - the Durable Streams offset-resume payoff vs raw SSE. (See `docs/superpowers/research/durable-streams-api.md` for the embed-vs-sidecar decision.)
 - The `IngestStreamBus` seam (`apps/axctl/src/dashboard/ingest-stream.ts`) means the local Durable-Streams-in-Bun backing can later be swapped for a hosted backend without touching the producers or the UI.
 - The CLI `ax ingest` and its terminal step animation (`apps/axctl/src/cli/ingest-trace-progress.ts`) are **unchanged** - the server path reuses `runIngest`, the CLI never passes a `runId`, and `AX_PROGRESS=off` still silences the CLI animation.
+- Live ingest in the dashboard requires running ax **from source** (the `bin/axctl` shim already does this). The compiled standalone binary serves the dashboard but disables live ingest - native lmdb can't bundle into the `--compile` binary, so the sidecar is skipped and `POST /api/ingest` returns 503.
 
 ## Workflow extraction commands
 

@@ -397,10 +397,12 @@ const API_CAPABILITIES = [
  * onto a detached daemon fiber that MUST outlive the HTTP request that
  * triggered it. A fresh per-request runtime would tear down when the request
  * resolves and kill the daemon mid-run. `stream` is the Durable Streams
- * sidecar the browser subscribes to directly.
+ * sidecar the browser subscribes to directly; it is `null` when the sidecar
+ * could not start (e.g. the compiled `--compile` binary, which cannot load
+ * native lmdb) - the server still boots and live ingest reports unavailable.
  */
 interface ServeIngestState {
-    readonly stream: DurableIngestStream;
+    readonly stream: DurableIngestStream | null;
     readonly runtime: ManagedRuntime.ManagedRuntime<
         Layer.Success<typeof IngestRuntimeLayer>,
         Layer.Error<typeof IngestRuntimeLayer>
@@ -417,6 +419,15 @@ async function handleIngestTrigger(req: Request): Promise<Response> {
         // server; the sidecar + runtime only exist once serveDashboard boots.
         return jsonResponse({ error: "ingest_unavailable" }, 503);
     }
+    const stream = state.stream;
+    if (stream === null) {
+        // The Durable Streams sidecar failed to start (e.g. the compiled
+        // single-file binary, which can't load native lmdb). The dashboard +
+        // all other routes still work; live ingest is the only casualty.
+        return jsonResponse({
+            error: "live ingest unavailable: run ax from source (the compiled binary can't host the Durable Streams sidecar)",
+        }, 503);
+    }
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
     const sinceDays = typeof body.since === "number" && Number.isInteger(body.since) && body.since > 0
         ? body.since
@@ -431,15 +442,15 @@ async function handleIngestTrigger(req: Request): Promise<Response> {
                     args: sinceDays === undefined ? [] : [`--since=${sinceDays}`],
                     cwd: process.cwd(),
                 },
-                state.stream,
+                stream,
                 IngestRuntimeLayer,
             ),
         );
         return jsonResponse({
             runId,
-            stream: state.stream.streamUrl(runId),
+            stream: stream.streamUrl(runId),
             streamName: ingestStreamName(runId),
-            streamBaseUrl: state.stream.baseUrl,
+            streamBaseUrl: stream.baseUrl,
         });
     } catch (err) {
         return jsonResponse({ error: err instanceof Error ? err.message : String(err) }, 500);
@@ -988,17 +999,25 @@ export async function handleDashboardRequestWithCors(req: Request): Promise<Resp
 export async function serveDashboard(args: string[]): Promise<void> {
     const { port } = parseDashboardServeArgs(args);
 
-    // Start the Durable Streams sidecar + a long-lived runtime ONCE, before we
-    // accept requests. POST /api/ingest forks the ingest pipeline onto this
-    // runtime's daemon fiber and publishes progress to this sidecar, which the
-    // browser subscribes to directly (the sidecar has permissive CORS).
-    const stream = await createDurableIngestStream();
+    // Start the Durable Streams sidecar ONCE, before we accept requests, so
+    // POST /api/ingest can publish progress the browser subscribes to directly
+    // (the sidecar has permissive CORS). Graceful degradation: the sidecar
+    // loads native lmdb, which can't load from a `bun build --compile`
+    // single-file binary, so this throws there. We catch and run WITHOUT live
+    // ingest rather than crash - the dashboard + every other route still work.
+    let stream: DurableIngestStream | null = null;
+    try {
+        stream = await createDurableIngestStream();
+    } catch (err) {
+        stream = null;
+        console.warn(`[ax] live ingest disabled: Durable Streams sidecar unavailable (${err instanceof Error ? err.message : String(err)}). Run ax from source (not the compiled binary) to enable live ingest in the dashboard.`);
+    }
 
-    // From here the sidecar port is bound. If anything before a successful
-    // `Bun.serve` listen throws (most commonly EADDRINUSE - port in use), tear
-    // down what we already started so we don't leak the sidecar port, then
-    // rethrow. Only the success path leaves `serveIngestState` + the shutdown
-    // handler in place.
+    // Build the long-lived runtime regardless (it doesn't need the sidecar).
+    // If anything before a successful `Bun.serve` listen throws (most commonly
+    // EADDRINUSE - port in use), tear down what we already started so we don't
+    // leak the sidecar port, then rethrow. Only the success path leaves
+    // `serveIngestState` + the shutdown handler in place.
     let runtime: ServeIngestState["runtime"] | undefined;
     let server: ReturnType<typeof Bun.serve>;
     try {
@@ -1010,7 +1029,7 @@ export async function serveDashboard(args: string[]): Promise<void> {
         server = Bun.serve({ port, fetch: handleDashboardRequestWithCors, idleTimeout: 60 });
     } catch (err) {
         serveIngestState = null;
-        await stream.stop().catch(() => undefined);
+        if (stream) await stream.stop().catch(() => undefined);
         if (runtime) await runtime.dispose().catch(() => undefined);
         throw err;
     }
@@ -1027,7 +1046,7 @@ export async function serveDashboard(args: string[]): Promise<void> {
         shuttingDown = true;
         serveIngestState = null;
         await server.stop();
-        await stream.stop().catch(() => undefined);
+        if (stream) await stream.stop().catch(() => undefined);
         await runtime.dispose().catch(() => undefined);
         process.removeListener("SIGINT", onSigint);
         process.removeListener("SIGTERM", onSigterm);

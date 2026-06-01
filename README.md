@@ -169,6 +169,10 @@ keeps the local Durable-Streams-in-Bun backing swappable for a hosted backend
 without touching producers or UI; the CLI `axctl ingest` and its terminal
 animation are unchanged.
 
+> Live ingest requires running ax **from source** (the `bin/axctl` shim already
+> does). The compiled standalone binary serves the dashboard but disables live
+> ingest, since native lmdb can't be bundled into the `--compile` binary.
+
 ## Agent integration
 
 `ax` ships two installable skills so a Claude Code / Codex agent can query
