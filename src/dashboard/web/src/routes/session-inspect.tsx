@@ -35,7 +35,6 @@ export function Span({ span }: { span: InspectSpanDto }) {
 }
 
 type ContentTone = { bg: string; fg: string; bar: string; label: string };
-type InspectLens = "legend" | "cost";
 
 const ALIAS_STYLE: Record<string, ContentTone> = {
     objective:             { bg: "#dcfce7", fg: "#166534", bar: "#22c55e", label: "objective" },
@@ -367,33 +366,7 @@ export function rawBlockTextStyle({
     };
 }
 
-function LensToggle({ lens, setLens }: { lens: InspectLens; setLens: (lens: InspectLens) => void }) {
-    const button = (value: InspectLens, label: string) => (
-        <button
-            type="button"
-            onClick={() => setLens(value)}
-            style={{
-                border: value === lens ? "1px solid #141615" : "1px solid #cfd8d4",
-                background: value === lens ? "#141615" : "#fff",
-                color: value === lens ? "#fff" : "#475569",
-                padding: "3px 9px",
-                font: "11px/1.2 ui-monospace, monospace",
-                cursor: "pointer",
-            }}
-        >
-            {label}
-        </button>
-    );
-    return (
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {button("legend", "legend")}
-            {button("cost", "cost lens")}
-        </div>
-    );
-}
-
 export function InspectGuide({ data }: { data: Pick<SessionInspectPayload, "total_chars" | "total_turns" | "token_usage"> }) {
-    const [lens, setLens] = useState<InspectLens>("legend");
     const usage = data.token_usage;
     const totalCost = tokenCostTotal(usage);
     const breakdownTotal = usage ? totalBreakdownCost(usage) : 0;
@@ -408,71 +381,62 @@ export function InspectGuide({ data }: { data: Pick<SessionInspectPayload, "tota
             return acc;
         }, { stops: [], cursor: 0 }).stops.join(", ");
 
+    if (!usage) return null;
+
     return (
         <div style={{
             margin: "4px 24px 10px",
-            padding: "10px 12px",
+            padding: "8px 10px",
             border: "1px solid #cfd8d4",
             background: "#f8fafc",
             display: "grid",
-            gap: 9,
+            gap: 7,
         }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                <LensToggle lens={lens} setLens={setLens} />
+                <div style={{ display: "flex", gap: 12, alignItems: "baseline", flexWrap: "wrap" }}>
+                    <strong
+                        title="Estimated total provider cost for this session from stored token usage and the model pricing catalog."
+                        style={{ color: "#141615", font: "700 15px/1 ui-monospace, monospace" }}
+                    >
+                        {fmtUsd(totalCost)}
+                    </strong>
+                    <span
+                        title="Total provider tokens reported for the session. This is billing telemetry, unlike the structure percentages below which are character share."
+                        style={{ color: "#64748b", font: "11px/1.4 ui-monospace, monospace" }}
+                    >
+                        {fmtCount(usage.estimated_tokens)} tokens · {usage.model ?? "unknown model"}
+                    </span>
+                </div>
                 <span style={{ color: "#64748b", font: "10px/1.4 ui-monospace, monospace" }}>
-                    structure % is character share · cost is provider token usage when available
+                    structure % = character share · hover metrics for definitions
                 </span>
             </div>
-            {lens === "legend" ? (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
-                    {[
-                        ["% chips", "Share of exported characters, not token or billing share."],
-                        ["kc", "Thousand characters in the turn or session."],
-                        ["span", "A classified message slice from the raw transcript."],
-                        ["top-right chips", "Semantic block/atom counts detected inside the turn."],
-                    ].map(([term, body]) => (
-                        <div key={term} style={{ background: "#fff", border: "1px solid #e2e8f0", padding: "7px 8px" }}>
-                            <div style={{ color: "#334155", font: "700 11px/1.3 ui-monospace, monospace" }}>{term}</div>
-                            <div style={{ color: "#64748b", fontSize: 12, lineHeight: 1.35 }}>{body}</div>
-                        </div>
-                    ))}
-                </div>
-            ) : usage ? (
-                <div style={{ display: "grid", gap: 8 }}>
-                    <div style={{ display: "flex", gap: 12, alignItems: "baseline", flexWrap: "wrap" }}>
-                        <strong style={{ color: "#141615", font: "700 18px/1 ui-monospace, monospace" }}>{fmtUsd(totalCost)}</strong>
-                        <span style={{ color: "#64748b", font: "11px/1.4 ui-monospace, monospace" }}>
-                            {fmtCount(usage.estimated_tokens)} tokens · {usage.model ?? "unknown model"} · {usage.pricing_source ?? "pricing source unknown"}
-                        </span>
-                    </div>
-                    <div style={{
-                        height: 10,
-                        border: "1px solid #cfd8d4",
-                        background: gradient ? `linear-gradient(90deg, ${gradient})` : "#e5e7eb",
-                    }} />
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 6 }}>
-                        {segments.map((segment) => (
-                            <div key={segment.label} style={{ background: "#fff", border: "1px solid #e2e8f0", padding: "6px 8px", boxShadow: `inset 3px 0 0 ${segment.color}` }}>
-                                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, font: "11px/1.3 ui-monospace, monospace" }}>
-                                    <span>{segment.label}</span>
-                                    <strong>{fmtUsd(segment.value)}</strong>
-                                </div>
-                                <div style={{ color: "#94a3b8", font: "10px/1.3 ui-monospace, monospace" }}>
-                                    {pctOf(segment.value, breakdownTotal || totalCost)}
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                    <div style={{ color: "#64748b", fontSize: 12 }}>
-                        Turn headers below use real provider per-turn usage when available.
-                        Block/span cost in the inspector is allocated within the selected turn.
-                    </div>
-                </div>
-            ) : (
-                <div style={{ background: "#fff", border: "1px solid #e2e8f0", padding: "8px 9px", color: "#64748b", fontSize: 12 }}>
-                    No token usage row is available for this shared/local payload yet. The structure view still works; cost attribution needs provider usage data.
-                </div>
-            )}
+            <div
+                title={`Cost mix by provider billing component. Pricing: ${usage.pricing_source ?? "unknown"}. Per-turn headers below use turn usage when available; inspector block/span cost is character-allocated within the selected turn.`}
+                style={{
+                    height: 8,
+                    border: "1px solid #cfd8d4",
+                    background: gradient ? `linear-gradient(90deg, ${gradient})` : "#e5e7eb",
+                }}
+            />
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {segments.map((segment) => (
+                    <span
+                        key={segment.label}
+                        title={`${segment.label}: ${fmtUsd(segment.value)} (${pctOf(segment.value, breakdownTotal || totalCost)} of known cost components)`}
+                        style={{
+                            background: "#fff",
+                            color: "#334155",
+                            border: "1px solid #e2e8f0",
+                            borderLeft: `3px solid ${segment.color}`,
+                            padding: "2px 7px",
+                            font: "10px/1.2 ui-monospace, monospace",
+                        }}
+                    >
+                        {segment.label} {fmtUsd(segment.value)}
+                    </span>
+                ))}
+            </div>
         </div>
     );
 }
@@ -873,7 +837,11 @@ export function Turn({
             const c = KIND_STYLE[kind];
             const pct = total > 0 ? ((n / total) * 100).toFixed(0) : "0";
             return (
-                <span key={kind} style={{ background: c.bg, color: c.fg, padding: "0 6px", borderRadius: 3, fontSize: 10, fontFamily: "ui-monospace, monospace" }}>
+                <span
+                    key={kind}
+                    title={`${c.label}: ${pct}% of this turn's characters. This is structure share, not token or billing share.`}
+                    style={{ background: c.bg, color: c.fg, padding: "0 6px", borderRadius: 3, fontSize: 10, fontFamily: "ui-monospace, monospace" }}
+                >
                     {c.label} {pct}%
                 </span>
             );
@@ -881,7 +849,7 @@ export function Turn({
     const aliasChips = turn.content ? semanticAliasCounts(turn.content).slice(0, 8).map(({ alias, label, count, tone }) => (
         <span
             key={alias}
-            title={`${label} · ${count} block${count === 1 ? "" : "s"}`}
+            title={`${label}: ${count} semantic block${count === 1 ? "" : "s"} detected inside this turn.`}
             style={{
                 background: tone.bg,
                 color: tone.fg,
@@ -931,10 +899,18 @@ export function Turn({
                     </span>
                 ) : null}
                 {jsonlBadge}
-                <span style={{ color: "#94a3b8" }}>{ts}</span>
-                <span style={{ color: "#94a3b8" }}>{sizeStr}c · {turn.spans.length}span</span>
+                <span title="Turn timestamp from the source transcript." style={{ color: "#94a3b8" }}>{ts}</span>
+                <span
+                    title={`${sizeStr}c = ${turn.char_count.toLocaleString()} characters in this turn. ${turn.spans.length}span = ${turn.spans.length} classified message slice${turn.spans.length === 1 ? "" : "s"} from the raw transcript.`}
+                    style={{ color: "#94a3b8" }}
+                >
+                    {sizeStr}c · {turn.spans.length}span
+                </span>
                 {turnUsage ? (
-                    <span title={`${turnUsage.usage_quality} · ${turnUsage.usage_source}`} style={{ color: "#64748b" }}>
+                    <span
+                        title={`Provider token usage for this turn. ${turnUsage.usage_quality} · ${turnUsage.usage_source}. fresh=input billed at normal input price; cached=cache-read input; out=output tokens.`}
+                        style={{ color: "#64748b" }}
+                    >
                         {turnCost !== null ? fmtUsd(turnCost) : "cost ?"} · {usageTokenLine(turnUsage)}
                     </span>
                 ) : null}
@@ -1203,7 +1179,11 @@ export function SessionInspectRoute() {
                             const n = data.totals_by_kind[kind] ?? 0;
                             const pct = data.total_chars > 0 ? ((n / data.total_chars) * 100).toFixed(1) : "0";
                             return (
-                                <span key={kind} style={{ background: c.bg, color: c.fg, padding: "2px 10px", borderRadius: 4, fontSize: 11, fontWeight: 600, borderLeft: `3px solid ${c.bar}` }}>
+                                <span
+                                    key={kind}
+                                    title={`${c.label}: ${pct}% of exported characters in this session view. This is not token share or billing share.`}
+                                    style={{ background: c.bg, color: c.fg, padding: "2px 10px", borderRadius: 4, fontSize: 11, fontWeight: 600, borderLeft: `3px solid ${c.bar}` }}
+                                >
                                     {c.label} <em style={{ fontStyle: "normal", opacity: 0.7, fontWeight: 400 }}>{pct}%</em>
                                 </span>
                             );
