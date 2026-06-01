@@ -10,4 +10,10 @@
 # with a 200 (URL stays as-is, React Router renders the matching route).
 # This is the catch-all for /features, /showcases, /origin, /old-landing,
 # /how-it-works, /docs/*, /manifesto, /brand, /releases/*, etc.
-/*  /_shell.html  200
+#
+# Target is /index.html (a copy of _shell.html emitted by the build), NOT
+# /_shell.html: Cloudflare Pages auto-redirects any *.html URL to its
+# extensionless form (308), so a `/_shell.html` rewrite target gets bounced to
+# /_shell and the /* rule re-matches -> infinite 308 loop. index.html is served
+# as the directory index without that redirect, breaking the loop.
+/*  /index.html  200
