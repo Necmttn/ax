@@ -10,7 +10,7 @@
       "extra-files": [
         {
           "type": "generic",
-          "path": "src/cli/version.ts"
+          "path": "apps/axctl/src/cli/version.ts"
         }
       ],
       "changelog-sections": [
