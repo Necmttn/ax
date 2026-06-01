@@ -11,7 +11,7 @@ import type {
 } from "@shared/dashboard-types.ts";
 import { shortSessionId } from "@shared/session-id.ts";
 import { FilterBar } from "./inspector-filter-bar.tsx";
-import { InspectGuide, KIND_STYLE, Turn } from "./session-inspect.tsx";
+import { CostRail, InspectGuide, KIND_STYLE, Turn, useVisibleTurnSeq } from "./session-inspect.tsx";
 
 interface ShareArtifact {
     readonly schema_version: 1;
@@ -159,6 +159,7 @@ export function ShareInspectView(props: { readonly owner: string; readonly gistI
     const [anchoredSeq, setAnchoredSeq] = useState<number | null>(() => hashSeq());
     const turnsRef = useRef<ReadonlyArray<InspectTurnDto>>([]);
     turnsRef.current = data?.turns ?? [];
+    const visibleSeq = useVisibleTurnSeq(data?.turns ?? [], anchoredSeq ?? data?.turns[0]?.seq ?? null);
 
     useEffect(() => {
         const onHashChange = () => setAnchoredSeq(hashSeq());
@@ -211,20 +212,27 @@ export function ShareInspectView(props: { readonly owner: string; readonly gistI
                             const n = data.totals_by_kind[kind] ?? 0;
                             const pct = data.total_chars > 0 ? ((n / data.total_chars) * 100).toFixed(1) : "0";
                             return (
-                                <span key={kind} style={{ background: c.bg, color: c.fg, padding: "2px 10px", borderRadius: 4, fontSize: 11, fontWeight: 600, borderLeft: `3px solid ${c.bar}` }}>
+                                <span
+                                    key={kind}
+                                    title={`${c.label}: ${pct}% of exported characters in this session view. This is not token share or billing share.`}
+                                    style={{ background: c.bg, color: c.fg, padding: "2px 10px", borderRadius: 4, fontSize: 11, fontWeight: 600, borderLeft: `3px solid ${c.bar}` }}
+                                >
                                     {c.label} <em style={{ fontStyle: "normal", opacity: 0.7, fontWeight: 400 }}>{pct}%</em>
                                 </span>
                             );
                         })}
                     </div>
-                    <div>
-                        {data.turns.map((turn) => (
-                            <Turn
-                                key={turn.seq}
-                                turn={turn}
-                                anchored={anchoredSeq === turn.seq}
-                            />
-                        ))}
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                        <div style={{ minWidth: 0, flex: "1 1 auto" }}>
+                            {data.turns.map((turn) => (
+                                <Turn
+                                    key={turn.seq}
+                                    turn={turn}
+                                    anchored={anchoredSeq === turn.seq}
+                                />
+                            ))}
+                        </div>
+                        <CostRail data={data} currentSeq={visibleSeq} />
                     </div>
                 </>
             ) : null}
