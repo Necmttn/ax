@@ -182,6 +182,61 @@ Decision:
   decide which repeated misses are valid labels, which need fixture text/target
   changes, and which imply deterministic/hybrid gates.
 
+## E491 - Workflow Hybrid Gate Check
+
+Question: does the existing deterministic none-safety/hybrid layer fix the
+same workflow-candidate miss that raw SetFit keeps predicting as `none`?
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers package-operations \
+  --operation=workflow-fixture-none-safety-pregate \
+  --execute \
+  --out=.ax/experiments/classifier-package-execution-workflow-fixture-none-safety-pregate-e491.json \
+  --json
+
+bun src/cli/index.ts classifiers package-operations \
+  --operation=workflow-fixture-hybrid-robustness \
+  --execute --allow-expensive \
+  --out=.ax/experiments/classifier-package-execution-workflow-fixture-hybrid-robustness-e491.json \
+  --json
+```
+
+Artifacts:
+
+- `.ax/experiments/none-safety-pregate-workflow-fixtures-current.json`
+- `.ax/experiments/hybrid-robustness-workflow-fixtures-current.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-none-safety-pregate-e491.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-hybrid-robustness-e491.json`
+
+Results:
+
+- None-safety pregate:
+  `decision=candidate_none_safety_pregate`, before macro F1 mean/min
+  `0.7933/0.7364`, after macro F1 mean/min `0.801/0.7364`, before none
+  false-positive max `0.0769`, after none false-positive max `0.0`,
+  `fixed_none_false_positive_count_total=1`, harmful overrides `0`.
+- Hybrid robustness:
+  `decision=hybrid_robust_enough`, failures `[]`, macro F1 mean/min
+  `0.801/0.7364`, accuracy mean `0.813`, none false-positive max `0.0`,
+  override count `1`, harmful overrides `0`.
+- The repeated workflow-candidate miss
+  `workflow-candidate-topic/review_coverage/correction_or_rejection_signal/lhseid`
+  remains predicted as `none` in seeds `7`, `13`, and `42`.
+- No none-safety override fired for that workflow-candidate row.
+
+Decision:
+
+- Keep the hybrid layer because it improves aggregate none safety without
+  harmful overrides in this run.
+- Do not claim the hybrid layer solves workflow-candidate correction recall.
+  The persistent miss points to a missing correction/workflow-state signal, not
+  to a generic none-safety problem.
+- Next useful slice: inspect whether deterministic correction gates can detect
+  the workflow-candidate row from its context, then encode the result as a
+  focused gate/eval rather than another broad SetFit run.
+
 Current recommendation:
 
 - Index continuation: E488 turns the accepted classifier-fixture follow-up into
