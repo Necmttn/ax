@@ -1,10 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import { Effect, Layer } from "effect";
-import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import type {
     SessionLink,
     SessionTopSkill,
-} from "../lib/shared/dashboard-types.ts";
+} from "@ax/lib/shared/dashboard-types";
 import {
     SESSION_SKILL_ROLES_SQL,
     sessionSkillRolesQuery,

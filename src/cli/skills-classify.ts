@@ -8,11 +8,11 @@
 import { Effect } from "effect";
 import { join } from "node:path";
 import { mkdir, writeFile, access } from "node:fs/promises";
-import { SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
-import { prettyPrint } from "../lib/json.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
+import { prettyPrint } from "@ax/lib/json";
 import { skillNameToSlug, renderClassifyBrief } from "./skills-classify-template.ts";
-import { validateSkillName } from "../lib/role-name.ts";
+import { validateSkillName } from "@ax/lib/role-name";
 
 export interface ClassifyRow {
     readonly name: string;

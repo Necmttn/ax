@@ -16,17 +16,17 @@ import { existsSync, readdirSync, readFileSync, realpathSync, statSync, unlinkSy
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import { surrealLiteral } from "../lib/json.ts";
+import { SurrealClient } from "@ax/lib/db";
+import { surrealLiteral } from "@ax/lib/json";
 import {
     parseAutomationMarkers,
     parseHookCommandMarkers,
     parseInlineMarkers,
     parseFrontmatterMarker,
 } from "./markers.ts";
-import type { DbError } from "../lib/errors.ts";
-import { recordRef } from "../lib/shared/surql.ts";
-import { recordKeyPart } from "../lib/shared/derive-keys.ts";
+import type { DbError } from "@ax/lib/errors";
+import { recordRef } from "@ax/lib/shared/surql";
+import { recordKeyPart } from "@ax/lib/shared/derive-keys";
 import {
     EXPERIMENT_STATUS_TASK_EMITTED,
     planTaskScaffolded,

@@ -1,11 +1,11 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { Effect, Schema } from "effect";
-import { AxConfig } from "../lib/config.ts";
-import { SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
-import { executeStatementsWith } from "../lib/shared/statement-exec.ts";
-import { recordRef, surrealObject, surrealOptionInt, surrealOptionString, surrealString } from "../lib/shared/surql.ts";
+import { AxConfig } from "@ax/lib/config";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
+import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
+import { recordRef, surrealObject, surrealOptionInt, surrealOptionString, surrealString } from "@ax/lib/shared/surql";
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 

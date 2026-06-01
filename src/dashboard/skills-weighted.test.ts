@@ -8,9 +8,9 @@
  */
 import { describe, it, expect } from "bun:test";
 import { Effect } from "effect";
-import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { fetchSkillsWeighted } from "./skills-weighted.ts";
-import { DbError } from "../lib/errors.ts";
+import { DbError } from "@ax/lib/errors";
 
 // ---------------------------------------------------------------------------
 // Test helpers

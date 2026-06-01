@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { Effect } from "effect";
-import { AppLayer } from "../src/lib/layers.ts";
+import { AppLayer } from "@ax/lib/layers";
 import { deriveSpawned } from "../src/ingest/derive-spawned.ts";
 
 async function main(): Promise<void> {

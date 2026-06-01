@@ -7,13 +7,13 @@
 import { describe, expect, it } from "bun:test";
 import { renderSessionMarkdown, renderSessionJson } from "./session-show-format.ts";
 import type { SessionShowPayload } from "../dashboard/session-show.ts";
-import type { SessionDetailPayload, SessionLink } from "../lib/shared/dashboard-types.ts";
+import type { SessionDetailPayload, SessionLink } from "@ax/lib/shared/dashboard-types";
 
 // ---------------------------------------------------------------------------
 // Test fixture helpers
 // ---------------------------------------------------------------------------
 
-type SessionId = import("../lib/shared/session-id.ts").SessionId;
+type SessionId = import("@ax/lib/shared/session-id").SessionId;
 
 const makeOverview = (
     partial: Partial<SessionDetailPayload["overview"]> = {},

@@ -26,13 +26,13 @@
 import { Effect, Schema } from "effect";
 import { homedir } from "node:os";
 import { statSync } from "node:fs";
-import { SurrealClient } from "../lib/db.ts";
-import { AppLayer } from "../lib/layers.ts";
-import type { DbError } from "../lib/errors.ts";
-import { recordRef, surrealDate } from "../lib/shared/surql.ts";
-import { surrealLiteral } from "../lib/json.ts";
-import { executeStatementsWith } from "../lib/shared/statement-exec.ts";
-import { safeKeyPart, recordKeyPart } from "../lib/shared/derive-keys.ts";
+import { SurrealClient } from "@ax/lib/db";
+import { AppLayer } from "@ax/lib/layers";
+import type { DbError } from "@ax/lib/errors";
+import { recordRef, surrealDate } from "@ax/lib/shared/surql";
+import { surrealLiteral } from "@ax/lib/json";
+import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
+import { safeKeyPart, recordKeyPart } from "@ax/lib/shared/derive-keys";
 
 export interface DeriveOpportunitiesStats {
     readonly experimentsScanned: number;

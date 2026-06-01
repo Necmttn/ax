@@ -1,4 +1,4 @@
-import type { InspectTurnContentDto, SessionTokenUsageDetail, TurnTokenUsageDetail } from "../lib/shared/dashboard-types.ts";
+import type { InspectTurnContentDto, SessionTokenUsageDetail, TurnTokenUsageDetail } from "@ax/lib/shared/dashboard-types";
 
 export const AX_SESSION_SHARE_SCHEMA_VERSION = 1 as const;
 

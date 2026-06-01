@@ -3,7 +3,7 @@ import { Effect } from "effect";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import {
     ClassifierPackageOperationNotFound,
     ClassifierPackageService,

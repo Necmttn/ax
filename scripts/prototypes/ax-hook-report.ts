@@ -16,8 +16,8 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { Effect, Layer } from "effect";
-import { SurrealClient, SurrealClientLive } from "/Users/necmttn/Projects/ax/src/lib/db.ts";
-import { AxConfigLive } from "/Users/necmttn/Projects/ax/src/lib/config.ts";
+import { SurrealClient, SurrealClientLive } from "@ax/lib/db";
+import { AxConfigLive } from "@ax/lib/config";
 
 interface HookFireRow {
     readonly id: string;

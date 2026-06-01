@@ -10,16 +10,16 @@
  */
 
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
 import type {
     SessionChildrenResponse,
     SessionListResponse,
     SessionListRow,
-} from "../lib/shared/dashboard-types.ts";
-import { queryPagedWithCount } from "../lib/shared/graph-query.ts";
-import { clampPagination, type PaginationConfig } from "../lib/shared/pagination.ts";
-import { toBareSessionId, toSessionRid } from "../lib/shared/session-id.ts";
+} from "@ax/lib/shared/dashboard-types";
+import { queryPagedWithCount } from "@ax/lib/shared/graph-query";
+import { clampPagination, type PaginationConfig } from "@ax/lib/shared/pagination";
+import { toBareSessionId, toSessionRid } from "@ax/lib/shared/session-id";
 
 export interface SessionsListOpts {
     readonly offset?: number;

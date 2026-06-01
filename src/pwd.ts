@@ -8,14 +8,14 @@
 import { realpath } from "node:fs/promises";
 import { Effect, Schema } from "effect";
 import { RecordId } from "surrealdb";
-import { SurrealClient } from "./db.ts";
-import type { DbError } from "./errors.ts";
-import { ProcessService, type ProcessError } from "./process.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
+import { ProcessService, type ProcessError } from "@ax/lib/process";
 import {
     chooseIdentity,
     normalizeGitRemoteUrl,
     type RepositoryIdentity,
-} from "../ingest/repository-identity.ts";
+} from "./ingest/repository-identity.ts";
 
 // ---------------------------------------------------------------------------
 // Errors

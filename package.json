@@ -127,6 +127,7 @@
     "classifiers:workflow-quality-conclusion": "bun scripts/classifier-workflow-quality-conclusion.ts"
   },
   "dependencies": {
+    "@ax/lib": "workspace:*",
     "@ax/schema": "workspace:*",
     "@opentui/core": "^0.2.5",
     "@opentui/react": "^0.2.5",

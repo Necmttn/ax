@@ -14,8 +14,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { listSessionsHere } from "./sessions-query.ts";
-import { AppLayer } from "../lib/layers.ts";
-import { SurrealClient } from "../lib/db.ts";
+import { AppLayer } from "@ax/lib/layers";
+import { SurrealClient } from "@ax/lib/db";
 
 const E2E_ENABLED = process.env.AX_E2E_DB === "1";
 

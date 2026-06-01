@@ -1,13 +1,13 @@
 import { Effect, Schema } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import { AppLayer } from "../lib/layers.ts";
-import { decodeJsonOrNull } from "../lib/decode.ts";
-import type { DbError } from "../lib/errors.ts";
+import { SurrealClient } from "@ax/lib/db";
+import { AppLayer } from "@ax/lib/layers";
+import { decodeJsonOrNull } from "@ax/lib/decode";
+import type { DbError } from "@ax/lib/errors";
 import { recordRef } from "./evidence-writers.ts";
-import { surrealDate, surrealJsonOption, surrealObject, surrealOptionInt, surrealOptionString, surrealString } from "../lib/shared/surql.ts";
-import { executeStatementsWith } from "../lib/shared/statement-exec.ts";
-import { deriveTaskLabel } from "../lib/shared/task-label.ts";
-import { isoTimestamp, recordKeyPart, safeKeyPart, type TimestampInput } from "../lib/shared/derive-keys.ts";
+import { surrealDate, surrealJsonOption, surrealObject, surrealOptionInt, surrealOptionString, surrealString } from "@ax/lib/shared/surql";
+import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
+import { deriveTaskLabel } from "@ax/lib/shared/task-label";
+import { isoTimestamp, recordKeyPart, safeKeyPart, type TimestampInput } from "@ax/lib/shared/derive-keys";
 import { tokenQualityLabels, type TokenSourceQuality } from "./token-quality.ts";
 
 type JsonRecord = Record<string, unknown>;

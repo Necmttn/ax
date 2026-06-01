@@ -1,5 +1,5 @@
-import { prettyPrint } from "../lib/json.ts";
-import { safeJsonParse } from "../lib/shared/safe-json.ts";
+import { prettyPrint } from "@ax/lib/json";
+import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import type { ClassifierExplainPayload, ClassifierExplainResult } from "../dashboard/classifier-explain.ts";
 
 const textOf = (value: unknown): string =>

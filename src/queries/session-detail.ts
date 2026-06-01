@@ -5,15 +5,15 @@
  *
  * Bindings: $sessionId (record reference, e.g. session:⟨…⟩).
  */
-import { defineQuery, defineSingleQuery } from "./query.ts";
+import { defineQuery, defineSingleQuery } from "@ax/lib/shared/query";
 import {
     isRecord,
     stringField,
     dateField,
     recordIdString,
-} from "../lib/shared/row-fields.ts";
-import { toBareSessionId } from "../lib/shared/session-id.ts";
-import { decodeJsonOrNull } from "../lib/decode.ts";
+} from "@ax/lib/shared/row-fields";
+import { toBareSessionId } from "@ax/lib/shared/session-id";
+import { decodeJsonOrNull } from "@ax/lib/decode";
 import type {
     SessionAgentDelegation,
     SessionLink,
@@ -22,7 +22,7 @@ import type {
     SessionToolCall,
     SessionTopSkill,
     TurnTokenUsageDetail,
-} from "../lib/shared/dashboard-types.ts";
+} from "@ax/lib/shared/dashboard-types";
 import type { ShareEvent, ShareFile, ShareTurn } from "../share/artifact.ts";
 
 export const SESSION_OVERVIEW_SQL = `

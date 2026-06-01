@@ -9,7 +9,7 @@ import { Effect } from "effect";
 import { mkdir, writeFile, access } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { cmdSkillsLint, type LintReport } from "./skills-lint.ts";
 
 // ---------------------------------------------------------------------------

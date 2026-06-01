@@ -1,6 +1,6 @@
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
 import {
     EPISODE_CHILDREN_SQL,
     EPISODE_CHILD_INVOCATIONS_SQL,
@@ -12,12 +12,12 @@ import {
     compressPhaseSequence,
     PHASE_LETTER,
     type Phase,
-} from "../lib/shared/phases.ts";
+} from "@ax/lib/shared/phases";
 import type {
     EpisodeNode,
     EpisodeTimelinePayload,
-} from "../lib/shared/dashboard-types.ts";
-import { toBareSessionId } from "../lib/shared/session-id.ts";
+} from "@ax/lib/shared/dashboard-types";
+import { toBareSessionId } from "@ax/lib/shared/session-id";
 
 const SESSION_ID_RE = /^[A-Za-z0-9_-]{6,80}$/;
 

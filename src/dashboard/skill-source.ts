@@ -12,14 +12,14 @@ import { spawn } from "node:child_process";
 import { access, readFile, rename } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
-import { surrealLiteral } from "../lib/json.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
+import { surrealLiteral } from "@ax/lib/json";
 import type {
     SkillSourcePayload,
     SkillSourceState,
     TriageDecision,
-} from "../lib/shared/dashboard-types.ts";
+} from "@ax/lib/shared/dashboard-types";
 
 const SKILL_FILE = "SKILL.md";
 const ARCHIVED_FILE = "SKILL.md.archived";

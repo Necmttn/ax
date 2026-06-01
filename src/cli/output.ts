@@ -2,7 +2,7 @@
  * Shared CLI output helpers used across axctl subcommands.
  */
 import { Effect } from "effect";
-import { DbError } from "../lib/errors.ts";
+import { DbError } from "@ax/lib/errors";
 
 /**
  * Detect if a command's output should be JSON.

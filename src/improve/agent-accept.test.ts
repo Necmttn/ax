@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildAgentAcceptPrompt, runAgentAccept } from "./agent-accept.ts";
 import { acceptProposal } from "./actions.ts";
-import { SurrealClient } from "../lib/db.ts";
-import { DbError } from "../lib/errors.ts";
+import { SurrealClient } from "@ax/lib/db";
+import { DbError } from "@ax/lib/errors";
 
 describe("buildAgentAcceptPrompt", () => {
     const ctx = {

@@ -3,11 +3,11 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { Effect, Schema } from "effect";
-import { AxConfig } from "../lib/config.ts";
-import { RecordId, SurrealClient } from "../lib/db.ts";
-import { decodeJsonOrNull } from "../lib/decode.ts";
-import type { DbError } from "../lib/errors.ts";
-import { executeStatements } from "../lib/shared/statement-exec.ts";
+import { AxConfig } from "@ax/lib/config";
+import { RecordId, SurrealClient } from "@ax/lib/db";
+import { decodeJsonOrNull } from "@ax/lib/decode";
+import type { DbError } from "@ax/lib/errors";
+import { executeStatements } from "@ax/lib/shared/statement-exec";
 import {
     type ToolCallSkillRelationWrite,
     type ToolCallWrite,

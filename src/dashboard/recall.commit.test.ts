@@ -6,7 +6,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
-import { SurrealClient } from "../lib/db.ts";
+import { SurrealClient } from "@ax/lib/db";
 import {
     RECALL_COMMITS_SQL,
     RECALL_SKILLS_SQL,

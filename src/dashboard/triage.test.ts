@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { recommendForSkill } from "./triage.ts";
-import type { SkillRow } from "../lib/shared/dashboard-types.ts";
+import type { SkillRow } from "@ax/lib/shared/dashboard-types";
 
 const baseRow = (overrides: Partial<SkillRow> = {}): SkillRow => ({
     name: "test-skill",

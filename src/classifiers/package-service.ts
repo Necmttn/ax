@@ -1,9 +1,9 @@
 import { Context, Effect, Layer, Schema } from "effect";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { prettyPrint } from "../lib/json.ts";
-import { SurrealClient } from "../lib/db.ts";
-import { safeJsonParse } from "../lib/shared/safe-json.ts";
+import { prettyPrint } from "@ax/lib/json";
+import { SurrealClient } from "@ax/lib/db";
+import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import {
     applyExecutionSurrealWritePlanReport,
     buildClassifierLifecycleInsightReport,

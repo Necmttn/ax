@@ -10,12 +10,12 @@ import { Effect } from "effect";
 import { join } from "node:path";
 import { readdir, readFile, unlink } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
-import { RecordId, SurrealClient, type SurrealClientShape } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
-import { prettyPrint } from "../lib/json.ts";
-import { recordLiteral } from "../lib/ids.ts";
-import { validateRoleName, validateSkillName } from "../lib/role-name.ts";
-import { surrealString } from "../lib/shared/surql.ts";
+import { RecordId, SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
+import { prettyPrint } from "@ax/lib/json";
+import { recordLiteral } from "@ax/lib/ids";
+import { validateRoleName, validateSkillName } from "@ax/lib/role-name";
+import { surrealString } from "@ax/lib/shared/surql";
 
 // ---------------------------------------------------------------------------
 // Types

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
-import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { ClassifierFactsService, ClassifierFactsServiceLive } from "./facts.ts";
 
 function clientWithRows(rows: readonly Record<string, unknown>[], capture: { sql?: string }): SurrealClientShape {

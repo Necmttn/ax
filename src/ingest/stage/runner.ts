@@ -1,6 +1,6 @@
 import { Deferred, Effect, Semaphore } from "effect";
-import type { DbError } from "../../lib/errors.ts";
-import { LiveTrace } from "../../lib/live-traces/index.ts";
+import type { DbError } from "@ax/lib/errors";
+import { LiveTrace } from "@ax/lib/live-traces/index";
 import type { BaseStageStats, IngestContext, StageDef } from "./types.ts";
 
 /** Max stages running their `run` Effect concurrently. Each stage has its own

@@ -1,7 +1,7 @@
 import { Effect } from "effect";
-import type { DbError } from "../lib/errors.ts";
-import { SurrealClient } from "../lib/db.ts";
-import { decodeJsonRecordOrNull } from "../lib/decode.ts";
+import type { DbError } from "@ax/lib/errors";
+import { SurrealClient } from "@ax/lib/db";
+import { decodeJsonRecordOrNull } from "@ax/lib/decode";
 import {
     buildFileContextHookEvidence,
     type FileContextPack,

@@ -11,8 +11,8 @@ import {
 } from "../src/classifiers/event-window.ts";
 import { ClassifierRunner, ClassifierRunnerLive, type ClassifierResult, type EventWindow } from "../src/classifiers/core.ts";
 import { builtInClassifiers } from "../src/classifiers/registry.ts";
-import { envConfig } from "../src/lib/db.ts";
-import { recordKeyPart } from "../src/lib/shared/derive-keys.ts";
+import { envConfig } from "@ax/lib/db";
+import { recordKeyPart } from "@ax/lib/shared/derive-keys";
 
 export interface WindowExportArgs {
     readonly days: number;

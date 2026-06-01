@@ -20,9 +20,9 @@
  */
 
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
-import { prettyPrint } from "../lib/json.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
+import { prettyPrint } from "@ax/lib/json";
 
 export interface RetroReflectRow {
     readonly proposalKey: string;

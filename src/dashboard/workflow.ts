@@ -1,7 +1,7 @@
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
-import { toBareSessionId } from "../lib/shared/session-id.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
+import { toBareSessionId } from "@ax/lib/shared/session-id";
 import {
     WEEKS_LOOKBACK,
     WORKFLOW_EPISODES_SQL,
@@ -17,7 +17,7 @@ import {
     compressPhaseSequence,
     PHASE_LETTER,
     type Phase,
-} from "../lib/shared/phases.ts";
+} from "@ax/lib/shared/phases";
 import type {
     EpisodeShapeAggregate,
     SessionShapeAggregate,
@@ -26,7 +26,7 @@ import type {
     WorkflowResponse,
     WorkflowSessionShape,
     WorkflowWeekBucket,
-} from "../lib/shared/dashboard-types.ts";
+} from "@ax/lib/shared/dashboard-types";
 
 const TOP_K = 10;
 

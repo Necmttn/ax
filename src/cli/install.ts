@@ -10,7 +10,7 @@ import {
     probePort,
     type PortHolder,
     type PortProbeResult,
-} from "../lib/port.ts";
+} from "@ax/lib/port";
 import {
     DEFAULT_DB_HOST,
     DEFAULT_DB_PORT,
@@ -18,8 +18,8 @@ import {
     readRuntimeState,
     runtimeStatePath,
     writeRuntimeState,
-} from "../lib/runtime-state.ts";
-import { prettyPrint } from "../lib/json.ts";
+} from "@ax/lib/runtime-state";
+import { prettyPrint } from "@ax/lib/json";
 // Schema is embedded at build time so the compiled binary is self-contained.
 import schemaSurql from "@ax/schema/schema.surql" with { type: "text" };
 

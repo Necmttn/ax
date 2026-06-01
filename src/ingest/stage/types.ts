@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect";
-import { DbError } from "../../lib/errors.ts";
+import { DbError } from "@ax/lib/errors";
 import { IngestStageTag } from "./tags.ts";
 
 /** Stable base shape every stage's stats class extends. `summary` is the

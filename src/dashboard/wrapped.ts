@@ -1,6 +1,6 @@
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
 import type {
     WrappedArchetype,
     WrappedConfidence,
@@ -8,7 +8,7 @@ import type {
     WrappedFact,
     WrappedProfile,
     WrappedUsageDay,
-} from "../lib/shared/dashboard-types.ts";
+} from "@ax/lib/shared/dashboard-types";
 import {
     WRAPPED_DAILY_ACTIVITY_SQL,
     WRAPPED_DAYS_LOOKBACK,

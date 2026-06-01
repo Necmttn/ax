@@ -1,8 +1,8 @@
 import { Context, Effect, Layer } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
-import { recordKeyPart } from "../lib/shared/derive-keys.ts";
-import { recordRef } from "../lib/shared/surql.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
+import { recordKeyPart } from "@ax/lib/shared/derive-keys";
+import { recordRef } from "@ax/lib/shared/surql";
 
 export interface ClassifierEvidenceRow {
     readonly id?: unknown;

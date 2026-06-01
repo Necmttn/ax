@@ -1,8 +1,8 @@
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
 import { errorSignatureRecordKey, symbolRecordKey } from "../ingest/record-keys.ts";
-import { surrealString } from "../lib/shared/surql.ts";
+import { surrealString } from "@ax/lib/shared/surql";
 import { normalizeErrorSignature } from "../ingest/turn-references.ts";
 import { classifyTurnIntent } from "../ingest/intent-kind.ts";
 

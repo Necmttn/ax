@@ -1,12 +1,12 @@
 import { Effect } from "effect";
-import type { SurrealClient } from "../lib/db.ts";
+import type { SurrealClient } from "@ax/lib/db";
 import type {
     InspectContentAtomDto,
     InspectContentBlockDto,
     InspectTurnContentDto,
-} from "../lib/shared/dashboard-types.ts";
-import { interpolateRid, queryMany } from "../lib/shared/graph-query.ts";
-import { toBareSessionId } from "../lib/shared/session-id.ts";
+} from "@ax/lib/shared/dashboard-types";
+import { interpolateRid, queryMany } from "@ax/lib/shared/graph-query";
+import { toBareSessionId } from "@ax/lib/shared/session-id";
 
 const TURN_CONTENT_DOCUMENTS_SQL = `
     SELECT

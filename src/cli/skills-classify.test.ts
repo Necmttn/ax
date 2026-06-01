@@ -4,10 +4,10 @@ import { mkdtempSync } from "node:fs";
 import { readFile, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { cmdSkillsClassify } from "./skills-classify.ts";
 import { skillNameToSlug } from "./skills-classify-template.ts";
-import { DbError } from "../lib/errors.ts";
+import { DbError } from "@ax/lib/errors";
 
 // ---------------------------------------------------------------------------
 // Test fixtures + mock DB

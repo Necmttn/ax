@@ -4,9 +4,9 @@ import { readFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import { homedir } from "node:os";
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import { ProcessService } from "../lib/process.ts";
-import type { DbError } from "../lib/errors.ts";
+import { SurrealClient } from "@ax/lib/db";
+import { ProcessService } from "@ax/lib/process";
+import type { DbError } from "@ax/lib/errors";
 import { getGitState } from "./git.ts";
 import {
     defaultHarnessDoctorReportBuilder,

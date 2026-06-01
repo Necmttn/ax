@@ -1,14 +1,14 @@
 import { Effect } from "effect";
-import { RecordId, SurrealClient } from "../../lib/db.ts";
-import type { DbError } from "../../lib/errors.ts";
-import { executeStatements } from "../../lib/shared/statement-exec.ts";
+import { RecordId, SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
+import { executeStatements } from "@ax/lib/shared/statement-exec";
 import {
     recordRef,
     surrealDate,
     surrealObject,
     surrealSet,
     surrealString,
-} from "../../lib/shared/surql.ts";
+} from "@ax/lib/shared/surql";
 import {
     agentEventRecordKey,
     buildAgentEventStatements,
@@ -26,7 +26,7 @@ import {
     type ToolCallWrite,
     type ToolFileEvidenceWrite,
 } from "../evidence-writers.ts";
-import { skillRecordKey } from "../../lib/skill-id.ts";
+import { skillRecordKey } from "@ax/lib/skill-id";
 import { invokedRelationRecordKey, turnRecordKey } from "../record-keys.ts";
 
 export interface NormalizedSessionWrite {

@@ -1,9 +1,9 @@
 import { Effect, Schema } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
-import { surrealLiteral } from "../lib/json.ts";
+import { surrealLiteral } from "@ax/lib/json";
 import { normalizeDelegationToolCall, type NormalizedDelegationSpawn } from "./delegation.ts";
 import type { AgentProviderName } from "./provider-events.ts";
 

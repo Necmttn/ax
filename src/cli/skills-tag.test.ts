@@ -7,7 +7,7 @@
  */
 import { describe, test, expect, mock } from "bun:test";
 import { Effect } from "effect";
-import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { cmdSkillsTag } from "./skills-tag.ts";
 
 // ---------------------------------------------------------------------------

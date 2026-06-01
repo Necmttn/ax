@@ -4,23 +4,23 @@
  */
 
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
 import type {
     SessionDetailPayload,
     SessionLink,
     SessionSkillRoleGroup,
     SessionTopSkill,
     SessionViewPayload,
-} from "../lib/shared/dashboard-types.ts";
-import { runQuery } from "../lib/shared/graph-query.ts";
+} from "@ax/lib/shared/dashboard-types";
+import { runQuery } from "@ax/lib/shared/graph-query";
 import {
     sessionSkillRolesQuery,
     type SessionSkillRoleEdge,
 } from "../queries/session-view.ts";
 import { fetchSessionDetail } from "./session-detail.ts";
 
-export type { SessionViewPayload } from "../lib/shared/dashboard-types.ts";
+export type { SessionViewPayload } from "@ax/lib/shared/dashboard-types";
 
 export interface FetchSessionViewOptions {
     readonly sessionId: string;

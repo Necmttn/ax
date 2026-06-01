@@ -2,14 +2,14 @@ import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import { decodeJsonOrNull } from "../lib/decode.ts";
-import type { DbError } from "../lib/errors.ts";
-import { AppLayer } from "../lib/layers.ts";
+import { SurrealClient } from "@ax/lib/db";
+import { decodeJsonOrNull } from "@ax/lib/decode";
+import type { DbError } from "@ax/lib/errors";
+import { AppLayer } from "@ax/lib/layers";
 import { recordRef } from "./evidence-writers.ts";
-import { surrealDate, surrealJsonTextOption, surrealObject, surrealOptionDate, surrealOptionRecord, surrealOptionString, surrealSet, surrealString } from "../lib/shared/surql.ts";
-import { executeStatements } from "../lib/shared/statement-exec.ts";
-import { nonEmptyString } from "../lib/shared/derive-keys.ts";
+import { surrealDate, surrealJsonTextOption, surrealObject, surrealOptionDate, surrealOptionRecord, surrealOptionString, surrealSet, surrealString } from "@ax/lib/shared/surql";
+import { executeStatements } from "@ax/lib/shared/statement-exec";
+import { nonEmptyString } from "@ax/lib/shared/derive-keys";
 
 type JsonRecord = Record<string, unknown>;
 

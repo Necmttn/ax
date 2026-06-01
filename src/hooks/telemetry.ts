@@ -1,12 +1,12 @@
 import { Effect } from "effect";
 import { RecordId } from "surrealdb";
-import { SurrealClient } from "../lib/db.ts";
+import { SurrealClient } from "@ax/lib/db";
 import {
     deterministicId,
     writeTelemetryRow,
     type TelemetryBaseRow,
     type TelemetryHarness,
-} from "../lib/telemetry-base.ts";
+} from "@ax/lib/telemetry-base";
 import type { FileContextHookInput, FileContextHookDecision } from "./file-context-hook.ts";
 import type {
     FileContextPack,

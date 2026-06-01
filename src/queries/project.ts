@@ -12,15 +12,15 @@
  *   - For invocations we filter via `in.session.project`, which the
  *     `invoked` table can index-walk through `in.session`.
  */
-import { defineQuery, defineSingleQuery } from "./query.ts";
-import { isRecord, stringField, dateField, recordIdString } from "../lib/shared/row-fields.ts";
-import { toBareSessionId } from "../lib/shared/session-id.ts";
+import { defineQuery, defineSingleQuery } from "@ax/lib/shared/query";
+import { isRecord, stringField, dateField, recordIdString } from "@ax/lib/shared/row-fields";
+import { toBareSessionId } from "@ax/lib/shared/session-id";
 import type {
     ProjectTopSkill,
     ProjectFailure,
     ProjectRecentSession,
     ProjectEpisode,
-} from "../lib/shared/dashboard-types.ts";
+} from "@ax/lib/shared/dashboard-types";
 
 /** Overview: session counts, span, source breakdown. */
 export const PROJECT_OVERVIEW_SQL = `

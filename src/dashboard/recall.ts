@@ -1,6 +1,6 @@
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
 import {
     RECALL_COUNT_SQL,
     RECALL_COMMITS_COUNT_SQL,
@@ -15,11 +15,11 @@ import type {
     RecallCommitHit,
     RecallSkillHit,
     RecallResponse,
-} from "../lib/shared/dashboard-types.ts";
-import { clampPagination, type PaginationConfig } from "../lib/shared/pagination.ts";
-import { isRecord, recordIdString } from "../lib/shared/row-fields.ts";
-import { runQuery } from "../lib/shared/graph-query.ts";
-import { recordLiteral } from "../lib/ids.ts";
+} from "@ax/lib/shared/dashboard-types";
+import { clampPagination, type PaginationConfig } from "@ax/lib/shared/pagination";
+import { isRecord, recordIdString } from "@ax/lib/shared/row-fields";
+import { runQuery } from "@ax/lib/shared/graph-query";
+import { recordLiteral } from "@ax/lib/ids";
 
 const RECALL_PAGINATION: PaginationConfig = { defaultLimit: 50, maxLimit: 200 };
 

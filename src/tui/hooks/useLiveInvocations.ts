@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Effect } from "effect";
 import { flushSync } from "@opentui/react";
 import { Table, type LiveSubscription } from "surrealdb";
-import type { SurrealClientShape } from "../../lib/db.ts";
+import type { SurrealClientShape } from "@ax/lib/db";
 
 /**
  * Live state pushed by SurrealDB live queries on the `invoked` relation table.

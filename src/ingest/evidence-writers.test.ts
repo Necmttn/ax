@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
-import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
-import { skillRecordKey } from "../lib/skill-id.ts";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { skillRecordKey } from "@ax/lib/skill-id";
 import {
     buildPlanSnapshotStatements,
     buildRelateToolCallSkillStatements,

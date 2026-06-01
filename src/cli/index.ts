@@ -1,15 +1,15 @@
 #!/usr/bin/env bun
 import { Effect, Layer, Option, References } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
-import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { listSessionsHere, listSessionsAround, listSessionsNear, type SessionRow } from "../dashboard/sessions-query.ts";
-import { findCommitWindow } from "../lib/git-window.ts";
-import { AxConfig } from "../lib/config.ts";
-import { safeJsonParse } from "../lib/shared/safe-json.ts";
-import { ProcessService } from "../lib/process.ts";
-import { prettyPrint, surrealLiteral } from "../lib/json.ts";
-import { prettifyProjectSlug } from "../lib/shared/project-slug.ts";
-import { AppLayer } from "../lib/layers.ts";
+import { findCommitWindow } from "@ax/lib/git-window";
+import { AxConfig } from "@ax/lib/config";
+import { safeJsonParse } from "@ax/lib/shared/safe-json";
+import { ProcessService } from "@ax/lib/process";
+import { prettyPrint, surrealLiteral } from "@ax/lib/json";
+import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
+import { AppLayer } from "@ax/lib/layers";
 import { deriveCheckpoints } from "../ingest/derive-checkpoints.ts";
 import { retroFromSession, upsertRetro, type RetroSource } from "../ingest/retro.ts";
 import { runAgentAccept } from "../improve/agent-accept.ts";
@@ -64,7 +64,7 @@ import {
     renderAllRolesJson,
 } from "./role-format.ts";
 import { homedir } from "node:os";
-import { recordRef, surrealString } from "../lib/shared/surql.ts";
+import { recordRef, surrealString } from "@ax/lib/shared/surql";
 import { ingestClaudeInsights } from "../ingest/claude-insights.ts";
 // backfillInvokedPositions - Phase B will register this as invokedPositionsStage.
 import { deriveSignals } from "../ingest/derive-signals.ts";
@@ -78,10 +78,10 @@ import { fetchSessionShow } from "../dashboard/session-show.ts";
 import { fetchCostSummary, type CostSummary } from "../dashboard/cost-query.ts";
 import { renderSessionMarkdown, renderSessionJson } from "./session-show-format.ts";
 import { cmdDaemon, cmdDoctor, cmdInstall, cmdUninstall } from "./install.ts";
-import { resolvePwdRepository } from "../lib/pwd.ts";
-import { detectStaleness } from "../lib/transcript-staleness.ts";
+import { resolvePwdRepository } from "../pwd.ts";
+import { detectStaleness } from "@ax/lib/transcript-staleness";
 import { ingestTranscripts } from "../ingest/transcripts.ts";
-import { encodeClaudeProjectSlug } from "../lib/transcript-locator.ts";
+import { encodeClaudeProjectSlug } from "@ax/lib/transcript-locator";
 import {
     createProgressReporter,
     parseProgressMode,
@@ -99,7 +99,7 @@ import {
     type FileContextHookInput,
 } from "../hooks/file-context-hook.ts";
 import { recordHookFire } from "../hooks/telemetry.ts";
-import type { TelemetryHarness } from "../lib/telemetry-base.ts";
+import type { TelemetryHarness } from "@ax/lib/telemetry-base";
 import { formatHookLogRowsTsv, queryHookLog } from "../hooks/log.ts";
 import {
     formatHookInvocationRows,
@@ -122,10 +122,10 @@ import {
     makeIngestEvent,
     publishIngestEvent,
 } from "../dashboard/telemetry.ts";
-import type { DbError } from "../lib/errors.ts";
+import type { DbError } from "@ax/lib/errors";
 import { StageRegistry, type StageRegistryShape } from "../ingest/stage/registry.ts";
 import { IngestRuntimeLayer } from "../ingest/stage/runtime.ts";
-import { ConsoleTransportLayer } from "../lib/live-traces/transports/console.ts";
+import { ConsoleTransportLayer } from "@ax/lib/live-traces/transports/console";
 import { selectByKeys, selectByTag } from "../ingest/stage/select.ts";
 import { type BaseStageStats, type StageDef } from "../ingest/stage/types.ts";
 import { runIngest } from "../ingest/run.ts";
@@ -583,7 +583,7 @@ interface RecallCliOpts {
  */
 const resolveScope = (
     scopeFlag: string | null,
-): Effect.Effect<RecallScope, DbError | import("../lib/process.ts").ProcessError, SurrealClient | ProcessService> =>
+): Effect.Effect<RecallScope, DbError | import("@ax/lib/process").ProcessError, SurrealClient | ProcessService> =>
     Effect.gen(function* () {
         if (scopeFlag === "all") return { kind: "all" } as RecallScope;
 
@@ -596,7 +596,7 @@ const resolveScope = (
                         process.exit(2);
                     }
                     // auto-detect: not a git repo → silent fall-through to all
-                    return Effect.succeed(null as import("../lib/pwd.ts").PwdResolution | null);
+                    return Effect.succeed(null as import("../pwd.ts").PwdResolution | null);
                 }),
             );
             if (resolution === null) return { kind: "all" } as RecallScope;

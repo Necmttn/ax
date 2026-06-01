@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
+import schemaSurql from "@ax/schema/schema.surql" with { type: "text" };
 import {
     PROVIDER_PARITY_FEATURE_KEYS,
     PROVIDER_PARITY_FEATURES,
@@ -7,7 +8,7 @@ import {
 } from "./provider-parity.ts";
 
 const definedSchemaTables = (): Set<string> => {
-    const schema = readFileSync("schema/schema.surql", "utf8");
+    const schema = schemaSurql;
     return new Set(
         [...schema.matchAll(/^DEFINE TABLE(?: IF NOT EXISTS)? ([A-Za-z_][A-Za-z0-9_]*)/gm)]
             .map((match) => match[1]!),

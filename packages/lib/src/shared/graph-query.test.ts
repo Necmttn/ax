@@ -219,7 +219,7 @@ describe("queryPagedWithCount", () => {
 });
 
 import { runQuery, runSingleQuery } from "./graph-query.ts";
-import { defineQuery, defineSingleQuery } from "../../queries/query.ts";
+import { defineQuery, defineSingleQuery } from "./query.ts";
 
 const clientReturning = (rows: unknown[]): SurrealClientShape => ({
     query: <T extends unknown[]>() => Effect.succeed([rows] as unknown as T),

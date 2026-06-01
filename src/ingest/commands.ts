@@ -4,11 +4,11 @@ import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
 import { Effect, Schema } from "effect";
-import { SurrealClient } from "../lib/db.ts";
+import { SurrealClient } from "@ax/lib/db";
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
-import { AppLayer } from "../lib/layers.ts";
-import type { DbError } from "../lib/errors.ts";
+import { AppLayer } from "@ax/lib/layers";
+import type { DbError } from "@ax/lib/errors";
 import { upsertSkillByName } from "./skill-upsert.ts";
 import { discoverProjectRoots } from "./project-discovery.ts";
 

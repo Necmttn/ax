@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import schemaSurql from "@ax/schema/schema.surql" with { type: "text" };
 import {
     SCHEMA_TABLES,
     checkoutActivitySql,
@@ -45,8 +45,7 @@ const STALE_FIELDS = [
 ] as const;
 
 function liveSchemaTables(): string[] {
-    const schema = readFileSync("schema/schema.surql", "utf8");
-    const defined = [...schema.matchAll(/^DEFINE TABLE(?: IF NOT EXISTS)? ([A-Za-z_][A-Za-z0-9_]*)/gm)]
+    const defined = [...schemaSurql.matchAll(/^DEFINE TABLE(?: IF NOT EXISTS)? ([A-Za-z_][A-Za-z0-9_]*)/gm)]
         .map((match) => match[1]!);
     return [...new Set(defined)].sort();
 }

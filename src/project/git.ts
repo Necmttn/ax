@@ -1,7 +1,7 @@
 import { dirname, extname } from "node:path";
 import { stat } from "node:fs/promises";
 import { Effect } from "effect";
-import { ProcessService, type ProcessResult } from "../lib/process.ts";
+import { ProcessService, type ProcessResult } from "@ax/lib/process";
 import type { GitState, ProjectFileChange } from "./types.ts";
 
 const exists = (path: string): Promise<boolean> =>

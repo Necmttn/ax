@@ -1,13 +1,13 @@
 import { describe, expect, it } from "bun:test";
 import { Effect, Layer } from "effect";
-import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
-import { LiveTraceLayer } from "../lib/live-traces/Tracer.ts";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { LiveTraceLayer } from "@ax/lib/live-traces/Tracer";
 import {
     TraceSinkLive,
     TraceTransportTag,
     type TraceTransport,
-} from "../lib/live-traces/Sink.ts";
-import type { TraceEvent } from "../lib/live-traces/types.ts";
+} from "@ax/lib/live-traces/Sink";
+import type { TraceEvent } from "@ax/lib/live-traces/types";
 import { StageRegistryLive, type StageDef } from "./stage/registry.ts";
 import { BaseStageStats, StageMeta } from "./stage/types.ts";
 import { runIngest, stageEventName } from "./run.ts";

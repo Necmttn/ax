@@ -3,12 +3,12 @@ import { readdir, stat } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
 import { Database } from "bun:sqlite";
 import { Effect, Schema } from "effect";
-import { AxConfig } from "../lib/config.ts";
-import { RecordId, SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
-import { skillRecordKey } from "../lib/skill-id.ts";
-import { executeStatements } from "../lib/shared/statement-exec.ts";
-import { recordRef, surrealDate, surrealString } from "../lib/shared/surql.ts";
+import { AxConfig } from "@ax/lib/config";
+import { RecordId, SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
+import { skillRecordKey } from "@ax/lib/skill-id";
+import { executeStatements } from "@ax/lib/shared/statement-exec";
+import { recordRef, surrealDate, surrealString } from "@ax/lib/shared/surql";
 import {
     buildRelateToolCallSkillStatements,
     buildToolCallStatements,

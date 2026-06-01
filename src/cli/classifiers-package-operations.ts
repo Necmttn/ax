@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { readFileSync } from "node:fs";
-import type { SurrealClient } from "../lib/db.ts";
-import { safeJsonParse } from "../lib/shared/safe-json.ts";
+import type { SurrealClient } from "@ax/lib/db";
+import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import {
     ClassifierPackageService,
     type ClassifierQualityStatusReport,

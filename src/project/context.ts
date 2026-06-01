@@ -4,9 +4,9 @@ import { getGitState } from "./git.ts";
 import { loadProjectStack } from "./stack.ts";
 import { deriveVerificationChecks } from "./verify.ts";
 import { buildProjectHarnessReport } from "./harness.ts";
-import { SurrealClient } from "../lib/db.ts";
-import { ProcessService } from "../lib/process.ts";
-import type { DbError } from "../lib/errors.ts";
+import { SurrealClient } from "@ax/lib/db";
+import { ProcessService } from "@ax/lib/process";
+import type { DbError } from "@ax/lib/errors";
 import type { ProjectContext, ProjectHarnessReport, ProjectVerification } from "./types.ts";
 
 interface ProjectGrounding {

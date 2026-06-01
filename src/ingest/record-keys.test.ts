@@ -10,7 +10,7 @@ import {
     toolRecordKey,
     turnRecordKey,
 } from "./record-keys.ts";
-import { legacySkillRecordKey, skillRecordKey } from "../lib/skill-id.ts";
+import { legacySkillRecordKey, skillRecordKey } from "@ax/lib/skill-id";
 
 const HASH = "[0-9a-f]{12,16}";
 

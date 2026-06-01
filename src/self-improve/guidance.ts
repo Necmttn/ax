@@ -1,5 +1,5 @@
 import type { DerivedSignal } from "./signals.ts";
-import { surrealJson, surrealString } from "../lib/shared/surql.ts";
+import { surrealJson, surrealString } from "@ax/lib/shared/surql";
 import { GUIDANCE_STATUS_PROPOSED } from "../improve/lifecycle.ts";
 
 export interface GuidanceDraft {

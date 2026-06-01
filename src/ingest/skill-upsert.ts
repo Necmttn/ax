@@ -1,7 +1,7 @@
-import { RecordId } from "../lib/db.ts";
-import { skillRecordKey } from "../lib/skill-id.ts";
-import type { DbError } from "../lib/errors.ts";
-import type { SurrealClientShape } from "../lib/db.ts";
+import { RecordId } from "@ax/lib/db";
+import { skillRecordKey } from "@ax/lib/skill-id";
+import type { DbError } from "@ax/lib/errors";
+import type { SurrealClientShape } from "@ax/lib/db";
 import { Effect } from "effect";
 
 export interface SkillContent {

@@ -15,7 +15,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
+import { SurrealClient } from "@ax/lib/db";
 import { backfillInvokedPositions } from "./backfill-invoked-positions.ts";
 
 // ---------------------------------------------------------------------------

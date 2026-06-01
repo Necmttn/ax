@@ -20,10 +20,10 @@
  * (sessionFilterClause), because IN (SELECT ...) over the 600k-row
  * invoked table tanks perf (we hit this for episodes in R16-A).
  */
-import { defineQuery } from "./query.ts";
-import { isRecord, stringField, dateField, numberField, recordIdString } from "../lib/shared/row-fields.ts";
-import { toBareSessionId } from "../lib/shared/session-id.ts";
-import type { RecallHit, RecallCommitHit, RecallSkillHit } from "../lib/shared/dashboard-types.ts";
+import { defineQuery } from "@ax/lib/shared/query";
+import { isRecord, stringField, dateField, numberField, recordIdString } from "@ax/lib/shared/row-fields";
+import { toBareSessionId } from "@ax/lib/shared/session-id";
+import type { RecallHit, RecallCommitHit, RecallSkillHit } from "@ax/lib/shared/dashboard-types";
 
 export const RECALL_TURNS_SQL = (sessionFilterClause: string): string => `
 SELECT

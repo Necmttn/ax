@@ -1,5 +1,5 @@
 /**
- * Tests for src/lib/pwd.ts
+ * Tests for src/pwd.ts
  * Uses real git fixtures (mkdtemp + git init) for process calls,
  * and a mock SurrealClient for DB checks.
  */
@@ -9,8 +9,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Effect, Layer } from "effect";
 import { RecordId } from "surrealdb";
-import { SurrealClient, type SurrealClientShape } from "./db.ts";
-import { ProcessServiceLive } from "./process.ts";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { ProcessServiceLive } from "@ax/lib/process";
 import { resolvePwdRepository } from "./pwd.ts";
 
 // ---------------------------------------------------------------------------

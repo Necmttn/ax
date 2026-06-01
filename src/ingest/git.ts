@@ -2,9 +2,9 @@ import { lstat, readFile, stat } from "node:fs/promises";
 import { join, basename, dirname } from "node:path";
 import { homedir } from "node:os";
 import { Effect, Schema } from "effect";
-import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
-import { AppLayer } from "../lib/layers.ts";
-import type { DbError } from "../lib/errors.ts";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { AppLayer } from "@ax/lib/layers";
+import type { DbError } from "@ax/lib/errors";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 import {
@@ -12,7 +12,7 @@ import {
     commitRecordKey,
     fileRecordKey,
 } from "./record-keys.ts";
-import { recordLiteral } from "../lib/ids.ts";
+import { recordLiteral } from "@ax/lib/ids";
 import {
     chooseIdentity,
     classifyCheckoutKind,
@@ -20,8 +20,8 @@ import {
     type CheckoutKind,
     type RepositoryIdentityKind,
 } from "./repository-identity.ts";
-import { surrealString } from "../lib/shared/surql.ts";
-import { executeStatementsWith } from "../lib/shared/statement-exec.ts";
+import { surrealString } from "@ax/lib/shared/surql";
+import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
 
 /**
  * Optional override file: one absolute repo path per line. Lines starting with

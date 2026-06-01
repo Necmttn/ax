@@ -1,9 +1,9 @@
 import { Effect, Schema } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
-import { recordKeyPart } from "../lib/shared/derive-keys.ts";
-import { executeStatementsWith } from "../lib/shared/statement-exec.ts";
-import { surrealString } from "../lib/shared/surql.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
+import { recordKeyPart } from "@ax/lib/shared/derive-keys";
+import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
+import { surrealString } from "@ax/lib/shared/surql";
 import { stableDigest } from "./record-keys.ts";
 import { buildContentDocumentStatements, type ContentDocumentWrite } from "./content-blocks/persist.ts";
 import { parseProviderTurn } from "./content-blocks/parse-turn.ts";

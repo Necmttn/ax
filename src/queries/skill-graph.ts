@@ -13,9 +13,9 @@
  *    it higher if the result is too dense.
  *  - $limit (int) - hard ceiling on edges returned (keeps SVG render bounded).
  */
-import { defineQuery } from "./query.ts";
-import { isRecord, stringField, dateField, numberField } from "../lib/shared/row-fields.ts";
-import type { SkillGraphEdge } from "../lib/shared/dashboard-types.ts";
+import { defineQuery } from "@ax/lib/shared/query";
+import { isRecord, stringField, dateField, numberField } from "@ax/lib/shared/row-fields";
+import type { SkillGraphEdge } from "@ax/lib/shared/dashboard-types";
 
 export const SKILL_GRAPH_EDGES_SQL = `
 SELECT

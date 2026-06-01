@@ -1,10 +1,10 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Effect } from "effect";
-import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
-import { prettyPrint } from "../lib/json.ts";
-import { recordKeyPart, safeKeyPart } from "../lib/shared/derive-keys.ts";
-import { safeJsonParse } from "../lib/shared/safe-json.ts";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { prettyPrint } from "@ax/lib/json";
+import { recordKeyPart, safeKeyPart } from "@ax/lib/shared/derive-keys";
+import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import {
     recordRef,
     surrealJson,
@@ -13,7 +13,7 @@ import {
     surrealObject,
     surrealOptionString,
     surrealString,
-} from "../lib/shared/surql.ts";
+} from "@ax/lib/shared/surql";
 import {
     ClassifierReviewPipelineService,
     ClassifierReviewPipelineServiceLive,

@@ -12,9 +12,9 @@ import type {
     RoleForSkillRow,
     RoleRow,
 } from "../dashboard/role-queries.ts";
-import type { SessionSkillRoleGroup } from "../lib/shared/dashboard-types.ts";
+import type { SessionSkillRoleGroup } from "@ax/lib/shared/dashboard-types";
 
-export type { SessionSkillRoleGroup as ByRoleGroup } from "../lib/shared/dashboard-types.ts";
+export type { SessionSkillRoleGroup as ByRoleGroup } from "@ax/lib/shared/dashboard-types";
 
 // ---------------------------------------------------------------------------
 // Helpers

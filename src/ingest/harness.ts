@@ -1,8 +1,8 @@
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import { ProcessService } from "../lib/process.ts";
-import { AppLayer } from "../lib/layers.ts";
-import type { DbError } from "../lib/errors.ts";
+import { SurrealClient } from "@ax/lib/db";
+import { ProcessService } from "@ax/lib/process";
+import { AppLayer } from "@ax/lib/layers";
+import type { DbError } from "@ax/lib/errors";
 import { buildProjectHarnessReport } from "../project/harness.ts";
 import type {
     GuidanceRevision,
@@ -11,9 +11,9 @@ import type {
     StackSignal,
 } from "../project/types.ts";
 import { recordRef } from "./evidence-writers.ts";
-import { surrealDate, surrealJsonOption, surrealObject, surrealOptionString, surrealString } from "../lib/shared/surql.ts";
-import { executeStatementsWith } from "../lib/shared/statement-exec.ts";
-import { safeKeyPart } from "../lib/shared/derive-keys.ts";
+import { surrealDate, surrealJsonOption, surrealObject, surrealOptionString, surrealString } from "@ax/lib/shared/surql";
+import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
+import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 
 export interface HarnessIngestStats {
     readonly guidanceSources: number;

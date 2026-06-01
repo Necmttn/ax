@@ -7,15 +7,15 @@ import {
     type ShareGraph,
     type ShareTurn,
 } from "./artifact.ts";
-import { SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
 import type {
     SessionOverview,
     SessionTokenUsageDetail,
     SessionToolCall,
     SessionTopSkill,
-} from "../lib/shared/dashboard-types.ts";
-import { runQuery, runSingleQuery } from "../lib/shared/graph-query.ts";
+} from "@ax/lib/shared/dashboard-types";
+import { runQuery, runSingleQuery } from "@ax/lib/shared/graph-query";
 import { resolveTurnContent } from "../queries/session-turn-content.ts";
 import {
     sessionOverviewQuery,

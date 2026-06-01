@@ -8,8 +8,8 @@
  * Also runs a doctor query to count unclassified skills with ≥3 invocations.
  */
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
 
 // ---------------------------------------------------------------------------
 // Types

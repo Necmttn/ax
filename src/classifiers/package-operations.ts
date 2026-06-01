@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { exec, execFile } from "node:child_process";
-import { safeJsonParse } from "../lib/shared/safe-json.ts";
+import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import {
     recordRef,
     surrealJson,
@@ -10,7 +10,7 @@ import {
     surrealObject,
     surrealOptionString,
     surrealString,
-} from "../lib/shared/surql.ts";
+} from "@ax/lib/shared/surql";
 import {
     findClassifierPackageOperation,
     listClassifierPackageOperations,

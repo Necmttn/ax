@@ -11,8 +11,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Effect, Layer } from "effect";
 import { RecordId } from "surrealdb";
-import { SurrealClient } from "../lib/db.ts";
-import { AxConfig, makeTestConfig } from "../lib/config.ts";
+import { SurrealClient } from "@ax/lib/db";
+import { AxConfig, makeTestConfig } from "@ax/lib/config";
 import { deriveClaudeSubagents } from "./derive-claude-subagents.ts";
 
 // ---------------------------------------------------------------------------

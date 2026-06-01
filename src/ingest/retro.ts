@@ -27,11 +27,11 @@
  */
 
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import { encodeJson } from "../lib/decode.ts";
-import type { DbError } from "../lib/errors.ts";
-import { recordRef, surrealDate, surrealJsonOption, surrealObject, surrealOptionString, surrealString } from "../lib/shared/surql.ts";
-import { recordKeyPart, safeKeyPart } from "../lib/shared/derive-keys.ts";
+import { SurrealClient } from "@ax/lib/db";
+import { encodeJson } from "@ax/lib/decode";
+import type { DbError } from "@ax/lib/errors";
+import { recordRef, surrealDate, surrealJsonOption, surrealObject, surrealOptionString, surrealString } from "@ax/lib/shared/surql";
+import { recordKeyPart, safeKeyPart } from "@ax/lib/shared/derive-keys";
 
 export type RetroSource =
     | "claude_stop_hook"

@@ -1,5 +1,5 @@
 import { Context, Effect, Layer, Option, Schema } from "effect";
-import { safeKeyPart } from "../lib/shared/derive-keys.ts";
+import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 
 export type ClassifierKind = "heuristic" | "manual" | "local_model" | "llm_review";
 export type ClassifierInputKind = "event_window" | "turn" | "session" | "tool_call";

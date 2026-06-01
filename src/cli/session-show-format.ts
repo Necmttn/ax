@@ -13,9 +13,9 @@ import type {
     SessionDetailPayload,
     SessionLink,
     SessionToolCall,
-} from "../lib/shared/dashboard-types.ts";
+} from "@ax/lib/shared/dashboard-types";
 import { renderByRoleSection } from "./role-format.ts";
-import { prettifyProjectSlug } from "../lib/shared/project-slug.ts";
+import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
 
 /** Last `n` hex chars of a UUID-like string, same pattern as cmdRecall. */
 function shortId(id: string, n = 12): string {

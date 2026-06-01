@@ -1,13 +1,13 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { Effect, Schema } from "effect";
-import { SurrealClient, RecordId } from "../lib/db.ts";
-import { AxConfig } from "../lib/config.ts";
-import type { DbError } from "../lib/errors.ts";
+import { SurrealClient, RecordId } from "@ax/lib/db";
+import { AxConfig } from "@ax/lib/config";
+import type { DbError } from "@ax/lib/errors";
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
-import { surrealLiteral } from "../lib/json.ts";
-import { decodeJsonOrNull } from "../lib/decode.ts";
+import { surrealLiteral } from "@ax/lib/json";
+import { decodeJsonOrNull } from "@ax/lib/decode";
 import {
     extractFileWithSessionId,
     upsertTurnsForSubagents,
@@ -17,8 +17,8 @@ import {
     relateToolCallSkillsForSubagents,
     writePlanSnapshotsForSubagents,
 } from "./transcripts.ts";
-import { resolveSkillName } from "../lib/skill-id.ts";
-import { recordLiteral } from "../lib/ids.ts";
+import { resolveSkillName } from "@ax/lib/skill-id";
+import { recordLiteral } from "@ax/lib/ids";
 
 interface SubagentManifest {
     readonly agentId: string;

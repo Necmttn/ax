@@ -1,7 +1,7 @@
 import { Effect } from "effect";
-import { SurrealClient } from "../../lib/db.ts";
-import type { DbError } from "../../lib/errors.ts";
-import { executeStatements } from "../../lib/shared/statement-exec.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
+import { executeStatements } from "@ax/lib/shared/statement-exec";
 import {
     recordRef,
     surrealJsonTextOption,
@@ -10,7 +10,7 @@ import {
     surrealOptionRecord,
     surrealOptionString,
     surrealString,
-} from "../../lib/shared/surql.ts";
+} from "@ax/lib/shared/surql";
 import { identityPart, stableDigest } from "../record-keys.ts";
 import type {
     ContentSourceKind,

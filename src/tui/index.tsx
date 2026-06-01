@@ -1,8 +1,8 @@
 import { Context, Effect, Exit, Layer, Scope } from "effect";
 import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
-import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
-import { AppLayer } from "../lib/layers.ts";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { AppLayer } from "@ax/lib/layers";
 import { App } from "./App.tsx";
 
 /**

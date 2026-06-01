@@ -3,7 +3,7 @@ import { Effect } from "effect";
 import { flushSync } from "@opentui/react";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { SurrealClientShape } from "../../lib/db.ts";
+import type { SurrealClientShape } from "@ax/lib/db";
 import { SKILL_DETAIL_SQL } from "../queries.ts";
 
 /**

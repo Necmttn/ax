@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { execFile } from "node:child_process";
-import { AppLayer } from "../lib/layers.ts";
-import { prettyPrint } from "../lib/json.ts";
+import { AppLayer } from "@ax/lib/layers";
+import { prettyPrint } from "@ax/lib/json";
 import type { AxSessionShare } from "../share/artifact.ts";
 import { exportSessionShare } from "../share/exporter.ts";
 import {

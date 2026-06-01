@@ -1,7 +1,7 @@
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import { ProcessService } from "../lib/process.ts";
-import type { DbError } from "../lib/errors.ts";
+import { SurrealClient } from "@ax/lib/db";
+import { ProcessService } from "@ax/lib/process";
+import type { DbError } from "@ax/lib/errors";
 import { wantsJson } from "./output.ts";
 import { buildProjectContext, buildProjectHarness, buildProjectVerification } from "../project/context.ts";
 import type { HarnessDoctorFinding, ProjectContext, ProjectHarnessReport, ProjectVerification, VerificationCheck } from "../project/types.ts";

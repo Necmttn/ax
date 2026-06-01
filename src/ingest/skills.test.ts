@@ -11,8 +11,8 @@ import { RecordId } from "surrealdb";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { SurrealClient } from "../lib/db.ts";
-import type { SurrealClientShape } from "../lib/db.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { SurrealClientShape } from "@ax/lib/db";
 import { ingestSkills } from "./skills.ts";
 
 // ---------------------------------------------------------------------------

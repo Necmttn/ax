@@ -11,10 +11,10 @@ import { Data, Effect } from "effect";
 import { dissectTurn, type TurnSpan } from "../ingest/turn-dissect.ts";
 import { extractCodexJsonlLines, type CodexTurnTokenUsage } from "../ingest/codex.ts";
 import { estimateCost } from "../ingest/model-pricing.ts";
-import { SurrealClient } from "../lib/db.ts";
-import { decodeJsonRecordOrNull, encodeJson } from "../lib/decode.ts";
+import { SurrealClient } from "@ax/lib/db";
+import { decodeJsonRecordOrNull, encodeJson } from "@ax/lib/decode";
 import { resolveTurnContent } from "../queries/session-turn-content.ts";
-import { locateTranscript, type TranscriptNotFoundError } from "../lib/transcript-locator.ts";
+import { locateTranscript, type TranscriptNotFoundError } from "@ax/lib/transcript-locator";
 import type {
     HookFireDto,
     InspectSpanDto,
@@ -25,14 +25,14 @@ import type {
     SessionTokenUsageDetail,
     SpawnMeta,
     TurnTokenUsageDetail,
-} from "../lib/shared/dashboard-types.ts";
+} from "@ax/lib/shared/dashboard-types";
 import {
     interpolateRid,
     queryMany,
     queryOptional,
-} from "../lib/shared/graph-query.ts";
-import { clampPagination, type PaginationConfig } from "../lib/shared/pagination.ts";
-import { toBareSessionId } from "../lib/shared/session-id.ts";
+} from "@ax/lib/shared/graph-query";
+import { clampPagination, type PaginationConfig } from "@ax/lib/shared/pagination";
+import { toBareSessionId } from "@ax/lib/shared/session-id";
 
 const INSPECT_TURNS_PAGINATION: PaginationConfig = { defaultLimit: 2000, maxLimit: 2000 };
 

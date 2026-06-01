@@ -16,7 +16,7 @@ export {
     toolCallRecordKey,
     toolRecordKey,
     turnRecordKey,
-} from "../lib/ids.ts";
+} from "@ax/lib/ids";
 export type {
     EditedRelationKeyInput,
     InvokedRelationKeyInput,
@@ -25,4 +25,4 @@ export type {
     ToolFileRelationKeyInput,
     ToolCallKeyInput,
     ToolKeyInput,
-} from "../lib/ids.ts";
+} from "@ax/lib/ids";

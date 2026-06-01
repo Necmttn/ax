@@ -18,12 +18,12 @@
  */
 
 import { Effect } from "effect";
-import { encodeJson } from "../lib/decode.ts";
+import { encodeJson } from "@ax/lib/decode";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
-import { prettyPrint } from "../lib/json.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
+import { prettyPrint } from "@ax/lib/json";
 import {
     parseRetroCorrections,
     parseRetroFailed,

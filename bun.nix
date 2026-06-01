@@ -16,6 +16,7 @@
   "@ax-classifier/direction-event" = copyPathToStore ./packages/ax-classifier-direction-event;
   "@ax-classifier/session-sections" = copyPathToStore ./packages/ax-classifier-session-sections;
   "@ax-classifier/verification-event" = copyPathToStore ./packages/ax-classifier-verification-event;
+  "@ax/lib" = copyPathToStore ./packages/lib;
   "@ax/schema" = copyPathToStore ./packages/schema;
   "@ax/site" = copyPathToStore ./apps/site;
   "@babel/code-frame@7.27.1" = fetchurl {

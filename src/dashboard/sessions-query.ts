@@ -5,9 +5,9 @@
  * typed rows from the `session` table with a lightweight turn summary.
  */
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
-import { recordLiteral } from "../lib/ids.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
+import { recordLiteral } from "@ax/lib/ids";
 
 // ---------------------------------------------------------------------------
 // Row shape

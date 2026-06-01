@@ -50,7 +50,7 @@ import { Effect } from "effect";
 import { SurrealClient } from "../db.ts";
 import type { DbError } from "../errors.ts";
 import { toSessionRid, type SessionId } from "./session-id.ts";
-import type { Query, SingleQuery } from "../../queries/query.ts";
+import type { Query, SingleQuery } from "./query.ts";
 
 /** Single-row select. Maps to `T | null` and swallows DB errors to `null`.
  *  Use for "fetch this thing for this session if it exists". */

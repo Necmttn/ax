@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
-import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { buildFileContextPack, extractFileContextSignals } from "./file-context.ts";
 
 function fakeContextClient(): SurrealClientShape {

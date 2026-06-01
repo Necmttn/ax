@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { Effect, Layer } from "effect";
-import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import {
     fetchSkillsByRole,
     fetchRolesForSkill,

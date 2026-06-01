@@ -1,5 +1,5 @@
 import type { InsightView } from "../queries/insights.ts";
-import { prettyPrint } from "../lib/json.ts";
+import { prettyPrint } from "@ax/lib/json";
 
 type InsightRow = Record<string, unknown>;
 

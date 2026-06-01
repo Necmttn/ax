@@ -1,8 +1,8 @@
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
-import { recordLiteral } from "../lib/ids.ts";
-import { surrealDate, surrealString } from "../lib/shared/surql.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
+import { recordLiteral } from "@ax/lib/ids";
+import { surrealDate, surrealString } from "@ax/lib/shared/surql";
 
 export interface CostSessionRow {
     readonly session: string;

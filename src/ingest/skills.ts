@@ -15,16 +15,16 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
 import { Effect, Schema } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import { defaultSkillDirs } from "../lib/paths.ts";
-import { AppLayer } from "../lib/layers.ts";
-import type { DbError } from "../lib/errors.ts";
+import { SurrealClient } from "@ax/lib/db";
+import { defaultSkillDirs } from "@ax/lib/paths";
+import { AppLayer } from "@ax/lib/layers";
+import type { DbError } from "@ax/lib/errors";
 import { upsertSkillByName } from "./skill-upsert.ts";
 import { relateSkillRoles } from "./skill-role.ts";
 import { discoverProjectRoots } from "./project-discovery.ts";
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
-import { validateRoleName } from "../lib/role-name.ts";
+import { validateRoleName } from "@ax/lib/role-name";
 
 interface ParsedSkill {
     name: string;

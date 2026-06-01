@@ -1,13 +1,13 @@
 import { readdir, stat, open } from "node:fs/promises";
 import { join, basename, isAbsolute, resolve } from "node:path";
 import { Effect, Schema } from "effect";
-import { RecordId, SurrealClient, filePointer } from "../lib/db.ts";
-import { AxConfig } from "../lib/config.ts";
-import { surrealLiteral } from "../lib/json.ts";
-import { decodeJsonOrNull } from "../lib/decode.ts";
-import { resolveSkillName, skillRecordKey } from "../lib/skill-id.ts";
-import { AppLayer } from "../lib/layers.ts";
-import type { DbError } from "../lib/errors.ts";
+import { RecordId, SurrealClient, filePointer } from "@ax/lib/db";
+import { AxConfig } from "@ax/lib/config";
+import { surrealLiteral } from "@ax/lib/json";
+import { decodeJsonOrNull } from "@ax/lib/decode";
+import { resolveSkillName, skillRecordKey } from "@ax/lib/skill-id";
+import { AppLayer } from "@ax/lib/layers";
+import type { DbError } from "@ax/lib/errors";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 import {
@@ -45,7 +45,7 @@ import {
 } from "./record-keys.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
 
-import { executeStatements, executeStatementsWith } from "../lib/shared/statement-exec.ts";
+import { executeStatements, executeStatementsWith } from "@ax/lib/shared/statement-exec";
 
 const MAX_OUTPUT_EXCERPT_CHARS = 1200;
 const DEFAULT_CLAUDE_CONCURRENCY = 4;

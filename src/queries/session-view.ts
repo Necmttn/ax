@@ -4,8 +4,8 @@
  * role edges, behind the typed query seam.
  */
 
-import { defineQuery } from "./query.ts";
-import { isRecord, stringField } from "../lib/shared/row-fields.ts";
+import { defineQuery } from "@ax/lib/shared/query";
+import { isRecord, stringField } from "@ax/lib/shared/row-fields";
 
 export interface SessionSkillRoleParams {
     readonly skillNames: ReadonlyArray<string>;

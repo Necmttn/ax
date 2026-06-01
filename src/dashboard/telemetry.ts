@@ -1,4 +1,4 @@
-import { surrealJson, surrealString } from "../lib/shared/surql.ts";
+import { surrealJson, surrealString } from "@ax/lib/shared/surql";
 
 export type IngestEventLevel = "debug" | "info" | "warn" | "error";
 

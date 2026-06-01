@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { Effect, Exit } from "effect";
 import { wantsJson, catchDbErrorAndExit } from "./output.ts";
-import { DbError } from "../lib/errors.ts";
+import { DbError } from "@ax/lib/errors";
 
 // ---------------------------------------------------------------------------
 // wantsJson

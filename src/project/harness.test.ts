@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { ProcessServiceLive } from "../lib/process.ts";
+import { ProcessServiceLive } from "@ax/lib/process";
 import {
     buildGuidanceRevisions,
     buildHarnessDoctor,

@@ -1,8 +1,8 @@
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
-import { prettyPrint, surrealLiteral } from "../lib/json.ts";
-import { stableDigest } from "../lib/ids.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
+import { prettyPrint, surrealLiteral } from "@ax/lib/json";
+import { stableDigest } from "@ax/lib/ids";
 import { recordRef } from "../ingest/evidence-writers.ts";
 
 export const ENFORCE_WORKTREE_CASE_KEY = "enforce_worktree_next_worktree";

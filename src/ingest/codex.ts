@@ -1,13 +1,13 @@
 import { readdir, stat, open } from "node:fs/promises";
 import { join } from "node:path";
 import { Effect, Schema } from "effect";
-import { RecordId, SurrealClient, filePointer } from "../lib/db.ts";
-import { AxConfig } from "../lib/config.ts";
-import { decodeJsonOrNull } from "../lib/decode.ts";
-import { skillRecordKey } from "../lib/skill-id.ts";
-import { recordRef, surrealDate, surrealJsonOption, surrealObject, surrealOptionInt, surrealOptionString, surrealString } from "../lib/shared/surql.ts";
-import { AppLayer } from "../lib/layers.ts";
-import type { DbError } from "../lib/errors.ts";
+import { RecordId, SurrealClient, filePointer } from "@ax/lib/db";
+import { AxConfig } from "@ax/lib/config";
+import { decodeJsonOrNull } from "@ax/lib/decode";
+import { skillRecordKey } from "@ax/lib/skill-id";
+import { recordRef, surrealDate, surrealJsonOption, surrealObject, surrealOptionInt, surrealOptionString, surrealString } from "@ax/lib/shared/surql";
+import { AppLayer } from "@ax/lib/layers";
+import type { DbError } from "@ax/lib/errors";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 import {
@@ -42,8 +42,8 @@ import {
 } from "./plans.ts";
 import { invokedRelationRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
-import { executeStatements } from "../lib/shared/statement-exec.ts";
-import { safeKeyPart } from "../lib/shared/derive-keys.ts";
+import { executeStatements } from "@ax/lib/shared/statement-exec";
+import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 import { tokenQualityLabels } from "./token-quality.ts";
 import { estimateCost } from "./model-pricing.ts";
 

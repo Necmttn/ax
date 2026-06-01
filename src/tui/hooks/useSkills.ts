@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Effect } from "effect";
 import { flushSync } from "@opentui/react";
-import type { SurrealClientShape } from "../../lib/db.ts";
+import type { SurrealClientShape } from "@ax/lib/db";
 import {
     PRODUCED_BY_SESSION_SQL,
     SKILL_LAST_PROJECT_SQL,

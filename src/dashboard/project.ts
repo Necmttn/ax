@@ -1,6 +1,6 @@
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
 import {
     projectOverviewQuery,
     projectTopSkillsQuery,
@@ -14,8 +14,8 @@ import type {
     ProjectPagePayload,
     ProjectRecentSession,
     ProjectTopSkill,
-} from "../lib/shared/dashboard-types.ts";
-import { runQuery, runSingleQuery } from "../lib/shared/graph-query.ts";
+} from "@ax/lib/shared/dashboard-types";
+import { runQuery, runSingleQuery } from "@ax/lib/shared/graph-query";
 
 export const fetchProject = (
     project: string,

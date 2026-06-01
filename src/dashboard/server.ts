@@ -1,6 +1,6 @@
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import { AppLayer } from "../lib/layers.ts";
+import { SurrealClient } from "@ax/lib/db";
+import { AppLayer } from "@ax/lib/layers";
 import { graphHealthSql } from "../queries/graph-health.ts";
 import { checkoutActivitySql, gitCorrelationSql } from "../queries/insights.ts";
 import { addIngestEventSubscriber, removeIngestEventSubscriber } from "./telemetry.ts";

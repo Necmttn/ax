@@ -1,7 +1,7 @@
 import { describe, expect, it, test } from "bun:test";
 import { Effect, Schema } from "effect";
-import { RecordId, type SurrealClientShape } from "../lib/db.ts";
-import { skillRecordKey } from "../lib/skill-id.ts";
+import { RecordId, type SurrealClientShape } from "@ax/lib/db";
+import { skillRecordKey } from "@ax/lib/skill-id";
 import { skillRecordIdFromLookup, upsertSkillByName } from "./skill-upsert.ts";
 import { SkillsKey, SkillsStats, skillsStage } from "./skills.ts";
 

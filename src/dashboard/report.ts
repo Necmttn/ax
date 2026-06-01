@@ -3,8 +3,8 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Effect } from "effect";
-import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
 import {
     checkoutActivitySql,
     gitCorrelationSql,

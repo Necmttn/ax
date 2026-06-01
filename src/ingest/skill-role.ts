@@ -1,9 +1,9 @@
 import { Effect } from "effect";
-import { RecordId } from "../lib/db.ts";
-import type { SurrealClientShape } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
-import { recordLiteral } from "../lib/ids.ts";
-import { validateRoleName } from "../lib/role-name.ts";
+import { RecordId } from "@ax/lib/db";
+import type { SurrealClientShape } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
+import { recordLiteral } from "@ax/lib/ids";
+import { validateRoleName } from "@ax/lib/role-name";
 
 const safeRoleName = (name: string): string | null => {
     try {

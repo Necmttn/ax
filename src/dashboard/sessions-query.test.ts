@@ -7,7 +7,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { RecordId } from "surrealdb";
-import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import {
     listSessionsHere,
     listSessionsAround,

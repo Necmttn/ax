@@ -5,9 +5,9 @@
  */
 
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import { surrealLiteral } from "../lib/json.ts";
-import type { DbError } from "../lib/errors.ts";
+import { SurrealClient } from "@ax/lib/db";
+import { surrealLiteral } from "@ax/lib/json";
+import type { DbError } from "@ax/lib/errors";
 import {
     type InterventionSafetyContract,
     interventionSafetyMessage,

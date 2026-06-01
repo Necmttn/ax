@@ -13,10 +13,10 @@ import {
     type ClassifierEvidenceRef,
 } from "../classifiers/repository.ts";
 import { builtInClassifiers } from "../classifiers/registry.ts";
-import { SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
-import { executeStatementsWith } from "../lib/shared/statement-exec.ts";
-import { recordKeyPart } from "../lib/shared/derive-keys.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
+import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
+import { recordKeyPart } from "@ax/lib/shared/derive-keys";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 

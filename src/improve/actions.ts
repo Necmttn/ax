@@ -10,11 +10,11 @@
 import { Effect } from "effect";
 import { existsSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
-import { recordRef, surrealString } from "../lib/shared/surql.ts";
-import { surrealLiteral } from "../lib/json.ts";
-import { recordKeyPart } from "../lib/shared/derive-keys.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
+import { recordRef, surrealString } from "@ax/lib/shared/surql";
+import { surrealLiteral } from "@ax/lib/json";
+import { recordKeyPart } from "@ax/lib/shared/derive-keys";
 import {
     type InterventionSafetyContract,
     PROPOSAL_STATUS_ACCEPTED,

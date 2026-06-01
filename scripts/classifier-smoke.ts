@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { spawnSync } from "node:child_process";
 import { Surreal } from "surrealdb";
-import { envConfig } from "../src/lib/db.ts";
+import { envConfig } from "@ax/lib/db";
 import { classifierThemesSql, harnessCandidatesSql } from "../src/queries/insights.ts";
 
 export interface ClassifierSmokeArgs {

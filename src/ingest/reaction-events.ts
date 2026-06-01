@@ -1,8 +1,8 @@
 import { Effect, Schema } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
-import { recordKeyPart, safeKeyPart } from "../lib/shared/derive-keys.ts";
-import { executeStatementsWith } from "../lib/shared/statement-exec.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
+import { recordKeyPart, safeKeyPart } from "@ax/lib/shared/derive-keys";
+import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
 import {
     recordRef,
     surrealDate,
@@ -11,7 +11,7 @@ import {
     surrealOptionRecord,
     surrealOptionString,
     surrealString,
-} from "../lib/shared/surql.ts";
+} from "@ax/lib/shared/surql";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 

@@ -16,9 +16,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { acceptProposal } from "./actions.ts";
 import { lintFiles } from "./lint.ts";
-import { AppLayer } from "../lib/layers.ts";
-import { SurrealClient } from "../lib/db.ts";
-import { surrealString } from "../lib/shared/surql.ts";
+import { AppLayer } from "@ax/lib/layers";
+import { SurrealClient } from "@ax/lib/db";
+import { surrealString } from "@ax/lib/shared/surql";
 
 // ---------------------------------------------------------------------------
 // Skip guard

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { InspectSpanDto, InspectSpanKind, InspectTurnDto } from "../../../../lib/shared/dashboard-types.ts";
+import type { InspectSpanDto, InspectSpanKind, InspectTurnDto } from "@ax/lib/shared/dashboard-types";
 import {
     childrenByAnchorTurn,
     isCorrectionTurn,

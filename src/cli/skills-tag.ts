@@ -6,11 +6,11 @@
  * with different roles to add multiple roles.
  */
 import { Effect } from "effect";
-import { RecordId, SurrealClient, type SurrealClientShape } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
-import { recordLiteral } from "../lib/ids.ts";
-import { validateRoleName, validateSkillName } from "../lib/role-name.ts";
-import { surrealString } from "../lib/shared/surql.ts";
+import { RecordId, SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
+import { recordLiteral } from "@ax/lib/ids";
+import { validateRoleName, validateSkillName } from "@ax/lib/role-name";
+import { surrealString } from "@ax/lib/shared/surql";
 
 export interface SkillsTagOptions {
     readonly skillName: string;

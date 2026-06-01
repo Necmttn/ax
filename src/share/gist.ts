@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect";
-import { prettyPrint } from "../lib/json.ts";
+import { prettyPrint } from "@ax/lib/json";
 import type { AxSessionShare } from "./artifact.ts";
 
 export interface GistRef {

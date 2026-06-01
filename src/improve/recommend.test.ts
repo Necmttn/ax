@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { recommend, formatRecommendations, selectByIndices, parseIndexInput, type RecommendItem } from "./recommend.ts";
-import { SurrealClient } from "../lib/db.ts";
+import { SurrealClient } from "@ax/lib/db";
 
 const layerWith = (rows: ReadonlyArray<unknown>) =>
     Layer.succeed(SurrealClient, {

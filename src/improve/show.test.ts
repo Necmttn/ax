@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { showExperiment, formatShow } from "./show.ts";
-import { SurrealClient } from "../lib/db.ts";
+import { SurrealClient } from "@ax/lib/db";
 
 const layerWith = (...fixtures: unknown[][]) => {
     let i = 0;

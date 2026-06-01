@@ -1,12 +1,12 @@
 import { Effect, Schema } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import { skillRecordKey } from "../lib/skill-id.ts";
-import { AppLayer } from "../lib/layers.ts";
-import type { DbError } from "../lib/errors.ts";
+import { SurrealClient } from "@ax/lib/db";
+import { skillRecordKey } from "@ax/lib/skill-id";
+import { AppLayer } from "@ax/lib/layers";
+import type { DbError } from "@ax/lib/errors";
 import { recordRef } from "./evidence-writers.ts";
-import { surrealDate, surrealJsonTextOption, surrealObject, surrealOptionRecord, surrealOptionString, surrealString } from "../lib/shared/surql.ts";
-import { executeStatementsWith } from "../lib/shared/statement-exec.ts";
-import { isoTimestamp, nonEmptyString, recordKeyPart, safeKeyPart, type TimestampInput } from "../lib/shared/derive-keys.ts";
+import { surrealDate, surrealJsonTextOption, surrealObject, surrealOptionRecord, surrealOptionString, surrealString } from "@ax/lib/shared/surql";
+import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
+import { isoTimestamp, nonEmptyString, recordKeyPart, safeKeyPart, type TimestampInput } from "@ax/lib/shared/derive-keys";
 
 /**
  * Negation patterns that signal a user pushed back on the previous assistant

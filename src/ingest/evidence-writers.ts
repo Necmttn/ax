@@ -1,8 +1,8 @@
 import { Effect } from "effect";
-import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
-import { skillRecordKey } from "../lib/skill-id.ts";
-import { executeStatements, executeStatementsWith } from "../lib/shared/statement-exec.ts";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
+import { skillRecordKey } from "@ax/lib/skill-id";
+import { executeStatements, executeStatementsWith } from "@ax/lib/shared/statement-exec";
 import {
     editedRelationRecordKey,
     fileRecordKey,
@@ -22,11 +22,11 @@ import {
     surrealJsonText,
     surrealJsonTextOption,
     recordRef,
-} from "../lib/shared/surql.ts";
-import { nonEmptyString } from "../lib/shared/derive-keys.ts";
+} from "@ax/lib/shared/surql";
+import { nonEmptyString } from "@ax/lib/shared/derive-keys";
 import type { ToolFileEvidence } from "./tool-file-evidence.ts";
 
-export { recordRef } from "../lib/shared/surql.ts";
+export { recordRef } from "@ax/lib/shared/surql";
 
 type JsonInput = unknown;
 type TimestampInput = Date | string;

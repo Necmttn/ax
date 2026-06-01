@@ -7,8 +7,8 @@
 
 import { describe, expect, it } from "bun:test";
 import { Effect, Layer } from "effect";
-import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
-import type { SessionDetailPayload, SessionLink } from "../lib/shared/dashboard-types.ts";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import type { SessionDetailPayload, SessionLink } from "@ax/lib/shared/dashboard-types";
 import { fetchSessionShow } from "./session-show.ts";
 
 // ---------------------------------------------------------------------------
@@ -16,7 +16,7 @@ import { fetchSessionShow } from "./session-show.ts";
 // ---------------------------------------------------------------------------
 
 const makeChild = (id: string): SessionLink => ({
-    session_id: id as unknown as import("../lib/shared/session-id.ts").SessionId,
+    session_id: id as unknown as import("@ax/lib/shared/session-id").SessionId,
     project: null,
     started_at: null,
     nickname: null,
@@ -29,7 +29,7 @@ const makePayload = (
     children: SessionLink[] = [],
 ): SessionDetailPayload => ({
     overview: {
-        id: id as unknown as import("../lib/shared/session-id.ts").SessionId,
+        id: id as unknown as import("@ax/lib/shared/session-id").SessionId,
         project: "test-project",
         cwd: "/test/cwd",
         model: null,

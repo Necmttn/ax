@@ -23,17 +23,17 @@
  */
 
 import { Effect, Schema } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import { AppLayer } from "../lib/layers.ts";
-import type { DbError } from "../lib/errors.ts";
+import { SurrealClient } from "@ax/lib/db";
+import { AppLayer } from "@ax/lib/layers";
+import type { DbError } from "@ax/lib/errors";
 import {
     recordRef,
     surrealObject,
     surrealOptionString,
     surrealString,
-} from "../lib/shared/surql.ts";
-import { executeStatementsWith } from "../lib/shared/statement-exec.ts";
-import { safeKeyPart, recordKeyPart } from "../lib/shared/derive-keys.ts";
+} from "@ax/lib/shared/surql";
+import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
+import { safeKeyPart, recordKeyPart } from "@ax/lib/shared/derive-keys";
 import type { HarnessLearningCandidate } from "../project/types.ts";
 
 export interface DeriveProposalsStats {
@@ -326,7 +326,7 @@ export const buildSkillProposalStatements = (
 
 export const deriveProposals = (
     opts: DeriveProposalsOpts = { minFrequency: 3 },
-): Effect.Effect<DeriveProposalsStats, DbError, SurrealClient | import("../lib/process.ts").ProcessService> =>
+): Effect.Effect<DeriveProposalsStats, DbError, SurrealClient | import("@ax/lib/process").ProcessService> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         const [candidates, skills, existingProposals] = yield* Effect.all([
@@ -378,7 +378,7 @@ if (import.meta.main) {
 
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
-import type { ProcessService } from "../lib/process.ts";
+import type { ProcessService } from "@ax/lib/process";
 
 export const ProposalsKey = Schema.Literal("proposals");
 export type ProposalsKey = typeof ProposalsKey.Type;

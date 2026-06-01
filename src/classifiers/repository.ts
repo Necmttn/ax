@@ -1,4 +1,4 @@
-import { safeKeyPart } from "../lib/shared/derive-keys.ts";
+import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 import {
     recordRef,
     surrealDate,
@@ -8,7 +8,7 @@ import {
     surrealOptionInt,
     surrealOptionRecord,
     surrealString,
-} from "../lib/shared/surql.ts";
+} from "@ax/lib/shared/surql";
 import type { ClassifierDefinition, ClassifierResult } from "./core.ts";
 
 export interface ClassifierEvidenceRef {

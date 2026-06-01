@@ -10,10 +10,10 @@
  *
  * The (has_error, ts) index keeps the WHERE clause cheap.
  */
-import { defineQuery } from "./query.ts";
-import { isRecord, stringField, dateField, numberField } from "../lib/shared/row-fields.ts";
-import { toBareSessionId } from "../lib/shared/session-id.ts";
-import type { ToolFailureRow, ToolFailureSample } from "../lib/shared/dashboard-types.ts";
+import { defineQuery } from "@ax/lib/shared/query";
+import { isRecord, stringField, dateField, numberField } from "@ax/lib/shared/row-fields";
+import { toBareSessionId } from "@ax/lib/shared/session-id";
+import type { ToolFailureRow, ToolFailureSample } from "@ax/lib/shared/dashboard-types";
 
 // Single GROUP BY pass over the (has_error, ts) index. Enrichment fields
 // (last_error_text, last_project, total_calls) are deferred to the detail

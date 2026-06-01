@@ -32,11 +32,11 @@
  */
 
 import { Effect, Schema } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
-import { executeStatementsWith } from "../lib/shared/statement-exec.ts";
+import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
 
 export interface BackfillInvokedPositionsStats {
     backfilled: number;

@@ -1,4 +1,4 @@
-import { decodeJsonOrNull } from "../lib/decode.ts";
+import { decodeJsonOrNull } from "@ax/lib/decode";
 import type { AgentProviderName } from "./provider-events.ts";
 
 export type ProviderDelegationSignalStatus = "available" | "unavailable";

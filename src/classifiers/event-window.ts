@@ -1,4 +1,4 @@
-import { recordKeyPart, safeKeyPart } from "../lib/shared/derive-keys.ts";
+import { recordKeyPart, safeKeyPart } from "@ax/lib/shared/derive-keys";
 import type { EventToolCall, EventTurn, EventWindow } from "./core.ts";
 
 export interface ClassifierTurnRow {

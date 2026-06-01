@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { WrappedProfile } from "../lib/shared/dashboard-types.ts";
+import type { WrappedProfile } from "@ax/lib/shared/dashboard-types";
 import {
     choosePrimaryArchetype,
     computeStreaks,

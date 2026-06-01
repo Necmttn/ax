@@ -1,5 +1,5 @@
 import { Layer } from "effect";
-import { AppLayer } from "../../lib/layers.ts";
+import { AppLayer } from "@ax/lib/layers";
 import { StageRegistryDefault } from "./registry.ts";
 
 /**

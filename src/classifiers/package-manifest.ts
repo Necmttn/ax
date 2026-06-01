@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { safeJsonParse } from "../lib/shared/safe-json.ts";
+import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import type { ClassifierInputKind, ClassifierKind } from "./core.ts";
 
 export const CLASSIFIER_PACKAGE_SCHEMA = "ax.classifier.v1";

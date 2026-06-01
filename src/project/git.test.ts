@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { ProcessServiceTest } from "../lib/process.ts";
+import { ProcessServiceTest } from "@ax/lib/process";
 import { getGitState } from "./git.ts";
 
 const STATUS_OUTPUT = ["## main", "M  src/a.ts", " M src/b.ts", "?? new.md", ""].join("\0");

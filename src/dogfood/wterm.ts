@@ -4,10 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import type { ServerWebSocket } from "bun";
-import { SurrealClient } from "../lib/db.ts";
-import { AppLayer } from "../lib/layers.ts";
+import { SurrealClient } from "@ax/lib/db";
+import { AppLayer } from "@ax/lib/layers";
 import { recordRef } from "../ingest/evidence-writers.ts";
-import { surrealJson, surrealString } from "../lib/shared/surql.ts";
+import { surrealJson, surrealString } from "@ax/lib/shared/surql";
 
 export type DogfoodScenario = "axctl-setup" | "interactive";
 export type DogfoodTransport = "auto" | "pty" | "process";

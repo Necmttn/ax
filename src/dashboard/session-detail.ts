@@ -1,6 +1,6 @@
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
 import {
     sessionAgentDelegationsQuery,
     sessionChildrenQuery,
@@ -17,8 +17,8 @@ import type {
     SessionOverview,
     SessionToolCall,
     SessionTopSkill,
-} from "../lib/shared/dashboard-types.ts";
-import { runQuery, runSingleQuery } from "../lib/shared/graph-query.ts";
+} from "@ax/lib/shared/dashboard-types";
+import { runQuery, runSingleQuery } from "@ax/lib/shared/graph-query";
 
 // Accepts both real UUIDs ("019e0ad4-c977-...") and our synthetic prefixed
 // ids ("claude-subagent-a41ef01d6ca8d521c"). Restrict the charset to the

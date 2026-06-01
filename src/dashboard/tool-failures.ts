@@ -1,6 +1,6 @@
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
 import {
     toolFailuresQuery,
     toolFailureDetailQuery,
@@ -12,8 +12,8 @@ import type {
     ToolFailureSample,
     ToolFailureRecommendation,
     ToolFailuresResponse,
-} from "../lib/shared/dashboard-types.ts";
-import { runQuery } from "../lib/shared/graph-query.ts";
+} from "@ax/lib/shared/dashboard-types";
+import { runQuery } from "@ax/lib/shared/graph-query";
 
 const HIGH_FAILURE_COUNT = 5;
 const RECENT_DAYS = 14;

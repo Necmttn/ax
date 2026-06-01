@@ -1,4 +1,4 @@
-import { CORRECTION_MAX_LENGTH, isCorrectionPhrase } from "../lib/shared/correction-phrase.ts";
+import { CORRECTION_MAX_LENGTH, isCorrectionPhrase } from "@ax/lib/shared/correction-phrase";
 
 export type TurnIntentKind =
     | "assistant"

@@ -1,7 +1,7 @@
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
-import { surrealLiteral } from "../lib/json.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
+import { surrealLiteral } from "@ax/lib/json";
 import {
     PRODUCED_BY_SESSION_SQL,
     SKILL_LAST_PROJECT_SQL,
@@ -9,7 +9,7 @@ import {
     SKILL_SUMMARY_PROPOSED_ONLY_SQL,
 } from "../queries/skill-summary.ts";
 import { SKILL_DETAIL_SQL } from "../queries/skill-detail.ts";
-import { prettifyProjectSlug } from "../lib/shared/project-slug.ts";
+import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
 import type {
     SkillDetailPayload,
     SkillPair,
@@ -20,7 +20,7 @@ import type {
     SkillTriageNote,
     SkillTriageResponse,
     TriageDecision,
-} from "../lib/shared/dashboard-types.ts";
+} from "@ax/lib/shared/dashboard-types";
 
 const TRIAGE_DECISIONS_SQL = `SELECT skill_name, decision, reason, decided_at FROM skill_triage_decision;`;
 

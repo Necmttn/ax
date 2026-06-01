@@ -39,13 +39,13 @@
  */
 
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import { AppLayer } from "../lib/layers.ts";
-import type { DbError } from "../lib/errors.ts";
-import { recordRef, surrealDate, surrealString } from "../lib/shared/surql.ts";
-import { executeStatementsWith } from "../lib/shared/statement-exec.ts";
-import { safeKeyPart, recordKeyPart } from "../lib/shared/derive-keys.ts";
-import { safeJsonParse } from "../lib/shared/safe-json.ts";
+import { SurrealClient } from "@ax/lib/db";
+import { AppLayer } from "@ax/lib/layers";
+import type { DbError } from "@ax/lib/errors";
+import { recordRef, surrealDate, surrealString } from "@ax/lib/shared/surql";
+import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
+import { safeKeyPart, recordKeyPart } from "@ax/lib/shared/derive-keys";
+import { safeJsonParse } from "@ax/lib/shared/safe-json";
 
 export type CheckpointKind = "+3s" | "+10s" | "+30s";
 export type CheckpointVerdict =

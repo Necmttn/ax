@@ -1,5 +1,5 @@
 import type { SkillDetailRecord } from "./hooks/useSkillDetail.ts";
-import { prettifyProjectSlug } from "../lib/shared/project-slug.ts";
+import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
 
 interface Props {
     readonly data: SkillDetailRecord | null;

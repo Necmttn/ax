@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { classifierExplainSql, fetchClassifierExplain, turnRecordRefFromInput } from "./classifier-explain.ts";
 
 describe("classifier explain query", () => {

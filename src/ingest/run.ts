@@ -1,10 +1,10 @@
 import { Effect, References } from "effect";
-import { AxConfig } from "../lib/config.ts";
-import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
-import { LiveTrace } from "../lib/live-traces/index.ts";
-import { TraceSink } from "../lib/live-traces/Sink.ts";
-import { ProcessService } from "../lib/process.ts";
+import { AxConfig } from "@ax/lib/config";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
+import { LiveTrace } from "@ax/lib/live-traces/index";
+import { TraceSink } from "@ax/lib/live-traces/Sink";
+import { ProcessService } from "@ax/lib/process";
 import {
     buildIngestEventStatement,
     buildIngestRunFinishStatement,

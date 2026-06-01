@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { Surreal } from "surrealdb";
-import { envConfig } from "../src/lib/db.ts";
-import { surrealDate, surrealString } from "../src/lib/shared/surql.ts";
+import { envConfig } from "@ax/lib/db";
+import { surrealDate, surrealString } from "@ax/lib/shared/surql";
 
 interface Args {
     readonly days: number;

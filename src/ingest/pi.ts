@@ -1,12 +1,12 @@
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { Effect, Schema } from "effect";
-import { AxConfig } from "../lib/config.ts";
-import { RecordId, SurrealClient } from "../lib/db.ts";
-import { decodeJsonOrNull } from "../lib/decode.ts";
-import type { DbError } from "../lib/errors.ts";
-import { safeKeyPart } from "../lib/shared/derive-keys.ts";
-import { executeStatements } from "../lib/shared/statement-exec.ts";
+import { AxConfig } from "@ax/lib/config";
+import { RecordId, SurrealClient } from "@ax/lib/db";
+import { decodeJsonOrNull } from "@ax/lib/decode";
+import type { DbError } from "@ax/lib/errors";
+import { safeKeyPart } from "@ax/lib/shared/derive-keys";
+import { executeStatements } from "@ax/lib/shared/statement-exec";
 import {
     recordRef,
     surrealDate,
@@ -15,8 +15,8 @@ import {
     surrealOptionInt,
     surrealOptionString,
     surrealString,
-} from "../lib/shared/surql.ts";
-import { skillRecordKey } from "../lib/skill-id.ts";
+} from "@ax/lib/shared/surql";
+import { skillRecordKey } from "@ax/lib/skill-id";
 import {
     buildRelateToolCallSkillStatements,
     buildToolFileEvidenceStatements,

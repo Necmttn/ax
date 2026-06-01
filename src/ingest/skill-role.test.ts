@@ -7,7 +7,7 @@ import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { RecordId } from "surrealdb";
 import { relateSkillRoles } from "./skill-role.ts";
-import type { SurrealClientShape } from "../lib/db.ts";
+import type { SurrealClientShape } from "@ax/lib/db";
 
 // ---------------------------------------------------------------------------
 // Mock DB helpers

@@ -1,6 +1,6 @@
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
 import type {
     GraphExplorerEdge,
     GraphExplorerMode,
@@ -10,7 +10,7 @@ import type {
     GraphExplorerStoryCard,
     GraphMetricValue,
     GraphNodeKind,
-} from "../lib/shared/dashboard-types.ts";
+} from "@ax/lib/shared/dashboard-types";
 
 const DEFAULT_MODE: GraphExplorerMode = "file-attention";
 const GRAPH_MODES = new Set<GraphExplorerMode>([

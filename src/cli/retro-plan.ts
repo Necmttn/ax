@@ -25,16 +25,16 @@
 
 import { Effect } from "effect";
 import { existsSync } from "node:fs";
-import { SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
-import { prettyPrint } from "../lib/json.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
+import { prettyPrint } from "@ax/lib/json";
 import {
     recordRef,
     surrealObject,
     surrealOptionString,
     surrealString,
-} from "../lib/shared/surql.ts";
-import { safeKeyPart } from "../lib/shared/derive-keys.ts";
+} from "@ax/lib/shared/surql";
+import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 import { dedupeSig, normalizeTitle } from "../ingest/derive-proposals.ts";
 import {
     type InterventionSafetyContract,

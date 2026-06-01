@@ -8,8 +8,8 @@
  */
 
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
-import type { DbError } from "../lib/errors.ts";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
 import { classifyTurnIntent, type TurnIntentKind } from "./intent-kind.ts";
 
 export interface TurnIntentRow {
