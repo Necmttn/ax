@@ -345,6 +345,12 @@ export interface WorkflowCandidateGuidancePendingReviewTaskListReport {
     readonly schema: "ax.workflow_candidate_pending_review_task_list.v1";
     readonly task_dir: string;
     readonly filters?: WorkflowCandidateGuidancePendingReviewTaskListFilters;
+    readonly recommended_task_path?: string;
+    readonly recommended_task_status?: WorkflowCandidateGuidancePendingReviewTaskStatus;
+    readonly recommended_task_review_decision_status?: WorkflowCandidateGuidancePendingReviewDecisionStatus;
+    readonly recommended_task_review_command_status?: WorkflowCandidateGuidancePendingReviewCommandStatus;
+    readonly recommended_task_candidate_ids?: readonly string[];
+    readonly recommended_task_next_action?: string;
     readonly task_count: number;
     readonly ready_for_review_count: number;
     readonly review_decisions_ready_count: number;
@@ -3481,6 +3487,36 @@ const pendingReviewTaskMatchesFilters = (
     return true;
 };
 
+const pendingReviewTaskRoutingRank = (task: WorkflowCandidateGuidancePendingReviewTaskListItem): number => {
+    if (
+        task.status === "missing_fixture_pack" ||
+        task.status === "missing_review_brief" ||
+        task.status === "missing_review_artifacts"
+    ) return 0;
+    if (task.status === "review_decisions_need_repair") return 1;
+    if (task.review_sync_command_can_execute || task.review_inspect_command_can_execute) return 2;
+    if (task.status === "ready_for_review") return 3;
+    if (task.status === "unknown_schema") return 4;
+    return 5;
+};
+
+const pendingReviewTaskRecommendedCommandStatus = (
+    task: WorkflowCandidateGuidancePendingReviewTaskListItem,
+): WorkflowCandidateGuidancePendingReviewCommandStatus => {
+    if (task.review_sync_command_status === "ready_to_execute") return task.review_sync_command_status;
+    if (task.review_inspect_command_status === "ready_to_execute") return task.review_inspect_command_status;
+    if (task.review_sync_command_status === "blocked_until_review_repairs") return task.review_sync_command_status;
+    if (task.review_inspect_command_status === "blocked_until_review_repairs") return task.review_inspect_command_status;
+    if (task.review_sync_command_status === "blocked_until_review_decisions") return task.review_sync_command_status;
+    if (task.review_inspect_command_status === "blocked_until_review_decisions") return task.review_inspect_command_status;
+    return "unavailable";
+};
+
+const selectRecommendedPendingReviewTask = (
+    tasks: readonly WorkflowCandidateGuidancePendingReviewTaskListItem[],
+): WorkflowCandidateGuidancePendingReviewTaskListItem | undefined =>
+    [...tasks].sort((a, b) => pendingReviewTaskRoutingRank(a) - pendingReviewTaskRoutingRank(b) || a.path.localeCompare(b.path))[0];
+
 export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input: {
     readonly taskDir: string;
     readonly taskFiles: readonly { readonly path: string; readonly content: string }[];
@@ -3556,10 +3592,19 @@ export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input:
         task.review_inspect_command_status === "blocked_until_review_repairs"
     ).length;
     const unknownSchemaCount = tasks.filter((task) => task.status === "unknown_schema").length;
+    const recommendedTask = selectRecommendedPendingReviewTask(tasks);
     return {
         schema: "ax.workflow_candidate_pending_review_task_list.v1",
         task_dir: input.taskDir,
         ...(input.filters === undefined ? {} : { filters: input.filters }),
+        ...(recommendedTask === undefined ? {} : {
+            recommended_task_path: recommendedTask.path,
+            recommended_task_status: recommendedTask.status,
+            recommended_task_review_decision_status: recommendedTask.review_decision_status,
+            recommended_task_review_command_status: pendingReviewTaskRecommendedCommandStatus(recommendedTask),
+            recommended_task_candidate_ids: recommendedTask.candidate_ids,
+            recommended_task_next_action: recommendedTask.review_decision_next_action,
+        }),
         task_count: tasks.length,
         ready_for_review_count: readyForReviewCount,
         review_decisions_ready_count: reviewDecisionsReadyCount,
@@ -3633,6 +3678,11 @@ export function renderWorkflowCandidateGuidancePendingReviewTaskListText(
         `commands blocked: ${report.review_command_blocked_count}`,
         `missing artifacts: ${report.missing_artifact_count}`,
         `unknown schema: ${report.unknown_schema_count}`,
+        `recommended task: ${report.recommended_task_path ?? "none"}`,
+        `recommended task status: ${report.recommended_task_status ?? "none"}`,
+        `recommended task review decisions: ${report.recommended_task_review_decision_status ?? "none"}`,
+        `recommended task command status: ${report.recommended_task_review_command_status ?? "none"}`,
+        `recommended task next: ${report.recommended_task_next_action ?? "none"}`,
         `next action: ${report.next_action}`,
         "",
         "tasks:",

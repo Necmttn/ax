@@ -33,8 +33,8 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E460 adds
-  `.ax/experiments/workflow-candidate-pending-review-tasks-blocked-e460.json`
+- Index continuation: E461 adds
+  `.ax/experiments/workflow-candidate-pending-review-tasks-recommended-e461.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -63,9 +63,62 @@ Current recommendation:
   the next review step. The task-list report also exposes aggregate executable
   command counts and service-side filters for path, task status, review
   decision status, and command status so services can route specific task
-  subsets without scanning every task. The immediate bottleneck remains a real
-  human review decision for that pending candidate, not promoting synthetic or
-  harness-only evidence.
+  subsets without scanning every task. The report now also exposes a
+  recommended pending task pointer with its review-decision state, command
+  state, candidate ids, and next action, so services can pick the next item
+  without re-encoding the routing priority. The immediate bottleneck remains a
+  real human review decision for that pending candidate, not promoting
+  synthetic or harness-only evidence.
+
+## E461 - Recommend Next Pending Review Task
+
+Question:
+- Can review services identify the next pending review task to work on from
+  the report header, without scanning task rows or re-implementing routing
+  priority?
+
+Implementation:
+- Added report-level recommended task fields to
+  `ax.workflow_candidate_pending_review_task_list.v1`:
+  - `recommended_task_path`,
+  - `recommended_task_status`,
+  - `recommended_task_review_decision_status`,
+  - `recommended_task_review_command_status`,
+  - `recommended_task_candidate_ids`, and
+  - `recommended_task_next_action`.
+- The selector uses the same safe routing order:
+  missing artifacts, review repairs, executable commands, human review,
+  unknown schema, then any remaining task.
+- Text output prints the recommended task fields before the task rows.
+- Regression coverage verifies missing-artifact, blocked-review, and
+  ready-command recommendation behavior.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-recommended-e461.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live task-list report:
+  - `recommended_task_path=.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+  - `recommended_task_status=ready_for_review`
+  - `recommended_task_review_decision_status=needs_review_decisions`
+  - `recommended_task_review_command_status=blocked_until_review_decisions`
+  - `recommended_task_candidate_ids=[classifier_candidate_group:hybrid-window/correction_or_rejection_signal]`
+  - `recommended_task_next_action=Open the review brief and set at least one fixture to accept, revise, reject, or defer with rationale.`
+
+Decision:
+- E461 gives services a single next-task pointer while preserving the human
+  review gate.
+- The live candidate remains blocked on human review; no review facts, graph
+  apply, guidance promotion, or harness promotion is warranted from this
+  evidence alone.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-recommended-e461.json --json
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --pending-review-command-status=blocked_until_review_decisions
+```
 
 ## E460 - Filter Pending Review Task Lists
 

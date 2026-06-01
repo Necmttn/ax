@@ -4259,6 +4259,11 @@ describe("classifiers workflow-candidates", () => {
             review_command_blocked_count: 1,
             missing_artifact_count: 1,
             unknown_schema_count: 0,
+            recommended_task_path: ".ax/tasks/workflow-candidate-pending-review-missing.md",
+            recommended_task_status: "missing_review_brief",
+            recommended_task_review_decision_status: "unknown",
+            recommended_task_review_command_status: "unavailable",
+            recommended_task_candidate_ids: ["classifier_candidate_group:hybrid-window/correction_or_rejection_signal"],
         });
         expect(report.tasks.map((task) => task.status)).toEqual(["missing_review_brief", "ready_for_review", "review_decisions_ready"]);
         expect(report.tasks[0]?.review_brief_status).toBe("missing");
@@ -4298,6 +4303,7 @@ describe("classifiers workflow-candidates", () => {
         });
         expect(report.tasks[2]?.candidate_ids).toEqual(["classifier_candidate_group:hybrid-window/correction_or_rejection_signal"]);
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("missing artifacts: 1");
+        expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("recommended task: .ax/tasks/workflow-candidate-pending-review-missing.md");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("missing_review_brief");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("review decisions ready: 1");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("sync commands ready: 1");
@@ -4328,6 +4334,8 @@ describe("classifiers workflow-candidates", () => {
             review_inspect_command_ready_count: 0,
             review_command_blocked_count: 1,
             missing_artifact_count: 0,
+            recommended_task_path: ".ax/tasks/workflow-candidate-pending-review-ready.md",
+            recommended_task_review_command_status: "blocked_until_review_decisions",
         });
         expect(blockedCommandReport.tasks[0]?.path).toBe(".ax/tasks/workflow-candidate-pending-review-ready.md");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(blockedCommandReport)).toContain("filter command status: blocked_until_review_decisions");
@@ -4353,6 +4361,8 @@ describe("classifiers workflow-candidates", () => {
             review_sync_command_ready_count: 1,
             review_inspect_command_ready_count: 1,
             review_command_blocked_count: 0,
+            recommended_task_path: ".ax/tasks/workflow-candidate-pending-review-reviewed.md",
+            recommended_task_review_command_status: "ready_to_execute",
         });
     });
 
