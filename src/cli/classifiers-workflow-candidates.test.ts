@@ -4250,6 +4250,7 @@ describe("classifiers workflow-candidates", () => {
         expect(report).toMatchObject({
             schema: "ax.workflow_candidate_pending_review_task_list.v1",
             task_dir: ".ax/tasks",
+            queue_status: "needs_artifact_repair",
             task_count: 3,
             ready_for_review_count: 1,
             review_decisions_ready_count: 1,
@@ -4330,6 +4331,7 @@ describe("classifiers workflow-candidates", () => {
         });
         expect(report.tasks[2]?.candidate_ids).toEqual(["classifier_candidate_group:hybrid-window/correction_or_rejection_signal"]);
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("missing artifacts: 1");
+        expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("queue status: needs_artifact_repair");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("recommended task: .ax/tasks/workflow-candidate-pending-review-missing.md");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("recommended task route: repair_artifacts");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("recommended fixture pack: .ax/experiments/pending-review.jsonl");
@@ -4366,6 +4368,7 @@ describe("classifiers workflow-candidates", () => {
         });
         expect(blockedCommandReport).toMatchObject({
             filters: { review_command_status: "blocked_until_review_decisions" },
+            queue_status: "waiting_for_review_decisions",
             task_count: 1,
             ready_for_review_count: 1,
             review_sync_command_ready_count: 0,
@@ -4424,6 +4427,7 @@ describe("classifiers workflow-candidates", () => {
         });
         expect(reviewedDecisionReport).toMatchObject({
             task_count: 1,
+            queue_status: "ready_to_execute",
             review_decisions_ready_count: 1,
             review_sync_command_ready_count: 1,
             review_inspect_command_ready_count: 1,
@@ -4489,6 +4493,7 @@ describe("classifiers workflow-candidates", () => {
         });
         expect(collectReviewRouteReport).toMatchObject({
             filters: { route: "collect_review_decisions" },
+            queue_status: "waiting_for_review_decisions",
             task_count: 1,
             ready_for_review_count: 1,
             review_sync_command_ready_count: 0,
@@ -4540,6 +4545,7 @@ describe("classifiers workflow-candidates", () => {
         });
         expect(needsReviewProgressReport).toMatchObject({
             filters: { review_progress_status: "needs_review" },
+            queue_status: "waiting_for_review_decisions",
             task_count: 1,
             ready_for_review_count: 1,
             review_decisions_ready_count: 0,
@@ -4578,6 +4584,7 @@ describe("classifiers workflow-candidates", () => {
         });
         expect(executableRouteReport).toMatchObject({
             filters: { route: "execute_review_command" },
+            queue_status: "ready_to_execute",
             task_count: 1,
             review_sync_command_ready_count: 1,
             review_inspect_command_ready_count: 1,

@@ -320,6 +320,13 @@ export type WorkflowCandidateGuidancePendingReviewRecommendedRoute =
     | "collect_review_decisions"
     | "repair_task_schema"
     | "inspect_task";
+export type WorkflowCandidateGuidancePendingReviewQueueStatus =
+    | "no_tasks"
+    | "needs_artifact_repair"
+    | "needs_review_repair"
+    | "ready_to_execute"
+    | "waiting_for_review_decisions"
+    | "needs_schema_repair";
 
 export interface WorkflowCandidateGuidancePendingReviewRouteCounts {
     readonly none: number;
@@ -388,6 +395,7 @@ export interface WorkflowCandidateGuidancePendingReviewTaskListReport {
     readonly schema: "ax.workflow_candidate_pending_review_task_list.v1";
     readonly task_dir: string;
     readonly filters?: WorkflowCandidateGuidancePendingReviewTaskListFilters;
+    readonly queue_status: WorkflowCandidateGuidancePendingReviewQueueStatus;
     readonly recommended_task_path?: string;
     readonly recommended_task_status?: WorkflowCandidateGuidancePendingReviewTaskStatus;
     readonly recommended_task_review_decision_status?: WorkflowCandidateGuidancePendingReviewDecisionStatus;
@@ -3648,6 +3656,22 @@ const pendingReviewTaskProgressStatusCounts = (
     return counts;
 };
 
+const pendingReviewQueueStatus = (input: {
+    readonly taskCount: number;
+    readonly missingArtifactCount: number;
+    readonly reviewDecisionsNeedRepairCount: number;
+    readonly reviewSyncCommandReadyCount: number;
+    readonly reviewInspectCommandReadyCount: number;
+    readonly readyForReviewCount: number;
+}): WorkflowCandidateGuidancePendingReviewQueueStatus => {
+    if (input.taskCount === 0) return "no_tasks";
+    if (input.missingArtifactCount > 0) return "needs_artifact_repair";
+    if (input.reviewDecisionsNeedRepairCount > 0) return "needs_review_repair";
+    if (input.reviewSyncCommandReadyCount > 0 || input.reviewInspectCommandReadyCount > 0) return "ready_to_execute";
+    if (input.readyForReviewCount > 0) return "waiting_for_review_decisions";
+    return "needs_schema_repair";
+};
+
 const selectRecommendedPendingReviewTask = (
     tasks: readonly WorkflowCandidateGuidancePendingReviewTaskListItem[],
 ): WorkflowCandidateGuidancePendingReviewTaskListItem | undefined =>
@@ -3734,11 +3758,20 @@ export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input:
     const routeCounts = pendingReviewTaskRouteCounts(tasks);
     const reviewProgressStatusCounts = pendingReviewTaskProgressStatusCounts(tasks);
     const unknownSchemaCount = tasks.filter((task) => task.status === "unknown_schema").length;
+    const queueStatus = pendingReviewQueueStatus({
+        taskCount: tasks.length,
+        missingArtifactCount,
+        reviewDecisionsNeedRepairCount,
+        reviewSyncCommandReadyCount,
+        reviewInspectCommandReadyCount,
+        readyForReviewCount,
+    });
     const recommendedTask = selectRecommendedPendingReviewTask(tasks);
     return {
         schema: "ax.workflow_candidate_pending_review_task_list.v1",
         task_dir: input.taskDir,
         ...(input.filters === undefined ? {} : { filters: input.filters }),
+        queue_status: queueStatus,
         ...(recommendedTask === undefined ? {} : {
             recommended_task_path: recommendedTask.path,
             recommended_task_status: recommendedTask.status,
@@ -3852,6 +3885,7 @@ export function renderWorkflowCandidateGuidancePendingReviewTaskListText(
             `filter review progress: ${report.filters.review_progress_status ?? "any"}`,
         ]),
         `tasks: ${report.task_count}`,
+        `queue status: ${report.queue_status}`,
         `ready: ${report.ready_for_review_count}`,
         `review decisions ready: ${report.review_decisions_ready_count}`,
         `review decisions need repair: ${report.review_decisions_need_repair_count}`,

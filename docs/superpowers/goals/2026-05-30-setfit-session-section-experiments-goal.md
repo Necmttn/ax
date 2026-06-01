@@ -33,8 +33,8 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E472 adds
-  `.ax/experiments/workflow-candidate-pending-review-tasks-task-progress-e472.json`
+- Index continuation: E473 adds
+  `.ax/experiments/workflow-candidate-pending-review-tasks-queue-status-e473.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -90,9 +90,55 @@ Current recommendation:
   see the queue split across unreadable, needs-review, partial, complete, and
   repair buckets before selecting a filter. Each task row now carries the same
   normalized review progress status, so services can render, debug, or route
-  individual rows without re-deriving status from fixture counters. The
-  immediate bottleneck remains a real human review decision for that pending
-  candidate, not promoting synthetic or harness-only evidence.
+  individual rows without re-deriving status from fixture counters. The report
+  now also exposes a machine-readable queue status, so services can distinguish
+  artifact repair, review repair, executable commands, human-review wait, schema
+  repair, and empty queues without parsing prose. The immediate bottleneck
+  remains a real human review decision for that pending candidate, not promoting
+  synthetic or harness-only evidence.
+
+## E473 - Expose Pending Review Queue Status
+
+Question:
+- Can review services identify the whole pending-review queue state without
+  parsing `next_action` prose or re-checking counts client-side?
+
+Implementation:
+- Added `queue_status` to
+  `ax.workflow_candidate_pending_review_task_list.v1`.
+- Status vocabulary:
+  - `no_tasks`
+  - `needs_artifact_repair`
+  - `needs_review_repair`
+  - `ready_to_execute`
+  - `waiting_for_review_decisions`
+  - `needs_schema_repair`
+- Text output now prints `queue status`.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-queue-status-e473.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live task-list report:
+  - `queue_status=waiting_for_review_decisions`
+  - `task_count=1`
+  - `ready_for_review_count=1`
+  - `review_command_blocked_count=1`
+  - `recommended_task_review_decision_status=needs_review_decisions`
+  - `recommended_task_can_execute_command=false`
+
+Decision:
+- E473 makes the top-level queue routing state machine-readable for review
+  services.
+- The live task remains blocked on a real reviewer verdict and rationale before
+  sync, inspect, graph apply, guidance promotion, or harness promotion.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-queue-status-e473.json --json
+```
 
 ## E472 - Expose Task Review Progress Status
 
