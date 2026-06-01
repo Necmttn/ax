@@ -4947,6 +4947,15 @@ export const DB_COMMANDS: ReadonlySet<string> = new Set([
     "dogfood",
 ]);
 
+export const classifiersPackageOperationsNeedsDb = (args: ReadonlyArray<string>): boolean =>
+    args[0] === "classifiers" &&
+    args[1] === "package-operations" &&
+    (
+        args.includes("--apply-write-plan") ||
+        args.includes("--graph-health") ||
+        args.includes("--boundary-replay-summary")
+    );
+
 async function main() {
     const [, , ...args] = process.argv;
     if (args[0] === undefined || args[0] === "help" || args[0] === "--help" || args[0] === "-h") {
@@ -4977,11 +4986,7 @@ async function main() {
     }
     if (
         args[0] === "classifiers" &&
-        ((args[1] === "package-operations" && (
-            args.includes("--apply-write-plan") ||
-            args.includes("--graph-health") ||
-            args.includes("--boundary-replay-summary")
-        )) ||
+        (classifiersPackageOperationsNeedsDb(args) ||
             args[1] === "graph" ||
             args[1] === "lifecycle")
     ) {

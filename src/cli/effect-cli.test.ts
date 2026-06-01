@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { DB_COMMANDS, detectRemovedIngestFlag, insightsOnlyConflicts, resolveIngestStages, rootCommand } from "./index.ts";
+import {
+    DB_COMMANDS,
+    classifiersPackageOperationsNeedsDb,
+    detectRemovedIngestFlag,
+    insightsOnlyConflicts,
+    resolveIngestStages,
+    rootCommand,
+} from "./index.ts";
 import { ALL_STAGES } from "../ingest/stage/registry.ts";
 import type { StageRegistryShape } from "../ingest/stage/registry.ts";
 import type { BaseStageStats, StageDef } from "../ingest/stage/types.ts";
@@ -232,6 +239,29 @@ describe("effect cli", () => {
         expect(subNames).toEqual(expect.arrayContaining(["summary", "for"]));
         expect(DB_COMMANDS.has("costs")).toBe(true);
         expect(DB_COMMANDS.has("pricing")).toBe(true);
+    });
+
+    test("DB-backed classifier package-operation flags are routed through DB", () => {
+        expect(classifiersPackageOperationsNeedsDb([
+            "classifiers",
+            "package-operations",
+            "--apply-write-plan",
+        ])).toBe(true);
+        expect(classifiersPackageOperationsNeedsDb([
+            "classifiers",
+            "package-operations",
+            "--graph-health",
+        ])).toBe(true);
+        expect(classifiersPackageOperationsNeedsDb([
+            "classifiers",
+            "package-operations",
+            "--boundary-replay-summary",
+        ])).toBe(true);
+        expect(classifiersPackageOperationsNeedsDb([
+            "classifiers",
+            "package-operations",
+            "--quality-status",
+        ])).toBe(false);
     });
 });
 
