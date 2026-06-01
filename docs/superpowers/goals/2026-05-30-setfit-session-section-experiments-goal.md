@@ -399,6 +399,53 @@ Decision:
 - Next useful slice: apply the boundary replay write plan to local SurrealDB
   and add/query graph-health filters for `boundary_replay_deterministic_projection`.
 
+## E495 - Boundary Replay Graph Apply
+
+Question: after projection, can the deterministic boundary replay facts be
+applied to local SurrealDB and queried back from the shared graph tables?
+
+Commands:
+
+```sh
+python3 packages/ax-classifier-session-sections/graph_write_plan_apply.py \
+  --write-plan=.ax/experiments/boundary-replay-graph-write-plan-workflow-candidate-current.json \
+  --out=.ax/experiments/boundary-replay-graph-apply-workflow-candidate-e495.json \
+  --json
+
+printf '%s\n' \
+  'SELECT graph_id, kind, subject, predicate, value_json, source_kind FROM classifier_graph_fact WHERE source_kind = "boundary_replay_deterministic_projection";' \
+  | surreal sql --hide-welcome --json --endpoint http://127.0.0.1:8521 --user root --pass root --ns ax --db main
+```
+
+Artifacts:
+
+- `.ax/experiments/boundary-replay-graph-apply-workflow-candidate-e495.json`
+
+Results:
+
+- Apply decision: `applied`
+- Statements attempted/applied: `7/7`
+- Failed statements: `0`
+- Tables: `classifier_graph_node`, `classifier_graph_edge`,
+  `classifier_graph_fact`
+- Direct Surreal query returned two facts for
+  `source_kind=boundary_replay_deterministic_projection`:
+  `covered_by_deterministic=true` and
+  `deterministic_label={"label":"correction","target":"workflow_state"}`.
+
+Important observation:
+
+- `classifiers graph --mode=lifecycle --source-kind=boundary_replay_deterministic_projection --fact-kind=classifier_boundary_replay`
+  currently reports `query_match_status=no_match`, even though the facts are in
+  SurrealDB. The graph CLI only surfaces selected fact families today.
+
+Decision:
+
+- The graph storage path works.
+- The remaining gap is query ergonomics: add a graph CLI mode or fact-family
+  branch for `classifier_boundary_replay` so services do not need raw SurrealQL
+  to consume deterministic replay evidence.
+
 Current recommendation:
 
 - Index continuation: E488 turns the accepted classifier-fixture follow-up into
