@@ -33,8 +33,8 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E471 adds
-  `.ax/experiments/workflow-candidate-pending-review-tasks-progress-counts-e471.json`
+- Index continuation: E472 adds
+  `.ax/experiments/workflow-candidate-pending-review-tasks-task-progress-e472.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -88,9 +88,49 @@ Current recommendation:
   only for needs-review, complete, repair, partial, or unreadable queues. The
   report now also exposes aggregate progress-status counts, so schedulers can
   see the queue split across unreadable, needs-review, partial, complete, and
-  repair buckets before selecting a filter. The immediate bottleneck remains a
-  real human review decision for that pending candidate, not promoting
-  synthetic or harness-only evidence.
+  repair buckets before selecting a filter. Each task row now carries the same
+  normalized review progress status, so services can render, debug, or route
+  individual rows without re-deriving status from fixture counters. The
+  immediate bottleneck remains a real human review decision for that pending
+  candidate, not promoting synthetic or harness-only evidence.
+
+## E472 - Expose Task Review Progress Status
+
+Question:
+- Can queue services inspect each pending-review task row's normalized review
+  progress state without re-deriving it from fixture counters and review
+  decision status?
+
+Implementation:
+- Added `review_progress_status` to each
+  `ax.workflow_candidate_pending_review_task_list.v1` task row.
+- The task row, recommended-task header, progress-status filter, and aggregate
+  progress counts now use the same normalized status vocabulary.
+- Text output now prints each row's `progress status`.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-task-progress-e472.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live task-list report:
+  - `tasks[0].path=.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+  - `tasks[0].review_progress_status=needs_review`
+  - `recommended_task_review_progress_status=needs_review`
+  - `review_progress_status_counts.needs_review=1`
+  - `recommended_task_can_execute_command=false`
+
+Decision:
+- E472 removes another client-side derivation from review services while
+  preserving the human-review gate.
+- The live task still requires a real verdict and rationale before sync,
+  inspect, graph apply, guidance promotion, or harness promotion.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-task-progress-e472.json --json
+```
 
 ## E471 - Count Pending Review Progress Statuses
 

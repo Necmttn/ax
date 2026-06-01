@@ -4292,6 +4292,7 @@ describe("classifiers workflow-candidates", () => {
             recommended_task_review_inspect_command_can_execute: false,
         });
         expect(report.tasks.map((task) => task.status)).toEqual(["missing_review_brief", "ready_for_review", "review_decisions_ready"]);
+        expect(report.tasks.map((task) => task.review_progress_status)).toEqual(["unreadable", "needs_review", "complete_review"]);
         expect(report.tasks[0]?.review_brief_status).toBe("missing");
         expect(report.tasks[1]?.review_decision_status).toBe("needs_review_decisions");
         expect(report.tasks[1]).toMatchObject({
@@ -4344,6 +4345,7 @@ describe("classifiers workflow-candidates", () => {
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("review progress unreadable: 1");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("review progress needs_review: 1");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("review progress complete_review: 1");
+        expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("progress status: needs_review");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("sync command status: ready_to_execute can_execute=yes");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("--review-facts=.ax/experiments/pending-review-facts.json");
 

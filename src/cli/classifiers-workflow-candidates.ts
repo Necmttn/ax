@@ -372,6 +372,7 @@ export interface WorkflowCandidateGuidancePendingReviewTaskListItem {
     readonly invalid_fixture_count?: number;
     readonly missing_rationale_count?: number;
     readonly review_decision_status: WorkflowCandidateGuidancePendingReviewDecisionStatus;
+    readonly review_progress_status: WorkflowCandidateGuidancePendingReviewProgressStatus;
     readonly review_decision_next_action: string;
     readonly review_sync_command?: readonly string[];
     readonly review_sync_command_status: WorkflowCandidateGuidancePendingReviewCommandStatus;
@@ -3552,7 +3553,7 @@ const pendingReviewTaskMatchesFilters = (
     ) return false;
     if (
         filters.review_progress_status !== undefined &&
-        pendingReviewTaskReviewProgressStatus(task) !== filters.review_progress_status
+        task.review_progress_status !== filters.review_progress_status
     ) return false;
     return true;
 };
@@ -3598,7 +3599,10 @@ const pendingReviewTaskRecommendedRoute = (
 };
 
 const pendingReviewTaskReviewProgressStatus = (
-    task: WorkflowCandidateGuidancePendingReviewTaskListItem,
+    task: Pick<
+        WorkflowCandidateGuidancePendingReviewTaskListItem,
+        "review_decision_status" | "fixture_count" | "reviewed_fixture_count" | "pending_fixture_count"
+    >,
 ): WorkflowCandidateGuidancePendingReviewProgressStatus => {
     if (task.review_decision_status === "unknown" || task.fixture_count === undefined) return "unreadable";
     if (
@@ -3640,7 +3644,7 @@ const pendingReviewTaskProgressStatusCounts = (
     tasks: readonly WorkflowCandidateGuidancePendingReviewTaskListItem[],
 ): WorkflowCandidateGuidancePendingReviewProgressStatusCounts => {
     const counts = emptyPendingReviewProgressStatusCounts();
-    for (const task of tasks) counts[pendingReviewTaskReviewProgressStatus(task)] += 1;
+    for (const task of tasks) counts[task.review_progress_status] += 1;
     return counts;
 };
 
@@ -3682,7 +3686,7 @@ export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input:
             const reviewInspectCommand = pendingReviewTaskReviewInspectCommand(parsed);
             const reviewSyncCommandStatus = pendingReviewTaskCommandStatus(reviewSyncCommand, decisionSummary.review_decision_status);
             const reviewInspectCommandStatus = pendingReviewTaskCommandStatus(reviewInspectCommand, decisionSummary.review_decision_status);
-            return {
+            const task = {
                 path: file.path,
                 ...(parsed.schema === undefined ? {} : { schema: parsed.schema }),
                 status: pendingReviewTaskStatusFor(parsed, fixturePackStatus, reviewBriefStatus, decisionSummary.review_decision_status),
@@ -3702,6 +3706,10 @@ export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input:
                 review_inspect_command_can_execute: reviewInspectCommandStatus === "ready_to_execute",
                 review_inspect_command_effect: "updates_review_pack_and_writes_review_artifacts",
                 ...decisionSummary,
+            } satisfies Omit<WorkflowCandidateGuidancePendingReviewTaskListItem, "review_progress_status">;
+            return {
+                ...task,
+                review_progress_status: pendingReviewTaskReviewProgressStatus(task),
             };
         })
         .filter((task): task is WorkflowCandidateGuidancePendingReviewTaskListItem => task !== undefined)
@@ -3891,6 +3899,7 @@ export function renderWorkflowCandidateGuidancePendingReviewTaskListText(
             `    stage: ${task.review_pipeline_stage ?? "unknown"}`,
             `    candidates: ${task.candidate_count}`,
             `    review decisions: ${task.review_decision_status}`,
+            `    progress status: ${task.review_progress_status}`,
             `    review fixtures: reviewed=${task.reviewed_fixture_count ?? "unknown"} pending=${task.pending_fixture_count ?? "unknown"} invalid=${task.invalid_fixture_count ?? "unknown"} missing_rationale=${task.missing_rationale_count ?? "unknown"}`,
             `    fixture pack: ${task.fixture_pack_status} ${task.fixture_pack_path ?? "unknown"}`,
             `    review brief: ${task.review_brief_status} ${task.review_brief_path ?? "unknown"}`,
