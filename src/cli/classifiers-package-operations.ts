@@ -29,6 +29,7 @@ import type {
     ClassifierLifecycleRouteBindingPreviewReport,
     ClassifierLifecycleInsightReport,
     ClassifierLifecycleRoutingSummaryReport,
+    ClassifierGraphBoundaryReplaySummary,
     ClassifierGraphQuerySuggestionRoutingSummary,
     ClassifierGraphHealthMode,
     ClassifierGraphHealthQuery,
@@ -53,6 +54,7 @@ export interface ClassifierPackageOperationsCommandInput extends ClassifierPacka
     readonly applyWritePlan?: boolean;
     readonly graphHealth?: boolean;
     readonly querySuggestionRouting?: boolean;
+    readonly boundaryReplaySummary?: boolean;
     readonly qualityStatus?: boolean;
     readonly sourceReportPath?: string;
     readonly graphMode?: ClassifierGraphHealthMode;
@@ -390,6 +392,25 @@ export function renderClassifierGraphQuerySuggestionRoutingSummaryText(
     lines.push(`verification expected query match: ${suggestion.verification.expected_query_match_status}`);
     lines.push(`verification expected result count: ${suggestion.verification.expected_result_count ?? "none"}`);
     return lines.join("\n");
+}
+
+export function renderClassifierGraphBoundaryReplaySummaryText(
+    summary: ClassifierGraphBoundaryReplaySummary,
+): string {
+    return [
+        "classifier boundary replay summary",
+        `status: ${summary.status}`,
+        `production posture: ${summary.production_posture}`,
+        `next action: ${summary.next_action}`,
+        `remediation: ${summary.remediation}`,
+        `covered subjects: ${summary.covered_subject_count}`,
+        `deterministic label subjects: ${summary.deterministic_label_subject_count}`,
+        `evidence paths: ${summary.evidence_path_count}`,
+        `classifiers: ${summary.classifier_keys.join(", ") || "none"}`,
+        `targets: ${summary.targets.join(", ") || "none"}`,
+        `subjects: ${summary.subjects.join(", ") || "none"}`,
+        `recommended argv: ${summary.recommended_argv?.join(" ") ?? "none"}`,
+    ].join("\n");
 }
 
 export function renderClassifierPackageExecutionGraphHealthText(report: ClassifierPackageExecutionGraphHealthReport): string {
@@ -1162,6 +1183,40 @@ export const runClassifiersPackageOperations = (
                 console.log(renderClassifierQualityStatusText(report));
             }
             if (!report.quality_gate_passed) {
+                process.exitCode = 1;
+            }
+            return;
+        }
+        if (input.boundaryReplaySummary) {
+            const query = {
+                ...(input.graphMode ? { mode: input.graphMode } : {}),
+                ...(input.operationId ? { operation_id: input.operationId } : {}),
+                ...(input.artifact ? { artifact_path: input.artifact } : {}),
+                ...(input.sourceKind ? { source_kind: input.sourceKind } : {}),
+                ...(input.factKind ? { fact_kind: input.factKind } : {}),
+                ...(input.status ? { status: input.status } : {}),
+                ...(input.sourceFixture ? { source_fixture_id: input.sourceFixture } : {}),
+                ...(input.proposedLabel ? { proposed_label: input.proposedLabel } : {}),
+                ...(input.threshold ? { threshold: input.threshold } : {}),
+                ...(input.minSeedCount === undefined ? {} : { min_seed_count: input.minSeedCount }),
+                ...(input.minPositiveRecall === undefined ? {} : { min_positive_recall: input.minPositiveRecall }),
+                ...(input.minCallReduction === undefined ? {} : { min_call_reduction: input.minCallReduction }),
+                ...(input.minNearestSimilarity === undefined ? {} : { min_nearest_similarity: input.minNearestSimilarity }),
+                ...(input.nearestFixture ? { nearest_fixture_id: input.nearestFixture } : {}),
+                ...(input.predicate ? { predicate: input.predicate } : {}),
+                ...(input.subject ? { subject: input.subject } : {}),
+                ...(input.valueContains ? { value_contains: input.valueContains } : {}),
+                ...(input.valueEquals !== undefined ? { value_equals: input.valueEquals } : {}),
+            } as const;
+            const report = input.out
+                ? yield* packages.writeBoundaryReplaySummaryReport({ out: input.out, query })
+                : yield* packages.boundaryReplaySummaryReport({ query });
+            if (input.json) {
+                console.log(JSON.stringify(report, null, 2));
+            } else if (!input.out) {
+                console.log(renderClassifierGraphBoundaryReplaySummaryText(report));
+            }
+            if (report.status !== "reviewed_deterministic_facts_available") {
                 process.exitCode = 1;
             }
             return;

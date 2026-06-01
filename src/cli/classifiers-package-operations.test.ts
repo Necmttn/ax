@@ -9,6 +9,7 @@ import {
     renderClassifierLifecycleRouteBindingPreviewText,
     renderClassifierLifecycleInsightText,
     renderClassifierLifecycleRoutingSummaryText,
+    renderClassifierGraphBoundaryReplaySummaryText,
     renderClassifierPackageExecutionFactsText,
     renderClassifierPackageExecutionGraphHealthText,
     renderClassifierPackageExecutionHistoryText,
@@ -31,6 +32,7 @@ import type {
     ClassifierLifecycleRouteBindingPreviewReport,
     ClassifierLifecycleInsightReport,
     ClassifierLifecycleRoutingSummaryReport,
+    ClassifierGraphBoundaryReplaySummary,
     ClassifierPackageExecutionFactProjectionReport,
     ClassifierPackageExecutionGraphHealthReport,
     ClassifierPackageExecutionHistoryReport,
@@ -318,6 +320,84 @@ describe("classifiers package-operations format", () => {
                 mode: "lifecycle",
                 predicate: "review_pipeline_recommended_action_execution_phase",
                 value_equals: "execute",
+            },
+        });
+    });
+
+    test("renders boundary replay summaries", () => {
+        const summary: ClassifierGraphBoundaryReplaySummary = {
+            status: "reviewed_deterministic_facts_available",
+            production_posture: "deterministic_and_reviewed_graph_facts_only",
+            next_action: "use_reviewed_deterministic_graph_facts",
+            remediation: "Use reviewed deterministic graph facts for promotion-safe behavior.",
+            covered_subject_count: 1,
+            deterministic_label_subject_count: 1,
+            evidence_path_count: 1,
+            classifier_keys: ["correction-event"],
+            targets: ["workflow_state"],
+            subjects: ["classifier_boundary_miss:workflow"],
+            recommended_argv: ["bun", "src/cli/index.ts", "classifiers", "graph", "--mode=boundary-replay"],
+        };
+
+        const output = renderClassifierGraphBoundaryReplaySummaryText(summary);
+
+        expect(output).toContain("classifier boundary replay summary");
+        expect(output).toContain("status: reviewed_deterministic_facts_available");
+        expect(output).toContain("production posture: deterministic_and_reviewed_graph_facts_only");
+        expect(output).toContain("classifiers: correction-event");
+        expect(output).toContain("targets: workflow_state");
+        expect(output).toContain("recommended argv: bun src/cli/index.ts classifiers graph --mode=boundary-replay");
+    });
+
+    test("routes boundary replay summaries to the compact writer", async () => {
+        const summary: ClassifierGraphBoundaryReplaySummary = {
+            status: "reviewed_deterministic_facts_available",
+            production_posture: "deterministic_and_reviewed_graph_facts_only",
+            next_action: "use_reviewed_deterministic_graph_facts",
+            remediation: "Use reviewed deterministic graph facts for promotion-safe behavior.",
+            covered_subject_count: 1,
+            deterministic_label_subject_count: 1,
+            evidence_path_count: 1,
+            classifier_keys: ["correction-event"],
+            targets: ["workflow_state"],
+            subjects: ["classifier_boundary_miss:workflow"],
+        };
+        let calledWith: unknown;
+        const previousExitCode = process.exitCode;
+        const service = ClassifierPackageService.of({
+            writeBoundaryReplaySummaryReport: (input: unknown) => Effect.sync(() => {
+                calledWith = input;
+                return summary;
+            }),
+        } as never);
+
+        try {
+            await Effect.runPromise(
+                runClassifiersPackageOperations({
+                    manifestPath: "packages/ax-classifier-session-sections/ax.classifier.json",
+                    boundaryReplaySummary: true,
+                    sourceKind: "boundary_replay_deterministic_projection",
+                    factKind: "classifier_boundary_replay",
+                    predicate: "covered_by_deterministic",
+                    valueEquals: "true",
+                    out: ".ax/experiments/boundary-replay-summary.json",
+                    json: false,
+                } as never).pipe(
+                    Effect.provideService(ClassifierPackageService, service),
+                    Effect.provideService(SurrealClient, {} as SurrealClientShape),
+                ),
+            );
+        } finally {
+            process.exitCode = previousExitCode ?? 0;
+        }
+
+        expect(calledWith).toEqual({
+            out: ".ax/experiments/boundary-replay-summary.json",
+            query: {
+                source_kind: "boundary_replay_deterministic_projection",
+                fact_kind: "classifier_boundary_replay",
+                predicate: "covered_by_deterministic",
+                value_equals: "true",
             },
         });
     });
