@@ -33,8 +33,8 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E474 adds
-  `.ax/experiments/workflow-candidate-pending-review-tasks-task-route-e474.json`
+- Index continuation: E475 adds
+  `.ax/experiments/workflow-candidate-pending-review-tasks-service-helper-e475.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -95,9 +95,55 @@ Current recommendation:
   artifact repair, review repair, executable commands, human-review wait, schema
   repair, and empty queues without parsing prose. Each task row now also carries
   its normalized route, so services can render or debug individual rows without
-  re-running routing rules. The immediate bottleneck remains a real human
-  review decision for that pending candidate, not promoting synthetic or
-  harness-only evidence.
+  re-running routing rules. The same pending-review task-list report is now
+  exposed through `ClassifierPackageService`, so Effect/service callers can test
+  and debug the review queue without shelling out to the CLI. The immediate
+  bottleneck remains a real human review decision for that pending candidate,
+  not promoting synthetic or harness-only evidence.
+
+## E475 - Add Pending Review Service Helper
+
+Question:
+- Can Effect/service callers load the pending workflow-candidate review queue
+  through `ClassifierPackageService` instead of shelling out to the CLI or
+  importing CLI internals directly?
+
+Implementation:
+- Added `ClassifierPackageService.pendingReviewTaskListReport({ taskDir,
+  filters })`.
+- The service method returns the same
+  `ax.workflow_candidate_pending_review_task_list.v1` report used by the CLI,
+  including queue status, row routes, progress status, command guards, artifact
+  statuses, and recommended-task headers.
+- Service errors use the existing `ClassifierPackageLoadError` vocabulary.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-service-helper-e475.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Service-layer test fixture:
+  - `queue_status=waiting_for_review_decisions`
+  - `recommended_task_route=collect_review_decisions`
+  - `recommended_task_review_progress_status=needs_review`
+  - `recommended_task_can_execute_command=false`
+  - `tasks[0].route=collect_review_decisions`
+- Live CLI parity artifact still reports the real queue as:
+  - `task_count=1`
+  - `queue_status=waiting_for_review_decisions`
+  - `recommended_task_can_execute_command=false`
+
+Decision:
+- E475 makes the pending review queue available to FX/service code for testing,
+  debugging, and scheduler routing.
+- The live task still requires a real verdict and rationale before sync,
+  inspect, graph apply, guidance promotion, or harness promotion.
+
+Verification:
+```sh
+bun test src/classifiers/package-service.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-service-helper-e475.json --json
+```
 
 ## E474 - Expose Task Review Route
 

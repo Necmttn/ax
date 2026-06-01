@@ -67,6 +67,73 @@ async function writeTempExecutionReportRoot(): Promise<string> {
 }
 
 describe("ClassifierPackageService", () => {
+    test("loads pending review task list reports through the service layer", async () => {
+        const taskDir = mkdtempSync(join(tmpdir(), "ax-pending-review-service-"));
+        const fixturePackPath = join(taskDir, "pending-review.jsonl");
+        const reviewBriefPath = join(taskDir, "pending-review.md");
+        const taskPath = join(taskDir, "workflow-candidate-pending-review-demo.md");
+        writeFileSync(fixturePackPath, `${JSON.stringify({
+            id: "workflow-candidate-review-coverage/correction_or_rejection_signal/example",
+            suite: "workflow-candidate-review-coverage",
+            name: "coverage-gap-correction_or_rejection_signal-01",
+            label: "correction_or_rejection_signal",
+            target: "unknown",
+            text: "USER:\nthis is wrong\n\nPREVIOUS_ASSISTANT:\n",
+            source_group: "workflow-candidate",
+            review_status: "pending",
+            topic: "review-coverage",
+            candidate_id: "classifier_candidate_group:hybrid-window/correction_or_rejection_signal",
+            candidate_label: "correction_or_rejection_signal",
+            proposed_action: "add_context_guardrail",
+        })}\n`);
+        writeFileSync(reviewBriefPath, "# Workflow Candidate Coverage Review\n\nReview the pending fixture.\n");
+        writeFileSync(taskPath, [
+            "---",
+            "ax_schema: \"ax.workflow_candidate_pending_review_task.v1\"",
+            `fixture_pack_path: ${JSON.stringify(fixturePackPath)}`,
+            `review_brief_path: ${JSON.stringify(reviewBriefPath)}`,
+            "source_kind: \"hybrid_window_classifier_projection\"",
+            `output_path: ${JSON.stringify(join(taskDir, "pending-review-batch.json"))}`,
+            `review_facts_path: ${JSON.stringify(join(taskDir, "pending-review-facts.json"))}`,
+            `review_write_plan_path: ${JSON.stringify(join(taskDir, "pending-review-write-plan.json"))}`,
+            "review_pipeline_stage: \"needs_review_decisions\"",
+            "candidate_ids_json: [\"classifier_candidate_group:hybrid-window/correction_or_rejection_signal\"]",
+            "---",
+            "",
+            "# ax pending workflow candidate review",
+        ].join("\n"));
+
+        const report = await runWithService(Effect.gen(function* () {
+            const packages = yield* ClassifierPackageService;
+            return yield* packages.pendingReviewTaskListReport({ taskDir });
+        }));
+
+        expect(report).toMatchObject({
+            schema: "ax.workflow_candidate_pending_review_task_list.v1",
+            task_dir: taskDir,
+            queue_status: "waiting_for_review_decisions",
+            task_count: 1,
+            ready_for_review_count: 1,
+            review_command_blocked_count: 1,
+            recommended_task_path: taskPath,
+            recommended_task_route: "collect_review_decisions",
+            recommended_task_review_progress_status: "needs_review",
+            recommended_task_can_execute_command: false,
+            route_counts: {
+                collect_review_decisions: 1,
+            },
+            review_progress_status_counts: {
+                needs_review: 1,
+            },
+        });
+        expect(report.tasks[0]).toMatchObject({
+            path: taskPath,
+            route: "collect_review_decisions",
+            review_progress_status: "needs_review",
+            review_decision_status: "needs_review_decisions",
+        });
+    });
+
     test("lists classifier package operations through the service layer", async () => {
         const operations = await runWithService(Effect.gen(function* () {
             const packages = yield* ClassifierPackageService;

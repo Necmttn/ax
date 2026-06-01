@@ -56,6 +56,11 @@ import {
     type ClassifierPackageOperationsSummary,
 } from "./package-operations.ts";
 import {
+    loadWorkflowCandidateGuidancePendingReviewTaskListReport,
+    type WorkflowCandidateGuidancePendingReviewTaskListFilters,
+    type WorkflowCandidateGuidancePendingReviewTaskListReport,
+} from "../cli/classifiers-workflow-candidates.ts";
+import {
     findClassifierPackageOperation,
     listClassifierPackageOperations,
     loadClassifierPackageManifest,
@@ -200,6 +205,11 @@ export interface ClassifierLifecycleRoutingSummaryWriteInput extends ClassifierL
     readonly out: string;
 }
 
+export interface ClassifierPendingReviewTaskListInput {
+    readonly taskDir: string;
+    readonly filters?: WorkflowCandidateGuidancePendingReviewTaskListFilters;
+}
+
 export interface ClassifierPackageServiceShape {
     readonly loadManifest: (path: string) => Effect.Effect<ClassifierPackageManifest, ClassifierPackageLoadError>;
     readonly listOperations: (manifestPath: string) => Effect.Effect<readonly ClassifierPackageOperation[], ClassifierPackageLoadError>;
@@ -293,6 +303,9 @@ export interface ClassifierPackageServiceShape {
     readonly writeLifecycleRoutingSummaryReport: (
         input: ClassifierLifecycleRoutingSummaryWriteInput,
     ) => Effect.Effect<ClassifierLifecycleRoutingSummaryReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, SurrealClient>;
+    readonly pendingReviewTaskListReport: (
+        input: ClassifierPendingReviewTaskListInput,
+    ) => Effect.Effect<WorkflowCandidateGuidancePendingReviewTaskListReport, ClassifierPackageLoadError>;
 }
 
 export class ClassifierPackageService extends Context.Service<ClassifierPackageService, ClassifierPackageServiceShape>()(
@@ -676,6 +689,18 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService>
             return report;
         });
 
+        const pendingReviewTaskList = Effect.fn("ClassifierPackageService.pendingReviewTaskListReport")(function* (
+            input: ClassifierPendingReviewTaskListInput,
+        ) {
+            return yield* Effect.try({
+                try: () => loadWorkflowCandidateGuidancePendingReviewTaskListReport(input.taskDir, input.filters),
+                catch: (error) => ClassifierPackageLoadError.make({
+                    path: input.taskDir,
+                    message: errorMessage(error),
+                }),
+            });
+        });
+
         return ClassifierPackageService.of({
             loadManifest,
             listOperations,
@@ -710,6 +735,7 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService>
             writeLifecycleInsightReport: writeLifecycleInsight,
             lifecycleRoutingSummaryReport: lifecycleRoutingSummary,
             writeLifecycleRoutingSummaryReport: writeLifecycleRoutingSummary,
+            pendingReviewTaskListReport: pendingReviewTaskList,
         });
     }),
 );
