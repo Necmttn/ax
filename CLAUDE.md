@@ -16,17 +16,38 @@ Guidance for Claude Code and other AI assistants working in this repo.
 
 ## Layout
 
+Bun-workspace monorepo. `apps/*` are deployable products, `packages/*` are
+shared internal libraries (raw `.ts` via per-file `exports`, no build step).
+Turbo (`turbo.json`) orchestrates build/typecheck/test; every package extends
+`tsconfig.base.json`; versions are pinned in the root `workspaces.catalog`.
+
 ```
-src/
-├── lib/         # db client, paths, helpers
-├── ingest/      # skills.ts, transcripts.ts (Claude), codex.ts
-├── cli/         # CLI entrypoint
-└── tui/         # OpenTUI dashboard (v0.1)
-schema/          # SurrealQL schema
-scripts/         # db lifecycle + reference cloning
-skill/           # SKILL.md for Claude Code installable skill
-.references/     # gitignored - clone of Effect source for AI lookup
+apps/
+├── axctl/                 # the CLI (npm package "axctl")
+│   ├── bin/axctl          # shell shim → src/cli/index.ts
+│   └── src/
+│       ├── lib/  (NOTE: moved to @ax/lib) cli/ ingest/ dashboard/ hooks/
+│       ├── improve/ classifiers/ queries/ context/ project/ tui/ ...
+│       └── ...            # the whole former /src tree
+└── site/                  # landing site (@ax/site, TanStack Start SPA → CF Pages)
+packages/
+├── lib/                   # @ax/lib - db client, paths, errors, layers, shared/, live-traces/
+├── schema/                # @ax/schema - schema.surql (DDL) + derived types
+└── ax-classifier-*/       # @ax-classifier/* + python classifier experiments
+scripts/                   # repo-wide orchestration (db lifecycle, checks, prototypes)
+skill/                     # SKILL.md for the installable Claude Code skill
+.references/               # gitignored - clone of Effect source for AI lookup
+turbo.json  tsconfig.base.json  package.json (root = workspace orchestrator)
 ```
+
+Internal imports resolve by package name: `@ax/lib/db`, `@ax/lib/shared/surql`,
+`@ax/schema/schema.surql` (with `{ type: "text" }`), `@ax-classifier/...`.
+
+**Build/test:** `bun run build` compiles the CLI to `dist/axctl`;
+`cd apps/site && bun run build` builds the site; `bunx turbo run build`
+orchestrates both. `bun test` (repo-wide) and `bun run typecheck` (axctl +
+packages) are the CI gates. Site has its own `bun run typecheck` (strict
+null-checks; needs a prior build for route/content codegen).
 
 <!-- effect-solutions:start -->
 ## Effect Best Practices
@@ -56,7 +77,7 @@ Run `bun refs:setup` after fresh clone to populate `.references/`.
 - SurrealDB v3 SCHEMAFULL - top-level fields explicit
 - Nested objects → JSON-encoded as `string` (no `flexible<object>` in v3)
 - Datetime fields require JS `Date` objects via the SDK (not ISO strings)
-- Skill names with `:` (plugin-namespaced) → encoded as `__` in record IDs (see `src/lib/skill-id.ts`)
+- Skill names with `:` (plugin-namespaced) → encoded as `__` in record IDs (see `packages/lib/src/skill-id.ts`)
 
 ## Reactivity
 

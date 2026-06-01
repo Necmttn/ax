@@ -1,6 +1,6 @@
 import { Effect } from "effect";
-import { SurrealClient } from "../src/lib/db.ts";
-import { AppLayer } from "../src/lib/layers.ts";
+import { SurrealClient } from "@ax/lib/db";
+import { AppLayer } from "@ax/lib/layers";
 
 const program = Effect.gen(function* () {
     const db = yield* SurrealClient;

@@ -1,0 +1,67 @@
+import { describe, expect, test } from "bun:test";
+import { Effect, Layer } from "effect";
+import { SurrealClient } from "@ax/lib/db";
+import { RECALL_COUNT_SQL, RECALL_TURNS_SQL } from "../queries/recall.ts";
+import { fetchRecall } from "./recall.ts";
+
+// ---------------------------------------------------------------------------
+// Minimal mock DB (mirrors recall.commit.test.ts pattern)
+// ---------------------------------------------------------------------------
+
+function makeMockDb(queryResponses: Map<string, unknown[][]> = new Map()) {
+    const impl = {
+        query: <T extends unknown[] = unknown[]>(sql: string, _bindings?: Record<string, unknown>) => {
+            for (const [pattern, response] of queryResponses) {
+                if (sql.includes(pattern)) {
+                    return Effect.succeed(response as T);
+                }
+            }
+            return Effect.succeed([[]] as unknown as T);
+        },
+        upsert: () => Effect.void,
+        relate: () => Effect.void,
+        putFile: () => Effect.void,
+        getFile: () => Effect.succeed(""),
+        raw: undefined as unknown as import("surrealdb").Surreal,
+    };
+    return Layer.succeed(SurrealClient, impl);
+}
+
+describe("recall pagination", () => {
+    test("RECALL_TURNS_SQL uses parameterised offset/limit", () => {
+        const sql = RECALL_TURNS_SQL("");
+        expect(sql).toMatch(/START \$offset/);
+        expect(sql).toMatch(/LIMIT \$limit/);
+        // sanity-check the WHERE filters still parameterise q/project/since.
+        expect(sql).toMatch(/text_excerpt @@ \$q/);
+    });
+
+    test("RECALL_COUNT_SQL shares the same WHERE filter set", () => {
+        const sql = RECALL_COUNT_SQL("AND session IN [session:a]");
+        expect(sql).toMatch(/count\(\) AS total/);
+        expect(sql).toMatch(/text_excerpt @@ \$q/);
+        expect(sql).toMatch(/AND session IN \[session:a\]/);
+        // Counts must not constrain by the window itself.
+        expect(sql).not.toMatch(/\$offset/);
+        expect(sql).not.toMatch(/\$limit/);
+    });
+});
+
+describe("recall back-compat: sources=turn (default)", () => {
+    test("total_count equals turn count when only turns requested", async () => {
+        const responses = new Map<string, unknown[][]>([
+            ["count() AS total", [[{ total: 7 }]]],
+        ]);
+        const layer = makeMockDb(responses);
+
+        const result = await Effect.runPromise(
+            // No sources specified - defaults to ["turn"]
+            fetchRecall({ q: "auth" }).pipe(Effect.provide(layer)),
+        );
+
+        expect(result.total_counts.commit).toBe(0);
+        expect(result.total_counts.skill).toBe(0);
+        // Back-compat: total_count == turn count when only turns requested
+        expect(result.total_count).toBe(result.total_counts.turn);
+    });
+});

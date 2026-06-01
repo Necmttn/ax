@@ -161,7 +161,7 @@ ax sessions here --days=14
 
 Add an image when the release changes a website, dashboard, TUI, CLI output, or
 workflow that benefits from seeing the shape. Store website-visible assets under
-\`site/public/releases/assets/\` and reference them with an absolute path.
+\`apps/site/public/releases/assets/\` and reference them with an absolute path.
 
 ![Replace with a focused screenshot or diagram alt text](/releases/assets/example.png)
 

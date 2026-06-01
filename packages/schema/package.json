@@ -1,0 +1,20 @@
+{
+  "name": "@ax/schema",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/types.ts",
+      "import": "./src/types.ts"
+    },
+    "./schema.surql": "./src/schema.surql"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "catalog:",
+    "typescript": "catalog:"
+  }
+}

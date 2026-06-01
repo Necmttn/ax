@@ -27,13 +27,13 @@ interface SearchHit {
     readonly text: string;
 }
 
-const SRC_DIR = "src";
+const SRC_DIR = "apps/axctl/src";
 // CLI handlers MUST be in WRITER_GLOBS too. `axctl improve accept` writes the
 // `experiment` table from src/cli/index.ts; without this glob the gate misses
 // it. Original (Phase D) commit shipped without this and reviewer demonstrated
 // a synthetic CLI-resident writer slipping past green.
-const WRITER_GLOBS = ["src/ingest", "src/improve", "src/dogfood", "src/project", "src/hooks", "src/cli"];
-const READER_GLOBS = ["src/cli", "src/dashboard", "src/queries", "src/improve", "src/ingest"];
+const WRITER_GLOBS = ["apps/axctl/src/ingest", "apps/axctl/src/improve", "apps/axctl/src/dogfood", "apps/axctl/src/project", "apps/axctl/src/hooks", "apps/axctl/src/cli"];
+const READER_GLOBS = ["apps/axctl/src/cli", "apps/axctl/src/dashboard", "apps/axctl/src/queries", "apps/axctl/src/improve", "apps/axctl/src/ingest"];
 
 /**
  * Tables that legitimately have no reader yet. ONLY shrink this list.

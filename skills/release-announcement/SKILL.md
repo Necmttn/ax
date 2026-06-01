@@ -96,7 +96,7 @@ commits and changed files prove and keep the story narrower.
 Put website-visible release images here:
 
 ```text
-site/public/releases/assets/
+apps/site/public/releases/assets/
 ```
 
 Reference them from release markdown:

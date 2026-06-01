@@ -125,9 +125,10 @@
                 ./bun.lock
                 ./bun.nix
                 ./tsconfig.json
-                ./bin
-                ./src
-                ./schema
+                ./tsconfig.base.json
+                ./turbo.json
+                ./apps/axctl
+                ./packages
                 ./scripts
               ];
             };
@@ -161,7 +162,7 @@
               runHook preBuild
               # Invoke vite via bun so node shebangs aren't honored by the loader.
               bun ./node_modules/vite/bin/vite.js build \
-                --config src/dashboard/web/vite.config.ts
+                --config apps/axctl/src/dashboard/web/vite.config.ts
               runHook postBuild
             '';
 
@@ -169,10 +170,10 @@
               runHook preInstall
 
               mkdir -p "$out/share/ax" "$out/bin"
-              cp -R src schema scripts package.json bun.lock tsconfig.json node_modules "$out/share/ax/"
+              cp -R apps packages scripts package.json bun.lock bun.nix tsconfig.json tsconfig.base.json turbo.json node_modules "$out/share/ax/"
 
               makeWrapper ${lib.getExe pkgs.bun} "$out/bin/axctl" \
-                --add-flags "$out/share/ax/src/cli/index.ts" \
+                --add-flags "$out/share/ax/apps/axctl/src/cli/index.ts" \
                 --prefix PATH : ${lib.makeBinPath [ pkgs.bun surrealdb ]}
 
               ln -s axctl "$out/bin/ax"

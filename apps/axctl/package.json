@@ -1,0 +1,54 @@
+{
+  "name": "axctl",
+  "version": "0.5.0",
+  "license": "AGPL-3.0-only",
+  "description": "ax CLI - local memory and telemetry for coding agents. axctl ingests transcripts, skills, and git history into SurrealDB; surfaces what skills are worth keeping and what the user actually does on demand.",
+  "type": "module",
+  "bin": {
+    "axctl": "./bin/axctl"
+  },
+  "files": [
+    "bin",
+    "dist"
+  ],
+  "scripts": {
+    "build": "bun build --compile --outfile=dist/axctl src/cli/index.ts",
+    "dev": "bun src/cli/index.ts",
+    "serve": "bun src/cli/index.ts serve",
+    "ingest": "bun src/cli/index.ts ingest",
+    "search": "bun src/cli/index.ts search",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "dashboard:dev": "vite --config src/dashboard/web/vite.config.ts",
+    "dashboard:build": "vite build --config src/dashboard/web/vite.config.ts"
+  },
+  "dependencies": {
+    "@ax/lib": "workspace:*",
+    "@ax/schema": "workspace:*",
+    "@ax-classifier/direction-event": "workspace:*",
+    "@ax-classifier/verification-event": "workspace:*",
+    "@opentui/core": "^0.2.5",
+    "@opentui/react": "^0.2.5",
+    "@tanstack/react-query": "^5",
+    "@wterm/core": "0.3.0",
+    "@wterm/dom": "0.3.0",
+    "effect": "catalog:",
+    "node-pty": "1.1.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "surrealdb": "^2.0.0",
+    "yaml": "^2.8.4"
+  },
+  "devDependencies": {
+    "@effect/language-service": "^0.85.1",
+    "@tanstack/react-router": "^1.169",
+    "@tanstack/router-plugin": "^1.167",
+    "@types/bun": "catalog:",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^6",
+    "bun-types": "1.3.13",
+    "typescript": "catalog:",
+    "vite": "catalog:"
+  }
+}

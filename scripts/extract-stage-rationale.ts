@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, "..");
-const SRC_DIR = resolve(REPO_ROOT, "src/ingest");
+const SRC_DIR = resolve(REPO_ROOT, "apps/axctl/src/ingest");
 const OUT_PATH = resolve(REPO_ROOT, "docs/how-ax-sees-your-work.generated.mdx");
 
 /**
@@ -80,7 +80,7 @@ const parseFile = async (path: string): Promise<Stage | null> => {
         inputs: tags.inputs,
         outputs: tags.outputs,
         order,
-        file: `src/ingest/${basename(path)}`,
+        file: `apps/axctl/src/ingest/${basename(path)}`,
     };
 };
 

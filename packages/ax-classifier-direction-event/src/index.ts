@@ -4,8 +4,8 @@ import {
     label,
     type ClassifierResult,
     type EventWindow,
-} from "../../../src/classifiers/core.ts";
-import { isControlOrContextText } from "../../../src/classifiers/control-text.ts";
+} from "../../../apps/axctl/src/classifiers/core.ts";
+import { isControlOrContextText } from "../../../apps/axctl/src/classifiers/control-text.ts";
 
 const classifierKey = "direction-event";
 const classifierVersion = "0.1.0";

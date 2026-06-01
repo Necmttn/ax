@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { EventWindow, ClassifierResult } from "../src/classifiers/core.ts";
+import type { EventWindow, ClassifierResult } from "../apps/axctl/src/classifiers/core.ts";
 import {
     approxTokenCount,
     buildWindowExportReport,

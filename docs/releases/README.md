@@ -80,7 +80,7 @@ the commits and issues prove, then keep the announcement narrower.
 Store website-visible release images in:
 
 ```text
-site/public/releases/assets/
+apps/site/public/releases/assets/
 ```
 
 Reference them from the release markdown with normal image syntax:

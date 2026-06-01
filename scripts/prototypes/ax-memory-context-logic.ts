@@ -2,7 +2,7 @@
 // Question: can real transcript task messages produce relevant, evidence-backed
 // guidance for a current coding-agent task before we build production memory?
 
-import { classifyTurnIntent, type TurnIntentKind } from "../../src/ingest/intent-kind.ts";
+import { classifyTurnIntent, type TurnIntentKind } from "../../apps/axctl/src/ingest/intent-kind.ts";
 
 export interface TaskTurn {
     readonly id: string;

@@ -3,8 +3,8 @@ import { Effect } from "effect";
 import {
     ClassifierRunner,
     ClassifierRunnerLive,
-} from "../../../src/classifiers/core.ts";
-import { windowFixture } from "../../../src/classifiers/test-fixtures.ts";
+} from "../../../apps/axctl/src/classifiers/core.ts";
+import { windowFixture } from "../../../apps/axctl/src/classifiers/test-fixtures.ts";
 import { verificationEventClassifier } from "./index.ts";
 
 const run = (user: string) =>
