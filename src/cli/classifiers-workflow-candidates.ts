@@ -80,6 +80,7 @@ export interface WorkflowCandidateCommandInput {
     readonly pendingReviewDecisionStatus?: WorkflowCandidateGuidancePendingReviewDecisionStatus;
     readonly pendingReviewCommandStatus?: WorkflowCandidateGuidancePendingReviewCommandStatus;
     readonly pendingReviewRoute?: WorkflowCandidateGuidancePendingReviewRecommendedRoute;
+    readonly pendingReviewProgressStatus?: WorkflowCandidateGuidancePendingReviewProgressStatus;
     readonly promoteHarnessProposals?: boolean;
     readonly requireHarnessChecks?: boolean;
     readonly promoteProposals?: boolean;
@@ -339,6 +340,7 @@ export interface WorkflowCandidateGuidancePendingReviewTaskListFilters {
     readonly review_decision_status?: WorkflowCandidateGuidancePendingReviewDecisionStatus;
     readonly review_command_status?: WorkflowCandidateGuidancePendingReviewCommandStatus;
     readonly route?: WorkflowCandidateGuidancePendingReviewRecommendedRoute;
+    readonly review_progress_status?: WorkflowCandidateGuidancePendingReviewProgressStatus;
 }
 
 export interface WorkflowCandidateGuidancePendingReviewTaskListItem {
@@ -3536,6 +3538,10 @@ const pendingReviewTaskMatchesFilters = (
         filters.route !== undefined &&
         pendingReviewTaskRecommendedRoute(task) !== filters.route
     ) return false;
+    if (
+        filters.review_progress_status !== undefined &&
+        pendingReviewTaskReviewProgressStatus(task) !== filters.review_progress_status
+    ) return false;
     return true;
 };
 
@@ -3805,6 +3811,7 @@ export function renderWorkflowCandidateGuidancePendingReviewTaskListText(
             `filter review decisions: ${report.filters.review_decision_status ?? "any"}`,
             `filter command status: ${report.filters.review_command_status ?? "any"}`,
             `filter route: ${report.filters.route ?? "any"}`,
+            `filter review progress: ${report.filters.review_progress_status ?? "any"}`,
         ]),
         `tasks: ${report.task_count}`,
         `ready: ${report.ready_for_review_count}`,
@@ -7143,6 +7150,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 ...(input.pendingReviewDecisionStatus === undefined ? {} : { review_decision_status: input.pendingReviewDecisionStatus }),
                 ...(input.pendingReviewCommandStatus === undefined ? {} : { review_command_status: input.pendingReviewCommandStatus }),
                 ...(input.pendingReviewRoute === undefined ? {} : { route: input.pendingReviewRoute }),
+                ...(input.pendingReviewProgressStatus === undefined ? {} : { review_progress_status: input.pendingReviewProgressStatus }),
             };
             const hasFilters = Object.keys(filters).length > 0;
             const report = loadWorkflowCandidateGuidancePendingReviewTaskListReport(taskDir, hasFilters ? filters : undefined);

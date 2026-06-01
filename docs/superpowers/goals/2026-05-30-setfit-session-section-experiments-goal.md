@@ -33,8 +33,8 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E469 adds
-  `.ax/experiments/workflow-candidate-pending-review-tasks-recommended-progress-status-e469.json`
+- Index continuation: E470 adds
+  `.ax/experiments/workflow-candidate-pending-review-tasks-progress-status-filter-e470.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -83,9 +83,52 @@ Current recommendation:
   progress counts so services can display or route review workload without
   scanning row details. It now also carries a normalized review progress
   status so services can branch on unreadable, needs-review, partial,
-  complete, or repair states without re-deriving them from counts. The
+  complete, or repair states without re-deriving them from counts. Task-list
+  queries can now filter directly by that progress status, so services can ask
+  only for needs-review, complete, repair, partial, or unreadable queues. The
   immediate bottleneck remains a real human review decision for that pending
   candidate, not promoting synthetic or harness-only evidence.
+
+## E470 - Filter Pending Review Tasks By Progress Status
+
+Question:
+- Can queue services request only pending-review tasks in a specific review
+  progress state, such as `needs_review`, without fetching all tasks and
+  post-filtering client-side?
+
+Implementation:
+- Added `review_progress_status` to
+  `ax.workflow_candidate_pending_review_task_list.v1` filters.
+- Added `--pending-review-progress-status` to
+  `classifiers workflow-candidates --list-pending-review-tasks`.
+- The filter uses the same progress-status derivation as the recommended-task
+  header, so filtering and routing remain consistent.
+- Text output now prints `filter review progress`.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-progress-status-filter-e470.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live `--pending-review-progress-status=needs_review` report:
+  - `filters.review_progress_status=needs_review`
+  - `task_count=1`
+  - `recommended_task_path=.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+  - `recommended_task_review_progress_status=needs_review`
+  - `recommended_task_review_decision_status=needs_review_decisions`
+  - `recommended_task_can_execute_command=false`
+
+Decision:
+- E470 makes progress-state queue routing first-class while keeping command
+  execution blocked until human review decisions exist.
+- The live task still needs a human verdict and rationale before sync, inspect,
+  graph apply, guidance promotion, or harness promotion.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --pending-review-progress-status=needs_review --out .ax/experiments/workflow-candidate-pending-review-tasks-progress-status-filter-e470.json --json
+```
 
 ## E469 - Add Recommended Review Progress Status
 

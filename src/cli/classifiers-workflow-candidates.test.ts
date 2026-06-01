@@ -4490,6 +4490,37 @@ describe("classifiers workflow-candidates", () => {
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(collectReviewRouteReport)).toContain("recommended review progress: fixtures=1 reviewed=0 pending=1 invalid=0 missing_rationale=0");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(collectReviewRouteReport)).toContain("recommended review progress status: needs_review");
 
+        const needsReviewProgressReport = buildWorkflowCandidateGuidancePendingReviewTaskListReport({
+            taskDir: ".ax/tasks",
+            filters: { review_progress_status: "needs_review" },
+            taskFiles: [
+                { path: ".ax/tasks/workflow-candidate-pending-review-ready.md", content: taskContent },
+                { path: ".ax/tasks/workflow-candidate-pending-review-missing.md", content: missingBriefContent },
+                { path: ".ax/tasks/workflow-candidate-pending-review-reviewed.md", content: reviewedContent },
+            ],
+            pathExists: (path) => path !== ".ax/experiments/missing-review.md",
+            readFile: (path) => {
+                if (path.endsWith(".jsonl")) return fixtureRowsJsonl;
+                if (path === ".ax/experiments/reviewed.md") return reviewedBrief;
+                return taskContent;
+            },
+        });
+        expect(needsReviewProgressReport).toMatchObject({
+            filters: { review_progress_status: "needs_review" },
+            task_count: 1,
+            ready_for_review_count: 1,
+            review_decisions_ready_count: 0,
+            missing_artifact_count: 0,
+            route_counts: {
+                collect_review_decisions: 1,
+                execute_review_command: 0,
+                repair_artifacts: 0,
+            },
+            recommended_task_path: ".ax/tasks/workflow-candidate-pending-review-ready.md",
+            recommended_task_review_progress_status: "needs_review",
+        });
+        expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(needsReviewProgressReport)).toContain("filter review progress: needs_review");
+
         const executableRouteReport = buildWorkflowCandidateGuidancePendingReviewTaskListReport({
             taskDir: ".ax/tasks",
             filters: { route: "execute_review_command" },
