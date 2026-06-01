@@ -33,8 +33,8 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E470 adds
-  `.ax/experiments/workflow-candidate-pending-review-tasks-progress-status-filter-e470.json`
+- Index continuation: E471 adds
+  `.ax/experiments/workflow-candidate-pending-review-tasks-progress-counts-e471.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -86,8 +86,50 @@ Current recommendation:
   complete, or repair states without re-deriving them from counts. Task-list
   queries can now filter directly by that progress status, so services can ask
   only for needs-review, complete, repair, partial, or unreadable queues. The
-  immediate bottleneck remains a real human review decision for that pending
-  candidate, not promoting synthetic or harness-only evidence.
+  report now also exposes aggregate progress-status counts, so schedulers can
+  see the queue split across unreadable, needs-review, partial, complete, and
+  repair buckets before selecting a filter. The immediate bottleneck remains a
+  real human review decision for that pending candidate, not promoting
+  synthetic or harness-only evidence.
+
+## E471 - Count Pending Review Progress Statuses
+
+Question:
+- Can queue services see how much pending-review work sits in each review
+  progress bucket without scanning every task row?
+
+Implementation:
+- Added `review_progress_status_counts` to
+  `ax.workflow_candidate_pending_review_task_list.v1`.
+- Counts use the same normalized progress-status derivation as the
+  recommended-task header and `--pending-review-progress-status` filter.
+- Text output now prints counts for `unreadable`, `needs_review`,
+  `partial_review`, `complete_review`, and `needs_repair`.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-progress-counts-e471.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live task-list report:
+  - `task_count=1`
+  - `review_progress_status_counts.needs_review=1`
+  - all other progress-status counts are `0`
+  - `recommended_task_path=.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+  - `recommended_task_review_progress_status=needs_review`
+  - `recommended_task_can_execute_command=false`
+
+Decision:
+- E471 makes queue workload shape visible at the same service boundary as
+  route counts and command counts.
+- The live task remains blocked on real review decisions before sync, inspect,
+  graph apply, guidance promotion, or harness promotion.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-progress-counts-e471.json --json
+```
 
 ## E470 - Filter Pending Review Tasks By Progress Status
 

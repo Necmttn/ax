@@ -334,6 +334,17 @@ type MutableWorkflowCandidateGuidancePendingReviewRouteCounts = {
     -readonly [K in keyof WorkflowCandidateGuidancePendingReviewRouteCounts]: WorkflowCandidateGuidancePendingReviewRouteCounts[K];
 };
 
+export interface WorkflowCandidateGuidancePendingReviewProgressStatusCounts {
+    readonly unreadable: number;
+    readonly needs_review: number;
+    readonly partial_review: number;
+    readonly complete_review: number;
+    readonly needs_repair: number;
+}
+type MutableWorkflowCandidateGuidancePendingReviewProgressStatusCounts = {
+    -readonly [K in keyof WorkflowCandidateGuidancePendingReviewProgressStatusCounts]: WorkflowCandidateGuidancePendingReviewProgressStatusCounts[K];
+};
+
 export interface WorkflowCandidateGuidancePendingReviewTaskListFilters {
     readonly path?: string;
     readonly status?: WorkflowCandidateGuidancePendingReviewTaskStatus;
@@ -408,6 +419,7 @@ export interface WorkflowCandidateGuidancePendingReviewTaskListReport {
     readonly review_inspect_command_ready_count: number;
     readonly review_command_blocked_count: number;
     readonly route_counts: WorkflowCandidateGuidancePendingReviewRouteCounts;
+    readonly review_progress_status_counts: WorkflowCandidateGuidancePendingReviewProgressStatusCounts;
     readonly missing_artifact_count: number;
     readonly unknown_schema_count: number;
     readonly tasks: readonly WorkflowCandidateGuidancePendingReviewTaskListItem[];
@@ -3616,6 +3628,22 @@ const pendingReviewTaskRouteCounts = (
     return counts;
 };
 
+const emptyPendingReviewProgressStatusCounts = (): MutableWorkflowCandidateGuidancePendingReviewProgressStatusCounts => ({
+    unreadable: 0,
+    needs_review: 0,
+    partial_review: 0,
+    complete_review: 0,
+    needs_repair: 0,
+});
+
+const pendingReviewTaskProgressStatusCounts = (
+    tasks: readonly WorkflowCandidateGuidancePendingReviewTaskListItem[],
+): WorkflowCandidateGuidancePendingReviewProgressStatusCounts => {
+    const counts = emptyPendingReviewProgressStatusCounts();
+    for (const task of tasks) counts[pendingReviewTaskReviewProgressStatus(task)] += 1;
+    return counts;
+};
+
 const selectRecommendedPendingReviewTask = (
     tasks: readonly WorkflowCandidateGuidancePendingReviewTaskListItem[],
 ): WorkflowCandidateGuidancePendingReviewTaskListItem | undefined =>
@@ -3696,6 +3724,7 @@ export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input:
         task.review_inspect_command_status === "blocked_until_review_repairs"
     ).length;
     const routeCounts = pendingReviewTaskRouteCounts(tasks);
+    const reviewProgressStatusCounts = pendingReviewTaskProgressStatusCounts(tasks);
     const unknownSchemaCount = tasks.filter((task) => task.status === "unknown_schema").length;
     const recommendedTask = selectRecommendedPendingReviewTask(tasks);
     return {
@@ -3754,6 +3783,7 @@ export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input:
         review_inspect_command_ready_count: reviewInspectCommandReadyCount,
         review_command_blocked_count: reviewCommandBlockedCount,
         route_counts: routeCounts,
+        review_progress_status_counts: reviewProgressStatusCounts,
         missing_artifact_count: missingArtifactCount,
         unknown_schema_count: unknownSchemaCount,
         tasks,
@@ -3826,6 +3856,11 @@ export function renderWorkflowCandidateGuidancePendingReviewTaskListText(
         `route collect_review_decisions: ${report.route_counts.collect_review_decisions}`,
         `route repair_task_schema: ${report.route_counts.repair_task_schema}`,
         `route inspect_task: ${report.route_counts.inspect_task}`,
+        `review progress unreadable: ${report.review_progress_status_counts.unreadable}`,
+        `review progress needs_review: ${report.review_progress_status_counts.needs_review}`,
+        `review progress partial_review: ${report.review_progress_status_counts.partial_review}`,
+        `review progress complete_review: ${report.review_progress_status_counts.complete_review}`,
+        `review progress needs_repair: ${report.review_progress_status_counts.needs_repair}`,
         `missing artifacts: ${report.missing_artifact_count}`,
         `unknown schema: ${report.unknown_schema_count}`,
         `recommended task: ${report.recommended_task_path ?? "none"}`,

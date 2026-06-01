@@ -4265,6 +4265,13 @@ describe("classifiers workflow-candidates", () => {
                 repair_task_schema: 0,
                 inspect_task: 0,
             },
+            review_progress_status_counts: {
+                unreadable: 1,
+                needs_review: 1,
+                partial_review: 0,
+                complete_review: 1,
+                needs_repair: 0,
+            },
             missing_artifact_count: 1,
             unknown_schema_count: 0,
             recommended_task_path: ".ax/tasks/workflow-candidate-pending-review-missing.md",
@@ -4334,6 +4341,9 @@ describe("classifiers workflow-candidates", () => {
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("commands blocked: 1");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("route collect_review_decisions: 1");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("route execute_review_command: 1");
+        expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("review progress unreadable: 1");
+        expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("review progress needs_review: 1");
+        expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("review progress complete_review: 1");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("sync command status: ready_to_execute can_execute=yes");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("--review-facts=.ax/experiments/pending-review-facts.json");
 
@@ -4362,6 +4372,13 @@ describe("classifiers workflow-candidates", () => {
             route_counts: {
                 collect_review_decisions: 1,
                 execute_review_command: 0,
+            },
+            review_progress_status_counts: {
+                unreadable: 0,
+                needs_review: 1,
+                partial_review: 0,
+                complete_review: 0,
+                needs_repair: 0,
             },
             missing_artifact_count: 0,
             recommended_task_path: ".ax/tasks/workflow-candidate-pending-review-ready.md",
@@ -4412,6 +4429,13 @@ describe("classifiers workflow-candidates", () => {
             route_counts: {
                 collect_review_decisions: 0,
                 execute_review_command: 1,
+            },
+            review_progress_status_counts: {
+                unreadable: 0,
+                needs_review: 0,
+                partial_review: 0,
+                complete_review: 1,
+                needs_repair: 0,
             },
             recommended_task_path: ".ax/tasks/workflow-candidate-pending-review-reviewed.md",
             recommended_task_review_command_status: "ready_to_execute",
@@ -4472,6 +4496,13 @@ describe("classifiers workflow-candidates", () => {
                 execute_review_command: 0,
                 repair_artifacts: 0,
             },
+            review_progress_status_counts: {
+                unreadable: 0,
+                needs_review: 1,
+                partial_review: 0,
+                complete_review: 0,
+                needs_repair: 0,
+            },
             recommended_task_path: ".ax/tasks/workflow-candidate-pending-review-ready.md",
             recommended_task_route: "collect_review_decisions",
             recommended_task_can_execute_command: false,
@@ -4516,6 +4547,13 @@ describe("classifiers workflow-candidates", () => {
                 execute_review_command: 0,
                 repair_artifacts: 0,
             },
+            review_progress_status_counts: {
+                unreadable: 0,
+                needs_review: 1,
+                partial_review: 0,
+                complete_review: 0,
+                needs_repair: 0,
+            },
             recommended_task_path: ".ax/tasks/workflow-candidate-pending-review-ready.md",
             recommended_task_review_progress_status: "needs_review",
         });
@@ -4545,6 +4583,13 @@ describe("classifiers workflow-candidates", () => {
                 collect_review_decisions: 0,
                 execute_review_command: 1,
                 repair_artifacts: 0,
+            },
+            review_progress_status_counts: {
+                unreadable: 0,
+                needs_review: 0,
+                partial_review: 0,
+                complete_review: 1,
+                needs_repair: 0,
             },
             recommended_task_path: ".ax/tasks/workflow-candidate-pending-review-reviewed.md",
             recommended_task_route: "execute_review_command",
