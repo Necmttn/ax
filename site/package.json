@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "predev": "bun ../scripts/extract-stage-rationale.ts",
-    "prebuild": "bun ../scripts/extract-stage-rationale.ts",
+    "predev": "bun ../scripts/extract-stage-rationale.ts && cp ../install.sh public/install",
+    "prebuild": "bun ../scripts/extract-stage-rationale.ts && cp ../install.sh public/install",
     "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",
