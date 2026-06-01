@@ -33,8 +33,8 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E466 adds
-  `.ax/experiments/workflow-candidate-pending-review-tasks-recommended-artifacts-e466.json`
+- Index continuation: E467 adds
+  `.ax/experiments/workflow-candidate-pending-review-tasks-recommended-artifact-status-e467.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -77,8 +77,53 @@ Current recommendation:
   for only collectible reviews or only executable commands. The recommended
   task header now also carries the fixture pack and review brief paths, so a
   service can open the review artifacts directly without scanning the task
-  rows. The immediate bottleneck remains a real human review decision for that
-  pending candidate, not promoting synthetic or harness-only evidence.
+  rows. It now also carries those artifacts' presence statuses, so services can
+  route the recommended task to open-review versus artifact repair from the
+  header alone. The immediate bottleneck remains a real human review decision
+  for that pending candidate, not promoting synthetic or harness-only
+  evidence.
+
+## E467 - Expose Recommended Review Artifact Status
+
+Question:
+- Can a review service tell whether the recommended task's fixture pack and
+  review brief are present from the task-list header, without scanning task
+  rows?
+
+Implementation:
+- Added `recommended_task_fixture_pack_status` and
+  `recommended_task_review_brief_status` to
+  `ax.workflow_candidate_pending_review_task_list.v1`.
+- Text output now prints `recommended fixture pack status` and
+  `recommended review brief status`.
+- Regression coverage verifies status headers for artifact-repair,
+  collect-review, and execute-command routes.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-recommended-artifact-status-e467.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live `--pending-review-route=collect_review_decisions` report:
+  - `recommended_task_path=.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+  - `recommended_task_route=collect_review_decisions`
+  - `recommended_task_fixture_pack_status=present`
+  - `recommended_task_review_brief_status=present`
+  - `recommended_task_review_decision_status=needs_review_decisions`
+  - `recommended_task_can_execute_command=false`
+
+Decision:
+- E467 completes the recommended-task artifact packet for queue services:
+  path plus status is available at report level.
+- The current task is artifact-complete and still human-review blocked; no
+  sync, inspect, graph apply, guidance promotion, or harness promotion should
+  run until a real reviewed decision exists.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --pending-review-route=collect_review_decisions --out .ax/experiments/workflow-candidate-pending-review-tasks-recommended-artifact-status-e467.json --json
+```
 
 ## E466 - Expose Recommended Review Artifacts
 
