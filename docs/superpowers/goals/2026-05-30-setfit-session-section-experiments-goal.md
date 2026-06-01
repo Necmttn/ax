@@ -276,6 +276,66 @@ Decision:
   the same workflow-candidate evidence so the graph can prefer deterministic
   reviewed correction facts over raw model `none` predictions.
 
+## E493 - Boundary Review Deterministic Replay
+
+Question: can the deterministic correction classifier be replayed against the
+actual workflow-candidate boundary review artifact, producing a machine-readable
+coverage report instead of relying on unit tests?
+
+Changes:
+
+- Added `scripts/classifier-boundary-review-replay.ts`.
+- Added package operation
+  `workflow-fixture-boundary-deterministic-replay`.
+- Added tests for deterministic coverage and uncovered-gap reporting.
+
+Command:
+
+```sh
+bun src/cli/index.ts classifiers package-operations \
+  --operation=workflow-fixture-boundary-deterministic-replay \
+  --execute \
+  --out=.ax/experiments/classifier-package-execution-workflow-fixture-boundary-deterministic-replay-e493.json \
+  --json
+```
+
+Artifacts:
+
+- `.ax/experiments/boundary-review-deterministic-replay-workflow-candidate-current.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-boundary-deterministic-replay-e493.json`
+
+Results:
+
+- Replay schema: `ax.boundary_review_deterministic_replay.v1`
+- Items: `1`
+- Covered by deterministic: `1`
+- Uncovered: `0`
+- Coverage rate: `1`
+- Decision: `deterministic_boundary_replay_complete`
+- The previously repeated SetFit miss
+  `workflow-candidate-topic/review_coverage/correction_or_rejection_signal/lhseid`
+  now receives deterministic result
+  `correction-event:correction/workflow_state` at confidence `0.84` with
+  signals `correction:workflow_state` and
+  `source:reviewed_workflow_candidate`.
+
+Verification:
+
+```sh
+bun test scripts/classifier-boundary-review-replay.test.ts src/classifiers/correction-event/index.test.ts src/classifiers/package-service.test.ts
+```
+
+Passed: `31` tests.
+
+Decision:
+
+- This is the strongest evidence in this loop for the hybrid architecture:
+  the model still misses the row, but a cheap reviewed-artifact deterministic
+  classifier covers it.
+- Next useful slice: make graph/query surfaces aware of this replay coverage
+  so candidate promotion can prefer deterministic reviewed correction evidence
+  and demote raw model `none` predictions on the same row.
+
 Current recommendation:
 
 - Index continuation: E488 turns the accepted classifier-fixture follow-up into
