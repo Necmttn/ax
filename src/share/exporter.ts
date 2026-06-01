@@ -23,6 +23,7 @@ import {
     sessionShareTimelineQuery,
     sessionShareTurnsQuery,
     sessionTokenUsageQuery,
+    sessionTurnTokenUsageQuery,
     sessionToolCallsQuery,
     sessionTopSkillsQuery,
 } from "../queries/session-detail.ts";
@@ -171,6 +172,17 @@ const attachTurnContent = (
         return content ? { ...turn, content } : turn;
     });
 
+const attachTurnTokenUsage = (
+    turns: ReadonlyArray<ShareTurn>,
+    usages: ReadonlyArray<NonNullable<ShareTurn["token_usage"]>>,
+): ReadonlyArray<ShareTurn> => {
+    const bySeq = new Map(usages.map((usage) => [usage.seq, usage]));
+    return turns.map((turn) => {
+        const tokenUsage = bySeq.get(turn.seq);
+        return tokenUsage ? { ...turn, token_usage: tokenUsage } : turn;
+    });
+};
+
 export const exportSessionShare = (
     sessionId: string,
     axVersion: string,
@@ -180,12 +192,13 @@ export const exportSessionShare = (
         if (recordRef === null) return null;
 
         const params = { recordRef };
-        const [overview, topSkillsRaw, toolCallsRaw, tokenUsage, turnsRaw, timelineRaw, filesRaw, turnContent] =
+        const [overview, topSkillsRaw, toolCallsRaw, tokenUsage, turnTokenUsageRaw, turnsRaw, timelineRaw, filesRaw, turnContent] =
             yield* Effect.all([
                 runSingleQuery(sessionOverviewQuery, params),
                 runQuery(sessionTopSkillsQuery, params),
                 runQuery(sessionToolCallsQuery, params),
                 runSingleQuery(sessionTokenUsageQuery, params),
+                runQuery(sessionTurnTokenUsageQuery, params),
                 runQuery(sessionShareTurnsQuery, params),
                 runQuery(sessionShareTimelineQuery, params),
                 runQuery(sessionShareFilesQuery, params),
@@ -201,7 +214,10 @@ export const exportSessionShare = (
             topSkills: topSkillsRaw.filter(isPresent),
             toolCalls: toolCallsRaw.filter(isPresent),
             tokenUsage,
-            turns: attachTurnContent(turnsRaw.filter(isPresent), turnContent),
+            turns: attachTurnContent(
+                attachTurnTokenUsage(turnsRaw.filter(isPresent), turnTokenUsageRaw.filter(isPresent)),
+                turnContent,
+            ),
             timeline: timelineRaw.filter(isPresent),
             files: filesRaw.filter(isPresent),
         });

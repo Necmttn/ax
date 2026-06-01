@@ -191,8 +191,10 @@ export function FilterBar({
 
     return (
         <div style={{
+            position: "sticky", top: 0, zIndex: 10,
             display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center",
             padding: "6px 24px", borderTop: "1px solid #e2e8f0", background: "#f8fafc",
+            borderBottom: "1px solid #e2e8f0",
             fontFamily: "ui-monospace, monospace", fontSize: 11,
         }}>
             <span style={{ color: "#64748b", marginRight: 4 }}>jump:</span>

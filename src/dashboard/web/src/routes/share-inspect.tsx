@@ -7,6 +7,7 @@ import type {
     InspectTurnDto,
     SessionInspectPayload,
     SessionTokenUsageDetail,
+    TurnTokenUsageDetail,
 } from "@shared/dashboard-types.ts";
 import { shortSessionId } from "@shared/session-id.ts";
 import { FilterBar } from "./inspector-filter-bar.tsx";
@@ -43,6 +44,7 @@ interface ShareArtifact {
         readonly intent_kind?: string;
         readonly text: string;
         readonly content?: InspectTurnContentDto | null;
+        readonly token_usage?: TurnTokenUsageDetail | null;
         readonly has_tool_use?: boolean;
         readonly has_error?: boolean;
     }>;
@@ -111,6 +113,7 @@ export function inspectPayloadFromShare(artifact: ShareArtifact, sourcePath: str
             char_count: turn.text.length,
             raw_text: turn.text,
             spans: [{ kind, text: turn.text, label: turn.intent_kind ?? turn.message_kind }],
+            token_usage: turn.token_usage ?? null,
             content: turn.content ?? null,
         };
     });
@@ -220,11 +223,6 @@ export function ShareInspectView(props: { readonly owner: string; readonly gistI
                                 key={turn.seq}
                                 turn={turn}
                                 anchored={anchoredSeq === turn.seq}
-                                costContext={{
-                                    tokenUsage: data.token_usage,
-                                    totalChars: data.total_chars,
-                                    totalTurns: data.total_turns,
-                                }}
                             />
                         ))}
                     </div>

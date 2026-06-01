@@ -141,6 +141,7 @@ describe("Codex transcript extraction", () => {
             estimatedTokens: 1200,
             contextWindow: 258400,
         });
+        expect(extracted?.turnTokenUsages).toEqual([]);
 
         const sql = __testBuildCodexBatchStatements(extracted!, 1200).join("\n");
         expect(sql).toContain("UPSERT session_token_usage:`codex_usage`");
@@ -356,6 +357,7 @@ describe("Codex transcript extraction", () => {
             contextWindow: 258400,
             tokenCountEvents: 1,
         });
+        expect(extracted?.turnTokenUsages).toEqual([]);
 
         const sql = __testBuildCodexBatchStatements(extracted!, 1200).join("\n");
         expect(sql).toContain("UPSERT session_token_usage:`codex_token_count`");
@@ -366,6 +368,65 @@ describe("Codex transcript extraction", () => {
         expect(sql).toContain('\\"token_source_quality\\":\\"explicit\\"');
         expect(sql).toContain('\\"token_source_detail\\":\\"codex_token_count.total_token_usage\\"');
         expect(sql).toContain('\\"total_token_usage\\"');
+    });
+
+    test("writes Codex per-turn token usage for token_count after a response item", () => {
+        const extracted = __testExtractCodexJsonlLines([
+            JSON.stringify({
+                type: "session_meta",
+                timestamp: "2026-05-09T10:00:00.000Z",
+                payload: {
+                    id: "codex-turn-usage",
+                    cwd: "/Users/necmttn/Projects/ax",
+                    model_provider: "gpt-5",
+                    timestamp: "2026-05-09T10:00:00.000Z",
+                },
+            }),
+            JSON.stringify({
+                type: "response_item",
+                timestamp: "2026-05-09T10:00:01.000Z",
+                payload: {
+                    type: "message",
+                    role: "assistant",
+                    content: [{ type: "output_text", text: "done" }],
+                },
+            }),
+            JSON.stringify({
+                type: "event_msg",
+                timestamp: "2026-05-09T10:00:02.000Z",
+                payload: {
+                    type: "token_count",
+                    info: {
+                        total_token_usage: {
+                            input_tokens: 1000,
+                            cached_input_tokens: 800,
+                            output_tokens: 100,
+                            total_tokens: 1100,
+                        },
+                        last_token_usage: {
+                            input_tokens: 1000,
+                            cached_input_tokens: 800,
+                            output_tokens: 100,
+                            total_tokens: 1100,
+                        },
+                    },
+                },
+            }),
+        ]);
+
+        expect(extracted?.turnTokenUsages[0]).toMatchObject({
+            seq: 1,
+            promptTokens: 1000,
+            cacheReadInputTokens: 800,
+            freshInputTokens: 200,
+            completionTokens: 100,
+            usageQuality: "provider_turn",
+        });
+        const sql = __testBuildCodexBatchStatements(extracted!, 1200).join("\n");
+        expect(sql).toContain("UPSERT turn_token_usage:`codex_turn_usage__");
+        expect(sql).toContain("__seq_000001`");
+        expect(sql).toContain("fresh_input_tokens: 200");
+        expect(sql).toContain("estimated_cost_usd:");
     });
 
     test("links adjacent provider events with linear parent edges while preserving tool-result parents", () => {

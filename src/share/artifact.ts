@@ -1,4 +1,4 @@
-import type { InspectTurnContentDto, SessionTokenUsageDetail } from "../lib/shared/dashboard-types.ts";
+import type { InspectTurnContentDto, SessionTokenUsageDetail, TurnTokenUsageDetail } from "../lib/shared/dashboard-types.ts";
 
 export const AX_SESSION_SHARE_SCHEMA_VERSION = 1 as const;
 
@@ -54,6 +54,7 @@ export interface ShareTurn {
     readonly text_excerpt?: string;
     readonly has_tool_use?: boolean;
     readonly has_error?: boolean;
+    readonly token_usage?: TurnTokenUsageDetail | null;
     readonly content?: InspectTurnContentDto | null;
 }
 

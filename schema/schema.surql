@@ -765,6 +765,33 @@ DEFINE INDEX session_token_usage_session ON session_token_usage FIELDS session U
 DEFINE INDEX session_token_usage_epoch ON session_token_usage FIELDS workflow_epoch, source, ts;
 DEFINE INDEX session_token_usage_model ON session_token_usage FIELDS model_ref, ts;
 
+DEFINE TABLE turn_token_usage SCHEMAFULL;
+DEFINE FIELD session       ON turn_token_usage TYPE record<session>;
+DEFINE FIELD turn          ON turn_token_usage TYPE record<turn>;
+DEFINE FIELD seq           ON turn_token_usage TYPE int;
+DEFINE FIELD source        ON turn_token_usage TYPE string;
+DEFINE FIELD model         ON turn_token_usage TYPE option<string>;
+DEFINE FIELD prompt_tokens ON turn_token_usage TYPE option<int>;
+DEFINE FIELD completion_tokens ON turn_token_usage TYPE option<int>;
+DEFINE FIELD cache_creation_input_tokens ON turn_token_usage TYPE option<int>;
+DEFINE FIELD cache_read_input_tokens ON turn_token_usage TYPE option<int>;
+DEFINE FIELD fresh_input_tokens ON turn_token_usage TYPE option<int>;
+DEFINE FIELD estimated_tokens ON turn_token_usage TYPE int;
+DEFINE FIELD model_ref      ON turn_token_usage TYPE option<record<agent_model>>;
+DEFINE FIELD estimated_input_cost_usd ON turn_token_usage TYPE option<float>;
+DEFINE FIELD estimated_output_cost_usd ON turn_token_usage TYPE option<float>;
+DEFINE FIELD estimated_cache_creation_cost_usd ON turn_token_usage TYPE option<float>;
+DEFINE FIELD estimated_cache_read_cost_usd ON turn_token_usage TYPE option<float>;
+DEFINE FIELD estimated_cost_usd ON turn_token_usage TYPE option<float>;
+DEFINE FIELD pricing_source ON turn_token_usage TYPE option<string>;
+DEFINE FIELD usage_source   ON turn_token_usage TYPE string;
+DEFINE FIELD usage_quality  ON turn_token_usage TYPE string;
+DEFINE FIELD raw            ON turn_token_usage TYPE option<string>;
+DEFINE FIELD ts             ON turn_token_usage TYPE datetime DEFAULT time::now();
+DEFINE INDEX turn_token_usage_turn ON turn_token_usage FIELDS turn UNIQUE;
+DEFINE INDEX turn_token_usage_session_seq ON turn_token_usage FIELDS session, seq;
+DEFINE INDEX turn_token_usage_model ON turn_token_usage FIELDS model_ref, ts;
+
 DEFINE TABLE session_health SCHEMAFULL;
 DEFINE FIELD session       ON session_health TYPE record<session>;
 DEFINE FIELD source        ON session_health TYPE string;

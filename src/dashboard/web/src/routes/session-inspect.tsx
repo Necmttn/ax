@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { api } from "../api.ts";
-import type { HookFireDto, InspectSpanDto, InspectSpanKind, InspectTurnDto, SessionInspectPayload, SessionTokenUsageDetail } from "@shared/dashboard-types.ts";
+import type { HookFireDto, InspectSpanDto, InspectSpanKind, InspectTurnDto, SessionInspectPayload, SessionTokenUsageDetail, TurnTokenUsageDetail } from "@shared/dashboard-types.ts";
 import { childrenByAnchorTurn, spawnAnchorSet, turnText } from "./inspector-filters.ts";
 import { spliceHookFires } from "@shared/hook-fire-splice.ts";
 import { FilterBar } from "./inspector-filter-bar.tsx";
@@ -36,12 +36,6 @@ export function Span({ span }: { span: InspectSpanDto }) {
 
 type ContentTone = { bg: string; fg: string; bar: string; label: string };
 type InspectLens = "legend" | "cost";
-
-interface InspectCostContext {
-    readonly tokenUsage: SessionTokenUsageDetail | null;
-    readonly totalChars: number;
-    readonly totalTurns: number;
-}
 
 const ALIAS_STYLE: Record<string, ContentTone> = {
     objective:             { bg: "#dcfce7", fg: "#166534", bar: "#22c55e", label: "objective" },
@@ -115,6 +109,16 @@ function costBarSegments(usage: SessionTokenUsageDetail): ReadonlyArray<{ label:
         { label: "cache read", value: numberOrNull(usage.estimated_cache_read_cost_usd), color: "#10b981" },
         { label: "output", value: numberOrNull(usage.estimated_output_cost_usd), color: "#8b5cf6" },
     ];
+}
+
+function usageTokenLine(usage: TurnTokenUsageDetail): string {
+    const parts = [
+        `${fmtCount(usage.estimated_tokens)} tok`,
+        usage.fresh_input_tokens !== null ? `${fmtCount(usage.fresh_input_tokens)} fresh` : null,
+        usage.cache_read_input_tokens !== null ? `${fmtCount(usage.cache_read_input_tokens)} cached` : null,
+        usage.completion_tokens !== null ? `${fmtCount(usage.completion_tokens)} out` : null,
+    ].filter((part): part is string => part !== null);
+    return parts.join(" · ");
 }
 
 function blockFamily(kind: string): ContentTone {
@@ -460,8 +464,8 @@ export function InspectGuide({ data }: { data: Pick<SessionInspectPayload, "tota
                         ))}
                     </div>
                     <div style={{ color: "#64748b", fontSize: 12 }}>
-                        Per-turn and per-block numbers below are char-weighted estimates from these session totals.
-                        Exact cache lineage by message is not stored yet.
+                        Turn headers below use real provider per-turn usage when available.
+                        Block/span cost in the inspector is allocated within the selected turn.
                     </div>
                 </div>
             ) : (
@@ -538,14 +542,14 @@ function TurnContentInspector({
     content,
     activeTarget,
     setActiveTarget,
-    costContext,
-    turnSeq,
+    turnUsage,
+    turnChars,
 }: {
     content: InspectTurnContentDto;
     activeTarget: InspectTarget | null;
     setActiveTarget: (target: InspectTarget | null) => void;
-    costContext?: InspectCostContext;
-    turnSeq: number;
+    turnUsage?: TurnTokenUsageDetail | null;
+    turnChars: number;
 }) {
     const block = selectedBlock(content, activeTarget) ?? visibleTextBlocks(content)[0] ?? content.blocks[0] ?? null;
     const atom = selectedAtom(block, activeTarget);
@@ -554,13 +558,12 @@ function TurnContentInspector({
     const blockChars = block
         ? Math.max(0, (block.end_offset ?? 0) - (block.start_offset ?? 0))
         : 0;
-    const blockTotalCost = costContext
-        ? estimateCharWeightedCost(costContext.tokenUsage?.estimated_cost_usd, costContext.totalChars, blockChars)
+    const blockTotalCost = turnUsage
+        ? estimateCharWeightedCost(turnUsage.estimated_cost_usd, turnChars, blockChars)
         : null;
-    const blockCacheReadCost = costContext
-        ? estimateCharWeightedCost(costContext.tokenUsage?.estimated_cache_read_cost_usd, costContext.totalChars, blockChars)
+    const blockCacheReadCost = turnUsage
+        ? estimateCharWeightedCost(turnUsage.estimated_cache_read_cost_usd, turnChars, blockChars)
         : null;
-    const futureTurns = Math.max(0, (costContext?.totalTurns ?? 0) - turnSeq - 1);
 
     return (
         <aside style={{ border: "1px solid #d8dee8", background: "#f8fafc", minWidth: 0, maxHeight: 400, overflow: "auto" }}>
@@ -596,7 +599,7 @@ function TurnContentInspector({
                         </pre>
                     </div>
 
-                    {costContext?.tokenUsage ? (
+                    {turnUsage ? (
                         <div style={{ background: "#fff", border: "1px solid #e2e8f0", padding: "8px 9px" }}>
                             <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
                                 <strong style={{ color: "#334155", font: "700 10px/1 ui-monospace, monospace", textTransform: "uppercase" }}>
@@ -607,17 +610,17 @@ function TurnContentInspector({
                                 </span>
                             </div>
                             <dl style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "4px 8px", margin: "7px 0 0", font: "11px/1.35 ui-monospace, monospace" }}>
-                                <dt style={{ color: "#64748b" }}>total downstream share</dt>
+                                <dt style={{ color: "#64748b" }}>allocated block cost</dt>
                                 <dd style={{ margin: 0, fontWeight: 700 }}>{fmtUsd(blockTotalCost)}</dd>
                                 <dt style={{ color: "#64748b" }}>cache-read share</dt>
                                 <dd style={{ margin: 0, fontWeight: 700 }}>{fmtUsd(blockCacheReadCost)}</dd>
                                 <dt style={{ color: "#64748b" }}>block chars</dt>
                                 <dd style={{ margin: 0 }}>{fmtCount(blockChars)}</dd>
-                                <dt style={{ color: "#64748b" }}>later turns</dt>
-                                <dd style={{ margin: 0 }}>{fmtCount(futureTurns)}</dd>
+                                <dt style={{ color: "#64748b" }}>turn tokens</dt>
+                                <dd style={{ margin: 0 }}>{fmtCount(turnUsage.estimated_tokens)}</dd>
                             </dl>
                             <div style={{ marginTop: 6, color: "#64748b", fontSize: 11, lineHeight: 1.35 }}>
-                                This estimates impact from session totals. Exact provider cache reuse per block is not stored yet.
+                                Turn usage is provider-derived; block/span cost is allocated by character share inside this turn.
                             </div>
                         </div>
                     ) : null}
@@ -853,12 +856,10 @@ export function Turn({
     turn,
     anchored,
     childrenSpawnedHere,
-    costContext,
 }: {
     turn: InspectTurnDto;
     anchored: boolean;
     childrenSpawnedHere?: ReadonlyArray<SpawnChildDto>;
-    costContext?: InspectCostContext;
 }) {
     const [showInspector, setShowInspector] = useState(false);
     const [activeTarget, setActiveTarget] = useState<InspectTarget | null>(null);
@@ -897,9 +898,8 @@ export function Turn({
     )) : [];
     const ts = turn.ts ? new Date(turn.ts).toISOString().slice(11, 19) : "";
     const sizeStr = turn.char_count > 1000 ? `${(turn.char_count / 1000).toFixed(1)}k` : `${turn.char_count}`;
-    const turnCost = costContext
-        ? estimateCharWeightedCost(costContext.tokenUsage?.estimated_cost_usd, costContext.totalChars, turn.char_count)
-        : null;
+    const turnUsage = turn.token_usage ?? null;
+    const turnCost = numberOrNull(turnUsage?.estimated_cost_usd);
     const spawnedChildCount = childrenSpawnedHere?.length ?? 0;
     const jsonlBadge = turn.role !== turn.semantic_role.replace(/_text$|_input$/, "")
         ? <span style={{ color: "#94a3b8", fontSize: 10 }}>(jsonl: {turn.role})</span>
@@ -933,9 +933,9 @@ export function Turn({
                 {jsonlBadge}
                 <span style={{ color: "#94a3b8" }}>{ts}</span>
                 <span style={{ color: "#94a3b8" }}>{sizeStr}c · {turn.spans.length}span</span>
-                {turnCost !== null ? (
-                    <span title="Estimated char-weighted share of session cost" style={{ color: "#64748b" }}>
-                        ~{fmtUsd(turnCost)}
+                {turnUsage ? (
+                    <span title={`${turnUsage.usage_quality} · ${turnUsage.usage_source}`} style={{ color: "#64748b" }}>
+                        {turnCost !== null ? fmtUsd(turnCost) : "cost ?"} · {usageTokenLine(turnUsage)}
                     </span>
                 ) : null}
                 {turn.content ? (
@@ -986,8 +986,8 @@ export function Turn({
                                 content={turn.content}
                                 activeTarget={activeTarget}
                                 setActiveTarget={setActiveTarget}
-                                costContext={costContext}
-                                turnSeq={turn.seq}
+                                turnUsage={turnUsage}
+                                turnChars={turn.char_count}
                             />
                         ) : null}
                     </div>
@@ -1224,11 +1224,6 @@ export function SessionInspectRoute() {
                                         turn={t}
                                         anchored={anchoredSeq === t.seq}
                                         childrenSpawnedHere={childrenByTurn.get(t.seq)}
-                                        costContext={{
-                                            tokenUsage: data.token_usage,
-                                            totalChars: data.total_chars,
-                                            totalTurns: data.total_turns,
-                                        }}
                                     />
                                 );
                             });

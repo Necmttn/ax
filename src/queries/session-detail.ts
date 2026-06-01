@@ -21,6 +21,7 @@ import type {
     SessionTokenUsageDetail,
     SessionToolCall,
     SessionTopSkill,
+    TurnTokenUsageDetail,
 } from "../lib/shared/dashboard-types.ts";
 import type { ShareEvent, ShareFile, ShareTurn } from "../share/artifact.ts";
 
@@ -116,6 +117,29 @@ SELECT
 FROM session_token_usage
 WHERE session = $sessionId
 LIMIT 1;`;
+
+export const SESSION_TURN_TOKEN_USAGE_SQL = `
+SELECT
+    seq,
+    model,
+    prompt_tokens,
+    completion_tokens,
+    cache_creation_input_tokens,
+    cache_read_input_tokens,
+    fresh_input_tokens,
+    estimated_tokens,
+    estimated_input_cost_usd,
+    estimated_output_cost_usd,
+    estimated_cache_creation_cost_usd,
+    estimated_cache_read_cost_usd,
+    estimated_cost_usd,
+    pricing_source,
+    usage_source,
+    usage_quality
+FROM turn_token_usage
+WHERE session = $sessionId
+ORDER BY seq ASC
+LIMIT 2000;`;
 
 /**
  * Provider-neutral file evidence. Edit evidence is turn-scoped; read/search
@@ -505,6 +529,36 @@ export const sessionTokenUsageQuery = defineSingleQuery<
             estimated_cache_read_cost_usd: nullableNumberField(raw, "estimated_cache_read_cost_usd"),
             estimated_cost_usd: nullableNumberField(raw, "estimated_cost_usd"),
             pricing_source: stringField(raw, "pricing_source"),
+        };
+    },
+});
+
+export const sessionTurnTokenUsageQuery = defineQuery<
+    SessionDetailParams,
+    Record<string, unknown>,
+    TurnTokenUsageDetail | null
+>({
+    name: "session-detail.turn_token_usage",
+    sql: (p) => subst(SESSION_TURN_TOKEN_USAGE_SQL, p.recordRef),
+    mapRow: (raw) => {
+        if (!isRecord(raw)) return null;
+        return {
+            seq: numericField(raw, "seq"),
+            model: stringField(raw, "model"),
+            prompt_tokens: nullableNumberField(raw, "prompt_tokens"),
+            completion_tokens: nullableNumberField(raw, "completion_tokens"),
+            cache_creation_input_tokens: nullableNumberField(raw, "cache_creation_input_tokens"),
+            cache_read_input_tokens: nullableNumberField(raw, "cache_read_input_tokens"),
+            fresh_input_tokens: nullableNumberField(raw, "fresh_input_tokens"),
+            estimated_tokens: numericField(raw, "estimated_tokens"),
+            estimated_input_cost_usd: nullableNumberField(raw, "estimated_input_cost_usd"),
+            estimated_output_cost_usd: nullableNumberField(raw, "estimated_output_cost_usd"),
+            estimated_cache_creation_cost_usd: nullableNumberField(raw, "estimated_cache_creation_cost_usd"),
+            estimated_cache_read_cost_usd: nullableNumberField(raw, "estimated_cache_read_cost_usd"),
+            estimated_cost_usd: nullableNumberField(raw, "estimated_cost_usd"),
+            pricing_source: stringField(raw, "pricing_source"),
+            usage_source: stringField(raw, "usage_source") ?? "unknown",
+            usage_quality: stringField(raw, "usage_quality") ?? "unknown",
         };
     },
 });

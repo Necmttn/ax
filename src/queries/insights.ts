@@ -90,6 +90,7 @@ export const SCHEMA_TABLES: readonly SchemaTableSpec[] = [
     { table: "user_message_ngram", stage: "active", note: "Derived user-language n-grams for preference and correction mining." },
     { table: "workflow_epoch", stage: "active", note: "Derived workflow eras for before/after comparisons." },
     { table: "session_token_usage", stage: "active", note: "Actual or estimated session token/cache usage." },
+    { table: "turn_token_usage", stage: "active", note: "Provider-derived per-turn token/cache usage and priced cost estimates." },
     { table: "session_health", stage: "active", note: "Derived session-level workflow, context, and interruption health." },
     { table: "commit_classification", stage: "active", note: "Commit message lifecycle classification." },
     { table: "branch", stage: "staged", note: "GitHub branch state for delivery analytics." },

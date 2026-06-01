@@ -241,6 +241,13 @@ export interface SessionTokenUsageDetail {
     readonly pricing_source: string | null;
 }
 
+export interface TurnTokenUsageDetail extends SessionTokenUsageDetail {
+    readonly seq: number;
+    readonly fresh_input_tokens: number | null;
+    readonly usage_source: string;
+    readonly usage_quality: string;
+}
+
 export interface SessionDetailPayload {
     readonly overview: SessionOverview | null;
     readonly top_skills: ReadonlyArray<SessionTopSkill>;
@@ -719,6 +726,7 @@ export interface InspectTurnDto {
     /** Canonical turn text that parser offsets are anchored to. */
     readonly raw_text?: string;
     readonly spans: ReadonlyArray<InspectSpanDto>;
+    readonly token_usage?: TurnTokenUsageDetail | null;
     readonly content?: InspectTurnContentDto | null;
 }
 
