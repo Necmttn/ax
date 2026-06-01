@@ -153,6 +153,78 @@ describe("ClassifierPackageService", () => {
         });
     });
 
+    test("summarizes classifier quality status from a saved robustness analysis report", async () => {
+        const root = mkdtempSync(join(tmpdir(), "ax-classifier-quality-status-"));
+        const sourceReportPath = join(root, "setfit-failure-analysis.json");
+        writeFileSync(sourceReportPath, `${JSON.stringify({
+            schema: "ax.setfit_robustness_failure_analysis.v1",
+            decision: "robust_with_residual_none_false_positive_review",
+            gate: {
+                passed: true,
+                observed: {
+                    macro_f1_min: 0.7542,
+                    none_false_positive_rate_max: 0.0769,
+                },
+            },
+            runs: [
+                { seed: 7, accuracy: 0.85, macro_f1: 0.8344, none_false_positive_rate: 0 },
+                { seed: 42, accuracy: 0.775, macro_f1: 0.7542, none_false_positive_rate: 0 },
+            ],
+            all_seed_unique_none_false_positive_count: 1,
+            all_seed_repeated_misses: [
+                {
+                    id: "session-section-chunks/correction-not-committed",
+                    actual: "correction_or_rejection_signal",
+                    predicted_labels: ["verification_or_recovery_signal"],
+                    hit_count: 2,
+                },
+            ],
+        }, null, 2)}\n`);
+
+        const report = await runWithService(Effect.gen(function* () {
+            const packages = yield* ClassifierPackageService;
+            return yield* packages.classifierQualityStatusReport({ sourceReportPath });
+        }));
+
+        expect(report).toMatchObject({
+            schema: "ax.classifier_quality_status.v1",
+            source_report_path: sourceReportPath,
+            source_schema: "ax.setfit_robustness_failure_analysis.v1",
+            source_decision: "robust_with_residual_none_false_positive_review",
+            quality_gate_passed: true,
+            promotion_quality: false,
+            recommended_use: "candidate_mining",
+            metrics: {
+                accuracy_min: 0.775,
+                accuracy_max: 0.85,
+                macro_f1_min: 0.7542,
+                macro_f1_max: 0.8344,
+                none_false_positive_rate_max: 0.0769,
+                repeated_miss_count: 1,
+                unique_none_false_positive_count: 1,
+            },
+            blockers: [
+                "residual_repeated_misses",
+                "residual_none_false_positives",
+                "missing_human_promotion_review",
+            ],
+            next_action: "Use this classifier for candidate mining and route promotion-quality facts through human review.",
+        });
+
+        const out = join(root, "classifier-quality-status.json");
+        const written = await runWithService(Effect.gen(function* () {
+            const packages = yield* ClassifierPackageService;
+            return yield* packages.writeClassifierQualityStatusReport({ sourceReportPath, out });
+        }));
+
+        expect(written.metrics.repeated_miss_count).toBe(1);
+        expect(JSON.parse(readFileSync(out, "utf8"))).toMatchObject({
+            schema: "ax.classifier_quality_status.v1",
+            promotion_quality: false,
+            recommended_use: "candidate_mining",
+        });
+    });
+
     test("lists classifier package operations through the service layer", async () => {
         const operations = await runWithService(Effect.gen(function* () {
             const packages = yield* ClassifierPackageService;

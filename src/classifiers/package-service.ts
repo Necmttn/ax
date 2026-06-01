@@ -1,7 +1,8 @@
 import { Context, Effect, Layer, Schema } from "effect";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { prettyPrint } from "../lib/json.ts";
 import { SurrealClient } from "../lib/db.ts";
+import { safeJsonParse } from "../lib/shared/safe-json.ts";
 import {
     applyExecutionSurrealWritePlanReport,
     buildClassifierLifecycleInsightReport,
@@ -216,6 +217,112 @@ export interface ClassifierPendingReviewTaskListWriteInput extends ClassifierPen
     readonly out: string;
 }
 
+export type ClassifierQualityRecommendedUse = "candidate_mining" | "model_quality_work";
+
+export interface ClassifierQualityStatusInput {
+    readonly sourceReportPath: string;
+}
+
+export interface ClassifierQualityStatusWriteInput extends ClassifierQualityStatusInput {
+    readonly out: string;
+}
+
+export interface ClassifierQualityStatusMetrics {
+    readonly accuracy_min?: number;
+    readonly accuracy_max?: number;
+    readonly macro_f1_min?: number;
+    readonly macro_f1_max?: number;
+    readonly none_false_positive_rate_max?: number;
+    readonly repeated_miss_count: number;
+    readonly unique_none_false_positive_count: number;
+}
+
+export interface ClassifierQualityStatusReport {
+    readonly schema: "ax.classifier_quality_status.v1";
+    readonly source_report_path: string;
+    readonly source_schema?: string;
+    readonly source_decision?: string;
+    readonly quality_gate_passed: boolean;
+    readonly promotion_quality: false;
+    readonly recommended_use: ClassifierQualityRecommendedUse;
+    readonly metrics: ClassifierQualityStatusMetrics;
+    readonly blockers: readonly string[];
+    readonly next_action: string;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+
+const numberValue = (value: unknown): number | undefined =>
+    typeof value === "number" && Number.isFinite(value) ? value : undefined;
+
+const stringValue = (value: unknown): string | undefined =>
+    typeof value === "string" ? value : undefined;
+
+const minNumber = (values: readonly (number | undefined)[]): number | undefined => {
+    const numbers = values.filter((value): value is number => value !== undefined);
+    return numbers.length > 0 ? Math.min(...numbers) : undefined;
+};
+
+const maxNumber = (values: readonly (number | undefined)[]): number | undefined => {
+    const numbers = values.filter((value): value is number => value !== undefined);
+    return numbers.length > 0 ? Math.max(...numbers) : undefined;
+};
+
+export const buildClassifierQualityStatusReport = (
+    sourceReportPath: string,
+    source: unknown,
+): ClassifierQualityStatusReport => {
+    const report = isRecord(source) ? source : {};
+    const gate = isRecord(report.gate) ? report.gate : {};
+    const gateObserved = isRecord(gate.observed) ? gate.observed : {};
+    const runs = Array.isArray(report.runs) ? report.runs.filter(isRecord) : [];
+    const sourceSchema = stringValue(report.schema);
+    const sourceDecision = stringValue(report.decision);
+    const repeatedMissCount = Array.isArray(report.all_seed_repeated_misses)
+        ? report.all_seed_repeated_misses.length
+        : 0;
+    const uniqueNoneFalsePositiveCount = numberValue(report.all_seed_unique_none_false_positive_count) ?? 0;
+    const qualityGatePassed = gate.passed === true;
+    const accuracyMin = minNumber(runs.map((run) => numberValue(run.accuracy)));
+    const accuracyMax = maxNumber(runs.map((run) => numberValue(run.accuracy)));
+    const macroF1Min = numberValue(gateObserved.macro_f1_min) ?? minNumber(runs.map((run) => numberValue(run.macro_f1)));
+    const macroF1Max = maxNumber(runs.map((run) => numberValue(run.macro_f1)));
+    const noneFalsePositiveRateMax =
+        numberValue(gateObserved.none_false_positive_rate_max) ??
+        maxNumber(runs.map((run) => numberValue(run.none_false_positive_rate)));
+    const blockers = [
+        qualityGatePassed ? null : "model_quality_gate_not_passed",
+        repeatedMissCount > 0 ? "residual_repeated_misses" : null,
+        uniqueNoneFalsePositiveCount > 0 ? "residual_none_false_positives" : null,
+        "missing_human_promotion_review",
+    ].filter((blocker): blocker is string => blocker !== null);
+    const metrics = {
+        ...(accuracyMin === undefined ? {} : { accuracy_min: accuracyMin }),
+        ...(accuracyMax === undefined ? {} : { accuracy_max: accuracyMax }),
+        ...(macroF1Min === undefined ? {} : { macro_f1_min: macroF1Min }),
+        ...(macroF1Max === undefined ? {} : { macro_f1_max: macroF1Max }),
+        ...(noneFalsePositiveRateMax === undefined ? {} : { none_false_positive_rate_max: noneFalsePositiveRateMax }),
+        repeated_miss_count: repeatedMissCount,
+        unique_none_false_positive_count: uniqueNoneFalsePositiveCount,
+    } satisfies ClassifierQualityStatusMetrics;
+
+    return {
+        schema: "ax.classifier_quality_status.v1",
+        source_report_path: sourceReportPath,
+        ...(sourceSchema === undefined ? {} : { source_schema: sourceSchema }),
+        ...(sourceDecision === undefined ? {} : { source_decision: sourceDecision }),
+        quality_gate_passed: qualityGatePassed,
+        promotion_quality: false,
+        recommended_use: qualityGatePassed ? "candidate_mining" : "model_quality_work",
+        metrics,
+        blockers,
+        next_action: qualityGatePassed
+            ? "Use this classifier for candidate mining and route promotion-quality facts through human review."
+            : "Keep this classifier in model-quality work until robustness gates pass.",
+    };
+};
+
 export interface ClassifierPackageServiceShape {
     readonly loadManifest: (path: string) => Effect.Effect<ClassifierPackageManifest, ClassifierPackageLoadError>;
     readonly listOperations: (manifestPath: string) => Effect.Effect<readonly ClassifierPackageOperation[], ClassifierPackageLoadError>;
@@ -315,6 +422,12 @@ export interface ClassifierPackageServiceShape {
     readonly writePendingReviewTaskListReport: (
         input: ClassifierPendingReviewTaskListWriteInput,
     ) => Effect.Effect<WorkflowCandidateGuidancePendingReviewTaskListReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError>;
+    readonly classifierQualityStatusReport: (
+        input: ClassifierQualityStatusInput,
+    ) => Effect.Effect<ClassifierQualityStatusReport, ClassifierPackageLoadError>;
+    readonly writeClassifierQualityStatusReport: (
+        input: ClassifierQualityStatusWriteInput,
+    ) => Effect.Effect<ClassifierQualityStatusReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError>;
 }
 
 export class ClassifierPackageService extends Context.Service<ClassifierPackageService, ClassifierPackageServiceShape>()(
@@ -724,6 +837,38 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService>
             return report;
         });
 
+        const classifierQualityStatus = Effect.fn("ClassifierPackageService.classifierQualityStatusReport")(function* (
+            input: ClassifierQualityStatusInput,
+        ) {
+            return yield* Effect.try({
+                try: () => {
+                    const parsed = safeJsonParse<unknown>(readFileSync(input.sourceReportPath, "utf8"));
+                    if (parsed === null) {
+                        throw new Error("Invalid classifier quality source JSON");
+                    }
+                    return buildClassifierQualityStatusReport(input.sourceReportPath, parsed);
+                },
+                catch: (error) => ClassifierPackageLoadError.make({
+                    path: input.sourceReportPath,
+                    message: errorMessage(error),
+                }),
+            });
+        });
+
+        const writeClassifierQualityStatus = Effect.fn("ClassifierPackageService.writeClassifierQualityStatusReport")(function* (
+            input: ClassifierQualityStatusWriteInput,
+        ) {
+            const report = yield* classifierQualityStatus(input);
+            yield* Effect.try({
+                try: () => writeFileSync(input.out, `${prettyPrint(report)}\n`, "utf8"),
+                catch: (error) => ClassifierPackageReportWriteError.make({
+                    path: input.out,
+                    message: errorMessage(error),
+                }),
+            });
+            return report;
+        });
+
         return ClassifierPackageService.of({
             loadManifest,
             listOperations,
@@ -760,6 +905,8 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService>
             writeLifecycleRoutingSummaryReport: writeLifecycleRoutingSummary,
             pendingReviewTaskListReport: pendingReviewTaskList,
             writePendingReviewTaskListReport: writePendingReviewTaskList,
+            classifierQualityStatusReport: classifierQualityStatus,
+            writeClassifierQualityStatusReport: writeClassifierQualityStatus,
         });
     }),
 );

@@ -33,9 +33,9 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E476 adds
-  `.ax/experiments/workflow-candidate-pending-review-tasks-service-write-e476.json`
-  as the latest hybrid classifier review-throughput evidence.
+- Index continuation: E477 adds
+  `.ax/experiments/classifier-quality-status-e477.json` as a compact
+  service-readable answer to whether the current classifier labels correctly.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
   append-only fixtures, graph projection, and workflow/harness usefulness
@@ -100,8 +100,65 @@ Current recommendation:
   and debug the review queue without shelling out to the CLI. That service can
   now also persist the queue report as a JSON artifact, so scheduler/debugger
   callers can save reproducible queue snapshots without duplicating CLI write
-  logic. The immediate bottleneck remains a real human review decision for that
-  pending candidate, not promoting synthetic or harness-only evidence.
+  logic. The classifier-quality status report now says the current SetFit
+  analysis passes the candidate-layer quality gate but remains
+  `promotion_quality=false` because residual repeated misses, residual `none`
+  false positives, and missing human promotion review still block autonomous
+  fact promotion. The immediate bottleneck remains a real human review decision
+  for that pending candidate, not promoting synthetic or harness-only evidence.
+
+## E477 - Add Classifier Quality Status Service Report
+
+Question:
+- Can services answer "does this classifier label correctly?" from the saved
+  robustness/failure-analysis artifact without reimplementing jq summaries or
+  confusing candidate-layer quality with promotion-quality facts?
+
+Implementation:
+- Added `ClassifierPackageService.classifierQualityStatusReport({
+  sourceReportPath })`.
+- Added `ClassifierPackageService.writeClassifierQualityStatusReport({
+  sourceReportPath, out })`.
+- Added `ax.classifier_quality_status.v1` with:
+  - source report path/schema/decision
+  - quality gate pass/fail
+  - promotion-quality status
+  - recommended use
+  - compact metrics
+  - explicit blockers and next action
+
+Artifacts:
+- `.ax/experiments/classifier-quality-status-e477.json`
+- Source:
+  `.ax/experiments/setfit-failure-analysis-embedding-helper-fixtures-current.json`
+
+Results:
+- Live quality-status report:
+  - `quality_gate_passed=true`
+  - `promotion_quality=false`
+  - `recommended_use=candidate_mining`
+  - `accuracy_min=0.775`
+  - `accuracy_max=0.85`
+  - `macro_f1_min=0.7542`
+  - `macro_f1_max=0.8439`
+  - `none_false_positive_rate_max=0.0769`
+  - `repeated_miss_count=6`
+  - `unique_none_false_positive_count=1`
+  - blockers:
+    `residual_repeated_misses`,
+    `residual_none_false_positives`,
+    `missing_human_promotion_review`
+
+Decision:
+- The classifier is useful as a candidate/mining layer.
+- It is not yet promotion-quality. Graph facts still need reviewed evidence
+  and human promotion gates.
+
+Verification:
+```sh
+bun test src/classifiers/package-service.test.ts -t "summarizes classifier quality status"
+bun -e 'const { Effect } = await import("effect"); const { ClassifierPackageService, ClassifierPackageServiceLive } = await import("./src/classifiers/package-service.ts"); const report = await Effect.runPromise(Effect.gen(function* () { const packages = yield* ClassifierPackageService; return yield* packages.writeClassifierQualityStatusReport({ sourceReportPath: ".ax/experiments/setfit-failure-analysis-embedding-helper-fixtures-current.json", out: ".ax/experiments/classifier-quality-status-e477.json" }); }).pipe(Effect.provide(ClassifierPackageServiceLive))); console.log(JSON.stringify({ schema: report.schema, quality_gate_passed: report.quality_gate_passed, promotion_quality: report.promotion_quality, recommended_use: report.recommended_use, blockers: report.blockers, metrics: report.metrics }, null, 2));'
+```
 
 ## E476 - Add Pending Review Service Write Helper
 
