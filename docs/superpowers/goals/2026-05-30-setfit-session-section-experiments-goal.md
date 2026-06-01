@@ -33,8 +33,8 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E468 adds
-  `.ax/experiments/workflow-candidate-pending-review-tasks-recommended-progress-e468.json`
+- Index continuation: E469 adds
+  `.ax/experiments/workflow-candidate-pending-review-tasks-recommended-progress-status-e469.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -81,9 +81,55 @@ Current recommendation:
   route the recommended task to open-review versus artifact repair from the
   header alone. It now also carries the recommended task's fixture/review
   progress counts so services can display or route review workload without
-  scanning row details. The immediate bottleneck remains a real human review
-  decision for that pending candidate, not promoting synthetic or harness-only
-  evidence.
+  scanning row details. It now also carries a normalized review progress
+  status so services can branch on unreadable, needs-review, partial,
+  complete, or repair states without re-deriving them from counts. The
+  immediate bottleneck remains a real human review decision for that pending
+  candidate, not promoting synthetic or harness-only evidence.
+
+## E469 - Add Recommended Review Progress Status
+
+Question:
+- Can queue services branch on the recommended task's review progress state
+  without re-deriving it from fixture counts and review decision status?
+
+Implementation:
+- Added `recommended_task_review_progress_status` to
+  `ax.workflow_candidate_pending_review_task_list.v1`.
+- Status vocabulary:
+  - `unreadable`
+  - `needs_review`
+  - `partial_review`
+  - `complete_review`
+  - `needs_repair`
+- Text output now prints `recommended review progress status`.
+- Regression coverage verifies unreadable artifact-repair tasks,
+  collect-review tasks, and complete executable review tasks.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-recommended-progress-status-e469.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live `--pending-review-route=collect_review_decisions` report:
+  - `recommended_task_review_progress_status=needs_review`
+  - `recommended_task_fixture_count=1`
+  - `recommended_task_reviewed_fixture_count=0`
+  - `recommended_task_pending_fixture_count=1`
+  - `recommended_task_review_decision_status=needs_review_decisions`
+  - `recommended_task_can_execute_command=false`
+
+Decision:
+- E469 gives services one stable progress enum for the recommended task while
+  keeping command execution blocked until real review decisions exist.
+- The live task still needs a human verdict and rationale before sync, inspect,
+  graph apply, guidance promotion, or harness promotion.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --pending-review-route=collect_review_decisions --out .ax/experiments/workflow-candidate-pending-review-tasks-recommended-progress-status-e469.json --json
+```
 
 ## E468 - Expose Recommended Review Progress
 

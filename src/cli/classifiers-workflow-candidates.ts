@@ -300,6 +300,12 @@ export type WorkflowCandidateGuidancePendingReviewDecisionStatus =
     | "reviewed_missing_rationale"
     | "invalid_review_status"
     | "review_decisions_ready";
+export type WorkflowCandidateGuidancePendingReviewProgressStatus =
+    | "unreadable"
+    | "needs_review"
+    | "partial_review"
+    | "complete_review"
+    | "needs_repair";
 export type WorkflowCandidateGuidancePendingReviewCommandStatus =
     | "unavailable"
     | "blocked_until_review_decisions"
@@ -383,6 +389,7 @@ export interface WorkflowCandidateGuidancePendingReviewTaskListReport {
     readonly recommended_task_pending_fixture_count?: number;
     readonly recommended_task_invalid_fixture_count?: number;
     readonly recommended_task_missing_rationale_count?: number;
+    readonly recommended_task_review_progress_status?: WorkflowCandidateGuidancePendingReviewProgressStatus;
     readonly recommended_task_candidate_ids?: readonly string[];
     readonly recommended_task_next_action?: string;
     readonly recommended_task_review_sync_command?: readonly string[];
@@ -3572,6 +3579,19 @@ const pendingReviewTaskRecommendedRoute = (
     return "inspect_task";
 };
 
+const pendingReviewTaskReviewProgressStatus = (
+    task: WorkflowCandidateGuidancePendingReviewTaskListItem,
+): WorkflowCandidateGuidancePendingReviewProgressStatus => {
+    if (task.review_decision_status === "unknown" || task.fixture_count === undefined) return "unreadable";
+    if (
+        task.review_decision_status === "reviewed_missing_rationale" ||
+        task.review_decision_status === "invalid_review_status"
+    ) return "needs_repair";
+    if ((task.reviewed_fixture_count ?? 0) === 0) return "needs_review";
+    if ((task.pending_fixture_count ?? 0) > 0) return "partial_review";
+    return "complete_review";
+};
+
 const emptyPendingReviewRouteCounts = (): MutableWorkflowCandidateGuidancePendingReviewRouteCounts => ({
     none: 0,
     repair_artifacts: 0,
@@ -3706,6 +3726,7 @@ export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input:
             ...(recommendedTask.missing_rationale_count === undefined ? {} : {
                 recommended_task_missing_rationale_count: recommendedTask.missing_rationale_count,
             }),
+            recommended_task_review_progress_status: pendingReviewTaskReviewProgressStatus(recommendedTask),
             recommended_task_candidate_ids: recommendedTask.candidate_ids,
             recommended_task_next_action: recommendedTask.review_decision_next_action,
             ...(recommendedTask.review_sync_command === undefined ? {} : {
@@ -3811,6 +3832,7 @@ export function renderWorkflowCandidateGuidancePendingReviewTaskListText(
         `recommended review brief: ${report.recommended_task_review_brief_path ?? "none"}`,
         `recommended review brief status: ${report.recommended_task_review_brief_status ?? "none"}`,
         `recommended review progress: fixtures=${report.recommended_task_fixture_count ?? "unknown"} reviewed=${report.recommended_task_reviewed_fixture_count ?? "unknown"} pending=${report.recommended_task_pending_fixture_count ?? "unknown"} invalid=${report.recommended_task_invalid_fixture_count ?? "unknown"} missing_rationale=${report.recommended_task_missing_rationale_count ?? "unknown"}`,
+        `recommended review progress status: ${report.recommended_task_review_progress_status ?? "none"}`,
         `recommended task next: ${report.recommended_task_next_action ?? "none"}`,
         `recommended sync command status: ${report.recommended_task_review_sync_command_status ?? "none"} can_execute=${report.recommended_task_review_sync_command_can_execute === undefined ? "none" : report.recommended_task_review_sync_command_can_execute ? "yes" : "no"}`,
         `recommended inspect command status: ${report.recommended_task_review_inspect_command_status ?? "none"} can_execute=${report.recommended_task_review_inspect_command_can_execute === undefined ? "none" : report.recommended_task_review_inspect_command_can_execute ? "yes" : "no"}`,

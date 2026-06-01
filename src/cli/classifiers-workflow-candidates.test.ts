@@ -4277,6 +4277,7 @@ describe("classifiers workflow-candidates", () => {
             recommended_task_fixture_pack_status: "present",
             recommended_task_review_brief_path: ".ax/experiments/missing-review.md",
             recommended_task_review_brief_status: "missing",
+            recommended_task_review_progress_status: "unreadable",
             recommended_task_candidate_ids: ["classifier_candidate_group:hybrid-window/correction_or_rejection_signal"],
             recommended_task_review_sync_command_status: "unavailable",
             recommended_task_review_sync_command_can_execute: false,
@@ -4376,6 +4377,7 @@ describe("classifiers workflow-candidates", () => {
             recommended_task_pending_fixture_count: 1,
             recommended_task_invalid_fixture_count: 0,
             recommended_task_missing_rationale_count: 0,
+            recommended_task_review_progress_status: "needs_review",
             recommended_task_review_sync_command_status: "blocked_until_review_decisions",
             recommended_task_review_sync_command_can_execute: false,
             recommended_task_review_inspect_command_status: "blocked_until_review_decisions",
@@ -4424,6 +4426,7 @@ describe("classifiers workflow-candidates", () => {
             recommended_task_pending_fixture_count: 0,
             recommended_task_invalid_fixture_count: 0,
             recommended_task_missing_rationale_count: 0,
+            recommended_task_review_progress_status: "complete_review",
             recommended_task_review_sync_command_status: "ready_to_execute",
             recommended_task_review_sync_command_can_execute: true,
             recommended_task_review_inspect_command_status: "ready_to_execute",
@@ -4481,9 +4484,11 @@ describe("classifiers workflow-candidates", () => {
             recommended_task_pending_fixture_count: 1,
             recommended_task_invalid_fixture_count: 0,
             recommended_task_missing_rationale_count: 0,
+            recommended_task_review_progress_status: "needs_review",
         });
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(collectReviewRouteReport)).toContain("filter route: collect_review_decisions");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(collectReviewRouteReport)).toContain("recommended review progress: fixtures=1 reviewed=0 pending=1 invalid=0 missing_rationale=0");
+        expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(collectReviewRouteReport)).toContain("recommended review progress status: needs_review");
 
         const executableRouteReport = buildWorkflowCandidateGuidancePendingReviewTaskListReport({
             taskDir: ".ax/tasks",
@@ -4522,6 +4527,7 @@ describe("classifiers workflow-candidates", () => {
             recommended_task_pending_fixture_count: 0,
             recommended_task_invalid_fixture_count: 0,
             recommended_task_missing_rationale_count: 0,
+            recommended_task_review_progress_status: "complete_review",
         });
     });
 
