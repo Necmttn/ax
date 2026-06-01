@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E480 adds the first fixture-context repair/regeneration
-  path. The live pending review packet can now be rehydrated from the stored
-  turn plus previous assistant context, reducing the current packet from three
-  context issues to one remaining `unknown_target` issue.
+- Index continuation: E481 makes the remaining E480 `unknown_target` blocker
+  machine-actionable. The repaired packet now carries a target-resolution row
+  and regenerated review brief section telling reviewers/services to set a
+  concrete target or defer/reject before human verdict collection.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
   append-only fixtures, graph projection, and workflow/harness usefulness
@@ -105,9 +105,69 @@ Current recommendation:
   analysis passes the candidate-layer quality gate but remains
   `promotion_quality=false` because residual repeated misses, residual `none`
   false positives, and missing human promotion review still block autonomous
-  fact promotion. The immediate bottleneck is now target resolution plus a real
-  human review decision for the repaired pending candidate, not promoting
-  synthetic or harness-only evidence.
+  fact promotion. The immediate bottleneck is now explicit target resolution
+  plus a real human review decision for the repaired pending candidate, not
+  promoting synthetic or harness-only evidence.
+
+## E481 - Add Target Resolution Guidance
+
+Question:
+- After E480 rehydrates the pending-review packet, can the remaining
+  `unknown_target` issue be represented as explicit reviewer/service work
+  instead of a vague context-repair residue?
+
+Implementation:
+- Extended `ax.workflow_candidate_pending_review_context_repair.v1` with:
+  - `target_resolution_required_count`
+  - `target_resolution_rows`
+  - `target_resolution_next_action`
+- Added target-resolution rows with:
+  - fixture id
+  - candidate id
+  - candidate label
+  - proposed action
+  - current target
+  - suggested review action: `set_target_or_defer`
+- Regenerated review briefs now include `## Target Resolution` before
+  provenance issues.
+- Text repair reports now render target-resolution workload and next action.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-context-repair-e481.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e481-repaired.jsonl`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e481-repaired.md`
+
+Live results:
+- Fixture count: `1`
+- Repaired fixtures: `1`
+- Remaining context issues: `1`
+- Target-resolution required count: `1`
+- Target-resolution row:
+  - candidate: `classifier_candidate_group:hybrid-window/correction_or_rejection_signal`
+  - label: `correction_or_rejection_signal`
+  - action: `add_context_guardrail`
+  - current target: `unknown`
+  - suggested review action: `set_target_or_defer`
+- Target-resolution next action:
+  `Set a concrete target or mark the fixture defer/reject before human verdict
+  collection.`
+
+Decision:
+- This is the right next gate. The packet is no longer silently broken, but it
+  is still blocked from normal verdict collection until target resolution is
+  performed.
+- Next useful slice: add a small sync/apply affordance for target-resolution
+  edits so a reviewer can set a concrete target in the repaired fixture pack,
+  rerun pending-review listing, and see the task move from context repair to
+  normal review collection.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "pending review context repair emits target resolution"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/classifiers/package-service.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --repair-pending-review-context --task-dir=.ax/tasks --out=.ax/experiments/workflow-candidate-pending-review-context-repair-e481.json --repaired-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e481-repaired.jsonl --repaired-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e481-repaired.md --json
+rg -n "Target Resolution|target_resolution|required|set_target_or_defer" .ax/experiments/workflow-candidate-pending-review-context-repair-e481.json .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e481-repaired.md
+```
 
 ## E480 - Regenerate Pending Review Context
 

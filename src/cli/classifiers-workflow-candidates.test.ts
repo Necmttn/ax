@@ -4748,6 +4748,47 @@ describe("classifiers workflow-candidates", () => {
         expect(renderWorkflowCandidateGuidancePendingReviewContextRepairText(report)).toContain("remaining issue: unknown_target");
     });
 
+    test("pending review context repair emits target resolution guidance for unknown targets", () => {
+        const fixtureRow = {
+            id: "workflow-candidate-review-coverage/correction_or_rejection_signal/unknown-target",
+            suite: "workflow-candidate-review-coverage" as const,
+            name: "coverage-gap-correction_or_rejection_signal-01",
+            label: "correction_or_rejection_signal",
+            target: "unknown",
+            text: "USER:\nthis is not bad, can we create another scenario\n\nPREVIOUS_ASSISTANT:\nI showed an example workflow.",
+            source_group: "workflow-candidate" as const,
+            review_status: "pending" as const,
+            topic: "review-coverage",
+            candidate_id: "classifier_candidate_group:hybrid-window/correction_or_rejection_signal",
+            candidate_label: "correction_or_rejection_signal",
+            proposed_action: "add_context_guardrail",
+            turn: "turn:demo__seq_000708",
+        };
+
+        const report = buildWorkflowCandidateGuidancePendingReviewContextRepairReport({
+            fixturePackPath: ".ax/experiments/pending-review.jsonl",
+            reviewBriefPath: ".ax/experiments/pending-review.md",
+            rows: [fixtureRow],
+            turnContexts: [],
+        });
+
+        expect(report).toMatchObject({
+            target_resolution_required_count: 1,
+            target_resolution_next_action: "Set a concrete target or mark the fixture defer/reject before human verdict collection.",
+        });
+        expect(report.target_resolution_rows).toEqual([{
+            fixture_id: "workflow-candidate-review-coverage/correction_or_rejection_signal/unknown-target",
+            candidate_id: "classifier_candidate_group:hybrid-window/correction_or_rejection_signal",
+            candidate_label: "correction_or_rejection_signal",
+            proposed_action: "add_context_guardrail",
+            current_target: "unknown",
+            suggested_review_action: "set_target_or_defer",
+        }]);
+        expect(report.repaired_review_brief_markdown).toContain("## Target Resolution");
+        expect(report.repaired_review_brief_markdown).toContain("suggested=`set_target_or_defer`");
+        expect(renderWorkflowCandidateGuidancePendingReviewContextRepairText(report)).toContain("target resolution required: 1");
+    });
+
     test("topic harness gates fail with only persisted failed harness facts", () => {
         const proposals = buildWorkflowCandidateProposalListReport({
             rows: [],

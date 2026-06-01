@@ -476,6 +476,15 @@ export interface WorkflowCandidateGuidancePendingReviewContextRepairRow {
     readonly repaired_fixture: WorkflowCandidateTopicClassifierFixtureRow;
 }
 
+export interface WorkflowCandidateGuidancePendingReviewTargetResolutionRow {
+    readonly fixture_id: string;
+    readonly candidate_id: string;
+    readonly candidate_label: string;
+    readonly proposed_action: string;
+    readonly current_target: string;
+    readonly suggested_review_action: "set_target_or_defer";
+}
+
 export interface WorkflowCandidateGuidancePendingReviewContextRepairReport {
     readonly schema: "ax.workflow_candidate_pending_review_context_repair.v1";
     readonly fixture_pack_path: string;
@@ -490,6 +499,9 @@ export interface WorkflowCandidateGuidancePendingReviewContextRepairReport {
     readonly after_issue_count: number;
     readonly repaired_issue_count: number;
     readonly remaining_issue_count: number;
+    readonly target_resolution_required_count: number;
+    readonly target_resolution_rows: readonly WorkflowCandidateGuidancePendingReviewTargetResolutionRow[];
+    readonly target_resolution_next_action: string;
     readonly rows: readonly WorkflowCandidateGuidancePendingReviewContextRepairRow[];
     readonly repaired_jsonl: string;
     readonly repaired_review_brief_markdown: string;
@@ -3568,6 +3580,45 @@ const pendingReviewContextRepairStatus = (
     return remainingIssueCount === 0 ? "fully_repaired" : "partially_repaired";
 };
 
+const pendingReviewTargetResolutionRows = (
+    rows: readonly WorkflowCandidateGuidancePendingReviewContextRepairRow[],
+): readonly WorkflowCandidateGuidancePendingReviewTargetResolutionRow[] =>
+    rows
+        .filter((row) => row.remaining_issues.includes("unknown_target"))
+        .map((row) => ({
+            fixture_id: row.fixture_id,
+            candidate_id: row.repaired_fixture.candidate_id,
+            candidate_label: row.repaired_fixture.candidate_label,
+            proposed_action: row.repaired_fixture.proposed_action,
+            current_target: row.repaired_fixture.target,
+            suggested_review_action: "set_target_or_defer",
+        }));
+
+const renderPendingReviewTargetResolutionMarkdown = (
+    rows: readonly WorkflowCandidateGuidancePendingReviewTargetResolutionRow[],
+): string => `${[
+    "## Target Resolution",
+    "",
+    ...(rows.length === 0
+        ? ["- _none_"]
+        : [
+            "- Set a concrete `target` in the fixture JSONL before collecting a human verdict, or mark the fixture `defer`/`reject` with rationale.",
+            ...rows.map((row) =>
+                `- fixture=\`${row.fixture_id}\` candidate=\`${row.candidate_id}\` label=\`${row.candidate_label}\` action=\`${row.proposed_action}\` current_target=\`${row.current_target}\` suggested=\`${row.suggested_review_action}\``
+            ),
+        ]),
+].join("\n")}\n\n`;
+
+const reviewBriefWithTargetResolution = (
+    brief: string,
+    targetRows: readonly WorkflowCandidateGuidancePendingReviewTargetResolutionRow[],
+): string => {
+    const section = renderPendingReviewTargetResolutionMarkdown(targetRows);
+    return brief.includes("\n## Provenance Issues\n")
+        ? brief.replace("\n## Provenance Issues\n", `\n${section}## Provenance Issues\n`)
+        : `${brief.trimEnd()}\n\n${section}`;
+};
+
 export function buildWorkflowCandidateGuidancePendingReviewContextRepairReport(input: {
     readonly fixturePackPath: string;
     readonly reviewBriefPath?: string;
@@ -3618,7 +3669,12 @@ export function buildWorkflowCandidateGuidancePendingReviewContextRepairReport(i
     const partiallyRepairedFixtureCount = rows.filter((row) => row.status === "partially_repaired").length;
     const unrepairedFixtureCount = rows.filter((row) => row.status === "unrepaired").length;
     const unchangedFixtureCount = rows.filter((row) => row.status === "unchanged").length;
+    const targetResolutionRows = pendingReviewTargetResolutionRows(rows);
     const repairedJsonl = `${repairedFixtures.map((row) => JSON.stringify(row)).join("\n")}${repairedFixtures.length === 0 ? "" : "\n"}`;
+    const repairedReviewBriefMarkdown = reviewBriefWithTargetResolution(
+        renderWorkflowCandidateReviewCoverageBriefMarkdown(repairedFixtures),
+        targetResolutionRows,
+    );
     return {
         schema: "ax.workflow_candidate_pending_review_context_repair.v1",
         fixture_pack_path: input.fixturePackPath,
@@ -3633,9 +3689,14 @@ export function buildWorkflowCandidateGuidancePendingReviewContextRepairReport(i
         after_issue_count: remainingIssueCount,
         repaired_issue_count: repairedIssueCount,
         remaining_issue_count: remainingIssueCount,
+        target_resolution_required_count: targetResolutionRows.length,
+        target_resolution_rows: targetResolutionRows,
+        target_resolution_next_action: targetResolutionRows.length === 0
+            ? "No target resolution is required before human verdict collection."
+            : "Set a concrete target or mark the fixture defer/reject before human verdict collection.",
         rows,
         repaired_jsonl: repairedJsonl,
-        repaired_review_brief_markdown: renderWorkflowCandidateReviewCoverageBriefMarkdown(repairedFixtures),
+        repaired_review_brief_markdown: repairedReviewBriefMarkdown,
         next_action: remainingIssueCount > 0
             ? "Review repaired context, then resolve remaining target issues before asking for a human verdict."
             : "Review the regenerated fixture brief and record a human verdict with rationale.",
@@ -3659,10 +3720,27 @@ export function renderWorkflowCandidateGuidancePendingReviewContextRepairText(
         `after issues: ${report.after_issue_count}`,
         `repaired issues: ${report.repaired_issue_count}`,
         `remaining issues: ${report.remaining_issue_count}`,
+        `target resolution required: ${report.target_resolution_required_count}`,
+        `target resolution next: ${report.target_resolution_next_action}`,
         `next action: ${report.next_action}`,
         "",
-        "fixtures:",
+        "target resolution:",
     ];
+    if (report.target_resolution_rows.length === 0) lines.push("  (none)");
+    for (const row of report.target_resolution_rows) {
+        lines.push(
+            `  - ${row.fixture_id}`,
+            `    candidate: ${row.candidate_id}`,
+            `    label: ${row.candidate_label}`,
+            `    action: ${row.proposed_action}`,
+            `    current target: ${row.current_target}`,
+            `    suggested: ${row.suggested_review_action}`,
+        );
+    }
+    lines.push(
+        "",
+        "fixtures:",
+    );
     if (report.rows.length === 0) lines.push("  (none)");
     for (const row of report.rows) {
         lines.push(
@@ -7576,6 +7654,9 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                         after_issue_count: 0,
                         repaired_issue_count: 0,
                         remaining_issue_count: 0,
+                        target_resolution_required_count: 0,
+                        target_resolution_rows: [],
+                        target_resolution_next_action: "No target resolution is required before human verdict collection.",
                         rows: [],
                         repaired_jsonl: "",
                         repaired_review_brief_markdown: "",
