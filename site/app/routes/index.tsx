@@ -4,6 +4,7 @@ import { SiteFooter } from "~/components/landing-sections/site-footer";
 import {
   DashboardPreview,
   LineageFlow,
+  OpenSourceSection,
   FooterCards,
 } from "~/components/landing-v2";
 
@@ -18,6 +19,7 @@ function Landing() {
       <main className="landing-v2">
         <DashboardPreview />
         <LineageFlow />
+        <OpenSourceSection />
         <FooterCards />
       </main>
       <SiteFooter />
