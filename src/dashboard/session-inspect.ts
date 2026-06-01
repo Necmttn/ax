@@ -20,6 +20,7 @@ import type {
     InspectTurnContentDto,
     InspectTurnDto,
     SessionInspectPayload,
+    SessionTokenUsageDetail,
     SpawnMeta,
 } from "../lib/shared/dashboard-types.ts";
 import {
@@ -244,6 +245,17 @@ const HOOK_FIRES_SQL = `
     WHERE session = $sid
     ORDER BY ts ASC;
 `;
+const TOKEN_USAGE_SQL = `
+    SELECT model, prompt_tokens, completion_tokens,
+           cache_creation_input_tokens, cache_read_input_tokens,
+           estimated_tokens,
+           estimated_input_cost_usd, estimated_output_cost_usd,
+           estimated_cache_creation_cost_usd, estimated_cache_read_cost_usd,
+           estimated_cost_usd, pricing_source
+    FROM session_token_usage
+    WHERE session = $sid
+    LIMIT 1;
+`;
 
 interface ParentRow { readonly parent: string | null; readonly nickname: string | null }
 interface ChildEdgeRow {
@@ -262,6 +274,20 @@ interface HookFireRow {
     readonly reason: string;
     readonly latency_ms: number;
     readonly injected_titles: ReadonlyArray<string> | null;
+}
+interface TokenUsageRow {
+    readonly model: string | null;
+    readonly prompt_tokens: number | null;
+    readonly completion_tokens: number | null;
+    readonly cache_creation_input_tokens: number | null;
+    readonly cache_read_input_tokens: number | null;
+    readonly estimated_tokens: number;
+    readonly estimated_input_cost_usd?: number | null;
+    readonly estimated_output_cost_usd?: number | null;
+    readonly estimated_cache_creation_cost_usd?: number | null;
+    readonly estimated_cache_read_cost_usd?: number | null;
+    readonly estimated_cost_usd: number | null;
+    readonly pricing_source: string | null;
 }
 
 /** Resolve the spawning parent of this session (codex spawn_agent / claude
@@ -313,6 +339,26 @@ const resolveHookFires = (sessionId: string): Effect.Effect<ReadonlyArray<HookFi
             injected_titles: row.injected_titles ?? [],
         }),
         "session-inspect resolveHookFires",
+    );
+
+const resolveTokenUsage = (sessionId: string): Effect.Effect<SessionTokenUsageDetail | null, never, SurrealClient> =>
+    queryOptional<TokenUsageRow, SessionTokenUsageDetail>(
+        interpolateRid(TOKEN_USAGE_SQL, toBareSessionId(sessionId)),
+        (row) => ({
+            model: row.model ?? null,
+            prompt_tokens: row.prompt_tokens ?? null,
+            completion_tokens: row.completion_tokens ?? null,
+            cache_creation_input_tokens: row.cache_creation_input_tokens ?? null,
+            cache_read_input_tokens: row.cache_read_input_tokens ?? null,
+            estimated_tokens: Number(row.estimated_tokens ?? 0),
+            estimated_input_cost_usd: row.estimated_input_cost_usd ?? null,
+            estimated_output_cost_usd: row.estimated_output_cost_usd ?? null,
+            estimated_cache_creation_cost_usd: row.estimated_cache_creation_cost_usd ?? null,
+            estimated_cache_read_cost_usd: row.estimated_cache_read_cost_usd ?? null,
+            estimated_cost_usd: row.estimated_cost_usd ?? null,
+            pricing_source: row.pricing_source ?? null,
+        }),
+        "session-inspect resolveTokenUsage",
     );
 
 /** Spawn args parsed out of a parent tool_use call. Keyed by call_id when
@@ -438,11 +484,12 @@ export const fetchSessionInspect = (
         // Normalise inbound id at the seam so the rest of the function operates
         // on a bare id (also what we echo back as payload.session_id).
         const bareSessionId = toBareSessionId(sessionId);
-        const [parent, childrenEdges, allHookFires, turnContent, found] = yield* Effect.all([
+        const [parent, childrenEdges, allHookFires, turnContent, tokenUsage, found] = yield* Effect.all([
             resolveParent(bareSessionId),
             resolveChildren(bareSessionId),
             resolveHookFires(bareSessionId),
             resolveTurnContent(bareSessionId),
+            resolveTokenUsage(bareSessionId),
             locateTranscript(bareSessionId),
         ], { concurrency: "unbounded" });
         const { offset: turnOffset, limit: turnLimit } = clampPagination(
@@ -584,6 +631,7 @@ export const fetchSessionInspect = (
                 session_id: bareSessionId,
                 source_path: found.path,
                 total_chars: totalChars,
+                token_usage: tokenUsage,
                 total_turns: turns.length,
                 turn_window: { offset: turnOffset, limit: turnLimit },
                 turns: turnSlice,

@@ -107,6 +107,10 @@ SELECT
     cache_creation_input_tokens,
     cache_read_input_tokens,
     estimated_tokens,
+    estimated_input_cost_usd,
+    estimated_output_cost_usd,
+    estimated_cache_creation_cost_usd,
+    estimated_cache_read_cost_usd,
     estimated_cost_usd,
     pricing_source
 FROM session_token_usage
@@ -495,6 +499,10 @@ export const sessionTokenUsageQuery = defineSingleQuery<
             cache_creation_input_tokens: nullableNumberField(raw, "cache_creation_input_tokens"),
             cache_read_input_tokens: nullableNumberField(raw, "cache_read_input_tokens"),
             estimated_tokens: numericField(raw, "estimated_tokens"),
+            estimated_input_cost_usd: nullableNumberField(raw, "estimated_input_cost_usd"),
+            estimated_output_cost_usd: nullableNumberField(raw, "estimated_output_cost_usd"),
+            estimated_cache_creation_cost_usd: nullableNumberField(raw, "estimated_cache_creation_cost_usd"),
+            estimated_cache_read_cost_usd: nullableNumberField(raw, "estimated_cache_read_cost_usd"),
             estimated_cost_usd: nullableNumberField(raw, "estimated_cost_usd"),
             pricing_source: stringField(raw, "pricing_source"),
         };

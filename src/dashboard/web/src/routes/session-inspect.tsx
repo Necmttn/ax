@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { api } from "../api.ts";
-import type { HookFireDto, InspectSpanDto, InspectSpanKind, InspectTurnDto } from "@shared/dashboard-types.ts";
+import type { HookFireDto, InspectSpanDto, InspectSpanKind, InspectTurnDto, SessionInspectPayload, SessionTokenUsageDetail } from "@shared/dashboard-types.ts";
 import { childrenByAnchorTurn, spawnAnchorSet, turnText } from "./inspector-filters.ts";
 import { spliceHookFires } from "@shared/hook-fire-splice.ts";
 import { FilterBar } from "./inspector-filter-bar.tsx";
@@ -35,6 +35,13 @@ export function Span({ span }: { span: InspectSpanDto }) {
 }
 
 type ContentTone = { bg: string; fg: string; bar: string; label: string };
+type InspectLens = "legend" | "cost";
+
+interface InspectCostContext {
+    readonly tokenUsage: SessionTokenUsageDetail | null;
+    readonly totalChars: number;
+    readonly totalTurns: number;
+}
 
 const ALIAS_STYLE: Record<string, ContentTone> = {
     objective:             { bg: "#dcfce7", fg: "#166534", bar: "#22c55e", label: "objective" },
@@ -56,6 +63,59 @@ const ALIAS_STYLE: Record<string, ContentTone> = {
     verification:          { bg: "#dcfce7", fg: "#14532d", bar: "#16a34a", label: "verification" },
     reference:             { bg: "#f1f5f9", fg: "#334155", bar: "#64748b", label: "reference" },
 };
+
+const numberOrNull = (value: number | null | undefined): number | null =>
+    typeof value === "number" && Number.isFinite(value) ? value : null;
+
+const fmtCount = (value: number | null | undefined): string =>
+    numberOrNull(value)?.toLocaleString() ?? "-";
+
+const fmtUsd = (value: number | null | undefined): string => {
+    const n = numberOrNull(value);
+    if (n === null) return "-";
+    if (n === 0) return "$0";
+    if (n < 0.01) return `$${n.toFixed(4)}`;
+    return `$${n.toFixed(2)}`;
+};
+
+const pctOf = (part: number | null | undefined, total: number | null | undefined): string => {
+    const p = numberOrNull(part);
+    const t = numberOrNull(total);
+    if (p === null || t === null || t <= 0) return "-";
+    return `${((p / t) * 100).toFixed(1)}%`;
+};
+
+export function estimateCharWeightedCost(
+    totalCost: number | null | undefined,
+    totalChars: number,
+    chars: number,
+): number | null {
+    const cost = numberOrNull(totalCost);
+    if (cost === null || totalChars <= 0 || chars <= 0) return null;
+    return cost * (chars / totalChars);
+}
+
+function tokenCostTotal(usage: SessionTokenUsageDetail | null): number | null {
+    return numberOrNull(usage?.estimated_cost_usd);
+}
+
+function totalBreakdownCost(usage: SessionTokenUsageDetail): number {
+    return [
+        usage.estimated_input_cost_usd,
+        usage.estimated_cache_creation_cost_usd,
+        usage.estimated_cache_read_cost_usd,
+        usage.estimated_output_cost_usd,
+    ].reduce((sum, value) => sum + (numberOrNull(value) ?? 0), 0);
+}
+
+function costBarSegments(usage: SessionTokenUsageDetail): ReadonlyArray<{ label: string; value: number | null; color: string }> {
+    return [
+        { label: "fresh input", value: numberOrNull(usage.estimated_input_cost_usd), color: "#2567a8" },
+        { label: "cache write", value: numberOrNull(usage.estimated_cache_creation_cost_usd), color: "#f59e0b" },
+        { label: "cache read", value: numberOrNull(usage.estimated_cache_read_cost_usd), color: "#10b981" },
+        { label: "output", value: numberOrNull(usage.estimated_output_cost_usd), color: "#8b5cf6" },
+    ];
+}
 
 function blockFamily(kind: string): ContentTone {
     if (kind.includes("system") || kind.includes("instruction")) return { bg: "#e5e7eb", fg: "#1f2937", bar: "#64748b", label: "system" };
@@ -303,6 +363,116 @@ export function rawBlockTextStyle({
     };
 }
 
+function LensToggle({ lens, setLens }: { lens: InspectLens; setLens: (lens: InspectLens) => void }) {
+    const button = (value: InspectLens, label: string) => (
+        <button
+            type="button"
+            onClick={() => setLens(value)}
+            style={{
+                border: value === lens ? "1px solid #141615" : "1px solid #cfd8d4",
+                background: value === lens ? "#141615" : "#fff",
+                color: value === lens ? "#fff" : "#475569",
+                padding: "3px 9px",
+                font: "11px/1.2 ui-monospace, monospace",
+                cursor: "pointer",
+            }}
+        >
+            {label}
+        </button>
+    );
+    return (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {button("legend", "legend")}
+            {button("cost", "cost lens")}
+        </div>
+    );
+}
+
+export function InspectGuide({ data }: { data: Pick<SessionInspectPayload, "total_chars" | "total_turns" | "token_usage"> }) {
+    const [lens, setLens] = useState<InspectLens>("legend");
+    const usage = data.token_usage;
+    const totalCost = tokenCostTotal(usage);
+    const breakdownTotal = usage ? totalBreakdownCost(usage) : 0;
+    const segments = usage ? costBarSegments(usage) : [];
+    const gradient = segments
+        .filter((segment) => (segment.value ?? 0) > 0 && breakdownTotal > 0)
+        .reduce<{ stops: string[]; cursor: number }>((acc, segment) => {
+            const width = ((segment.value ?? 0) / breakdownTotal) * 100;
+            const next = acc.cursor + width;
+            acc.stops.push(`${segment.color} ${acc.cursor.toFixed(2)}% ${next.toFixed(2)}%`);
+            acc.cursor = next;
+            return acc;
+        }, { stops: [], cursor: 0 }).stops.join(", ");
+
+    return (
+        <div style={{
+            margin: "4px 24px 10px",
+            padding: "10px 12px",
+            border: "1px solid #cfd8d4",
+            background: "#f8fafc",
+            display: "grid",
+            gap: 9,
+        }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <LensToggle lens={lens} setLens={setLens} />
+                <span style={{ color: "#64748b", font: "10px/1.4 ui-monospace, monospace" }}>
+                    structure % is character share · cost is provider token usage when available
+                </span>
+            </div>
+            {lens === "legend" ? (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
+                    {[
+                        ["% chips", "Share of exported characters, not token or billing share."],
+                        ["kc", "Thousand characters in the turn or session."],
+                        ["span", "A classified message slice from the raw transcript."],
+                        ["top-right chips", "Semantic block/atom counts detected inside the turn."],
+                    ].map(([term, body]) => (
+                        <div key={term} style={{ background: "#fff", border: "1px solid #e2e8f0", padding: "7px 8px" }}>
+                            <div style={{ color: "#334155", font: "700 11px/1.3 ui-monospace, monospace" }}>{term}</div>
+                            <div style={{ color: "#64748b", fontSize: 12, lineHeight: 1.35 }}>{body}</div>
+                        </div>
+                    ))}
+                </div>
+            ) : usage ? (
+                <div style={{ display: "grid", gap: 8 }}>
+                    <div style={{ display: "flex", gap: 12, alignItems: "baseline", flexWrap: "wrap" }}>
+                        <strong style={{ color: "#141615", font: "700 18px/1 ui-monospace, monospace" }}>{fmtUsd(totalCost)}</strong>
+                        <span style={{ color: "#64748b", font: "11px/1.4 ui-monospace, monospace" }}>
+                            {fmtCount(usage.estimated_tokens)} tokens · {usage.model ?? "unknown model"} · {usage.pricing_source ?? "pricing source unknown"}
+                        </span>
+                    </div>
+                    <div style={{
+                        height: 10,
+                        border: "1px solid #cfd8d4",
+                        background: gradient ? `linear-gradient(90deg, ${gradient})` : "#e5e7eb",
+                    }} />
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 6 }}>
+                        {segments.map((segment) => (
+                            <div key={segment.label} style={{ background: "#fff", border: "1px solid #e2e8f0", padding: "6px 8px", boxShadow: `inset 3px 0 0 ${segment.color}` }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, font: "11px/1.3 ui-monospace, monospace" }}>
+                                    <span>{segment.label}</span>
+                                    <strong>{fmtUsd(segment.value)}</strong>
+                                </div>
+                                <div style={{ color: "#94a3b8", font: "10px/1.3 ui-monospace, monospace" }}>
+                                    {pctOf(segment.value, breakdownTotal || totalCost)}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                    <div style={{ color: "#64748b", fontSize: 12 }}>
+                        Per-turn and per-block numbers below are char-weighted estimates from these session totals.
+                        Exact cache lineage by message is not stored yet.
+                    </div>
+                </div>
+            ) : (
+                <div style={{ background: "#fff", border: "1px solid #e2e8f0", padding: "8px 9px", color: "#64748b", fontSize: 12 }}>
+                    No token usage row is available for this shared/local payload yet. The structure view still works; cost attribution needs provider usage data.
+                </div>
+            )}
+        </div>
+    );
+}
+
 function AnnotatedRawText({
     content,
     rawText,
@@ -368,15 +538,29 @@ function TurnContentInspector({
     content,
     activeTarget,
     setActiveTarget,
+    costContext,
+    turnSeq,
 }: {
     content: InspectTurnContentDto;
     activeTarget: InspectTarget | null;
     setActiveTarget: (target: InspectTarget | null) => void;
+    costContext?: InspectCostContext;
+    turnSeq: number;
 }) {
     const block = selectedBlock(content, activeTarget) ?? visibleTextBlocks(content)[0] ?? content.blocks[0] ?? null;
     const atom = selectedAtom(block, activeTarget);
     const family = block ? blockTone(block) : ALIAS_STYLE.reference;
     const blockAtoms = block?.atoms ?? [];
+    const blockChars = block
+        ? Math.max(0, (block.end_offset ?? 0) - (block.start_offset ?? 0))
+        : 0;
+    const blockTotalCost = costContext
+        ? estimateCharWeightedCost(costContext.tokenUsage?.estimated_cost_usd, costContext.totalChars, blockChars)
+        : null;
+    const blockCacheReadCost = costContext
+        ? estimateCharWeightedCost(costContext.tokenUsage?.estimated_cache_read_cost_usd, costContext.totalChars, blockChars)
+        : null;
+    const futureTurns = Math.max(0, (costContext?.totalTurns ?? 0) - turnSeq - 1);
 
     return (
         <aside style={{ border: "1px solid #d8dee8", background: "#f8fafc", minWidth: 0, maxHeight: 400, overflow: "auto" }}>
@@ -411,6 +595,32 @@ function TurnContentInspector({
                             {contentBrief(block.text_excerpt ?? block.text)}
                         </pre>
                     </div>
+
+                    {costContext?.tokenUsage ? (
+                        <div style={{ background: "#fff", border: "1px solid #e2e8f0", padding: "8px 9px" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
+                                <strong style={{ color: "#334155", font: "700 10px/1 ui-monospace, monospace", textTransform: "uppercase" }}>
+                                    estimated cost lens
+                                </strong>
+                                <span style={{ color: "#94a3b8", font: "10px/1 ui-monospace, monospace" }}>
+                                    char-weighted
+                                </span>
+                            </div>
+                            <dl style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "4px 8px", margin: "7px 0 0", font: "11px/1.35 ui-monospace, monospace" }}>
+                                <dt style={{ color: "#64748b" }}>total downstream share</dt>
+                                <dd style={{ margin: 0, fontWeight: 700 }}>{fmtUsd(blockTotalCost)}</dd>
+                                <dt style={{ color: "#64748b" }}>cache-read share</dt>
+                                <dd style={{ margin: 0, fontWeight: 700 }}>{fmtUsd(blockCacheReadCost)}</dd>
+                                <dt style={{ color: "#64748b" }}>block chars</dt>
+                                <dd style={{ margin: 0 }}>{fmtCount(blockChars)}</dd>
+                                <dt style={{ color: "#64748b" }}>later turns</dt>
+                                <dd style={{ margin: 0 }}>{fmtCount(futureTurns)}</dd>
+                            </dl>
+                            <div style={{ marginTop: 6, color: "#64748b", fontSize: 11, lineHeight: 1.35 }}>
+                                This estimates impact from session totals. Exact provider cache reuse per block is not stored yet.
+                            </div>
+                        </div>
+                    ) : null}
 
                     {atom ? (
                         <AtomCard atom={atom} active />
@@ -639,7 +849,17 @@ function HookFireMarker({ hook }: { hook: HookFireDto }) {
     );
 }
 
-export function Turn({ turn, anchored, childrenSpawnedHere }: { turn: InspectTurnDto; anchored: boolean; childrenSpawnedHere?: ReadonlyArray<SpawnChildDto> }) {
+export function Turn({
+    turn,
+    anchored,
+    childrenSpawnedHere,
+    costContext,
+}: {
+    turn: InspectTurnDto;
+    anchored: boolean;
+    childrenSpawnedHere?: ReadonlyArray<SpawnChildDto>;
+    costContext?: InspectCostContext;
+}) {
     const [showInspector, setShowInspector] = useState(false);
     const [activeTarget, setActiveTarget] = useState<InspectTarget | null>(null);
     const s = KIND_STYLE[turn.semantic_role];
@@ -677,6 +897,9 @@ export function Turn({ turn, anchored, childrenSpawnedHere }: { turn: InspectTur
     )) : [];
     const ts = turn.ts ? new Date(turn.ts).toISOString().slice(11, 19) : "";
     const sizeStr = turn.char_count > 1000 ? `${(turn.char_count / 1000).toFixed(1)}k` : `${turn.char_count}`;
+    const turnCost = costContext
+        ? estimateCharWeightedCost(costContext.tokenUsage?.estimated_cost_usd, costContext.totalChars, turn.char_count)
+        : null;
     const spawnedChildCount = childrenSpawnedHere?.length ?? 0;
     const jsonlBadge = turn.role !== turn.semantic_role.replace(/_text$|_input$/, "")
         ? <span style={{ color: "#94a3b8", fontSize: 10 }}>(jsonl: {turn.role})</span>
@@ -710,6 +933,11 @@ export function Turn({ turn, anchored, childrenSpawnedHere }: { turn: InspectTur
                 {jsonlBadge}
                 <span style={{ color: "#94a3b8" }}>{ts}</span>
                 <span style={{ color: "#94a3b8" }}>{sizeStr}c · {turn.spans.length}span</span>
+                {turnCost !== null ? (
+                    <span title="Estimated char-weighted share of session cost" style={{ color: "#64748b" }}>
+                        ~{fmtUsd(turnCost)}
+                    </span>
+                ) : null}
                 {turn.content ? (
                     <button
                         onClick={() => setShowInspector((value) => !value)}
@@ -758,6 +986,8 @@ export function Turn({ turn, anchored, childrenSpawnedHere }: { turn: InspectTur
                                 content={turn.content}
                                 activeTarget={activeTarget}
                                 setActiveTarget={setActiveTarget}
+                                costContext={costContext}
+                                turnSeq={turn.seq}
                             />
                         ) : null}
                     </div>
@@ -966,6 +1196,7 @@ export function SessionInspectRoute() {
                         getHookFireIdxs={() => hookFireIdxsRef.current}
                         totalHookFires={data.total_hook_fires}
                     />
+                    <InspectGuide data={data} />
                     <div style={{ display: "flex", gap: 4, flexWrap: "wrap", padding: "4px 24px 8px" }}>
                         {(Object.keys(KIND_STYLE) as InspectSpanKind[]).map((kind) => {
                             const c = KIND_STYLE[kind];
@@ -993,6 +1224,11 @@ export function SessionInspectRoute() {
                                         turn={t}
                                         anchored={anchoredSeq === t.seq}
                                         childrenSpawnedHere={childrenByTurn.get(t.seq)}
+                                        costContext={{
+                                            tokenUsage: data.token_usage,
+                                            totalChars: data.total_chars,
+                                            totalTurns: data.total_turns,
+                                        }}
                                     />
                                 );
                             });

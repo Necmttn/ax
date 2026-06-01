@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { rawBlockTextStyle } from "./session-inspect.tsx";
+import { estimateCharWeightedCost, rawBlockTextStyle } from "./session-inspect.tsx";
 
 const tone = {
     bg: "#fce7f3",
@@ -26,5 +26,17 @@ describe("rawBlockTextStyle", () => {
         expect(hovered.borderBottom).toBe(`1px solid ${tone.bar}`);
         expect(mismatch.background).toBe("transparent");
         expect(mismatch.borderBottom).toBe("1px dotted #f97316");
+    });
+});
+
+describe("estimateCharWeightedCost", () => {
+    test("allocates a session cost by character share", () => {
+        expect(estimateCharWeightedCost(2, 1000, 250)).toBe(0.5);
+    });
+
+    test("returns null when attribution inputs are missing", () => {
+        expect(estimateCharWeightedCost(null, 1000, 250)).toBeNull();
+        expect(estimateCharWeightedCost(2, 0, 250)).toBeNull();
+        expect(estimateCharWeightedCost(2, 1000, 0)).toBeNull();
     });
 });

@@ -6,10 +6,11 @@ import type {
     InspectSpanKind,
     InspectTurnDto,
     SessionInspectPayload,
+    SessionTokenUsageDetail,
 } from "@shared/dashboard-types.ts";
 import { shortSessionId } from "@shared/session-id.ts";
 import { FilterBar } from "./inspector-filter-bar.tsx";
-import { KIND_STYLE, Turn } from "./session-inspect.tsx";
+import { InspectGuide, KIND_STYLE, Turn } from "./session-inspect.tsx";
 
 interface ShareArtifact {
     readonly schema_version: 1;
@@ -32,6 +33,7 @@ interface ShareArtifact {
         readonly skills_used: number;
         readonly failures: number;
     };
+    readonly token_usage?: SessionTokenUsageDetail | null;
     readonly turns?: ReadonlyArray<{
         readonly id: string;
         readonly seq: number;
@@ -118,6 +120,7 @@ export function inspectPayloadFromShare(artifact: ShareArtifact, sourcePath: str
         source_path: sourcePath,
         total_chars: totalChars,
         totals_by_kind: totals,
+        token_usage: artifact.token_usage ?? null,
         total_turns: turns.length,
         turn_window: { offset: 0, limit: turns.length },
         turns,
@@ -198,6 +201,7 @@ export function ShareInspectView(props: { readonly owner: string; readonly gistI
                         getHookFireIdxs={() => []}
                         totalHookFires={0}
                     />
+                    <InspectGuide data={data} />
                     <div style={{ display: "flex", gap: 4, flexWrap: "wrap", padding: "4px 24px 8px" }}>
                         {(Object.keys(KIND_STYLE) as InspectSpanKind[]).map((kind) => {
                             const c = KIND_STYLE[kind];
@@ -212,7 +216,16 @@ export function ShareInspectView(props: { readonly owner: string; readonly gistI
                     </div>
                     <div>
                         {data.turns.map((turn) => (
-                            <Turn key={turn.seq} turn={turn} anchored={anchoredSeq === turn.seq} />
+                            <Turn
+                                key={turn.seq}
+                                turn={turn}
+                                anchored={anchoredSeq === turn.seq}
+                                costContext={{
+                                    tokenUsage: data.token_usage,
+                                    totalChars: data.total_chars,
+                                    totalTurns: data.total_turns,
+                                }}
+                            />
                         ))}
                     </div>
                 </>

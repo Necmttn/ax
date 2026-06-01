@@ -233,6 +233,10 @@ export interface SessionTokenUsageDetail {
     readonly cache_creation_input_tokens: number | null;
     readonly cache_read_input_tokens: number | null;
     readonly estimated_tokens: number;
+    readonly estimated_input_cost_usd?: number | null;
+    readonly estimated_output_cost_usd?: number | null;
+    readonly estimated_cache_creation_cost_usd?: number | null;
+    readonly estimated_cache_read_cost_usd?: number | null;
     readonly estimated_cost_usd: number | null;
     readonly pricing_source: string | null;
 }
@@ -774,6 +778,9 @@ export interface SessionInspectPayload {
     readonly total_chars: number;
     /** All-session totals across every turn, NOT just the returned slice. */
     readonly totals_by_kind: Partial<Record<InspectSpanKind, number>>;
+    /** Real session-level provider token/cost totals when ingested. Per-turn
+     *  and per-block cost attribution in the SPA is estimated from this. */
+    readonly token_usage: SessionTokenUsageDetail | null;
     /** Total number of turns in the session (the returned `turns` slice may
      *  be a window - see `turn_window`). */
     readonly total_turns: number;
