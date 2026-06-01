@@ -33,8 +33,8 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E463 adds
-  `.ax/experiments/workflow-candidate-pending-review-tasks-route-e463.json`
+- Index continuation: E464 adds
+  `.ax/experiments/workflow-candidate-pending-review-tasks-route-counts-e464.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -71,9 +71,57 @@ Current recommendation:
   service can plan the exact next command while still honoring the blocked
   state. The pointer now also includes a machine-readable route kind and a
   command-execution boolean, so services can branch without parsing prose
-  `next_action` strings. The immediate bottleneck remains a real human review
-  decision for that pending candidate, not promoting synthetic or harness-only
-  evidence.
+  `next_action` strings. The report now includes aggregate route counts so a
+  scheduler can see review queue workload by route before choosing a task. The
+  immediate bottleneck remains a real human review decision for that pending
+  candidate, not promoting synthetic or harness-only evidence.
+
+## E464 - Count Pending Review Routes
+
+Question:
+- Can review services see pending-review queue workload by route without
+  scanning every task row?
+
+Implementation:
+- Added `route_counts` to
+  `ax.workflow_candidate_pending_review_task_list.v1`.
+- Counts are computed over the filtered task set using the same route function
+  as `recommended_task_route`.
+- Text output now prints route totals for:
+  - `repair_artifacts`,
+  - `repair_review_decisions`,
+  - `execute_review_command`,
+  - `collect_review_decisions`,
+  - `repair_task_schema`, and
+  - `inspect_task`.
+- Regression coverage verifies mixed route counts and filtered route counts.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-route-counts-e464.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live task-list report:
+  - `route_counts.collect_review_decisions=1`
+  - `route_counts.execute_review_command=0`
+  - `route_counts.repair_artifacts=0`
+  - `recommended_task_route=collect_review_decisions`
+  - `recommended_task_can_execute_command=false`
+- Text output confirms the filtered review-decision queue has one
+  `collect_review_decisions` task and no executable route.
+
+Decision:
+- E464 gives schedulers report-level route workload without weakening the
+  review gate.
+- The current classifier candidate still needs real review decisions before any
+  sync, inspect, graph apply, guidance promotion, or harness promotion.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-route-counts-e464.json --json
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --pending-review-decision-status=needs_review_decisions
+```
 
 ## E463 - Add Recommended Review Route
 

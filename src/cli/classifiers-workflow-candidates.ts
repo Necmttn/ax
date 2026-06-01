@@ -313,6 +313,19 @@ export type WorkflowCandidateGuidancePendingReviewRecommendedRoute =
     | "repair_task_schema"
     | "inspect_task";
 
+export interface WorkflowCandidateGuidancePendingReviewRouteCounts {
+    readonly none: number;
+    readonly repair_artifacts: number;
+    readonly repair_review_decisions: number;
+    readonly execute_review_command: number;
+    readonly collect_review_decisions: number;
+    readonly repair_task_schema: number;
+    readonly inspect_task: number;
+}
+type MutableWorkflowCandidateGuidancePendingReviewRouteCounts = {
+    -readonly [K in keyof WorkflowCandidateGuidancePendingReviewRouteCounts]: WorkflowCandidateGuidancePendingReviewRouteCounts[K];
+};
+
 export interface WorkflowCandidateGuidancePendingReviewTaskListFilters {
     readonly path?: string;
     readonly status?: WorkflowCandidateGuidancePendingReviewTaskStatus;
@@ -374,6 +387,7 @@ export interface WorkflowCandidateGuidancePendingReviewTaskListReport {
     readonly review_sync_command_ready_count: number;
     readonly review_inspect_command_ready_count: number;
     readonly review_command_blocked_count: number;
+    readonly route_counts: WorkflowCandidateGuidancePendingReviewRouteCounts;
     readonly missing_artifact_count: number;
     readonly unknown_schema_count: number;
     readonly tasks: readonly WorkflowCandidateGuidancePendingReviewTaskListItem[];
@@ -3543,6 +3557,24 @@ const pendingReviewTaskRecommendedRoute = (
     return "inspect_task";
 };
 
+const emptyPendingReviewRouteCounts = (): MutableWorkflowCandidateGuidancePendingReviewRouteCounts => ({
+    none: 0,
+    repair_artifacts: 0,
+    repair_review_decisions: 0,
+    execute_review_command: 0,
+    collect_review_decisions: 0,
+    repair_task_schema: 0,
+    inspect_task: 0,
+});
+
+const pendingReviewTaskRouteCounts = (
+    tasks: readonly WorkflowCandidateGuidancePendingReviewTaskListItem[],
+): WorkflowCandidateGuidancePendingReviewRouteCounts => {
+    const counts = emptyPendingReviewRouteCounts();
+    for (const task of tasks) counts[pendingReviewTaskRecommendedRoute(task)] += 1;
+    return counts;
+};
+
 const selectRecommendedPendingReviewTask = (
     tasks: readonly WorkflowCandidateGuidancePendingReviewTaskListItem[],
 ): WorkflowCandidateGuidancePendingReviewTaskListItem | undefined =>
@@ -3622,6 +3654,7 @@ export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input:
         task.review_inspect_command_status === "blocked_until_review_decisions" ||
         task.review_inspect_command_status === "blocked_until_review_repairs"
     ).length;
+    const routeCounts = pendingReviewTaskRouteCounts(tasks);
     const unknownSchemaCount = tasks.filter((task) => task.status === "unknown_schema").length;
     const recommendedTask = selectRecommendedPendingReviewTask(tasks);
     return {
@@ -3655,6 +3688,7 @@ export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input:
         review_sync_command_ready_count: reviewSyncCommandReadyCount,
         review_inspect_command_ready_count: reviewInspectCommandReadyCount,
         review_command_blocked_count: reviewCommandBlockedCount,
+        route_counts: routeCounts,
         missing_artifact_count: missingArtifactCount,
         unknown_schema_count: unknownSchemaCount,
         tasks,
@@ -3719,6 +3753,12 @@ export function renderWorkflowCandidateGuidancePendingReviewTaskListText(
         `sync commands ready: ${report.review_sync_command_ready_count}`,
         `inspect commands ready: ${report.review_inspect_command_ready_count}`,
         `commands blocked: ${report.review_command_blocked_count}`,
+        `route repair_artifacts: ${report.route_counts.repair_artifacts}`,
+        `route repair_review_decisions: ${report.route_counts.repair_review_decisions}`,
+        `route execute_review_command: ${report.route_counts.execute_review_command}`,
+        `route collect_review_decisions: ${report.route_counts.collect_review_decisions}`,
+        `route repair_task_schema: ${report.route_counts.repair_task_schema}`,
+        `route inspect_task: ${report.route_counts.inspect_task}`,
         `missing artifacts: ${report.missing_artifact_count}`,
         `unknown schema: ${report.unknown_schema_count}`,
         `recommended task: ${report.recommended_task_path ?? "none"}`,
