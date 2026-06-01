@@ -8,7 +8,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const SCHEMA_PATH = join(new URL("..", import.meta.url).pathname, "schema/schema.surql");
+const SCHEMA_PATH = join(new URL(".", import.meta.url).pathname, "schema.surql");
 const schema = readFileSync(SCHEMA_PATH, "utf8");
 
 describe("commit FTS schema (F4)", () => {

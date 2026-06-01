@@ -21,7 +21,7 @@ import {
 } from "../lib/runtime-state.ts";
 import { prettyPrint } from "../lib/json.ts";
 // Schema is embedded at build time so the compiled binary is self-contained.
-import schemaSurql from "../../schema/schema.surql" with { type: "text" };
+import schemaSurql from "@ax/schema/schema.surql" with { type: "text" };
 
 const HOME = homedir();
 const DATA_DIR = process.env.AX_DATA_DIR ?? join(HOME, ".local", "share", "ax");
