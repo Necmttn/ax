@@ -114,7 +114,8 @@ describe("reaction event classifier", () => {
         ]);
 
         const sql = buildReactionEventStatements([event]).join("\n");
-        expect(sql).toContain("UPSERT reaction_event:`u1__a1");
+        // id is keyed by user_turn alone (stable + idempotent vs the unique index)
+        expect(sql).toContain("UPSERT reaction_event:`u1`");
         expect(sql).toContain('reaction_type: "direction"');
         expect(sql).toContain('target: "environment_setup"');
         expect(sql).toContain("context_json");

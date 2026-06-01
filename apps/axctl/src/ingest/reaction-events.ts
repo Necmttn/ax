@@ -110,8 +110,15 @@ const isToolFailure = (row: ReactionEventInput, text: string): boolean =>
 const clamp = (value: number): number =>
     Math.max(0, Math.min(1, Number(value.toFixed(2))));
 
-const eventKey = (userTurnKey: string, assistantTurnKey: string | null): string =>
-    `${safeKeyPart(userTurnKey)}__${safeKeyPart(assistantTurnKey ?? "none")}__${Bun.hash(`${userTurnKey}|${assistantTurnKey ?? ""}`).toString(16).slice(0, 12)}`;
+// The reaction_event record id is keyed by user_turn ALONE. The schema enforces
+// one reaction_event per user_turn (UNIQUE index reaction_event_user_turn), so
+// the id must be a stable function of user_turn for the UPSERT to be idempotent.
+// Folding assistantTurnKey/hash into the id (as before) made `--since N` runs
+// derive a DIFFERENT id for the same user_turn whenever the windowed fetch saw a
+// different "previous assistant", producing a second record and a unique-index
+// violation that aborted the whole ingest. assistantTurnKey is still stored as
+// the assistant_turn field; it just doesn't belong in the primary key.
+const eventKey = (userTurnKey: string): string => safeKeyPart(userTurnKey);
 
 const baseEvent = (
     row: ReactionEventInput,
@@ -123,7 +130,7 @@ const baseEvent = (
     const assistantTurnKey = previousAssistant?.key ?? null;
     return {
         ...patch,
-        key: eventKey(userTurnKey, assistantTurnKey),
+        key: eventKey(userTurnKey),
         userTurnKey,
         assistantTurnKey,
         sessionKey: recordKeyPart(row.session, "session"),
