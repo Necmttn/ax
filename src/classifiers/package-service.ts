@@ -1,4 +1,6 @@
 import { Context, Effect, Layer, Schema } from "effect";
+import { writeFileSync } from "node:fs";
+import { prettyPrint } from "../lib/json.ts";
 import { SurrealClient } from "../lib/db.ts";
 import {
     applyExecutionSurrealWritePlanReport,
@@ -210,6 +212,10 @@ export interface ClassifierPendingReviewTaskListInput {
     readonly filters?: WorkflowCandidateGuidancePendingReviewTaskListFilters;
 }
 
+export interface ClassifierPendingReviewTaskListWriteInput extends ClassifierPendingReviewTaskListInput {
+    readonly out: string;
+}
+
 export interface ClassifierPackageServiceShape {
     readonly loadManifest: (path: string) => Effect.Effect<ClassifierPackageManifest, ClassifierPackageLoadError>;
     readonly listOperations: (manifestPath: string) => Effect.Effect<readonly ClassifierPackageOperation[], ClassifierPackageLoadError>;
@@ -306,6 +312,9 @@ export interface ClassifierPackageServiceShape {
     readonly pendingReviewTaskListReport: (
         input: ClassifierPendingReviewTaskListInput,
     ) => Effect.Effect<WorkflowCandidateGuidancePendingReviewTaskListReport, ClassifierPackageLoadError>;
+    readonly writePendingReviewTaskListReport: (
+        input: ClassifierPendingReviewTaskListWriteInput,
+    ) => Effect.Effect<WorkflowCandidateGuidancePendingReviewTaskListReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError>;
 }
 
 export class ClassifierPackageService extends Context.Service<ClassifierPackageService, ClassifierPackageServiceShape>()(
@@ -701,6 +710,20 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService>
             });
         });
 
+        const writePendingReviewTaskList = Effect.fn("ClassifierPackageService.writePendingReviewTaskListReport")(function* (
+            input: ClassifierPendingReviewTaskListWriteInput,
+        ) {
+            const report = yield* pendingReviewTaskList(input);
+            yield* Effect.try({
+                try: () => writeFileSync(input.out, `${prettyPrint(report)}\n`, "utf8"),
+                catch: (error) => ClassifierPackageReportWriteError.make({
+                    path: input.out,
+                    message: errorMessage(error),
+                }),
+            });
+            return report;
+        });
+
         return ClassifierPackageService.of({
             loadManifest,
             listOperations,
@@ -736,6 +759,7 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService>
             lifecycleRoutingSummaryReport: lifecycleRoutingSummary,
             writeLifecycleRoutingSummaryReport: writeLifecycleRoutingSummary,
             pendingReviewTaskListReport: pendingReviewTaskList,
+            writePendingReviewTaskListReport: writePendingReviewTaskList,
         });
     }),
 );

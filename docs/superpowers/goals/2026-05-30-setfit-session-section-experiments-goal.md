@@ -33,8 +33,8 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E475 adds
-  `.ax/experiments/workflow-candidate-pending-review-tasks-service-helper-e475.json`
+- Index continuation: E476 adds
+  `.ax/experiments/workflow-candidate-pending-review-tasks-service-write-e476.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -97,9 +97,52 @@ Current recommendation:
   its normalized route, so services can render or debug individual rows without
   re-running routing rules. The same pending-review task-list report is now
   exposed through `ClassifierPackageService`, so Effect/service callers can test
-  and debug the review queue without shelling out to the CLI. The immediate
-  bottleneck remains a real human review decision for that pending candidate,
-  not promoting synthetic or harness-only evidence.
+  and debug the review queue without shelling out to the CLI. That service can
+  now also persist the queue report as a JSON artifact, so scheduler/debugger
+  callers can save reproducible queue snapshots without duplicating CLI write
+  logic. The immediate bottleneck remains a real human review decision for that
+  pending candidate, not promoting synthetic or harness-only evidence.
+
+## E476 - Add Pending Review Service Write Helper
+
+Question:
+- Can Effect/service callers persist the pending workflow-candidate review
+  queue report without reimplementing CLI JSON writing?
+
+Implementation:
+- Added `ClassifierPackageService.writePendingReviewTaskListReport({ taskDir,
+  filters, out })`.
+- The write helper delegates to `pendingReviewTaskListReport` and writes the
+  same pretty JSON format used by CLI artifacts.
+- Write failures use the existing `ClassifierPackageReportWriteError`
+  vocabulary.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-service-write-e476.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Service-layer test fixture:
+  - writes `pending-review-task-list.json`
+  - persisted JSON includes `queue_status=waiting_for_review_decisions`
+  - persisted JSON includes `recommended_task_path`
+  - persisted row includes `route=collect_review_decisions`
+  - persisted row includes `review_progress_status=needs_review`
+- Live CLI parity artifact still reports:
+  - `task_count=1`
+  - `queue_status=waiting_for_review_decisions`
+  - `recommended_task_can_execute_command=false`
+
+Decision:
+- E476 gives review services a tested read/write queue report surface.
+- The live task still requires a real verdict and rationale before sync,
+  inspect, graph apply, guidance promotion, or harness promotion.
+
+Verification:
+```sh
+bun test src/classifiers/package-service.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-service-write-e476.json --json
+```
 
 ## E475 - Add Pending Review Service Helper
 

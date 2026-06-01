@@ -132,6 +132,25 @@ describe("ClassifierPackageService", () => {
             review_progress_status: "needs_review",
             review_decision_status: "needs_review_decisions",
         });
+
+        const out = join(taskDir, "pending-review-task-list.json");
+        const written = await runWithService(Effect.gen(function* () {
+            const packages = yield* ClassifierPackageService;
+            return yield* packages.writePendingReviewTaskListReport({ taskDir, out });
+        }));
+
+        expect(written.queue_status).toBe("waiting_for_review_decisions");
+        expect(JSON.parse(readFileSync(out, "utf8"))).toMatchObject({
+            schema: "ax.workflow_candidate_pending_review_task_list.v1",
+            task_dir: taskDir,
+            queue_status: "waiting_for_review_decisions",
+            recommended_task_path: taskPath,
+            tasks: [{
+                path: taskPath,
+                route: "collect_review_decisions",
+                review_progress_status: "needs_review",
+            }],
+        });
     });
 
     test("lists classifier package operations through the service layer", async () => {
