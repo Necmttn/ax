@@ -33,8 +33,9 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E456 adds
-  `.ax/experiments/workflow-candidate-pending-review-tasks-e456.json`
+- Index continuation: E457 adds
+  `.ax/experiments/workflow-topic-guidance-decision-batch-e457.json` and
+  `.ax/experiments/workflow-candidate-pending-review-tasks-e457.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -58,9 +59,68 @@ Current recommendation:
   `ax.workflow_candidate_pending_review_task.v1` marker, and the CLI can list
   those tasks, verify their fixture/brief artifacts, and dry-run the linked
   review brief to report whether human decisions are present before review. A
-  smoke-marked review is correctly blocked from apply, so the immediate
-  bottleneck remains a real human review decision for that pending candidate,
-  not promoting synthetic or harness-only evidence.
+  smoke-marked review is correctly blocked from apply, and each pending task
+  now carries structured sync/inspect commands for the next non-mutating review
+  step. The immediate bottleneck remains a real human review decision for that
+  pending candidate, not promoting synthetic or harness-only evidence.
+
+## E457 - Emit Review Task Sync Commands
+
+Question:
+- Can the pending review task list tell a service exactly which non-mutating
+  command to run after the reviewer edits the linked review brief?
+
+Implementation:
+- Extended pending review task frontmatter and summaries with:
+  - `source_kind`,
+  - `output_path`,
+  - `review_facts_path`, and
+  - `review_write_plan_path`.
+- The task list now emits structured argv arrays:
+  - `review_sync_command` for syncing the edited brief back into the review
+    pack and refreshing readiness,
+  - `review_inspect_command` for producing review facts and write-plan JSON
+    before any apply.
+- The text renderer now prints the same commands for manual execution.
+- Updated regression coverage for generated task metadata and task-list command
+  output.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e457.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e457.jsonl`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e457.md`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e457.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e457.json`
+- `.ax/experiments/workflow-candidate-pending-review-tasks-e457.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live batch task summary now includes:
+  - `source_kind=hybrid_window_classifier_projection`
+  - `output_path=.ax/experiments/workflow-topic-guidance-decision-batch-e457.json`
+  - `review_facts_path=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e457.json`
+  - `review_write_plan_path=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e457.json`
+- Live task list includes `review_sync_command` and
+  `review_inspect_command` arrays for
+  `classifier_candidate_group:hybrid-window/correction_or_rejection_signal`.
+- The task still reports:
+  - `review_decision_status=needs_review_decisions`
+  - `reviewed_fixture_count=0`
+  - `pending_fixture_count=1`
+
+Decision:
+- E457 gives review services a direct next-command surface without scraping the
+  markdown review brief.
+- This remains non-mutating and does not apply graph facts; it only prepares
+  the reviewed task for a future human-edited sync/readiness step.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=hybrid_window_classifier_projection --limit=10 --coverage-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e457.jsonl --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e457.md --review-facts=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-facts-e457.json --review-write-plan=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-write-plan-e457.json --review-pipeline-lifecycle --review-pipeline-verify-outputs --emit-pending-review-task --task-dir=.ax/tasks --out .ax/experiments/workflow-topic-guidance-decision-batch-e457.json --json
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-e457.json --json
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks
+```
 
 ## E456 - Surface Pending Review Decision Readiness
 

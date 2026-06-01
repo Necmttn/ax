@@ -260,6 +260,10 @@ export interface WorkflowCandidateGuidancePendingReviewTaskSummary {
     readonly fixture_count: number;
     readonly review_brief_path?: string;
     readonly fixture_pack_path: string;
+    readonly source_kind?: string;
+    readonly output_path?: string;
+    readonly review_facts_path?: string;
+    readonly review_write_plan_path?: string;
     readonly review_pipeline_stage: WorkflowCandidateReviewCoveragePipelineStage;
     readonly next_action: string;
 }
@@ -268,6 +272,10 @@ export interface WorkflowCandidateGuidancePendingReviewTaskParsed {
     readonly schema?: string;
     readonly fixture_pack_path?: string;
     readonly review_brief_path?: string;
+    readonly source_kind?: string;
+    readonly output_path?: string;
+    readonly review_facts_path?: string;
+    readonly review_write_plan_path?: string;
     readonly review_pipeline_stage?: string;
     readonly candidate_ids: readonly string[];
 }
@@ -307,6 +315,8 @@ export interface WorkflowCandidateGuidancePendingReviewTaskListItem {
     readonly missing_rationale_count?: number;
     readonly review_decision_status: WorkflowCandidateGuidancePendingReviewDecisionStatus;
     readonly review_decision_next_action: string;
+    readonly review_sync_command?: readonly string[];
+    readonly review_inspect_command?: readonly string[];
 }
 
 export interface WorkflowCandidateGuidancePendingReviewTaskListReport {
@@ -3134,6 +3144,8 @@ export function buildWorkflowCandidateGuidancePendingReviewTask(input: {
     readonly taskDir: string;
     readonly fixturePack: WorkflowCandidateReviewCoverageFixtureSummary;
     readonly handoff: WorkflowCandidateGuidancePendingReviewHandoffSummary;
+    readonly sourceKind?: string;
+    readonly outputPath?: string;
 }): { readonly summary: WorkflowCandidateGuidancePendingReviewTaskSummary; readonly content: string } {
     const path = pendingReviewTaskPath(input.taskDir, input.fixturePack);
     const candidateIds = [...new Set(input.fixturePack.fixtures.map((row) => row.candidate_id))].sort();
@@ -3143,6 +3155,10 @@ export function buildWorkflowCandidateGuidancePendingReviewTask(input: {
         `ax_schema: ${JSON.stringify(workflowCandidateGuidancePendingReviewTaskSchema)}`,
         `fixture_pack_path: ${JSON.stringify(input.fixturePack.path)}`,
         ...(input.handoff.review_brief_path === undefined ? [] : [`review_brief_path: ${JSON.stringify(input.handoff.review_brief_path)}`]),
+        ...(input.sourceKind === undefined ? [] : [`source_kind: ${JSON.stringify(input.sourceKind)}`]),
+        ...(input.outputPath === undefined ? [] : [`output_path: ${JSON.stringify(input.outputPath)}`]),
+        ...(input.handoff.review_facts_path === undefined ? [] : [`review_facts_path: ${JSON.stringify(input.handoff.review_facts_path)}`]),
+        ...(input.handoff.review_write_plan_path === undefined ? [] : [`review_write_plan_path: ${JSON.stringify(input.handoff.review_write_plan_path)}`]),
         `review_pipeline_stage: ${JSON.stringify(input.handoff.review_pipeline_stage)}`,
         `candidate_ids_json: ${JSON.stringify(candidateIds)}`,
         "---",
@@ -3200,6 +3216,10 @@ export function buildWorkflowCandidateGuidancePendingReviewTask(input: {
             fixture_count: input.fixturePack.emitted_fixture_count,
             ...(input.handoff.review_brief_path === undefined ? {} : { review_brief_path: input.handoff.review_brief_path }),
             fixture_pack_path: input.fixturePack.path,
+            ...(input.sourceKind === undefined ? {} : { source_kind: input.sourceKind }),
+            ...(input.outputPath === undefined ? {} : { output_path: input.outputPath }),
+            ...(input.handoff.review_facts_path === undefined ? {} : { review_facts_path: input.handoff.review_facts_path }),
+            ...(input.handoff.review_write_plan_path === undefined ? {} : { review_write_plan_path: input.handoff.review_write_plan_path }),
             review_pipeline_stage: input.handoff.review_pipeline_stage,
             next_action: input.handoff.next_action,
         },
@@ -3248,11 +3268,19 @@ export function parseWorkflowCandidateGuidancePendingReviewTaskMarkdown(
     const schema = pendingReviewTaskStringField(fields, "ax_schema");
     const fixturePackPath = pendingReviewTaskStringField(fields, "fixture_pack_path");
     const reviewBriefPath = pendingReviewTaskStringField(fields, "review_brief_path");
+    const sourceKind = pendingReviewTaskStringField(fields, "source_kind");
+    const outputPath = pendingReviewTaskStringField(fields, "output_path");
+    const reviewFactsPath = pendingReviewTaskStringField(fields, "review_facts_path");
+    const reviewWritePlanPath = pendingReviewTaskStringField(fields, "review_write_plan_path");
     const reviewPipelineStage = pendingReviewTaskStringField(fields, "review_pipeline_stage");
     return {
         ...(schema === undefined ? {} : { schema }),
         ...(fixturePackPath === undefined ? {} : { fixture_pack_path: fixturePackPath }),
         ...(reviewBriefPath === undefined ? {} : { review_brief_path: reviewBriefPath }),
+        ...(sourceKind === undefined ? {} : { source_kind: sourceKind }),
+        ...(outputPath === undefined ? {} : { output_path: outputPath }),
+        ...(reviewFactsPath === undefined ? {} : { review_facts_path: reviewFactsPath }),
+        ...(reviewWritePlanPath === undefined ? {} : { review_write_plan_path: reviewWritePlanPath }),
         ...(reviewPipelineStage === undefined ? {} : { review_pipeline_stage: reviewPipelineStage }),
         candidate_ids: [...new Set(candidateIds)].sort(),
     };
@@ -3288,6 +3316,42 @@ const reviewDecisionNextAction = (status: WorkflowCandidateGuidancePendingReview
         case "unknown":
             return "Repair or regenerate task artifacts before reading review decisions.";
     }
+};
+
+const pendingReviewTaskReviewSyncCommand = (
+    parsed: WorkflowCandidateGuidancePendingReviewTaskParsed,
+): readonly string[] | undefined => {
+    if (
+        parsed.source_kind === undefined ||
+        parsed.fixture_pack_path === undefined ||
+        parsed.review_brief_path === undefined
+    ) return undefined;
+    return [
+        "bun",
+        "src/cli/index.ts",
+        "classifiers",
+        "workflow-candidates",
+        "--guidance-decision-batch",
+        `--source-kind=${parsed.source_kind}`,
+        `--coverage-review-pack=${parsed.fixture_pack_path}`,
+        `--sync-coverage-review-brief=${parsed.review_brief_path}`,
+        `--coverage-review-brief=${parsed.review_brief_path}`,
+        ...(parsed.output_path === undefined ? [] : [`--out=${parsed.output_path}`]),
+        "--json",
+    ];
+};
+
+const pendingReviewTaskReviewInspectCommand = (
+    parsed: WorkflowCandidateGuidancePendingReviewTaskParsed,
+): readonly string[] | undefined => {
+    const syncCommand = pendingReviewTaskReviewSyncCommand(parsed);
+    if (syncCommand === undefined) return undefined;
+    return [
+        ...syncCommand.filter((arg) => !arg.startsWith("--out=")),
+        ...(parsed.review_facts_path === undefined ? [] : [`--review-facts=${parsed.review_facts_path}`]),
+        ...(parsed.review_write_plan_path === undefined ? [] : [`--review-write-plan=${parsed.review_write_plan_path}`]),
+        ...(parsed.output_path === undefined ? [] : [`--out=${parsed.output_path}`]),
+    ];
 };
 
 const pendingReviewTaskDecisionSummary = (input: {
@@ -3389,6 +3453,8 @@ export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input:
                 reviewBriefStatus,
                 ...(input.readFile === undefined ? {} : { readFile: input.readFile }),
             });
+            const reviewSyncCommand = pendingReviewTaskReviewSyncCommand(parsed);
+            const reviewInspectCommand = pendingReviewTaskReviewInspectCommand(parsed);
             return {
                 path: file.path,
                 ...(parsed.schema === undefined ? {} : { schema: parsed.schema }),
@@ -3400,6 +3466,8 @@ export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input:
                 ...(parsed.review_pipeline_stage === undefined ? {} : { review_pipeline_stage: parsed.review_pipeline_stage }),
                 candidate_ids: parsed.candidate_ids,
                 candidate_count: parsed.candidate_ids.length,
+                ...(reviewSyncCommand === undefined ? {} : { review_sync_command: reviewSyncCommand }),
+                ...(reviewInspectCommand === undefined ? {} : { review_inspect_command: reviewInspectCommand }),
                 ...decisionSummary,
             };
         })
@@ -3491,6 +3559,8 @@ export function renderWorkflowCandidateGuidancePendingReviewTaskListText(
             `    fixture pack: ${task.fixture_pack_status} ${task.fixture_pack_path ?? "unknown"}`,
             `    review brief: ${task.review_brief_status} ${task.review_brief_path ?? "unknown"}`,
             `    next: ${task.review_decision_next_action}`,
+            ...(task.review_sync_command === undefined ? [] : [`    sync command: ${task.review_sync_command.join(" ")}`]),
+            ...(task.review_inspect_command === undefined ? [] : [`    inspect command: ${task.review_inspect_command.join(" ")}`]),
         );
         for (const candidateId of task.candidate_ids) lines.push(`    candidate: ${candidateId}`);
     }
@@ -7184,6 +7254,8 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     taskDir,
                     fixturePack: pendingReviewFixturePack,
                     handoff: pendingReviewHandoff,
+                    sourceKind: input.sourceKind,
+                    ...(input.out === undefined ? {} : { outputPath: input.out }),
                 });
                 mkdirSync(dirname(task.summary.path!), { recursive: true });
                 writeFileSync(task.summary.path!, task.content, "utf8");

@@ -4138,6 +4138,8 @@ describe("classifiers workflow-candidates", () => {
             taskDir: ".ax/tasks",
             fixturePack,
             handoff,
+            sourceKind: "hybrid_window_classifier_projection",
+            outputPath: ".ax/experiments/pending-review-batch.json",
         });
         const batch = buildWorkflowCandidateTopicGuidanceDecisionBatchReport({
             sourceKind: "hybrid_window_classifier_projection",
@@ -4156,10 +4158,16 @@ describe("classifiers workflow-candidates", () => {
             fixture_count: 1,
             fixture_pack_path: ".ax/experiments/pending-review.jsonl",
             review_brief_path: ".ax/experiments/pending-review.md",
+            source_kind: "hybrid_window_classifier_projection",
+            output_path: ".ax/experiments/pending-review-batch.json",
+            review_facts_path: ".ax/experiments/pending-review-facts.json",
+            review_write_plan_path: ".ax/experiments/pending-review-write-plan.json",
             review_pipeline_stage: "needs_review_decisions",
         });
         expect(task.summary.path).toContain(".ax/tasks/workflow-candidate-pending-review-");
         expect(task.content).toContain("ax_schema: \"ax.workflow_candidate_pending_review_task.v1\"");
+        expect(task.content).toContain("source_kind: \"hybrid_window_classifier_projection\"");
+        expect(task.content).toContain("output_path: \".ax/experiments/pending-review-batch.json\"");
         expect(task.content).toContain("candidate_ids_json: [\"classifier_candidate_group:hybrid-window/correction_or_rejection_signal\"]");
         expect(task.content).toContain("# ax pending workflow candidate review");
         expect(task.content).toContain("**Review brief:** `.ax/experiments/pending-review.md`");
@@ -4168,6 +4176,10 @@ describe("classifiers workflow-candidates", () => {
             schema: "ax.workflow_candidate_pending_review_task.v1",
             fixture_pack_path: ".ax/experiments/pending-review.jsonl",
             review_brief_path: ".ax/experiments/pending-review.md",
+            source_kind: "hybrid_window_classifier_projection",
+            output_path: ".ax/experiments/pending-review-batch.json",
+            review_facts_path: ".ax/experiments/pending-review-facts.json",
+            review_write_plan_path: ".ax/experiments/pending-review-write-plan.json",
             review_pipeline_stage: "needs_review_decisions",
             candidate_ids: ["classifier_candidate_group:hybrid-window/correction_or_rejection_signal"],
         });
@@ -4195,6 +4207,10 @@ describe("classifiers workflow-candidates", () => {
             "ax_schema: \"ax.workflow_candidate_pending_review_task.v1\"",
             "fixture_pack_path: \".ax/experiments/pending-review.jsonl\"",
             "review_brief_path: \".ax/experiments/pending-review.md\"",
+            "source_kind: \"hybrid_window_classifier_projection\"",
+            "output_path: \".ax/experiments/pending-review-batch.json\"",
+            "review_facts_path: \".ax/experiments/pending-review-facts.json\"",
+            "review_write_plan_path: \".ax/experiments/pending-review-write-plan.json\"",
             "review_pipeline_stage: \"needs_review_decisions\"",
             "candidate_ids_json: [\"classifier_candidate_group:hybrid-window/correction_or_rejection_signal\"]",
             "---",
@@ -4251,11 +4267,25 @@ describe("classifiers workflow-candidates", () => {
             pending_fixture_count: 0,
             invalid_fixture_count: 0,
             missing_rationale_count: 0,
+            review_sync_command: [
+                "bun",
+                "src/cli/index.ts",
+                "classifiers",
+                "workflow-candidates",
+                "--guidance-decision-batch",
+                "--source-kind=hybrid_window_classifier_projection",
+                "--coverage-review-pack=.ax/experiments/reviewed.jsonl",
+                "--sync-coverage-review-brief=.ax/experiments/reviewed.md",
+                "--coverage-review-brief=.ax/experiments/reviewed.md",
+                "--out=.ax/experiments/pending-review-batch.json",
+                "--json",
+            ],
         });
         expect(report.tasks[2]?.candidate_ids).toEqual(["classifier_candidate_group:hybrid-window/correction_or_rejection_signal"]);
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("missing artifacts: 1");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("missing_review_brief");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("review decisions ready: 1");
+        expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("--review-facts=.ax/experiments/pending-review-facts.json");
     });
 
     test("topic harness gates fail with only persisted failed harness facts", () => {
