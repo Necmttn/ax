@@ -1,5 +1,6 @@
 import { Context, Effect, Layer, Schema } from "effect";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { prettyPrint } from "../lib/json.ts";
 import { SurrealClient } from "../lib/db.ts";
 import { safeJsonParse } from "../lib/shared/safe-json.ts";
@@ -44,6 +45,7 @@ import {
     type ClassifierPackageExecutionSurrealWritePlanReport,
     type ClassifierPackageExecutionSurrealApplyReport,
     type ClassifierPackageExecutionGraphHealthReport,
+    type ClassifierGraphBoundaryReplaySummary,
     type ClassifierGraphQuerySuggestionRoutingSummary,
     type ClassifierLifecycleInsightReport,
     type ClassifierLifecycleRoutingSummaryReport,
@@ -194,6 +196,14 @@ export interface ClassifierGraphQuerySuggestionRoutingSummaryWriteInput extends 
     readonly out: string;
 }
 
+export interface ClassifierBoundaryReplaySummaryInput {
+    readonly query?: Partial<ClassifierGraphHealthQuery>;
+}
+
+export interface ClassifierBoundaryReplaySummaryWriteInput extends ClassifierBoundaryReplaySummaryInput {
+    readonly out: string;
+}
+
 export interface ClassifierLifecycleInsightInput {
     readonly root?: string;
     readonly workflowStatusPath?: string;
@@ -268,6 +278,28 @@ const maxNumber = (values: readonly (number | undefined)[]): number | undefined 
     const numbers = values.filter((value): value is number => value !== undefined);
     return numbers.length > 0 ? Math.max(...numbers) : undefined;
 };
+
+const boundaryReplaySummaryQuery = (query?: Partial<ClassifierGraphHealthQuery>): Partial<ClassifierGraphHealthQuery> => ({
+    mode: "boundary-replay",
+    source_kind: "boundary_replay_deterministic_projection",
+    fact_kind: "classifier_boundary_replay",
+    predicate: "covered_by_deterministic",
+    value_equals: "true",
+    ...query,
+});
+
+const fallbackBoundaryReplaySummary = (): ClassifierGraphBoundaryReplaySummary => ({
+    status: "no_reviewed_deterministic_facts",
+    production_posture: "not_applicable",
+    next_action: "project_or_apply_boundary_replay_facts",
+    remediation: "Project and apply boundary replay facts before routing product behavior from reviewed deterministic evidence.",
+    covered_subject_count: 0,
+    deterministic_label_subject_count: 0,
+    evidence_path_count: 0,
+    classifier_keys: [],
+    targets: [],
+    subjects: [],
+});
 
 export const buildClassifierQualityStatusReport = (
     sourceReportPath: string,
@@ -401,6 +433,12 @@ export interface ClassifierPackageServiceShape {
     readonly writeExecutionGraphQuerySuggestionRoutingSummaryReport: (
         input: ClassifierGraphQuerySuggestionRoutingSummaryWriteInput,
     ) => Effect.Effect<ClassifierGraphQuerySuggestionRoutingSummary, ClassifierPackageReportWriteError, SurrealClient>;
+    readonly boundaryReplaySummaryReport: (
+        input?: ClassifierBoundaryReplaySummaryInput,
+    ) => Effect.Effect<ClassifierGraphBoundaryReplaySummary, ClassifierPackageReportWriteError, SurrealClient>;
+    readonly writeBoundaryReplaySummaryReport: (
+        input: ClassifierBoundaryReplaySummaryWriteInput,
+    ) => Effect.Effect<ClassifierGraphBoundaryReplaySummary, ClassifierPackageReportWriteError, SurrealClient>;
     readonly writeExecutionGraphHealthReport: (
         input: ClassifierPackageExecutionGraphHealthWriteInput,
     ) => Effect.Effect<ClassifierPackageExecutionGraphHealthReport, ClassifierPackageReportWriteError, SurrealClient>;
@@ -749,6 +787,32 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService>
             return report;
         });
 
+        const boundaryReplaySummary = Effect.fn("ClassifierPackageService.boundaryReplaySummaryReport")(function* (
+            input?: ClassifierBoundaryReplaySummaryInput,
+        ) {
+            const report = yield* executionGraphHealth({
+                query: boundaryReplaySummaryQuery(input?.query),
+            });
+            return report.boundary_replay_summary ?? fallbackBoundaryReplaySummary();
+        });
+
+        const writeBoundaryReplaySummary = Effect.fn("ClassifierPackageService.writeBoundaryReplaySummaryReport")(function* (
+            input: ClassifierBoundaryReplaySummaryWriteInput,
+        ) {
+            const report = yield* boundaryReplaySummary(input);
+            yield* Effect.try({
+                try: () => {
+                    mkdirSync(dirname(input.out), { recursive: true });
+                    writeFileSync(input.out, `${prettyPrint(report)}\n`, "utf8");
+                },
+                catch: (error) => ClassifierPackageReportWriteError.make({
+                    path: input.out,
+                    message: errorMessage(error),
+                }),
+            });
+            return report;
+        });
+
         const lifecycleInsight = Effect.fn("ClassifierPackageService.lifecycleInsightReport")(function* (
             input?: ClassifierLifecycleInsightInput,
         ) {
@@ -898,6 +962,8 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService>
             executionGraphHealthReport: executionGraphHealth,
             executionGraphQuerySuggestionRoutingSummary,
             writeExecutionGraphQuerySuggestionRoutingSummaryReport: writeExecutionGraphQuerySuggestionRoutingSummary,
+            boundaryReplaySummaryReport: boundaryReplaySummary,
+            writeBoundaryReplaySummaryReport: writeBoundaryReplaySummary,
             writeExecutionGraphHealthReport: writeExecutionGraphHealth,
             lifecycleInsightReport: lifecycleInsight,
             writeLifecycleInsightReport: writeLifecycleInsight,

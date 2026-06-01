@@ -802,6 +802,130 @@ describe("ClassifierPackageService", () => {
         expect(saved.suggestion.verification.command_kind).toBe("classifier_graph_query_repair_verification");
     });
 
+    test("summarizes boundary replay posture through the service layer", async () => {
+        const statements: string[] = [];
+        const db = {
+            query: (sql: string) => Effect.sync(() => {
+                statements.push(sql);
+                expect(sql).toContain("FROM classifier_graph_node");
+                return [
+                    [],
+                    [
+                        {
+                            graph_id: "edge:boundary",
+                            kind: "reported_boundary_miss",
+                            from_id: "artifact:boundary",
+                            to_id: "classifier_boundary_miss:workflow",
+                            evidence_path: ".ax/experiments/boundary-review-deterministic-replay-workflow-candidate-current.json",
+                            properties_json: "{}",
+                            source_kind: "boundary_replay_deterministic_projection",
+                        },
+                    ],
+                    [
+                        {
+                            graph_id: "fact:boundary:covered",
+                            kind: "classifier_boundary_replay",
+                            subject: "classifier_boundary_miss:workflow",
+                            predicate: "covered_by_deterministic",
+                            value_json: JSON.stringify(true),
+                            evidence_edges_json: JSON.stringify(["edge:boundary"]),
+                            properties_json: JSON.stringify({
+                                classifier_key: "correction-event",
+                                actual: "correction_or_rejection_signal",
+                                target: "workflow_state",
+                            }),
+                            source_kind: "boundary_replay_deterministic_projection",
+                        },
+                        {
+                            graph_id: "fact:boundary:label",
+                            kind: "classifier_boundary_replay",
+                            subject: "classifier_boundary_miss:workflow",
+                            predicate: "deterministic_label",
+                            object: "classifier_deterministic_result:workflow",
+                            value_json: JSON.stringify({ label: "correction", target: "workflow_state" }),
+                            evidence_edges_json: JSON.stringify(["edge:boundary"]),
+                            properties_json: JSON.stringify({
+                                classifier_key: "correction-event",
+                                target: "workflow_state",
+                                confidence: 0.84,
+                                signals: ["correction:workflow_state"],
+                            }),
+                            source_kind: "boundary_replay_deterministic_projection",
+                        },
+                    ],
+                ];
+            }),
+        } as unknown as SurrealClientShape;
+
+        const summary = await runWithServiceAndDb(Effect.gen(function* () {
+            const packages = yield* ClassifierPackageService;
+            return yield* packages.boundaryReplaySummaryReport();
+        }), db);
+
+        expect(statements).toHaveLength(1);
+        expect(summary).toMatchObject({
+            status: "reviewed_deterministic_facts_available",
+            production_posture: "deterministic_and_reviewed_graph_facts_only",
+            next_action: "use_reviewed_deterministic_graph_facts",
+            covered_subject_count: 1,
+            deterministic_label_subject_count: 1,
+            evidence_path_count: 1,
+            classifier_keys: ["correction-event"],
+            targets: ["workflow_state"],
+            subjects: ["classifier_boundary_miss:workflow"],
+        });
+    });
+
+    test("writes boundary replay posture summaries through the service layer", async () => {
+        const out = join(mkdtempSync(join(tmpdir(), "ax-boundary-replay-summary-")), "nested", "summary.json");
+        const db = {
+            query: (sql: string) => Effect.sync(() => {
+                expect(sql).toContain("FROM classifier_graph_node");
+                return [
+                    [],
+                    [
+                        {
+                            graph_id: "edge:boundary",
+                            kind: "reported_boundary_miss",
+                            from_id: "artifact:boundary",
+                            to_id: "classifier_boundary_miss:workflow",
+                            evidence_path: ".ax/experiments/boundary-review-deterministic-replay-workflow-candidate-current.json",
+                            properties_json: "{}",
+                            source_kind: "boundary_replay_deterministic_projection",
+                        },
+                    ],
+                    [
+                        {
+                            graph_id: "fact:boundary:covered",
+                            kind: "classifier_boundary_replay",
+                            subject: "classifier_boundary_miss:workflow",
+                            predicate: "covered_by_deterministic",
+                            value_json: JSON.stringify(true),
+                            evidence_edges_json: JSON.stringify(["edge:boundary"]),
+                            properties_json: JSON.stringify({
+                                classifier_key: "correction-event",
+                                target: "workflow_state",
+                            }),
+                            source_kind: "boundary_replay_deterministic_projection",
+                        },
+                    ],
+                ];
+            }),
+        } as unknown as SurrealClientShape;
+
+        const summary = await runWithServiceAndDb(Effect.gen(function* () {
+            const packages = yield* ClassifierPackageService;
+            return yield* packages.writeBoundaryReplaySummaryReport({ out });
+        }), db);
+        const saved = JSON.parse(readFileSync(out, "utf8"));
+
+        expect(summary.status).toBe("reviewed_deterministic_facts_available");
+        expect(saved).toMatchObject({
+            status: "reviewed_deterministic_facts_available",
+            production_posture: "deterministic_and_reviewed_graph_facts_only",
+        });
+    });
+
     test("builds lifecycle insights through the service layer", async () => {
         const statusDir = mkdtempSync(join(tmpdir(), "ax-lifecycle-status-"));
         const statusPath = join(statusDir, "status.json");

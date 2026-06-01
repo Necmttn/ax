@@ -726,6 +726,43 @@ bun run typecheck
 Passed: `82` Bun tests. Typecheck exited `0` with the existing Effect lint
 messages.
 
+## E500 - Boundary Replay Service Helper
+
+Question: can Effect callers retrieve the promotion-safe boundary replay
+posture without knowing the exact graph query filters?
+
+Changes:
+
+- Added `ClassifierPackageService.boundaryReplaySummaryReport`.
+- Added `ClassifierPackageService.writeBoundaryReplaySummaryReport`.
+- The service helper applies the default boundary replay graph query:
+  `mode=boundary-replay`, `source_kind=boundary_replay_deterministic_projection`,
+  `fact_kind=classifier_boundary_replay`,
+  `predicate=covered_by_deterministic`, `value=true`.
+- Callers can still override query fields when they need a narrower debug view.
+- Added service-layer fake-DB tests for read and write paths.
+
+Result:
+
+- The service returns the compact graph posture:
+  `reviewed_deterministic_facts_available`.
+- The returned production posture remains:
+  `deterministic_and_reviewed_graph_facts_only`.
+- The helper reports classifier key `correction-event`, target
+  `workflow_state`, one covered subject, one deterministic-label subject, and
+  one evidence path from the reviewed replay fixture in the test graph.
+
+Verification:
+
+```sh
+bun test src/classifiers/package-service.test.ts
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts
+bun run typecheck
+```
+
+Passed: `27` focused service tests, then `109` combined classifier package
+tests. Typecheck exited `0` with the existing Effect lint messages/warnings.
+
 Current recommendation:
 
 - Index continuation: E488 turns the accepted classifier-fixture follow-up into
