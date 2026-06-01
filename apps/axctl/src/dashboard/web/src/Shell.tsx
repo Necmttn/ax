@@ -21,7 +21,9 @@ interface Tab {
         | "/workflow"
         | "/recall"
         | "/sessions"
-        | "/wrapped";
+        | "/wrapped"
+        | "/improve"
+        | "/ingest-live";
     readonly label: string;
     readonly prefetch: () => Promise<unknown>;
 }
@@ -99,6 +101,11 @@ export function Shell({ children }: { children: ReactNode }) {
         {
             to: "/recall",
             label: "Recall",
+            prefetch: () => Promise.resolve(undefined),
+        },
+        {
+            to: "/ingest-live",
+            label: "Live",
             prefetch: () => Promise.resolve(undefined),
         },
         {

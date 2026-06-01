@@ -22,6 +22,7 @@ import { GraphRoute } from "./routes/graph.tsx";
 import type { GraphExplorerMode } from "@shared/dashboard-types.ts";
 import { WrappedRoute } from "./routes/wrapped.tsx";
 import { ImproveRoute } from "./routes/improve.tsx";
+import { IngestLiveRoute } from "./routes/ingest-live.tsx";
 import { ShareInspectView } from "./routes/share-inspect.tsx";
 
 const rootRoute = createRootRoute({
@@ -203,6 +204,12 @@ const improveRoute = createRoute({
     component: ImproveRoute,
 });
 
+const ingestLiveRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/ingest-live",
+    component: IngestLiveRoute,
+});
+
 const routeTree = rootRoute.addChildren([
     indexRoute,
     skillsRoute,
@@ -220,6 +227,7 @@ const routeTree = rootRoute.addChildren([
     recallRoute,
     wrappedRoute,
     improveRoute,
+    ingestLiveRoute,
 ]);
 
 // Studio build serves at /studio/; mount router under that basepath so

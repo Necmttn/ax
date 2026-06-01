@@ -113,6 +113,14 @@ async function jsonFetch<T>(input: RequestInfo, init?: RequestInit): Promise<T> 
     return (await res.json()) as T;
 }
 
+export interface IngestTriggerResponse {
+    readonly runId: string;
+    /** Full Durable Streams sidecar URL to subscribe to directly. */
+    readonly stream: string;
+    readonly streamName: string;
+    readonly streamBaseUrl: string;
+}
+
 export interface DaemonVersion {
     readonly version: string;
     readonly api_version: number;
@@ -224,6 +232,15 @@ export const api = {
         if (params.limit != null) usp.set("limit", String(params.limit));
         return jsonFetch(`/api/recall?${usp.toString()}`);
     },
+    /** Trigger a live ingest run. Returns the full Durable Streams sidecar URL
+     *  the browser subscribes to directly (the sidecar has permissive CORS and
+     *  runs on its own localhost port). */
+    ingest: (params: { since?: number } = {}): Promise<IngestTriggerResponse> =>
+        jsonFetch("/api/ingest", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(params.since != null ? { since: params.since } : {}),
+        }),
     toolFailures: (): Promise<ToolFailuresResponse> => jsonFetch("/api/tool-failures"),
     toolFailureDetail: (label: string): Promise<ToolFailureDetailPayload> =>
         jsonFetch(`/api/tool-failures/${encodeURIComponent(label)}/detail`),

@@ -1754,6 +1754,65 @@ td.skill-cell .description {
     letter-spacing: 0.06em;
 }
 
+/* Live ingest stage checklist */
+.ingest-stages {
+    list-style: none;
+    margin: 8px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.ingest-stage {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    font-size: 13px;
+}
+
+.ingest-stage-glyph {
+    width: 16px;
+    text-align: center;
+    font-weight: 700;
+}
+
+.ingest-stage-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ingest-stage-status {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+}
+
+.ingest-stage.ok .ingest-stage-glyph {
+    color: #2ea043;
+}
+
+.ingest-stage.error .ingest-stage-glyph {
+    color: #f85149;
+}
+
+.ingest-stage.running .ingest-stage-glyph {
+    color: var(--muted);
+    animation: ingest-pulse 1s ease-in-out infinite;
+}
+
+@keyframes ingest-pulse {
+    0%, 100% { opacity: 0.35; }
+    50% { opacity: 1; }
+}
+
 .wrapped-heatmap {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(42px, 1fr));
