@@ -24,6 +24,8 @@ export const KIND_STYLE: Record<InspectSpanKind, KindStyle> = {
     pasted_reference:      { bg: "#fecaca", fg: "#7f1d1d", bar: "#ef4444", label: "pasted" },
 };
 
+const JUMP_TARGET_SCROLL_MARGIN = 76;
+
 export function Span({ span }: { span: InspectSpanDto }) {
     const s = KIND_STYLE[span.kind];
     const title = span.label ? `${s.label}: ${span.label}` : s.label;
@@ -779,6 +781,7 @@ function HookFireMarker({ hook }: { hook: HookFireDto }) {
             data-hook-fire="true"
             style={{
                 margin: "4px 24px", padding: "6px 10px",
+                scrollMarginTop: JUMP_TARGET_SCROLL_MARGIN,
                 borderLeft: "3px solid #10b981",
                 background: hook.inject ? "#ecfdf5" : "#f8fafc",
                 borderRadius: 3, fontSize: 11,
@@ -879,6 +882,7 @@ export function Turn({
                 display: "grid",
                 gridTemplateColumns: "1fr",
                 padding: "6px 24px",
+                scrollMarginTop: JUMP_TARGET_SCROLL_MARGIN,
                 borderLeft: `3px solid ${s.bar}`,
                 background: anchored ? "#fef3c7" : "transparent",
                 transition: "background 0.6s",
