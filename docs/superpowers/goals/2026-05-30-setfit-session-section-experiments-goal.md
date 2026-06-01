@@ -33,9 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E477 adds
-  `.ax/experiments/classifier-quality-status-e477.json` as a compact
-  service-readable answer to whether the current classifier labels correctly.
+- Index continuation: E478 audits the only live pending review candidate and
+  finds that it is not ready for automatic promotion: the fixture has one
+  low-confidence example, truncated user text, and no previous-assistant
+  context.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
   append-only fixtures, graph projection, and workflow/harness usefulness
@@ -105,7 +106,68 @@ Current recommendation:
   `promotion_quality=false` because residual repeated misses, residual `none`
   false positives, and missing human promotion review still block autonomous
   fact promotion. The immediate bottleneck remains a real human review decision
-  for that pending candidate, not promoting synthetic or harness-only evidence.
+  or fixture-context repair for that pending candidate, not promoting synthetic
+  or harness-only evidence.
+
+## E478 - Audit Pending Review Candidate Evidence
+
+Question:
+- Is the only live pending `correction_or_rejection_signal` candidate ready for
+  review/promotion, or does the review packet itself need repair before it can
+  improve the classifier and graph?
+
+Evidence inspected:
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e457.md`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e457.jsonl`
+- `.ax/experiments/workflow-candidate-pending-review-tasks-service-write-e476.json`
+
+Findings:
+- Live queue state remains:
+  - `task_count=1`
+  - `queue_status=waiting_for_review_decisions`
+  - `recommended_task_review_progress_status=needs_review`
+  - `recommended_task_review_decision_status=needs_review_decisions`
+  - `recommended_task_can_execute_command=false`
+- The pending candidate is:
+  - `classifier_candidate_group:hybrid-window/correction_or_rejection_signal`
+  - proposed action: `add_context_guardrail`
+  - support count: `1`
+  - evidence count: `1`
+  - confidence: `0.6036`
+- The fixture text is incomplete for a strong correction/rejection verdict:
+  - user text is truncated after "trying to create workflow bas..."
+  - `PREVIOUS_ASSISTANT` is empty
+  - target is `unknown`
+- The visible user text reads more like a direction/expansion request than a
+  correction or rejection:
+  - "this is not bad"
+  - asks for "another scenarios"
+  - mentions retro-reflect/self-apply/workflow examples
+- Earlier smoke artifacts contain a rejected row for the same fixture, but that
+  was explicitly marked as smoke review and lacks real reviewer provenance, so
+  it must not be reused as promotion evidence.
+
+Decision:
+- Do not promote this candidate automatically.
+- The classifier path still looks worth continuing, but this candidate should
+  be treated as a boundary/data-quality case:
+  - likely human verdict: `reject` or `defer`
+  - better system action: repair/regenerate the fixture with fuller turn
+    context before using it for model-quality improvement
+
+Next action:
+- Add a fixture-context repair path for pending review rows whose review text is
+  truncated, has empty previous-assistant context, or has `target=unknown`.
+- After repair, ask for a real human verdict/rationale before syncing review
+  facts or applying graph writes.
+
+Verification:
+```sh
+jq '{task_count, queue_status, recommended_task_path, recommended_task_candidate_ids, recommended_task_review_brief_path, recommended_task_fixture_pack_path, recommended_task_review_progress_status, recommended_task_review_decision_status, recommended_task_can_execute_command, next_action}' .ax/experiments/workflow-candidate-pending-review-tasks-service-write-e476.json
+wc -l .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e457.jsonl
+jq -R 'fromjson? | {id, label, target, review_status, candidate_id, candidate_label, proposed_action, confidence, text, turn}' .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e457.jsonl
+```
 
 ## E477 - Add Classifier Quality Status Service Report
 
