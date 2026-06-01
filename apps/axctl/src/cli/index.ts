@@ -4823,9 +4823,15 @@ const doctorCommand = Command.make(
     ({ json }) => Effect.promise(() => cmdDoctor(boolArg("json", json))),
 ).pipe(Command.withDescription("Check local installation health"));
 
-const uninstallCommand = Command.make("uninstall", {}, () =>
-    Effect.promise(() => cmdUninstall()),
-).pipe(Command.withDescription("Remove launchd plists and the axctl symlink"));
+const uninstallCommand = Command.make(
+    "uninstall",
+    { purge: Flag.boolean("purge").pipe(Flag.withDefault(false)) },
+    ({ purge }) => Effect.promise(() => cmdUninstall(purge)),
+).pipe(
+    Command.withDescription(
+        "Remove launchd plists and the axctl symlink (--purge also deletes ~/.local/share/ax: binary + data)",
+    ),
+);
 
 const devOnlyCommands = process.env.AX_DEV === "1" ? [dogfoodCommand] : [];
 

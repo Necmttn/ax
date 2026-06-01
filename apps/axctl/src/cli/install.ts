@@ -1,4 +1,4 @@
-import { mkdir, writeFile, unlink, symlink, lstat, chmod } from "node:fs/promises";
+import { mkdir, writeFile, unlink, symlink, lstat, chmod, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -750,7 +750,7 @@ export async function cmdDoctor(args: string[]) {
     console.log(formatDoctorReport(collectDoctorReport(), json));
 }
 
-export async function cmdUninstall() {
+export async function cmdUninstall(purge = false) {
     console.log("[axctl] uninstall");
     for (const plist of [DERIVE_PLIST, WATCH_PLIST, DB_PLIST]) {
         const removed = await unloadAgent(plist);
@@ -780,5 +780,16 @@ export async function cmdUninstall() {
     }
 
     console.log();
-    console.log(`Data preserved at ${DATA_DIR}. Delete manually if you want a clean slate.`);
+    if (purge) {
+        // --purge wipes the whole install root: the compiled binary, the
+        // SurrealDB store, transcript/codex buckets, and logs. The symlinks +
+        // launchd jobs are already gone above, so this leaves nothing behind.
+        await rm(DATA_DIR, { recursive: true, force: true });
+        console.log(`  purged data dir: ${DATA_DIR}`);
+        console.log();
+        console.log("ax fully removed. Thanks for trying it.");
+    } else {
+        console.log(`Data preserved at ${DATA_DIR}.`);
+        console.log("Re-run with --purge (or 'rm -rf' it) for a clean slate.");
+    }
 }
