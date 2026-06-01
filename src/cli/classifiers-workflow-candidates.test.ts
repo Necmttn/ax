@@ -4192,8 +4192,8 @@ describe("classifiers workflow-candidates", () => {
             suite: "workflow-candidate-review-coverage",
             name: "coverage-gap-correction_or_rejection_signal-01",
             label: "correction_or_rejection_signal",
-            target: "unknown",
-            text: "USER:\nthis is wrong\n\nPREVIOUS_ASSISTANT:\n",
+            target: "workflow_state",
+            text: "USER:\nthis is wrong\n\nPREVIOUS_ASSISTANT:\nI claimed the command passed without checking the output.\n",
             source_group: "workflow-candidate",
             review_status: "pending",
             topic: "review-coverage",
@@ -4616,6 +4616,79 @@ describe("classifiers workflow-candidates", () => {
             recommended_task_missing_rationale_count: 0,
             recommended_task_review_progress_status: "complete_review",
         });
+    });
+
+    test("pending review task list routes incomplete fixture context to repair", () => {
+        const fixtureRow = {
+            id: "workflow-candidate-review-coverage/correction_or_rejection_signal/incomplete",
+            suite: "workflow-candidate-review-coverage",
+            name: "coverage-gap-correction_or_rejection_signal-01",
+            label: "correction_or_rejection_signal",
+            target: "unknown",
+            text: "USER:\nUSER: this is not bad, can we create another scenerio like retro reflect trying to create workflow bas...\n\nPREVIOUS_ASSISTANT:\n",
+            source_group: "workflow-candidate",
+            review_status: "pending",
+            topic: "review-coverage",
+            candidate_id: "classifier_candidate_group:hybrid-window/correction_or_rejection_signal",
+            candidate_label: "correction_or_rejection_signal",
+            proposed_action: "add_context_guardrail",
+        };
+        const taskContent = [
+            "---",
+            "ax_schema: \"ax.workflow_candidate_pending_review_task.v1\"",
+            "fixture_pack_path: \".ax/experiments/pending-review.jsonl\"",
+            "review_brief_path: \".ax/experiments/pending-review.md\"",
+            "source_kind: \"hybrid_window_classifier_projection\"",
+            "output_path: \".ax/experiments/pending-review-batch.json\"",
+            "review_facts_path: \".ax/experiments/pending-review-facts.json\"",
+            "review_write_plan_path: \".ax/experiments/pending-review-write-plan.json\"",
+            "review_pipeline_stage: \"needs_review_decisions\"",
+            "candidate_ids_json: [\"classifier_candidate_group:hybrid-window/correction_or_rejection_signal\"]",
+            "---",
+            "",
+            "# ax pending workflow candidate review",
+        ].join("\n");
+
+        const report = buildWorkflowCandidateGuidancePendingReviewTaskListReport({
+            taskDir: ".ax/tasks",
+            taskFiles: [{ path: ".ax/tasks/workflow-candidate-pending-review-ready.md", content: taskContent }],
+            pathExists: () => true,
+            readFile: (path) => path.endsWith(".jsonl") ? `${JSON.stringify(fixtureRow)}\n` : "# review brief",
+        });
+
+        expect(report).toMatchObject({
+            queue_status: "needs_review_repair",
+            task_count: 1,
+            ready_for_review_count: 0,
+            review_decisions_need_repair_count: 1,
+            route_counts: {
+                repair_review_decisions: 1,
+                collect_review_decisions: 0,
+            },
+            recommended_task_status: "review_decisions_need_repair",
+            recommended_task_route: "repair_review_decisions",
+            recommended_task_review_context_status: "needs_repair",
+            recommended_task_review_context_issue_count: 3,
+            recommended_task_review_context_issues: [
+                "truncated_user_text",
+                "missing_previous_assistant_context",
+                "unknown_target",
+            ],
+            recommended_task_next_action: "Repair fixture context before asking for review decisions.",
+        });
+        expect(report.tasks[0]).toMatchObject({
+            status: "review_decisions_need_repair",
+            route: "repair_review_decisions",
+            review_context_status: "needs_repair",
+            review_context_issue_count: 3,
+            review_context_issues: [
+                "truncated_user_text",
+                "missing_previous_assistant_context",
+                "unknown_target",
+            ],
+        });
+        expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("review context status: needs_repair");
+        expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("context issue: truncated_user_text");
     });
 
     test("topic harness gates fail with only persisted failed harness facts", () => {

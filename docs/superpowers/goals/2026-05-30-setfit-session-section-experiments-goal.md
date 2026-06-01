@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E478 audits the only live pending review candidate and
-  finds that it is not ready for automatic promotion: the fixture has one
-  low-confidence example, truncated user text, and no previous-assistant
-  context.
+- Index continuation: E479 makes the E478 review-packet problem
+  machine-detectable. The live pending queue now routes the incomplete fixture
+  to `needs_review_repair` / `repair_review_decisions` with explicit context
+  issues instead of treating it as a normal human-review collection task.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
   append-only fixtures, graph projection, and workflow/harness usefulness
@@ -108,6 +108,61 @@ Current recommendation:
   fact promotion. The immediate bottleneck remains a real human review decision
   or fixture-context repair for that pending candidate, not promoting synthetic
   or harness-only evidence.
+
+## E479 - Route Incomplete Pending Review Context to Repair
+
+Question:
+- Can the pending-review queue detect incomplete fixture context before asking
+  for a human verdict, so low-quality review packets do not masquerade as
+  normal `needs_review` work?
+
+Implementation:
+- Added review-context status fields to
+  `ax.workflow_candidate_pending_review_task_list.v1` task rows and
+  recommended-task headers:
+  - `review_context_status`
+  - `review_context_issue_count`
+  - `review_context_issues`
+- Context issue vocabulary:
+  - `truncated_user_text`
+  - `missing_previous_assistant_context`
+  - `unknown_target`
+- Pending review tasks with context issues now route as:
+  - `status=review_decisions_need_repair`
+  - `route=repair_review_decisions`
+  - `queue_status=needs_review_repair`
+  - `next_action=Repair fixture context before asking for review decisions.`
+- Text output renders review-context status and issue rows for debugging.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-context-repair-e479.json`
+
+Live results:
+- The only pending review task now reports:
+  - `queue_status=needs_review_repair`
+  - `recommended_task_status=review_decisions_need_repair`
+  - `recommended_task_route=repair_review_decisions`
+  - `recommended_task_review_context_status=needs_repair`
+  - `recommended_task_review_context_issue_count=3`
+  - `recommended_task_review_context_issues=[
+    truncated_user_text,
+    missing_previous_assistant_context,
+    unknown_target
+    ]`
+
+Decision:
+- This confirms the current pending candidate should not be reviewed or
+  promoted as-is.
+- The next useful implementation slice is a fixture-context repair/regeneration
+  path that can rehydrate the full turn and previous-assistant context before
+  producing a new review brief.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "pending review task list routes incomplete fixture context"
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-context-repair-e479.json --json
+```
 
 ## E478 - Audit Pending Review Candidate Evidence
 
