@@ -295,6 +295,11 @@ export type WorkflowCandidateGuidancePendingReviewDecisionStatus =
     | "reviewed_missing_rationale"
     | "invalid_review_status"
     | "review_decisions_ready";
+export type WorkflowCandidateGuidancePendingReviewCommandStatus =
+    | "unavailable"
+    | "blocked_until_review_decisions"
+    | "blocked_until_review_repairs"
+    | "ready_to_execute";
 
 export interface WorkflowCandidateGuidancePendingReviewTaskListItem {
     readonly path: string;
@@ -316,7 +321,13 @@ export interface WorkflowCandidateGuidancePendingReviewTaskListItem {
     readonly review_decision_status: WorkflowCandidateGuidancePendingReviewDecisionStatus;
     readonly review_decision_next_action: string;
     readonly review_sync_command?: readonly string[];
+    readonly review_sync_command_status: WorkflowCandidateGuidancePendingReviewCommandStatus;
+    readonly review_sync_command_can_execute: boolean;
+    readonly review_sync_command_effect: "updates_review_pack_and_writes_report";
     readonly review_inspect_command?: readonly string[];
+    readonly review_inspect_command_status: WorkflowCandidateGuidancePendingReviewCommandStatus;
+    readonly review_inspect_command_can_execute: boolean;
+    readonly review_inspect_command_effect: "updates_review_pack_and_writes_review_artifacts";
 }
 
 export interface WorkflowCandidateGuidancePendingReviewTaskListReport {
@@ -3354,6 +3365,16 @@ const pendingReviewTaskReviewInspectCommand = (
     ];
 };
 
+const pendingReviewTaskCommandStatus = (
+    command: readonly string[] | undefined,
+    reviewDecisionStatus: WorkflowCandidateGuidancePendingReviewDecisionStatus,
+): WorkflowCandidateGuidancePendingReviewCommandStatus => {
+    if (command === undefined) return "unavailable";
+    if (reviewDecisionStatus === "review_decisions_ready") return "ready_to_execute";
+    if (reviewDecisionStatus === "reviewed_missing_rationale" || reviewDecisionStatus === "invalid_review_status") return "blocked_until_review_repairs";
+    return "blocked_until_review_decisions";
+};
+
 const pendingReviewTaskDecisionSummary = (input: {
     readonly parsed: WorkflowCandidateGuidancePendingReviewTaskParsed;
     readonly fixturePackStatus: WorkflowCandidateGuidancePendingReviewTaskArtifactStatus;
@@ -3455,6 +3476,8 @@ export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input:
             });
             const reviewSyncCommand = pendingReviewTaskReviewSyncCommand(parsed);
             const reviewInspectCommand = pendingReviewTaskReviewInspectCommand(parsed);
+            const reviewSyncCommandStatus = pendingReviewTaskCommandStatus(reviewSyncCommand, decisionSummary.review_decision_status);
+            const reviewInspectCommandStatus = pendingReviewTaskCommandStatus(reviewInspectCommand, decisionSummary.review_decision_status);
             return {
                 path: file.path,
                 ...(parsed.schema === undefined ? {} : { schema: parsed.schema }),
@@ -3467,7 +3490,13 @@ export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input:
                 candidate_ids: parsed.candidate_ids,
                 candidate_count: parsed.candidate_ids.length,
                 ...(reviewSyncCommand === undefined ? {} : { review_sync_command: reviewSyncCommand }),
+                review_sync_command_status: reviewSyncCommandStatus,
+                review_sync_command_can_execute: reviewSyncCommandStatus === "ready_to_execute",
+                review_sync_command_effect: "updates_review_pack_and_writes_report",
                 ...(reviewInspectCommand === undefined ? {} : { review_inspect_command: reviewInspectCommand }),
+                review_inspect_command_status: reviewInspectCommandStatus,
+                review_inspect_command_can_execute: reviewInspectCommandStatus === "ready_to_execute",
+                review_inspect_command_effect: "updates_review_pack_and_writes_review_artifacts",
                 ...decisionSummary,
             };
         })
@@ -3559,6 +3588,8 @@ export function renderWorkflowCandidateGuidancePendingReviewTaskListText(
             `    fixture pack: ${task.fixture_pack_status} ${task.fixture_pack_path ?? "unknown"}`,
             `    review brief: ${task.review_brief_status} ${task.review_brief_path ?? "unknown"}`,
             `    next: ${task.review_decision_next_action}`,
+            `    sync command status: ${task.review_sync_command_status} can_execute=${task.review_sync_command_can_execute ? "yes" : "no"}`,
+            `    inspect command status: ${task.review_inspect_command_status} can_execute=${task.review_inspect_command_can_execute ? "yes" : "no"}`,
             ...(task.review_sync_command === undefined ? [] : [`    sync command: ${task.review_sync_command.join(" ")}`]),
             ...(task.review_inspect_command === undefined ? [] : [`    inspect command: ${task.review_inspect_command.join(" ")}`]),
         );

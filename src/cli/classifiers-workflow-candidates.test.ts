@@ -4260,6 +4260,14 @@ describe("classifiers workflow-candidates", () => {
         expect(report.tasks.map((task) => task.status)).toEqual(["missing_review_brief", "ready_for_review", "review_decisions_ready"]);
         expect(report.tasks[0]?.review_brief_status).toBe("missing");
         expect(report.tasks[1]?.review_decision_status).toBe("needs_review_decisions");
+        expect(report.tasks[1]).toMatchObject({
+            review_sync_command_status: "blocked_until_review_decisions",
+            review_sync_command_can_execute: false,
+            review_sync_command_effect: "updates_review_pack_and_writes_report",
+            review_inspect_command_status: "blocked_until_review_decisions",
+            review_inspect_command_can_execute: false,
+            review_inspect_command_effect: "updates_review_pack_and_writes_review_artifacts",
+        });
         expect(report.tasks[2]).toMatchObject({
             review_decision_status: "review_decisions_ready",
             synced_fixture_count: 1,
@@ -4267,6 +4275,10 @@ describe("classifiers workflow-candidates", () => {
             pending_fixture_count: 0,
             invalid_fixture_count: 0,
             missing_rationale_count: 0,
+            review_sync_command_status: "ready_to_execute",
+            review_sync_command_can_execute: true,
+            review_inspect_command_status: "ready_to_execute",
+            review_inspect_command_can_execute: true,
             review_sync_command: [
                 "bun",
                 "src/cli/index.ts",
@@ -4285,6 +4297,7 @@ describe("classifiers workflow-candidates", () => {
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("missing artifacts: 1");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("missing_review_brief");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("review decisions ready: 1");
+        expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("sync command status: ready_to_execute can_execute=yes");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("--review-facts=.ax/experiments/pending-review-facts.json");
     });
 

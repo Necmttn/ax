@@ -33,9 +33,8 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E457 adds
-  `.ax/experiments/workflow-topic-guidance-decision-batch-e457.json` and
-  `.ax/experiments/workflow-candidate-pending-review-tasks-e457.json`
+- Index continuation: E458 adds
+  `.ax/experiments/workflow-candidate-pending-review-tasks-e458.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -60,9 +59,65 @@ Current recommendation:
   those tasks, verify their fixture/brief artifacts, and dry-run the linked
   review brief to report whether human decisions are present before review. A
   smoke-marked review is correctly blocked from apply, and each pending task
-  now carries structured sync/inspect commands for the next non-mutating review
-  step. The immediate bottleneck remains a real human review decision for that
-  pending candidate, not promoting synthetic or harness-only evidence.
+  now carries structured sync/inspect commands plus explicit command guards for
+  the next review step. The immediate bottleneck remains a real human review
+  decision for that pending candidate, not promoting synthetic or harness-only
+  evidence.
+
+## E458 - Guard Pending Review Task Commands
+
+Question:
+- Can services see that pending review sync/inspect commands exist but must not
+  run until the linked review brief has real reviewed fixture decisions?
+
+Implementation:
+- Added command status/can-execute fields to pending review task list items:
+  - `review_sync_command_status`,
+  - `review_sync_command_can_execute`,
+  - `review_sync_command_effect`,
+  - `review_inspect_command_status`,
+  - `review_inspect_command_can_execute`, and
+  - `review_inspect_command_effect`.
+- Command status is:
+  - `ready_to_execute` only when `review_decision_status` is
+    `review_decisions_ready`,
+  - `blocked_until_review_repairs` when reviewed fixtures need rationale or
+    status fixes,
+  - `blocked_until_review_decisions` while all fixtures are still pending, and
+  - `unavailable` when command metadata is incomplete.
+- Text output now prints command status and can-execute flags next to the
+  command argv.
+- Extended regression coverage for blocked and ready command states.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-e458.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live task list reports:
+  - `review_decision_status=needs_review_decisions`
+  - `review_sync_command_status=blocked_until_review_decisions`
+  - `review_sync_command_can_execute=false`
+  - `review_inspect_command_status=blocked_until_review_decisions`
+  - `review_inspect_command_can_execute=false`
+  - `review_sync_command_effect=updates_review_pack_and_writes_report`
+  - `review_inspect_command_effect=updates_review_pack_and_writes_review_artifacts`
+- The command argv remains visible for planning, but the machine-readable guard
+  prevents services from treating it as executable before human review.
+
+Decision:
+- E458 fixes an important service-safety ambiguity from E457: sync/inspect
+  commands are available as next-step plans, but explicitly blocked until the
+  review brief has reviewed decisions.
+- The current task still requires real human review before any sync, inspect,
+  or graph apply work should run.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-e458.json --json
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks
+```
 
 ## E457 - Emit Review Task Sync Commands
 
