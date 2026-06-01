@@ -47,12 +47,20 @@ const isTransactionConflict = (err: DbError): boolean =>
     /transaction conflict|can be retried/i.test(err.message);
 
 /**
- * Retry policy for transient transaction conflicts: exponential backoff
- * (100ms, 200ms, 400ms) capped at 3 retries. Only retries while the error
- * looks like a transaction conflict - any other DbError fails fast.
+ * Retry policy for transient transaction conflicts: jittered exponential
+ * backoff (~100ms, 200ms, 400ms, 800ms, 1.6s, 3.2s ±20%) capped at 6 retries.
+ * Only retries while the error looks like a transaction conflict - any other
+ * DbError fails fast.
+ *
+ * The jitter is the important part: two ingest processes (e.g. the background
+ * watcher + a manual `axctl ingest` run) hitting the same hot record
+ * (agent_provider:`codex`, sessions, etc.) back off in LOCKSTEP without it, so
+ * they collide again on every retry and exhaust the budget. Jittering the
+ * delays de-correlates the retriers so one wins and the other settles.
  */
 const transactionConflictRetry = Schedule.exponential("100 millis", 2).pipe(
-    Schedule.take(3),
+    Schedule.jittered,
+    Schedule.take(6),
     Schedule.while<DbError, unknown>((metadata) => isTransactionConflict(metadata.input)),
     Schedule.tapInput((err: DbError) =>
         Effect.logDebug("db transaction conflict retry", {
