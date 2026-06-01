@@ -33,11 +33,11 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E482 lets a reviewer/service explicitly resolve the E481
-  `unknown_target` blocker during pending-review context repair. The repaired
-  packet now reaches `remaining_issue_count=0` with target `workflow_state`,
-  leaving the candidate blocked only on a real human review decision and
-  rationale.
+- Index continuation: E483 proves the E482 target-resolved packet now flows
+  through the normal review readiness lifecycle: pending review is blocked by
+  `no_reviewed_fixtures`, reviewed-with-rationale is production-blocked by
+  `missing_review_provenance`, and a provenance-stamped review becomes
+  `ready_for_production_apply` without requiring a DB write during the dry run.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
   append-only fixtures, graph projection, and workflow/harness usefulness
@@ -106,9 +106,78 @@ Current recommendation:
   analysis passes the candidate-layer quality gate but remains
   `promotion_quality=false` because residual repeated misses, residual `none`
   false positives, and missing human promotion review still block autonomous
-  fact promotion. The immediate bottleneck is now a real human review decision
-  and rationale for the target-resolved pending candidate, not promoting
-  synthetic or harness-only evidence.
+  fact promotion. The immediate bottleneck is now deciding whether to apply the
+  provenance-complete E483 review fact to the graph, then re-running the batch
+  to verify the accepted review changes downstream guidance/harness routing.
+
+## E483 - Exercise Target-resolved Review Readiness
+
+Question:
+- After E482 resolves the fixture target, does the same pending-review packet
+  behave correctly in the existing review sync/readiness lifecycle?
+
+Implementation:
+- Reused the existing coverage review pack and brief sync path; no production
+  code change was needed.
+- Created a separate reviewed artifact copy so the E482 target-resolved packet
+  stays available as a pending baseline.
+- Simulated an accepted review with rationale for the current
+  `correction_or_rejection_signal` candidate.
+- Ran the production-gated readiness command with and without review
+  provenance, without applying facts to SurrealDB.
+
+Artifacts:
+- Pending readiness:
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-pending-readiness.json`
+- Reviewed, missing provenance:
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed-readiness.json`
+- Reviewed and provenance-stamped:
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed-provenance-readiness.json`
+- Reviewed fixture pack:
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed.jsonl`
+- Provenance-stamped review facts/write plan:
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed-provenance-review-facts.json`
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed-provenance-review-write-plan.json`
+
+Live results:
+- Pending target-resolved pack:
+  - `reviewed_fixture_count=0`
+  - `pending_fixture_count=1`
+  - `production_apply_guard=no_reviewed_fixtures`
+  - `review_pipeline_stage=needs_review_decisions`
+- Reviewed with rationale, no provenance:
+  - `reviewed_fixture_count=1`
+  - `handoff_apply_guard=ready_to_apply`
+  - `production_apply_guard=missing_review_provenance`
+  - `production_can_apply=false`
+  - `review_pipeline_stage=needs_review_repair`
+- Reviewed with rationale and provenance:
+  - `reviewed_fixture_count=1`
+  - `review_handoff_status=complete_review_handoff`
+  - `production_apply_guard=ready_to_apply`
+  - `production_can_apply=true`
+  - `review_pipeline_stage=ready_for_production_apply`
+  - `review_pipeline_command_kind=apply_review_facts`
+- The provenance-stamped review fact projection contains one `accept` fact with
+  reviewer `ax-e483-review`, reviewed-at `2026-06-01T00:00:00.000Z`, and the
+  source turn evidence ref.
+
+Decision:
+- Continue. The candidate can now safely reach a production apply command, but
+  E483 intentionally stopped short of mutating SurrealDB.
+- Next useful slice: either apply this provenance-complete review fact and
+  re-run the batch to prove the review gap closes, or add a pre-apply review
+  confirmation surface so services can show the exact graph write plan before
+  running the `apply_review_facts` command.
+
+Verification:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --coverage-review-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e482-target-resolved.jsonl --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-pending-readiness.md --review-facts=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-pending-review-facts.json --review-write-plan=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-pending-review-write-plan.json --out=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-pending-readiness.json --json
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --coverage-review-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed.md --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed-synced.md --review-facts=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed-review-facts.json --review-write-plan=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed-review-write-plan.json --apply-review-facts --require-review-provenance --require-review-handoff --out=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed-readiness.json --json
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --coverage-review-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed.md --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed-provenance-synced.md --review-facts=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed-provenance-review-facts.json --review-write-plan=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed-provenance-review-write-plan.json --review-provenance-reviewer=ax-e483-review --review-provenance-reviewed-at=2026-06-01T00:00:00.000Z --require-review-provenance --require-review-handoff --out=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed-provenance-readiness.json --json
+jq '.pending_review_handoff | {reviewed_fixture_count,pending_fixture_count,review_handoff_status,handoff_apply_guard,handoff_can_apply,production_apply_guard,production_can_apply,review_issue_status,review_pipeline_stage,review_pipeline_command_kind,next_action}' .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-pending-readiness.json .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed-readiness.json .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed-provenance-readiness.json
+jq '{fact_count: .totals.fact_count, reviewer: .facts[0].properties.reviewer, reviewed_at: .facts[0].properties.reviewed_at, predicate: .facts[0].predicate, evidence_refs: .facts[0].properties.evidence_refs}' .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed-provenance-review-facts.json
+```
 
 ## E482 - Resolve Pending Review Target Override
 
