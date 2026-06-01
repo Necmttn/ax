@@ -1224,6 +1224,7 @@ export interface WorkflowCandidatePersistedReviewFact {
     readonly predicate?: string;
     readonly object?: string;
     readonly candidate_id?: string;
+    readonly target?: string;
     readonly rationale?: string;
     readonly helper_source_fixture_ids: readonly string[];
     readonly updated_at?: string;
@@ -4948,6 +4949,7 @@ export function buildWorkflowCandidateTopicReviewGraphProjection(
                 topic: report.topic,
                 candidate_id: candidate.group_id,
                 candidate_label: candidate.label,
+                target: candidate.target ?? null,
                 proposed_action: candidate.proposed_action,
                 verdict: review.verdict,
                 rationale: review.rationale,
@@ -4996,6 +4998,7 @@ export function buildWorkflowCandidateTopicReviewGraphProjection(
                 topic: report.topic,
                 candidate_id: candidate.group_id,
                 candidate_label: candidate.label,
+                target: candidate.target ?? null,
                 proposed_action: candidate.proposed_action,
                 verdict: review.verdict,
                 rationale: review.rationale,
@@ -5776,6 +5779,7 @@ export function buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures(
                 topic,
                 candidate_id: row.candidate_id,
                 candidate_label: row.candidate_label,
+                target: row.target,
                 proposed_action: row.proposed_action,
                 verdict,
                 rationale: row.review_rationale ?? "",
@@ -5828,6 +5832,7 @@ export function buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures(
                 topic,
                 candidate_id: row.candidate_id,
                 candidate_label: row.candidate_label,
+                target: row.target,
                 proposed_action: row.proposed_action,
                 verdict,
                 rationale: row.review_rationale ?? "",
@@ -6896,6 +6901,9 @@ const candidateFromPersistedTopicReviewFact = (
     const proposedAction = typeof props.proposed_action === "string" && props.proposed_action.length > 0
         ? props.proposed_action
         : "review_section_pattern";
+    const target = typeof props.target === "string" && props.target.length > 0
+        ? props.target
+        : undefined;
     const evidenceRefs = Array.isArray(props.evidence_refs)
         ? props.evidence_refs.filter((entry): entry is string => typeof entry === "string")
         : [];
@@ -6910,6 +6918,7 @@ const candidateFromPersistedTopicReviewFact = (
         ...(fact.predicate === undefined ? {} : { predicate: fact.predicate }),
         ...(typeof fact.object === "string" ? { object: fact.object } : {}),
         candidate_id: candidateId,
+        ...(target === undefined ? {} : { target }),
         ...(rationale.length === 0 ? {} : { rationale }),
         helper_source_fixture_ids: Array.isArray(props.helper_source_fixture_ids)
             ? props.helper_source_fixture_ids.filter((entry): entry is string => typeof entry === "string")
@@ -6926,6 +6935,7 @@ const candidateFromPersistedTopicReviewFact = (
     return {
         group_id: candidateId,
         label,
+        ...(target === undefined ? {} : { target }),
         proposed_action: proposedAction,
         raw_support_count: 1,
         support_count: 1,

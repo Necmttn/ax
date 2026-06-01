@@ -1445,7 +1445,7 @@ describe("classifiers workflow-candidates", () => {
                 suite: "workflow-candidate-review-coverage",
                 name: "coverage-gap-verification_or_recovery_signal-01",
                 label: "verification_or_recovery_signal",
-                target: "unknown",
+                target: "workflow_state",
                 text: "USER:\ncontinue and make sure the tests prove this does not regress\n\nPREVIOUS_ASSISTANT:\n",
                 source_group: "workflow-candidate",
                 review_status: "accept",
@@ -1501,6 +1501,7 @@ describe("classifiers workflow-candidates", () => {
             object: "classifier_candidate_group:hybrid-window/verification_or_recovery_signal",
             properties: {
                 fixture_id: "workflow-candidate-review-coverage/verification_or_recovery_signal/a",
+                target: "workflow_state",
                 rationale: "This is useful verification/recovery behavior to preserve as review context.",
                 reviewer: "reviewer@example.test",
                 reviewed_at: "2026-05-31T10:00:00Z",
@@ -3950,6 +3951,73 @@ describe("classifiers workflow-candidates", () => {
             turn: "turn:correction",
         });
         expect(summary.fixtures[0]?.text).toContain("successful retro workflow");
+    });
+
+    test("accepted classifier fixtures preserve target from persisted review facts", () => {
+        const proposals = buildWorkflowCandidateProposalListReport({
+            rows: [],
+            limit: 10,
+            status: "all",
+            expandEvidence: true,
+            search: "review-coverage",
+        });
+        const candidates = buildWorkflowCandidateReport({
+            groupRows: [],
+            evidenceRows: [],
+            sourceKind: "hybrid_window_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            search: "review-coverage",
+            taskLike: "include",
+        });
+        const report = withWorkflowCandidateTopicPersistedReviewCandidates({
+            ...buildWorkflowCandidateTopicReport({
+                sourceKind: "hybrid_window_classifier_projection",
+                topic: "review-coverage",
+                proposals,
+                candidates,
+            }),
+            persisted_review_facts: buildWorkflowCandidateTopicReviewGraphListReport({
+                topic: "review-coverage",
+                facts: [{
+                    graph_id: "fact:workflow_topic_candidate_review__review_coverage__correction",
+                    subject: "workflow_topic_candidate_review:review_coverage:correction",
+                    predicate: "accept",
+                    object: "classifier_candidate_group:hybrid-window/correction_or_rejection_signal",
+                    value_json: properties({ reviewed: true, verdict: "accept" }),
+                    properties_json: properties({
+                        topic: "review-coverage",
+                        candidate_id: "classifier_candidate_group:hybrid-window/correction_or_rejection_signal",
+                        candidate_label: "correction_or_rejection_signal",
+                        proposed_action: "add_context_guardrail",
+                        target: "workflow_state",
+                        rationale: "Accepted as a workflow-state correction fixture.",
+                        evidence_refs: ["turn:correction"],
+                    }),
+                }],
+                edges: [],
+            }),
+        });
+        const reportWithDecision = {
+            ...report,
+            guidance_decision: buildWorkflowCandidateTopicGuidanceDecisionReport(report),
+        };
+
+        const summary = buildWorkflowCandidateAcceptedClassifierFixtureSummary(
+            [reportWithDecision],
+            ".ax/experiments/accepted-classifier-fixtures.jsonl",
+        );
+
+        expect(summary.fixtures).toHaveLength(1);
+        expect(summary.fixtures[0]).toMatchObject({
+            label: "correction_or_rejection_signal",
+            target: "workflow_state",
+            review_status: "accept",
+            topic: "review-coverage",
+            candidate_id: "classifier_candidate_group:hybrid-window/correction_or_rejection_signal",
+            result_id: "fact:workflow_topic_candidate_review__review_coverage__correction",
+            turn: "turn:correction",
+        });
     });
 
     test("guidance decision batch summarizes multiple reviewed topics", () => {

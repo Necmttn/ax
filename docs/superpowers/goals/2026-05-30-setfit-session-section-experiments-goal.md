@@ -33,14 +33,11 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E486 materializes accepted `classifier_fixture`
-  follow-ups into a JSONL fixture-pack artifact. The reviewed
-  `correction_or_rejection_signal` candidate is still not guidance, but batch
-  reports now carry `accepted_classifier_fixture_pack` with one accepted
-  `workflow-candidate-topic` fixture row that services can append or package.
-  The important rough edge is that the row currently falls back to
-  `target="unknown"` because the accepted graph fact did not preserve the
-  repaired `workflow_state` target into the candidate row.
+- Index continuation: E487 preserves reviewed target provenance through review
+  graph projection, persisted review fact rehydration, and accepted
+  classifier-fixture export. The reviewed `correction_or_rejection_signal`
+  candidate is still not guidance, but the accepted fixture-pack row now emits
+  `target="workflow_state"` instead of `unknown`.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
   append-only fixtures, graph projection, and workflow/harness usefulness
@@ -109,10 +106,68 @@ Current recommendation:
   analysis passes the candidate-layer quality gate but remains
   `promotion_quality=false` because residual repeated misses, residual `none`
   false positives, and missing human promotion review still block autonomous
-  fact promotion. The immediate bottleneck is now preserving reviewed target
-  provenance in accepted fixture rows or appending the generated fixture into a
-  real package, then rerunning package quality checks to see whether it improves
-  the model or just the review graph.
+  fact promotion. The immediate bottleneck is now appending the generated
+  accepted fixture into a real package, then rerunning package quality checks to
+  see whether it improves the model or just the review graph.
+
+## E487 - Preserve Accepted Fixture Target Provenance
+
+Question:
+- Can the accepted classifier-fixture path preserve the human-reviewed
+  `workflow_state` target from fixture review through graph facts and back into
+  generated accepted fixture rows?
+
+Implementation:
+- Added target propagation to topic review graph node/fact projection.
+- Added target rehydration when persisted review facts are converted back into
+  synthetic workflow candidates.
+- Added regression coverage for review-coverage graph projection and accepted
+  classifier fixture materialization.
+- Re-applied the existing reviewed pack so the local persisted graph fact now
+  carries `target="workflow_state"`.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e487-target-preserved-review-facts.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e487-target-preserved-review-write-plan.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e487-accepted-classifier-fixtures-target-post-apply.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e487-accepted-classifier-fixtures-target-post-apply.jsonl`
+
+Live results:
+- Projected/applied review fact properties now include:
+  - candidate:
+    `classifier_candidate_group:hybrid-window/correction_or_rejection_signal`
+  - target: `workflow_state`
+  - predicate: `accept`
+  - reviewer: `ax-e484-apply`
+  - reviewed-at: `2026-06-01T00:00:00.000Z`
+- Post-apply accepted fixture export:
+  - emitted fixtures: `1`
+  - accepted fixture candidates: `1`
+  - label: `correction_or_rejection_signal`
+  - target: `workflow_state`
+  - review status: `accept`
+  - topic: `review-coverage`
+  - result id:
+    `fact:workflow_topic_candidate_review__review_coverage__classifier_candidate_g__a67b2fdd040f`
+
+Decision:
+- Continue. The fixture follow-up now carries enough reviewed target provenance
+  to be appended to a real classifier package without losing the reason the
+  row exists.
+- Next useful slice: append/package this accepted fixture and rerun package
+  quality status to decide whether it improves classifier quality or only the
+  review graph.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "projects reviewed coverage-gap fixtures"
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "accepted classifier fixtures preserve target"
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=transcript_classifier_projection --coverage-review-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed.jsonl --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e487-target-preserved.md --review-facts=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e487-target-preserved-review-facts.json --review-write-plan=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e487-target-preserved-review-write-plan.json --apply-review-facts --require-review-provenance --out=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e487-target-preserved-readiness.json --json
+jq '.facts[0] | {id,predicate,object,properties}' .ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e487-target-preserved-review-facts.json
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=transcript_classifier_projection --include-review-facts --classifier-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-e487-accepted-classifier-fixtures-target-post-apply.jsonl --out=.ax/experiments/workflow-topic-guidance-decision-batch-e487-accepted-classifier-fixtures-target-post-apply.json --json
+jq '{target: .accepted_classifier_fixture_pack.fixtures[0].target, emitted: .accepted_classifier_fixture_pack.emitted_fixture_count, total: .totals.accepted_classifier_fixture_candidate_count}' .ax/experiments/workflow-topic-guidance-decision-batch-e487-accepted-classifier-fixtures-target-post-apply.json
+head -n 1 .ax/experiments/workflow-topic-guidance-decision-batch-e487-accepted-classifier-fixtures-target-post-apply.jsonl | jq '{id,label,target,review_status,topic,candidate_id,turn,result_id}'
+```
 
 ## E486 - Materialize Accepted Classifier Fixture Follow-up
 
