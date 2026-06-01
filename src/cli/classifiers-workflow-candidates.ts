@@ -75,6 +75,10 @@ export interface WorkflowCandidateCommandInput {
     readonly emitAdjacentTasks?: boolean;
     readonly emitPendingReviewTask?: boolean;
     readonly listPendingReviewTasks?: boolean;
+    readonly pendingReviewTaskPath?: string;
+    readonly pendingReviewTaskStatus?: WorkflowCandidateGuidancePendingReviewTaskStatus;
+    readonly pendingReviewDecisionStatus?: WorkflowCandidateGuidancePendingReviewDecisionStatus;
+    readonly pendingReviewCommandStatus?: WorkflowCandidateGuidancePendingReviewCommandStatus;
     readonly promoteHarnessProposals?: boolean;
     readonly requireHarnessChecks?: boolean;
     readonly promoteProposals?: boolean;
@@ -301,6 +305,13 @@ export type WorkflowCandidateGuidancePendingReviewCommandStatus =
     | "blocked_until_review_repairs"
     | "ready_to_execute";
 
+export interface WorkflowCandidateGuidancePendingReviewTaskListFilters {
+    readonly path?: string;
+    readonly status?: WorkflowCandidateGuidancePendingReviewTaskStatus;
+    readonly review_decision_status?: WorkflowCandidateGuidancePendingReviewDecisionStatus;
+    readonly review_command_status?: WorkflowCandidateGuidancePendingReviewCommandStatus;
+}
+
 export interface WorkflowCandidateGuidancePendingReviewTaskListItem {
     readonly path: string;
     readonly schema?: string;
@@ -333,6 +344,7 @@ export interface WorkflowCandidateGuidancePendingReviewTaskListItem {
 export interface WorkflowCandidateGuidancePendingReviewTaskListReport {
     readonly schema: "ax.workflow_candidate_pending_review_task_list.v1";
     readonly task_dir: string;
+    readonly filters?: WorkflowCandidateGuidancePendingReviewTaskListFilters;
     readonly task_count: number;
     readonly ready_for_review_count: number;
     readonly review_decisions_ready_count: number;
@@ -3450,14 +3462,34 @@ const pendingReviewTaskDecisionSummary = (input: {
     }
 };
 
+const pendingReviewTaskMatchesFilters = (
+    task: WorkflowCandidateGuidancePendingReviewTaskListItem,
+    filters?: WorkflowCandidateGuidancePendingReviewTaskListFilters,
+): boolean => {
+    if (filters === undefined) return true;
+    if (filters.path !== undefined && task.path !== filters.path) return false;
+    if (filters.status !== undefined && task.status !== filters.status) return false;
+    if (
+        filters.review_decision_status !== undefined &&
+        task.review_decision_status !== filters.review_decision_status
+    ) return false;
+    if (
+        filters.review_command_status !== undefined &&
+        task.review_sync_command_status !== filters.review_command_status &&
+        task.review_inspect_command_status !== filters.review_command_status
+    ) return false;
+    return true;
+};
+
 export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input: {
     readonly taskDir: string;
     readonly taskFiles: readonly { readonly path: string; readonly content: string }[];
+    readonly filters?: WorkflowCandidateGuidancePendingReviewTaskListFilters;
     readonly pathExists?: (path: string) => boolean;
     readonly readFile?: (path: string) => string;
 }): WorkflowCandidateGuidancePendingReviewTaskListReport {
     const pathExists = input.pathExists ?? existsSync;
-    const tasks = input.taskFiles
+    const allTasks = input.taskFiles
         .map((file): WorkflowCandidateGuidancePendingReviewTaskListItem | undefined => {
             const parsed = parseWorkflowCandidateGuidancePendingReviewTaskMarkdown(file.content);
             if (
@@ -3506,6 +3538,7 @@ export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input:
         })
         .filter((task): task is WorkflowCandidateGuidancePendingReviewTaskListItem => task !== undefined)
         .sort((a, b) => a.path.localeCompare(b.path));
+    const tasks = allTasks.filter((task) => pendingReviewTaskMatchesFilters(task, input.filters));
     const missingArtifactCount = tasks.filter((task) =>
         task.status === "missing_fixture_pack" ||
         task.status === "missing_review_brief" ||
@@ -3526,6 +3559,7 @@ export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input:
     return {
         schema: "ax.workflow_candidate_pending_review_task_list.v1",
         task_dir: input.taskDir,
+        ...(input.filters === undefined ? {} : { filters: input.filters }),
         task_count: tasks.length,
         ready_for_review_count: readyForReviewCount,
         review_decisions_ready_count: reviewDecisionsReadyCount,
@@ -3566,9 +3600,11 @@ const listMarkdownFiles = (dir: string): readonly string[] => {
 
 export function loadWorkflowCandidateGuidancePendingReviewTaskListReport(
     taskDir: string,
+    filters?: WorkflowCandidateGuidancePendingReviewTaskListFilters,
 ): WorkflowCandidateGuidancePendingReviewTaskListReport {
     return buildWorkflowCandidateGuidancePendingReviewTaskListReport({
         taskDir,
+        ...(filters === undefined ? {} : { filters }),
         taskFiles: listMarkdownFiles(taskDir).map((path) => ({
             path,
             content: readFileSync(path, "utf8"),
@@ -3582,6 +3618,12 @@ export function renderWorkflowCandidateGuidancePendingReviewTaskListText(
     const lines = [
         "workflow candidate pending review tasks",
         `task dir: ${report.task_dir}`,
+        ...(report.filters === undefined ? [] : [
+            `filter path: ${report.filters.path ?? "any"}`,
+            `filter status: ${report.filters.status ?? "any"}`,
+            `filter review decisions: ${report.filters.review_decision_status ?? "any"}`,
+            `filter command status: ${report.filters.review_command_status ?? "any"}`,
+        ]),
         `tasks: ${report.task_count}`,
         `ready: ${report.ready_for_review_count}`,
         `review decisions ready: ${report.review_decisions_ready_count}`,
@@ -6890,7 +6932,14 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
         const db = yield* SurrealClient;
         const taskDir = input.taskDir ?? ".ax/tasks";
         if (input.listPendingReviewTasks) {
-            const report = loadWorkflowCandidateGuidancePendingReviewTaskListReport(taskDir);
+            const filters: WorkflowCandidateGuidancePendingReviewTaskListFilters = {
+                ...(input.pendingReviewTaskPath === undefined ? {} : { path: input.pendingReviewTaskPath }),
+                ...(input.pendingReviewTaskStatus === undefined ? {} : { status: input.pendingReviewTaskStatus }),
+                ...(input.pendingReviewDecisionStatus === undefined ? {} : { review_decision_status: input.pendingReviewDecisionStatus }),
+                ...(input.pendingReviewCommandStatus === undefined ? {} : { review_command_status: input.pendingReviewCommandStatus }),
+            };
+            const hasFilters = Object.keys(filters).length > 0;
+            const report = loadWorkflowCandidateGuidancePendingReviewTaskListReport(taskDir, hasFilters ? filters : undefined);
             if (input.out) {
                 mkdirSync(dirname(input.out), { recursive: true });
                 writeFileSync(input.out, `${prettyPrint(report)}\n`, "utf8");

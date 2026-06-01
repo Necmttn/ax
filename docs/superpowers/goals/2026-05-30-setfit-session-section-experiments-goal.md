@@ -33,8 +33,8 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E459 adds
-  `.ax/experiments/workflow-candidate-pending-review-tasks-e459.json`
+- Index continuation: E460 adds
+  `.ax/experiments/workflow-candidate-pending-review-tasks-blocked-e460.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -61,9 +61,56 @@ Current recommendation:
   smoke-marked review is correctly blocked from apply, and each pending task
   now carries structured sync/inspect commands plus explicit command guards for
   the next review step. The task-list report also exposes aggregate executable
-  command counts so services can route without scanning every task. The
-  immediate bottleneck remains a real human review decision for that pending
-  candidate, not promoting synthetic or harness-only evidence.
+  command counts and service-side filters for path, task status, review
+  decision status, and command status so services can route specific task
+  subsets without scanning every task. The immediate bottleneck remains a real
+  human review decision for that pending candidate, not promoting synthetic or
+  harness-only evidence.
+
+## E460 - Filter Pending Review Task Lists
+
+Question:
+- Can review services query only the pending review tasks that match a routing
+  state, such as blocked commands or ready review decisions, without fetching
+  and filtering the full task list client-side?
+
+Implementation:
+- Added task-list filters for:
+  - `--pending-review-task-path`,
+  - `--pending-review-task-status`,
+  - `--pending-review-decision-status`, and
+  - `--pending-review-command-status`.
+- The report includes the applied `filters` object and recomputes all aggregate
+  counts over the filtered task set.
+- Text output prints active filters for manual debugging.
+- Regression coverage verifies blocked-command filtering and
+  review-decision-ready filtering.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-blocked-e460.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live filtered task-list command:
+  - `filters.review_command_status=blocked_until_review_decisions`
+  - `task_count=1`
+  - `ready_for_review_count=1`
+  - `review_sync_command_ready_count=0`
+  - `review_inspect_command_ready_count=0`
+  - `review_command_blocked_count=1`
+  - `missing_artifact_count=0`
+  - `review_decision_status=needs_review_decisions`
+
+Decision:
+- E460 improves service routing/readiness without weakening the review gate.
+- The live candidate is still correctly blocked on real human review decisions;
+  no graph promotion or guidance application is warranted.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --pending-review-command-status=blocked_until_review_decisions --out .ax/experiments/workflow-candidate-pending-review-tasks-blocked-e460.json --json
+```
 
 ## E459 - Summarize Pending Review Command Readiness
 
