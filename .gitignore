@@ -40,20 +40,20 @@ history.txt
 .surmlcache/
 
 # landing port scratchpad
-site/PORT-NOTES-LANDING.md
+apps/site/PORT-NOTES-LANDING.md
 # origin port scratchpad
-site/PORT-NOTES-ORIGIN.md
+apps/site/PORT-NOTES-ORIGIN.md
 
 # site workspace
-site/dist
-site/.tanstack
-site/.wrangler
-site/node_modules
-site/app/routeTree.gen.ts
-site/.content-collections
+apps/site/dist
+apps/site/.tanstack
+apps/site/.wrangler
+apps/site/node_modules
+apps/site/app/routeTree.gen.ts
+apps/site/.content-collections
 
 # generated MDX partial - rebuilt by scripts/extract-stage-rationale.ts on every dev/build
 docs/how-ax-sees-your-work.generated.mdx
 
 # scratch screenshots from landing iteration
-site/.tmp-shots/
+apps/site/.tmp-shots/
