@@ -33,11 +33,12 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E483 proves the E482 target-resolved packet now flows
-  through the normal review readiness lifecycle: pending review is blocked by
-  `no_reviewed_fixtures`, reviewed-with-rationale is production-blocked by
-  `missing_review_provenance`, and a provenance-stamped review becomes
-  `ready_for_production_apply` without requiring a DB write during the dry run.
+- Index continuation: E484 applied the provenance-complete E483 review fact to
+  the graph and re-ran the batch. The target-resolved
+  `correction_or_rejection_signal` candidate now appears in `review-coverage`
+  with `has_review_acceptance=true`; downstream routing correctly keeps
+  guidance promotion not warranted because the recommended artifact is
+  `classifier_fixture`.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
   append-only fixtures, graph projection, and workflow/harness usefulness
@@ -106,9 +107,72 @@ Current recommendation:
   analysis passes the candidate-layer quality gate but remains
   `promotion_quality=false` because residual repeated misses, residual `none`
   false positives, and missing human promotion review still block autonomous
-  fact promotion. The immediate bottleneck is now deciding whether to apply the
-  provenance-complete E483 review fact to the graph, then re-running the batch
-  to verify the accepted review changes downstream guidance/harness routing.
+  fact promotion. The immediate bottleneck is now converting this accepted
+  classifier-fixture recommendation into an actual classifier fixture/package
+  update, then rerunning quality checks to see whether it improves the model
+  or just the review graph.
+
+## E484 - Apply Target-resolved Review Fact
+
+Question:
+- Once E483 marks the target-resolved review packet production-ready, does
+  applying the review fact to SurrealDB make the accepted candidate visible in
+  downstream topic guidance routing?
+
+Implementation:
+- Reused the production-gated review apply command for the E483 reviewed pack.
+- First apply attempt correctly refused to mutate when syncing from the older
+  review brief stripped reviewer metadata from the pack; the gate fell back to
+  `missing_review_provenance`.
+- Reran the apply with explicit provenance stamping:
+  - reviewer `ax-e484-apply`
+  - reviewed-at `2026-06-01T00:00:00.000Z`
+- Re-ran the guidance decision batch with persisted review facts included.
+
+Artifacts:
+- Apply readiness:
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e484-applied-readiness.json`
+- Applied review facts/write plan:
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e484-applied-review-facts.json`
+  `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e484-applied-review-write-plan.json`
+- Post-apply batch:
+  `.ax/experiments/workflow-topic-guidance-decision-batch-e484-post-apply.json`
+- Focused coverage check:
+  `.ax/experiments/workflow-candidate-review-coverage-e484-post-apply.json`
+
+Live results:
+- The apply command exited successfully after provenance stamping.
+- The projected/applied review fact is:
+  - predicate: `accept`
+  - object: `classifier_candidate_group:hybrid-window/correction_or_rejection_signal`
+  - reviewer: `ax-e484-apply`
+  - reviewed-at: `2026-06-01T00:00:00.000Z`
+- Post-apply `review-coverage` batch now includes
+  `classifier_candidate_group:hybrid-window/correction_or_rejection_signal`:
+  - recommended artifact: `classifier_fixture`
+  - `has_review_acceptance=true`
+  - decision: `guidance_promotion_not_warranted`
+  - rationale: primary recommendation is `classifier_fixture`, not guidance
+- Post-apply batch totals changed to:
+  - `candidate_count=7`
+  - `guidance_not_warranted_count=3`
+  - `needs_human_review_count=4`
+
+Decision:
+- Continue. The full repair -> review -> provenance -> graph apply loop worked.
+  The accepted result should not become guidance; it should feed classifier
+  fixture/package improvement.
+- Next useful slice: expose a route for accepted `classifier_fixture`
+  recommendations so the service can turn this graph fact into a fixture-pack
+  append or package update candidate, then re-run quality status.
+
+Verification:
+```sh
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=transcript_classifier_projection --coverage-review-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed.jsonl --sync-coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e483-reviewed.md --coverage-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e484-applied-synced.md --review-facts=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e484-applied-review-facts.json --review-write-plan=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e484-applied-review-write-plan.json --review-provenance-reviewer=ax-e484-apply --review-provenance-reviewed-at=2026-06-01T00:00:00.000Z --apply-review-facts --require-review-provenance --require-review-handoff --out=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e484-applied-readiness.json --json
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=transcript_classifier_projection --include-review-facts --out=.ax/experiments/workflow-topic-guidance-decision-batch-e484-post-apply.json --json
+jq '.decisions[] | select(.topic=="review-coverage") | {decision, totals, candidates: [.candidates[] | {candidate_id,label,recommended_artifact,has_review_acceptance,decision,rationale}]}' .ax/experiments/workflow-topic-guidance-decision-batch-e484-post-apply.json
+jq '.totals' .ax/experiments/workflow-topic-guidance-decision-batch-e484-post-apply.json
+```
 
 ## E483 - Exercise Target-resolved Review Readiness
 
