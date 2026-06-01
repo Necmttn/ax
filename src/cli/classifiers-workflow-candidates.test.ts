@@ -4254,6 +4254,9 @@ describe("classifiers workflow-candidates", () => {
             ready_for_review_count: 1,
             review_decisions_ready_count: 1,
             review_decisions_need_repair_count: 0,
+            review_sync_command_ready_count: 1,
+            review_inspect_command_ready_count: 1,
+            review_command_blocked_count: 1,
             missing_artifact_count: 1,
             unknown_schema_count: 0,
         });
@@ -4297,6 +4300,8 @@ describe("classifiers workflow-candidates", () => {
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("missing artifacts: 1");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("missing_review_brief");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("review decisions ready: 1");
+        expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("sync commands ready: 1");
+        expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("commands blocked: 1");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("sync command status: ready_to_execute can_execute=yes");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("--review-facts=.ax/experiments/pending-review-facts.json");
     });

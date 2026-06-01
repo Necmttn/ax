@@ -337,6 +337,9 @@ export interface WorkflowCandidateGuidancePendingReviewTaskListReport {
     readonly ready_for_review_count: number;
     readonly review_decisions_ready_count: number;
     readonly review_decisions_need_repair_count: number;
+    readonly review_sync_command_ready_count: number;
+    readonly review_inspect_command_ready_count: number;
+    readonly review_command_blocked_count: number;
     readonly missing_artifact_count: number;
     readonly unknown_schema_count: number;
     readonly tasks: readonly WorkflowCandidateGuidancePendingReviewTaskListItem[];
@@ -3370,6 +3373,7 @@ const pendingReviewTaskCommandStatus = (
     reviewDecisionStatus: WorkflowCandidateGuidancePendingReviewDecisionStatus,
 ): WorkflowCandidateGuidancePendingReviewCommandStatus => {
     if (command === undefined) return "unavailable";
+    if (reviewDecisionStatus === "unknown") return "unavailable";
     if (reviewDecisionStatus === "review_decisions_ready") return "ready_to_execute";
     if (reviewDecisionStatus === "reviewed_missing_rationale" || reviewDecisionStatus === "invalid_review_status") return "blocked_until_review_repairs";
     return "blocked_until_review_decisions";
@@ -3510,6 +3514,14 @@ export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input:
     const readyForReviewCount = tasks.filter((task) => task.status === "ready_for_review").length;
     const reviewDecisionsReadyCount = tasks.filter((task) => task.status === "review_decisions_ready").length;
     const reviewDecisionsNeedRepairCount = tasks.filter((task) => task.status === "review_decisions_need_repair").length;
+    const reviewSyncCommandReadyCount = tasks.filter((task) => task.review_sync_command_can_execute).length;
+    const reviewInspectCommandReadyCount = tasks.filter((task) => task.review_inspect_command_can_execute).length;
+    const reviewCommandBlockedCount = tasks.filter((task) =>
+        task.review_sync_command_status === "blocked_until_review_decisions" ||
+        task.review_sync_command_status === "blocked_until_review_repairs" ||
+        task.review_inspect_command_status === "blocked_until_review_decisions" ||
+        task.review_inspect_command_status === "blocked_until_review_repairs"
+    ).length;
     const unknownSchemaCount = tasks.filter((task) => task.status === "unknown_schema").length;
     return {
         schema: "ax.workflow_candidate_pending_review_task_list.v1",
@@ -3518,6 +3530,9 @@ export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input:
         ready_for_review_count: readyForReviewCount,
         review_decisions_ready_count: reviewDecisionsReadyCount,
         review_decisions_need_repair_count: reviewDecisionsNeedRepairCount,
+        review_sync_command_ready_count: reviewSyncCommandReadyCount,
+        review_inspect_command_ready_count: reviewInspectCommandReadyCount,
+        review_command_blocked_count: reviewCommandBlockedCount,
         missing_artifact_count: missingArtifactCount,
         unknown_schema_count: unknownSchemaCount,
         tasks,
@@ -3527,8 +3542,8 @@ export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input:
                 ? "Regenerate or repair pending review task artifacts before review."
                 : reviewDecisionsNeedRepairCount > 0
                     ? "Repair reviewed fixture statuses or rationales before applying."
-                    : reviewDecisionsReadyCount > 0
-                        ? "Run the batch sync/readiness command for ready review decisions."
+                    : reviewSyncCommandReadyCount > 0 || reviewInspectCommandReadyCount > 0
+                        ? "Run executable pending review sync or inspect commands for ready review decisions."
                         : readyForReviewCount > 0
                             ? "Open the review brief for each ready task and record human review decisions."
                             : "Regenerate pending review tasks with the current schema before review.",
@@ -3571,6 +3586,9 @@ export function renderWorkflowCandidateGuidancePendingReviewTaskListText(
         `ready: ${report.ready_for_review_count}`,
         `review decisions ready: ${report.review_decisions_ready_count}`,
         `review decisions need repair: ${report.review_decisions_need_repair_count}`,
+        `sync commands ready: ${report.review_sync_command_ready_count}`,
+        `inspect commands ready: ${report.review_inspect_command_ready_count}`,
+        `commands blocked: ${report.review_command_blocked_count}`,
         `missing artifacts: ${report.missing_artifact_count}`,
         `unknown schema: ${report.unknown_schema_count}`,
         `next action: ${report.next_action}`,

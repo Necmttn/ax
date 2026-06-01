@@ -33,8 +33,8 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E458 adds
-  `.ax/experiments/workflow-candidate-pending-review-tasks-e458.json`
+- Index continuation: E459 adds
+  `.ax/experiments/workflow-candidate-pending-review-tasks-e459.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -60,9 +60,62 @@ Current recommendation:
   review brief to report whether human decisions are present before review. A
   smoke-marked review is correctly blocked from apply, and each pending task
   now carries structured sync/inspect commands plus explicit command guards for
-  the next review step. The immediate bottleneck remains a real human review
-  decision for that pending candidate, not promoting synthetic or harness-only
-  evidence.
+  the next review step. The task-list report also exposes aggregate executable
+  command counts so services can route without scanning every task. The
+  immediate bottleneck remains a real human review decision for that pending
+  candidate, not promoting synthetic or harness-only evidence.
+
+## E459 - Summarize Pending Review Command Readiness
+
+Question:
+- Can services decide at the report level whether any pending review sync or
+  inspect commands are executable, without scanning every task row?
+
+Implementation:
+- Added aggregate command readiness fields to
+  `ax.workflow_candidate_pending_review_task_list.v1`:
+  - `review_sync_command_ready_count`,
+  - `review_inspect_command_ready_count`, and
+  - `review_command_blocked_count`.
+- Updated report routing so executable sync/inspect commands drive the top
+  level next action only when review decisions are actually ready.
+- Missing artifact tasks now report command status `unavailable` rather than a
+  blocked executable command.
+- Text output prints the aggregate command readiness totals.
+- Extended regression coverage for ready command counts, blocked command
+  counts, and text rendering.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-e459.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live task-list report:
+  - `task_count=1`
+  - `review_sync_command_ready_count=0`
+  - `review_inspect_command_ready_count=0`
+  - `review_command_blocked_count=1`
+  - `review_decision_status=needs_review_decisions`
+  - `review_sync_command_status=blocked_until_review_decisions`
+  - `review_inspect_command_status=blocked_until_review_decisions`
+- Text output now includes:
+  - `sync commands ready: 0`
+  - `inspect commands ready: 0`
+  - `commands blocked: 1`
+
+Decision:
+- E459 gives service schedulers a top-level signal for pending review command
+  execution while preserving the human-review gate.
+- The next productive work remains either real human review of the task or
+  another non-mutating service/readiness surface; graph promotion is still not
+  warranted.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-e459.json --json
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks
+```
 
 ## E458 - Guard Pending Review Task Commands
 
