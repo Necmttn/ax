@@ -351,6 +351,12 @@ export interface WorkflowCandidateGuidancePendingReviewTaskListReport {
     readonly recommended_task_review_command_status?: WorkflowCandidateGuidancePendingReviewCommandStatus;
     readonly recommended_task_candidate_ids?: readonly string[];
     readonly recommended_task_next_action?: string;
+    readonly recommended_task_review_sync_command?: readonly string[];
+    readonly recommended_task_review_sync_command_status?: WorkflowCandidateGuidancePendingReviewCommandStatus;
+    readonly recommended_task_review_sync_command_can_execute?: boolean;
+    readonly recommended_task_review_inspect_command?: readonly string[];
+    readonly recommended_task_review_inspect_command_status?: WorkflowCandidateGuidancePendingReviewCommandStatus;
+    readonly recommended_task_review_inspect_command_can_execute?: boolean;
     readonly task_count: number;
     readonly ready_for_review_count: number;
     readonly review_decisions_ready_count: number;
@@ -3604,6 +3610,16 @@ export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input:
             recommended_task_review_command_status: pendingReviewTaskRecommendedCommandStatus(recommendedTask),
             recommended_task_candidate_ids: recommendedTask.candidate_ids,
             recommended_task_next_action: recommendedTask.review_decision_next_action,
+            ...(recommendedTask.review_sync_command === undefined ? {} : {
+                recommended_task_review_sync_command: recommendedTask.review_sync_command,
+            }),
+            recommended_task_review_sync_command_status: recommendedTask.review_sync_command_status,
+            recommended_task_review_sync_command_can_execute: recommendedTask.review_sync_command_can_execute,
+            ...(recommendedTask.review_inspect_command === undefined ? {} : {
+                recommended_task_review_inspect_command: recommendedTask.review_inspect_command,
+            }),
+            recommended_task_review_inspect_command_status: recommendedTask.review_inspect_command_status,
+            recommended_task_review_inspect_command_can_execute: recommendedTask.review_inspect_command_can_execute,
         }),
         task_count: tasks.length,
         ready_for_review_count: readyForReviewCount,
@@ -3683,6 +3699,10 @@ export function renderWorkflowCandidateGuidancePendingReviewTaskListText(
         `recommended task review decisions: ${report.recommended_task_review_decision_status ?? "none"}`,
         `recommended task command status: ${report.recommended_task_review_command_status ?? "none"}`,
         `recommended task next: ${report.recommended_task_next_action ?? "none"}`,
+        `recommended sync command status: ${report.recommended_task_review_sync_command_status ?? "none"} can_execute=${report.recommended_task_review_sync_command_can_execute === undefined ? "none" : report.recommended_task_review_sync_command_can_execute ? "yes" : "no"}`,
+        `recommended inspect command status: ${report.recommended_task_review_inspect_command_status ?? "none"} can_execute=${report.recommended_task_review_inspect_command_can_execute === undefined ? "none" : report.recommended_task_review_inspect_command_can_execute ? "yes" : "no"}`,
+        ...(report.recommended_task_review_sync_command === undefined ? [] : [`recommended sync command: ${report.recommended_task_review_sync_command.join(" ")}`]),
+        ...(report.recommended_task_review_inspect_command === undefined ? [] : [`recommended inspect command: ${report.recommended_task_review_inspect_command.join(" ")}`]),
         `next action: ${report.next_action}`,
         "",
         "tasks:",

@@ -33,8 +33,8 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E461 adds
-  `.ax/experiments/workflow-candidate-pending-review-tasks-recommended-e461.json`
+- Index continuation: E462 adds
+  `.ax/experiments/workflow-candidate-pending-review-tasks-recommended-commands-e462.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -66,9 +66,60 @@ Current recommendation:
   subsets without scanning every task. The report now also exposes a
   recommended pending task pointer with its review-decision state, command
   state, candidate ids, and next action, so services can pick the next item
-  without re-encoding the routing priority. The immediate bottleneck remains a
-  real human review decision for that pending candidate, not promoting
-  synthetic or harness-only evidence.
+  without re-encoding the routing priority. That pointer now also carries the
+  recommended sync/inspect argv arrays and can-execute flags, so a review
+  service can plan the exact next command while still honoring the blocked
+  state. The immediate bottleneck remains a real human review decision for
+  that pending candidate, not promoting synthetic or harness-only evidence.
+
+## E462 - Surface Recommended Review Commands
+
+Question:
+- Can review services get the recommended pending task command argv arrays
+  from the report header, without scanning the task rows after selecting the
+  next task?
+
+Implementation:
+- Added recommended-task command fields to
+  `ax.workflow_candidate_pending_review_task_list.v1`:
+  - `recommended_task_review_sync_command`,
+  - `recommended_task_review_sync_command_status`,
+  - `recommended_task_review_sync_command_can_execute`,
+  - `recommended_task_review_inspect_command`,
+  - `recommended_task_review_inspect_command_status`, and
+  - `recommended_task_review_inspect_command_can_execute`.
+- Text output now prints recommended sync/inspect command statuses and argv
+  arrays beside the recommended task fields.
+- Regression coverage verifies the header command status/can-execute fields
+  for unavailable, blocked, and ready-to-execute recommended tasks.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-recommended-commands-e462.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live task-list report:
+  - `recommended_task_path=.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+  - `recommended_task_review_sync_command_status=blocked_until_review_decisions`
+  - `recommended_task_review_sync_command_can_execute=false`
+  - `recommended_task_review_inspect_command_status=blocked_until_review_decisions`
+  - `recommended_task_review_inspect_command_can_execute=false`
+  - both recommended command argv arrays are present for planning, but blocked
+    from execution until real review decisions exist.
+
+Decision:
+- E462 gives review services a complete report-header routing packet:
+  recommended task, candidate ids, next action, command argv, and command
+  guards.
+- The candidate remains correctly blocked on human review; no graph promotion
+  or guidance application is warranted.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-recommended-commands-e462.json --json
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --pending-review-task-path=.ax/tasks/workflow-candidate-pending-review-nqj7es.md
+```
 
 ## E461 - Recommend Next Pending Review Task
 

@@ -4264,6 +4264,10 @@ describe("classifiers workflow-candidates", () => {
             recommended_task_review_decision_status: "unknown",
             recommended_task_review_command_status: "unavailable",
             recommended_task_candidate_ids: ["classifier_candidate_group:hybrid-window/correction_or_rejection_signal"],
+            recommended_task_review_sync_command_status: "unavailable",
+            recommended_task_review_sync_command_can_execute: false,
+            recommended_task_review_inspect_command_status: "unavailable",
+            recommended_task_review_inspect_command_can_execute: false,
         });
         expect(report.tasks.map((task) => task.status)).toEqual(["missing_review_brief", "ready_for_review", "review_decisions_ready"]);
         expect(report.tasks[0]?.review_brief_status).toBe("missing");
@@ -4336,9 +4340,15 @@ describe("classifiers workflow-candidates", () => {
             missing_artifact_count: 0,
             recommended_task_path: ".ax/tasks/workflow-candidate-pending-review-ready.md",
             recommended_task_review_command_status: "blocked_until_review_decisions",
+            recommended_task_review_sync_command_status: "blocked_until_review_decisions",
+            recommended_task_review_sync_command_can_execute: false,
+            recommended_task_review_inspect_command_status: "blocked_until_review_decisions",
+            recommended_task_review_inspect_command_can_execute: false,
         });
         expect(blockedCommandReport.tasks[0]?.path).toBe(".ax/tasks/workflow-candidate-pending-review-ready.md");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(blockedCommandReport)).toContain("filter command status: blocked_until_review_decisions");
+        expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(blockedCommandReport)).toContain("recommended sync command status: blocked_until_review_decisions can_execute=no");
+        expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(blockedCommandReport)).toContain("--coverage-review-pack=.ax/experiments/pending-review.jsonl");
 
         const reviewedDecisionReport = buildWorkflowCandidateGuidancePendingReviewTaskListReport({
             taskDir: ".ax/tasks",
@@ -4363,7 +4373,24 @@ describe("classifiers workflow-candidates", () => {
             review_command_blocked_count: 0,
             recommended_task_path: ".ax/tasks/workflow-candidate-pending-review-reviewed.md",
             recommended_task_review_command_status: "ready_to_execute",
+            recommended_task_review_sync_command_status: "ready_to_execute",
+            recommended_task_review_sync_command_can_execute: true,
+            recommended_task_review_inspect_command_status: "ready_to_execute",
+            recommended_task_review_inspect_command_can_execute: true,
         });
+        expect(reviewedDecisionReport.recommended_task_review_sync_command).toEqual([
+            "bun",
+            "src/cli/index.ts",
+            "classifiers",
+            "workflow-candidates",
+            "--guidance-decision-batch",
+            "--source-kind=hybrid_window_classifier_projection",
+            "--coverage-review-pack=.ax/experiments/reviewed.jsonl",
+            "--sync-coverage-review-brief=.ax/experiments/reviewed.md",
+            "--coverage-review-brief=.ax/experiments/reviewed.md",
+            "--out=.ax/experiments/pending-review-batch.json",
+            "--json",
+        ]);
     });
 
     test("topic harness gates fail with only persisted failed harness facts", () => {
